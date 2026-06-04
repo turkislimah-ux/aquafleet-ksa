@@ -6,6 +6,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "4321", "--directory", "preview"],
       "port": 4321
+    },
+    {
+      "name": "aquafleet-3002",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "3002", "--directory", "preview"],
+      "port": 3002
     }
   ]
 }
