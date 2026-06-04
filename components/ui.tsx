@@ -110,7 +110,7 @@ export function Table({ children }: { children: ReactNode }) {
     </div>
   );
 }
-export function TH({ children, className }: { children: ReactNode; className?: string }) {
+export function TH({ children, className }: { children?: ReactNode; className?: string }) {
   return <th className={cn("text-start font-medium muted py-2 px-3 text-xs uppercase tracking-wide whitespace-nowrap", className)}>{children}</th>;
 }
 export function TD({ children, className }: { children: ReactNode; className?: string }) {
