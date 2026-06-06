@@ -1236,81 +1236,491 @@ window.PAGES_1 = (function () {
   }
 
   // ---------- Trips ----------
-  function trips() {
-    const filter = window.APP_STATE.tripFilter || "all";
-    window.APP_STATE.tripFilter = filter;
-    const all = D().trips;
-    const list = filter === "all" ? all : all.filter(t => t.status === filter);
+  /** TRIP handler namespace: project + Kanban actions. Manual workflow only —
+   *  trips never auto-progress; management has to push them through. */
+  window.TRIP = {
+    /** Open the "new project" modal. Required: name, location, ≥1 driver,
+     *  rate per trip. */
+    openNewProject() {
+      const driversList = D().drivers;
+      const html = `
+        <div class="space-y-3">
+          <p class="text-sm muted">${lang()==='en'
+            ? 'Spin up a new water-transport project. Each project gets its own Kanban board.'
+            : 'إنشاء مشروع نقل مياه جديد. كل مشروع يحصل على لوحة كانبان خاصة به.'}</p>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">${T("trip.projectNameEn")}</label>
+              <input id="npName" class="input w-full" placeholder="e.g. King Salman Park"/></div>
+            <div><label class="field-label">${T("trip.projectNameAr")}</label>
+              <input id="npNameAr" class="input w-full" placeholder="مثال: حديقة الملك سلمان"/></div>
+            <div><label class="field-label">${T("trip.locationEn")}</label>
+              <input id="npLoc" class="input w-full" placeholder="City / district"/></div>
+            <div><label class="field-label">${T("trip.locationAr")}</label>
+              <input id="npLocAr" class="input w-full" placeholder="المدينة / المنطقة"/></div>
+            <div><label class="field-label">${T("trip.coordsLat")}</label>
+              <input id="npLat" class="input w-full" type="number" step="0.0001" value="24.7136"/></div>
+            <div><label class="field-label">${T("trip.coordsLng")}</label>
+              <input id="npLng" class="input w-full" type="number" step="0.0001" value="46.6753"/></div>
+            <div class="col-span-2"><label class="field-label">${T("trip.ratePerTripField")}</label>
+              <input id="npRate" class="input w-full" type="number" min="0" value="60"/></div>
+            <div class="col-span-2"><label class="field-label">${T("trip.assignDrivers")}</label>
+              <div id="npDrivers" class="chip-strip" style="max-height:11rem">
+                ${driversList.map(d => `
+                  <button type="button" class="chip" data-id="${d.id}" onclick="TRIP._toggleDriverChip('${d.id}', this)">
+                    ${escapeHtml(lang()==='ar'?d.nameAr:d.name)} <span class="muted text-[10px]">${d.id}</span>
+                  </button>
+                `).join("")}
+              </div>
+            </div>
+            <div class="col-span-2"><label class="field-label">${T("trip.descriptionEn")}</label>
+              <textarea id="npDesc" class="input w-full" rows="2"></textarea></div>
+            <div class="col-span-2"><label class="field-label">${T("trip.descriptionAr")}</label>
+              <textarea id="npDescAr" class="input w-full" rows="2" dir="rtl"></textarea></div>
+          </div>
+        </div>`;
+      const footer = `
+        <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="TRIP.saveNewProject()">${ICONS.save()}${T("c.save")}</button>`;
+      window.app.openModal({ title: T("trip.newProjectTitle"), html, footer, size: "lg" });
+      window.APP_STATE.npDraftDrivers = [];
+    },
 
-    const delivered = all.filter(t => t.status === "delivered");
-    const totalLiters = delivered.reduce((s, t) => s + t.waterLiters, 0);
-    const totalRev = delivered.reduce((s, t) => s + t.revenueSar, 0);
-    const totalCost = delivered.reduce((s, t) => s + t.costSar, 0);
-    const onTime = delivered.filter(t => (t.actualDurationMin ?? 0) <= t.plannedDurationMin + 10).length;
-    const STATUS = ["all", "scheduled", "loading", "in_transit", "delivered", "cancelled"];
+    _toggleDriverChip(driverId, el) {
+      const arr = window.APP_STATE.npDraftDrivers || (window.APP_STATE.npDraftDrivers = []);
+      const idx = arr.indexOf(driverId);
+      if (idx >= 0) { arr.splice(idx, 1); el.classList.remove("chip-selected"); }
+      else { arr.push(driverId); el.classList.add("chip-selected"); }
+    },
+
+    saveNewProject() {
+      const name = document.getElementById("npName").value.trim();
+      const nameAr = document.getElementById("npNameAr").value.trim();
+      const location = document.getElementById("npLoc").value.trim();
+      const locationAr = document.getElementById("npLocAr").value.trim();
+      const lat = +document.getElementById("npLat").value;
+      const lng = +document.getElementById("npLng").value;
+      const rate = +document.getElementById("npRate").value || 60;
+      const desc = document.getElementById("npDesc").value.trim();
+      const descAr = document.getElementById("npDescAr").value.trim();
+      const driverIds = (window.APP_STATE.npDraftDrivers || []).slice();
+      if (!name || !location) {
+        window.app.toast(lang()==='en' ? "Name and location required" : "الاسم والموقع مطلوبان");
+        return;
+      }
+      if (driverIds.length === 0) {
+        window.app.toast(T("trip.pickAtLeastOne"));
+        return;
+      }
+      const id = D().nextProjectId();
+      const newProj = {
+        id, name, nameAr: nameAr || name,
+        ratePerTrip: rate,
+        customer: name,
+        location, locationAr: locationAr || location,
+        coords: { lat, lng },
+        description: desc, descriptionAr: descAr || desc,
+        active: true,
+        createdAt: new Date().toISOString().slice(0, 10),
+        assignedDriverIds: driverIds,
+      };
+      D().PROJECTS.push(newProj);
+      D().PROJECT_BY_CUSTOMER[name] = id;
+      window.APP_STATE.npDraftDrivers = [];
+      window.app.toast(`${id} · ${T("trip.newProject")}`);
+      window.app.closeModal();
+      window.app.render();
+    },
+
+    /** Manual "Start trip" — moves Scheduled → Loading. Driver doesn't leave
+     *  until this is pushed by management. */
+    startTrip(tripId) {
+      const t = D().trips.find(x => x.id === tripId);
+      if (!t) return;
+      t.status = "loading";
+      t.actualStart = new Date().toISOString();
+      window.app.toast(`${t.ref} · ${T("status.loading")}`);
+      window.app.render();
+    },
+
+    /** Generic advance — used to push between intermediate columns. */
+    advance(tripId, to) {
+      const t = D().trips.find(x => x.id === tripId);
+      if (!t) return;
+      t.status = to;
+      if (to === "in_transit" && !t.actualStart) t.actualStart = new Date().toISOString();
+      window.app.toast(`${t.ref} → ${T(`status.${to}`)}`);
+      window.app.render();
+    },
+
+    /** Delivery transition — also writes commission to the driver's monthly row. */
+    markDelivered(tripId) {
+      const t = D().trips.find(x => x.id === tripId);
+      if (!t) return;
+      t.status = "delivered";
+      t.actualEnd = new Date().toISOString();
+      t.actualDurationMin = t.plannedDurationMin;  // simple stand-in
+      const paid = D().payCommissionForTrip(tripId);
+      const proj = paid && D().PROJECTS.find(p => p.id === paid.projectId);
+      window.app.toast(`${t.ref} · ${T("trip.commissionPaid")} +${fmtSar(proj ? proj.ratePerTrip : 0)}`);
+      window.app.render();
+    },
+
+    /** Card click on a running trip → Route Optimization page with this trip
+     *  focused. The routes() view picks up APP_STATE.selectedTripId. */
+    viewOnMap(tripId) {
+      window.APP_STATE.selectedTripId = tripId;
+      window.app.navigate('/routes');
+    },
+    clearMapFocus() {
+      window.APP_STATE.selectedTripId = null;
+      window.app.render();
+    },
+
+    /** Manage which drivers are assigned to a project. Re-uses the chip
+     *  picker. Saving updates project.assignedDriverIds in place. */
+    openAssignDrivers(projectId) {
+      const p = D().PROJECTS.find(x => x.id === projectId);
+      if (!p) return;
+      window.APP_STATE.adDraft = (p.assignedDriverIds || []).slice();
+      const html = `
+        <div class="space-y-3">
+          <p class="text-sm muted">${escapeHtml(lang()==='ar'?p.nameAr:p.name)} — ${escapeHtml(lang()==='ar'?p.locationAr:p.location)}</p>
+          <div class="chip-strip" style="max-height:13rem">
+            ${D().drivers.map(d => {
+              const on = (p.assignedDriverIds||[]).includes(d.id);
+              return `<button type="button" class="chip ${on?'chip-selected':''}" data-id="${d.id}" onclick="TRIP._toggleAssignChip('${d.id}', this)">
+                ${escapeHtml(lang()==='ar'?d.nameAr:d.name)} <span class="muted text-[10px]">${d.id}</span>
+              </button>`;
+            }).join("")}
+          </div>
+        </div>`;
+      const footer = `
+        <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="TRIP.saveAssignDrivers('${projectId}')">${ICONS.save()}${T("c.save")}</button>`;
+      window.app.openModal({ title: `${T("trip.manageDrivers")} — ${p.id}`, html, footer });
+    },
+    _toggleAssignChip(driverId, el) {
+      const arr = window.APP_STATE.adDraft || (window.APP_STATE.adDraft = []);
+      const idx = arr.indexOf(driverId);
+      if (idx >= 0) { arr.splice(idx, 1); el.classList.remove("chip-selected"); }
+      else { arr.push(driverId); el.classList.add("chip-selected"); }
+    },
+    saveAssignDrivers(projectId) {
+      const p = D().PROJECTS.find(x => x.id === projectId);
+      if (!p) return;
+      p.assignedDriverIds = (window.APP_STATE.adDraft || []).slice();
+      window.APP_STATE.adDraft = null;
+      window.app.toast(`${p.id} · ${p.assignedDriverIds.length} ${lang()==='en'?'driver(s) assigned':'سائق معين'}`);
+      window.app.closeModal();
+      window.app.render();
+    },
+
+    /** Add a brand-new trip onto a project (lands in Scheduled). The truck
+     *  and driver default to the first assigned driver / their truck. */
+    openNewTrip(projectId) {
+      const p = D().PROJECTS.find(x => x.id === projectId);
+      if (!p) return;
+      const assigned = (p.assignedDriverIds || []).map(id => D().findDriver(id)).filter(Boolean);
+      if (assigned.length === 0) {
+        window.app.toast(T("trip.noDriversAssigned"));
+        return;
+      }
+      const html = `
+        <div class="space-y-3">
+          <p class="text-sm muted">${escapeHtml(lang()==='ar'?p.nameAr:p.name)} · ${T("trip.ratePerTripLabel")}: <b>${fmtSar(p.ratePerTrip)}</b></p>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">${T("c.driver")}</label>
+              <select id="ntDriver" class="select w-full">
+                ${assigned.map(d => `<option value="${d.id}">${escapeHtml(lang()==='ar'?d.nameAr:d.name)} · ${d.id}</option>`).join("")}
+              </select></div>
+            <div><label class="field-label">${lang()==='en'?'Scheduled date':'تاريخ الجدولة'}</label>
+              <input id="ntDate" type="date" class="input w-full" value="${new Date(2026,5,6).toISOString().slice(0,10)}"/></div>
+            <div><label class="field-label">${lang()==='en'?'Water (liters)':'كمية المياه (لتر)'}</label>
+              <input id="ntLiters" type="number" class="input w-full" value="12000"/></div>
+            <div><label class="field-label">${lang()==='en'?'Distance (km)':'المسافة (كم)'}</label>
+              <input id="ntDist" type="number" class="input w-full" value="120"/></div>
+          </div>
+        </div>`;
+      const footer = `
+        <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="TRIP.saveNewTrip('${projectId}')">${ICONS.save()}${T("c.save")}</button>`;
+      window.app.openModal({ title: `${T("trip.addTripToProject")} — ${p.id}`, html, footer });
+    },
+    saveNewTrip(projectId) {
+      const p = D().PROJECTS.find(x => x.id === projectId);
+      const driverId = document.getElementById("ntDriver").value;
+      const date = document.getElementById("ntDate").value;
+      const liters = +document.getElementById("ntLiters").value || 8000;
+      const dist = +document.getElementById("ntDist").value || 100;
+      const truck = D().trucks.find(t => t.driverId === driverId) || D().trucks[0];
+      const driver = D().findDriver(driverId);
+      const homeDepot = truck?.homeDepot || "Riyadh";
+      const oCoords = D().DEPOT_COORDS[homeDepot];
+      const id = `TRP-${String(D().trips.length + 1).padStart(4, "0")}`;
+      D().trips.push({
+        id, ref: `WT-2026-${String(2000 + D().trips.length)}`,
+        truckId: truck.id, driverId,
+        origin: { name: `${homeDepot} Depot`, nameAr: `مستودع ${homeDepot}`, lat: oCoords[0], lng: oCoords[1] },
+        destination: { name: p.customer, nameAr: p.nameAr, lat: p.coords.lat, lng: p.coords.lng },
+        customer: p.customer, customerAr: p.nameAr,
+        projectId: p.id,
+        scheduledStart: new Date(date + "T08:00:00Z").toISOString(),
+        status: "scheduled",
+        distanceKm: dist,
+        plannedDurationMin: Math.round(dist * 1.1),
+        waterLiters: liters,
+        waterType: "potable",
+        costSar: +((dist / (truck.fuelEfficiencyKmPerL || 3)) * 2.18 + 350).toFixed(2),
+        revenueSar: +(liters * 0.085 + 200).toFixed(2),
+        fuelLiters: +((dist / (truck.fuelEfficiencyKmPerL || 3))).toFixed(1),
+        routeWaypoints: [
+          { lat: oCoords[0], lng: oCoords[1] },
+          { lat: (oCoords[0] + p.coords.lat) / 2, lng: (oCoords[1] + p.coords.lng) / 2 },
+          { lat: p.coords.lat, lng: p.coords.lng },
+        ],
+        optimized: true,
+      });
+      window.app.toast(`${id} · ${T("status.scheduled")}`);
+      window.app.closeModal();
+      window.app.render();
+    },
+  };
+
+  // Anchor "today" for the reporting periods. Matches the data seed.
+  const TRIPS_TODAY = () => new Date(2026, 5, 6);
+
+  /** Trips page = project-stacked Kanban boards.
+   *  Each project gets its own card: header + reporting strip +
+   *  Kanban (Scheduled · Loading · In Transit · Delivered) + driver table. */
+  function trips() {
+    const projects = D().PROJECTS.filter(p => p.active !== false);
+    const monthKey = D().CURRENT_MONTH_KEY;
+    const allTrips = D().trips;
+
+    // Top-of-page KPIs
+    const runningCount = allTrips.filter(t => t.status === "loading" || t.status === "in_transit").length;
+    const pendingPush = allTrips.filter(t => t.status === "scheduled").length;
+    const monthDelivered = allTrips.filter(t => {
+      if (t.status !== "delivered") return false;
+      const d = new Date(t.scheduledStart);
+      return d.getFullYear() === 2026 && d.getMonth() === 5;
+    });
+    const commissionPool = monthDelivered.reduce((s, t) => {
+      const p = projects.find(p => p.id === t.projectId);
+      return s + (p ? p.ratePerTrip : 0);
+    }, 0);
 
     return `
       ${pageHeader({
-        title: T("nav.trips"),
-        subtitle: `${all.length} ${T("c.tripsSubtitle")}`,
-        actions: btn({ label: T("c.schedule"), icon: ICONS.calendar(), variant: "outline" })
-              + btn({ label: T("c.newTrip"), icon: ICONS.plus(), variant: "primary", onclick: "alert('Demo: new trip')" })
+        title: T("trip.projectsHeader"),
+        subtitle: T("trip.projectsSubtitle"),
+        actions: btn({ label: T("c.newProject"), icon: ICONS.plus(), variant: "primary", onclick: "TRIP.openNewProject()" })
       })}
 
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
-        ${stat({ label: lang()==='en'?"Total Liters Delivered":"إجمالي اللترات الموردة", value: fmtNum(totalLiters), tone: "info" })}
-        ${stat({ label: lang()==='en'?"Trips Delivered":"رحلات مكتملة", value: delivered.length, tone: "ok" })}
-        ${stat({ label: lang()==='en'?"On-Time":"في الوقت", value: `${Math.round((onTime/Math.max(1,delivered.length))*100)}%`, tone: "ok" })}
-        ${stat({ label: T("c.revenue"), value: fmtSar(totalRev), tone: "ok" })}
-        ${stat({ label: lang()==='en'?"Op Cost":"تكلفة التشغيل", value: fmtSar(totalCost), tone: "warn" })}
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        ${stat({ label: T("trip.activeProjects"), value: projects.length, tone: "info" })}
+        ${stat({ label: T("trip.pendingPushes"),  value: pendingPush, tone: pendingPush > 0 ? "warn" : "ok" })}
+        ${stat({ label: T("trip.runningTrips"),   value: runningCount, tone: "ok" })}
+        ${stat({ label: T("trip.commissionPool"), value: fmtSar(commissionPool), tone: "ok" })}
       </div>
 
-      <div class="card p-3 mb-5">
-        <div class="flex items-center gap-1 flex-wrap">
-          ${STATUS.map(s => `<button class="btn-chip ${filter===s?'active':''}" onclick="window.APP_STATE.tripFilter='${s}'; window.app.render()">
-            ${s==='all'?T('c.all'):T(`status.${s}`)}
-            <span class="muted ms-1">${s==='all'?all.length:all.filter(x=>x.status===s).length}</span>
-          </button>`).join("")}
+      <div class="space-y-5">
+        ${projects.map(p => projectKanbanCard(p, monthKey)).join("")}
+      </div>
+    `;
+  }
+
+  /** Render one project's full card: header, reporting strip, 4-column
+   *  Kanban, then a driver-summary table. */
+  function projectKanbanCard(p, monthKey) {
+    const projectTrips = D().trips.filter(t => t.projectId === p.id);
+    const today = TRIPS_TODAY();
+    const within = (t, days) => {
+      const d = new Date(t.scheduledStart);
+      const diff = (today - d) / 86400000;
+      return diff >= 0 && diff < days;
+    };
+    const deliveredTrips = projectTrips.filter(t => t.status === "delivered");
+    const report = {
+      day:     deliveredTrips.filter(t => within(t, 1)).length,
+      week:    deliveredTrips.filter(t => within(t, 7)).length,
+      month:   deliveredTrips.filter(t => within(t, 30)).length,
+      quarter: deliveredTrips.filter(t => within(t, 90)).length,
+    };
+
+    const byStatus = {
+      scheduled:  projectTrips.filter(t => t.status === "scheduled"),
+      loading:    projectTrips.filter(t => t.status === "loading"),
+      in_transit: projectTrips.filter(t => t.status === "in_transit"),
+      delivered:  projectTrips.filter(t => t.status === "delivered")
+                                .slice().sort((a, b) => new Date(b.actualEnd || b.scheduledStart) - new Date(a.actualEnd || a.scheduledStart))
+                                .slice(0, 6),
+    };
+
+    const columns = [
+      ["scheduled",  T("trip.kanbanScheduled"),  byStatus.scheduled,  "col-scheduled"],
+      ["loading",    T("trip.kanbanLoading"),    byStatus.loading,    "col-loading"],
+      ["in_transit", T("trip.kanbanInTransit"),  byStatus.in_transit, "col-transit"],
+      ["delivered",  T("trip.kanbanDelivered"),  byStatus.delivered,  "col-delivered"],
+    ];
+
+    return `
+      <div class="card project-card overflow-hidden" id="proj-${p.id}">
+        ${projectHeader(p)}
+        ${reportingStrip(p, report)}
+        <div class="kanban-board">
+          ${columns.map(([status, label, trips, cls]) => kanbanColumn(p, status, label, trips, cls)).join("")}
+        </div>
+        ${driverSummaryTable(p, projectTrips, monthKey)}
+      </div>
+    `;
+  }
+
+  function projectHeader(p) {
+    return `
+      <div class="project-head">
+        <div class="project-head-l">
+          <div class="project-title">
+            <span class="project-dot"></span>
+            <div>
+              <h3 class="project-name">${escapeHtml(lang()==='ar'?p.nameAr:p.name)}</h3>
+              <div class="project-meta">
+                <span class="muted">${p.id}</span>
+                <span class="dotsep">·</span>
+                <span class="muted">${ICONS.pin()}</span>
+                <span>${escapeHtml(lang()==='ar'?p.locationAr:p.location)}</span>
+                <span class="dotsep">·</span>
+                <span class="rate-pill"><span class="muted">${T("trip.ratePerTripLabel")}:</span> <b class="tabular">${fmtSar(p.ratePerTrip)}</b></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="project-head-r">
+          <button class="btn btn-outline" onclick="TRIP.openAssignDrivers('${p.id}')">${ICONS.users()}${T("trip.manageDrivers")}</button>
+          <button class="btn btn-primary" onclick="TRIP.openNewTrip('${p.id}')">${ICONS.plus()}${T("trip.addTripToProject")}</button>
         </div>
       </div>
+      ${p.description ? `<p class="project-desc muted text-xs">${escapeHtml(lang()==='ar'?p.descriptionAr:p.description)}</p>` : ""}
+    `;
+  }
 
-      <div class="card overflow-hidden">
+  function reportingStrip(p, r) {
+    const tile = (label, value) => `
+      <div class="report-tile">
+        <div class="report-label">${label}</div>
+        <div class="report-value tabular">${value}</div>
+      </div>`;
+    return `
+      <div class="reporting-strip">
+        <div class="reporting-strip-label">
+          <span class="text-brand-600">${ICONS.history ? ICONS.history() : ''}</span>
+          ${T("trip.reporting")}
+        </div>
+        ${tile(T("trip.today"),   r.day)}
+        ${tile(T("trip.week"),    r.week)}
+        ${tile(T("trip.month"),   r.month)}
+        ${tile(T("trip.quarter"), r.quarter)}
+      </div>
+    `;
+  }
+
+  function kanbanColumn(project, status, label, list, cls) {
+    return `
+      <div class="kanban-col ${cls}">
+        <div class="kanban-col-head">
+          <span class="kanban-col-title">${label}</span>
+          <span class="kanban-col-count">${list.length}</span>
+        </div>
+        <div class="kanban-col-body">
+          ${list.length === 0 ? `<div class="kanban-empty">—</div>` : list.map(t => kanbanCard(project, t)).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function kanbanCard(project, t) {
+    const driver = D().findDriver(t.driverId);
+    const truck = D().findTruck(t.truckId);
+    const action = (() => {
+      if (t.status === "scheduled")  return `<button class="kanban-action kanban-action-primary" onclick="event.stopPropagation(); TRIP.startTrip('${t.id}')">${ICONS.play()}${T("trip.startTrip")}</button>`;
+      if (t.status === "loading")    return `<button class="kanban-action kanban-action-outline" onclick="event.stopPropagation(); TRIP.advance('${t.id}','in_transit')">${ICONS.arrowRight()}${T("trip.markInTransit")}</button>`;
+      if (t.status === "in_transit") return `<button class="kanban-action kanban-action-success" onclick="event.stopPropagation(); TRIP.markDelivered('${t.id}')">${ICONS.check()}${T("trip.markDelivered")}</button>`;
+      if (t.status === "delivered")  return `<span class="kanban-paid">${ICONS.check()}${T("trip.commissionPaid")} +${fmtSar(project.ratePerTrip)}</span>`;
+      return "";
+    })();
+    const clickable = (t.status === "loading" || t.status === "in_transit");
+    const onClick = clickable ? `onclick="TRIP.viewOnMap('${t.id}')"` : "";
+    return `
+      <div class="kanban-card kanban-${t.status} ${clickable ? 'is-clickable' : ''}" ${onClick}>
+        <div class="kanban-card-row">
+          <span class="kanban-ref">${t.ref}</span>
+          <span class="kanban-truck">${truck?.id || '—'}</span>
+        </div>
+        <div class="kanban-card-row-2">
+          <span class="kanban-driver">${driver ? escapeHtml(lang()==='ar'?driver.nameAr:driver.name) : '<span class="muted">—</span>'}</span>
+        </div>
+        <div class="kanban-card-row-3">
+          <span class="kanban-water"><span class="text-brand-500">${ICONS.droplet()}</span> ${fmtNum(t.waterLiters)} ${T("trip.cardWater")}</span>
+          <span class="kanban-dist muted">${t.distanceKm} ${T("trip.cardKm")}</span>
+        </div>
+        ${action}
+        ${clickable ? `<div class="kanban-hint muted">${ICONS.pin()} ${T("trip.cardClickRoute")}</div>` : ""}
+      </div>
+    `;
+  }
+
+  function driverSummaryTable(project, projectTrips, monthKey) {
+    const drivers = (project.assignedDriverIds || []).map(id => D().findDriver(id)).filter(Boolean);
+    if (drivers.length === 0) {
+      return `<div class="driver-table-wrap"><p class="muted text-sm p-3 text-center">${T("trip.noDriversAssigned")}</p></div>`;
+    }
+    const now = TRIPS_TODAY();
+    const isThisMonth = (iso) => {
+      const d = new Date(iso);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    };
+    const rows = drivers.map(d => {
+      const driverTrips = projectTrips.filter(t => t.driverId === d.id);
+      const monthDelivered = driverTrips.filter(t => t.status === "delivered" && isThisMonth(t.scheduledStart)).length;
+      const monthCommission = monthDelivered * project.ratePerTrip;
+      const lastTrip = driverTrips.slice().sort((a, b) => new Date(b.scheduledStart) - new Date(a.scheduledStart))[0];
+      const assignedTruck = D().trucks.find(tr => tr.driverId === d.id);
+      return `
+        <tr>
+          <td>
+            <div class="flex items-center gap-2">
+              <div class="h-7 w-7 rounded-full text-white grid place-items-center text-[11px] font-semibold" style="background:#0c66bf">${initials(d.name)}</div>
+              <div>
+                <div class="font-medium text-sm">${escapeHtml(lang()==='ar'?d.nameAr:d.name)}</div>
+                <div class="text-[11px] muted">${d.id}</div>
+              </div>
+            </div>
+          </td>
+          <td class="font-mono text-xs">${assignedTruck ? assignedTruck.id : '<span class="muted">—</span>'}</td>
+          <td>${pill(d.status, T(`status.${d.status}`))}</td>
+          <td class="tabular font-medium">${monthDelivered}</td>
+          <td class="tabular text-emerald-600 font-semibold">${fmtSar(monthCommission)}</td>
+          <td class="text-xs">${lastTrip ? new Date(lastTrip.scheduledStart).toLocaleDateString() : '<span class="muted">—</span>'}</td>
+        </tr>`;
+    }).join("");
+    return `
+      <div class="driver-table-wrap">
+        <div class="driver-table-head">
+          <span class="text-emerald-600">${ICONS.users()}</span>
+          <span class="font-semibold text-sm">${T("trip.driverTable")}</span>
+          <span class="muted text-xs ms-auto">${drivers.length} ${lang()==='en'?'driver(s)':'سائق'}</span>
+        </div>
         <div class="overflow-x-auto scroll-thin">
           <table class="tbl">
-            <thead>
-              <tr>
-                <th>Ref</th><th>${T("c.status")}</th><th>${T("c.customer")}</th><th>${T("c.route")}</th>
-                <th>${T("c.truck")}</th><th>${T("c.driver")}</th><th>${T("c.liters")}</th>
-                <th>${T("c.distance")}</th><th>${T("c.schedule")}</th><th>${T("c.cost")}</th><th>${T("c.revenue")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${list.map(t => {
-                const driver = D().findDriver(t.driverId);
-                const truck = D().findTruck(t.truckId);
-                const margin = t.revenueSar - t.costSar;
-                return `
-                <tr>
-                  <td><div class="font-medium">${t.ref}</div><div class="text-[11px] muted">${t.id}</div></td>
-                  <td>${pill(t.status, T(`status.${t.status}`))}</td>
-                  <td><div class="font-medium">${escapeHtml(lang()==='ar'?t.customerAr:t.customer)}</div><div class="text-[11px] muted">${T(`water.${t.waterType}`)}</div></td>
-                  <td>
-                    <div class="flex items-center gap-1.5 text-xs">
-                      <span class="muted truncate" style="max-width:110px">${escapeHtml(lang()==='ar'?t.origin.nameAr:t.origin.name)}</span>
-                      <span class="muted">${ICONS.arrowRight()}</span>
-                      <span class="font-medium truncate" style="max-width:110px">${escapeHtml(lang()==='ar'?t.destination.nameAr:t.destination.name)}</span>
-                    </div>
-                  </td>
-                  <td class="font-mono text-xs">${truck?.id}</td>
-                  <td>${driver ? escapeHtml(lang()==='ar'?driver.nameAr:driver.name) : '—'}</td>
-                  <td class="tabular"><span class="text-brand-500">${ICONS.droplet()}</span> ${fmtNum(t.waterLiters)}</td>
-                  <td class="tabular">${t.distanceKm} km</td>
-                  <td class="text-xs">${new Date(t.scheduledStart).toLocaleDateString()}</td>
-                  <td class="tabular">${fmtSar(t.costSar)}</td>
-                  <td class="tabular">${fmtSar(t.revenueSar)} <span class="text-[11px] ${margin>0?'text-emerald-600':'text-rose-600'}">(${margin>0?'+':''}${fmtSar(margin)})</span></td>
-                </tr>`;
-              }).join("")}
-            </tbody>
+            <thead><tr>
+              <th>${T("trip.driverName")}</th>
+              <th>${T("trip.truckCol")}</th>
+              <th>${T("trip.driverDutyStatus")}</th>
+              <th>${T("trip.tripsThisMonth")}</th>
+              <th>${T("trip.commissionThisMonth")}</th>
+              <th>${T("trip.lastTrip")}</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
           </table>
         </div>
       </div>
@@ -1321,23 +1731,37 @@ window.PAGES_1 = (function () {
   function routes() {
     const opt = window.APP_STATE.routeOpt !== false;
     window.APP_STATE.routeOpt = opt;
-    const active = D().trips.filter(t => t.status === "in_transit" || t.status === "loading" || t.status === "scheduled").slice(0, 18);
+    // Honor a focused trip pushed by the Kanban "View on map" action.
+    const focusedTripId = window.APP_STATE.selectedTripId;
+    const focusedTrip = focusedTripId ? D().trips.find(t => t.id === focusedTripId) : null;
+
+    const active = focusedTrip
+      ? [focusedTrip]
+      : D().trips.filter(t => t.status === "in_transit" || t.status === "loading" || t.status === "scheduled").slice(0, 18);
 
     const points = [];
-    D().trucks.forEach(tr => {
-      if (tr.status === "active" || tr.status === "idle") {
-        points.push({ id: tr.id, lat: tr.iot.gps.lat, lng: tr.iot.gps.lng,
-          color: tr.status === "active" ? "#10b981" : "#3b82f6", size: 0.9, label: `${tr.id} · ${tr.plate}` });
-      }
-    });
+    if (!focusedTrip) {
+      D().trucks.forEach(tr => {
+        if (tr.status === "active" || tr.status === "idle") {
+          points.push({ id: tr.id, lat: tr.iot.gps.lat, lng: tr.iot.gps.lng,
+            color: tr.status === "active" ? "#10b981" : "#3b82f6", size: 0.9, label: `${tr.id} · ${tr.plate}` });
+        }
+      });
+    } else {
+      // Pin the focused trip's truck and destination only
+      const tr = D().findTruck(focusedTrip.truckId);
+      if (tr) points.push({ id: tr.id, lat: tr.iot.gps.lat, lng: tr.iot.gps.lng,
+        color: "#10b981", size: 1.4, label: `${tr.id} · ${tr.plate}` });
+    }
     active.forEach(t => {
       points.push({ id: `dest-${t.id}`, lat: t.destination.lat, lng: t.destination.lng,
-        color: "#ef4444", size: 1.1, label: t.destination.name });
+        color: "#ef4444", size: focusedTrip ? 1.6 : 1.1, label: t.destination.name });
     });
     const routeLines = active.map(t => ({
       id: t.id,
       points: opt ? t.routeWaypoints : [t.routeWaypoints[0], t.routeWaypoints[t.routeWaypoints.length - 1]],
-      color: opt ? "#0b7eea" : "#94a3b8", dashed: !opt,
+      color: focusedTrip ? "#7c3aed" : (opt ? "#0b7eea" : "#94a3b8"),
+      dashed: !opt && !focusedTrip,
     }));
 
     const totalKm = active.reduce((s, t) => s + t.distanceKm, 0);
@@ -1345,7 +1769,30 @@ window.PAGES_1 = (function () {
     const timeSaved = +(totalKm * 0.012).toFixed(1);
     const costSaved = Math.round(fuelSaved * 2.18);
 
+    // Focused-trip banner above the page header
+    const focusBanner = focusedTrip ? (() => {
+      const driver = D().findDriver(focusedTrip.driverId);
+      const truck  = D().findTruck(focusedTrip.truckId);
+      const proj   = D().PROJECTS.find(p => p.id === focusedTrip.projectId);
+      return `
+        <div class="focus-banner mb-3">
+          <div class="focus-banner-l">
+            <span class="text-purple-600">${ICONS.pin()}</span>
+            <div>
+              <div class="font-semibold text-sm">${T("trip.routeFocusedTrip")}</div>
+              <div class="text-xs muted">
+                <b>${focusedTrip.ref}</b> · ${escapeHtml(proj ? (lang()==='ar'?proj.nameAr:proj.name) : '')}
+                · ${truck?.id || ''} · ${driver ? escapeHtml(lang()==='ar'?driver.nameAr:driver.name) : ''}
+                · ${fmtNum(focusedTrip.waterLiters)} L · ${focusedTrip.distanceKm} km · ${pill(focusedTrip.status, T(`status.${focusedTrip.status}`))}
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-outline" onclick="TRIP.clearMapFocus()">${ICONS.x()}${T("trip.routeClearFocus")}</button>
+        </div>`;
+    })() : "";
+
     return `
+      ${focusBanner}
       ${pageHeader({
         title: T("nav.routes"),
         subtitle: T("c.routesSubtitle"),

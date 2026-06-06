@@ -216,7 +216,11 @@
   };
   const ORIGINS = Object.keys(ORIGIN_AR_MAP);
 
-  const trips = Array.from({ length: 60 }, (_, i) => {
+  // "Today" anchor used by the trip seed below + by the Kanban reporting
+  // periods (daily / weekly / monthly / quarterly).
+  const TRIPS_TODAY = new Date(2026, 5, 6);  // 2026-06-06
+
+  const trips = Array.from({ length: 72 }, (_, i) => {
     const truck = trucks[i % trucks.length];
     const customer = CUSTOMERS[i % CUSTOMERS.length];
     const origin = ORIGINS[i % ORIGINS.length];
@@ -226,7 +230,11 @@
     const status = pool[i % pool.length];
     const water = Math.min(truck.capacityLiters, intBetween(8000, truck.capacityLiters));
     const fuelLiters = +(distance / truck.fuelEfficiencyKmPerL).toFixed(1);
-    const startDate = new Date(2026, 4, 11 - (i % 14), intBetween(5, 21), intBetween(0, 59));
+    // Spread trips across last 35 days from TRIPS_TODAY so daily/weekly/
+    // monthly/quarterly reporting periods are all non-empty.
+    const dayOffset = -(i % 35);
+    const startDate = new Date(TRIPS_TODAY.getTime() + dayOffset * 86400000);
+    startDate.setHours(intBetween(5, 21), intBetween(0, 59), 0, 0);
     const [oLat, oLng] = DEPOT_COORDS[truck.homeDepot];
     const dLat = oLat + (rnd() - 0.5) * 1.6, dLng = oLng + (rnd() - 0.5) * 1.6;
     return {
@@ -237,6 +245,7 @@
       origin: { name: origin, nameAr: ORIGIN_AR_MAP[origin], lat: oLat, lng: oLng },
       destination: { name: customer[0], nameAr: customer[1], lat: dLat, lng: dLng },
       customer: customer[0], customerAr: customer[1],
+      projectId: null,  // back-filled after PROJECT_BY_CUSTOMER is built
       scheduledStart: startDate.toISOString(),
       actualStart: status !== "scheduled" ? startDate.toISOString() : undefined,
       actualEnd: status === "delivered" ? new Date(startDate.getTime() + planned * 60000).toISOString() : undefined,
@@ -626,17 +635,81 @@
   /** Driver commissions. The user wants commissions distributed by project
    *  served + trip count, with manual override for special trips. We seed a
    *  reasonable structure that the UI can edit live (state held in APP_STATE). */
+  /** Each project carries its own water-transport workstream. Drivers are
+   *  assigned to one or more projects; trips operate inside a project's
+   *  Kanban board. Commission rate is per trip and is paid the moment a
+   *  trip enters the Delivered column. */
   const PROJECTS = [
-    { id: "PRJ-NEOM", name: "NEOM Construction Camp", nameAr: "مخيم نيوم للإنشاءات", ratePerTrip: 85 },
-    { id: "PRJ-ARAMCO", name: "Aramco Operations", nameAr: "عمليات أرامكو", ratePerTrip: 70 },
-    { id: "PRJ-DIRIYAH", name: "Diriyah Gate Project", nameAr: "مشروع بوابة الدرعية", ratePerTrip: 65 },
-    { id: "PRJ-REDSEA", name: "Red Sea Project Site", nameAr: "موقع مشروع البحر الأحمر", ratePerTrip: 90 },
-    { id: "PRJ-KAEC", name: "KAEC Residential", nameAr: "مدينة الملك عبدالله الاقتصادية", ratePerTrip: 60 },
-    { id: "PRJ-RIYADH", name: "Riyadh Municipality", nameAr: "أمانة الرياض", ratePerTrip: 50 },
-    { id: "PRJ-JEDDAH", name: "Jeddah Industrial Area", nameAr: "المنطقة الصناعية - جدة", ratePerTrip: 55 },
-    { id: "PRJ-YANBU", name: "Yanbu Industrial Hub", nameAr: "مركز ينبع الصناعي", ratePerTrip: 60 },
-    { id: "PRJ-ALULA", name: "AlUla Heritage Site", nameAr: "موقع العلا التراثي", ratePerTrip: 75 },
-    { id: "PRJ-QIDDIYA", name: "Qiddiya Construction", nameAr: "إنشاءات القدية", ratePerTrip: 65 },
+    { id: "PRJ-NEOM",    name: "NEOM Construction Camp",   nameAr: "مخيم نيوم للإنشاءات",
+      ratePerTrip: 85,   customer: "NEOM Construction Camp",
+      location: "NEOM, Tabuk Province", locationAr: "نيوم، منطقة تبوك",
+      coords: { lat: 27.9300, lng: 35.0900 },
+      description: "Round-the-clock potable water support for the NEOM Phase-1 worker housing.",
+      descriptionAr: "دعم المياه الصالحة للشرب لمساكن العمال في المرحلة الأولى من نيوم.",
+      active: true, createdAt: "2025-11-01" },
+    { id: "PRJ-ARAMCO", name: "Aramco Operations", nameAr: "عمليات أرامكو",
+      ratePerTrip: 70, customer: "Aramco Operations",
+      location: "Dhahran, Eastern Province", locationAr: "الظهران، المنطقة الشرقية",
+      coords: { lat: 26.2885, lng: 50.1500 },
+      description: "Industrial and process-water deliveries to Aramco compound sites.",
+      descriptionAr: "توصيل مياه صناعية لمواقع أرامكو.",
+      active: true, createdAt: "2025-09-15" },
+    { id: "PRJ-DIRIYAH", name: "Diriyah Gate Project", nameAr: "مشروع بوابة الدرعية",
+      ratePerTrip: 65, customer: "Diriyah Gate Project",
+      location: "Diriyah, Riyadh", locationAr: "الدرعية، الرياض",
+      coords: { lat: 24.7370, lng: 46.5750 },
+      description: "Construction water for the Diriyah heritage restoration zone.",
+      descriptionAr: "مياه إنشاءات لمنطقة ترميم تراث الدرعية.",
+      active: true, createdAt: "2026-01-12" },
+    { id: "PRJ-REDSEA", name: "Red Sea Project Site", nameAr: "موقع مشروع البحر الأحمر",
+      ratePerTrip: 90, customer: "Red Sea Project Site",
+      location: "Umluj, Tabuk Province", locationAr: "أملج، منطقة تبوك",
+      coords: { lat: 25.0260, lng: 37.2640 },
+      description: "Premium rate — long-haul potable + irrigation deliveries to the Red Sea coastal resorts.",
+      descriptionAr: "تعريفة مميزة — توصيل مياه الشرب والري للمنتجعات الساحلية بالبحر الأحمر.",
+      active: true, createdAt: "2025-12-03" },
+    { id: "PRJ-KAEC", name: "KAEC Residential", nameAr: "مدينة الملك عبدالله الاقتصادية",
+      ratePerTrip: 60, customer: "KAEC Residential",
+      location: "KAEC, Western Region", locationAr: "مدينة الملك عبدالله الاقتصادية",
+      coords: { lat: 22.4500, lng: 39.1500 },
+      description: "Residential potable water — daily routes through the KAEC compound.",
+      descriptionAr: "مياه شرب للمناطق السكنية — مسارات يومية داخل المدينة الاقتصادية.",
+      active: true, createdAt: "2025-08-20" },
+    { id: "PRJ-RIYADH", name: "Riyadh Municipality", nameAr: "أمانة الرياض",
+      ratePerTrip: 50, customer: "Riyadh Municipality",
+      location: "Riyadh metropolitan area", locationAr: "أمانة الرياض",
+      coords: { lat: 24.7136, lng: 46.6753 },
+      description: "Municipal contract — emergency top-ups + park irrigation tanker runs.",
+      descriptionAr: "عقد بلدي — تعبئة طارئة وري حدائق.",
+      active: true, createdAt: "2025-06-10" },
+    { id: "PRJ-JEDDAH", name: "Jeddah Industrial Area", nameAr: "المنطقة الصناعية - جدة",
+      ratePerTrip: 55, customer: "Jeddah Industrial Area",
+      location: "Jeddah, Western Region", locationAr: "جدة",
+      coords: { lat: 21.4858, lng: 39.1925 },
+      description: "Process water for the Jeddah Industrial Cities (1st + 2nd phases).",
+      descriptionAr: "مياه عمليات للمدن الصناعية بجدة (المرحلة الأولى والثانية).",
+      active: true, createdAt: "2025-07-22" },
+    { id: "PRJ-YANBU", name: "Yanbu Industrial Hub", nameAr: "مركز ينبع الصناعي",
+      ratePerTrip: 60, customer: "Yanbu Industrial Hub",
+      location: "Yanbu, Western Region", locationAr: "ينبع",
+      coords: { lat: 24.0890, lng: 38.0610 },
+      description: "Industrial water for the Yanbu petrochemical corridor.",
+      descriptionAr: "مياه صناعية لمحور البتروكيماويات بينبع.",
+      active: true, createdAt: "2025-10-18" },
+    { id: "PRJ-ALULA", name: "AlUla Heritage Site", nameAr: "موقع العلا التراثي",
+      ratePerTrip: 75, customer: "AlUla Heritage Site",
+      location: "AlUla, Madinah region", locationAr: "العلا",
+      coords: { lat: 26.6082, lng: 37.9220 },
+      description: "Heritage-site potable + dust-suppression water for the AlUla restoration.",
+      descriptionAr: "مياه شرب وإخماد غبار لمشروع ترميم العلا.",
+      active: true, createdAt: "2026-02-04" },
+    { id: "PRJ-QIDDIYA", name: "Qiddiya Construction", nameAr: "إنشاءات القدية",
+      ratePerTrip: 65, customer: "Qiddiya Construction",
+      location: "Qiddiya, Riyadh region", locationAr: "القدية، الرياض",
+      coords: { lat: 24.5750, lng: 46.1750 },
+      description: "Construction-grade water for the Qiddiya entertainment city build-out.",
+      descriptionAr: "مياه إنشائية لمشروع مدينة القدية الترفيهية.",
+      active: true, createdAt: "2026-03-08" },
   ];
   const PROJECT_BY_CUSTOMER = {
     "NEOM Construction Camp": "PRJ-NEOM",
@@ -650,13 +723,30 @@
     "AlUla Heritage Site": "PRJ-ALULA",
     "Qiddiya Construction": "PRJ-QIDDIYA",
   };
+
+  // Back-fill each trip's projectId from the customer mapping.
+  trips.forEach(t => { t.projectId = PROJECT_BY_CUSTOMER[t.customer] || null; });
+
+  // Build each project's assignedDriverIds from drivers who actually ran trips
+  // there. This makes the Kanban driver tables non-empty out of the gate.
+  PROJECTS.forEach(p => {
+    const driverIds = new Set();
+    trips.forEach(t => { if (t.projectId === p.id && t.driverId) driverIds.add(t.driverId); });
+    // Always seat at least 2 drivers per project so the driver table has rows
+    // even on a brand-new project. Fall back to the first N drivers if needed.
+    if (driverIds.size < 2) {
+      drivers.slice(0, 4).forEach(d => driverIds.add(d.id));
+    }
+    p.assignedDriverIds = Array.from(driverIds).slice(0, 8);
+  });
   // Seed three months of commissions (Mar, Apr, May 2026) so the user can
   // switch months in the UI. May is the editable current month; Apr is mostly
   // paid; Mar is fully paid. Each row keyed by driverId+monthKey.
   const COMMISSION_MONTHS = [
-    { key: "2026-03", labelEn: "March 2026",  labelAr: "مارس 2026",  defaultPayout: ["paid", "paid", "paid"] },
-    { key: "2026-04", labelEn: "April 2026",  labelAr: "أبريل 2026", defaultPayout: ["paid", "approved", "paid"] },
-    { key: "2026-05", labelEn: "May 2026",    labelAr: "مايو 2026",  defaultPayout: ["pending", "approved", "paid"] },
+    { key: "2026-03", labelEn: "March 2026", labelAr: "مارس 2026",  defaultPayout: ["paid", "paid", "paid"] },
+    { key: "2026-04", labelEn: "April 2026", labelAr: "أبريل 2026", defaultPayout: ["paid", "approved", "paid"] },
+    { key: "2026-05", labelEn: "May 2026",   labelAr: "مايو 2026",  defaultPayout: ["paid", "paid", "approved"] },
+    { key: "2026-06", labelEn: "June 2026",  labelAr: "يونيو 2026", defaultPayout: ["pending", "approved", "paid"] },
   ];
 
   function buildLinesFor(driver, monthFactor) {
@@ -688,7 +778,8 @@
 
   const commissions = [];
   COMMISSION_MONTHS.forEach((m, mi) => {
-    const monthFactor = mi === 0 ? 0.85 : mi === 1 ? 0.95 : 1.0; // March smallest, May full
+    // June is the live month — fewer trips banked so far. May is a peak month.
+    const monthFactor = mi === 0 ? 0.85 : mi === 1 ? 0.95 : mi === 2 ? 1.0 : 0.35;
     drivers.forEach((d, di) => {
       const lines = buildLinesFor(d, monthFactor);
       const wantSpecial = rnd() < (mi === 2 ? 0.28 : 0.18);
@@ -715,7 +806,7 @@
       });
     });
   });
-  const CURRENT_MONTH_KEY = "2026-05";
+  const CURRENT_MONTH_KEY = "2026-06";
   // ----------------------------------------------------------------------
   // ARCHIVE — per-project documents organized into named, sortable groups.
   // Each document carries a `type` and an `aiExtracted` field map that the
@@ -1359,6 +1450,51 @@
     findPart: id => parts.find(p => p.id === id),
     findWO: id => workOrders.find(w => w.id === id),
     findOutsourced: id => outsourcedJobs.find(o => o.id === id),
+    findTripsForProject(projectId) { return trips.filter(t => t.projectId === projectId); },
+    nextProjectId() {
+      let n = PROJECTS.length + 1;
+      while (PROJECTS.some(p => p.id === `PRJ-CUSTOM${n}`)) n++;
+      return `PRJ-CUSTOM${n}`;
+    },
+    /** When a trip transitions to "delivered" from the Kanban, credit the
+     *  driver's commission row for the current month: increment the existing
+     *  project line, or create one if none exists. Creates the row itself if
+     *  the driver doesn't have one for the current month yet. */
+    payCommissionForTrip(tripId) {
+      const t = trips.find(x => x.id === tripId);
+      if (!t) return null;
+      const proj = PROJECTS.find(p => p.id === t.projectId);
+      if (!proj || !t.driverId) return null;
+      const monthKey = CURRENT_MONTH_KEY;
+      let row = commissions.find(c => c.driverId === t.driverId && c.monthKey === monthKey);
+      if (!row) {
+        row = {
+          driverId: t.driverId, monthKey,
+          payoutStatus: "pending",
+          lines: [], specials: [], adjustments: [],
+          bonus: 0,
+        };
+        commissions.push(row);
+      }
+      let line = row.lines.find(l => l.projectId === proj.id);
+      if (line) {
+        line.tripsCount += 1;
+        line.amountSar = line.tripsCount * line.ratePerTrip;
+        line.lastTripAt = new Date().toISOString();
+      } else {
+        row.lines.push({
+          id: `CL-${t.driverId}-${proj.id}-auto-${Date.now().toString(36)}`,
+          projectId: proj.id,
+          tripsCount: 1,
+          ratePerTrip: proj.ratePerTrip,
+          amountSar: proj.ratePerTrip,
+          manual: false,
+          lastTripAt: new Date().toISOString(),
+          source: "kanban_delivery",
+        });
+      }
+      return { driverId: t.driverId, projectId: proj.id, ratePerTrip: proj.ratePerTrip };
+    },
     findProject: id => PROJECTS.find(p => p.id === id),
     /** Find a commission row for a driver in a specific month (defaults to
      *  current). Returns null if none seeded. */
