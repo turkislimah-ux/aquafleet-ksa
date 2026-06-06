@@ -216,9 +216,23 @@
   };
   const ORIGINS = Object.keys(ORIGIN_AR_MAP);
 
+  // Water filling stations — each tanker fills its tank at one of these
+  // stations before heading out. Drivers can pick any station; the chosen
+  // station is shown in the Loading-column Kanban card.
+  const WATER_STATIONS = [
+    { id: "WS-MAN",   name: "Manfuhah Station",     nameAr: "محطة منفوحة",         city: "Riyadh",  cityAr: "الرياض" },
+    { id: "WS-UAH",   name: "Umm Al Hamam Station", nameAr: "محطة أم الحمام",      city: "Riyadh",  cityAr: "الرياض" },
+    { id: "WS-OLA",   name: "Olaya Filling Point",  nameAr: "نقطة العليا للتعبئة", city: "Riyadh",  cityAr: "الرياض" },
+    { id: "WS-JED-N", name: "Jeddah North Plant",   nameAr: "محطة جدة الشمالية",   city: "Jeddah",  cityAr: "جدة" },
+    { id: "WS-JED-S", name: "Al Hamra Station",     nameAr: "محطة الحمراء",        city: "Jeddah",  cityAr: "جدة" },
+    { id: "WS-DAM",   name: "Dammam Desalination",  nameAr: "محطة تحلية الدمام",   city: "Dammam",  cityAr: "الدمام" },
+    { id: "WS-MAD",   name: "Madinah Filling Hub",  nameAr: "محطة تعبئة المدينة",  city: "Madinah", cityAr: "المدينة" },
+    { id: "WS-TBK",   name: "Tabuk West Station",   nameAr: "محطة تبوك الغربية",   city: "Tabuk",   cityAr: "تبوك" },
+  ];
+
   // "Today" anchor used by the trip seed below + by the Kanban reporting
   // periods (daily / weekly / monthly / quarterly).
-  const TRIPS_TODAY = new Date(2026, 5, 6);  // 2026-06-06
+  const TRIPS_TODAY = new Date(2026, 5, 7);  // 2026-06-07
 
   const trips = Array.from({ length: 72 }, (_, i) => {
     const truck = trucks[i % trucks.length];
@@ -237,6 +251,14 @@
     startDate.setHours(intBetween(5, 21), intBetween(0, 59), 0, 0);
     const [oLat, oLng] = DEPOT_COORDS[truck.homeDepot];
     const dLat = oLat + (rnd() - 0.5) * 1.6, dLng = oLng + (rnd() - 0.5) * 1.6;
+    // Tank class = the truck's capacity in m³ (33 / 18 / 6). Loading phase
+    // gets a water-station assignment.
+    const tankSizeM3 = truck.capacityM3 || Math.round((truck.capacityLiters || 18000) / 1000);
+    const waterStationId = WATER_STATIONS[i % WATER_STATIONS.length].id;
+    // Phase timestamps — populated for whichever phases the trip has reached.
+    const loadingAt = (status !== "scheduled") ? new Date(startDate.getTime() + 5 * 60000).toISOString() : null;
+    const inTransitAt = (status === "in_transit" || status === "delivered") ? new Date(startDate.getTime() + 25 * 60000).toISOString() : null;
+    const deliveredAt = (status === "delivered") ? new Date(startDate.getTime() + planned * 60000).toISOString() : null;
     return {
       id: `TRP-${String(i + 1).padStart(4, "0")}`,
       ref: `WT-2026-${String(1000 + i)}`,
@@ -246,6 +268,14 @@
       destination: { name: customer[0], nameAr: customer[1], lat: dLat, lng: dLng },
       customer: customer[0], customerAr: customer[1],
       projectId: null,  // back-filled after PROJECT_BY_CUSTOMER is built
+      tankSizeM3,
+      waterStationId,
+      phaseTimestamps: {
+        scheduled: startDate.toISOString(),
+        loading: loadingAt,
+        in_transit: inTransitAt,
+        delivered: deliveredAt,
+      },
       scheduledStart: startDate.toISOString(),
       actualStart: status !== "scheduled" ? startDate.toISOString() : undefined,
       actualEnd: status === "delivered" ? new Date(startDate.getTime() + planned * 60000).toISOString() : undefined,
@@ -646,70 +676,80 @@
       coords: { lat: 27.9300, lng: 35.0900 },
       description: "Round-the-clock potable water support for the NEOM Phase-1 worker housing.",
       descriptionAr: "دعم المياه الصالحة للشرب لمساكن العمال في المرحلة الأولى من نيوم.",
-      active: true, createdAt: "2025-11-01" },
+      active: true, createdAt: "2025-11-01",
+      commissionMode: "scalable", scalableRatePct: 6 },
     { id: "PRJ-ARAMCO", name: "Aramco Operations", nameAr: "عمليات أرامكو",
       ratePerTrip: 70, customer: "Aramco Operations",
       location: "Dhahran, Eastern Province", locationAr: "الظهران، المنطقة الشرقية",
       coords: { lat: 26.2885, lng: 50.1500 },
       description: "Industrial and process-water deliveries to Aramco compound sites.",
       descriptionAr: "توصيل مياه صناعية لمواقع أرامكو.",
-      active: true, createdAt: "2025-09-15" },
+      active: true, createdAt: "2025-09-15",
+      commissionMode: "fixed", scalableRatePct: 0 },
     { id: "PRJ-DIRIYAH", name: "Diriyah Gate Project", nameAr: "مشروع بوابة الدرعية",
       ratePerTrip: 65, customer: "Diriyah Gate Project",
       location: "Diriyah, Riyadh", locationAr: "الدرعية، الرياض",
       coords: { lat: 24.7370, lng: 46.5750 },
       description: "Construction water for the Diriyah heritage restoration zone.",
       descriptionAr: "مياه إنشاءات لمنطقة ترميم تراث الدرعية.",
-      active: true, createdAt: "2026-01-12" },
+      active: true, createdAt: "2026-01-12",
+      commissionMode: "fixed", scalableRatePct: 0 },
     { id: "PRJ-REDSEA", name: "Red Sea Project Site", nameAr: "موقع مشروع البحر الأحمر",
       ratePerTrip: 90, customer: "Red Sea Project Site",
       location: "Umluj, Tabuk Province", locationAr: "أملج، منطقة تبوك",
       coords: { lat: 25.0260, lng: 37.2640 },
       description: "Premium rate — long-haul potable + irrigation deliveries to the Red Sea coastal resorts.",
       descriptionAr: "تعريفة مميزة — توصيل مياه الشرب والري للمنتجعات الساحلية بالبحر الأحمر.",
-      active: true, createdAt: "2025-12-03" },
+      active: true, createdAt: "2025-12-03",
+      commissionMode: "scalable", scalableRatePct: 8 },
     { id: "PRJ-KAEC", name: "KAEC Residential", nameAr: "مدينة الملك عبدالله الاقتصادية",
       ratePerTrip: 60, customer: "KAEC Residential",
       location: "KAEC, Western Region", locationAr: "مدينة الملك عبدالله الاقتصادية",
       coords: { lat: 22.4500, lng: 39.1500 },
       description: "Residential potable water — daily routes through the KAEC compound.",
       descriptionAr: "مياه شرب للمناطق السكنية — مسارات يومية داخل المدينة الاقتصادية.",
-      active: true, createdAt: "2025-08-20" },
+      active: true, createdAt: "2025-08-20",
+      commissionMode: "fixed", scalableRatePct: 0 },
     { id: "PRJ-RIYADH", name: "Riyadh Municipality", nameAr: "أمانة الرياض",
       ratePerTrip: 50, customer: "Riyadh Municipality",
       location: "Riyadh metropolitan area", locationAr: "أمانة الرياض",
       coords: { lat: 24.7136, lng: 46.6753 },
       description: "Municipal contract — emergency top-ups + park irrigation tanker runs.",
       descriptionAr: "عقد بلدي — تعبئة طارئة وري حدائق.",
-      active: true, createdAt: "2025-06-10" },
+      active: true, createdAt: "2025-06-10",
+      commissionMode: "fixed", scalableRatePct: 0 },
     { id: "PRJ-JEDDAH", name: "Jeddah Industrial Area", nameAr: "المنطقة الصناعية - جدة",
       ratePerTrip: 55, customer: "Jeddah Industrial Area",
       location: "Jeddah, Western Region", locationAr: "جدة",
       coords: { lat: 21.4858, lng: 39.1925 },
       description: "Process water for the Jeddah Industrial Cities (1st + 2nd phases).",
       descriptionAr: "مياه عمليات للمدن الصناعية بجدة (المرحلة الأولى والثانية).",
-      active: true, createdAt: "2025-07-22" },
+      active: true, createdAt: "2025-07-22",
+      commissionMode: "fixed", scalableRatePct: 0 },
     { id: "PRJ-YANBU", name: "Yanbu Industrial Hub", nameAr: "مركز ينبع الصناعي",
       ratePerTrip: 60, customer: "Yanbu Industrial Hub",
       location: "Yanbu, Western Region", locationAr: "ينبع",
       coords: { lat: 24.0890, lng: 38.0610 },
       description: "Industrial water for the Yanbu petrochemical corridor.",
       descriptionAr: "مياه صناعية لمحور البتروكيماويات بينبع.",
-      active: true, createdAt: "2025-10-18" },
+      active: true, createdAt: "2025-10-18",
+      commissionMode: "fixed", scalableRatePct: 0 },
     { id: "PRJ-ALULA", name: "AlUla Heritage Site", nameAr: "موقع العلا التراثي",
       ratePerTrip: 75, customer: "AlUla Heritage Site",
       location: "AlUla, Madinah region", locationAr: "العلا",
       coords: { lat: 26.6082, lng: 37.9220 },
       description: "Heritage-site potable + dust-suppression water for the AlUla restoration.",
       descriptionAr: "مياه شرب وإخماد غبار لمشروع ترميم العلا.",
-      active: true, createdAt: "2026-02-04" },
+      active: true, createdAt: "2026-02-04",
+      commissionMode: "scalable", scalableRatePct: 5 },
     { id: "PRJ-QIDDIYA", name: "Qiddiya Construction", nameAr: "إنشاءات القدية",
       ratePerTrip: 65, customer: "Qiddiya Construction",
       location: "Qiddiya, Riyadh region", locationAr: "القدية، الرياض",
       coords: { lat: 24.5750, lng: 46.1750 },
       description: "Construction-grade water for the Qiddiya entertainment city build-out.",
       descriptionAr: "مياه إنشائية لمشروع مدينة القدية الترفيهية.",
-      active: true, createdAt: "2026-03-08" },
+      active: true, createdAt: "2026-03-08",
+      commissionMode: "fixed", scalableRatePct: 0 },
   ];
   const PROJECT_BY_CUSTOMER = {
     "NEOM Construction Camp": "PRJ-NEOM",
@@ -1451,15 +1491,30 @@
     findWO: id => workOrders.find(w => w.id === id),
     findOutsourced: id => outsourcedJobs.find(o => o.id === id),
     findTripsForProject(projectId) { return trips.filter(t => t.projectId === projectId); },
+    WATER_STATIONS,
+    findWaterStation(id) { return WATER_STATIONS.find(s => s.id === id) || null; },
     nextProjectId() {
       let n = PROJECTS.length + 1;
       while (PROJECTS.some(p => p.id === `PRJ-CUSTOM${n}`)) n++;
       return `PRJ-CUSTOM${n}`;
     },
+    /** Compute the commission for the n-th delivery on this project (1-indexed).
+     *  - Fixed: every trip pays project.ratePerTrip.
+     *  - Scalable: nth trip pays base × (1 + (n-1) × pct/100), so a 5% bump
+     *    means trip 2 pays 1.05× base, trip 3 pays 1.10× base, etc. */
+    commissionForNthTrip(project, n) {
+      if (!project) return 0;
+      const base = project.ratePerTrip || 0;
+      if (project.commissionMode !== "scalable" || !project.scalableRatePct) return base;
+      return +(base * (1 + (n - 1) * (project.scalableRatePct / 100))).toFixed(2);
+    },
+
     /** When a trip transitions to "delivered" from the Kanban, credit the
-     *  driver's commission row for the current month: increment the existing
-     *  project line, or create one if none exists. Creates the row itself if
-     *  the driver doesn't have one for the current month yet. */
+     *  driver's commission row for the current month: add the cost of the
+     *  Nth trip (where N is post-increment) for this project. If the project
+     *  has scalable commission, the amount on this trip differs from the
+     *  per-trip base. We track the cumulative amount + count on a per-line
+     *  basis so the driver page can show both. */
     payCommissionForTrip(tripId) {
       const t = trips.find(x => x.id === tripId);
       if (!t) return null;
@@ -1477,9 +1532,11 @@
         commissions.push(row);
       }
       let line = row.lines.find(l => l.projectId === proj.id);
+      const nextN = line ? line.tripsCount + 1 : 1;
+      const thisTripPay = this.commissionForNthTrip(proj, nextN);
       if (line) {
-        line.tripsCount += 1;
-        line.amountSar = line.tripsCount * line.ratePerTrip;
+        line.tripsCount = nextN;
+        line.amountSar = +(line.amountSar + thisTripPay).toFixed(2);
         line.lastTripAt = new Date().toISOString();
       } else {
         row.lines.push({
@@ -1487,13 +1544,15 @@
           projectId: proj.id,
           tripsCount: 1,
           ratePerTrip: proj.ratePerTrip,
-          amountSar: proj.ratePerTrip,
+          amountSar: thisTripPay,
           manual: false,
           lastTripAt: new Date().toISOString(),
           source: "kanban_delivery",
+          commissionMode: proj.commissionMode || "fixed",
+          scalableRatePct: proj.scalableRatePct || 0,
         });
       }
-      return { driverId: t.driverId, projectId: proj.id, ratePerTrip: proj.ratePerTrip };
+      return { driverId: t.driverId, projectId: proj.id, paidThisTrip: thisTripPay, tripN: nextN };
     },
     findProject: id => PROJECTS.find(p => p.id === id),
     /** Find a commission row for a driver in a specific month (defaults to

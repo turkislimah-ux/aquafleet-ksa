@@ -852,6 +852,32 @@ window.DICT = {
     // Routes page - selected-trip banner
     routeFocusedTrip: { en: "Showing route for selected trip", ar: "عرض مسار الرحلة المحددة" },
     routeClearFocus:  { en: "Clear", ar: "إلغاء التحديد" },
+    // New-project commission settings
+    commissionSetup:  { en: "Commission setup", ar: "إعدادات العمولة" },
+    commissionMode:   { en: "Mode",             ar: "النوع" },
+    modeFixed:        { en: "Fixed",            ar: "ثابتة" },
+    modeFixedDesc:    { en: "Every trip pays the same rate", ar: "كل رحلة بنفس التعريفة" },
+    modeScalable:     { en: "Scalable",         ar: "تصاعدية" },
+    modeScalableDesc: { en: "1st trip pays the base; each next trip gets a % bump", ar: "الرحلة الأولى بالأساس؛ كل رحلة تالية تزيد بنسبة %" },
+    baseRate:         { en: "Base rate / trip (SAR)", ar: "أساس العمولة / رحلة (ريال)" },
+    bumpPct:          { en: "Increase per next trip (%)", ar: "نسبة الزيادة لكل رحلة لاحقة (%)" },
+    previewLine:      { en: "Preview",          ar: "معاينة" },
+    // Drivers picker (scrollable list)
+    pickDriversList:  { en: "Drivers (scroll & click to select)", ar: "السائقون (مرر واختر)" },
+    selectedNDrivers: { en: "selected",         ar: "محدد" },
+    // New-trip form
+    tripTankType:     { en: "Tank type",        ar: "نوع الخزان" },
+    tripTankTypeNote: { en: "From the Fleet truck capacity", ar: "من سعة الشاحنة" },
+    pickWaterStation: { en: "Water station",    ar: "محطة المياه" },
+    scheduledFor:     { en: "Scheduled for",    ar: "مجدولة لـ" },
+    scheduledTime:    { en: "Scheduled time",   ar: "الوقت المجدول" },
+    fillAt:           { en: "Fill at",          ar: "تعبئة في" },
+    // Kanban card phase rows (replacing liters + km)
+    phaseScheduledOn: { en: "Scheduled",        ar: "مجدولة" },
+    phaseLoadingSince:{ en: "Loading since",    ar: "تحميل منذ" },
+    phaseTransitSince:{ en: "In transit since", ar: "في الطريق منذ" },
+    phaseDeliveredAt: { en: "Delivered",        ar: "تم التسليم" },
+    cubicMeters:      { en: "m³",               ar: "م³" },
   },
 };
 

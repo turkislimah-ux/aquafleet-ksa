@@ -1239,10 +1239,11 @@ window.PAGES_1 = (function () {
   /** TRIP handler namespace: project + Kanban actions. Manual workflow only —
    *  trips never auto-progress; management has to push them through. */
   window.TRIP = {
-    /** Open the "new project" modal. Required: name, location, ≥1 driver,
-     *  rate per trip. */
+    /** Open the "new project" modal. Required: name, single location,
+     *  commission setup (fixed or scalable), ≥1 driver. */
     openNewProject() {
-      const driversList = D().drivers;
+      window.APP_STATE.npDraftDrivers = [];
+      window.APP_STATE.npCommissionMode = "fixed";
       const html = `
         <div class="space-y-3">
           <p class="text-sm muted">${lang()==='en'
@@ -1253,28 +1254,75 @@ window.PAGES_1 = (function () {
               <input id="npName" class="input w-full" placeholder="e.g. King Salman Park"/></div>
             <div><label class="field-label">${T("trip.projectNameAr")}</label>
               <input id="npNameAr" class="input w-full" placeholder="مثال: حديقة الملك سلمان"/></div>
-            <div><label class="field-label">${T("trip.locationEn")}</label>
-              <input id="npLoc" class="input w-full" placeholder="City / district"/></div>
-            <div><label class="field-label">${T("trip.locationAr")}</label>
-              <input id="npLocAr" class="input w-full" placeholder="المدينة / المنطقة"/></div>
+            <div class="col-span-2"><label class="field-label">${T("trip.location")}</label>
+              <input id="npLoc" class="input w-full" placeholder="${lang()==='en'?'e.g. Riyadh — King Salman Park':'مثال: الرياض — حديقة الملك سلمان'}"/></div>
             <div><label class="field-label">${T("trip.coordsLat")}</label>
               <input id="npLat" class="input w-full" type="number" step="0.0001" value="24.7136"/></div>
             <div><label class="field-label">${T("trip.coordsLng")}</label>
               <input id="npLng" class="input w-full" type="number" step="0.0001" value="46.6753"/></div>
-            <div class="col-span-2"><label class="field-label">${T("trip.ratePerTripField")}</label>
-              <input id="npRate" class="input w-full" type="number" min="0" value="60"/></div>
-            <div class="col-span-2"><label class="field-label">${T("trip.assignDrivers")}</label>
-              <div id="npDrivers" class="chip-strip" style="max-height:11rem">
-                ${driversList.map(d => `
-                  <button type="button" class="chip" data-id="${d.id}" onclick="TRIP._toggleDriverChip('${d.id}', this)">
-                    ${escapeHtml(lang()==='ar'?d.nameAr:d.name)} <span class="muted text-[10px]">${d.id}</span>
-                  </button>
-                `).join("")}
+          </div>
+
+          <!-- Commission setup block -->
+          <div class="commission-setup">
+            <div class="commission-setup-head">
+              <span class="text-emerald-600">${ICONS.money ? ICONS.money() : ''}</span>
+              <span class="font-semibold text-sm">${T("trip.commissionSetup")}</span>
+            </div>
+            <div class="commission-mode-row">
+              <label class="mode-chip ${'active'}" id="modeFixedChip" onclick="TRIP._setCommissionMode('fixed')">
+                <input type="radio" name="npMode" value="fixed" checked/>
+                <div>
+                  <div class="mode-label">${T("trip.modeFixed")}</div>
+                  <div class="mode-desc">${T("trip.modeFixedDesc")}</div>
+                </div>
+              </label>
+              <label class="mode-chip" id="modeScalableChip" onclick="TRIP._setCommissionMode('scalable')">
+                <input type="radio" name="npMode" value="scalable"/>
+                <div>
+                  <div class="mode-label">${T("trip.modeScalable")}</div>
+                  <div class="mode-desc">${T("trip.modeScalableDesc")}</div>
+                </div>
+              </label>
+            </div>
+            <div class="grid grid-cols-2 gap-3 mt-2">
+              <div><label class="field-label">${T("trip.baseRate")}</label>
+                <input id="npRate" class="input w-full" type="number" min="0" value="60" oninput="TRIP._refreshCommissionPreview()"/></div>
+              <div id="npBumpWrap" style="display:none">
+                <label class="field-label">${T("trip.bumpPct")}</label>
+                <input id="npBump" class="input w-full" type="number" min="0" max="50" value="5" oninput="TRIP._refreshCommissionPreview()"/>
               </div>
             </div>
-            <div class="col-span-2"><label class="field-label">${T("trip.descriptionEn")}</label>
+            <div class="commission-preview" id="npCommissionPreview"></div>
+          </div>
+
+          <!-- Drivers picker (scrollable list) -->
+          <div>
+            <label class="field-label">${T("trip.pickDriversList")} <span class="muted text-[11px]" id="npDriverCount"></span></label>
+            <div id="npDriversList" class="driver-list">
+              ${D().drivers.map(d => {
+                const truck = D().trucks.find(tr => tr.driverId === d.id);
+                return `
+                  <div class="driver-row" data-id="${d.id}" onclick="TRIP._toggleDriverRow('${d.id}', this)">
+                    <div class="driver-row-l">
+                      <div class="h-8 w-8 rounded-full text-white grid place-items-center text-[11px] font-semibold" style="background:#0c66bf">${initials(d.name)}</div>
+                      <div>
+                        <div class="driver-row-name">${escapeHtml(lang()==='ar'?d.nameAr:d.name)}</div>
+                        <div class="driver-row-meta">${d.id} · ${depotLabel(d.homeDepot)} ${truck ? `· ${truck.id}` : ''}</div>
+                      </div>
+                    </div>
+                    <div class="driver-row-r">
+                      ${pill(d.status, T(`status.${d.status}`))}
+                      <span class="driver-row-check">${ICONS.check()}</span>
+                    </div>
+                  </div>`;
+              }).join("")}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 gap-3">
+            <div><label class="field-label">${T("trip.descriptionEn")}</label>
               <textarea id="npDesc" class="input w-full" rows="2"></textarea></div>
-            <div class="col-span-2"><label class="field-label">${T("trip.descriptionAr")}</label>
+            <div><label class="field-label">${T("trip.descriptionAr")}</label>
               <textarea id="npDescAr" class="input w-full" rows="2" dir="rtl"></textarea></div>
           </div>
         </div>`;
@@ -1282,24 +1330,62 @@ window.PAGES_1 = (function () {
         <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
         <button class="btn btn-primary" onclick="TRIP.saveNewProject()">${ICONS.save()}${T("c.save")}</button>`;
       window.app.openModal({ title: T("trip.newProjectTitle"), html, footer, size: "lg" });
-      window.APP_STATE.npDraftDrivers = [];
+      setTimeout(() => TRIP._refreshCommissionPreview(), 0);
     },
 
-    _toggleDriverChip(driverId, el) {
+    _setCommissionMode(mode) {
+      window.APP_STATE.npCommissionMode = mode;
+      document.getElementById("modeFixedChip").classList.toggle("active", mode === "fixed");
+      document.getElementById("modeScalableChip").classList.toggle("active", mode === "scalable");
+      const bumpWrap = document.getElementById("npBumpWrap");
+      if (bumpWrap) bumpWrap.style.display = mode === "scalable" ? "" : "none";
+      const fixedRadio = document.querySelector('input[value="fixed"]');
+      const scaleRadio = document.querySelector('input[value="scalable"]');
+      if (fixedRadio) fixedRadio.checked = mode === "fixed";
+      if (scaleRadio) scaleRadio.checked = mode === "scalable";
+      TRIP._refreshCommissionPreview();
+    },
+
+    _refreshCommissionPreview() {
+      const mode = window.APP_STATE.npCommissionMode || "fixed";
+      const base = +document.getElementById("npRate")?.value || 0;
+      const pct = +document.getElementById("npBump")?.value || 0;
+      const el = document.getElementById("npCommissionPreview");
+      if (!el) return;
+      if (mode === "fixed") {
+        el.innerHTML = `<div class="muted text-xs">${T("trip.previewLine")}: <b class="tabular text-emerald-600">${fmtSar(base)}</b> ${lang()==='en'?'every trip':'لكل رحلة'}</div>`;
+      } else {
+        const preview = [1, 2, 3, 5, 10].map(n => ({ n, pay: +(base * (1 + (n - 1) * (pct / 100))).toFixed(2) }));
+        el.innerHTML = `
+          <div class="muted text-xs mb-1">${T("trip.previewLine")} (${lang()==='en'?'first 10 trips':'أول 10 رحلات'}):</div>
+          <div class="preview-grid">
+            ${preview.map(p => `
+              <div class="preview-cell">
+                <div class="text-[10px] muted">${lang()==='en'?'Trip':'رحلة'} ${p.n}</div>
+                <div class="text-sm font-semibold text-emerald-600 tabular">${fmtSar(p.pay)}</div>
+              </div>`).join("")}
+          </div>`;
+      }
+    },
+
+    _toggleDriverRow(driverId, el) {
       const arr = window.APP_STATE.npDraftDrivers || (window.APP_STATE.npDraftDrivers = []);
       const idx = arr.indexOf(driverId);
-      if (idx >= 0) { arr.splice(idx, 1); el.classList.remove("chip-selected"); }
-      else { arr.push(driverId); el.classList.add("chip-selected"); }
+      if (idx >= 0) { arr.splice(idx, 1); el.classList.remove("selected"); }
+      else { arr.push(driverId); el.classList.add("selected"); }
+      const counter = document.getElementById("npDriverCount");
+      if (counter) counter.textContent = `· ${arr.length} ${T("trip.selectedNDrivers")}`;
     },
 
     saveNewProject() {
       const name = document.getElementById("npName").value.trim();
       const nameAr = document.getElementById("npNameAr").value.trim();
       const location = document.getElementById("npLoc").value.trim();
-      const locationAr = document.getElementById("npLocAr").value.trim();
       const lat = +document.getElementById("npLat").value;
       const lng = +document.getElementById("npLng").value;
       const rate = +document.getElementById("npRate").value || 60;
+      const bump = +document.getElementById("npBump").value || 0;
+      const mode = window.APP_STATE.npCommissionMode || "fixed";
       const desc = document.getElementById("npDesc").value.trim();
       const descAr = document.getElementById("npDescAr").value.trim();
       const driverIds = (window.APP_STATE.npDraftDrivers || []).slice();
@@ -1316,19 +1402,32 @@ window.PAGES_1 = (function () {
         id, name, nameAr: nameAr || name,
         ratePerTrip: rate,
         customer: name,
-        location, locationAr: locationAr || location,
+        location, locationAr: location,  // single field — used for both UIs
         coords: { lat, lng },
         description: desc, descriptionAr: descAr || desc,
         active: true,
         createdAt: new Date().toISOString().slice(0, 10),
         assignedDriverIds: driverIds,
+        commissionMode: mode,
+        scalableRatePct: mode === "scalable" ? bump : 0,
       };
       D().PROJECTS.push(newProj);
       D().PROJECT_BY_CUSTOMER[name] = id;
       window.APP_STATE.npDraftDrivers = [];
+      window.APP_STATE.npCommissionMode = "fixed";
       window.app.toast(`${id} · ${T("trip.newProject")}`);
       window.app.closeModal();
       window.app.render();
+    },
+
+    /** Stamp a phase's timestamp now (also keeps actualStart/actualEnd for
+     *  any downstream reporting code that still looks at them). */
+    _stampPhase(t, phase) {
+      t.phaseTimestamps = t.phaseTimestamps || { scheduled: null, loading: null, in_transit: null, delivered: null };
+      const now = new Date().toISOString();
+      t.phaseTimestamps[phase] = now;
+      if (phase === "loading" || phase === "in_transit") t.actualStart = t.actualStart || now;
+      if (phase === "delivered") t.actualEnd = now;
     },
 
     /** Manual "Start trip" — moves Scheduled → Loading. Driver doesn't leave
@@ -1337,7 +1436,7 @@ window.PAGES_1 = (function () {
       const t = D().trips.find(x => x.id === tripId);
       if (!t) return;
       t.status = "loading";
-      t.actualStart = new Date().toISOString();
+      TRIP._stampPhase(t, "loading");
       window.app.toast(`${t.ref} · ${T("status.loading")}`);
       window.app.render();
     },
@@ -1347,7 +1446,7 @@ window.PAGES_1 = (function () {
       const t = D().trips.find(x => x.id === tripId);
       if (!t) return;
       t.status = to;
-      if (to === "in_transit" && !t.actualStart) t.actualStart = new Date().toISOString();
+      TRIP._stampPhase(t, to);
       window.app.toast(`${t.ref} → ${T(`status.${to}`)}`);
       window.app.render();
     },
@@ -1357,11 +1456,10 @@ window.PAGES_1 = (function () {
       const t = D().trips.find(x => x.id === tripId);
       if (!t) return;
       t.status = "delivered";
-      t.actualEnd = new Date().toISOString();
+      TRIP._stampPhase(t, "delivered");
       t.actualDurationMin = t.plannedDurationMin;  // simple stand-in
       const paid = D().payCommissionForTrip(tripId);
-      const proj = paid && D().PROJECTS.find(p => p.id === paid.projectId);
-      window.app.toast(`${t.ref} · ${T("trip.commissionPaid")} +${fmtSar(proj ? proj.ratePerTrip : 0)}`);
+      window.app.toast(`${t.ref} · ${T("trip.commissionPaid")} +${fmtSar(paid ? paid.paidThisTrip : 0)}`);
       window.app.render();
     },
 
@@ -1376,21 +1474,35 @@ window.PAGES_1 = (function () {
       window.app.render();
     },
 
-    /** Manage which drivers are assigned to a project. Re-uses the chip
-     *  picker. Saving updates project.assignedDriverIds in place. */
+    /** Manage which drivers are assigned to a project. Uses the same
+     *  scrollable list pattern as new-project. Saving updates
+     *  project.assignedDriverIds in place. */
     openAssignDrivers(projectId) {
       const p = D().PROJECTS.find(x => x.id === projectId);
       if (!p) return;
       window.APP_STATE.adDraft = (p.assignedDriverIds || []).slice();
       const html = `
         <div class="space-y-3">
-          <p class="text-sm muted">${escapeHtml(lang()==='ar'?p.nameAr:p.name)} — ${escapeHtml(lang()==='ar'?p.locationAr:p.location)}</p>
-          <div class="chip-strip" style="max-height:13rem">
+          <p class="text-sm muted">${escapeHtml(lang()==='ar'?p.nameAr:p.name)} — ${escapeHtml(p.location)}</p>
+          <label class="field-label">${T("trip.pickDriversList")} <span class="muted text-[11px]" id="adDriverCount">· ${(p.assignedDriverIds||[]).length} ${T("trip.selectedNDrivers")}</span></label>
+          <div class="driver-list">
             ${D().drivers.map(d => {
               const on = (p.assignedDriverIds||[]).includes(d.id);
-              return `<button type="button" class="chip ${on?'chip-selected':''}" data-id="${d.id}" onclick="TRIP._toggleAssignChip('${d.id}', this)">
-                ${escapeHtml(lang()==='ar'?d.nameAr:d.name)} <span class="muted text-[10px]">${d.id}</span>
-              </button>`;
+              const truck = D().trucks.find(tr => tr.driverId === d.id);
+              return `
+                <div class="driver-row ${on?'selected':''}" data-id="${d.id}" onclick="TRIP._toggleAssignRow('${d.id}', this)">
+                  <div class="driver-row-l">
+                    <div class="h-8 w-8 rounded-full text-white grid place-items-center text-[11px] font-semibold" style="background:#0c66bf">${initials(d.name)}</div>
+                    <div>
+                      <div class="driver-row-name">${escapeHtml(lang()==='ar'?d.nameAr:d.name)}</div>
+                      <div class="driver-row-meta">${d.id} · ${depotLabel(d.homeDepot)} ${truck ? `· ${truck.id}` : ''}</div>
+                    </div>
+                  </div>
+                  <div class="driver-row-r">
+                    ${pill(d.status, T(`status.${d.status}`))}
+                    <span class="driver-row-check">${ICONS.check()}</span>
+                  </div>
+                </div>`;
             }).join("")}
           </div>
         </div>`;
@@ -1399,11 +1511,13 @@ window.PAGES_1 = (function () {
         <button class="btn btn-primary" onclick="TRIP.saveAssignDrivers('${projectId}')">${ICONS.save()}${T("c.save")}</button>`;
       window.app.openModal({ title: `${T("trip.manageDrivers")} — ${p.id}`, html, footer });
     },
-    _toggleAssignChip(driverId, el) {
+    _toggleAssignRow(driverId, el) {
       const arr = window.APP_STATE.adDraft || (window.APP_STATE.adDraft = []);
       const idx = arr.indexOf(driverId);
-      if (idx >= 0) { arr.splice(idx, 1); el.classList.remove("chip-selected"); }
-      else { arr.push(driverId); el.classList.add("chip-selected"); }
+      if (idx >= 0) { arr.splice(idx, 1); el.classList.remove("selected"); }
+      else { arr.push(driverId); el.classList.add("selected"); }
+      const counter = document.getElementById("adDriverCount");
+      if (counter) counter.textContent = `· ${arr.length} ${T("trip.selectedNDrivers")}`;
     },
     saveAssignDrivers(projectId) {
       const p = D().PROJECTS.find(x => x.id === projectId);
@@ -1415,8 +1529,9 @@ window.PAGES_1 = (function () {
       window.app.render();
     },
 
-    /** Add a brand-new trip onto a project (lands in Scheduled). The truck
-     *  and driver default to the first assigned driver / their truck. */
+    /** Add a brand-new trip onto a project (lands in Scheduled). Asks for
+     *  tank Type (m³ class — derived from the truck's capacity) and a
+     *  Water Station for the loading phase. */
     openNewTrip(projectId) {
       const p = D().PROJECTS.find(x => x.id === projectId);
       if (!p) return;
@@ -1425,38 +1540,83 @@ window.PAGES_1 = (function () {
         window.app.toast(T("trip.noDriversAssigned"));
         return;
       }
+      // Build the Type dropdown based on each driver's truck capacity.
+      // When the driver changes we'll refresh this. For the first paint use
+      // the first driver's truck.
+      const firstDriver = assigned[0];
+      const firstTruck = D().trucks.find(t => t.driverId === firstDriver.id);
+      const todayISO = new Date(2026, 5, 7).toISOString().slice(0, 10);
       const html = `
         <div class="space-y-3">
           <p class="text-sm muted">${escapeHtml(lang()==='ar'?p.nameAr:p.name)} · ${T("trip.ratePerTripLabel")}: <b>${fmtSar(p.ratePerTrip)}</b></p>
           <div class="grid grid-cols-2 gap-3">
             <div><label class="field-label">${T("c.driver")}</label>
-              <select id="ntDriver" class="select w-full">
-                ${assigned.map(d => `<option value="${d.id}">${escapeHtml(lang()==='ar'?d.nameAr:d.name)} · ${d.id}</option>`).join("")}
+              <select id="ntDriver" class="select w-full" onchange="TRIP._refreshNewTripType()">
+                ${assigned.map(d => {
+                  const tr = D().trucks.find(t => t.driverId === d.id);
+                  const cap = tr ? (tr.capacityM3 || Math.round((tr.capacityLiters||18000)/1000)) : 18;
+                  return `<option value="${d.id}" data-cap="${cap}" data-truck="${tr ? tr.id : ''}">${escapeHtml(lang()==='ar'?d.nameAr:d.name)} · ${d.id}${tr?` · ${tr.id}`:''}</option>`;
+                }).join("")}
               </select></div>
-            <div><label class="field-label">${lang()==='en'?'Scheduled date':'تاريخ الجدولة'}</label>
-              <input id="ntDate" type="date" class="input w-full" value="${new Date(2026,5,6).toISOString().slice(0,10)}"/></div>
-            <div><label class="field-label">${lang()==='en'?'Water (liters)':'كمية المياه (لتر)'}</label>
-              <input id="ntLiters" type="number" class="input w-full" value="12000"/></div>
-            <div><label class="field-label">${lang()==='en'?'Distance (km)':'المسافة (كم)'}</label>
-              <input id="ntDist" type="number" class="input w-full" value="120"/></div>
+            <div>
+              <label class="field-label">${T("trip.tripTankType")}</label>
+              <select id="ntType" class="select w-full">
+                <option value="33">33 ${T("trip.cubicMeters")}</option>
+                <option value="18">18 ${T("trip.cubicMeters")}</option>
+                <option value="6">6 ${T("trip.cubicMeters")}</option>
+              </select>
+              <div class="text-[10px] muted mt-1">${T("trip.tripTankTypeNote")}</div>
+            </div>
+            <div><label class="field-label">${T("trip.pickWaterStation")}</label>
+              <select id="ntStation" class="select w-full">
+                ${D().WATER_STATIONS.map(s => `<option value="${s.id}">${escapeHtml(lang()==='ar'?s.nameAr:s.name)} · ${escapeHtml(lang()==='ar'?s.cityAr:s.city)}</option>`).join("")}
+              </select></div>
+            <div><label class="field-label">${T("trip.scheduledFor")}</label>
+              <input id="ntDate" type="date" class="input w-full" value="${todayISO}"/></div>
+            <div class="col-span-2">
+              <label class="field-label">${T("trip.scheduledTime")}</label>
+              <input id="ntTime" type="time" class="input w-full" value="08:00"/>
+            </div>
           </div>
         </div>`;
       const footer = `
         <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
         <button class="btn btn-primary" onclick="TRIP.saveNewTrip('${projectId}')">${ICONS.save()}${T("c.save")}</button>`;
       window.app.openModal({ title: `${T("trip.addTripToProject")} — ${p.id}`, html, footer });
+      // Default tank size to the first driver's truck capacity
+      setTimeout(() => TRIP._refreshNewTripType(), 0);
     },
+
+    _refreshNewTripType() {
+      const sel = document.getElementById("ntDriver");
+      const typeSel = document.getElementById("ntType");
+      if (!sel || !typeSel) return;
+      const opt = sel.options[sel.selectedIndex];
+      const cap = opt && opt.dataset.cap;
+      if (!cap) return;
+      // Snap to nearest of {33,18,6}
+      const choice = [33, 18, 6].reduce((best, n) => Math.abs(n - cap) < Math.abs(best - cap) ? n : best, 18);
+      typeSel.value = String(choice);
+    },
+
     saveNewTrip(projectId) {
       const p = D().PROJECTS.find(x => x.id === projectId);
       const driverId = document.getElementById("ntDriver").value;
+      const tankSizeM3 = +document.getElementById("ntType").value || 18;
+      const stationId = document.getElementById("ntStation").value;
       const date = document.getElementById("ntDate").value;
-      const liters = +document.getElementById("ntLiters").value || 8000;
-      const dist = +document.getElementById("ntDist").value || 100;
+      const time = document.getElementById("ntTime").value || "08:00";
       const truck = D().trucks.find(t => t.driverId === driverId) || D().trucks[0];
       const driver = D().findDriver(driverId);
       const homeDepot = truck?.homeDepot || "Riyadh";
       const oCoords = D().DEPOT_COORDS[homeDepot];
       const id = `TRP-${String(D().trips.length + 1).padStart(4, "0")}`;
+      const scheduledISO = new Date(`${date}T${time}:00Z`).toISOString();
+      // Estimate distance from origin -> project coords (simple deg→km approx)
+      const dLat = (p.coords.lat - oCoords[0]) * 111;
+      const dLng = (p.coords.lng - oCoords[1]) * 95;
+      const dist = Math.max(15, Math.round(Math.sqrt(dLat*dLat + dLng*dLng)));
+      const liters = tankSizeM3 * 1000;
       D().trips.push({
         id, ref: `WT-2026-${String(2000 + D().trips.length)}`,
         truckId: truck.id, driverId,
@@ -1464,7 +1624,10 @@ window.PAGES_1 = (function () {
         destination: { name: p.customer, nameAr: p.nameAr, lat: p.coords.lat, lng: p.coords.lng },
         customer: p.customer, customerAr: p.nameAr,
         projectId: p.id,
-        scheduledStart: new Date(date + "T08:00:00Z").toISOString(),
+        tankSizeM3,
+        waterStationId: stationId,
+        phaseTimestamps: { scheduled: scheduledISO, loading: null, in_transit: null, delivered: null },
+        scheduledStart: scheduledISO,
         status: "scheduled",
         distanceKm: dist,
         plannedDurationMin: Math.round(dist * 1.1),
@@ -1638,31 +1801,69 @@ window.PAGES_1 = (function () {
     `;
   }
 
+  /** Format a phase timestamp into a compact "Mon · 14:32" string. Falls
+   *  back to the scheduledStart when a phase hasn't been stamped. */
+  function fmtPhaseStamp(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    const locale = lang() === "ar" ? "ar-SA-u-ca-gregory" : "en-GB";
+    const date = d.toLocaleDateString(locale, { day: "2-digit", month: "short" });
+    const time = d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+    return `${date} · ${time}`;
+  }
+
   function kanbanCard(project, t) {
     const driver = D().findDriver(t.driverId);
     const truck = D().findTruck(t.truckId);
+    const ts = t.phaseTimestamps || {};
+    const tankSize = t.tankSizeM3 || (truck ? truck.capacityM3 : null);
+    const station = t.waterStationId ? D().findWaterStation(t.waterStationId) : null;
+
     const action = (() => {
       if (t.status === "scheduled")  return `<button class="kanban-action kanban-action-primary" onclick="event.stopPropagation(); TRIP.startTrip('${t.id}')">${ICONS.play()}${T("trip.startTrip")}</button>`;
       if (t.status === "loading")    return `<button class="kanban-action kanban-action-outline" onclick="event.stopPropagation(); TRIP.advance('${t.id}','in_transit')">${ICONS.arrowRight()}${T("trip.markInTransit")}</button>`;
       if (t.status === "in_transit") return `<button class="kanban-action kanban-action-success" onclick="event.stopPropagation(); TRIP.markDelivered('${t.id}')">${ICONS.check()}${T("trip.markDelivered")}</button>`;
-      if (t.status === "delivered")  return `<span class="kanban-paid">${ICONS.check()}${T("trip.commissionPaid")} +${fmtSar(project.ratePerTrip)}</span>`;
+      if (t.status === "delivered") {
+        // Compute the actual paid for this delivery so the badge tells the truth
+        // even on scalable projects.
+        return `<span class="kanban-paid">${ICONS.check()}${T("trip.commissionPaid")} +${fmtSar(project.ratePerTrip)}</span>`;
+      }
       return "";
     })();
+
+    // Phase-detail rows — replaces the old water/km line. Each status shows
+    // its own most-relevant timestamp; loading additionally shows the station.
+    const phaseRows = (() => {
+      if (t.status === "scheduled") {
+        return `<div class="kanban-phase"><span class="kanban-phase-label">${T("trip.phaseScheduledOn")}:</span> <span class="kanban-phase-val tabular">${fmtPhaseStamp(ts.scheduled || t.scheduledStart)}</span></div>`;
+      }
+      if (t.status === "loading") {
+        return `
+          <div class="kanban-phase"><span class="kanban-phase-label">${T("trip.phaseLoadingSince")}:</span> <span class="kanban-phase-val tabular">${fmtPhaseStamp(ts.loading || ts.scheduled || t.scheduledStart)}</span></div>
+          ${station ? `<div class="kanban-station"><span class="text-brand-500">${ICONS.droplet()}</span> ${T("trip.fillAt")}: <b>${escapeHtml(lang()==='ar'?station.nameAr:station.name)}</b></div>` : ""}
+        `;
+      }
+      if (t.status === "in_transit") {
+        return `<div class="kanban-phase"><span class="kanban-phase-label">${T("trip.phaseTransitSince")}:</span> <span class="kanban-phase-val tabular">${fmtPhaseStamp(ts.in_transit || ts.loading || t.scheduledStart)}</span></div>`;
+      }
+      if (t.status === "delivered") {
+        return `<div class="kanban-phase"><span class="kanban-phase-label">${T("trip.phaseDeliveredAt")}:</span> <span class="kanban-phase-val tabular">${fmtPhaseStamp(ts.delivered || t.actualEnd || t.scheduledStart)}</span></div>`;
+      }
+      return "";
+    })();
+
     const clickable = (t.status === "loading" || t.status === "in_transit");
     const onClick = clickable ? `onclick="TRIP.viewOnMap('${t.id}')"` : "";
     return `
       <div class="kanban-card kanban-${t.status} ${clickable ? 'is-clickable' : ''}" ${onClick}>
         <div class="kanban-card-row">
           <span class="kanban-ref">${t.ref}</span>
-          <span class="kanban-truck">${truck?.id || '—'}</span>
+          <span class="kanban-truck">${truck?.id || '—'}${tankSize ? ` · ${tankSize}${T("trip.cubicMeters")}` : ''}</span>
         </div>
         <div class="kanban-card-row-2">
           <span class="kanban-driver">${driver ? escapeHtml(lang()==='ar'?driver.nameAr:driver.name) : '<span class="muted">—</span>'}</span>
         </div>
-        <div class="kanban-card-row-3">
-          <span class="kanban-water"><span class="text-brand-500">${ICONS.droplet()}</span> ${fmtNum(t.waterLiters)} ${T("trip.cardWater")}</span>
-          <span class="kanban-dist muted">${t.distanceKm} ${T("trip.cardKm")}</span>
-        </div>
+        ${phaseRows}
         ${action}
         ${clickable ? `<div class="kanban-hint muted">${ICONS.pin()} ${T("trip.cardClickRoute")}</div>` : ""}
       </div>

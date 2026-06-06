@@ -713,3 +713,78 @@ html[dir="rtl"] .group-row .group-caret { transform: rotate(180deg); }
   .kanban-board { grid-template-columns: 1fr; }
   .reporting-strip { grid-template-columns: 1fr 1fr; }
 }
+
+/* ===== Trips v2 — scrollable driver list, commission setup, phase rows ===== */
+
+/* Scrollable driver list (used in new-project + manage-drivers modals) */
+.driver-list {
+  border:1px solid rgb(var(--border)); border-radius:.55rem;
+  background:rgb(var(--card)); max-height:18rem; overflow-y:auto;
+}
+.driver-row {
+  display:flex; align-items:center; justify-content:space-between; gap:.6rem;
+  padding:.55rem .75rem; border-bottom:1px solid rgb(var(--border));
+  cursor:pointer; transition: background .12s ease;
+}
+.driver-row:last-child { border-bottom:0; }
+.driver-row:hover { background:rgba(11,126,234,.05); }
+.driver-row.selected { background:rgba(16,185,129,.06); }
+.driver-row.selected:hover { background:rgba(16,185,129,.09); }
+.driver-row-l { display:flex; align-items:center; gap:.55rem; min-width:0; flex:1; }
+.driver-row-name { font-size:.82rem; font-weight:600; line-height:1.2; }
+.driver-row-meta { font-size:.65rem; color:rgb(var(--muted)); }
+.driver-row-r { display:flex; align-items:center; gap:.4rem; flex-shrink:0; }
+.driver-row-check {
+  display:none; width:1.1rem; height:1.1rem; color:#10b981;
+  align-items:center; justify-content:center;
+}
+.driver-row.selected .driver-row-check { display:inline-flex; }
+
+/* Commission setup block (new-project modal) */
+.commission-setup {
+  border:1px solid rgb(var(--border)); border-radius:.6rem;
+  padding:.7rem .8rem .6rem; background:rgba(16,185,129,.03);
+}
+.commission-setup-head { display:flex; align-items:center; gap:.4rem; margin-bottom:.45rem; }
+.commission-setup-head svg { width:1rem; height:1rem; }
+.commission-mode-row { display:grid; grid-template-columns: 1fr 1fr; gap:.5rem; }
+.mode-chip {
+  display:flex; gap:.45rem; align-items:flex-start;
+  padding:.55rem .65rem; border-radius:.45rem;
+  border:1.5px solid rgb(var(--border)); background:rgb(var(--card));
+  cursor:pointer; transition: all .12s ease;
+}
+.mode-chip:hover { border-color:rgba(16,185,129,.5); background:rgba(16,185,129,.04); }
+.mode-chip.active { border-color:#10b981; background:rgba(16,185,129,.08); box-shadow: 0 0 0 1px rgba(16,185,129,.4); }
+.mode-chip input[type="radio"] { margin-top:.18rem; accent-color:#10b981; }
+.mode-label { font-size:.78rem; font-weight:600; }
+.mode-desc { font-size:.62rem; color:rgb(var(--muted)); line-height:1.3; margin-top:.1rem; }
+
+.commission-preview { margin-top:.55rem; padding-top:.5rem; border-top:1px dashed rgb(var(--border)); }
+.preview-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:.35rem; }
+.preview-cell {
+  padding:.35rem .4rem; border-radius:.35rem;
+  background:rgb(var(--card)); border:1px solid rgb(var(--border));
+}
+
+/* Kanban card phase/station rows (replace the old liters+km line) */
+.kanban-phase {
+  display:flex; align-items:center; gap:.3rem;
+  font-size:.62rem; padding:.18rem .25rem; line-height:1.25;
+}
+.kanban-phase-label { color:rgb(var(--muted)); font-weight:500; }
+.kanban-phase-val { font-weight:700; color:rgb(var(--text)); font-size:.66rem; }
+.kanban-station {
+  display:flex; align-items:center; gap:.25rem;
+  font-size:.62rem; padding:.2rem .4rem; margin-top:.1rem;
+  border-radius:.35rem; background:rgba(11,126,234,.08); color:#0c66bf;
+  border-left:2px solid #0b7eea;
+}
+[dir="rtl"] .kanban-station { border-left:0; border-right:2px solid #0b7eea; }
+.kanban-station svg { width:.7rem; height:.7rem; }
+.kanban-station b { font-weight:700; }
+
+@media (max-width: 640px) {
+  .commission-mode-row { grid-template-columns: 1fr; }
+  .preview-grid { grid-template-columns: repeat(3, 1fr); }
+}
