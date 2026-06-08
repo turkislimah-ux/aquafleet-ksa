@@ -930,11 +930,23 @@
       type: "registration",
       iconBg: "rgba(16,185,129,.12)", iconColor: "#047857",
     },
+    {
+      filename: "Commercial_Registration_AquaFleet_1010234567.pdf",
+      type: "commercial_registration",
+      iconBg: "rgba(139,92,246,.12)", iconColor: "#7c3aed",
+    },
+    {
+      filename: "National_Address_HQ_Riyadh.pdf",
+      type: "national_address",
+      iconBg: "rgba(16,185,129,.12)", iconColor: "#047857",
+    },
   ];
 
   /** Heuristic: detect a document type from a filename. Returns "other" if unknown. */
   function detectDocType(filename) {
     const f = String(filename || "").toLowerCase();
+    if (/(commercial[_\- ]?registration|cr[_\- ]\d|سجل[_\- ]?تجاري)/.test(f)) return "commercial_registration";
+    if (/(national[_\- ]?address|عنوان[_\- ]?وطني)/.test(f)) return "national_address";
     if (/(insurance|policy|بوليصة|تأمين)/.test(f)) return "insurance";
     if (/(invoice|فاتورة)/.test(f)) return "invoice";
     if (/(inspection|mot|فحص)/.test(f)) return "inspection";
@@ -1020,6 +1032,29 @@
           expiryDate: driver.licenseExpiry,
           authority: "Saudi General Department of Traffic",
           notes: "",
+        };
+      case "commercial_registration":
+        return {
+          entity: pick(["AquaFleet KSA Co.", "AquaFleet Water Transport LLC", "AquaFleet Logistics Co."]),
+          docNumber: `${1010 + intBetween(100000, 999999)}`,
+          activity: pick(["Bulk water transport", "Heavy vehicle logistics", "Water tanker operations"]),
+          issueDate: fmtDate(addDays(today, -intBetween(180, 1800))),
+          expiryDate: fmtDate(addDays(today, intBetween(60, 720))),
+          authority: "Ministry of Commerce — Saudi Arabia",
+          capitalSar: intBetween(500000, 5000000),
+        };
+      case "national_address":
+        return {
+          holder: pick(["AquaFleet KSA Co.", "AquaFleet Water Transport LLC"]),
+          shortAddress: `${pick(["RHRA","HAJD","KKRA","DKHD"])}${intBetween(1000,9999)}`,
+          building: String(intBetween(2000, 9999)),
+          street: pick(["King Fahd Road", "Olaya Street", "Prince Mohammed Road", "Northern Ring Road"]),
+          district: pick(["Al Olaya", "Al Malqa", "Al Sahafa", "Al Yarmouk", "Al Murabba"]),
+          city: pick(["Riyadh", "Jeddah", "Dammam", "Madinah"]),
+          postalCode: String(intBetween(10000, 99999)),
+          additionalNumber: String(intBetween(1000, 9999)),
+          authority: "Saudi Post — SPL",
+          issueDate: fmtDate(addDays(today, -intBetween(30, 720))),
         };
       case "insurance":
         return {
@@ -1123,6 +1158,127 @@
       });
     }
   });
+
+  /** Document helpers — feed the new Archive UI.
+   *
+   *  - docPrimaryHeading: the human-friendly title for a doc card
+   *    (e.g. "License — Mohammed Al-Qahtani" instead of the raw filename).
+   *  - docExpiryStatus:  "expired" | "expiring_soon" | "valid" | "n_a"
+   *    based on extracted.expiryDate against TODAY_REF.
+   *  - docDaysUntilExpiry: signed integer (negative = past expiry).
+   *  - docSummaryFields: ordered [{ key, value }] list of the 3–4
+   *    fields that should appear on the card face for that doc type.
+   *  - docDetailFields:  the full ordered field list for the doc-detail
+   *    modal (everything in extracted, in a sensible order).
+   *  - docIssuer:        a short string identifying who issued the doc
+   *    (e.g. "Saudi General Department of Traffic"), used for the
+   *    "Group by Issuer" view. Falls back to a sensible per-type label.
+   *  - docExpiryStatusList / docPrimaryHeadingList: convenience wrappers
+   *    so the UI can iterate without writing the same lookup each time. */
+  const DOC_TODAY = new Date(2026, 5, 7);
+  const _typeIssuer = {
+    license: "Saudi General Department of Traffic",
+    registration: "Saudi General Department of Traffic",
+    insurance: "Saudi Central Bank (regulated insurer)",
+    commercial_registration: "Ministry of Commerce — Saudi Arabia",
+    national_address: "Saudi Post — SPL",
+    permit: "Ministry of Transport — TGA",
+    inspection: "MVPI Authorized Center",
+    contract: "AquaFleet KSA — Legal",
+    delivery: "Operations",
+    quote: "Procurement",
+    po: "Procurement",
+    invoice: "Finance",
+    letter: "Correspondence",
+    other: "Various",
+  };
+  function docPrimaryHeading(doc) {
+    if (!doc || !doc.extracted) return doc?.filename || "—";
+    const e = doc.extracted;
+    switch (doc.type) {
+      case "license": return e.holder ? `License — ${e.holder}` : "Driver License";
+      case "registration": return e.plate ? `Vehicle Reg — ${e.plate}` : "Vehicle Registration";
+      case "insurance": return e.plate ? `Insurance — ${e.plate}` : (e.policyNumber || "Insurance");
+      case "commercial_registration": return e.entity ? `CR — ${e.entity}` : `CR ${e.docNumber || ""}`;
+      case "national_address": return e.holder ? `Address — ${e.holder}` : "National Address";
+      case "permit": return e.docNumber ? `Permit ${e.docNumber}` : "Permit";
+      case "inspection": return e.truck ? `Inspection — ${e.truck}` : "Inspection";
+      case "contract": return e.party2 ? `Contract — ${e.party2}` : "Contract";
+      case "delivery": return e.docNumber ? `Delivery ${e.docNumber}` : "Delivery";
+      case "quote": return e.vendor ? `Quote — ${e.vendor}` : "Quote";
+      case "po": return e.docNumber || "Purchase Order";
+      case "invoice": return e.vendor ? `Invoice — ${e.vendor}` : (e.docNumber || "Invoice");
+      case "letter": return e.subject || "Letter";
+      default: return e.docNumber || doc.filename;
+    }
+  }
+  function docExpiryStatus(doc) {
+    const exp = doc?.extracted?.expiryDate;
+    if (!exp) return "n_a";
+    const d = new Date(exp);
+    const diffDays = Math.round((d - DOC_TODAY) / 86400000);
+    if (diffDays < 0) return "expired";
+    if (diffDays <= 60) return "expiring_soon";
+    return "valid";
+  }
+  function docDaysUntilExpiry(doc) {
+    const exp = doc?.extracted?.expiryDate;
+    if (!exp) return null;
+    const d = new Date(exp);
+    return Math.round((d - DOC_TODAY) / 86400000);
+  }
+  function docIssuer(doc) {
+    return doc?.extracted?.authority || _typeIssuer[doc?.type] || "Various";
+  }
+
+  // The 3–4 most-important fields per type for the card face.
+  function docSummaryFields(doc) {
+    if (!doc || !doc.extracted) return [];
+    const e = doc.extracted;
+    const pickFields = (arr) => arr.filter(([, v]) => v != null && v !== "");
+    switch (doc.type) {
+      case "license":
+        return pickFields([["docNumber", e.docNumber], ["licenseClass", e.licenseClass], ["authority", e.authority], ["expiryDate", e.expiryDate]]);
+      case "registration":
+        return pickFields([["plate", e.plate], ["vin", e.vin], ["holder", e.holder], ["expiryDate", e.expiryDate]]);
+      case "insurance":
+        return pickFields([["policyNumber", e.policyNumber], ["vendor", e.vendor], ["coverage", e.coverage], ["expiryDate", e.expiryDate]]);
+      case "commercial_registration":
+        return pickFields([["docNumber", e.docNumber], ["entity", e.entity], ["activity", e.activity], ["expiryDate", e.expiryDate]]);
+      case "national_address":
+        return pickFields([["shortAddress", e.shortAddress], ["building", e.building], ["district", e.district], ["postalCode", e.postalCode]]);
+      case "permit":
+        return pickFields([["docNumber", e.docNumber], ["scope", e.scope], ["authority", e.authority], ["expiryDate", e.expiryDate]]);
+      case "inspection":
+        return pickFields([["truck", e.truck], ["result", e.result], ["issueDate", e.issueDate], ["nextDue", e.nextDue]]);
+      case "contract":
+        return pickFields([["party2", e.party2], ["docNumber", e.docNumber], ["amount", e.amount && `${e.amount} ${e.currency||"SAR"}`], ["expiryDate", e.expiryDate]]);
+      case "delivery":
+        return pickFields([["docNumber", e.docNumber], ["consignee", e.consignee], ["truck", e.truck], ["issueDate", e.issueDate]]);
+      case "quote":
+        return pickFields([["vendor", e.vendor], ["docNumber", e.docNumber], ["amount", e.amount && `${e.amount} ${e.currency||"SAR"}`], ["validity", e.validity && `${e.validity} d`]]);
+      case "po":
+        return pickFields([["vendor", e.vendor], ["docNumber", e.docNumber], ["amount", e.amount && `${e.amount} ${e.currency||"SAR"}`], ["paymentTerms", e.paymentTerms]]);
+      case "invoice":
+        return pickFields([["vendor", e.vendor], ["docNumber", e.docNumber], ["amount", e.amount && `${e.amount} ${e.currency||"SAR"}`], ["dueDate", e.dueDate]]);
+      case "letter":
+        return pickFields([["from", e.from], ["to", e.to], ["subject", e.subject], ["issueDate", e.issueDate]]);
+      default:
+        return pickFields([["docNumber", e.docNumber], ["issueDate", e.issueDate]]);
+    }
+  }
+
+  // Every extracted key, for the doc-detail modal.
+  function docDetailFields(doc) {
+    if (!doc || !doc.extracted) return [];
+    const e = doc.extracted;
+    // Preserve a sensible order across types; fall back to Object.keys.
+    const preferred = ["entity","holder","docNumber","policyNumber","plate","vin","truck","driver","licenseClass","activity","coverage","party1","party2","from","to","subject","shipper","consignee","vendor","items","weight","amount","currency","paymentTerms","sumInsured","premium","capitalSar","shortAddress","building","street","district","city","postalCode","additionalNumber","authority","issueDate","effectiveDate","dueDate","expiryDate","nextDue","validity","result","notes"];
+    const ordered = preferred.filter(k => e[k] != null && e[k] !== "").map(k => ({ key: k, value: e[k] }));
+    // Append anything not in the preferred order.
+    Object.keys(e).forEach(k => { if (!preferred.includes(k) && e[k] != null && e[k] !== "") ordered.push({ key: k, value: e[k] }); });
+    return ordered;
+  }
 
   function commissionTotal(c) {
     const lineSum = c.lines.reduce((s, l) => s + l.amountSar, 0);
@@ -1399,6 +1555,7 @@
     COMMISSION_MONTHS, CURRENT_MONTH_KEY,
     documents, AI_SAMPLES, GROUP_TEMPLATES,
     detectDocType, detectRefs, aiExtract,
+    docPrimaryHeading, docExpiryStatus, docDaysUntilExpiry, docIssuer, docSummaryFields, docDetailFields,
     repairDescriptions, outsourcedJobs,
     consumePartsForWO,
     ENGINE_COMPONENTS,
