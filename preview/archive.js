@@ -68,6 +68,7 @@ window.PAGES_ARCHIVE = (function () {
         </div>
         <div class="doc-card-title">${escapeHtml(heading)}</div>
         <div class="doc-card-issuer">${escapeHtml(issuerLine)}</div>
+        ${groupChip(doc)}
         <div class="doc-card-fields">
           ${summary.map(([k, v]) => `
             <div class="doc-field">
@@ -97,7 +98,22 @@ window.PAGES_ARCHIVE = (function () {
       const ord = { expired: 0, expiring_soon: 1, valid: 2, n_a: 3 }[s];
       return { key: `${ord}-${s}`, label: lbl };
     }
+    if (mode === "custom") {
+      const g = doc.customGroupId ? D().findArchiveGroup(doc.customGroupId) : null;
+      if (!g) return { key: "zzz-ungrouped", label: T("arc.ungrouped"), color: null };
+      // Sort newest groups last so the order is stable + predictable.
+      return { key: `${g.id}`, label: (lang()==='ar'?g.nameAr:g.name), color: g.color };
+    }
     return { key: "all", label: T("arc.docs") };
+  }
+
+  /** Compact colored chip rendered on a doc card when it belongs to a custom group. */
+  function groupChip(doc) {
+    if (!doc.customGroupId) return "";
+    const g = D().findArchiveGroup(doc.customGroupId);
+    if (!g) return "";
+    const name = lang()==='ar' ? g.nameAr : g.name;
+    return `<span class="grp-chip" style="--c:${g.color}">${ICONS.folder ? ICONS.folder() : ''}${escapeHtml(name)}</span>`;
   }
 
   /** Build the section list from the current filters + group mode. */
@@ -134,6 +150,92 @@ window.PAGES_ARCHIVE = (function () {
     },
 
     // ---- Upload flow ----
+    // ---- Custom-group management ----
+    openNewGroup() {
+      const swatches = ["#0b7eea","#f59e0b","#7c3aed","#10b981","#be123c","#64748b","#0ea5e9","#db2777"];
+      const html = `
+        <div class="space-y-3">
+          <p class="text-sm muted">${lang()==='en'?'Custom groups cut across document types — like binders or project folders.':'مجموعات مخصصة تقسّم المستندات حسب احتياجك (مثل: ملفات أو مشاريع).'}</p>
+          <div>
+            <label class="field-label">${T("arc.groupName")}</label>
+            <input id="agName" class="input w-full" placeholder="${lang()==='en'?'e.g. Saudi Aramco contract — 2026':'مثال: عقد أرامكو السعودية — 2026'}"/>
+          </div>
+          <div>
+            <label class="field-label">${T("arc.groupColor")}</label>
+            <div class="grp-swatch-row">
+              ${swatches.map((c, i) => `
+                <label class="grp-swatch" style="--c:${c}">
+                  <input type="radio" name="agColor" value="${c}" ${i===0?'checked':''}/>
+                  <span class="grp-swatch-dot" style="background:${c}"></span>
+                </label>`).join("")}
+            </div>
+          </div>
+          ${D().archiveCustomGroups.length > 0 ? `
+            <div>
+              <div class="field-label">${lang()==='en'?'Existing groups':'المجموعات الحالية'}</div>
+              <div class="grp-list">
+                ${D().archiveCustomGroups.map(g => {
+                  const count = D().documents.filter(d => d.customGroupId === g.id).length;
+                  return `<div class="grp-row" style="--c:${g.color}">
+                    <span class="grp-swatch-dot" style="background:${g.color}"></span>
+                    <span class="flex-1 truncate text-sm">${escapeHtml(lang()==='ar'?g.nameAr:g.name)}</span>
+                    <span class="muted text-[11px]">${count} ${T("arc.docs").toLowerCase()}</span>
+                    <button class="icon-btn" title="${T("arc.deleteGroup")}" onclick="ARC.deleteGroup('${g.id}')">${ICONS.trash()}</button>
+                  </div>`;
+                }).join("")}
+              </div>
+            </div>` : ""}
+        </div>`;
+      const footer = `
+        <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="ARC.saveNewGroup()">${ICONS.save()}${T("arc.addGroup")}</button>`;
+      window.app.openModal({ title: T("arc.newGroup"), html, footer });
+    },
+
+    saveNewGroup() {
+      const name = document.getElementById("agName").value.trim();
+      const colorEl = document.querySelector('input[name="agColor"]:checked');
+      const color = colorEl ? colorEl.value : "#0b7eea";
+      if (!name) {
+        window.app.toast(lang()==='en' ? "Enter a group name" : "أدخل اسم المجموعة");
+        return;
+      }
+      const id = `AGRP-${String(Date.now()).slice(-6)}`;
+      D().archiveCustomGroups.push({
+        id, name, nameAr: name, color,
+        createdAt: new Date().toISOString().slice(0, 10),
+      });
+      window.app.toast(`${T("arc.groupCreated")} · ${name}`);
+      window.app.closeModal();
+      // Switch to Custom group view so the new group is visible immediately.
+      window.APP_STATE.arc.groupBy = "custom";
+      window.app.render();
+    },
+
+    deleteGroup(groupId) {
+      const g = D().findArchiveGroup(groupId);
+      if (!g) return;
+      const docCount = D().documents.filter(d => d.customGroupId === groupId).length;
+      const html = `
+        <p class="text-sm">${T("arc.confirmDeleteGroup")}</p>
+        <p class="text-xs muted mt-1">${escapeHtml(lang()==='ar'?g.nameAr:g.name)} · ${docCount} ${T("arc.docs").toLowerCase()}</p>`;
+      const footer = `
+        <button class="btn btn-outline" onclick="ARC.openNewGroup()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" style="background:#be123c" onclick="ARC.commitDeleteGroup('${groupId}')">${ICONS.trash()}${T("arc.deleteGroup")}</button>`;
+      window.app.openModal({ title: T("arc.deleteGroup"), html, footer, size: "sm" });
+    },
+
+    commitDeleteGroup(groupId) {
+      // Unassign any docs in this group, then delete it.
+      D().documents.forEach(d => { if (d.customGroupId === groupId) d.customGroupId = null; });
+      const arr = D().archiveCustomGroups;
+      const i = arr.findIndex(g => g.id === groupId);
+      if (i >= 0) arr.splice(i, 1);
+      window.app.toast(T("arc.deleteGroup"));
+      window.app.closeModal();
+      window.app.render();
+    },
+
     /** Open the autonomous-upload modal: file picker → AI auto-fill → Finish. */
     openUpload() {
       ensureState();
@@ -332,6 +434,15 @@ window.PAGES_ARCHIVE = (function () {
       const html = `
         <div class="space-y-3">
           <p class="text-xs muted">${heading}</p>
+          <!-- Group assignment (custom-group bucket for the Archive) -->
+          <div>
+            <label class="field-label">${T("arc.assignToGroup")}</label>
+            <select id="ed-customGroupId" class="select w-full">
+              <option value="">${T("arc.noGroup")}</option>
+              ${D().archiveCustomGroups.map(g => `
+                <option value="${g.id}" ${d.customGroupId===g.id?'selected':''}>${escapeHtml(lang()==='ar'?g.nameAr:g.name)}</option>`).join("")}
+            </select>
+          </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
             ${fields.map(f => `
               <div>
@@ -353,6 +464,8 @@ window.PAGES_ARCHIVE = (function () {
         const el = document.getElementById(`ed-${k}`);
         if (el) d.extracted[k] = el.value;
       });
+      const gEl = document.getElementById("ed-customGroupId");
+      if (gEl) d.customGroupId = gEl.value || null;
       window.app.toast(T("arc.saveChanges"));
       ARC.openDoc(docId);
     },
@@ -468,8 +581,12 @@ window.PAGES_ARCHIVE = (function () {
             <option value="type"   ${S.groupBy==='type'?'selected':''}>${T("arc.groupType")}</option>
             <option value="issuer" ${S.groupBy==='issuer'?'selected':''}>${T("arc.groupIssuer")}</option>
             <option value="expiry" ${S.groupBy==='expiry'?'selected':''}>${T("arc.groupExpiry")}</option>
+            <option value="custom" ${S.groupBy==='custom'?'selected':''}>${T("arc.groupCustom")}</option>
             <option value="none"   ${S.groupBy==='none'?'selected':''}>${T("arc.groupNone")}</option>
           </select>
+          ${S.groupBy === 'custom'
+            ? `<button class="btn btn-outline" onclick="ARC.openNewGroup()">${ICONS.plus()}${T("arc.newGroup")}</button>`
+            : ""}
           <label class="arc-toolbar-label">${T("arc.typeFilter")}</label>
           <select class="select" onchange="ARC.setTypeFilter(this.value)">
             <option value="all" ${S.typeFilter==='all'?'selected':''}>${T("arc.allTypes")}</option>

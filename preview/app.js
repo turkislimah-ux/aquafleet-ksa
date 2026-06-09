@@ -12,6 +12,11 @@ window.APP_STATE = window.APP_STATE || {
   invDrawerPartId: null,  // open the detail panel for this part
   // Commission state (per-driver overrides edited live)
   comOverrides: {},       // { driverId: { lines: {projectId: {ratePerTrip}}, specials: [...], adjustments: [...], bonusSar, payoutStatus } }
+  // Auth session: { personId, email, signedInAt } | null. Restored from localStorage on boot.
+  session: (function () {
+    try { return JSON.parse(localStorage.getItem("aqua_session") || "null"); } catch { return null; }
+  })(),
+  loginError: null,
   // Modal stack
   modal: null,            // { html, onClose }
   toast: null,            // { msg, until }
@@ -53,6 +58,60 @@ window.app = {
   },
 };
 
+// ---- Auth (window.AUTH) — sign-in / sign-out / current-user helpers ----
+window.AUTH = {
+  currentUser() {
+    const s = window.APP_STATE.session;
+    if (!s) return null;
+    return window.DATA && window.DATA.findPerson ? window.DATA.findPerson(s.personId) : null;
+  },
+  isSignedIn() { return !!window.APP_STATE.session; },
+
+  /** Sign in with email + password. On success: persist session, navigate to /. */
+  signIn(email, password) {
+    const r = window.DATA.authenticate(email, password);
+    if (!r || !r.person) {
+      window.APP_STATE.loginError = T("auth.invalidCreds");
+      renderApp();
+      return false;
+    }
+    window.APP_STATE.session = {
+      personId: r.person.id,
+      email: r.user.email,
+      signedInAt: new Date().toISOString(),
+    };
+    window.APP_STATE.loginError = null;
+    try { localStorage.setItem("aqua_session", JSON.stringify(window.APP_STATE.session)); } catch {}
+    window.app.toast(`${T("auth.welcomeBack")}, ${window.DATA.findPerson(r.person.id).name.split(" ")[0]}`);
+    window.app.navigate("/");
+    return true;
+  },
+
+  /** Quick sign-in from a demo-account row (no password prompt). */
+  signInAs(email) {
+    const u = window.DATA.AUTH_USERS.find(x => x.email === email);
+    if (!u) return false;
+    return this.signIn(email, u.password);
+  },
+
+  /** Sign out → clear session, navigate to /login. */
+  signOut() {
+    window.APP_STATE.session = null;
+    try { localStorage.removeItem("aqua_session"); } catch {}
+    window.app.toast(T("auth.sessionEnded"));
+    window.app.navigate("/login");
+  },
+};
+
+// ---- Sign-in handler used by the login form ----
+window.submitSignIn = function (ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  const email = (document.getElementById("siEmail")?.value || "").trim();
+  const pwd = document.getElementById("siPwd")?.value || "";
+  window.AUTH.signIn(email, pwd);
+  return false;
+};
+
 function currentRoute() {
   const h = (window.location.hash || "#/").slice(1);
   return h === "" ? "/" : h;
@@ -74,6 +133,88 @@ function setTheme(t) {
 window.setLang = setLang;
 window.setTheme = setTheme;
 
+// ---- Login page ----
+function loginPage() {
+  const lang = window.APP_STATE.lang;
+  const err = window.APP_STATE.loginError;
+  const themeBtn = `<button class="btn btn-outline w-9 px-0 justify-center" onclick="setTheme('${window.APP_STATE.theme === 'light' ? 'dark' : 'light'}')">${window.APP_STATE.theme === 'light' ? ICONS.moon() : ICONS.sun()}</button>`;
+  const langBtn = `<button class="btn btn-outline" onclick="setLang('${lang === 'en' ? 'ar' : 'en'}')">${ICONS.globe()}<span class="font-medium">${lang === 'en' ? 'العربية' : 'English'}</span></button>`;
+
+  // Demo accounts list
+  const users = (window.DATA && window.DATA.AUTH_USERS) || [];
+  const demoRows = users.map(u => {
+    const person = window.DATA.findPerson(u.personId);
+    if (!person) return "";
+    const initials = person.name.split(" ").map(w => w[0]).slice(0, 2).join("");
+    const name = lang === "ar" ? person.nameAr : person.name;
+    return `
+      <button type="button" class="login-demo-row" onclick="AUTH.signInAs('${u.email}')">
+        <span class="login-demo-ava">${initials}</span>
+        <span class="login-demo-info">
+          <span class="login-demo-name">${UI.escapeHtml(name)}</span>
+          <span class="login-demo-meta">${UI.escapeHtml(u.email)} · ${T(`role.${person.role}`)}</span>
+        </span>
+        <span class="login-demo-go">${ICONS.arrowRight()}</span>
+      </button>`;
+  }).join("");
+
+  const defaultEmail = users[0]?.email || "";
+
+  return `
+    <div class="login-wrap">
+      <div class="login-topbar">
+        <div class="flex items-center gap-2">
+          <div class="h-9 w-9 rounded-xl logo-grad grid place-items-center text-white font-bold">A</div>
+          <div class="font-semibold">${T("appName")}</div>
+        </div>
+        <div class="flex items-center gap-2">${langBtn}${themeBtn}</div>
+      </div>
+
+      <div class="login-card-wrap">
+        <div class="login-card">
+          <div class="login-hero">
+            <div class="login-hero-badge">${ICONS.lock ? ICONS.lock() : ICONS.activity()}</div>
+            <h1 class="login-hero-title">${T("auth.signInTitle")}</h1>
+            <p class="login-hero-sub">${T("auth.signInSubtitle")}</p>
+          </div>
+
+          <form class="login-form" onsubmit="return submitSignIn(event)">
+            ${err ? `<div class="login-error">${UI.escapeHtml(err)}</div>` : ""}
+            <div class="login-field">
+              <label class="field-label" for="siEmail">${T("auth.email")}</label>
+              <input id="siEmail" class="input w-full" type="email" autocomplete="username" required value="${UI.escapeHtml(defaultEmail)}" placeholder="you@aquafleet.sa"/>
+            </div>
+            <div class="login-field">
+              <div class="login-field-row">
+                <label class="field-label" for="siPwd">${T("auth.password")}</label>
+                <a class="login-forgot" tabindex="-1">${T("auth.forgotPwd")}</a>
+              </div>
+              <input id="siPwd" class="input w-full" type="password" autocomplete="current-password" required placeholder="aquafleet"/>
+            </div>
+            <label class="login-remember">
+              <input type="checkbox" checked />
+              <span>${T("auth.rememberMe")}</span>
+            </label>
+            <button type="submit" class="btn btn-primary w-full justify-center" style="height:2.6rem">
+              ${ICONS.arrowRight()} <span>${T("auth.signIn")}</span>
+            </button>
+          </form>
+
+          ${users.length > 0 ? `
+            <div class="login-divider"><span>${T("auth.or")}</span></div>
+            <div class="login-demo">
+              <div class="login-demo-head">${T("auth.demoAccounts")}</div>
+              <div class="login-demo-list">${demoRows}</div>
+            </div>` : ""}
+        </div>
+
+        <div class="login-footer">${T("auth.footer")}</div>
+      </div>
+    </div>
+    ${toastLayer()}
+  `;
+}
+
 function shell(inner) {
   const lang = window.APP_STATE.lang;
   const theme = window.APP_STATE.theme;
@@ -87,6 +228,21 @@ function shell(inner) {
 
   const langBtn = `<button class="btn btn-outline" onclick="setLang('${lang === 'en' ? 'ar' : 'en'}')">${ICONS.globe()}<span class="font-medium">${lang === 'en' ? 'العربية' : 'English'}</span></button>`;
   const themeBtn = `<button class="btn btn-outline w-9 px-0 justify-center" onclick="setTheme('${theme === 'light' ? 'dark' : 'light'}')">${theme === 'light' ? ICONS.moon() : ICONS.sun()}</button>`;
+
+  // Current user chip + sign-out
+  const me = window.AUTH.currentUser();
+  const meInitials = me ? me.name.split(" ").map(w => w[0]).slice(0, 2).join("") : "??";
+  const meName = me ? (lang==='ar' ? me.nameAr : me.name) : "";
+  const meRole = me ? T(`role.${me.role}`) : "";
+  const userChip = me ? `
+    <div class="topbar-user" title="${UI.escapeHtml(meName)} · ${UI.escapeHtml(meRole)}">
+      <div class="h-9 w-9 rounded-full text-white grid place-items-center text-sm font-semibold" style="background:#0c66bf">${meInitials}</div>
+      <div class="topbar-user-info">
+        <div class="topbar-user-name">${UI.escapeHtml(meName)}</div>
+        <div class="topbar-user-role">${UI.escapeHtml(meRole)}</div>
+      </div>
+      <button class="icon-btn" title="${T("auth.signOut")}" onclick="AUTH.signOut()">${ICONS.logout ? ICONS.logout() : ICONS.x()}</button>
+    </div>` : "";
 
   return `
     <div class="flex min-h-screen">
@@ -116,7 +272,7 @@ function shell(inner) {
           <div class="flex items-center gap-2">
             ${langBtn}${themeBtn}
             <button class="btn btn-outline w-9 px-0 justify-center relative">${ICONS.bell()}<span class="absolute top-1.5 ${lang==='ar'?'left-1.5':'right-1.5'} h-2 w-2 rounded-full bg-rose-500"></span></button>
-            <div class="h-9 w-9 rounded-full text-white grid place-items-center text-sm font-semibold" style="background:#0c66bf">TS</div>
+            ${userChip}
           </div>
         </header>
 
@@ -177,7 +333,31 @@ function renderApp() {
   document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
   document.documentElement.lang = lang;
   document.documentElement.classList.toggle("dark", window.APP_STATE.theme === "dark");
-  document.getElementById("root").innerHTML = shell(renderRoute());
+
+  const route = currentRoute();
+  const root = document.getElementById("root");
+
+  // Auth gate: any route except /login requires a session.
+  if (!window.AUTH.isSignedIn() && route !== "/login") {
+    // Bounce silently to the login route (preserves the previously requested
+    // hash via APP_STATE so we could deep-link back to it after sign-in).
+    window.APP_STATE._postLoginRoute = route !== "/" ? route : null;
+    window.location.hash = "#/login";
+    root.innerHTML = loginPage();
+    return;
+  }
+  if (route === "/login") {
+    // If already signed in, kick back to dashboard.
+    if (window.AUTH.isSignedIn()) {
+      window.location.hash = "#/";
+      root.innerHTML = shell(renderRoute());
+      return;
+    }
+    root.innerHTML = loginPage();
+    return;
+  }
+
+  root.innerHTML = shell(renderRoute());
 }
 
 window.addEventListener("hashchange", renderApp);

@@ -1252,15 +1252,15 @@
       case "inspection":
         return pickFields([["truck", e.truck], ["result", e.result], ["issueDate", e.issueDate], ["nextDue", e.nextDue]]);
       case "contract":
-        return pickFields([["party2", e.party2], ["docNumber", e.docNumber], ["amount", e.amount && `${e.amount} ${e.currency||"SAR"}`], ["expiryDate", e.expiryDate]]);
+        return pickFields([["party2", e.party2], ["docNumber", e.docNumber], ["amount", e.amount], ["expiryDate", e.expiryDate]]);
       case "delivery":
         return pickFields([["docNumber", e.docNumber], ["consignee", e.consignee], ["truck", e.truck], ["issueDate", e.issueDate]]);
       case "quote":
-        return pickFields([["vendor", e.vendor], ["docNumber", e.docNumber], ["amount", e.amount && `${e.amount} ${e.currency||"SAR"}`], ["validity", e.validity && `${e.validity} d`]]);
+        return pickFields([["vendor", e.vendor], ["docNumber", e.docNumber], ["amount", e.amount], ["validity", e.validity && `${e.validity} d`]]);
       case "po":
-        return pickFields([["vendor", e.vendor], ["docNumber", e.docNumber], ["amount", e.amount && `${e.amount} ${e.currency||"SAR"}`], ["paymentTerms", e.paymentTerms]]);
+        return pickFields([["vendor", e.vendor], ["docNumber", e.docNumber], ["amount", e.amount], ["paymentTerms", e.paymentTerms]]);
       case "invoice":
-        return pickFields([["vendor", e.vendor], ["docNumber", e.docNumber], ["amount", e.amount && `${e.amount} ${e.currency||"SAR"}`], ["dueDate", e.dueDate]]);
+        return pickFields([["vendor", e.vendor], ["docNumber", e.docNumber], ["amount", e.amount], ["dueDate", e.dueDate]]);
       case "letter":
         return pickFields([["from", e.from], ["to", e.to], ["subject", e.subject], ["issueDate", e.issueDate]]);
       default:
@@ -1279,6 +1279,36 @@
     Object.keys(e).forEach(k => { if (!preferred.includes(k) && e[k] != null && e[k] !== "") ordered.push({ key: k, value: e[k] }); });
     return ordered;
   }
+
+  /** Custom Archive groups — user-defined folders that cut across document
+   *  types (e.g. "Compliance binder 2026"). Seeded with a few examples;
+   *  the UI can add/remove more. Each doc carries a `customGroupId` (null
+   *  = ungrouped). The "Group by: Custom group" mode buckets docs by this
+   *  field. */
+  const archiveCustomGroups = [
+    { id: "AGRP-001", name: "Compliance binder 2026", nameAr: "ملف الالتزام 2026", color: "#0b7eea", createdAt: "2026-01-15" },
+    { id: "AGRP-002", name: "Vendor agreements",      nameAr: "اتفاقيات الموردين",  color: "#f59e0b", createdAt: "2026-02-08" },
+    { id: "AGRP-003", name: "NEOM project archive",   nameAr: "أرشيف مشروع نيوم",   color: "#7c3aed", createdAt: "2026-03-20" },
+  ];
+  // Tag a slice of seeded documents to demo the grouping.
+  documents.forEach((d, i) => {
+    if (i % 9 === 0) d.customGroupId = "AGRP-001";
+    else if (i % 11 === 0) d.customGroupId = "AGRP-002";
+    else if (i % 13 === 0) d.customGroupId = "AGRP-003";
+    else d.customGroupId = null;
+  });
+
+  /** Auth users — for the demo login page. Each user is one of the
+   *  existing PER-* people so the topbar can read their name / role.
+   *  Password is intentionally trivial for the demo. */
+  const AUTH_USERS = [
+    { personId: "PER-001", email: "turki@aquafleet.sa",   password: "aquafleet" },
+    { personId: "PER-002", email: "sara@aquafleet.sa",    password: "aquafleet" },
+    { personId: "PER-003", email: "mahmoud@aquafleet.sa", password: "aquafleet" },
+    { personId: "PER-004", email: "hatem@aquafleet.sa",   password: "aquafleet" },
+    { personId: "PER-008", email: "reem@aquafleet.sa",    password: "aquafleet" },
+    { personId: "PER-009", email: "khaled@aquafleet.sa",  password: "aquafleet" },
+  ];
 
   function commissionTotal(c) {
     const lineSum = c.lines.reduce((s, l) => s + l.amountSar, 0);
@@ -1556,6 +1586,21 @@
     documents, AI_SAMPLES, GROUP_TEMPLATES,
     detectDocType, detectRefs, aiExtract,
     docPrimaryHeading, docExpiryStatus, docDaysUntilExpiry, docIssuer, docSummaryFields, docDetailFields,
+    archiveCustomGroups,
+    findArchiveGroup: (id) => archiveCustomGroups.find(g => g.id === id) || null,
+    AUTH_USERS,
+    /** Validate a sign-in attempt. Returns the matched user record + person
+     *  on success, null on failure. Accepts a lenient match for the demo:
+     *  - exact email + password (canonical path)
+     *  - email alone if the user picked from the demo-account list */
+    authenticate(email, password) {
+      const e = String(email || "").trim().toLowerCase();
+      const u = AUTH_USERS.find(x => x.email.toLowerCase() === e);
+      if (!u) return null;
+      if (password != null && password !== "" && u.password !== password) return null;
+      const person = people.find(p => p.id === u.personId) || null;
+      return { user: u, person };
+    },
     repairDescriptions, outsourcedJobs,
     consumePartsForWO,
     ENGINE_COMPONENTS,

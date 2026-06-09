@@ -939,3 +939,142 @@ html[dir="rtl"] .group-row .group-caret { transform: rotate(180deg); }
   .doc-card-fields { grid-template-columns: 1fr; }
   .doc-detail-grid { grid-template-columns: 1fr; }
 }
+
+/* ===== Login page ===== */
+.login-wrap {
+  min-height: 100vh; display:flex; flex-direction:column;
+  background: linear-gradient(135deg, rgba(11,126,234,.05), rgba(245,158,11,.05) 50%, rgba(124,58,237,.05));
+}
+.dark .login-wrap {
+  background: linear-gradient(135deg, rgba(11,126,234,.10), rgba(0,0,0,0) 50%, rgba(124,58,237,.10));
+}
+.login-topbar {
+  height: 3.25rem; padding: 0 1.25rem;
+  display:flex; align-items:center; justify-content:space-between;
+  border-bottom: 1px solid rgb(var(--border));
+  background: rgb(var(--card));
+}
+.login-card-wrap { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 2.5rem 1rem; gap:1rem; }
+.login-card {
+  width: 100%; max-width: 470px;
+  background: rgb(var(--card)); border: 1px solid rgb(var(--border));
+  border-radius: 1.1rem; padding: 2rem 1.75rem;
+  box-shadow: 0 22px 60px -22px rgba(0,0,0,.30), 0 6px 16px -6px rgba(0,0,0,.10);
+}
+.login-hero { text-align:center; margin-bottom: 1.5rem; }
+.login-hero-badge {
+  width: 3.5rem; height: 3.5rem; border-radius: 1rem;
+  background: linear-gradient(135deg,#229dff,#0c66bf); color: white;
+  display: grid; place-items: center; margin: 0 auto .65rem;
+  box-shadow: 0 8px 22px -8px rgba(11,126,234,.7);
+}
+.login-hero-badge svg { width: 1.6rem; height: 1.6rem; }
+.login-hero-title { font-size: 1.25rem; font-weight: 700; line-height: 1.3; }
+.login-hero-sub { font-size: .82rem; color: rgb(var(--muted)); margin-top: .35rem; line-height: 1.45; }
+
+.login-form { display: flex; flex-direction: column; gap: .75rem; }
+.login-field { display:flex; flex-direction:column; gap:.3rem; }
+.login-field-row { display:flex; align-items:center; justify-content:space-between; }
+.login-forgot { font-size: .68rem; color:#0c66bf; cursor:pointer; }
+.login-forgot:hover { text-decoration: underline; }
+.login-remember { display:flex; align-items:center; gap:.45rem; font-size: .78rem; color: rgb(var(--muted)); cursor:pointer; user-select:none; margin: .2rem 0 .4rem; }
+.login-remember input { accent-color: #0b7eea; }
+.login-error {
+  border-left: 3px solid #be123c;
+  background: rgba(244,63,94,.08);
+  color: #be123c; font-size: .78rem; font-weight: 500;
+  padding: .55rem .7rem; border-radius: .4rem;
+}
+[dir="rtl"] .login-error { border-left: 0; border-right: 3px solid #be123c; }
+
+.login-divider {
+  display:flex; align-items:center; gap:.65rem;
+  margin: 1.25rem 0; color: rgb(var(--muted));
+  font-size: .72rem; text-transform: uppercase; letter-spacing:.08em; font-weight:600;
+}
+.login-divider::before, .login-divider::after {
+  content: ""; flex:1; height: 1px; background: rgb(var(--border));
+}
+
+.login-demo-head {
+  font-size: .68rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em;
+  color: rgb(var(--muted)); margin-bottom: .55rem;
+}
+.login-demo-list { display: flex; flex-direction: column; gap: .35rem; max-height: 14rem; overflow-y: auto; padding-right: 2px; }
+.login-demo-row {
+  display: flex; align-items: center; gap: .65rem;
+  padding: .55rem .65rem;
+  border: 1px solid rgb(var(--border)); border-radius: .55rem;
+  background: rgb(var(--bg)); color: inherit;
+  text-align: start; cursor: pointer; transition: all .12s ease;
+}
+.login-demo-row:hover { border-color: #0b7eea; background: rgba(11,126,234,.05); }
+.login-demo-ava {
+  width: 2rem; height: 2rem; border-radius: 9999px;
+  background: #0c66bf; color: white;
+  display: grid; place-items: center; font-weight: 600; font-size: .72rem;
+  flex-shrink: 0;
+}
+.login-demo-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.login-demo-name { font-size: .82rem; font-weight: 600; line-height: 1.2; }
+.login-demo-meta { font-size: .65rem; color: rgb(var(--muted)); }
+.login-demo-go { color: rgb(var(--muted)); display:flex; align-items:center; }
+.login-demo-go svg { width: .9rem; height: .9rem; }
+[dir="rtl"] .login-demo-go svg { transform: scaleX(-1); }
+
+.login-footer { font-size: .68rem; color: rgb(var(--muted)); padding-top: .5rem; }
+
+/* ===== Topbar user chip + sign-out ===== */
+.topbar-user {
+  display: flex; align-items: center; gap: .55rem;
+  padding: .25rem .55rem .25rem .35rem;
+  border: 1px solid rgb(var(--border));
+  border-radius: 9999px;
+  background: rgb(var(--card));
+}
+[dir="rtl"] .topbar-user { padding: .25rem .35rem .25rem .55rem; }
+.topbar-user-info {
+  display: flex; flex-direction: column; line-height: 1.1;
+  min-width: 0; max-width: 11rem;
+}
+.topbar-user-name { font-size: .78rem; font-weight: 600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.topbar-user-role { font-size: .62rem; color: rgb(var(--muted)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.topbar-user .icon-btn { width: 1.8rem; height: 1.8rem; }
+@media (max-width: 768px) {
+  .topbar-user-info { display: none; }
+}
+
+/* ===== Archive custom-group chip (on cards) + group manager modal ===== */
+.grp-chip {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .15rem .45rem; border-radius: 9999px;
+  font-size: .6rem; font-weight: 600;
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+  color: var(--c);
+  border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+  margin-top: .25rem; align-self: flex-start;
+  max-width: 100%;
+}
+.grp-chip svg { width: .7rem; height: .7rem; }
+
+.grp-swatch-row { display:flex; gap:.4rem; flex-wrap:wrap; }
+.grp-swatch {
+  width: 2rem; height: 2rem; border-radius: 9999px;
+  display: grid; place-items: center;
+  border: 2px solid transparent; cursor:pointer; transition: border-color .12s ease;
+}
+.grp-swatch:has(input:checked) { border-color: var(--c); }
+.grp-swatch input { display: none; }
+.grp-swatch-dot { width: 1.4rem; height: 1.4rem; border-radius: 9999px; box-shadow: 0 0 0 2px rgba(0,0,0,.06); }
+
+.grp-list {
+  display: flex; flex-direction: column; gap: .3rem;
+  max-height: 11rem; overflow-y: auto;
+  border: 1px solid rgb(var(--border)); border-radius: .5rem; padding: .35rem;
+}
+.grp-row {
+  display: flex; align-items: center; gap: .55rem;
+  padding: .4rem .55rem; border-radius: .4rem;
+  background: color-mix(in srgb, var(--c) 6%, transparent);
+}
