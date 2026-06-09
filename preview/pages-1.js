@@ -1430,11 +1430,26 @@ window.PAGES_1 = (function () {
       if (phase === "delivered") t.actualEnd = now;
     },
 
+    /** Apply a brief optimistic pulse to the card that triggered the
+     *  transition so the user feels the click before the next render
+     *  moves it into the new column. Pure visual — no state change. */
+    _pulseTripCard(tripId) {
+      // Find the clicked card by matching one of its onclick handlers.
+      const sel = `.kanban-card[onclick*="TRIP.viewOnMap('${tripId}')"], .kanban-card .kanban-action[onclick*="'${tripId}'"]`;
+      let card = document.querySelector(sel);
+      if (card && !card.classList.contains("kanban-card")) card = card.closest(".kanban-card");
+      if (card) {
+        card.classList.add("optimistic");
+        setTimeout(() => card.classList.remove("optimistic"), 220);
+      }
+    },
+
     /** Manual "Start trip" — moves Scheduled → Loading. Driver doesn't leave
      *  until this is pushed by management. */
     startTrip(tripId) {
       const t = D().trips.find(x => x.id === tripId);
       if (!t) return;
+      TRIP._pulseTripCard(tripId);
       t.status = "loading";
       TRIP._stampPhase(t, "loading");
       window.app.toast(`${t.ref} · ${T("status.loading")}`);
@@ -1445,6 +1460,7 @@ window.PAGES_1 = (function () {
     advance(tripId, to) {
       const t = D().trips.find(x => x.id === tripId);
       if (!t) return;
+      TRIP._pulseTripCard(tripId);
       t.status = to;
       TRIP._stampPhase(t, to);
       window.app.toast(`${t.ref} → ${T(`status.${to}`)}`);
@@ -1455,6 +1471,7 @@ window.PAGES_1 = (function () {
     markDelivered(tripId) {
       const t = D().trips.find(x => x.id === tripId);
       if (!t) return;
+      TRIP._pulseTripCard(tripId);
       t.status = "delivered";
       TRIP._stampPhase(t, "delivered");
       t.actualDurationMin = t.plannedDurationMin;  // simple stand-in

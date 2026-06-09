@@ -311,6 +311,33 @@ function toastLayer() {
   return `<div class="toast">${UI.escapeHtml(t.msg)}</div>`;
 }
 
+/** Skeleton page — shown briefly on every route transition so the app
+ *  reads as "preparing" rather than "blank". Layout matches the real
+ *  page rhythm (header strip + stat row + body card). */
+function skeletonPage() {
+  return `
+    <div class="skel-page">
+      <div class="flex items-start justify-between gap-4 flex-wrap mb-5">
+        <div style="min-width:280px; flex:1">
+          <div class="skel skel-h1"></div>
+          <div class="skel skel-line short"></div>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="skel" style="height:2.35rem; width:7rem; border-radius: var(--r-3);"></div>
+          <div class="skel" style="height:2.35rem; width:9rem; border-radius: var(--r-3);"></div>
+        </div>
+      </div>
+      <div class="skel-grid">
+        <div class="skel skel-stat"></div>
+        <div class="skel skel-stat"></div>
+        <div class="skel skel-stat"></div>
+        <div class="skel skel-stat"></div>
+      </div>
+      <div class="skel skel-card" style="margin-bottom:.85rem"></div>
+      <div class="skel skel-card"></div>
+    </div>`;
+}
+
 function renderRoute() {
   const r = currentRoute();
   if (r === "/" || r === "") return PAGES_1.dashboard();
@@ -328,6 +355,11 @@ function renderRoute() {
   return `<div class="card p-6">Not found: ${r}</div>`;
 }
 
+/** Module-level last-route memo so we only flash the skeleton on a
+ *  real route transition (hash change), not on every renderApp() called
+ *  by modals / toasts / state changes within the same page. */
+let __lastRoute = null;
+
 function renderApp() {
   const lang = window.APP_STATE.lang;
   document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
@@ -339,21 +371,38 @@ function renderApp() {
 
   // Auth gate: any route except /login requires a session.
   if (!window.AUTH.isSignedIn() && route !== "/login") {
-    // Bounce silently to the login route (preserves the previously requested
-    // hash via APP_STATE so we could deep-link back to it after sign-in).
     window.APP_STATE._postLoginRoute = route !== "/" ? route : null;
     window.location.hash = "#/login";
     root.innerHTML = loginPage();
+    __lastRoute = "/login";
     return;
   }
   if (route === "/login") {
-    // If already signed in, kick back to dashboard.
     if (window.AUTH.isSignedIn()) {
       window.location.hash = "#/";
       root.innerHTML = shell(renderRoute());
+      __lastRoute = "/";
       return;
     }
     root.innerHTML = loginPage();
+    __lastRoute = "/login";
+    return;
+  }
+
+  // First mount or actual route change → flash the skeleton briefly.
+  const isTransition = __lastRoute !== route;
+  if (isTransition) {
+    root.innerHTML = shell(skeletonPage());
+    __lastRoute = route;
+    // Defer the real paint to the next macro-tick. 220 ms = long enough
+    // to be felt (and read as "loading") without feeling sluggish.
+    setTimeout(() => {
+      // Only paint if we're still on the same route — otherwise a faster
+      // subsequent navigation owns the screen.
+      if (currentRoute() === route) {
+        document.getElementById("root").innerHTML = shell(renderRoute());
+      }
+    }, 220);
     return;
   }
 

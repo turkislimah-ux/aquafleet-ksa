@@ -894,12 +894,25 @@ window.PAGES_ARCHIVE = (function () {
     },
 
     commitDeleteDoc(docId) {
-      const arr = D().documents;
-      const i = arr.findIndex(x => x.id === docId);
-      if (i >= 0) arr.splice(i, 1);
-      window.app.toast(T("arc.deleteDoc2"));
+      // Optimistic UI: close the modal immediately, fade the card out
+      // where it sits in the grid, then splice + re-render after the
+      // fade completes. The user sees the action take effect before
+      // the data layer catches up.
       window.app.closeModal();
-      window.app.render();
+      const card = document.querySelector(`.doc-card[onclick*="ARC.openDoc('${docId}')"]`);
+      const doSplice = () => {
+        const arr = D().documents;
+        const i = arr.findIndex(x => x.id === docId);
+        if (i >= 0) arr.splice(i, 1);
+        window.app.toast(T("arc.deleteDoc2"));
+        window.app.render();
+      };
+      if (card) {
+        card.classList.add("fade-out");
+        setTimeout(doSplice, 320);
+      } else {
+        doSplice();
+      }
     },
 
     /** Open the original file. If it was uploaded in-session, we have its
