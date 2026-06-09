@@ -338,6 +338,27 @@
     { id: "SUP-005", name: "ALJ Industrial",         phone: "+966 12 668 4400", email: "supply@alj-industrial.sa", contactPerson: "Faisal Al-Jomaih" },
   ];
   const SUPPLIER_NAMES = SUPPLIERS.map(s => s.name);
+
+  /** Custom Archive document types — user-defined doc taxonomies that sit
+   *  alongside the 14 built-in types. Declared up here so `aiExtract` can
+   *  reference it without hitting the TDZ. */
+  const archiveCustomTypes = [
+    {
+      id: "DT-ZAKAT",
+      label: "Zakat & Tax Certificate",
+      labelAr: "شهادة الزكاة والضريبة",
+      color: "#0c66bf",
+      fields: [
+        { key: "certificateNumber", label: "Certificate #",     labelAr: "رقم الشهادة" },
+        { key: "entity",            label: "Entity",            labelAr: "المنشأة" },
+        { key: "authority",         label: "Issuing authority", labelAr: "الجهة المُصدِرة" },
+        { key: "issueDate",         label: "Issue date",        labelAr: "تاريخ الإصدار" },
+        { key: "expiryDate",        label: "Expiry date",       labelAr: "تاريخ الانتهاء" },
+        { key: "notes",             label: "Notes",             labelAr: "ملاحظات" },
+      ],
+      createdAt: "2026-04-01",
+    },
+  ];
   const findSupplierByName = (name) => SUPPLIERS.find(s => s.name === name) || SUPPLIERS[0];
 
   const parts = PART_DEFS.map((d, i) => {
@@ -980,6 +1001,26 @@
     const fmtDate = (d) => d.toISOString().slice(0, 10);
     const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 
+    // Custom user-defined types: build an empty (or sample) record from the
+    // type's declared field list so manual entry / AI fallback has the right shape.
+    const custom = archiveCustomTypes.find(t => t.id === type);
+    if (custom) {
+      const out = {};
+      custom.fields.forEach(f => {
+        // Provide a sample value for common keys so the UI demo isn't empty.
+        if (/date|expir/i.test(f.key)) {
+          out[f.key] = /expir/i.test(f.key)
+            ? fmtDate(addDays(today, intBetween(60, 720)))
+            : fmtDate(addDays(today, -intBetween(0, 180)));
+        } else if (f.key === "entity") out[f.key] = "AquaFleet KSA Co.";
+        else if (f.key === "authority") out[f.key] = "Ministry of Commerce — Saudi Arabia";
+        else if (f.key === "certificateNumber") out[f.key] = `CERT-${intBetween(100000, 999999)}`;
+        else if (f.key === "notes") out[f.key] = "";
+        else out[f.key] = "";
+      });
+      return out;
+    }
+
     switch (type) {
       case "invoice":
         return {
@@ -1194,6 +1235,15 @@
   };
   function docPrimaryHeading(doc) {
     if (!doc || !doc.extracted) return doc?.filename || "—";
+    // Custom types: heading = first non-empty extracted value or the type label.
+    const ct = archiveCustomTypes.find(t => t.id === doc.type);
+    if (ct) {
+      const e = doc.extracted;
+      const primaryKeys = ["certificateNumber","docNumber","entity","holder","subject"];
+      for (const k of primaryKeys) if (e[k]) return `${ct.label} — ${e[k]}`;
+      for (const f of ct.fields) if (e[f.key]) return `${ct.label} — ${e[f.key]}`;
+      return ct.label;
+    }
     const e = doc.extracted;
     switch (doc.type) {
       case "license": return e.holder ? `License — ${e.holder}` : "Driver License";
@@ -1228,7 +1278,13 @@
     return Math.round((d - DOC_TODAY) / 86400000);
   }
   function docIssuer(doc) {
-    return doc?.extracted?.authority || _typeIssuer[doc?.type] || "Various";
+    if (!doc) return "Various";
+    if (doc.extracted?.authority) return doc.extracted.authority;
+    if (_typeIssuer[doc.type]) return _typeIssuer[doc.type];
+    // Custom types fall back to a sensible default.
+    const ct = archiveCustomTypes.find(t => t.id === doc.type);
+    if (ct) return ct.label;
+    return "Various";
   }
 
   // The 3–4 most-important fields per type for the card face.
@@ -1236,6 +1292,11 @@
     if (!doc || !doc.extracted) return [];
     const e = doc.extracted;
     const pickFields = (arr) => arr.filter(([, v]) => v != null && v !== "");
+    // Custom types: take the first 4 declared fields that have a value.
+    const ct = archiveCustomTypes.find(t => t.id === doc.type);
+    if (ct) {
+      return pickFields(ct.fields.slice(0, 4).map(f => [f.key, e[f.key]]));
+    }
     switch (doc.type) {
       case "license":
         return pickFields([["docNumber", e.docNumber], ["licenseClass", e.licenseClass], ["authority", e.authority], ["expiryDate", e.expiryDate]]);
@@ -1588,6 +1649,27 @@
     docPrimaryHeading, docExpiryStatus, docDaysUntilExpiry, docIssuer, docSummaryFields, docDetailFields,
     archiveCustomGroups,
     findArchiveGroup: (id) => archiveCustomGroups.find(g => g.id === id) || null,
+    archiveCustomTypes,
+    findCustomType: (id) => archiveCustomTypes.find(t => t.id === id) || null,
+    /** Built-in doc types — the UI calls this to render the full taxonomy
+     *  in dropdowns + filters. Mirrors detectDocType's set. */
+    builtInDocTypes: [
+      "license","registration","insurance","commercial_registration","national_address",
+      "permit","inspection","contract","delivery","quote","po","invoice","letter","other",
+    ],
+    /** All known doc types (built-in + user-defined). The IDs of custom
+     *  types are the same strings used as `doc.type` on records. */
+    allDocTypes() { return this.builtInDocTypes.concat(archiveCustomTypes.map(t => t.id)); },
+    /** Resolve a doc type id → a human label honoring the current language. */
+    docTypeLabel(typeId, lang) {
+      const ct = archiveCustomTypes.find(t => t.id === typeId);
+      if (ct) return lang === "ar" ? ct.labelAr || ct.label : ct.label;
+      // Fall back to the i18n table for built-ins
+      const key = `doc.${typeId}`;
+      const T2 = window.T;
+      const v = T2 ? T2(key) : key;
+      return v && v !== key ? v : typeId;
+    },
     AUTH_USERS,
     /** Validate a sign-in attempt. Returns the matched user record + person
      *  on success, null on failure. Accepts a lenient match for the demo:

@@ -1126,3 +1126,18 @@ html[dir="rtl"] .group-row .group-caret { transform: rotate(180deg); }
 .doc-check-title { font-size: .78rem; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .doc-check-row:has(input:checked) { background: rgba(16,185,129,.07); }
 .doc-check-row:has(input:checked):hover { background: rgba(16,185,129,.10); }
+
+/* ===== Archive — Custom doc-type designer ===== */
+.type-field-list {
+  display: flex; flex-direction: column; gap: .35rem;
+  max-height: 16rem; overflow-y: auto;
+  border: 1px solid rgb(var(--border)); border-radius: .5rem;
+  background: rgb(var(--card)); padding: .5rem;
+}
+.type-field-row {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .15rem .25rem; border-radius: .35rem;
+}
+.type-field-row:hover { background: rgba(11,126,234,.04); }
+.type-field-row .input { flex: 1; min-width: 0; }
+.type-field-row .icon-btn { color: #be123c; flex-shrink: 0; }

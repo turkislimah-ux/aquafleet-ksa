@@ -763,6 +763,23 @@ window.DICT = {
     bulkAssigned: { en: "documents assigned", ar: "مستند تم تخصيصها" },
     bulkAssignDoc: { en: "Add document to group…", ar: "إضافة مستند إلى مجموعة…" },
     nothingChanged: { en: "No changes", ar: "لا تغييرات" },
+    // Custom document types
+    newType: { en: "New type", ar: "نوع جديد" },
+    newTypeTitle: { en: "Create a new document type", ar: "إنشاء نوع مستند جديد" },
+    newTypeIntro: { en: "Define a new document category and the fields it should capture. New uploads can pick this type from the manual-entry form.", ar: "حدّد نوع مستند جديد والحقول التي يلتقطها. ستظهر للمستخدمين عند الإدخال اليدوي." },
+    typeLabel: { en: "Type name", ar: "اسم النوع" },
+    typeLabelAr: { en: "Type name (Arabic)", ar: "اسم النوع (عربي)" },
+    typeColor: { en: "Color", ar: "اللون" },
+    typeFields: { en: "Fields", ar: "الحقول" },
+    typeFieldsHint: { en: "Each row becomes a labeled input on the document form.", ar: "كل صف يصبح حقلاً مسمّى في نموذج المستند." },
+    fieldLabel: { en: "Label", ar: "التسمية" },
+    fieldKey: { en: "Key (auto)", ar: "المفتاح (تلقائي)" },
+    addField: { en: "Add field", ar: "إضافة حقل" },
+    removeField: { en: "Remove", ar: "حذف" },
+    typeCreated: { en: "Document type created", ar: "تم إنشاء نوع المستند" },
+    customTypeBadge: { en: "Custom", ar: "مخصص" },
+    requireNameAndOneField: { en: "Enter a name and at least one field", ar: "أدخل اسم النوع وحقلاً واحداً على الأقل" },
+    pickAType: { en: "— Pick a type —", ar: "— اختر النوع —" },
   },
   // Authentication / login
   auth: {

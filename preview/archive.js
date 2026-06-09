@@ -63,7 +63,7 @@ window.PAGES_ARCHIVE = (function () {
     return `
       <div class="doc-card" onclick="ARC.openDoc('${doc.id}')">
         <div class="doc-card-head">
-          <div class="doc-type-chip doc-type-${type}">${T(`doc.${type}`)}</div>
+          ${typeChipHtml(type)}
           ${expiryPill(doc)}
         </div>
         <div class="doc-card-title">${escapeHtml(heading)}</div>
@@ -72,7 +72,7 @@ window.PAGES_ARCHIVE = (function () {
         <div class="doc-card-fields">
           ${summary.map(([k, v]) => `
             <div class="doc-field">
-              <div class="doc-field-label">${T(`af.${k}`) === `af.${k}` ? escapeHtml(k) : T(`af.${k}`)}</div>
+              <div class="doc-field-label">${escapeHtml(fieldLabel(doc.type, k))}</div>
               <div class="doc-field-value">${escapeHtml(fmtField(k, v))}</div>
             </div>`).join("")}
         </div>
@@ -86,7 +86,7 @@ window.PAGES_ARCHIVE = (function () {
   /** Group key for the current "Group by" mode. Returns { key, label } so
    *  the section header reads naturally. */
   function groupOf(doc, mode) {
-    if (mode === "type") return { key: doc.type, label: T(`doc.${doc.type}`) };
+    if (mode === "type") return { key: doc.type, label: typeLabel(doc.type) };
     if (mode === "issuer") return { key: D().docIssuer(doc), label: D().docIssuer(doc) };
     if (mode === "expiry") {
       const s = D().docExpiryStatus(doc);
@@ -132,6 +132,50 @@ window.PAGES_ARCHIVE = (function () {
     return [...map.values()].sort((a, b) => String(a.key).localeCompare(String(b.key)));
   }
 
+  /** Resolve a field's display label. If the field is declared on a custom
+   *  doc type, use the user-supplied label; otherwise fall back to the
+   *  i18n table; finally fall back to the raw key. */
+  function fieldLabel(typeId, key) {
+    const ct = D().findCustomType(typeId);
+    if (ct) {
+      const f = ct.fields.find(x => x.key === key);
+      if (f) return lang() === "ar" ? (f.labelAr || f.label) : f.label;
+    }
+    const v = T(`af.${key}`);
+    return v && v !== `af.${key}` ? v : key;
+  }
+
+  /** Turn a free-text label into a safe camelCase key for the extracted blob.
+   *  "Issue date" → "issueDate", "Document #" → "documentNumber". */
+  function slugify(s) {
+    return String(s || "")
+      .replace(/#/g, " number")
+      .replace(/[^a-zA-Z0-9\s]+/g, "")
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .map((w, i) => i === 0 ? w : (w[0]?.toUpperCase() + w.slice(1)))
+      .join("");
+  }
+
+  /** Resolve a doc-type id → its label (built-in via i18n, custom via DATA). */
+  function typeLabel(typeId) {
+    const ct = D().findCustomType(typeId);
+    if (ct) return lang() === "ar" ? (ct.labelAr || ct.label) : ct.label;
+    const v = T(`doc.${typeId}`);
+    return v && v !== `doc.${typeId}` ? v : typeId;
+  }
+
+  /** Doc-type chip with built-in CSS class for known types and an inline
+   *  style for custom types (uses the type's own color). */
+  function typeChipHtml(typeId) {
+    const ct = D().findCustomType(typeId);
+    if (ct) {
+      return `<span class="doc-type-chip" style="--c:${ct.color}; color:${ct.color}; background:${ct.color}1a; border-color:${ct.color}59">${escapeHtml(typeLabel(typeId))}</span>`;
+    }
+    return `<span class="doc-type-chip doc-type-${typeId}">${escapeHtml(typeLabel(typeId))}</span>`;
+  }
+
   // ---- ARC handlers ----
   window.ARC = {
     setGroupBy(v) { ensureState(); window.APP_STATE.arc.groupBy = v; window.app.render(); },
@@ -150,6 +194,138 @@ window.PAGES_ARCHIVE = (function () {
     },
 
     // ---- Upload flow ----
+    // ---- Custom document-type designer ----
+    /** Open the "New document type" designer. The user names the type,
+     *  picks a color, and defines a list of fields. The new type lands
+     *  in D().archiveCustomTypes and shows up everywhere doc types are
+     *  used (filters, manual-entry picker, card chips). */
+    openNewType() {
+      window.APP_STATE.arc.newType = {
+        name: "",
+        nameAr: "",
+        color: "#0c66bf",
+        fields: [
+          { label: "Document #", labelAr: "رقم المستند" },
+          { label: "Issue date", labelAr: "تاريخ الإصدار" },
+          { label: "Expiry date", labelAr: "تاريخ الانتهاء" },
+        ],
+      };
+      ARC._renderNewType();
+    },
+
+    addTypeField() {
+      const d = window.APP_STATE.arc.newType;
+      if (!d) return;
+      d.fields.push({ label: "", labelAr: "" });
+      ARC._renderNewType();
+    },
+
+    removeTypeField(idx) {
+      const d = window.APP_STATE.arc.newType;
+      if (!d || !d.fields[idx]) return;
+      d.fields.splice(idx, 1);
+      ARC._renderNewType();
+    },
+
+    /** Re-render the type designer (used when fields are added/removed). */
+    _renderNewType() {
+      const d = window.APP_STATE.arc.newType;
+      if (!d) return;
+      // Read user input back from any rendered field rows BEFORE re-rendering,
+      // so add/remove doesn't lose what the user already typed.
+      d.fields.forEach((f, i) => {
+        const lbl = document.getElementById(`nt-flabel-${i}`);
+        if (lbl) f.label = lbl.value;
+      });
+      const nameEl = document.getElementById("ntName");
+      if (nameEl) d.name = nameEl.value;
+      const nameArEl = document.getElementById("ntNameAr");
+      if (nameArEl) d.nameAr = nameArEl.value;
+      const colorEl = document.querySelector('input[name="ntColor"]:checked');
+      if (colorEl) d.color = colorEl.value;
+
+      const swatches = ["#0c66bf","#7c3aed","#10b981","#f59e0b","#be123c","#0ea5e9","#bd8b3f","#64748b"];
+      const fieldsHtml = d.fields.map((f, i) => `
+        <div class="type-field-row">
+          <input id="nt-flabel-${i}" class="input flex-1" placeholder="${T("arc.fieldLabel")}" value="${escapeHtml(f.label)}"/>
+          <span class="muted text-[10px] font-mono">${slugify(f.label) || "(auto-key)"}</span>
+          <button type="button" class="icon-btn" title="${T("arc.removeField")}" onclick="ARC.removeTypeField(${i})">${ICONS.trash()}</button>
+        </div>`).join("");
+
+      const html = `
+        <div class="space-y-3">
+          <p class="text-sm muted">${T("arc.newTypeIntro")}</p>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="field-label">${T("arc.typeLabel")}</label>
+              <input id="ntName" class="input w-full" value="${escapeHtml(d.name)}" placeholder="e.g. Zakat & Tax Certificate"/>
+            </div>
+            <div>
+              <label class="field-label">${T("arc.typeLabelAr")}</label>
+              <input id="ntNameAr" class="input w-full" dir="rtl" value="${escapeHtml(d.nameAr)}" placeholder="مثال: شهادة الزكاة والضريبة"/>
+            </div>
+          </div>
+          <div>
+            <label class="field-label">${T("arc.typeColor")}</label>
+            <div class="grp-swatch-row">
+              ${swatches.map((c) => `
+                <label class="grp-swatch" style="--c:${c}">
+                  <input type="radio" name="ntColor" value="${c}" ${c===d.color?'checked':''}/>
+                  <span class="grp-swatch-dot" style="background:${c}"></span>
+                </label>`).join("")}
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="field-label !mb-0">${T("arc.typeFields")}</label>
+              <button type="button" class="btn btn-outline btn-xs" onclick="ARC.addTypeField()">${ICONS.plus()}${T("arc.addField")}</button>
+            </div>
+            <p class="text-[11px] muted mb-2">${T("arc.typeFieldsHint")}</p>
+            <div class="type-field-list">${fieldsHtml}</div>
+          </div>
+        </div>`;
+      const footer = `
+        <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="ARC.saveNewType()">${ICONS.save()}${T("arc.newType")}</button>`;
+      window.app.openModal({ title: T("arc.newTypeTitle"), html, footer });
+    },
+
+    saveNewType() {
+      const d = window.APP_STATE.arc.newType;
+      if (!d) return;
+      // Read final values from DOM
+      d.name = (document.getElementById("ntName")?.value || "").trim();
+      d.nameAr = (document.getElementById("ntNameAr")?.value || "").trim() || d.name;
+      const colorEl = document.querySelector('input[name="ntColor"]:checked');
+      if (colorEl) d.color = colorEl.value;
+      d.fields.forEach((f, i) => {
+        const el = document.getElementById(`nt-flabel-${i}`);
+        if (el) f.label = (el.value || "").trim();
+      });
+      const validFields = d.fields.filter(f => f.label).map(f => ({
+        key: slugify(f.label),
+        label: f.label,
+        labelAr: f.labelAr || f.label,
+      }));
+      if (!d.name || validFields.length === 0) {
+        window.app.toast(T("arc.requireNameAndOneField"));
+        return;
+      }
+      const id = `DT-${slugify(d.name).toUpperCase()}-${String(Date.now()).slice(-4)}`;
+      D().archiveCustomTypes.push({
+        id,
+        label: d.name,
+        labelAr: d.nameAr,
+        color: d.color,
+        fields: validFields,
+        createdAt: new Date().toISOString().slice(0, 10),
+      });
+      window.APP_STATE.arc.newType = null;
+      window.app.toast(`${T("arc.typeCreated")} · ${d.name}`);
+      window.app.closeModal();
+      window.app.render();
+    },
+
     // ---- Custom-group management ----
     openNewGroup() {
       const swatches = ["#0b7eea","#f59e0b","#7c3aed","#10b981","#be123c","#64748b","#0ea5e9","#db2777"];
@@ -187,7 +363,7 @@ window.PAGES_ARCHIVE = (function () {
                 ${docs.map(d => `
                   <label class="doc-check-row" data-search="${escapeHtml((d.filename + " " + D().docPrimaryHeading(d) + " " + Object.values(d.extracted||{}).join(" ")).toLowerCase())}">
                     <input type="checkbox" value="${d.id}" onchange="ARC._toggleNewGroupDoc('${d.id}', this.checked)"/>
-                    <span class="doc-type-chip doc-type-${d.type}">${T(`doc.${d.type}`)}</span>
+                    ${typeChipHtml(d.type)}
                     <span class="doc-check-title">${escapeHtml(D().docPrimaryHeading(d))}</span>
                     ${d.customGroupId ? `<span class="muted text-[11px]">· ${escapeHtml((D().findArchiveGroup(d.customGroupId)||{}).name || '')}</span>` : ""}
                   </label>`).join("")}
@@ -290,7 +466,7 @@ window.PAGES_ARCHIVE = (function () {
               ${docs.map(d => `
                 <label class="doc-check-row" data-search="${escapeHtml((d.filename + " " + D().docPrimaryHeading(d) + " " + Object.values(d.extracted||{}).join(" ")).toLowerCase())}">
                   <input type="checkbox" value="${d.id}" ${current.has(d.id) ? 'checked' : ''} onchange="ARC._toggleMmDoc('${d.id}', this.checked)"/>
-                  <span class="doc-type-chip doc-type-${d.type}">${T(`doc.${d.type}`)}</span>
+                  ${typeChipHtml(d.type)}
                   <span class="doc-check-title">${escapeHtml(D().docPrimaryHeading(d))}</span>
                   ${d.customGroupId && d.customGroupId !== groupId
                     ? `<span class="muted text-[11px]">· ${escapeHtml((D().findArchiveGroup(d.customGroupId)||{}).name || '')}</span>`
@@ -511,7 +687,7 @@ window.PAGES_ARCHIVE = (function () {
       if (!u) return;
 
       // ---- Doc type list shared by manual entry + filters ----
-      const ALL_TYPES = ["license","registration","insurance","commercial_registration","national_address","permit","inspection","contract","delivery","quote","po","invoice","letter","other"];
+      const ALL_TYPES = D().allDocTypes();
 
       let body = "";
       if (!u.mode) {
@@ -541,7 +717,7 @@ window.PAGES_ARCHIVE = (function () {
             <div class="upload-result-head">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="pill pill-info"><span class="dot"></span>${T("arc.uploadManual")}</span>
-                <span class="doc-type-chip doc-type-${u.type}">${T(`doc.${u.type}`)}</span>
+                ${typeChipHtml(u.type)}
               </div>
               <button type="button" class="btn btn-ghost btn-xs" onclick="ARC.setUploadMode(null); ARC._renderUpload()">${ICONS.arrowLeft()}${lang()==='en'?'Back':'العودة'}</button>
             </div>
@@ -549,7 +725,7 @@ window.PAGES_ARCHIVE = (function () {
               <div>
                 <label class="field-label">${T("arc.pickDocType")}</label>
                 <select class="select w-full" onchange="ARC.setManualType(this.value)">
-                  ${ALL_TYPES.map(t => `<option value="${t}" ${u.type===t?'selected':''}>${T(`doc.${t}`)}</option>`).join("")}
+                  ${ALL_TYPES.map(t => `<option value="${t}" ${u.type===t?'selected':''}>${escapeHtml(typeLabel(t))}</option>`).join("")}
                 </select>
                 <div class="text-[10px] muted mt-1">${T("arc.pickDocTypeHint")}</div>
               </div>
@@ -564,7 +740,7 @@ window.PAGES_ARCHIVE = (function () {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
               ${keys.map(k => `
                 <div>
-                  <label class="field-label">${T(`af.${k}`) === `af.${k}` ? escapeHtml(k) : T(`af.${k}`)}</label>
+                  <label class="field-label">${escapeHtml(fieldLabel(u.type, k))}</label>
                   <input class="input w-full" id="auf-${escapeHtml(k)}" value=""/>
                 </div>`).join("")}
             </div>
@@ -598,7 +774,7 @@ window.PAGES_ARCHIVE = (function () {
             <div class="upload-result-head">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="ai-chip">${ICONS.zap ? ICONS.zap() : "★"} AI</span>
-                <span class="doc-type-chip doc-type-${u.type}">${T(`doc.${u.type}`)}</span>
+                ${typeChipHtml(u.type)}
                 <span class="muted text-xs">${u.confidence}% ${T("arc.aiConfidence").toLowerCase()}</span>
               </div>
               <div class="text-[11px] muted truncate" style="max-width:260px">${escapeHtml(u.filename)}</div>
@@ -607,7 +783,7 @@ window.PAGES_ARCHIVE = (function () {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
               ${keys.map(k => `
                 <div>
-                  <label class="field-label">${T(`af.${k}`) === `af.${k}` ? escapeHtml(k) : T(`af.${k}`)}</label>
+                  <label class="field-label">${escapeHtml(fieldLabel(u.type, k))}</label>
                   <input class="input w-full" id="auf-${escapeHtml(k)}" value="${escapeHtml(u.extracted[k])}"/>
                 </div>`).join("")}
             </div>
@@ -635,7 +811,7 @@ window.PAGES_ARCHIVE = (function () {
         <div class="space-y-3">
           <div class="flex items-center justify-between flex-wrap gap-2">
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="doc-type-chip doc-type-${d.type}">${T(`doc.${d.type}`)}</span>
+              ${typeChipHtml(d.type)}
               ${expiryPill(d)}
               <span class="muted text-xs">${T("arc.issuer")}: <b>${escapeHtml(D().docIssuer(d))}</b></span>
             </div>
@@ -646,7 +822,7 @@ window.PAGES_ARCHIVE = (function () {
           <div class="doc-detail-grid">
             ${fields.map(f => `
               <div class="doc-detail-row">
-                <div class="doc-field-label">${T(`af.${f.key}`) === `af.${f.key}` ? escapeHtml(f.key) : T(`af.${f.key}`)}</div>
+                <div class="doc-field-label">${escapeHtml(fieldLabel(d.type, f.key))}</div>
                 <div class="doc-field-value">${escapeHtml(fmtField(f.key, f.value))}</div>
               </div>`).join("")}
           </div>
@@ -682,7 +858,7 @@ window.PAGES_ARCHIVE = (function () {
           <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
             ${fields.map(f => `
               <div>
-                <label class="field-label">${T(`af.${f.key}`) === `af.${f.key}` ? escapeHtml(f.key) : T(`af.${f.key}`)}</label>
+                <label class="field-label">${escapeHtml(fieldLabel(d.type, f.key))}</label>
                 <input class="input w-full" id="ed-${escapeHtml(f.key)}" value="${escapeHtml(f.value)}"/>
               </div>`).join("")}
           </div>
@@ -793,13 +969,19 @@ window.PAGES_ARCHIVE = (function () {
     const totalDocs = D().documents.length;
 
     // Build the type-filter dropdown options from the unique types in the data.
-    const usedTypes = [...new Set(D().documents.map(d => d.type))].sort();
+    // Show every type that's either in use OR user-defined, so newly-created
+    // custom types appear in the filter immediately (even with 0 docs).
+    const usedTypes = [...new Set([
+      ...D().documents.map(d => d.type),
+      ...D().archiveCustomTypes.map(t => t.id),
+    ])].sort();
 
     return `
       ${pageHeader({
         title: T("arc.title"),
         subtitle: `${totalDocs} ${T("arc.totalDocs")} · ${T("arc.subtitleV2")}`,
-        actions: btn({ label: T("arc.uploadDoc"), icon: ICONS.upload(), variant: "primary", onclick: "ARC.openUpload()" })
+        actions: btn({ label: T("arc.newType"), icon: ICONS.plus(), variant: "outline", onclick: "ARC.openNewType()" })
+              + btn({ label: T("arc.uploadDoc"), icon: ICONS.upload(), variant: "primary", onclick: "ARC.openUpload()" })
       })}
 
       <!-- Toolbar: prominent search + Group by + Type filter -->
@@ -826,7 +1008,7 @@ window.PAGES_ARCHIVE = (function () {
           <label class="arc-toolbar-label">${T("arc.typeFilter")}</label>
           <select class="select" onchange="ARC.setTypeFilter(this.value)">
             <option value="all" ${S.typeFilter==='all'?'selected':''}>${T("arc.allTypes")}</option>
-            ${usedTypes.map(t => `<option value="${t}" ${S.typeFilter===t?'selected':''}>${T(`doc.${t}`)}</option>`).join("")}
+            ${usedTypes.map(t => `<option value="${t}" ${S.typeFilter===t?'selected':''}>${escapeHtml(typeLabel(t))}</option>`).join("")}
           </select>
         </div>
       </div>
