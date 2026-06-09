@@ -746,6 +746,23 @@ window.DICT = {
     noGroup: { en: "— None —", ar: "— لا شيء —" },
     deleteGroup: { en: "Delete group", ar: "حذف المجموعة" },
     confirmDeleteGroup: { en: "Delete this group? Its documents become Ungrouped.", ar: "حذف هذه المجموعة؟ ستصبح مستنداتها بدون مجموعة." },
+    // Upload modes
+    uploadModePick: { en: "How do you want to add this document?", ar: "كيف تريد إضافة هذا المستند؟" },
+    uploadFromFile: { en: "Upload a file", ar: "رفع ملف" },
+    uploadFromFileSub: { en: "AI reads the document and auto-fills the fields.", ar: "يقرأ الذكاء الاصطناعي المستند ويملأ الحقول تلقائياً." },
+    uploadManual: { en: "Enter manually", ar: "إدخال يدوي" },
+    uploadManualSub: { en: "No file? Pick a document type and fill the fields yourself.", ar: "بدون ملف؟ اختر نوع المستند واملأ الحقول بنفسك." },
+    pickDocType: { en: "Document type", ar: "نوع المستند" },
+    pickDocTypeHint: { en: "Pick the type — the right fields will appear below.", ar: "اختر النوع لتظهر الحقول المناسبة." },
+    manualEntryNote: { en: "Manual entry — no file is stored.", ar: "إدخال يدوي — لن يتم تخزين أي ملف." },
+    // Bulk group assignment
+    manageMembers: { en: "Manage documents", ar: "إدارة المستندات" },
+    pickDocsForGroup: { en: "Documents in this group", ar: "المستندات في هذه المجموعة" },
+    pickDocsHint: { en: "Click to add or remove documents from this group.", ar: "اضغط لإضافة أو إزالة المستندات من هذه المجموعة." },
+    selectedNDocs: { en: "selected", ar: "محدد" },
+    bulkAssigned: { en: "documents assigned", ar: "مستند تم تخصيصها" },
+    bulkAssignDoc: { en: "Add document to group…", ar: "إضافة مستند إلى مجموعة…" },
+    nothingChanged: { en: "No changes", ar: "لا تغييرات" },
   },
   // Authentication / login
   auth: {

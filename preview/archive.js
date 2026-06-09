@@ -153,6 +153,9 @@ window.PAGES_ARCHIVE = (function () {
     // ---- Custom-group management ----
     openNewGroup() {
       const swatches = ["#0b7eea","#f59e0b","#7c3aed","#10b981","#be123c","#64748b","#0ea5e9","#db2777"];
+      // Draft for which documents will land in the new group (none picked yet)
+      window.APP_STATE.arc.newGroupDocIds = new Set();
+      const docs = D().documents.slice().sort((a, b) => D().docPrimaryHeading(a).localeCompare(D().docPrimaryHeading(b)));
       const html = `
         <div class="space-y-3">
           <p class="text-sm muted">${lang()==='en'?'Custom groups cut across document types — like binders or project folders.':'مجموعات مخصصة تقسّم المستندات حسب احتياجك (مثل: ملفات أو مشاريع).'}</p>
@@ -170,6 +173,28 @@ window.PAGES_ARCHIVE = (function () {
                 </label>`).join("")}
             </div>
           </div>
+
+          <!-- Pick documents to drop into this group right away -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="field-label !mb-0">${T("arc.pickDocsForGroup")}</label>
+              <span id="ngDocCount" class="muted text-[11px]">0 ${T("arc.selectedNDocs")}</span>
+            </div>
+            <p class="text-[11px] muted mb-2">${T("arc.pickDocsHint")}</p>
+            <div class="doc-checklist">
+              <input type="search" class="input w-full mb-2" placeholder="${T("arc.searchPlaceholder")}" oninput="ARC._filterChecklist(this.value, 'ng')"/>
+              <div id="ng-doc-rows" class="doc-checklist-rows">
+                ${docs.map(d => `
+                  <label class="doc-check-row" data-search="${escapeHtml((d.filename + " " + D().docPrimaryHeading(d) + " " + Object.values(d.extracted||{}).join(" ")).toLowerCase())}">
+                    <input type="checkbox" value="${d.id}" onchange="ARC._toggleNewGroupDoc('${d.id}', this.checked)"/>
+                    <span class="doc-type-chip doc-type-${d.type}">${T(`doc.${d.type}`)}</span>
+                    <span class="doc-check-title">${escapeHtml(D().docPrimaryHeading(d))}</span>
+                    ${d.customGroupId ? `<span class="muted text-[11px]">· ${escapeHtml((D().findArchiveGroup(d.customGroupId)||{}).name || '')}</span>` : ""}
+                  </label>`).join("")}
+              </div>
+            </div>
+          </div>
+
           ${D().archiveCustomGroups.length > 0 ? `
             <div>
               <div class="field-label">${lang()==='en'?'Existing groups':'المجموعات الحالية'}</div>
@@ -180,6 +205,7 @@ window.PAGES_ARCHIVE = (function () {
                     <span class="grp-swatch-dot" style="background:${g.color}"></span>
                     <span class="flex-1 truncate text-sm">${escapeHtml(lang()==='ar'?g.nameAr:g.name)}</span>
                     <span class="muted text-[11px]">${count} ${T("arc.docs").toLowerCase()}</span>
+                    <button class="icon-btn" title="${T("arc.manageMembers")}" onclick="ARC.openManageMembers('${g.id}')">${ICONS.users()}</button>
                     <button class="icon-btn" title="${T("arc.deleteGroup")}" onclick="ARC.deleteGroup('${g.id}')">${ICONS.trash()}</button>
                   </div>`;
                 }).join("")}
@@ -189,7 +215,27 @@ window.PAGES_ARCHIVE = (function () {
       const footer = `
         <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
         <button class="btn btn-primary" onclick="ARC.saveNewGroup()">${ICONS.save()}${T("arc.addGroup")}</button>`;
-      window.app.openModal({ title: T("arc.newGroup"), html, footer });
+      window.app.openModal({ title: T("arc.newGroup"), html, footer, size: "lg" });
+    },
+
+    _toggleNewGroupDoc(docId, checked) {
+      const set = window.APP_STATE.arc.newGroupDocIds;
+      if (!set) return;
+      if (checked) set.add(docId); else set.delete(docId);
+      const counter = document.getElementById("ngDocCount");
+      if (counter) counter.textContent = `${set.size} ${T("arc.selectedNDocs")}`;
+    },
+
+    /** Lightweight client-side filter for the doc checklist. */
+    _filterChecklist(query, scope) {
+      const wrap = document.getElementById(scope === "mm" ? "mm-doc-rows" : "ng-doc-rows");
+      if (!wrap) return;
+      const q = (query || "").toLowerCase().trim();
+      wrap.querySelectorAll(".doc-check-row").forEach(row => {
+        if (!q) { row.style.display = ""; return; }
+        const hay = row.getAttribute("data-search") || "";
+        row.style.display = hay.includes(q) ? "" : "none";
+      });
     },
 
     saveNewGroup() {
@@ -205,9 +251,86 @@ window.PAGES_ARCHIVE = (function () {
         id, name, nameAr: name, color,
         createdAt: new Date().toISOString().slice(0, 10),
       });
-      window.app.toast(`${T("arc.groupCreated")} · ${name}`);
+      // Bulk-assign every picked doc into this new group.
+      const picks = window.APP_STATE.arc.newGroupDocIds;
+      let assigned = 0;
+      if (picks && picks.size > 0) {
+        picks.forEach(docId => {
+          const d = D().findDocument(docId);
+          if (d) { d.customGroupId = id; assigned++; }
+        });
+      }
+      window.APP_STATE.arc.newGroupDocIds = null;
+      window.app.toast(`${T("arc.groupCreated")} · ${name}${assigned > 0 ? ` · ${assigned} ${T("arc.bulkAssigned")}` : ""}`);
       window.app.closeModal();
       // Switch to Custom group view so the new group is visible immediately.
+      window.APP_STATE.arc.groupBy = "custom";
+      window.app.render();
+    },
+
+    /** Manage members of an existing group — full checklist with current
+     *  members pre-checked. Saving diffs the new set against the current. */
+    openManageMembers(groupId) {
+      const g = D().findArchiveGroup(groupId);
+      if (!g) return;
+      const docs = D().documents.slice().sort((a, b) => D().docPrimaryHeading(a).localeCompare(D().docPrimaryHeading(b)));
+      const current = new Set(D().documents.filter(d => d.customGroupId === groupId).map(d => d.id));
+      window.APP_STATE.arc.mmDraft = { groupId, set: new Set(current) };
+      const html = `
+        <div class="space-y-3">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="grp-swatch-dot" style="background:${g.color}"></span>
+            <span class="font-semibold">${escapeHtml(lang()==='ar'?g.nameAr:g.name)}</span>
+            <span id="mmDocCount" class="muted text-[11px]">· ${current.size} ${T("arc.selectedNDocs")}</span>
+          </div>
+          <p class="text-[11px] muted">${T("arc.pickDocsHint")}</p>
+          <input type="search" class="input w-full" placeholder="${T("arc.searchPlaceholder")}" oninput="ARC._filterChecklist(this.value, 'mm')"/>
+          <div class="doc-checklist" style="max-height:24rem">
+            <div id="mm-doc-rows" class="doc-checklist-rows">
+              ${docs.map(d => `
+                <label class="doc-check-row" data-search="${escapeHtml((d.filename + " " + D().docPrimaryHeading(d) + " " + Object.values(d.extracted||{}).join(" ")).toLowerCase())}">
+                  <input type="checkbox" value="${d.id}" ${current.has(d.id) ? 'checked' : ''} onchange="ARC._toggleMmDoc('${d.id}', this.checked)"/>
+                  <span class="doc-type-chip doc-type-${d.type}">${T(`doc.${d.type}`)}</span>
+                  <span class="doc-check-title">${escapeHtml(D().docPrimaryHeading(d))}</span>
+                  ${d.customGroupId && d.customGroupId !== groupId
+                    ? `<span class="muted text-[11px]">· ${escapeHtml((D().findArchiveGroup(d.customGroupId)||{}).name || '')}</span>`
+                    : ""}
+                </label>`).join("")}
+            </div>
+          </div>
+        </div>`;
+      const footer = `
+        <button class="btn btn-outline" onclick="ARC.openNewGroup()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="ARC.saveManageMembers()">${ICONS.save()}${T("arc.saveChanges")}</button>`;
+      window.app.openModal({ title: `${T("arc.manageMembers")} — ${escapeHtml(lang()==='ar'?g.nameAr:g.name)}`, html, footer, size: "lg" });
+    },
+
+    _toggleMmDoc(docId, checked) {
+      const d = window.APP_STATE.arc.mmDraft;
+      if (!d) return;
+      if (checked) d.set.add(docId); else d.set.delete(docId);
+      const counter = document.getElementById("mmDocCount");
+      if (counter) counter.textContent = `· ${d.set.size} ${T("arc.selectedNDocs")}`;
+    },
+
+    saveManageMembers() {
+      const d = window.APP_STATE.arc.mmDraft;
+      if (!d) return;
+      const target = d.groupId;
+      let added = 0, removed = 0;
+      D().documents.forEach(doc => {
+        const shouldBeIn = d.set.has(doc.id);
+        const isCurrentlyIn = doc.customGroupId === target;
+        if (shouldBeIn && !isCurrentlyIn) { doc.customGroupId = target; added++; }
+        else if (!shouldBeIn && isCurrentlyIn) { doc.customGroupId = null; removed++; }
+      });
+      window.APP_STATE.arc.mmDraft = null;
+      if (added === 0 && removed === 0) {
+        window.app.toast(T("arc.nothingChanged"));
+      } else {
+        window.app.toast(`+${added} / -${removed} · ${T("arc.bulkAssigned")}`);
+      }
+      window.app.closeModal();
       window.APP_STATE.arc.groupBy = "custom";
       window.app.render();
     },
@@ -236,11 +359,59 @@ window.PAGES_ARCHIVE = (function () {
       window.app.render();
     },
 
-    /** Open the autonomous-upload modal: file picker → AI auto-fill → Finish. */
+    /** Open the upload modal. Step 0 picks between AI-from-file or manual
+     *  entry; the rest of the flow branches on `upload.mode`. */
     openUpload() {
       ensureState();
-      window.APP_STATE.arc.upload = { filename: "", type: null, extracted: null, confidence: 0, scanning: false, dataUrl: null, mime: null };
+      window.APP_STATE.arc.upload = {
+        mode: null,            // null | "file" | "manual"
+        filename: "",
+        type: null,
+        extracted: null,
+        confidence: 0,
+        scanning: false,
+        dataUrl: null,
+        mime: null,
+      };
       ARC._renderUpload();
+    },
+
+    /** Pick a mode in step 0. "file" jumps to the OS file picker; "manual"
+     *  opens an empty type-picker form. */
+    setUploadMode(mode) {
+      ensureState();
+      const u = window.APP_STATE.arc.upload;
+      u.mode = mode;
+      if (mode === "file") {
+        ARC._renderUpload();
+        ARC.pickFile();
+      } else {
+        // Manual mode — start with the most common type so users see fields immediately.
+        u.type = "license";
+        u.extracted = ARC._blankExtractedFor("license");
+        u.confidence = 100;
+        ARC._renderUpload();
+      }
+    },
+
+    /** Manual-entry: change the document type → blank out the fields for the new type. */
+    setManualType(type) {
+      const u = window.APP_STATE.arc.upload;
+      u.type = type;
+      u.extracted = ARC._blankExtractedFor(type);
+      ARC._renderUpload();
+    },
+
+    /** Build an "empty" extracted record for a given type. Uses the existing
+     *  aiExtract to know which keys belong to the type, then blanks every
+     *  value so the user fills them in. */
+    _blankExtractedFor(type) {
+      try {
+        const seeded = D().aiExtract(type, {});
+        const blank = {};
+        Object.keys(seeded).forEach(k => { blank[k] = ""; });
+        return blank;
+      } catch { return {}; }
     },
 
     /** Trigger the native file picker. */
@@ -294,35 +465,40 @@ window.PAGES_ARCHIVE = (function () {
       }, 900);
     },
 
-    /** Finish — save the extracted record onto window.DATA.documents. */
+    /** Finish — save the extracted record onto window.DATA.documents.
+     *  Works for both AI-from-file and manual entry. */
     finishUpload() {
       const S = window.APP_STATE.arc;
       const u = S.upload;
       if (!u || !u.extracted) return;
+      const isManual = u.mode === "manual";
       // Read back any field edits.
       const extracted = {};
       Object.keys(u.extracted).forEach(k => {
         const el = document.getElementById(`auf-${k}`);
         extracted[k] = el ? el.value : u.extracted[k];
       });
+      const groupEl = document.getElementById("auf-customGroupId");
+      const customGroupId = groupEl ? (groupEl.value || null) : null;
       const id = `DOC-${String(D().documents.length + 1).padStart(5, "0")}`;
       D().documents.push({
         id,
-        filename: u.filename,
+        filename: u.filename || (isManual
+          ? `${T(`doc.${u.type}`)} — ${new Date().toISOString().slice(0, 10)}.manual`
+          : "untitled.pdf"),
         type: u.type,
-        // Project/group are gone from the UI but kept on the record so
-        // older queries don't break — bucket new docs into the first project
-        // / first group so they still appear in legacy filters.
+        // Project/group remain on the record for legacy filters.
         projectId: D().PROJECTS[0]?.id || null,
         groupId: D().PROJECTS[0]?.groups[0]?.id || null,
-        sizeKb: Math.round((u.dataUrl?.length || 0) / 1400),  // rough estimate from base64
+        customGroupId,
+        sizeKb: isManual ? 0 : Math.round((u.dataUrl?.length || 0) / 1400),
         uploadedOn: new Date().toISOString(),
-        scannedByAI: true,
-        aiConfidence: u.confidence,
+        scannedByAI: !isManual,
+        aiConfidence: isManual ? null : u.confidence,
         extracted,
-        notes: "",
-        originalDataUrl: u.dataUrl,
-        originalMime: u.mime,
+        notes: isManual ? T("arc.manualEntryNote") : "",
+        originalDataUrl: isManual ? null : u.dataUrl,
+        originalMime: isManual ? null : u.mime,
       });
       window.app.toast(`${id} · ${T("arc.finish")}`);
       S.upload = null;
@@ -334,9 +510,68 @@ window.PAGES_ARCHIVE = (function () {
       const u = window.APP_STATE.arc.upload;
       if (!u) return;
 
+      // ---- Doc type list shared by manual entry + filters ----
+      const ALL_TYPES = ["license","registration","insurance","commercial_registration","national_address","permit","inspection","contract","delivery","quote","po","invoice","letter","other"];
+
       let body = "";
-      if (!u.filename) {
-        // Step 1 — drop zone
+      if (!u.mode) {
+        // Step 0 — pick mode (AI from file OR manual entry)
+        body = `
+          <div class="upload-mode-pick">
+            <div class="upload-mode-head">${T("arc.uploadModePick")}</div>
+            <div class="upload-mode-grid">
+              <button type="button" class="upload-mode-tile" onclick="ARC.setUploadMode('file')">
+                <span class="upload-mode-icon ai">${ICONS.upload()}</span>
+                <div class="upload-mode-title">${T("arc.uploadFromFile")}</div>
+                <div class="upload-mode-sub">${T("arc.uploadFromFileSub")}</div>
+                <span class="ai-chip" style="margin-top:.5rem">${ICONS.zap ? ICONS.zap() : "★"} AI</span>
+              </button>
+              <button type="button" class="upload-mode-tile" onclick="ARC.setUploadMode('manual')">
+                <span class="upload-mode-icon manual">${ICONS.pencil()}</span>
+                <div class="upload-mode-title">${T("arc.uploadManual")}</div>
+                <div class="upload-mode-sub">${T("arc.uploadManualSub")}</div>
+              </button>
+            </div>
+          </div>`;
+      } else if (u.mode === "manual") {
+        // Manual entry — type picker + editable form
+        const keys = Object.keys(u.extracted || {});
+        body = `
+          <div class="upload-result">
+            <div class="upload-result-head">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="pill pill-info"><span class="dot"></span>${T("arc.uploadManual")}</span>
+                <span class="doc-type-chip doc-type-${u.type}">${T(`doc.${u.type}`)}</span>
+              </div>
+              <button type="button" class="btn btn-ghost btn-xs" onclick="ARC.setUploadMode(null); ARC._renderUpload()">${ICONS.arrowLeft()}${lang()==='en'?'Back':'العودة'}</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              <div>
+                <label class="field-label">${T("arc.pickDocType")}</label>
+                <select class="select w-full" onchange="ARC.setManualType(this.value)">
+                  ${ALL_TYPES.map(t => `<option value="${t}" ${u.type===t?'selected':''}>${T(`doc.${t}`)}</option>`).join("")}
+                </select>
+                <div class="text-[10px] muted mt-1">${T("arc.pickDocTypeHint")}</div>
+              </div>
+              <div>
+                <label class="field-label">${T("arc.assignToGroup")}</label>
+                <select id="auf-customGroupId" class="select w-full">
+                  <option value="">${T("arc.noGroup")}</option>
+                  ${D().archiveCustomGroups.map(g => `<option value="${g.id}">${escapeHtml(lang()==='ar'?g.nameAr:g.name)}</option>`).join("")}
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+              ${keys.map(k => `
+                <div>
+                  <label class="field-label">${T(`af.${k}`) === `af.${k}` ? escapeHtml(k) : T(`af.${k}`)}</label>
+                  <input class="input w-full" id="auf-${escapeHtml(k)}" value=""/>
+                </div>`).join("")}
+            </div>
+            <p class="text-[11px] muted mt-3">${T("arc.manualEntryNote")}</p>
+          </div>`;
+      } else if (!u.filename) {
+        // Step 1 (file mode) — drop zone
         body = `
           <div class="upload-drop" onclick="ARC.pickFile()">
             <span class="upload-drop-icon">${ICONS.upload()}</span>
@@ -380,7 +615,8 @@ window.PAGES_ARCHIVE = (function () {
       }
 
       const html = `<div class="space-y-3">${body}</div>`;
-      const footer = u && u.extracted
+      const canFinish = u && (u.extracted || u.mode === "manual");
+      const footer = canFinish
         ? `<button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
            <button class="btn btn-primary" onclick="ARC.finishUpload()">${ICONS.check()}${T("arc.finish")}</button>`
         : `<button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>`;
