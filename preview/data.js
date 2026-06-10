@@ -339,6 +339,15 @@
   ];
   const SUPPLIER_NAMES = SUPPLIERS.map(s => s.name);
 
+  /** Warehouses where part inventory lives. Previously hard-coded as a
+   *  three-item list in the parts seed — promoted here so the UI can add
+   *  new locations on the fly. */
+  const WAREHOUSES = [
+    { id: "WH-RIY", name: "Riyadh",  nameAr: "الرياض",   city: "Riyadh",  cityAr: "الرياض",   address: "Industrial Area, Riyadh" },
+    { id: "WH-JED", name: "Jeddah",  nameAr: "جدة",      city: "Jeddah",  cityAr: "جدة",      address: "Phase 2 Industrial Zone, Jeddah" },
+    { id: "WH-DAM", name: "Dammam",  nameAr: "الدمام",   city: "Dammam",  cityAr: "الدمام",   address: "Eastern Industrial Cluster, Dammam" },
+  ];
+
   /** Custom Archive document types — user-defined doc taxonomies that sit
    *  alongside the 14 built-in types. Declared up here so `aiExtract` can
    *  reference it without hitting the TDZ. */
@@ -1473,6 +1482,10 @@
 
   // Seed ~7 purchase orders distributed across statuses so each tab has data.
   const purchaseOrders = [];
+  // Log of every parts-receipt (PO-based or loose). Each row:
+  // { id, sourceType: "po" | "manual", poId?, supplier, warehouse,
+  //   lines, invoices, receivedDate, receivedById, totalCost, note }
+  const partReceipts = [];
   const PO_TODAY = new Date(2026, 4, 20);
   function makePO(spec) {
     const supplierName = spec.supplierName || parts.find(p => p.id === spec.lines[0].partId)?.supplier || SUPPLIER_NAMES[0];
@@ -1691,6 +1704,90 @@
     APPROVER_ROLES, MIN_APPROVALS, AI_RATIONALES,
     findPO: id => purchaseOrders.find(o => o.id === id),
     findSupplierByName,
+    WAREHOUSES,
+    findWarehouseByName: (name) => WAREHOUSES.find(w => w.name === name || w.nameAr === name) || null,
+    /** Add a new supplier on the fly (used by the +Supplier flow inside
+     *  Add Parts / New PO). Returns the freshly-created record. */
+    addSupplier({ name, phone, email, contactPerson }) {
+      const trimmed = String(name || "").trim();
+      if (!trimmed) return null;
+      const existing = SUPPLIERS.find(s => s.name.toLowerCase() === trimmed.toLowerCase());
+      if (existing) return existing;
+      const idx = SUPPLIERS.length + 1;
+      const rec = {
+        id: `SUP-${String(idx).padStart(3, "0")}`,
+        name: trimmed,
+        phone: phone || "",
+        email: email || "",
+        contactPerson: contactPerson || "",
+      };
+      SUPPLIERS.push(rec);
+      SUPPLIER_NAMES.push(rec.name);
+      return rec;
+    },
+    /** Add a new warehouse on the fly. */
+    addWarehouse({ name, city, address }) {
+      const trimmed = String(name || "").trim();
+      if (!trimmed) return null;
+      const existing = WAREHOUSES.find(w => w.name.toLowerCase() === trimmed.toLowerCase());
+      if (existing) return existing;
+      const id = `WH-${trimmed.slice(0, 3).toUpperCase()}-${String(WAREHOUSES.length + 1).padStart(2, "0")}`;
+      const rec = {
+        id, name: trimmed, nameAr: trimmed,
+        city: city || trimmed, cityAr: city || trimmed,
+        address: address || "",
+      };
+      WAREHOUSES.push(rec);
+      return rec;
+    },
+    /** Receive parts WITHOUT a Purchase Order ("Add parts" direct flow).
+     *  Each line becomes a fresh FIFO tier on its part record. Mandatory
+     *  invoice (data URL) is stored on the receipt log. */
+    receiveLooseParts({ supplierName, warehouse, lines, invoices, receivedById, note }) {
+      if (!lines || lines.length === 0) return { receiptId: null, totalCost: 0 };
+      const today = new Date().toISOString().slice(0, 10);
+      let total = 0;
+      lines.forEach(l => {
+        const p = parts.find(x => x.id === l.partId);
+        if (!p || !l.qty || l.qty <= 0) return;
+        // Mark previous Current → Previous, then push the new tier.
+        if (p.priceTiers.length > 0) {
+          const last = p.priceTiers[p.priceTiers.length - 1];
+          if (last.note === "Current price") last.note = "Previous price";
+        }
+        p.priceTiers.push({
+          priceSar: +l.unitPriceSar || p.currentPriceSar,
+          qty: l.qty,
+          qtyPurchased: l.qty,
+          receivedOn: today,
+          note: "Current price",
+        });
+        p.qtyOnHand = p.priceTiers.reduce((s, t) => s + t.qty, 0);
+        p.previousPriceSar = p.currentPriceSar;
+        p.currentPriceSar = +l.unitPriceSar || p.currentPriceSar;
+        p.lastReceived = today;
+        p.supplier = supplierName || p.supplier;
+        if (warehouse) p.warehouse = warehouse;
+        total += (+l.unitPriceSar || 0) * (l.qty || 0);
+      });
+      // Log the receipt itself so we can show a small audit trail.
+      const receiptId = `RCP-${String(Date.now()).slice(-6)}`;
+      partReceipts.push({
+        id: receiptId,
+        sourceType: "manual",
+        receivedById, receivedDate: today,
+        supplier: supplierName,
+        warehouse,
+        lines: lines.map(l => ({ partId: l.partId, qty: l.qty, unitPriceSar: +l.unitPriceSar })),
+        invoices: invoices || [],
+        note: note || "",
+        totalCost: total,
+      });
+      return { receiptId, totalCost: total };
+    },
+    /** All historical part receipts (PO and loose). The UI uses this for
+     *  per-part history; the seeded loose-receipts list is empty at boot. */
+    partReceipts,
     nextPOId, suggestAIPurchaseLines,
     /** Currently-eligible approvers — fleet managers, ops supervisors, inventory clerks. */
     approverList() { return people.filter(p => APPROVER_ROLES.includes(p.role) && p.active); },

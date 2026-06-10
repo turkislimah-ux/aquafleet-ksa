@@ -2148,14 +2148,20 @@ window.PAGES_2 = (function () {
 
           <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div><label class="field-label">${T("c.supplier")}</label>
-              <select id="poSupplier" class="select w-full" onchange="window.APP_STATE.poDraft.supplierName=this.value; INV._refreshSupplierCard()">
-                ${suppliers.map(s => `<option ${s.name===draft.supplierName?'selected':''}>${escapeHtml(s.name)}</option>`).join("")}
-              </select>
+              <div class="flex gap-2">
+                <select id="poSupplier" class="select flex-1" onchange="window.APP_STATE.poDraft.supplierName=this.value; INV._refreshSupplierCard()">
+                  ${suppliers.map(s => `<option ${s.name===draft.supplierName?'selected':''}>${escapeHtml(s.name)}</option>`).join("")}
+                </select>
+                <button type="button" class="btn btn-outline" onclick="INV.openNewSupplier()">${T("inv.newSupplier")}</button>
+              </div>
             </div>
             <div><label class="field-label">${T("c.warehouse")}</label>
-              <select id="poWarehouse" class="select w-full" onchange="window.APP_STATE.poDraft.warehouse=this.value">
-                ${["Riyadh","Jeddah","Dammam"].map(w => `<option ${w===draft.warehouse?'selected':''}>${w}</option>`).join("")}
-              </select>
+              <div class="flex gap-2">
+                <select id="poWarehouse" class="select flex-1" onchange="window.APP_STATE.poDraft.warehouse=this.value">
+                  ${D().WAREHOUSES.map(w => `<option value="${escapeHtml(w.name)}" ${w.name===draft.warehouse?'selected':''}>${escapeHtml(lang()==='ar'?w.nameAr:w.name)}</option>`).join("")}
+                </select>
+                <button type="button" class="btn btn-outline" onclick="INV.openNewWarehouse()">${T("inv.newWarehouse")}</button>
+              </div>
             </div>
             <div><label class="field-label">${T("inv.expectedDelivery")}</label>
               <input id="poETA" type="date" class="input w-full" value="${draft.expectedDelivery}" onchange="window.APP_STATE.poDraft.expectedDelivery=this.value"/></div>
@@ -2426,74 +2432,210 @@ window.PAGES_2 = (function () {
       return `<span class="${cls}"><span class="dot"></span>${T(`inv.${labelKey}`)}</span>`;
     },
 
-    /** ===== Add Parts (Receive) ===== */
+    /** ===== Add Parts (Receive) — works WITH or WITHOUT a Purchase Order.
+     *  Always requires an invoice. If a PO number is provided + looked up,
+     *  the lines/supplier/warehouse auto-fill from the PO; otherwise the
+     *  user fills everything manually. */
     openReceive(prefillPOId) {
-      window.APP_STATE.receiveDraft = { poId: prefillPOId || "", lines: [] };
+      window.APP_STATE.receiveDraft = {
+        mode: prefillPOId ? "po" : "manual",   // "po" | "manual" — toggled by Lookup
+        poId: prefillPOId || "",
+        supplierName: "",
+        warehouse: D().WAREHOUSES[0]?.name || "Riyadh",
+        lines: [],
+        invoices: [],
+        note: "",
+      };
       INV._renderReceiveModal();
     },
+
+    /** "Lookup" the entered PO number. On success, populate supplier +
+     *  warehouse + lines from the PO and flip the modal into PO mode.
+     *  On miss, toast and stay in manual mode. */
     receivePOLookup() {
       const v = document.getElementById("rcvPONum").value.trim();
+      if (!v) return;
       const po = D().findPO(v);
       if (!po) { window.app.toast(T("inv.poNotFound")); return; }
       if (po.status !== "issued" && po.status !== "draft") {
         window.app.toast(T("inv.poAlreadyReceived"));
         return;
       }
-      window.APP_STATE.receiveDraft = {
-        poId: po.id,
-        lines: po.lines.map(l => ({ partId: l.partId, plannedQty: l.qty, qty: l.qty, unitPriceSar: l.unitPriceSar, plannedPrice: l.unitPriceSar })),
-      };
+      const d = window.APP_STATE.receiveDraft;
+      d.mode = "po";
+      d.poId = po.id;
+      d.supplierName = po.supplier.name;
+      d.warehouse = po.warehouse || d.warehouse;
+      d.lines = po.lines.map(l => ({ partId: l.partId, plannedQty: l.qty, qty: l.qty, unitPriceSar: l.unitPriceSar, plannedPrice: l.unitPriceSar }));
+      INV._renderReceiveModal();
+      window.app.toast(`${po.id} · ${lang()==='en'?'Lines auto-filled':'تم تعبئة البنود تلقائياً'}`);
+    },
+
+    /** Add a fresh empty part-line in manual mode (and in PO mode if extra
+     *  parts are received alongside the PO). The user picks the part from
+     *  the dropdown labelled "Pick a part to add…". */
+    rcvAddLine() {
+      const sel = document.getElementById("rcvAddPart");
+      if (!sel || !sel.value) return;
+      const p = D().findPart(sel.value);
+      if (!p) return;
+      const d = window.APP_STATE.receiveDraft;
+      const existing = d.lines.find(l => l.partId === p.id);
+      if (existing) { existing.qty += p.reorderQty || 1; }
+      else {
+        d.lines.push({ partId: p.id, qty: p.reorderQty || 1, unitPriceSar: p.currentPriceSar });
+      }
+      sel.value = "";
       INV._renderReceiveModal();
     },
+
+    rcvRemoveLine(idx) {
+      const d = window.APP_STATE.receiveDraft;
+      d.lines.splice(idx, 1);
+      INV._renderReceiveModal();
+    },
+
+    /** Trigger the native file picker, then read each file as a data URL
+     *  and push into the receipt draft's `invoices[]`. Cap 6 files × 4 MB. */
+    rcvUploadInvoice() {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*,application/pdf";
+      input.multiple = true;
+      input.style.display = "none";
+      document.body.appendChild(input);
+      input.onchange = (e) => {
+        const files = Array.from(e.target.files || []);
+        let processed = 0, total = files.length;
+        const finish = () => { if (++processed === total) { document.body.removeChild(input); INV._renderReceiveModal(); } };
+        files.forEach(file => {
+          if (file.size > 4 * 1024 * 1024) { window.app.toast(T("inv.invoiceTooLargeInv")); finish(); return; }
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            window.APP_STATE.receiveDraft.invoices.push({
+              id: `INV-${Date.now().toString(36)}-${Math.floor(Math.random()*1e5)}`,
+              name: file.name,
+              dataUrl: ev.target.result,
+              mime: file.type,
+              uploadedAt: new Date().toISOString(),
+            });
+            finish();
+          };
+          reader.readAsDataURL(file);
+        });
+        if (total === 0) document.body.removeChild(input);
+      };
+      input.click();
+    },
+
+    rcvRemoveInvoice(invoiceId) {
+      const d = window.APP_STATE.receiveDraft;
+      d.invoices = d.invoices.filter(x => x.id !== invoiceId);
+      INV._renderReceiveModal();
+    },
+
     _renderReceiveModal() {
       const d = window.APP_STATE.receiveDraft;
+      if (!d) return;
       const po = d.poId ? D().findPO(d.poId) : null;
-      const linesHtml = !po ? `<tr><td colspan="5" class="text-center muted py-3">${lang()==='en'?'Enter a PO number to auto-fill':'أدخل رقم أمر شراء للتعبئة'}</td></tr>`
+      const suppliers = D().SUPPLIERS;
+      const warehouses = D().WAREHOUSES;
+      const allParts = D().parts;
+
+      const linesHtml = d.lines.length === 0
+        ? `<tr><td colspan="5" class="text-center muted py-3">${lang()==='en'?'No lines yet — pick a part below to add one.':'لا توجد بنود — اختر قطعة بالأسفل لإضافتها.'}</td></tr>`
         : d.lines.map((l, idx) => {
             const part = D().findPart(l.partId);
-            const variance = l.qty !== l.plannedQty || l.unitPriceSar !== l.plannedPrice;
+            const variance = l.plannedQty != null && (l.qty !== l.plannedQty || l.unitPriceSar !== l.plannedPrice);
             return `<tr>
               <td>
                 <div class="font-mono text-[11px] muted">${part?.sku || ''}</div>
                 <div class="text-sm font-medium">${escapeHtml(part ? (lang()==='ar'?part.nameAr:part.name) : '—')}</div>
-                <div class="text-[10px] muted">${T("inv.poStatusIssued")}: ${l.plannedQty} × ${fmtSar(l.plannedPrice)}</div>
+                ${l.plannedQty != null ? `<div class="text-[10px] muted">${T("inv.poStatusIssued")}: ${l.plannedQty} × ${fmtSar(l.plannedPrice)}</div>` : ''}
               </td>
               <td><input type="number" class="input w-20" min="0" value="${l.qty}" onchange="window.APP_STATE.receiveDraft.lines[${idx}].qty=+this.value; INV._renderReceiveModal()"/></td>
               <td><input type="number" class="input w-24" min="0" step="0.01" value="${l.unitPriceSar}" onchange="window.APP_STATE.receiveDraft.lines[${idx}].unitPriceSar=+this.value; INV._renderReceiveModal()"/></td>
               <td class="tabular font-semibold">${fmtSar(l.qty * l.unitPriceSar)}</td>
-              <td>${variance ? `<span class="pill pill-warn"><span class="dot"></span>${lang()==='en'?'Variance':'فرق'}</span>` : `<span class="pill pill-ok"><span class="dot"></span>${lang()==='en'?'Match':'مطابق'}</span>`}</td>
+              <td>
+                ${l.plannedQty != null
+                  ? (variance
+                      ? `<span class="pill pill-warn"><span class="dot"></span>${lang()==='en'?'Variance':'فرق'}</span>`
+                      : `<span class="pill pill-ok"><span class="dot"></span>${lang()==='en'?'Match':'مطابق'}</span>`)
+                  : `<button class="icon-btn" style="color:#be123c" title="${T("c.delete")}" onclick="INV.rcvRemoveLine(${idx})">${ICONS.trash()}</button>`}
+              </td>
             </tr>`;
           }).join("");
-      const total = d.lines.reduce((s, l) => s + l.qty * l.unitPriceSar, 0);
+      const total = d.lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPriceSar || 0), 0);
+
+      // Invoice gallery
+      const invHtml = d.invoices.length === 0
+        ? `<div class="invoice-empty">${T("inv.invoiceUploadHelp")}</div>`
+        : d.invoices.map(inv => {
+            const isPdf = (inv.mime || "").includes("pdf") || /\.pdf$/i.test(inv.name);
+            return `
+              <div class="invoice-tile">
+                ${isPdf
+                  ? `<div class="invoice-pdf"><span class="invoice-pdf-icon">PDF</span><span class="invoice-name">${escapeHtml(inv.name)}</span></div>`
+                  : `<img src="${inv.dataUrl}" alt="${escapeHtml(inv.name)}"/><span class="invoice-name">${escapeHtml(inv.name)}</span>`}
+                <span class="x-btn" onclick="INV.rcvRemoveInvoice('${inv.id}')" title="${T("inv.invoiceRemove")}">×</span>
+              </div>`;
+          }).join("");
+
       const html = `
         <div class="space-y-3">
-          <p class="text-sm muted">${lang()==='en'?'Receive parts against an issued Purchase Order. Stock is added to inventory and the PO is routed for management approval.':'استلام القطع مقابل أمر شراء صادر. تُضاف الكميات للمخزون ويُحال الأمر لاعتماد الإدارة.'}</p>
+          <p class="text-sm" style="color:rgba(255,255,255,.9)">${T("inv.addPartsIntro")}</p>
 
-          <div class="grid grid-cols-3 gap-3">
-            <div class="col-span-2"><label class="field-label">${T("inv.poNumber")} — ${T("inv.enterPONumber")}</label>
-              <input id="rcvPONum" class="input w-full" value="${d.poId}" placeholder="PO-2026-0001" onkeydown="if(event.key==='Enter'){event.preventDefault();INV.receivePOLookup()}"/></div>
-            <div class="self-end"><button class="btn btn-primary" onclick="INV.receivePOLookup()">${ICONS.search ? ICONS.search() : ''}${lang()==='en'?'Lookup':'بحث'}</button></div>
+          <!-- Optional PO lookup -->
+          <div class="card p-3" style="background: rgba(11,126,234,.08); border-color: rgba(11,126,234,.25)">
+            <label class="field-label">${T("inv.poOptional")}</label>
+            <div class="flex gap-2 items-center">
+              <input id="rcvPONum" class="input flex-1" value="${escapeHtml(d.poId)}" placeholder="PO-2026-0001" onkeydown="if(event.key==='Enter'){event.preventDefault();INV.receivePOLookup()}"/>
+              <button class="btn btn-outline" onclick="INV.receivePOLookup()">${ICONS.search ? ICONS.search() : ''}${T("inv.lookupBtn")}</button>
+            </div>
+            <div class="text-[11px] muted mt-1">${T("inv.poOptionalHelp")}</div>
+            ${(function () {
+              const issued = D().purchaseOrders
+                .filter(o => o.status === "issued")
+                .slice().sort((a, b) => new Date(b.requestDate) - new Date(a.requestDate))
+                .slice(0, 6);
+              if (issued.length === 0) return "";
+              return `
+                <div class="recent-po-strip" style="margin-top:.5rem">
+                  <span class="strip-label">${T("inv.recentIssuedPOs")}:</span>
+                  ${issued.map(o => `
+                    <button class="po-chip" onclick="document.getElementById('rcvPONum').value='${o.id}'; INV.receivePOLookup()" title="${escapeHtml(o.supplier.name)} · ${o.requestDate}">${o.id}</button>
+                  `).join("")}
+                </div>`;
+            })()}
           </div>
-          ${(function () {
-            // Recent issued POs — one-click to autofill the lookup input.
-            const issued = D().purchaseOrders
-              .filter(o => o.status === "issued")
-              .slice().sort((a, b) => new Date(b.requestDate) - new Date(a.requestDate))
-              .slice(0, 6);
-            if (issued.length === 0) return "";
-            return `
-              <div class="recent-po-strip">
-                <span class="strip-label">${T("inv.recentIssuedPOs")}:</span>
-                ${issued.map(o => `
-                  <button class="po-chip" onclick="document.getElementById('rcvPONum').value='${o.id}'; INV.receivePOLookup()" title="${escapeHtml(o.supplier.name)} · ${o.requestDate}">${o.id}</button>
-                `).join("")}
-              </div>`;
-          })()}
+
+          <!-- Supplier + Warehouse -->
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="field-label">${T("c.supplier")}</label>
+              <div class="flex gap-2">
+                <select id="rcvSupplier" class="select flex-1" onchange="window.APP_STATE.receiveDraft.supplierName=this.value">
+                  <option value="">${lang()==='en'?'— Pick a supplier —':'— اختر مورّداً —'}</option>
+                  ${suppliers.map(s => `<option value="${escapeHtml(s.name)}" ${d.supplierName === s.name ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join("")}
+                </select>
+                <button type="button" class="btn btn-outline" onclick="INV.openNewSupplier()">${T("inv.newSupplier")}</button>
+              </div>
+            </div>
+            <div>
+              <label class="field-label">${T("c.warehouse")}</label>
+              <div class="flex gap-2">
+                <select id="rcvWarehouse" class="select flex-1" onchange="window.APP_STATE.receiveDraft.warehouse=this.value">
+                  ${warehouses.map(w => `<option value="${escapeHtml(w.name)}" ${d.warehouse === w.name ? 'selected' : ''}>${escapeHtml(lang()==='ar'?w.nameAr:w.name)}</option>`).join("")}
+                </select>
+                <button type="button" class="btn btn-outline" onclick="INV.openNewWarehouse()">${T("inv.newWarehouse")}</button>
+              </div>
+            </div>
+          </div>
 
           ${po ? `
             <div class="card p-3">
               <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                <div><div class="field-label">${T("c.supplier")}</div><div class="font-medium">${escapeHtml(po.supplier.name)}</div></div>
+                <div><div class="field-label">${T("inv.poNumber")}</div><div class="font-medium">${po.id}</div></div>
                 <div><div class="field-label">${T("c.status")}</div><div>${INV._poStatusPill(po.status)}</div></div>
                 <div><div class="field-label">${T("inv.requestDate")}</div><div>${po.requestDate}</div></div>
                 <div><div class="field-label">${T("inv.expectedDelivery")}</div><div>${po.expectedDelivery}</div></div>
@@ -2501,49 +2643,180 @@ window.PAGES_2 = (function () {
             </div>
           ` : ""}
 
-          <div class="card overflow-hidden">
-            <table class="tbl">
-              <thead><tr>
-                <th>${T("c.part")}</th>
-                <th>${T("inv.actualQty")}</th>
-                <th>${T("inv.actualUnitPrice")}</th>
-                <th>${T("c.subtotal")}</th>
-                <th></th>
-              </tr></thead>
-              <tbody>${linesHtml}</tbody>
-              <tfoot><tr>
-                <td colspan="3" class="text-end font-semibold">${T("inv.actualTotal")}</td>
-                <td class="tabular font-bold text-brand-600">${fmtSar(total)}</td>
-                <td></td>
-              </tr></tfoot>
-            </table>
+          <!-- Line items -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="field-label !mb-0">${T("inv.poLines")}</label>
+              <div class="flex items-center gap-2">
+                <select id="rcvAddPart" class="select" style="max-width:280px">
+                  <option value="">${T("inv.addLineFromPart")}</option>
+                  ${allParts.map(p => `<option value="${p.id}">${p.sku} · ${escapeHtml(lang()==='ar'?p.nameAr:p.name)}</option>`).join("")}
+                </select>
+                <button type="button" class="btn btn-outline" onclick="INV.rcvAddLine()">${ICONS.plus()}${T("inv.addLine")}</button>
+              </div>
+            </div>
+            <div class="card overflow-hidden">
+              <table class="tbl">
+                <thead><tr>
+                  <th>${T("c.part")}</th>
+                  <th>${T("inv.actualQty")}</th>
+                  <th>${T("inv.actualUnitPrice")}</th>
+                  <th>${T("c.subtotal")}</th>
+                  <th></th>
+                </tr></thead>
+                <tbody>${linesHtml}</tbody>
+                <tfoot><tr>
+                  <td colspan="3" class="text-end font-semibold">${T("inv.actualTotal")}</td>
+                  <td class="tabular font-bold text-brand-600">${fmtSar(total)}</td>
+                  <td></td>
+                </tr></tfoot>
+              </table>
+            </div>
+          </div>
+
+          <!-- Mandatory invoice upload -->
+          <div class="invoice-required ${d.invoices.length === 0 ? 'is-missing' : 'is-met'}">
+            <div class="flex items-center justify-between mb-1">
+              <label class="field-label !mb-0">
+                ${T("inv.invoiceUpload")}
+                <span class="inline-block w-1.5 h-1.5 rounded-full ms-1" style="background:${d.invoices.length === 0 ? '#f43f5e' : '#10b981'}"></span>
+              </label>
+              <button type="button" class="btn btn-outline" onclick="INV.rcvUploadInvoice()">${ICONS.upload()}${T("inv.invoiceAdd")}</button>
+            </div>
+            <div class="invoice-gallery" style="min-height:3rem">${invHtml}</div>
+            ${d.invoices.length > 0 ? `<div class="text-[11px] muted mt-1">${d.invoices.length} ${T("inv.invoiceAttached")}</div>` : ''}
+          </div>
+        </div>`;
+
+      const canSave = d.lines.length > 0 && d.invoices.length > 0 && d.supplierName;
+      const footer = `
+        <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" ${canSave ? '' : 'disabled style="opacity:.5;cursor:not-allowed"'} onclick="INV.confirmReceipt()">${ICONS.check()}${T("inv.saveReceipt")}</button>`;
+      window.app.openModal({ title: T("inv.addPartsTitle"), html, footer, size: "lg" });
+    },
+
+    confirmReceipt() {
+      const d = window.APP_STATE.receiveDraft;
+      if (!d || d.lines.length === 0) return;
+      if (d.invoices.length === 0) { window.app.toast(T("inv.invoiceRequired")); return; }
+      if (!d.supplierName) { window.app.toast(T("inv.requireField")); return; }
+
+      // PO mode → mirror actuals back, then drive the existing PO receive flow.
+      if (d.mode === "po" && d.poId) {
+        const po = D().findPO(d.poId);
+        if (po) {
+          po.lines.forEach(l => {
+            const draftLine = d.lines.find(x => x.partId === l.partId);
+            if (draftLine) { l.receivedQty = draftLine.qty; l.receivedUnitPriceSar = draftLine.unitPriceSar; }
+          });
+          po.receivedDate = new Date().toISOString().slice(0, 10);
+          po.warehouse = d.warehouse || po.warehouse;
+          po.receiptInvoices = (po.receiptInvoices || []).concat(d.invoices);
+          D().receivePO(po.id, "PER-008");
+          window.app.toast(`${po.id} · ${T("inv.receiptSent")}`);
+          window.APP_STATE.receiveDraft = null;
+          window.app.closeModal();
+          window.APP_STATE.invTab = "approvals";
+          window.app.render();
+          return;
+        }
+      }
+
+      // Manual mode (no PO) → write loose receipt + adjust stock directly.
+      const out = D().receiveLooseParts({
+        supplierName: d.supplierName,
+        warehouse: d.warehouse,
+        lines: d.lines.map(l => ({ partId: l.partId, qty: l.qty, unitPriceSar: l.unitPriceSar })),
+        invoices: d.invoices,
+        receivedById: "PER-008",
+        note: d.note,
+      });
+      window.app.toast(`${T("inv.receiptSavedNoPO")} · ${fmtSar(out.totalCost)}`);
+      window.APP_STATE.receiveDraft = null;
+      window.app.closeModal();
+      window.app.render();
+    },
+
+    /** ===== Inline +Supplier / +Warehouse modals ===== */
+    openNewSupplier() {
+      const html = `
+        <div class="space-y-3">
+          <p class="text-sm" style="color:rgba(255,255,255,.85)">${lang()==='en'?'Quickly add a supplier. They\'ll be available in every PO and Add Parts dropdown.':'إضافة مورّد بسرعة. سيظهر فوراً في جميع القوائم.'}</p>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">${T("inv.supplierName")}</label>
+              <input id="nsName" class="input w-full" placeholder="${lang()==='en'?'e.g. Al-Khaleej Heavy Trucks':'مثال: الخليج للشاحنات الثقيلة'}"/></div>
+            <div><label class="field-label">${T("inv.supplierPhoneLabel")}</label>
+              <input id="nsPhone" class="input w-full" placeholder="+966 11 ..."/></div>
+            <div><label class="field-label">${T("inv.supplierEmailLabel")}</label>
+              <input id="nsEmail" class="input w-full" placeholder="orders@..."/></div>
+            <div><label class="field-label">${T("inv.supplierContactLabel")}</label>
+              <input id="nsContact" class="input w-full" placeholder="${lang()==='en'?'Contact person':'جهة الاتصال'}"/></div>
           </div>
         </div>`;
       const footer = `
-        <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
-        <button class="btn btn-primary" ${po ? '' : 'disabled style="opacity:.5;cursor:not-allowed"'} onclick="INV.confirmReceipt()">${ICONS.check()}${T("inv.confirmReceipt")}</button>`;
-      window.app.openModal({ title: T("inv.tabReceive"), html, footer, size: "lg" });
+        <button class="btn btn-outline" onclick="INV._renderReceiveModal()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="INV.saveNewSupplier()">${ICONS.save()}${T("inv.newSupplierTitle")}</button>`;
+      window.app.openModal({ title: T("inv.newSupplierTitle"), html, footer });
     },
-    confirmReceipt() {
-      const d = window.APP_STATE.receiveDraft;
-      if (!d || !d.poId || d.lines.length === 0) return;
-      const po = D().findPO(d.poId);
-      if (!po) return;
-      // Mirror actuals back into the PO line items, then receive
-      po.lines.forEach(l => {
-        const draftLine = d.lines.find(x => x.partId === l.partId);
-        if (draftLine) {
-          l.receivedQty = draftLine.qty;
-          l.receivedUnitPriceSar = draftLine.unitPriceSar;
-        }
+    saveNewSupplier() {
+      const name = (document.getElementById("nsName").value || "").trim();
+      if (!name) { window.app.toast(T("inv.requireField")); return; }
+      const rec = D().addSupplier({
+        name,
+        phone: document.getElementById("nsPhone").value,
+        email: document.getElementById("nsEmail").value,
+        contactPerson: document.getElementById("nsContact").value,
       });
-      po.receivedDate = new Date().toISOString().slice(0, 10);
-      D().receivePO(po.id, "PER-008");
-      window.app.toast(`${po.id} · ${T("inv.receiptSent")}`);
-      window.APP_STATE.receiveDraft = null;
-      window.app.closeModal();
-      window.APP_STATE.invTab = "approvals";
-      window.app.render();
+      if (rec) {
+        // Auto-select the new supplier in the draft so the user lands ready.
+        const d = window.APP_STATE.receiveDraft;
+        if (d) d.supplierName = rec.name;
+        const poDraft = window.APP_STATE.poDraft;
+        if (poDraft) poDraft.supplierName = rec.name;
+        window.app.toast(`${T("inv.supplierCreated")} · ${rec.name}`);
+      }
+      // Return to whichever flow opened this modal
+      if (window.APP_STATE.receiveDraft) INV._renderReceiveModal();
+      else if (window.APP_STATE.poDraft) INV._renderPOModal();
+      else window.app.closeModal();
+    },
+
+    openNewWarehouse() {
+      const html = `
+        <div class="space-y-3">
+          <p class="text-sm" style="color:rgba(255,255,255,.85)">${lang()==='en'?'Define a new storage location. Parts received into this warehouse will appear with its name in the inventory.':'حدّد موقع تخزين جديد. القطع المستلمة فيه ستظهر باسمه في المخزون.'}</p>
+          <div class="grid grid-cols-1 gap-3">
+            <div><label class="field-label">${T("inv.warehouseName")}</label>
+              <input id="nwName" class="input w-full" placeholder="${lang()==='en'?'e.g. Yanbu South Yard':'مثال: مستودع ينبع الجنوبي'}"/></div>
+            <div><label class="field-label">${T("inv.warehouseCity")}</label>
+              <input id="nwCity" class="input w-full" placeholder="${lang()==='en'?'Yanbu':'ينبع'}"/></div>
+            <div><label class="field-label">${T("inv.warehouseAddress")}</label>
+              <input id="nwAddress" class="input w-full" placeholder="${lang()==='en'?'Street / district / landmarks':'الشارع / الحي / علامة مميزة'}"/></div>
+          </div>
+        </div>`;
+      const footer = `
+        <button class="btn btn-outline" onclick="INV._renderReceiveModal()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="INV.saveNewWarehouse()">${ICONS.save()}${T("inv.newWarehouseTitle")}</button>`;
+      window.app.openModal({ title: T("inv.newWarehouseTitle"), html, footer });
+    },
+    saveNewWarehouse() {
+      const name = (document.getElementById("nwName").value || "").trim();
+      if (!name) { window.app.toast(T("inv.requireField")); return; }
+      const rec = D().addWarehouse({
+        name,
+        city: document.getElementById("nwCity").value,
+        address: document.getElementById("nwAddress").value,
+      });
+      if (rec) {
+        const d = window.APP_STATE.receiveDraft;
+        if (d) d.warehouse = rec.name;
+        const poDraft = window.APP_STATE.poDraft;
+        if (poDraft) poDraft.warehouse = rec.name;
+        window.app.toast(`${T("inv.warehouseCreated")} · ${rec.name}`);
+      }
+      if (window.APP_STATE.receiveDraft) INV._renderReceiveModal();
+      else if (window.APP_STATE.poDraft) INV._renderPOModal();
+      else window.app.closeModal();
     },
 
     /** ===== Approvals ===== */

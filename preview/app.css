@@ -1518,3 +1518,121 @@ aside.w-64 {
 
 /* Stat tile depth — light underline + crisp white top */
 .card > .text-2xl { letter-spacing: -.025em; }
+
+/* ===============================================================
+   Modal text contrast — improve readability inside pop-up panels.
+   The previous v3 glass surface left some text washed out; tighten
+   the foreground colors so labels, helper text, and headings sit
+   well on both light and dark glass.
+   =============================================================== */
+.modal-shell {
+  color: rgb(var(--fg));
+}
+.modal-body, .modal-head, .modal-foot {
+  color: rgb(var(--fg));
+}
+.modal-body .field-label {
+  color: rgb(var(--fg));
+  opacity: 0.78;
+  font-weight: 600;
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.modal-body .muted,
+.modal-body .text-[11px].muted,
+.modal-body .text-[10px].muted,
+.modal-body .text-xs.muted {
+  color: rgb(var(--fg));
+  opacity: 0.65;
+}
+.modal-body input,
+.modal-body select,
+.modal-body textarea {
+  color: rgb(var(--fg));
+}
+.modal-body input::placeholder,
+.modal-body textarea::placeholder {
+  color: rgb(var(--fg));
+  opacity: 0.42;
+}
+
+/* Dark mode: white text everywhere inside the modal */
+.dark .modal-shell { color: #f3f6fb; }
+.dark .modal-body { color: #f3f6fb; }
+.dark .modal-body .field-label { color: #ffffff; opacity: 0.85; }
+.dark .modal-body .muted,
+.dark .modal-body .text-[11px].muted,
+.dark .modal-body .text-[10px].muted,
+.dark .modal-body .text-xs.muted {
+  color: #ffffff; opacity: 0.70;
+}
+.dark .modal-body h1,
+.dark .modal-body h2,
+.dark .modal-body h3,
+.dark .modal-body h4,
+.dark .modal-body .font-semibold,
+.dark .modal-body .font-medium {
+  color: #ffffff;
+}
+.dark .modal-body input,
+.dark .modal-body select,
+.dark .modal-body textarea {
+  color: #ffffff;
+  background: rgba(255,255,255,.04);
+  border-color: rgba(255,255,255,.12);
+}
+.dark .modal-body input::placeholder,
+.dark .modal-body textarea::placeholder {
+  color: rgba(255,255,255,.45);
+}
+.dark .modal-body .input:focus,
+.dark .modal-body .select:focus {
+  background: rgba(255,255,255,.07);
+  border-color: #4eabff;
+}
+.dark .modal-head h2 { color: #ffffff; }
+
+/* Modal table — make labels and cell text crisp on the glass surface */
+.modal-body .tbl th { color: rgb(var(--fg)); opacity: 0.7; }
+.dark .modal-body .tbl th { color: #ffffff; opacity: 0.6; background: rgba(255,255,255,.03); }
+.dark .modal-body .tbl td { color: #f3f6fb; }
+.dark .modal-body .tbl tr:hover td { background: rgba(255,255,255,.04); }
+
+/* Cards nested inside modals — make sure they read on the glass */
+.dark .modal-body .card {
+  background: rgba(255,255,255,.04);
+  border-color: rgba(255,255,255,.10);
+  color: #f3f6fb;
+}
+
+/* "Invoice required" required-field highlight (in receive modal) */
+.invoice-required {
+  border: 1.5px dashed rgba(244,63,94,.45);
+  background: rgba(244,63,94,.04);
+  border-radius: var(--r-3);
+  padding: .65rem .8rem;
+  transition: all var(--dur-2) var(--ease);
+}
+.invoice-required.is-met {
+  border-style: solid;
+  border-color: rgba(16,185,129,.40);
+  background: rgba(16,185,129,.04);
+}
+.dark .invoice-required { background: rgba(244,63,94,.12); }
+.dark .invoice-required.is-met { background: rgba(16,185,129,.10); }
+.invoice-empty {
+  display: flex; align-items: center; justify-content: center;
+  height: 3.5rem;
+  border-radius: var(--r-2);
+  background: rgba(0,0,0,.025);
+  color: rgb(var(--fg));
+  opacity: 0.55;
+  font-size: .72rem;
+  padding: 0 .8rem;
+  text-align: center;
+}
+.dark .invoice-empty { background: rgba(255,255,255,.04); }
+
+/* "+Supplier" / "+Warehouse" inline buttons sit alongside select inputs */
+.modal-body select.flex-1 { min-width: 0; }
