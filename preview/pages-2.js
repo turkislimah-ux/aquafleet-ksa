@@ -1529,12 +1529,22 @@ window.PAGES_2 = (function () {
   // ---------- IoT ----------
   function iot() {
     const ts = D().trucks;
+    const rv = r => (r && r.value != null) ? r.value : null;   // reading → number|null
     const online = ts.filter(t => t.status !== "out_of_service").length;
-    const overheat = ts.filter(t => t.iot.engineTempC > 95).length;
-    const lowOil = ts.filter(t => t.iot.oilPressureKpa < 350).length;
-    const tireIssues = ts.filter(t => Math.min(t.iot.tirePressureBarFL, t.iot.tirePressureBarFR, t.iot.tirePressureBarRL, t.iot.tirePressureBarRR) < 7.5).length;
-    const lowBat = ts.filter(t => t.iot.batteryV < 12.5).length;
+    const overheat = ts.filter(t => { const v = rv(t.iot.engineTemp); return v != null && v > 95; }).length;
+    const lowOil = ts.filter(t => { const v = rv(t.iot.oilPressure); return v != null && v < 350; }).length;
+    const tireIssues = ts.filter(t => {
+      const tp = t.iot.tires ? Object.values(t.iot.tires).map(rv).filter(v => v != null) : [];
+      return tp.length > 0 && Math.min.apply(null, tp) < 7.5;
+    }).length;
+    const lowBat = ts.filter(t => { const v = rv(t.iot.battery); return v != null && v < 12.5; }).length;
     const highVib = ts.filter(t => t.iot.vibrationRms > 4.5).length;
+    // Count offline/faulty readers across the trucks shown in the live grid.
+    const offlineCount = ts.slice(0, 16).reduce((n, t) => {
+      const rs = [t.iot.engineTemp, t.iot.oilPressure, t.iot.battery, t.iot.fuelLevel, t.iot.tankLevel]
+        .concat(t.iot.tires ? Object.values(t.iot.tires) : []);
+      return n + rs.filter(r => !r || r.value == null).length;
+    }, 0);
 
     return `
       ${pageHeader({
@@ -1554,29 +1564,30 @@ window.PAGES_2 = (function () {
 
       ${section({
         title: T("c.liveSensors"),
-        action: `<span class="text-xs muted flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-500 pulse-dot"></span>${T("c.streaming")}</span>`,
+        action: `<span class="text-xs flex items-center gap-3">
+          ${offlineCount > 0 ? `<span class="muted flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" style="background:#94a3b8"></span>${offlineCount} ${T("c.offlineReaders")}</span>` : ""}
+          <span class="muted flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-500 pulse-dot"></span>${T("c.streaming")}</span>
+        </span>`,
         body: `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           ${ts.slice(0, 16).map(tr => {
-            const tempBad = tr.iot.engineTempC > 95;
-            const oilBad = tr.iot.oilPressureKpa < 350;
-            const battBad = tr.iot.batteryV < 12.5;
-            const vibBad = tr.iot.vibrationRms > 4.5;
+            const io = tr.iot;
+            const offline = tr.status === "out_of_service";
             return `
             <div class="rounded-xl border border-app p-3 cursor-pointer hover:shadow-md transition" onclick="window.app.navigate('/fleet/${tr.id}')">
               <div class="flex items-center justify-between mb-2">
                 <div><div class="font-mono text-xs muted">${tr.id}</div><div class="font-semibold text-sm">${escapeHtml(lang()==='ar'?tr.plateAr:tr.plate)}</div></div>
                 <div class="flex items-center gap-1 text-xs">
-                  <span class="${tr.status === 'out_of_service' ? 'text-rose-500' : 'text-emerald-500'}">${ICONS.wifi()}</span>
-                  <span class="muted">${tr.iot.speedKph} km/h</span>
+                  <span class="${offline ? 'text-rose-500' : 'text-emerald-500'}">${ICONS.wifi()}</span>
+                  <span class="muted">${offline ? "—" : tr.iot.speedKph + " km/h"}</span>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-1.5 text-xs">
-                ${sensor(ICONS.thermo(), `${tr.iot.engineTempC}°C`, tempBad)}
-                ${sensor(ICONS.gauge(), `${tr.iot.oilPressureKpa} kPa`, oilBad)}
-                ${sensor(ICONS.battery(), `${tr.iot.batteryV}V`, battBad)}
-                ${sensor(ICONS.zap(), `${tr.iot.vibrationRms} mm/s`, vibBad)}
-                ${sensor(ICONS.droplet(), `${tr.iot.tankLevelPct}% ${lang()==='en'?'tank':'خزان'}`)}
-                ${sensor(ICONS.fuel(), `${tr.iot.fuelLevelPct}% ${lang()==='en'?'fuel':'وقود'}`, tr.iot.fuelLevelPct < 25)}
+                ${sensorR(ICONS.thermo(), io.engineTemp, v => `${v}°C`, v => v > 95)}
+                ${sensorR(ICONS.gauge(), io.oilPressure, v => `${v} kPa`, v => v < 350)}
+                ${sensorR(ICONS.battery(), io.battery, v => `${v}V`, v => v < 12.5)}
+                ${sensorR(ICONS.zap(), { value: io.vibrationRms, status: "ok" }, v => `${v} mm/s`, v => v > 4.5)}
+                ${sensorR(ICONS.droplet(), io.tankLevel, v => `${Math.round(v)}% ${lang()==='en'?'tank':'خزان'}`)}
+                ${sensorR(ICONS.fuel(), io.fuelLevel, v => `${Math.round(v)}% ${lang()==='en'?'fuel':'وقود'}`, v => v < 25)}
               </div>
               <div class="mt-2 text-[10px] muted text-end">${T("c.updated")}: 8s</div>
             </div>`;
@@ -1585,9 +1596,25 @@ window.PAGES_2 = (function () {
       })}
     `;
   }
-  function sensor(icon, label, bad) {
+  /** Render one sensor chip. A reading is { value, status }; when the value is
+   *  null (uninstalled / no signal / fault) show a dash + the reason instead. */
+  function sensorR(icon, reading, fmt, badFn) {
+    if (!reading || reading.value == null) {
+      const reason = sensorReason(reading ? reading.status : "no_signal");
+      return `<div class="flex items-center gap-1.5 px-2 py-1 rounded-md" style="background:rgba(0,0,0,.04); color:#94a3b8" title="${escapeHtml(reason)}">
+        <span style="opacity:.55">${icon}</span>
+        <span class="tabular font-semibold">—</span>
+        <span class="truncate text-[10px]" style="opacity:.85">${escapeHtml(reason)}</span>
+      </div>`;
+    }
+    const bad = badFn ? badFn(reading.value) : false;
     const cls = bad ? "background:rgba(244,63,94,.10); color:#be123c" : "background:rgba(0,0,0,.04)";
-    return `<div class="flex items-center gap-1.5 px-2 py-1 rounded-md" style="${cls}"><span>${icon}</span><span class="tabular truncate">${escapeHtml(label)}</span></div>`;
+    return `<div class="flex items-center gap-1.5 px-2 py-1 rounded-md" style="${cls}"><span>${icon}</span><span class="tabular truncate">${escapeHtml(fmt(reading.value))}</span></div>`;
+  }
+  function sensorReason(status) {
+    return status === "not_installed" ? T("c.sensorNotInstalled")
+         : status === "fault" ? T("c.sensorFault")
+         : T("c.sensorNoSignal");
   }
 
   // ---------- Inventory ----------
@@ -2046,24 +2073,22 @@ window.PAGES_2 = (function () {
       });
     },
 
-    /** ===== Stock cell — replaces the old bar with a level pill + clear qty. */
+    /** ===== Stock cell — just quantity + reorder level, colored by state.
+     *  critical (red) ≤ reorder · mid (yellow) ≤ 1.5× · healthy (green) above. */
     stockCell(p) {
       const ratio = p.qtyOnHand / Math.max(1, p.reorderLevel);
-      let level, cls;
-      if (p.qtyOnHand <= p.reorderLevel * 0.5)       { level = T("inv.stockCritical"); cls = "stock-critical"; }
-      else if (p.qtyOnHand <= p.reorderLevel)        { level = T("inv.stockLow");      cls = "stock-low"; }
-      else if (p.qtyOnHand >= p.reorderLevel * 3)    { level = T("inv.stockOver");     cls = "stock-over"; }
-      else                                            { level = T("inv.stockOk");       cls = "stock-ok"; }
+      let cls, label;
+      if (ratio <= 1)        { cls = "stock-critical"; label = T("inv.stockCritical"); }
+      else if (ratio <= 1.5) { cls = "stock-low";      label = T("inv.stockMid"); }
+      else                   { cls = "stock-ok";       label = T("inv.stockOk"); }
       return `
         <div class="stock-cell">
-          <div class="stock-num ${cls}">
+          <div class="stock-num ${cls}" title="${escapeHtml(label)}">
+            <span class="stock-dot"></span>
             <span class="stock-qty">${p.qtyOnHand}</span>
             <span class="stock-unit">${p.unit}</span>
           </div>
-          <div class="stock-meta">
-            <span class="stock-pill ${cls}"><span class="dot"></span>${level}</span>
-            <span class="stock-reorder muted">${T("inv.reorderAt")} ${p.reorderLevel}</span>
-          </div>
+          <span class="stock-reorder muted">${T("inv.reorderAt")} ${p.reorderLevel}</span>
         </div>`;
     },
 
@@ -3448,7 +3473,7 @@ window.PAGES_2 = (function () {
         { l1: lang()==='en'?"Revenue":"الإيرادات", l2: lang()==='en'?"Cost":"التكلفة", c1: "#10b981", c2: "#f59e0b" });
       PAGES_1.drawPie("costPie", costMix.map(c => ({ label: c.name, value: c.value, color: c.color })));
       PAGES_1.drawDualLine("litersTrend", monthly.map(m=>m.m), monthly.map(m=>m.liters/1000), monthly.map(m=>m.trips),
-        { c1: "#0b7eea", c2: "#8b5cf6", l1: lang()==='en'?"Liters (×1000)":"لتر (×1000)", l2: lang()==='en'?"Trips":"رحلات" });
+        { c1: "#0b7eea", c2: "#8b5cf6", l1: lang()==='en'?"Volume (m³)":"الحجم (م³)", l2: lang()==='en'?"Trips":"رحلات" });
       PAGES_1.drawDualBar("depotChart", depotPerf.map(d=>depotLabel(d.depot)), depotPerf.map(d=>d.trips), depotPerf.map(d=>d.util),
         { c1: "#0b7eea", c2: "#10b981", l1: lang()==='en'?"Trips":"رحلات", l2: lang()==='en'?"Util %":"% استخدام" });
     }, 0);

@@ -673,6 +673,10 @@ html[dir="rtl"] .group-row .group-caret { transform: rotate(180deg); }
 .stock-num.stock-low      .stock-qty { color:#b45309; }
 .stock-num.stock-critical .stock-qty { color:#be123c; }
 .stock-num.stock-over     .stock-qty { color:#0c66bf; }
+.stock-dot { width:.5rem; height:.5rem; border-radius:9999px; display:inline-block; align-self:center; }
+.stock-num.stock-ok       .stock-dot { background:#10b981; }
+.stock-num.stock-low      .stock-dot { background:#f59e0b; }
+.stock-num.stock-critical .stock-dot { background:#f43f5e; }
 .stock-meta { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; font-size:.65rem; }
 .stock-reorder { font-size:.62rem; }
 .stock-pill {

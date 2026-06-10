@@ -78,10 +78,22 @@
     { key: "alternator", en: "Alternator",     ar: "الدينمو",            vibBase: 1.9, sndBase: 73, vibMax: 4.6, sndMax: 90 },
   ];
 
-  function makeIoT(health, depot) {
+  function makeIoT(health, depot, status) {
     const [lat, lng] = DEPOT_COORDS[depot];
     const wear = 100 - health;            // 0-62 ish
     const wearF = wear / 60;              // 0..1 normalized
+    // A diagnostic sensor reading. Out-of-service trucks report no telemetry;
+    // otherwise a small share of readers are uninstalled / silent / faulty so
+    // the UI can show a dash + reason instead of a fabricated number.
+    const offline = status === "out_of_service";
+    function reading(value) {
+      if (offline) return { value: null, status: "no_signal" };
+      const r = rnd();
+      if (r < 0.04) return { value: null, status: "not_installed" };
+      if (r < 0.07) return { value: null, status: "no_signal" };
+      if (r < 0.10) return { value: null, status: "fault" };
+      return { value, status: "ok" };
+    }
     // Per-component vibration + sound. Higher wear pushes readings toward the
     // component's threshold; condition is "ok" up to ~70% of max, "warn" up
     // to ~90%, and "bad" above that.
@@ -99,10 +111,20 @@
     });
     return {
       // Vehicle-level
-      speedKph: rnd() < 0.5 ? 0 : intBetween(40, 95),
-      fuelLevelPct: +(20 + rnd() * 75).toFixed(1),
-      tankLevelPct: +(rnd() * 100).toFixed(1),
+      speedKph: offline ? 0 : (rnd() < 0.5 ? 0 : intBetween(40, 95)),
+      fuelLevel: reading(+(20 + rnd() * 75).toFixed(1)),
+      tankLevel: reading(+(rnd() * 100).toFixed(1)),
       gps: { lat: +(lat + (rnd() - 0.5) * 0.4).toFixed(4), lng: +(lng + (rnd() - 0.5) * 0.4).toFixed(4) },
+      // Discrete diagnostic sensors (each may be uninstalled / silent / faulty)
+      engineTemp: reading(+(82 + wearF * 28 + rnd() * 8).toFixed(0)),
+      oilPressure: reading(+(440 - wearF * 130 + rnd() * 30).toFixed(0)),
+      battery: reading(+(12.3 + rnd() * 1.7 - wearF * 0.7).toFixed(1)),
+      tires: {
+        FL: reading(+(8.5 - wearF * 1.5 + rnd() * 0.8).toFixed(1)),
+        FR: reading(+(8.5 - wearF * 1.5 + rnd() * 0.8).toFixed(1)),
+        RL: reading(+(8.5 - wearF * 1.5 + rnd() * 0.8).toFixed(1)),
+        RR: reading(+(8.5 - wearF * 1.5 + rnd() * 0.8).toFixed(1)),
+      },
       // Engine component health (vibration + sound sensors detect failures)
       engineComponents,
       // Aggregated overall vibration kept for backward compat with calendar code
@@ -149,7 +171,7 @@
       lastServiceDate: lastServiceDate.toISOString().slice(0, 10),
       nextServiceKm: lastServiceKm + 15000, // kept for any old refs
       vin: `WDB${intBetween(100000000, 999999999)}`,
-      iot: makeIoT(health, depot),
+      iot: makeIoT(health, depot, status),
       healthScore: health,
       fuelEfficiencyKmPerL: +(2.4 + rnd() * 1.2).toFixed(2),
       utilizationPct: +(40 + rnd() * 55).toFixed(1),
@@ -1699,6 +1721,7 @@
     repairDescriptions, outsourcedJobs,
     consumePartsForWO,
     ENGINE_COMPONENTS,
+    makeIoT,
     CAPACITY_OPTIONS_M3: [33, 18, 6],
     purchaseOrders,
     APPROVER_ROLES, MIN_APPROVALS, AI_RATIONALES,

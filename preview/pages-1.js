@@ -78,7 +78,7 @@ window.PAGES_1 = (function () {
                 <div class="font-medium text-sm">${tr.ref} → ${escapeHtml(lang()==='ar'?tr.destination.nameAr:tr.destination.name)}</div>
                 ${pill(tr.status, T(`status.${tr.status}`))}
               </div>
-              <div class="text-xs muted">${fmtNum(tr.waterLiters)} L · ${tr.distanceKm} km · ${new Date(tr.scheduledStart).toLocaleDateString()}</div>
+              <div class="text-xs muted">${(tr.waterLiters/1000).toFixed(1)} ${T("c.cubicMeters")} · ${tr.distanceKm} km · ${new Date(tr.scheduledStart).toLocaleDateString()}</div>
             </div>`).join("");
 
       const html = `
@@ -559,7 +559,7 @@ window.PAGES_1 = (function () {
 
     setTimeout(() => {
       window.DASH._drawAll();
-      drawAreaChart("litersChart", lastNDays(14), Array.from({length: 14}, (_,i) => 90000 + ((i*7919)%60000)), { color: "#0b7eea" });
+      drawAreaChart("litersChart", lastNDays(14), Array.from({length: 14}, (_,i) => 90 + ((i*7919)%60000)/1000), { color: "#0b7eea" });
       drawPie("fleetPie", [
         { label: T("status.active"), value: k.active, color: "#10b981" },
         { label: T("status.idle"), value: k.idle, color: "#3b82f6" },
@@ -596,7 +596,7 @@ window.PAGES_1 = (function () {
           <div class="flex items-center justify-between mb-3">
             <div>
               <h3 class="font-semibold">${T("kpi.litersDelivered")}</h3>
-              <p class="text-xs muted">${fmtNum(k.litersDelivered30d)} ${lang() === "en" ? "liters · 30 days" : "لتر · 30 يوم"}</p>
+              <p class="text-xs muted">${fmtNum(Math.round(k.litersDelivered30d/1000))} ${T("c.cubicMeters")} ${lang() === "en" ? "· 30 days" : "· 30 يوم"}</p>
             </div>
             <div class="text-emerald-600 text-xs flex items-center gap-1">${ICONS.trendUp()} +12.4%</div>
           </div>
@@ -689,7 +689,7 @@ window.PAGES_1 = (function () {
             ${pill(tr.status, T(`status.${tr.status}`))}
           </div>
           <div class="text-xs muted truncate">${escapeHtml(tr.truckId)} → ${escapeHtml(lang()==='ar'?tr.destination.nameAr:tr.destination.name)}</div>
-          <div class="text-[11px] muted">${fmtNum(tr.waterLiters)} L · ${tr.distanceKm} km</div>
+          <div class="text-[11px] muted">${(tr.waterLiters/1000).toFixed(1)} ${T("c.cubicMeters")} · ${tr.distanceKm} km</div>
         </div>
       </div>`;
   }
@@ -798,21 +798,8 @@ window.PAGES_1 = (function () {
         fuelEfficiencyKmPerL: 3.0,
         utilizationPct: 0,
         acquiredOn: today,
-        // Build a baseline IoT snapshot for the new truck (clean readings)
-        iot: (function buildClean() {
-          const componentsList = D().ENGINE_COMPONENTS;
-          const engineComponents = {};
-          componentsList.forEach(c => {
-            engineComponents[c.key] = { vibrationRms: c.vibBase, soundDb: c.sndBase, condition: "ok" };
-          });
-          return {
-            speedKph: 0, fuelLevelPct: 100, tankLevelPct: 0,
-            gps: { lat: D().DEPOT_COORDS[depot][0], lng: D().DEPOT_COORDS[depot][1] },
-            engineComponents,
-            vibrationRms: componentsList.reduce((s, c) => s + c.vibBase, 0) / componentsList.length,
-            lastUpdate: new Date().toISOString(),
-          };
-        })(),
+        // Baseline IoT snapshot for the new truck — reuse the shared builder
+        iot: D().makeIoT(98, depot, status),
       };
       D().trucks.push(t);
       window.app.toast(`${t.id} · ${plate} · ${T("status.active")}`);
@@ -2057,7 +2044,7 @@ window.PAGES_1 = (function () {
               <div class="text-xs muted">
                 <b>${focusedTrip.ref}</b> · ${escapeHtml(proj ? (lang()==='ar'?proj.nameAr:proj.name) : '')}
                 · ${truck?.id || ''} · ${driver ? escapeHtml(lang()==='ar'?driver.nameAr:driver.name) : ''}
-                · ${fmtNum(focusedTrip.waterLiters)} L · ${focusedTrip.distanceKm} km · ${pill(focusedTrip.status, T(`status.${focusedTrip.status}`))}
+                · ${(focusedTrip.waterLiters/1000).toFixed(1)} ${T("c.cubicMeters")} · ${focusedTrip.distanceKm} km · ${pill(focusedTrip.status, T(`status.${focusedTrip.status}`))}
               </div>
             </div>
           </div>
@@ -2322,14 +2309,15 @@ window.PAGES_1 = (function () {
       case "water": {
         const k = d.fleetKpis();
         const ser = _dailySeries(d.trips, t => t.scheduledStart, t => t.waterLiters, 14);
+        const m3vals = ser.values.map(v => +(v / 1000).toFixed(1));
         return {
-          title: en ? "Water delivered · 14 days" : "المياه المُسلَّمة · 14 يومًا",
+          title: en ? "Water delivered (m³) · 14 days" : "المياه المُسلَّمة (م³) · 14 يومًا",
           defaultDisplay: "chart", chartKind: "line",
-          line: { labels: ser.labels, values: ser.values, color: "#0b7eea" },
+          line: { labels: ser.labels, values: m3vals, color: "#0b7eea" },
           stats: [
-            { label: T("kpi.litersDelivered"), value: fmtNum(k.litersDelivered30d), tone: "info" },
+            { label: T("kpi.litersDelivered"), value: `${fmtNum(Math.round(k.litersDelivered30d/1000))} ${T("c.cubicMeters")}`, tone: "info" },
           ],
-          items: ser.labels.map((l, i) => ({ label: l, value: ser.values[i], color: "#0b7eea" })),
+          items: ser.labels.map((l, i) => ({ label: l, value: m3vals[i], color: "#0b7eea" })),
         };
       }
       case "revenue": {
