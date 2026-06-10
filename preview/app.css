@@ -1645,6 +1645,84 @@ aside.w-64 {
   color: #f3f6fb;
 }
 
+/* Colored status pills / expiry pills / doc-type chips use dark accent text
+   tuned for LIGHT backgrounds. The modal surface is dark in every theme, so
+   force the bright (dark-theme) accent variants here for legible contrast. */
+.modal-body .pill-ok    { color:#6ee7b7; background:rgba(16,185,129,.16); }
+.modal-body .pill-info  { color:#7dd3fc; background:rgba(11,126,234,.16); }
+.modal-body .pill-warn  { color:#fcd34d; background:rgba(245,158,11,.18); }
+.modal-body .pill-bad,
+.modal-body .pill-delayed { color:#fda4af; background:rgba(244,63,94,.16); }
+.modal-body .pill-muted { color:#cbd5e1; background:rgba(148,163,184,.16); }
+
+.modal-body .exp-ok   { color:#6ee7b7; background:rgba(16,185,129,.18); }
+.modal-body .exp-warn { color:#fcd34d; background:rgba(245,158,11,.20); }
+.modal-body .exp-bad  { color:#fda4af; background:rgba(244,63,94,.18); }
+
+/* doc-type chips — border is currentColor, so brightening color lifts both */
+.modal-body .doc-type-license,
+.modal-body .doc-type-insurance,
+.modal-body .doc-type-delivery        { color:#7dd3fc; background:rgba(11,126,234,.16); }
+.modal-body .doc-type-registration,
+.modal-body .doc-type-permit,
+.modal-body .doc-type-inspection,
+.modal-body .doc-type-national_address { color:#6ee7b7; background:rgba(16,185,129,.16); }
+.modal-body .doc-type-contract,
+.modal-body .doc-type-commercial_registration { color:#c4b5fd; background:rgba(139,92,246,.16); }
+.modal-body .doc-type-quote,
+.modal-body .doc-type-po,
+.modal-body .doc-type-invoice         { color:#fcd34d; background:rgba(245,158,11,.16); }
+.modal-body .doc-type-letter,
+.modal-body .doc-type-other           { color:#cbd5e1; background:rgba(148,163,184,.16); }
+
+/* Chip-strip selector: light box + light chips would be invisible on the dark
+   modal — give them dark translucent surfaces with white text. */
+.modal-body .chip-strip {
+  background: rgba(0,0,0,.18);
+  border-color: rgba(255,255,255,.12);
+}
+.modal-body .chip {
+  background: rgba(255,255,255,.06);
+  border-color: rgba(255,255,255,.16);
+  color: #f3f6fb;
+}
+.modal-body .chip:hover {
+  background: rgba(96,196,255,.14);
+  border-color: rgba(96,196,255,.5);
+}
+.modal-body .chip-selected,
+.modal-body .chip-selected:hover {
+  background: #0b7eea;
+  border-color: #0b7eea;
+  color: #fff;
+}
+
+/* Nested panels that use rgb(var(--card)) (solid white in light mode) become
+   white boxes inside the dark modal, hiding the now-white text. Darken them. */
+.modal-body .parts-picker,
+.modal-body .driver-list,
+.modal-body .doc-checklist,
+.modal-body .type-field-list,
+.modal-body .qty-stepper,
+.modal-body .mode-chip {
+  background: rgba(255,255,255,.05);
+  border-color: rgba(255,255,255,.14);
+}
+.modal-body .parts-picker .tbl th { background: rgba(255,255,255,.04); }
+.modal-body .mode-chip:hover { border-color: rgba(110,231,183,.5); background: rgba(16,185,129,.10); }
+.modal-body .mode-chip.active { border-color:#10b981; background: rgba(16,185,129,.16); }
+.modal-body .parts-cat { color:#7dd3fc; }
+.modal-body .qty-btn { color: rgba(255,255,255,.7); }
+.modal-body .qty-btn:hover { background: rgba(96,196,255,.14); color:#bfe3ff; }
+
+/* PO status pills — brighten dark accent text for the dark modal surface */
+.modal-body .po-draft    { color:#cbd5e1; background:rgba(148,163,184,.16); }
+.modal-body .po-issued   { color:#7dd3fc; background:rgba(11,126,234,.16); }
+.modal-body .po-received { color:#c4b5fd; background:rgba(139,92,246,.16); }
+.modal-body .po-pending  { color:#fcd34d; background:rgba(245,158,11,.18); }
+.modal-body .po-approved { color:#6ee7b7; background:rgba(16,185,129,.18); }
+.modal-body .po-rejected { color:#fda4af; background:rgba(244,63,94,.16); }
+
 /* "Invoice required" required-field highlight (in receive modal) */
 .invoice-required {
   border: 1.5px dashed rgba(244,63,94,.45);
