@@ -1740,6 +1740,38 @@
       WAREHOUSES.push(rec);
       return rec;
     },
+    /** Add a brand-new item / equipment type to the catalog on the fly
+     *  (used by the +Item flow inside Add Parts / New PO). Starts at zero
+     *  on-hand with no price tiers — stock arrives via the receive flow.
+     *  Returns the freshly-created (or matching existing) part record. */
+    addPart({ name, nameAr, sku, category, unit, priceSar, reorderLevel, reorderQty, warehouse, supplier }) {
+      const trimmed = String(name || "").trim();
+      if (!trimmed) return null;
+      const existing = parts.find(p => p.name.toLowerCase() === trimmed.toLowerCase());
+      if (existing) return existing;
+      const idx = parts.length + 1;
+      const price = +priceSar || 0;
+      const rec = {
+        id: `PRT-${String(idx).padStart(4, "0")}`,
+        sku: (sku && String(sku).trim()) || `SKU-${1000 + idx}`,
+        name: trimmed,
+        nameAr: (nameAr && String(nameAr).trim()) || trimmed,
+        category: category || "consumable",
+        unit: unit || "ea",
+        currentPriceSar: price,
+        previousPriceSar: null,
+        priceTiers: [],
+        qtyOnHand: 0,
+        reorderLevel: +reorderLevel || 0,
+        reorderQty: +reorderQty || 1,
+        warehouse: warehouse || (WAREHOUSES[0] && WAREHOUSES[0].name) || "",
+        supplier: supplier || SUPPLIER_NAMES[0] || "",
+        leadTimeDays: 7,
+        lastReceived: null,
+      };
+      parts.push(rec);
+      return rec;
+    },
     /** Receive parts WITHOUT a Purchase Order ("Add parts" direct flow).
      *  Each line becomes a fresh FIFO tier on its part record. Mandatory
      *  invoice (data URL) is stored on the receipt log. */
@@ -1868,6 +1900,25 @@
     findTruck: id => trucks.find(t => t.id === id),
     findDriver: id => drivers.find(d => d.id === id),
     findPerson: id => people.find(p => p.id === id),
+    /** Add a staff member (support/management employee) on the fly. Mirrors
+     *  the shape of seeded `people` records. Returns the new record. */
+    addPerson({ name, nameAr, role, email, phone, depot, active }) {
+      const trimmed = String(name || "").trim();
+      if (!trimmed) return null;
+      const idx = people.length + 1;
+      const rec = {
+        id: `PER-${String(idx).padStart(3, "0")}`,
+        name: trimmed,
+        nameAr: (nameAr && String(nameAr).trim()) || trimmed,
+        role: role || "ops_supervisor",
+        email: email || "",
+        phone: phone || "",
+        depot: depot || DEPOTS[0],
+        active: active !== false,
+      };
+      people.push(rec);
+      return rec;
+    },
     findPart: id => parts.find(p => p.id === id),
     findWO: id => workOrders.find(w => w.id === id),
     findOutsourced: id => outsourcedJobs.find(o => o.id === id),

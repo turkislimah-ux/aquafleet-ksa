@@ -9,6 +9,58 @@ window.PAGES_1 = (function () {
   window.DRV = {
     setTab(v) { window.APP_STATE.driversTab = v; window.app.render(); },
 
+    /** Add a management / support staff member, capturing the same fields
+     *  held about existing employees. */
+    openAddStaff() {
+      const roles = ["fleet_manager", "ops_supervisor", "mechanic", "inventory_clerk", "dispatcher"];
+      const depots = D().DEPOTS;
+      const html = `
+        <div class="space-y-3">
+          <p class="text-sm" style="color:rgba(255,255,255,.85)">${T("c.newStaffIntro")}</p>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">${T("c.staffName")}</label>
+              <input id="stName" class="input w-full" placeholder="${lang()==='en'?'e.g. Omar Al-Qahtani':'مثال: عمر القحطاني'}"/></div>
+            <div><label class="field-label">${T("c.staffNameAr")}</label>
+              <input id="stNameAr" class="input w-full" dir="rtl" placeholder="${lang()==='en'?'optional':'اختياري'}"/></div>
+            <div><label class="field-label">${T("c.staffRole")}</label>
+              <select id="stRole" class="select w-full">${roles.map(r=>`<option value="${r}">${escapeHtml(T(`role.${r}`))}</option>`).join("")}</select></div>
+            <div><label class="field-label">${T("c.staffDepot")}</label>
+              <select id="stDepot" class="select w-full">${depots.map(dp=>`<option value="${dp}">${escapeHtml(depotLabel(dp))}</option>`).join("")}</select></div>
+            <div><label class="field-label">${T("c.staffEmail")}</label>
+              <input id="stEmail" type="email" class="input w-full" placeholder="name@aquafleet.sa"/></div>
+            <div><label class="field-label">${T("c.staffPhone")}</label>
+              <input id="stPhone" class="input w-full" placeholder="+966 5..."/></div>
+            <div class="col-span-2 flex items-center gap-2">
+              <input id="stActive" type="checkbox" checked class="h-4 w-4"/>
+              <label for="stActive" class="field-label !mb-0">${T("c.staffActive")}</label>
+            </div>
+          </div>
+        </div>`;
+      const footer = `
+        <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="DRV.saveStaff()">${ICONS.save()}${T("c.newStaffTitle")}</button>`;
+      window.app.openModal({ title: T("c.newStaffTitle"), html, footer });
+    },
+    saveStaff() {
+      const name = (document.getElementById("stName").value || "").trim();
+      if (!name) { window.app.toast(T("inv.requireField")); return; }
+      const rec = D().addPerson({
+        name,
+        nameAr: document.getElementById("stNameAr").value,
+        role: document.getElementById("stRole").value,
+        depot: document.getElementById("stDepot").value,
+        email: document.getElementById("stEmail").value,
+        phone: document.getElementById("stPhone").value,
+        active: document.getElementById("stActive").checked,
+      });
+      if (rec) {
+        window.APP_STATE.driversTab = "staff";
+        window.app.toast(`${T("c.staffCreated")} · ${rec.name}`);
+      }
+      window.app.closeModal();
+      window.app.render();
+    },
+
     /** Show the full driver profile in a modal with quick links. */
     openDriver(driverId) {
       const d = D().findDriver(driverId);
@@ -503,8 +555,10 @@ window.PAGES_1 = (function () {
 
     const liveTrips = D().trips.filter(t => t.status === "in_transit" || t.status === "loading").slice(0, 5);
     const topAlerts = D().predictiveAlerts.slice(0, 5);
+    window.APP_STATE.dashWidgets = window.APP_STATE.dashWidgets || [];
 
     setTimeout(() => {
+      window.DASH._drawAll();
       drawAreaChart("litersChart", lastNDays(14), Array.from({length: 14}, (_,i) => 90000 + ((i*7919)%60000)), { color: "#0b7eea" });
       drawPie("fleetPie", [
         { label: T("status.active"), value: k.active, color: "#10b981" },
@@ -523,8 +577,10 @@ window.PAGES_1 = (function () {
         title: T("nav.dashboard"),
         subtitle: T("c.period"),
         actions: btn({ label: T("c.liveIoT"), icon: ICONS.activity(), variant: "outline" })
-                + btn({ label: T("c.newTrip"), icon: ICONS.plus(), variant: "primary", onclick: "alert('Demo: open new trip wizard')" }),
+                + btn({ label: T("c.addWidget"), icon: ICONS.plus(), variant: "primary", onclick: "DASH.openAddWidget()" }),
       })}
+
+      ${window.DASH.renderWidgets()}
 
       <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-5">
         ${stat({ label: T("kpi.activeTrucks"), value: `${k.active}/${D().trucks.length}`, sub: `${k.maint} ${T("status.maintenance")}`, tone: "ok" })}
@@ -1151,7 +1207,7 @@ window.PAGES_1 = (function () {
     const header = pageHeader({
       title: T("nav.drivers"),
       subtitle: `${ds.length} ${T("c.drivers")} · ${D().people.length} ${lang()==='en'?'support staff':'موظف دعم'}`,
-      actions: btn({ label: T("c.addPerson"), icon: ICONS.plus(), variant: "primary", onclick: "alert('Demo: add person')" })
+      actions: btn({ label: T("c.addStaff"), icon: ICONS.plus(), variant: "primary", onclick: "DRV.openAddStaff()" })
     });
 
     if (tab === "commissions") {
@@ -2153,5 +2209,407 @@ window.PAGES_1 = (function () {
     });
   }
 
-  return { dashboard, fleet, fleetDetail, drivers, trips, routes, drawAreaChart, drawPie, drawDualBar, drawDualLine };
+  function drawBars(id, labels, data, colors) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (window.__charts && window.__charts[id]) window.__charts[id].destroy();
+    window.__charts = window.__charts || {};
+    window.__charts[id] = new Chart(el, {
+      type: "bar",
+      data: { labels, datasets: [{ data, backgroundColor: colors || "#0b7eea", borderRadius: 4, maxBarThickness: 36 }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false } },
+        scales: { x: { grid: { display: false }, ticks: { font: { size: 11 }, color: "#64748b" } },
+                  y: { grid: { color: "#eef2f7" }, ticks: { font: { size: 11 }, color: "#64748b" }, beginAtZero: true } } }
+    });
+  }
+
+  // ===================================================================
+  //  Dashboard custom summaries — "AI" reads a natural-language request,
+  //  matches it to a live dataset, and renders it as a chart / stats /
+  //  table widget. Widgets persist as queries in APP_STATE.dashWidgets
+  //  and are recomputed on every render so the data stays fresh.
+  // ===================================================================
+  function _palette(i) {
+    return ["#0b7eea", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#14b8a6"][i % 8];
+  }
+  function _countBy(arr, fn) {
+    const m = {};
+    arr.forEach(x => { const k = fn(x); m[k] = (m[k] || 0) + 1; });
+    return m;
+  }
+  function _dailySeries(items, dateFn, valFn, n) {
+    const map = {};
+    items.forEach(it => { const k = String(dateFn(it) || "").slice(0, 10); if (k) map[k] = (map[k] || 0) + (valFn(it) || 0); });
+    const labels = [], values = [], today = new Date();
+    for (let i = n - 1; i >= 0; i--) {
+      const dt = new Date(today.getTime() - i * 86400000);
+      const key = dt.toISOString().slice(0, 10);
+      labels.push(key.slice(5));
+      values.push(Math.round(map[key] || 0));
+    }
+    return { labels, values };
+  }
+
+  function dashCompute(key) {
+    const d = D();
+    const en = lang() === "en";
+    switch (key) {
+      case "fleet": {
+        const k = d.fleetKpis();
+        return {
+          title: en ? "Fleet status" : "حالة الأسطول",
+          defaultDisplay: "chart", chartKind: "pie",
+          stats: [
+            { label: T("kpi.activeTrucks"), value: `${k.active}/${d.trucks.length}`, tone: "ok" },
+            { label: T("status.maintenance"), value: k.maint, tone: "warn" },
+            { label: T("status.out_of_service"), value: k.oos, tone: "bad" },
+          ],
+          items: [
+            { label: T("status.active"), value: k.active, color: "#10b981" },
+            { label: T("status.idle"), value: k.idle, color: "#3b82f6" },
+            { label: T("status.maintenance"), value: k.maint, color: "#f59e0b" },
+            { label: T("status.out_of_service"), value: k.oos, color: "#ef4444" },
+          ],
+        };
+      }
+      case "drivers": {
+        const ds = d.drivers;
+        const onDuty = ds.filter(x => x.status === "on_duty").length;
+        const avgSafety = Math.round(ds.reduce((s, x) => s + x.safetyScore, 0) / ds.length);
+        const byDepot = _countBy(ds, x => x.homeDepot);
+        return {
+          title: en ? "Drivers by depot" : "السائقون حسب المستودع",
+          defaultDisplay: "chart", chartKind: "bars",
+          stats: [
+            { label: T("c.driverOnDuty"), value: `${onDuty}/${ds.length}`, tone: "ok" },
+            { label: T("c.avgSafety"), value: avgSafety, tone: avgSafety > 80 ? "ok" : "warn" },
+            { label: T("c.drivers"), value: ds.length, tone: "info" },
+          ],
+          items: Object.keys(byDepot).map((dp, i) => ({ label: depotLabel(dp), value: byDepot[dp], color: _palette(i) })),
+        };
+      }
+      case "trips": {
+        const ts = d.trips;
+        const by = _countBy(ts, x => x.status);
+        const colors = { scheduled: "#3b82f6", loading: "#f59e0b", in_transit: "#0b7eea", delivered: "#10b981", cancelled: "#94a3b8" };
+        const order = ["scheduled", "loading", "in_transit", "delivered", "cancelled"];
+        return {
+          title: en ? "Trips by status" : "الرحلات حسب الحالة",
+          defaultDisplay: "chart", chartKind: "pie",
+          stats: [
+            { label: T("c.trips"), value: ts.length, tone: "info" },
+            { label: T("status.in_transit"), value: by.in_transit || 0, tone: "ok" },
+            { label: T("status.delivered"), value: by.delivered || 0, tone: "ok" },
+          ],
+          items: order.filter(s => by[s]).map(s => ({ label: T("status." + s), value: by[s], color: colors[s] })),
+        };
+      }
+      case "fuel": {
+        const k = d.fleetKpis();
+        const total = d.trips.reduce((s, t) => s + (t.fuelLiters || 0), 0);
+        const byDepot = {};
+        d.trips.forEach(t => { const dp = (d.findTruck(t.truckId) || {}).homeDepot || "—"; byDepot[dp] = (byDepot[dp] || 0) + (t.fuelLiters || 0); });
+        return {
+          title: en ? "Fuel consumption by depot" : "استهلاك الوقود حسب المستودع",
+          defaultDisplay: "chart", chartKind: "bars",
+          stats: [
+            { label: T("kpi.fuelCost"), value: fmtSar(k.fuelCost30d), tone: "warn" },
+            { label: en ? "Fuel used (L)" : "الوقود المستهلك (ل)", value: fmtNum(Math.round(total)), tone: "info" },
+          ],
+          items: Object.keys(byDepot).map((dp, i) => ({ label: depotLabel(dp), value: Math.round(byDepot[dp]), color: _palette(i) })),
+        };
+      }
+      case "water": {
+        const k = d.fleetKpis();
+        const ser = _dailySeries(d.trips, t => t.scheduledStart, t => t.waterLiters, 14);
+        return {
+          title: en ? "Water delivered · 14 days" : "المياه المُسلَّمة · 14 يومًا",
+          defaultDisplay: "chart", chartKind: "line",
+          line: { labels: ser.labels, values: ser.values, color: "#0b7eea" },
+          stats: [
+            { label: T("kpi.litersDelivered"), value: fmtNum(k.litersDelivered30d), tone: "info" },
+          ],
+          items: ser.labels.map((l, i) => ({ label: l, value: ser.values[i], color: "#0b7eea" })),
+        };
+      }
+      case "revenue": {
+        const k = d.fleetKpis();
+        const ser = _dailySeries(d.trips, t => t.scheduledStart, t => t.revenueSar, 14);
+        return {
+          title: en ? "Revenue · 14 days" : "الإيرادات · 14 يومًا",
+          defaultDisplay: "chart", chartKind: "line",
+          line: { labels: ser.labels, values: ser.values, color: "#10b981" },
+          stats: [
+            { label: T("kpi.revenue"), value: fmtSar(k.revenue30d), tone: "ok" },
+          ],
+          items: ser.labels.map((l, i) => ({ label: l, value: ser.values[i], color: "#10b981" })),
+        };
+      }
+      case "cost": {
+        const k = d.fleetKpis();
+        return {
+          title: en ? "Revenue vs cost · 30 days" : "الإيراد مقابل التكلفة · 30 يومًا",
+          defaultDisplay: "chart", chartKind: "bars",
+          stats: [
+            { label: T("kpi.revenue"), value: fmtSar(k.revenue30d), tone: "ok" },
+            { label: T("c.operatingCost"), value: fmtSar(k.opCost30d), tone: "warn" },
+            { label: T("kpi.fuelCost"), value: fmtSar(k.fuelCost30d), tone: "bad" },
+          ],
+          items: [
+            { label: T("kpi.revenue"), value: Math.round(k.revenue30d), color: "#10b981" },
+            { label: T("c.operatingCost"), value: Math.round(k.opCost30d), color: "#f59e0b" },
+            { label: T("kpi.fuelCost"), value: Math.round(k.fuelCost30d), color: "#ef4444" },
+          ],
+        };
+      }
+      case "maintenance": {
+        const wos = d.workOrders;
+        const open = wos.filter(w => w.status !== "completed" && w.status !== "cancelled").length;
+        const done = wos.filter(w => w.status === "completed").length;
+        const by = _countBy(wos, w => w.status);
+        return {
+          title: en ? "Work orders by status" : "أوامر العمل حسب الحالة",
+          defaultDisplay: "chart", chartKind: "bars",
+          stats: [
+            { label: T("kpi.openWO"), value: open, tone: "warn" },
+            { label: T("status.completed"), value: done, tone: "ok" },
+            { label: en ? "Total WOs" : "إجمالي الأوامر", value: wos.length, tone: "info" },
+          ],
+          items: Object.keys(by).map((s, i) => ({ label: T("status." + s) || s, value: by[s], color: _palette(i) })),
+        };
+      }
+      case "inventory": {
+        const ps = d.parts;
+        const low = ps.filter(p => p.qtyOnHand <= p.reorderLevel);
+        const value = ps.reduce((s, p) => s + p.qtyOnHand * (p.currentPriceSar || 0), 0);
+        const top = low.slice().sort((a, b) => a.qtyOnHand - b.qtyOnHand).slice(0, 8);
+        return {
+          title: en ? "Low-stock parts" : "قطع منخفضة المخزون",
+          defaultDisplay: "table", chartKind: "bars",
+          stats: [
+            { label: en ? "Catalog items" : "أصناف الكتالوج", value: ps.length, tone: "info" },
+            { label: en ? "Low stock" : "منخفض المخزون", value: low.length, tone: low.length ? "bad" : "ok" },
+            { label: en ? "Stock value" : "قيمة المخزون", value: fmtSar(Math.round(value)), tone: "ok" },
+          ],
+          table: {
+            cols: [T("c.part"), T("inv.stockLabel"), en ? "Reorder at" : "حد الطلب"],
+            rows: top.map(p => [en ? p.name : p.nameAr, p.qtyOnHand, p.reorderLevel]),
+          },
+          items: top.map((p, i) => ({ label: en ? p.name : p.nameAr, value: p.qtyOnHand, color: _palette(i) })),
+        };
+      }
+      case "alerts": {
+        const al = d.predictiveAlerts;
+        const by = _countBy(al, a => a.severity);
+        const colors = { critical: "#ef4444", warning: "#f59e0b", info: "#3b82f6" };
+        return {
+          title: en ? "Predictive alerts by severity" : "التنبيهات التنبؤية حسب الخطورة",
+          defaultDisplay: "chart", chartKind: "pie",
+          stats: [
+            { label: T("kpi.criticalAlerts"), value: by.critical || 0, tone: "bad" },
+            { label: en ? "Warnings" : "تحذيرات", value: by.warning || 0, tone: "warn" },
+            { label: en ? "Total alerts" : "إجمالي التنبيهات", value: al.length, tone: "info" },
+          ],
+          items: ["critical", "warning", "info"].filter(s => by[s]).map(s => ({ label: s, value: by[s], color: colors[s] })),
+        };
+      }
+      case "commissions": {
+        const cs = d.commissionsForMonth(d.CURRENT_MONTH_KEY);
+        const pending = cs.filter(c => c.payoutStatus === "pending").length;
+        const totalPay = cs.reduce((s, c) => s + (d.commissionTotal ? d.commissionTotal(c) : 0), 0);
+        const by = _countBy(cs, c => c.payoutStatus);
+        return {
+          title: en ? "Commissions this month" : "العمولات هذا الشهر",
+          defaultDisplay: "stat", chartKind: "bars",
+          stats: [
+            { label: en ? "Drivers paid out" : "سائقون مستحقون", value: cs.length, tone: "info" },
+            { label: en ? "Pending" : "معلّقة", value: pending, tone: pending ? "warn" : "ok" },
+            { label: en ? "Total payout" : "إجمالي الصرف", value: fmtSar(Math.round(totalPay)), tone: "ok" },
+          ],
+          items: Object.keys(by).map((s, i) => ({ label: s, value: by[s], color: _palette(i) })),
+        };
+      }
+      case "depots": {
+        const byTrucks = _countBy(d.trucks, t => t.homeDepot);
+        return {
+          title: en ? "Trucks by depot" : "الشاحنات حسب المستودع",
+          defaultDisplay: "chart", chartKind: "bars",
+          stats: Object.keys(byTrucks).map((dp, i) => ({ label: depotLabel(dp), value: byTrucks[dp], tone: "info" })),
+          items: Object.keys(byTrucks).map((dp, i) => ({ label: depotLabel(dp), value: byTrucks[dp], color: _palette(i) })),
+        };
+      }
+      case "utilization": {
+        const k = d.fleetKpis();
+        return {
+          title: en ? "Utilization & health" : "الاستخدام والصحة",
+          defaultDisplay: "stat", chartKind: "bars",
+          stats: [
+            { label: T("kpi.utilization"), value: k.utilization + "%", tone: "info" },
+            { label: T("kpi.avgHealth"), value: k.avgHealth, tone: k.avgHealth > 75 ? "ok" : "warn" },
+            { label: T("kpi.onTime"), value: k.onTimePct + "%", tone: "ok" },
+          ],
+          items: [
+            { label: T("kpi.utilization"), value: k.utilization, color: "#0b7eea" },
+            { label: T("kpi.avgHealth"), value: k.avgHealth, color: "#10b981" },
+            { label: T("kpi.onTime"), value: k.onTimePct, color: "#f59e0b" },
+          ],
+        };
+      }
+      default: {
+        const k = d.fleetKpis();
+        const openWO = d.workOrders.filter(w => w.status !== "completed" && w.status !== "cancelled").length;
+        const crit = d.predictiveAlerts.filter(a => a.severity === "critical").length;
+        return {
+          title: en ? "Operations overview" : "نظرة عامة على العمليات",
+          defaultDisplay: "stat", chartKind: "bars",
+          stats: [
+            { label: T("kpi.activeTrucks"), value: `${k.active}/${d.trucks.length}`, tone: "ok" },
+            { label: T("kpi.utilization"), value: k.utilization + "%", tone: "info" },
+            { label: T("kpi.openWO"), value: openWO, tone: "warn" },
+            { label: T("kpi.criticalAlerts"), value: crit, tone: "bad" },
+            { label: T("kpi.revenue"), value: fmtSar(k.revenue30d), tone: "ok" },
+            { label: T("kpi.fuelCost"), value: fmtSar(k.fuelCost30d), tone: "warn" },
+          ],
+          items: [
+            { label: T("status.active"), value: k.active, color: "#10b981" },
+            { label: T("status.maintenance"), value: k.maint, color: "#f59e0b" },
+            { label: T("status.out_of_service"), value: k.oos, color: "#ef4444" },
+          ],
+        };
+      }
+    }
+  }
+
+  function dashInterpret(req, pref) {
+    const q = (req || "").toLowerCase();
+    const map = [
+      { key: "fleet",        words: ["truck", "fleet", "vehicle", "شاحن", "أسطول", "مركب"] },
+      { key: "drivers",      words: ["driver", "سائق"] },
+      { key: "fuel",         words: ["fuel", "diesel", "وقود", "ديزل"] },
+      { key: "water",        words: ["water", "liter", "litre", "مياه", "ماء", "لتر"] },
+      { key: "trips",        words: ["trip", "delivery", "deliver", "رحل", "تسليم"] },
+      { key: "maintenance",  words: ["maintenance", "work order", "repair", "صيان", "إصلاح", "أمر عمل"] },
+      { key: "inventory",    words: ["part", "inventory", "stock", "spare", "قطع", "مخزون", "مخزن"] },
+      { key: "alerts",       words: ["alert", "predict", "warning", "risk", "تنبيه", "تنبؤ", "خطر", "إنذار"] },
+      { key: "commissions",  words: ["commission", "payout", "عمول", "مستحق"] },
+      { key: "revenue",      words: ["revenue", "income", "sales", "إيراد", "دخل", "مبيع"] },
+      { key: "cost",         words: ["cost", "expense", "spend", "operating", "تكلف", "مصروف", "نفق"] },
+      { key: "depots",       words: ["depot", "region", "branch", "مستودع", "منطقة", "فرع"] },
+      { key: "utilization",  words: ["utiliz", "health", "uptime", "performance", "استخدام", "أداء", "صحة"] },
+    ];
+    let key = "overview";
+    for (const m of map) { if (m.words.some(w => q.includes(w))) { key = m.key; break; } }
+    const spec = dashCompute(key);
+    let display = pref;
+    if (!display || display === "auto") {
+      if (/table|جدول/.test(q)) display = "table";
+      else if (/chart|graph|plot|pie|bar|line|trend|رسم|مخطط|بياني|منحنى/.test(q)) display = "chart";
+      else if (/stat|number|kpi|count|total|metric|إحصاء|رقم|عدد|إجمالي/.test(q)) display = "stat";
+      else display = spec.defaultDisplay || "stat";
+    }
+    return { datasetKey: key, display, title: spec.title };
+  }
+
+  function _statCardsFromItems(spec) {
+    return (spec.items || []).slice(0, 6).map(it => stat({ label: it.label, value: it.value, tone: "info" })).join("");
+  }
+  function _tableHtml(spec) {
+    let cols, rows;
+    if (spec.table) { cols = spec.table.cols; rows = spec.table.rows; }
+    else { cols = [lang() === "en" ? "Item" : "البند", lang() === "en" ? "Value" : "القيمة"]; rows = (spec.items || []).map(it => [it.label, it.value]); }
+    if (!rows.length) return `<p class="muted text-sm">${lang() === "en" ? "No data" : "لا توجد بيانات"}</p>`;
+    return `<div class="overflow-x-auto scroll-thin"><table class="tbl"><thead><tr>${cols.map(c => `<th>${escapeHtml(String(c))}</th>`).join("")}</tr></thead>
+      <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td class="${i === 0 ? "" : "tabular"}">${escapeHtml(String(c))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  }
+  function _widgetHtml(w) {
+    const spec = dashCompute(w.datasetKey);
+    let body;
+    if (w.display === "stat") {
+      const cards = (spec.stats && spec.stats.length ? spec.stats.map(s => stat(s)).join("") : _statCardsFromItems(spec));
+      body = `<div class="grid grid-cols-2 md:grid-cols-3 gap-3">${cards}</div>`;
+    } else if (w.display === "table") {
+      body = _tableHtml(spec);
+    } else {
+      body = `<div class="h-64"><canvas id="dashw-${w.id}"></canvas></div>`;
+    }
+    return `
+      <div class="card p-4">
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <div class="min-w-0">
+            <h3 class="font-semibold truncate">${escapeHtml(w.title || spec.title)}</h3>
+            <p class="text-[11px] muted truncate">${ICONS.zap ? ICONS.zap() : "★"} ${escapeHtml(w.request)}</p>
+          </div>
+          <button class="btn btn-ghost btn-xs" onclick="DASH.removeWidget('${w.id}')">${ICONS.x()}</button>
+        </div>
+        ${body}
+      </div>`;
+  }
+
+  window.DASH = {
+    renderWidgets() {
+      const ws = (window.APP_STATE.dashWidgets || []);
+      if (ws.length === 0) return "";
+      return `<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">${ws.map(_widgetHtml).join("")}</div>`;
+    },
+    _drawAll() {
+      (window.APP_STATE.dashWidgets || []).forEach(w => {
+        if (w.display !== "chart") return;
+        const spec = dashCompute(w.datasetKey);
+        const id = "dashw-" + w.id;
+        if (spec.chartKind === "line" && spec.line) drawAreaChart(id, spec.line.labels, spec.line.values, { color: spec.line.color });
+        else if (spec.chartKind === "pie") drawPie(id, spec.items);
+        else drawBars(id, (spec.items || []).map(i => i.label), (spec.items || []).map(i => i.value), (spec.items || []).map(i => i.color));
+      });
+    },
+    removeWidget(id) {
+      window.APP_STATE.dashWidgets = (window.APP_STATE.dashWidgets || []).filter(w => w.id !== id);
+      window.app.render();
+    },
+    openAddWidget() {
+      const examples = lang() === "en"
+        ? ["Fuel consumption by depot as a chart", "Low-stock parts as a table", "Predictive alerts by severity", "Revenue over the last 14 days", "Drivers on duty stats"]
+        : ["استهلاك الوقود حسب المستودع كمخطط", "القطع منخفضة المخزون كجدول", "التنبيهات التنبؤية حسب الخطورة", "الإيرادات آخر 14 يومًا", "إحصاءات السائقين في الخدمة"];
+      const html = `
+        <div class="space-y-3">
+          <p class="text-sm" style="color:rgba(255,255,255,.85)">${T("c.aiWidgetIntro")}</p>
+          <div>
+            <label class="field-label">${lang() === "en" ? "What do you want to see?" : "ماذا تريد أن ترى؟"}</label>
+            <textarea id="dashReq" class="input w-full" style="min-height:70px" placeholder="${T("c.aiWidgetPlaceholder")}"></textarea>
+          </div>
+          <div>
+            <label class="field-label">${T("c.aiWidgetExamples")}</label>
+            <div class="flex flex-wrap gap-2">
+              ${examples.map(ex => `<button type="button" class="chip" onclick="document.getElementById('dashReq').value=this.textContent.trim()">${escapeHtml(ex)}</button>`).join("")}
+            </div>
+          </div>
+          <div>
+            <label class="field-label">${T("c.displayLabel")}</label>
+            <select id="dashDisplay" class="select w-full">
+              <option value="auto">${T("c.displayAuto")}</option>
+              <option value="stat">${T("c.displayStat")}</option>
+              <option value="chart">${T("c.displayChart")}</option>
+              <option value="table">${T("c.displayTable")}</option>
+            </select>
+          </div>
+        </div>`;
+      const footer = `
+        <button class="btn btn-outline" onclick="window.app.closeModal()">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="DASH.generate()">${ICONS.zap ? ICONS.zap() : ""}${T("c.generateWidget")}</button>`;
+      window.app.openModal({ title: T("c.aiWidgetTitle"), html, footer });
+    },
+    generate() {
+      const reqEl = document.getElementById("dashReq");
+      const req = (reqEl && reqEl.value || "").trim();
+      if (!req) { window.app.toast(T("c.widgetDescribe")); return; }
+      const pref = (document.getElementById("dashDisplay") || {}).value || "auto";
+      const r = dashInterpret(req, pref);
+      window.APP_STATE.dashWidgets = window.APP_STATE.dashWidgets || [];
+      window.APP_STATE.dashWidgets.unshift({ id: "W" + Date.now().toString(36), request: req, display: r.display, datasetKey: r.datasetKey, title: r.title });
+      window.app.closeModal();
+      window.app.toast(T("c.widgetAdded"));
+      window.app.render();
+    },
+  };
+
+  return { dashboard, fleet, fleetDetail, drivers, trips, routes, drawAreaChart, drawPie, drawDualBar, drawDualLine, drawBars };
 })();

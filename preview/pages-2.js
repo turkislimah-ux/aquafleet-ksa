@@ -2178,6 +2178,7 @@ window.PAGES_2 = (function () {
                   ${allParts.map(p => `<option value="${p.id}">${p.sku} · ${escapeHtml(lang()==='ar'?p.nameAr:p.name)} · ${T("inv.stockLabel")}: ${p.qtyOnHand}</option>`).join("")}
                 </select>
                 <button class="btn btn-outline" onclick="INV.poLineAdd()">${ICONS.plus()}${T("inv.addLine")}</button>
+                <button class="btn btn-outline" onclick="INV.openNewPart()">${ICONS.plus()}${lang()==='en'?'New item':'صنف جديد'}</button>
               </div>
             </div>
             <div class="card overflow-hidden">
@@ -2653,6 +2654,7 @@ window.PAGES_2 = (function () {
                   ${allParts.map(p => `<option value="${p.id}">${p.sku} · ${escapeHtml(lang()==='ar'?p.nameAr:p.name)}</option>`).join("")}
                 </select>
                 <button type="button" class="btn btn-outline" onclick="INV.rcvAddLine()">${ICONS.plus()}${T("inv.addLine")}</button>
+                <button type="button" class="btn btn-outline" onclick="INV.openNewPart()">${ICONS.plus()}${lang()==='en'?'New item':'صنف جديد'}</button>
               </div>
             </div>
             <div class="card overflow-hidden">
@@ -2816,6 +2818,84 @@ window.PAGES_2 = (function () {
       }
       if (window.APP_STATE.receiveDraft) INV._renderReceiveModal();
       else if (window.APP_STATE.poDraft) INV._renderPOModal();
+      else window.app.closeModal();
+    },
+
+    /** Create a brand-new item / equipment type inline, then drop it into the
+     *  active draft (New PO or Add Parts) as a line item. */
+    openNewPart() {
+      const cats = [
+        ["fluid",      lang()==='en'?'Fluid':'سوائل'],
+        ["filter",     lang()==='en'?'Filter':'فلتر'],
+        ["brake",      lang()==='en'?'Brake':'فرامل'],
+        ["tire",       lang()==='en'?'Tire':'إطارات'],
+        ["electrical", lang()==='en'?'Electrical':'كهرباء'],
+        ["tank",       lang()==='en'?'Tank':'خزان'],
+        ["engine",     lang()==='en'?'Engine':'محرك'],
+        ["consumable", lang()==='en'?'Consumable':'مستهلكات'],
+        ["equipment",  lang()==='en'?'Equipment':'معدات'],
+      ];
+      const units = [
+        ["ea",  lang()==='en'?'each (ea)':'قطعة'],
+        ["L",   lang()==='en'?'liter (L)':'لتر'],
+        ["set", lang()==='en'?'set':'طقم'],
+        ["kg",  "kg"],
+        ["m",   "m"],
+      ];
+      const html = `
+        <div class="space-y-3">
+          <p class="text-sm" style="color:rgba(255,255,255,.85)">${lang()==='en'?'Create a brand-new item or equipment type. It is added to the catalog and dropped straight into your current list.':'أنشئ صنفًا أو معدة جديدة. تُضاف للكتالوج وتُدرج مباشرة في قائمتك الحالية.'}</p>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">${lang()==='en'?'Item / Equipment name':'اسم الصنف / المعدة'}</label>
+              <input id="npName" class="input w-full" placeholder="${lang()==='en'?'e.g. Hydraulic Jack 20T':'مثال: رافعة هيدروليكية 20 طن'}"/></div>
+            <div><label class="field-label">${lang()==='en'?'Name (Arabic)':'الاسم (عربي)'}</label>
+              <input id="npNameAr" class="input w-full" dir="rtl" placeholder="${lang()==='en'?'optional':'اختياري'}"/></div>
+            <div><label class="field-label">${lang()==='en'?'SKU':'رمز الصنف'}</label>
+              <input id="npSku" class="input w-full" placeholder="${lang()==='en'?'auto if blank':'تلقائي إن تُرك فارغًا'}"/></div>
+            <div><label class="field-label">${lang()==='en'?'Category':'الفئة'}</label>
+              <select id="npCategory" class="select w-full">${cats.map(c=>`<option value="${c[0]}">${escapeHtml(c[1])}</option>`).join("")}</select></div>
+            <div><label class="field-label">${lang()==='en'?'Unit':'الوحدة'}</label>
+              <select id="npUnit" class="select w-full">${units.map(u=>`<option value="${u[0]}">${escapeHtml(u[1])}</option>`).join("")}</select></div>
+            <div><label class="field-label">${lang()==='en'?'Unit price (SAR)':'سعر الوحدة (ر.س)'}</label>
+              <input id="npPrice" type="number" min="0" step="0.01" class="input w-full" placeholder="0.00"/></div>
+            <div><label class="field-label">${lang()==='en'?'Reorder level':'حد إعادة الطلب'}</label>
+              <input id="npReorderLevel" type="number" min="0" class="input w-full" placeholder="0"/></div>
+            <div><label class="field-label">${lang()==='en'?'Reorder qty':'كمية إعادة الطلب'}</label>
+              <input id="npReorderQty" type="number" min="1" class="input w-full" placeholder="1"/></div>
+          </div>
+        </div>`;
+      const back = window.APP_STATE.poDraft ? "INV._renderPOModal()" : "INV._renderReceiveModal()";
+      const footer = `
+        <button class="btn btn-outline" onclick="${back}">${T("c.cancel")}</button>
+        <button class="btn btn-primary" onclick="INV.saveNewPart()">${ICONS.save()}${lang()==='en'?'Create item':'إنشاء الصنف'}</button>`;
+      window.app.openModal({ title: lang()==='en'?'New item / equipment':'صنف / معدة جديدة', html, footer });
+    },
+    saveNewPart() {
+      const name = (document.getElementById("npName").value || "").trim();
+      if (!name) { window.app.toast(T("inv.requireField")); return; }
+      const rec = D().addPart({
+        name,
+        nameAr: document.getElementById("npNameAr").value,
+        sku: document.getElementById("npSku").value,
+        category: document.getElementById("npCategory").value,
+        unit: document.getElementById("npUnit").value,
+        priceSar: document.getElementById("npPrice").value,
+        reorderLevel: document.getElementById("npReorderLevel").value,
+        reorderQty: document.getElementById("npReorderQty").value,
+      });
+      if (rec) {
+        const qty = rec.reorderQty || 1;
+        const addToDraft = (d) => {
+          const ex = d.lines.find(l => l.partId === rec.id);
+          if (ex) ex.qty += qty;
+          else d.lines.push({ partId: rec.id, qty, unitPriceSar: rec.currentPriceSar });
+        };
+        if (window.APP_STATE.poDraft) addToDraft(window.APP_STATE.poDraft);
+        else if (window.APP_STATE.receiveDraft) addToDraft(window.APP_STATE.receiveDraft);
+        window.app.toast(`${lang()==='en'?'Item created':'تم إنشاء الصنف'} · ${rec.name}`);
+      }
+      if (window.APP_STATE.poDraft) INV._renderPOModal();
+      else if (window.APP_STATE.receiveDraft) INV._renderReceiveModal();
       else window.app.closeModal();
     },
 
