@@ -3,8 +3,8 @@ import "./globals.css";
 import AppShell from "@/components/AppShell";
 
 export const metadata: Metadata = {
-  title: "AquaFleet KSA — Water Transportation Fleet Operations",
-  description: "Fleet, trips, predictive maintenance & inventory for water transport in Saudi Arabia",
+  title: "Bousla — Bin Slimah Group Operations",
+  description: "Water transport & treatment operations for Bin Slimah Group",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

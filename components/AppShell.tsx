@@ -6,17 +6,23 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Truck as TruckIcon, Users, Route, Wrench, Brain,
   Boxes, FileBarChart, Activity, Search, Bell, Sun, Moon, Globe, MapPin,
+  Building2, FolderKanban, LogOut,
 } from "lucide-react";
 import type { Lang } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { signOut } from "@/lib/actions/auth";
 
 type AppCtx = { lang: Lang; setLang: (l: Lang) => void; theme: "light" | "dark"; setTheme: (m: "light" | "dark") => void };
 const Ctx = createContext<AppCtx>({ lang: "en", setLang: () => {}, theme: "light", setTheme: () => {} });
 export const useApp = () => useContext(Ctx);
 
+// `label` (English literal) takes precedence over the i18n `key` lookup —
+// used for Phase 1 pages that don't have i18n entries yet.
 const NAV = [
   { href: "/", key: "dashboard", icon: LayoutDashboard },
+  { href: "/customers", label: "Customers", icon: Building2 },
+  { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/fleet", key: "fleet", icon: TruckIcon },
   { href: "/drivers", key: "drivers", icon: Users },
   { href: "/trips", key: "trips", icon: Route },
@@ -26,7 +32,7 @@ const NAV = [
   { href: "/iot", key: "iot", icon: Activity },
   { href: "/inventory", key: "inventory", icon: Boxes },
   { href: "/reports", key: "reports", icon: FileBarChart },
-];
+] as { href: string; key?: string; label?: string; icon: typeof LayoutDashboard }[];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = useState<Lang>("en");
@@ -54,16 +60,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const setLang = (l: Lang) => setLangState(l);
   const setTheme = (m: "light" | "dark") => setThemeState(m);
 
+  // /login renders standalone, without the app chrome.
+  if (pathname === "/login") return <>{children}</>;
+
   return (
     <Ctx.Provider value={{ lang, setLang, theme, setTheme }}>
       <div className="flex min-h-screen">
         {/* Sidebar */}
         <aside className="w-64 shrink-0 border-app border-e p-4 hidden md:flex flex-col" style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}>
           <div className="flex items-center gap-2 mb-6 px-2">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 grid place-items-center text-white font-bold">A</div>
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 grid place-items-center text-white font-bold">B</div>
             <div>
-              <div className="font-semibold leading-tight">{t("appName", lang)}</div>
-              <div className="text-[11px] muted leading-tight">{t("tagline", lang)}</div>
+              <div className="font-semibold leading-tight">Bousla</div>
+              <div className="text-[11px] muted leading-tight">Bin Slimah Group · Operations</div>
             </div>
           </div>
           <nav className="flex flex-col gap-1">
@@ -77,14 +86,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     active ? "bg-brand-600 text-white shadow-soft" : "hover:bg-black/5 dark:hover:bg-white/5"
                   )}>
                   <Icon className="h-4 w-4 shrink-0" />
-                  <span>{t(`nav.${item.key}`, lang)}</span>
+                  <span>{item.label ?? t(`nav.${item.key}`, lang)}</span>
                 </Link>
               );
             })}
           </nav>
           <div className="mt-auto pt-4 text-[11px] muted px-2">
-            <div>v0.1 · MVP demo</div>
-            <div>© 2026 AquaFleet KSA</div>
+            <div>v0.1 · MVP</div>
+            <div>© 2026 Bousla · Bin Slimah Group</div>
           </div>
         </aside>
 
@@ -118,7 +127,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <Bell className="h-4 w-4" />
                 <span className="absolute top-1.5 end-1.5 h-2 w-2 rounded-full bg-rose-500"></span>
               </button>
-              <div className="h-9 w-9 rounded-full bg-brand-700 text-white grid place-items-center text-sm font-semibold">TS</div>
+              <form action={signOut}>
+                <button type="submit"
+                  className="h-9 px-3 rounded-lg border text-sm flex items-center gap-1.5 hover:bg-black/5 dark:hover:bg-white/5"
+                  style={{ borderColor: "rgb(var(--border))" }}>
+                  <LogOut className="h-4 w-4" />
+                  <span className="font-medium">Log out</span>
+                </button>
+              </form>
             </div>
           </header>
 
