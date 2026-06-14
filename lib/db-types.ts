@@ -56,3 +56,59 @@ export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   paused: "Paused",
   ended: "Ended",
 };
+
+// ---------------------------------------------------------------------------
+// Phase 2 — trucks + drivers (see 0002_init_trucks_drivers.sql).
+// Assignment is single-source-of-truth: only trucks.assigned_driver_id holds
+// the link. Driver rows carry NO truck reference.
+// ---------------------------------------------------------------------------
+
+export type DriverStatus = "active" | "on_leave" | "inactive";
+
+export type Driver = {
+  id: string;
+  name: string;
+  name_ar: string | null;
+  iqama_number: string | null;
+  license_expiry: string | null;
+  status: DriverStatus;
+  safety_score: number | null;
+  rating: number | null;
+  active: boolean;
+  created_at: string;
+};
+
+export type TruckStatus = "active" | "idle" | "maintenance" | "out_of_service";
+
+export type Truck = {
+  id: string;
+  plate: string;
+  model: string | null;
+  year: number | null;
+  capacity_m3: number | null;
+  status: TruckStatus;
+  health_score: number | null;
+  home_station: string | null;
+  odometer_km: number | null;
+  engine_hours: number | null;
+  vin: string | null;
+  assigned_driver_id: string | null;
+  active: boolean;
+  created_at: string;
+};
+
+export const DRIVER_STATUS_LABELS: Record<DriverStatus, string> = {
+  active: "Active",
+  on_leave: "On leave",
+  inactive: "Inactive",
+};
+
+export const TRUCK_STATUS_LABELS: Record<TruckStatus, string> = {
+  active: "Active",
+  idle: "Idle",
+  maintenance: "Maintenance",
+  out_of_service: "Out of service",
+};
+
+// Riyadh-only operation: 3 water stations (placeholder labels for now).
+export const STATION_OPTIONS = ["South Station 1", "South Station 2", "North Station"] as const;
