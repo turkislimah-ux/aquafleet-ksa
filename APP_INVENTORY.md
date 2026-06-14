@@ -1,7 +1,8 @@
 # AquaFleet KSA — Application Inventory
 
-> **Status:** as-built assessment of the current prototype, captured before any new development.
+> **Status:** as-built assessment of the original prototype, captured before any new development.
 > **Scope:** the static single-page app under `preview/`.
+> **Real vs. demo:** for which Next.js pages are now Supabase-backed, see [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
 ## 0. Architecture at a glance
 
