@@ -15,12 +15,15 @@ export type Customer = {
   delivery_lat: number | null;
   delivery_lng: number | null;
   payment_model: PaymentModel;
+  default_station: string | null;
   active: boolean;
   created_at: string;
 };
 
 export type CommissionMode = "fixed" | "scalable";
 export type ProjectStatus = "active" | "paused" | "ended";
+
+export type WaterType = "potable" | "non_potable";
 
 export type Project = {
   id: string;
@@ -32,6 +35,8 @@ export type Project = {
   start_date: string | null;
   end_date: string | null;
   status: ProjectStatus;
+  water_type: WaterType | null;
+  default_station: string | null;
   created_at: string;
 };
 
@@ -112,3 +117,81 @@ export const TRUCK_STATUS_LABELS: Record<TruckStatus, string> = {
 
 // Riyadh-only operation: 3 water stations (placeholder labels for now).
 export const STATION_OPTIONS = ["South Station 1", "South Station 2", "North Station"] as const;
+
+// ---------------------------------------------------------------------------
+// Phase 3 — trips + Kanban (see 0003_init_trips.sql).
+// A trip references a project OR a bare customer. Stage advances through four
+// columns; *_at is stamped on entering each stage. All stage changes funnel
+// through one action so GPS automation can drive it later.
+// ---------------------------------------------------------------------------
+
+export type TripStage = "scheduled" | "loading" | "in_transit" | "delivered";
+
+export type Trip = {
+  id: string;
+  project_id: string | null;
+  customer_id: string | null;
+  water_station: string;
+  truck_id: string | null;
+  driver_id: string | null;
+  water_type: WaterType;
+  rate_sar: number | null;
+  stage: TripStage;
+  trip_date: string;
+  scheduled_at: string | null;
+  loading_at: string | null;
+  in_transit_at: string | null;
+  delivered_at: string | null;
+  created_at: string;
+};
+
+export const WATER_TYPE_LABELS: Record<WaterType, string> = {
+  potable: "Potable",
+  non_potable: "Non-potable",
+};
+
+export const TRIP_STAGE_LABELS: Record<TripStage, string> = {
+  scheduled: "Scheduled",
+  loading: "Loading",
+  in_transit: "In transit",
+  delivered: "Delivered",
+};
+
+// Column order on the Kanban board (also the natural progression).
+export const STAGE_ORDER: TripStage[] = ["scheduled", "loading", "in_transit", "delivered"];
+
+// The timestamp column stamped when a trip ENTERS each stage.
+export const STAGE_TIMESTAMP: Record<TripStage, "scheduled_at" | "loading_at" | "in_transit_at" | "delivered_at"> = {
+  scheduled: "scheduled_at",
+  loading: "loading_at",
+  in_transit: "in_transit_at",
+  delivered: "delivered_at",
+};
+
+// Distinct, readable per-stage colors (slate / amber / sky / emerald). Tailwind
+// classes for the card accent + the column header chip.
+export const STAGE_STYLES: Record<TripStage, { card: string; dot: string; chip: string }> = {
+  scheduled: {
+    card: "border-s-4 border-s-slate-400",
+    dot: "bg-slate-400",
+    chip: "bg-slate-500/10 text-slate-700 dark:text-slate-300 ring-slate-500/20",
+  },
+  loading: {
+    card: "border-s-4 border-s-amber-500",
+    dot: "bg-amber-500",
+    chip: "bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20",
+  },
+  in_transit: {
+    card: "border-s-4 border-s-sky-500",
+    dot: "bg-sky-500",
+    chip: "bg-sky-500/10 text-sky-700 dark:text-sky-300 ring-sky-500/20",
+  },
+  delivered: {
+    card: "border-s-4 border-s-emerald-500",
+    dot: "bg-emerald-500",
+    chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20",
+  },
+};
+
+// Guard rail for batch trip creation.
+export const MAX_BATCH_TRIPS = 50;
