@@ -29,14 +29,30 @@ export type Project = {
   id: string;
   customer_id: string;
   name: string;
+  // Customer billing rate per trip — kept SEPARATE from driver commission.
   rate_per_trip_sar: number;
   commission_mode: CommissionMode;
+  // Driver BASE commission per trip (SAR). Fixed pays this flat; scalable uses
+  // it as the base for the per-trip bump (commission_bump_pct).
   commission_value: number;
+  commission_bump_pct: number;
   start_date: string | null;
   end_date: string | null;
   status: ProjectStatus;
   water_type: WaterType | null;
   default_station: string | null;
+  // Demo header fields (Path B).
+  location: string | null;
+  location_lat: number | null;
+  location_lng: number | null;
+  description: string | null;
+  created_at: string;
+};
+
+// project_drivers join row — which drivers staff which project (0004).
+export type ProjectDriver = {
+  project_id: string;
+  driver_id: string;
   created_at: string;
 };
 
@@ -129,13 +145,19 @@ export type TripStage = "scheduled" | "loading" | "in_transit" | "delivered";
 
 export type Trip = {
   id: string;
+  // Human reference code, DB-generated (e.g. WT-2026-0042). Backfilled in 0004.
+  ref: string | null;
   project_id: string | null;
   customer_id: string | null;
   water_station: string;
   truck_id: string | null;
   driver_id: string | null;
   water_type: WaterType;
+  // Tank class in m³ (e.g. 33 / 18 / 6). Nullable.
+  tank_size_m3: number | null;
   rate_sar: number | null;
+  // Driver commission actually paid for this trip, stamped on Delivered.
+  commission_sar: number | null;
   stage: TripStage;
   trip_date: string;
   scheduled_at: string | null;

@@ -44,8 +44,15 @@ create table if not exists public.projects (
   rate_per_trip_sar numeric(12, 2) not null default 0,
   -- 'fixed'   = commission_value is paid per trip, unchanged.
   -- 'scalable'= commission grows per trip by commission_value (percent step).
+  -- Driver-commission model. rate_per_trip_sar above is the CUSTOMER billing
+  -- rate; the columns below are the DRIVER's commission, kept separate.
+  --   'fixed'    = every delivered trip pays commission_value (flat).
+  --   'scalable' = trip n pays commission_value * (1 + (n-1) * step%/100),
+  --                where the step % lives in projects.commission_bump_pct
+  --                (added in 0004) and n resets per driver/project/month.
   commission_mode   text not null default 'fixed'
                       check (commission_mode in ('fixed', 'scalable')),
+  -- Driver BASE commission per trip (SAR). See commission_mode above.
   commission_value  numeric(12, 2) not null default 0,
   start_date        date,
   end_date          date,  -- nullable = open-ended project
