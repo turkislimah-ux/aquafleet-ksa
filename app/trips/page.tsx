@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
 import type { Trip, WaterType } from "@/lib/db-types";
 import CreateTripForm from "./CreateTripForm";
+import TripBoard from "./TripBoard";
 
 export const dynamic = "force-dynamic";
 
@@ -72,12 +73,12 @@ export default async function TripsPage() {
         </p>
       )}
       <CreateTripForm
-        trips={trips}
         projects={projects}
         customers={customers}
         trucks={trucks}
         drivers={drivers}
       />
+      <TripBoard trips={trips} />
     </div>
   );
 }

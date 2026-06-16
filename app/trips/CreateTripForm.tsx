@@ -1,24 +1,19 @@
 "use client";
 
-// Client island for the Trips page: a flat roster table plus a New trip modal
-// wired to createTrip. The modal links each trip to EITHER a project or a bare
-// customer; picking a project pre-fills water type + station (both still
-// overridable). Count lets you stamp out a batch of identical trips in one go.
-// (The Kanban board and edit/stage-change flows arrive in later sub-steps.)
+// Client island: the "New trip" button + modal, wired to createTrip. The modal
+// links each trip to EITHER a project or a bare customer; picking a project
+// pre-fills water type + station (both still overridable). Count stamps out a
+// batch of identical trips in one insert. The board itself lives in TripBoard.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
-import { Btn, Table, TH, TD } from "@/components/ui";
+import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
-  type Trip,
   type WaterType,
-  type TripStage,
   WATER_TYPE_LABELS,
-  TRIP_STAGE_LABELS,
   STATION_OPTIONS,
-  STAGE_STYLES,
   MAX_BATCH_TRIPS,
 } from "@/lib/db-types";
 import { createTrip } from "./actions";
@@ -32,11 +27,6 @@ type ProjectOption = {
 type CustomerOption = { id: string; name: string; default_station: string | null };
 type TruckOption = { id: string; plate: string };
 type DriverOption = { id: string; name: string };
-type TripRow = Trip & {
-  linkedName: string;
-  truckPlate: string | null;
-  driverName: string | null;
-};
 
 type Kind = "project" | "customer";
 
@@ -44,29 +34,12 @@ const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-function StageChip({ stage }: { stage: TripStage }) {
-  const s = STAGE_STYLES[stage];
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-        s.chip
-      )}
-    >
-      <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
-      {TRIP_STAGE_LABELS[stage]}
-    </span>
-  );
-}
-
 export default function CreateTripForm({
-  trips,
   projects,
   customers,
   trucks,
   drivers,
 }: {
-  trips: TripRow[];
   projects: ProjectOption[];
   customers: CustomerOption[];
   trucks: TruckOption[];
@@ -142,54 +115,6 @@ export default function CreateTripForm({
           Create a customer or project first — a trip must link to one.
         </p>
       )}
-
-      <div className="card p-0 overflow-hidden">
-        <Table>
-          <thead>
-            <tr>
-              <TH>Linked to</TH>
-              <TH>Station</TH>
-              <TH>Water</TH>
-              <TH>Truck</TH>
-              <TH>Driver</TH>
-              <TH>Stage</TH>
-              <TH>Date</TH>
-            </tr>
-          </thead>
-          <tbody>
-            {trips.length === 0 && (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="py-6 px-3 border-t text-center muted text-sm"
-                  style={{ borderColor: "rgb(var(--border))" }}
-                >
-                  No trips yet.
-                </td>
-              </tr>
-            )}
-            {trips.map((tr) => (
-              <tr key={tr.id}>
-                <TD className="font-medium">{tr.linkedName}</TD>
-                <TD>{tr.water_station}</TD>
-                <TD>{WATER_TYPE_LABELS[tr.water_type]}</TD>
-                <TD>
-                  {tr.truckPlate ? (
-                    <span className="font-mono text-xs">{tr.truckPlate}</span>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                </TD>
-                <TD>{tr.driverName ?? <span className="muted">—</span>}</TD>
-                <TD>
-                  <StageChip stage={tr.stage} />
-                </TD>
-                <TD className="tabular-nums">{tr.trip_date}</TD>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </div>
 
       {open && (
         <div
