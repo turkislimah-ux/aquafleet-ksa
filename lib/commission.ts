@@ -1,0 +1,105 @@
+// Driver-commission engine — PURE. No Supabase, no Next, no I/O. Every function
+// here is deterministic and unit-checkable in isolation (see
+// scripts/commission-check.ts). The board/actions consume this; they never
+// re-implement the math.
+//
+// Model (Path B, confirmed):
+//   base  = projects.commission_value      (driver base commission per trip, SAR)
+//   mode  = projects.commission_mode       ('fixed' | 'scalable')
+//   bump% = projects.commission_bump_pct   (scalable step %; 0 for fixed)
+//
+//   fixed    : every delivered trip pays `base`.
+//   scalable : the n-th delivered trip pays  base * (1 + (n-1) * bump%/100),
+//              where n is THIS driver's trip number ON THIS PROJECT within the
+//              current CALENDAR MONTH (resets to 1 each month).
+
+import type { CommissionMode } from "./db-types";
+
+// Round to 2 decimals (money). Keeps 60 * 1.05 = 63, not 62.99999.
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Commission for the n-th trip (1-based) of a driver on a project this month.
+ * - fixed    → base, regardless of n.
+ * - scalable → base * (1 + (n-1) * bumpPct/100).
+ * Guards: n is clamped to >= 1; a non-finite/negative base yields 0.
+ */
+export function commissionForNthTrip(
+  base: number,
+  mode: CommissionMode,
+  bumpPct: number,
+  n: number
+): number {
+  if (!Number.isFinite(base) || base <= 0) return 0;
+  const idx = Math.max(1, Math.floor(n));
+  if (mode === "fixed") return round2(base);
+  const pct = Number.isFinite(bumpPct) ? bumpPct : 0;
+  return round2(base * (1 + (idx - 1) * (pct / 100)));
+}
+
+/**
+ * Commission for a trip being delivered NOW, given how many of this driver's
+ * trips on this project were ALREADY delivered earlier this same month.
+ * The new trip is the (priorThisMonth + 1)-th. Used by the delivery action to
+ * stamp trips.commission_sar.
+ */
+export function commissionForDelivery(
+  base: number,
+  mode: CommissionMode,
+  bumpPct: number,
+  priorThisMonth: number
+): number {
+  const prior = Math.max(0, Math.floor(priorThisMonth));
+  return commissionForNthTrip(base, mode, bumpPct, prior + 1);
+}
+
+// "YYYY-MM" for an ISO timestamp. Derived from the UTC instant (deterministic
+// across machines). Month-boundary deliveries are bucketed by UTC date.
+export function monthKeyOf(iso: string): string {
+  return iso.slice(0, 7);
+}
+
+type DeliveredLite = { delivered_at: string | null };
+
+export type MonthlyCommission = {
+  monthKey: string;
+  count: number;
+  total: number;
+  perTrip: { n: number; delivered_at: string; commission: number }[];
+};
+
+/**
+ * Roll up one driver's commission on one project for a single calendar month.
+ * `trips` is that driver's delivered trips on that project (any months); rows
+ * are filtered to `monthKey`, sorted by delivered_at ascending, numbered
+ * n = 1..k, and each priced. Because numbering is scoped to `monthKey`, the
+ * scalable ramp resets every month automatically.
+ *
+ * Trips with a null delivered_at are ignored (not yet delivered = no commission).
+ */
+export function monthlyDriverProjectCommission(
+  trips: DeliveredLite[],
+  base: number,
+  mode: CommissionMode,
+  bumpPct: number,
+  monthKey: string
+): MonthlyCommission {
+  const inMonth = trips
+    .filter((t): t is { delivered_at: string } => !!t.delivered_at)
+    .filter((t) => monthKeyOf(t.delivered_at) === monthKey)
+    .sort((a, b) => (a.delivered_at < b.delivered_at ? -1 : a.delivered_at > b.delivered_at ? 1 : 0));
+
+  const perTrip = inMonth.map((t, i) => {
+    const n = i + 1;
+    return { n, delivered_at: t.delivered_at, commission: commissionForNthTrip(base, mode, bumpPct, n) };
+  });
+
+  return {
+    monthKey,
+    count: perTrip.length,
+    total: round2(perTrip.reduce((s, p) => s + p.commission, 0)),
+    perTrip,
+  };
+}
