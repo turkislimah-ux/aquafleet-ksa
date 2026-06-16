@@ -172,22 +172,22 @@ export const STAGE_TIMESTAMP: Record<TripStage, "scheduled_at" | "loading_at" | 
 // classes for the card accent + the column header chip.
 export const STAGE_STYLES: Record<TripStage, { card: string; dot: string; chip: string }> = {
   scheduled: {
-    card: "border-s-4 border-s-slate-400",
+    card: "border-t-[3px] border-t-slate-400",
     dot: "bg-slate-400",
     chip: "bg-slate-500/10 text-slate-700 dark:text-slate-300 ring-slate-500/20",
   },
   loading: {
-    card: "border-s-4 border-s-amber-500",
+    card: "border-t-[3px] border-t-amber-500",
     dot: "bg-amber-500",
     chip: "bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20",
   },
   in_transit: {
-    card: "border-s-4 border-s-sky-500",
+    card: "border-t-[3px] border-t-sky-500",
     dot: "bg-sky-500",
     chip: "bg-sky-500/10 text-sky-700 dark:text-sky-300 ring-sky-500/20",
   },
   delivered: {
-    card: "border-s-4 border-s-emerald-500",
+    card: "border-t-[3px] border-t-emerald-500",
     dot: "bg-emerald-500",
     chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20",
   },

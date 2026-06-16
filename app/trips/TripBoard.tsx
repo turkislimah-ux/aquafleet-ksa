@@ -41,7 +41,8 @@ function TripCard({ trip, onClick }: { trip: TripRow; onClick: () => void }) {
       onClick={onClick}
       className={cn(
         "card p-3 text-sm w-full text-start transition hover:shadow-soft hover:-translate-y-px",
-        s.card
+        s.card,
+        trip.stage === "delivered" && "opacity-[0.85]"
       )}
     >
       <div className="font-medium truncate">{trip.linkedName}</div>
