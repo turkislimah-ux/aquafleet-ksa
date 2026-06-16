@@ -56,3 +56,33 @@ export async function updateProject(id: string, formData: FormData): Promise<Act
   revalidatePath("/projects");
   return { error: null };
 }
+
+// Replace-all the drivers staffing a project (project_drivers join). Mirrors the
+// demo's "Manage drivers" Save: whatever is selected becomes the full set.
+export async function setProjectDrivers(
+  projectId: string,
+  driverIds: string[]
+): Promise<ActionResult> {
+  if (!projectId) return { error: "Missing project." };
+
+  const supabase = createClient();
+  // Clear the project's current assignments, then insert the chosen set.
+  const { error: delErr } = await supabase
+    .from("project_drivers")
+    .delete()
+    .eq("project_id", projectId);
+  if (delErr) return { error: delErr.message };
+
+  const rows = Array.from(new Set(driverIds.filter(Boolean))).map((driver_id) => ({
+    project_id: projectId,
+    driver_id,
+  }));
+  if (rows.length > 0) {
+    const { error: insErr } = await supabase.from("project_drivers").insert(rows);
+    if (insErr) return { error: insErr.message };
+  }
+
+  revalidatePath("/projects");
+  revalidatePath("/trips");
+  return { error: null };
+}

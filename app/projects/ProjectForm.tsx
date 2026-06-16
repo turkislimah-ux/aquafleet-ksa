@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Users } from "lucide-react";
 import { Btn, Table, TH, TD, StatusPill } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import {
@@ -15,6 +15,7 @@ import {
   PROJECT_STATUS_LABELS,
 } from "@/lib/db-types";
 import { createProject, updateProject } from "./actions";
+import ManageDriversModal, { type DriverOption } from "./ManageDriversModal";
 
 type CustomerOption = { id: string; name: string };
 type ProjectRow = Project & { customerName: string };
@@ -26,15 +27,20 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 export default function ProjectForm({
   projects,
   customers,
+  drivers,
+  assignmentsByProject,
 }: {
   projects: ProjectRow[];
   customers: CustomerOption[];
+  drivers: DriverOption[];
+  assignmentsByProject: Record<string, string[]>;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState<ProjectRow | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [managing, setManaging] = useState<ProjectRow | null>(null);
 
   function openNew() {
     setEditing(null);
@@ -111,9 +117,15 @@ export default function ProjectForm({
                 <TD>{p.start_date ?? "—"} → {p.end_date ?? "open"}</TD>
                 <TD><StatusPill status={p.status === "active" ? "active" : p.status === "paused" ? "warning" : "out_of_service"} label={PROJECT_STATUS_LABELS[p.status]} /></TD>
                 <TD className="text-end">
-                  <Btn variant="outline" onClick={() => openEdit(p)}>
-                    <Pencil className="h-3.5 w-3.5" /> Edit
-                  </Btn>
+                  <div className="inline-flex gap-2">
+                    <Btn variant="outline" onClick={() => setManaging(p)}>
+                      <Users className="h-3.5 w-3.5" /> Drivers
+                      <span className="muted">({(assignmentsByProject[p.id] ?? []).length})</span>
+                    </Btn>
+                    <Btn variant="outline" onClick={() => openEdit(p)}>
+                      <Pencil className="h-3.5 w-3.5" /> Edit
+                    </Btn>
+                  </div>
                 </TD>
               </tr>
             ))}
@@ -181,6 +193,15 @@ export default function ProjectForm({
             </form>
           </div>
         </div>
+      )}
+
+      {managing && (
+        <ManageDriversModal
+          project={{ id: managing.id, name: managing.name }}
+          drivers={drivers}
+          assigned={assignmentsByProject[managing.id] ?? []}
+          onClose={() => setManaging(null)}
+        />
       )}
     </>
   );
