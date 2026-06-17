@@ -5,7 +5,7 @@
 // pre-fills water type + station (both still overridable). Count stamps out a
 // batch of identical trips in one insert. The board itself lives in TripBoard.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Btn } from "@/components/ui";
@@ -39,11 +39,18 @@ export default function CreateTripForm({
   customers,
   trucks,
   drivers,
+  openForProject,
+  onCloseControlled,
 }: {
   projects: ProjectOption[];
   customers: CustomerOption[];
   trucks: TruckOption[];
   drivers: DriverOption[];
+  // When set (from a project card's "Add trip"), open the modal pre-scoped to
+  // that project. Full per-project rework (assigned-driver picker, tank/time)
+  // lands in Cluster 5; this just preselects + locks the project.
+  openForProject?: string | null;
+  onCloseControlled?: () => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -70,6 +77,7 @@ export default function CreateTripForm({
   }
   function close() {
     setOpen(false);
+    onCloseControlled?.();
   }
 
   function onPickProject(id: string) {
@@ -83,6 +91,17 @@ export default function CreateTripForm({
     const c = customers.find((x) => x.id === id);
     if (c?.default_station) setStation(c.default_station);
   }
+
+  // A project card's "Add trip" opens the modal pre-scoped to that project.
+  useEffect(() => {
+    if (openForProject) {
+      setError(null);
+      setKind("project");
+      onPickProject(openForProject);
+      setOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openForProject]);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();

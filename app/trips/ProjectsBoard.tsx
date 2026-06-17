@@ -14,7 +14,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin } from "lucide-react";
+import { MapPin, Plus, Users } from "lucide-react";
 import { Btn, Stat } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import {
@@ -31,6 +31,7 @@ import {
 } from "@/lib/db-types";
 import { setTripStage } from "./actions";
 import CreateTripForm from "./CreateTripForm";
+import ManageDriversModal from "../projects/ManageDriversModal";
 
 type TripRow = Trip & {
   linkedName: string;
@@ -104,11 +105,15 @@ function ProjectCard({
   trips,
   assignedCount,
   onCardClick,
+  onManage,
+  onAdd,
 }: {
   project: ProjectHeader;
   trips: TripRow[];
   assignedCount: number;
   onCardClick: (t: TripRow) => void;
+  onManage: (p: ProjectHeader) => void;
+  onAdd: (projectId: string) => void;
 }) {
   return (
     <div className="card p-4">
@@ -141,7 +146,14 @@ function ProjectCard({
             <span>{assignedCount} {assignedCount === 1 ? "driver" : "drivers"}</span>
           </div>
         </div>
-        {/* Right-side buttons (Manage drivers / Add trip) land in commit 2. */}
+        <div className="inline-flex gap-2 shrink-0">
+          <Btn variant="outline" onClick={() => onManage(project)}>
+            <Users className="h-3.5 w-3.5" /> Manage drivers
+          </Btn>
+          <Btn variant="primary" onClick={() => onAdd(project.id)}>
+            <Plus className="h-3.5 w-3.5" /> Add trip
+          </Btn>
+        </div>
       </div>
       {project.description && <p className="text-sm muted mt-2">{project.description}</p>}
 
@@ -204,6 +216,8 @@ export default function ProjectsBoard({
   const [menuTrip, setMenuTrip] = useState<TripRow | null>(null);
   const [saving, setSaving] = useState<TripStage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [managing, setManaging] = useState<ProjectHeader | null>(null);
+  const [addTripProjectId, setAddTripProjectId] = useState<string | null>(null);
 
   // KPI row — GLOBAL across all projects and all dates (demo behavior).
   const activeProjects = projects.filter((p) => p.status === "active").length;
@@ -281,8 +295,15 @@ export default function ProjectsBoard({
         </span>
       </div>
 
-      {/* Global new-trip button (per-project Add trip lands in commit 2). */}
-      <CreateTripForm projects={projects} customers={customers} trucks={trucks} drivers={drivers} />
+      {/* New-trip modal: own button = global; openForProject = per-project "Add trip". */}
+      <CreateTripForm
+        projects={projects}
+        customers={customers}
+        trucks={trucks}
+        drivers={drivers}
+        openForProject={addTripProjectId}
+        onCloseControlled={() => setAddTripProjectId(null)}
+      />
 
       {/* Project-stacked board */}
       {activeList.length === 0 && directCustomer.length === 0 ? (
@@ -296,6 +317,8 @@ export default function ProjectsBoard({
               trips={byProject.get(p.id) ?? []}
               assignedCount={(assignmentsByProject[p.id] ?? []).length}
               onCardClick={openMenu}
+              onManage={setManaging}
+              onAdd={setAddTripProjectId}
             />
           ))}
 
@@ -393,6 +416,16 @@ export default function ProjectsBoard({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Manage-drivers modal (project_drivers assignment) */}
+      {managing && (
+        <ManageDriversModal
+          project={{ id: managing.id, name: managing.name }}
+          drivers={drivers}
+          assigned={assignmentsByProject[managing.id] ?? []}
+          onClose={() => setManaging(null)}
+        />
       )}
     </div>
   );
