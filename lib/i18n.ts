@@ -14,6 +14,7 @@ export const dict = {
     iot: { en: "IoT Monitoring", ar: "مراقبة المستشعرات" },
     inventory: { en: "Inventory", ar: "المخزون" },
     reports: { en: "Reports", ar: "التقارير" },
+    archive: { en: "Archive", ar: "الأرشيف" },
   },
   status: {
     active: { en: "Active", ar: "نشط" },

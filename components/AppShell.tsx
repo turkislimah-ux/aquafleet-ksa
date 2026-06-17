@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Truck as TruckIcon, Users, Route, Wrench, Brain,
   Boxes, FileBarChart, Activity, Search, Bell, Sun, Moon, Globe, MapPin,
-  Building2, FolderKanban, LogOut,
+  Archive, LogOut,
 } from "lucide-react";
 import type { Lang } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
@@ -17,14 +17,13 @@ type AppCtx = { lang: Lang; setLang: (l: Lang) => void; theme: "light" | "dark";
 const Ctx = createContext<AppCtx>({ lang: "en", setLang: () => {}, theme: "light", setTheme: () => {} });
 export const useApp = () => useContext(Ctx);
 
-// `label` (English literal) takes precedence over the i18n `key` lookup —
-// used for Phase 1 pages that don't have i18n entries yet.
+// Nav mirrors the demo's routes exactly (preview/app.js NAV). Fleet Detail
+// (/fleet/:id) is a sub-route reached via "View", not a nav entry. `label` can
+// override the i18n `key` lookup, but every key below exists in lib/i18n.ts.
 const NAV = [
   { href: "/", key: "dashboard", icon: LayoutDashboard },
-  { href: "/customers", label: "Customers", icon: Building2 },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/trucks", label: "Trucks", icon: TruckIcon },
-  { href: "/drivers", label: "Drivers", icon: Users },
+  { href: "/fleet", key: "fleet", icon: TruckIcon },
+  { href: "/drivers", key: "drivers", icon: Users },
   { href: "/trips", key: "trips", icon: Route },
   { href: "/routes", key: "routes", icon: MapPin },
   { href: "/maintenance", key: "maintenance", icon: Wrench },
@@ -32,6 +31,7 @@ const NAV = [
   { href: "/iot", key: "iot", icon: Activity },
   { href: "/inventory", key: "inventory", icon: Boxes },
   { href: "/reports", key: "reports", icon: FileBarChart },
+  { href: "/archive", key: "archive", icon: Archive },
 ] as { href: string; key?: string; label?: string; icon: typeof LayoutDashboard }[];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
