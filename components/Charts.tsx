@@ -115,6 +115,57 @@ export function AreaChart({
   );
 }
 
+// Mirrors drawBars(): single bar dataset, per-bar colors, 4px radius, 36px max
+// thickness, no legend, no x gridlines, slate y gridlines, beginAtZero. Used by
+// the AI summary widgets (DASH._drawAll → drawBars branch).
+export function BarChart({
+  labels,
+  data,
+  colors,
+  className,
+}: {
+  labels: string[];
+  data: number[];
+  colors?: string[];
+  className?: string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const chartRef = useRef<Chart<"bar", number[], string> | null>(null);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    chartRef.current?.destroy();
+    chartRef.current = new Chart(el, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          { data, backgroundColor: colors ?? "#0b7eea", borderRadius: 4, maxBarThickness: 36 },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 11 }, color: "#64748b" } },
+          y: { grid: { color: "#eef2f7" }, ticks: { font: { size: 11 }, color: "#64748b" }, beginAtZero: true },
+        },
+      },
+    });
+    return () => {
+      chartRef.current?.destroy();
+      chartRef.current = null;
+    };
+  }, [labels, data, colors]);
+
+  return (
+    <div className={className}>
+      <canvas ref={canvasRef} />
+    </div>
+  );
+}
+
 // Mirrors drawDualBar(): two bar datasets, 4px radius, 14px max thickness,
 // top-end legend, no x gridlines, slate y gridlines.
 export function DualBarChart({
