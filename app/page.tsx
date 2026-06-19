@@ -14,12 +14,31 @@ export default async function DashboardPage() {
 
   const [trucksRes, tripsRes, driversRes] = await Promise.all([
     supabase.from("trucks").select("id, status, health_score"),
-    supabase.from("trips").select("id, stage, trip_date, rate_sar, delivered_at"),
+    supabase
+      .from("trips")
+      .select(
+        "id, ref, stage, trip_date, rate_sar, delivered_at, truck_id, water_station, water_type, tank_size_m3, truck:trucks(plate)"
+      )
+      .order("created_at", { ascending: false }),
     supabase.from("drivers").select("id, status"),
   ]);
 
+  type JoinedTrip = {
+    id: string;
+    ref: string | null;
+    stage: string;
+    trip_date: string;
+    rate_sar: number | null;
+    delivered_at: string | null;
+    truck_id: string | null;
+    water_station: string;
+    water_type: "potable" | "non_potable";
+    tank_size_m3: number | null;
+    truck: { plate: string } | null;
+  };
+
   const trucks = trucksRes.data ?? [];
-  const trips = tripsRes.data ?? [];
+  const trips = (tripsRes.data ?? []) as unknown as JoinedTrip[];
   const drivers = driversRes.data ?? [];
 
   // ---- Fleet KPIs (REAL: trucks.status, trucks.health_score) ----
@@ -48,12 +67,29 @@ export default async function DashboardPage() {
     .filter((t) => t.stage === "delivered" && (t.delivered_at ?? "").slice(0, 10) >= cutoff)
     .reduce((s, t) => s + (t.rate_sar ?? 0), 0);
 
+  // Live Trips (REAL: stage in loading/in_transit, newest first, top 5).
+  // destination/liters/distance fields don't exist in schema; we surface the
+  // real substitutes water_station + tank_size_m3 + water_type instead.
+  const liveTrips = trips
+    .filter((t) => t.stage === "loading" || t.stage === "in_transit")
+    .slice(0, 5)
+    .map((t) => ({
+      id: t.id,
+      ref: t.ref,
+      stage: t.stage as "loading" | "in_transit",
+      truckLabel: t.truck?.plate ?? t.truck_id ?? "—",
+      station: t.water_station,
+      waterType: t.water_type,
+      tankM3: t.tank_size_m3,
+    }));
+
   const error = trucksRes.error || tripsRes.error || driversRes.error;
 
   return (
     <DashboardClient
       fleet={{ total, active, idle, maint, oos, avgHealth }}
       bottom={{ todayTrips, onDuty, driversTotal: drivers.length, revenue30d }}
+      liveTrips={liveTrips}
       errorMsg={error?.message ?? null}
     />
   );
