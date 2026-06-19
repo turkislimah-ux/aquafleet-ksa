@@ -401,10 +401,10 @@ export default function DashboardClient({
                       <StatusPill status={tr.stage} label={TRIP_STAGE_LABELS[tr.stage as TripStage]} />
                     </div>
                     <div className="text-xs muted truncate">
-                      {tr.truckLabel} → {tr.station}
+                      {tr.truckLabel} → {tr.station || "—"}
                     </div>
                     <div className="text-[11px] muted">
-                      {tr.tankM3 != null ? `${tr.tankM3} m³` : "— m³"} · {WATER_TYPE_LABELS[tr.waterType]}
+                      {tr.tankM3 != null ? `${tr.tankM3} m³` : "— m³"} · {WATER_TYPE_LABELS[tr.waterType] ?? tr.waterType}
                     </div>
                   </div>
                 </div>
