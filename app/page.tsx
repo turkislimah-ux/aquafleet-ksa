@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatSar } from "@/lib/utils";
 import { TRIP_STAGE_LABELS } from "@/lib/db-types";
-import DashboardClient, { type Datasets } from "./DashboardClient";
+import DashboardClient, { type Datasets, type DashboardCharts } from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +84,62 @@ export default async function DashboardPage() {
       waterType: t.water_type,
       tankM3: t.tank_size_m3,
     }));
+
+  // ---- Volume Delivered (30d) — REAL per-day Σ tank_size_m3 ----
+  // Honest-empty: if NO trip in the 30-day window carries tank_size_m3, hasData
+  // is false and the client renders "No data yet" instead of a line. Badge % is
+  // current 30d total vs the preceding 30d; null (hidden) when empty or prior=0.
+  const VOL_DAYS = 30;
+  const volLabels: string[] = [];
+  const volKeys: string[] = [];
+  for (let i = VOL_DAYS - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000);
+    volKeys.push(d.toISOString().slice(0, 10));
+    volLabels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+  }
+  const volKeySet = new Set(volKeys);
+  const volMap: Record<string, number> = {};
+  trips.forEach((t) => {
+    if (t.tank_size_m3 == null) return;
+    const k = (t.trip_date ?? "").slice(0, 10);
+    if (volKeySet.has(k)) volMap[k] = (volMap[k] ?? 0) + t.tank_size_m3;
+  });
+  const volValues = volKeys.map((k) => +(volMap[k] ?? 0).toFixed(2));
+  const volHasData = Object.keys(volMap).length > 0;
+  const volTotal = volValues.reduce((s, v) => s + v, 0);
+
+  const prevVolKeys = new Set<string>();
+  for (let i = 2 * VOL_DAYS - 1; i >= VOL_DAYS; i--) {
+    prevVolKeys.add(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
+  }
+  let prevVolTotal = 0;
+  trips.forEach((t) => {
+    if (t.tank_size_m3 == null) return;
+    const k = (t.trip_date ?? "").slice(0, 10);
+    if (prevVolKeys.has(k)) prevVolTotal += t.tank_size_m3;
+  });
+  const volPct = volHasData && prevVolTotal > 0 ? +(((volTotal - prevVolTotal) / prevVolTotal) * 100).toFixed(1) : null;
+
+  // ---- Daily Trips (14d) — REAL per-day trip COUNT (always available) ----
+  const TRIP_DAYS = 14;
+  const tripLabels: string[] = [];
+  const tripKeys: string[] = [];
+  for (let i = TRIP_DAYS - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000);
+    tripKeys.push(d.toISOString().slice(0, 10));
+    tripLabels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+  }
+  const tripCountMap: Record<string, number> = {};
+  trips.forEach((t) => {
+    const k = (t.trip_date ?? "").slice(0, 10);
+    if (k) tripCountMap[k] = (tripCountMap[k] ?? 0) + 1;
+  });
+  const tripCounts = tripKeys.map((k) => tripCountMap[k] ?? 0);
+
+  const charts: DashboardCharts = {
+    volume: { labels: volLabels, values: volValues, total: volTotal, pct: volPct, hasData: volHasData },
+    dailyTrips: { labels: tripLabels, counts: tripCounts },
+  };
 
   // ---- AI summary widget datasets (mirrors demo dashCompute, preview/pages-1.js:2240) ----
   // REAL datasets are computed from live tables. Datasets whose tables/columns
@@ -198,6 +254,7 @@ export default async function DashboardPage() {
       fleet={{ total, active, idle, maint, oos, avgHealth }}
       bottom={{ todayTrips, onDuty, driversTotal: drivers.length, revenue30d }}
       liveTrips={liveTrips}
+      charts={charts}
       datasets={datasets}
       errorMsg={error?.message ?? null}
     />

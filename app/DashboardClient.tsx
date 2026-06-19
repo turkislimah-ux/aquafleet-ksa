@@ -12,8 +12,8 @@
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
-import { PageHeader, Stat, Btn, Section, StatusPill, Bar } from "@/components/ui";
-import { PieChart, AreaChart, DualBarChart, BarChart } from "@/components/Charts";
+import { PageHeader, Stat, Btn, Section, StatusPill } from "@/components/ui";
+import { PieChart, AreaChart, BarChart } from "@/components/Charts";
 import { Activity, Plus, TrendingUp, TrendingDown, Droplets, Zap, X } from "lucide-react";
 import { formatSar, cn } from "@/lib/utils";
 import { WATER_TYPE_LABELS, TRIP_STAGE_LABELS, type WaterType, type TripStage } from "@/lib/db-types";
@@ -28,6 +28,14 @@ type LiveTrip = {
   station: string;
   waterType: WaterType;
   tankM3: number | null;
+};
+
+// Real chart series computed server-side (page.tsx). Volume = per-day Σ
+// tank_size_m3 over 30 days (hasData false → honest-empty); dailyTrips = per-day
+// trip count over 14 days. Fuel is intentionally absent (no schema source yet).
+export type DashboardCharts = {
+  volume: { labels: string[]; values: number[]; total: number; pct: number | null; hasData: boolean };
+  dailyTrips: { labels: string[]; counts: number[] };
 };
 
 // ---- AI summary widget engine types (ported from DASH/dashCompute) ----
@@ -52,26 +60,6 @@ export type Datasets = Record<DatasetKey, WidgetSpec>;
 
 type Display = "stat" | "chart" | "table";
 type Widget = { id: string; request: string; display: Display; datasetKey: DatasetKey; title: string };
-
-// Demo synthetic placeholder series (preview/pages-1.js dashboard()). These two
-// charts are hardcoded in the demo too; replicated until real liters/fuel exist.
-const VOLUME = Array.from({ length: 14 }, (_, i) => 90 + ((i * 7919) % 60000) / 1000);
-const DAILY_TRIPS = Array.from({ length: 14 }, (_, i) => 22 + ((i * 13) % 14));
-const DAILY_FUEL = Array.from({ length: 14 }, (_, i) => 18 + ((i * 7) % 9));
-const last14Labels = Array.from({ length: 14 }, (_, i) => {
-  const d = new Date(Date.now() - (13 - i) * 86400000);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-});
-
-// Operating Cost rows are hardcoded in the demo; replicated verbatim (PLACEHOLDER).
-const COST_ROWS: [string, number][] = [
-  ["Fuel", 142000],
-  ["Maintenance", 58000],
-  ["Drivers", 96000],
-  ["Parts", 31000],
-  ["Other", 18000],
-];
-const COST_MAX = 142000;
 
 // dashInterpret() ported 1:1 (preview/pages-1.js:2471). Keyword → dataset key,
 // then resolve display (auto/stat/chart/table). Arabic keywords kept verbatim.
@@ -216,12 +204,14 @@ export default function DashboardClient({
   fleet,
   bottom,
   liveTrips,
+  charts,
   datasets,
   errorMsg,
 }: {
   fleet: Fleet;
   bottom: Bottom;
   liveTrips: LiveTrip[];
+  charts: DashboardCharts;
   datasets: Datasets;
   errorMsg: string | null;
 }) {
@@ -305,20 +295,37 @@ export default function DashboardClient({
         <Stat label="Critical Alerts" value="—" sub="predictive AI" tone="bad" />
       </div>
 
-      {/* Volume Delivered (2/3, PLACEHOLDER chart) + Fleet Status (1/3, REAL). */}
+      {/* Volume Delivered (2/3, REAL Σ tank_size_m3/day or honest-empty) + Fleet Status (1/3, REAL). */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 card p-4">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="font-semibold">Volume Delivered (30d)</h3>
-              <p className="text-xs muted">— m³ · 30 days</p>
+              <p className="text-xs muted">
+                {charts.volume.hasData ? `${Math.round(charts.volume.total).toLocaleString("en-US")} m³` : "— m³"} · 30 days
+              </p>
             </div>
-            <div className="text-emerald-600 text-xs flex items-center gap-1">
-              <TrendingUp className="h-3 w-3" /> +12.4%
-            </div>
+            {/* Real period-over-period %; hidden entirely when no data / prior=0. */}
+            {charts.volume.pct != null && (
+              charts.volume.pct >= 0 ? (
+                <div className="text-emerald-600 text-xs flex items-center gap-1">
+                  <TrendingUp className="h-3 w-3" /> +{charts.volume.pct}%
+                </div>
+              ) : (
+                <div className="text-rose-600 text-xs flex items-center gap-1">
+                  <TrendingDown className="h-3 w-3" /> {charts.volume.pct}%
+                </div>
+              )
+            )}
           </div>
           <div className="h-64">
-            <AreaChart labels={last14Labels} data={VOLUME} color="#0b7eea" className="h-full" />
+            {charts.volume.hasData ? (
+              <AreaChart labels={charts.volume.labels} data={charts.volume.values} color="#0b7eea" className="h-full" />
+            ) : (
+              <div className="h-full grid place-items-center">
+                <p className="text-sm muted">No data yet</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -341,41 +348,22 @@ export default function DashboardClient({
         </div>
       </div>
 
-      {/* Daily Trips & Fuel (2/3, PLACEHOLDER chart) + Operating Cost (1/3). */}
+      {/* Daily Trips (2/3, REAL counts; Fuel honest-empty) + Operating Cost (1/3, honest-empty). */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="card p-4 lg:col-span-2">
           <h3 className="font-semibold mb-3">Daily Trips & Fuel</h3>
-          <div className="h-56">
-            <DualBarChart
-              labels={last14Labels}
-              d1={DAILY_TRIPS}
-              d2={DAILY_FUEL}
-              l1="Trips"
-              l2="Fuel (L×100)"
-              className="h-full"
-            />
+          <div className="h-48">
+            <BarChart labels={charts.dailyTrips.labels} data={charts.dailyTrips.counts} className="h-full" />
           </div>
+          {/* Fuel series intentionally absent — no fuel data in schema yet. */}
+          <p className="text-xs muted mt-2">Fuel — no data yet</p>
         </div>
 
         <div className="card p-4">
           <h3 className="font-semibold mb-3">Operating Cost (30d)</h3>
-          {/* Top value is data-driven in the demo (trips.costSar) — not in schema
-              yet → PLACEHOLDER. Breakdown rows are hardcoded in the demo. */}
-          <div className="text-2xl font-semibold tabular-nums">—</div>
-          <p className="text-xs muted mb-4 flex items-center gap-1">
-            <TrendingDown className="h-3 w-3 text-emerald-500" /> -4.8% vs last period
-          </p>
-          <div className="space-y-2">
-            {COST_ROWS.map(([label, value]) => (
-              <div key={label}>
-                <div className="flex justify-between text-xs mb-1">
-                  <span>{label}</span>
-                  <span className="font-medium tabular-nums">{formatSar(value)}</span>
-                </div>
-                <Bar value={value} max={COST_MAX} tone="ok" />
-              </div>
-            ))}
-          </div>
+          {/* Honest-empty until cost tables land (Maintenance/Inventory phases).
+              No hardcoded rows, no fake % badge. */}
+          <p className="text-sm muted py-8 text-center">No data yet</p>
         </div>
       </div>
 
