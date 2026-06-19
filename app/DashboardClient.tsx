@@ -284,15 +284,20 @@ export default function DashboardClient({
         </div>
       )}
 
-      {/* 6 KPI tiles. REAL: Active Trucks, Avg Fleet Health. PLACEHOLDER ("—"):
-          Utilization, On-Time, Open Work Orders, Critical Alerts. */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+      {/* 10 KPI tiles in one 5-col grid (2 rows). REAL: Active Trucks, Avg Fleet
+          Health, Trips Today, Drivers On Duty, Revenue (30d). PLACEHOLDER ("—"):
+          Utilization, On-Time, Open Work Orders, Critical Alerts, Fuel Cost. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <Stat label="Active Trucks" value={`${fleet.active}/${fleet.total}`} sub={`${fleet.maint} Maintenance`} tone="ok" />
         <Stat label="Utilization" value="—" sub="30-day avg" tone="info" />
         <Stat label="Avg Fleet Health" value={fleet.avgHealth} sub="out of 100" tone={fleet.avgHealth > 75 ? "ok" : "warn"} />
         <Stat label="On-Time Delivery" value="—" sub="on schedule" tone="ok" />
         <Stat label="Open Work Orders" value="—" sub="active work orders" tone="warn" />
         <Stat label="Critical Alerts" value="—" sub="predictive AI" tone="bad" />
+        <Stat label="Trips Today" value={bottom.todayTrips} sub="scheduled today" />
+        <Stat label="Drivers On Duty" value={`${bottom.onDuty}/${bottom.driversTotal}`} tone="ok" />
+        <Stat label="Fuel Cost (30d)" value="—" tone="warn" />
+        <Stat label="Revenue (30d)" value={formatSar(bottom.revenue30d)} tone="ok" />
       </div>
 
       {/* Volume Delivered (2/3, REAL Σ tank_size_m3/day or honest-empty) + Fleet Status (1/3, REAL). */}
@@ -412,15 +417,6 @@ export default function DashboardClient({
             </div>
           )}
         </Section>
-      </div>
-
-      {/* Bottom 4 KPIs. REAL: Trips Today, Drivers On Duty, Revenue (30d, Σ
-          rate_sar delivered). PLACEHOLDER ("—"): Fuel Cost. */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label="Trips Today" value={bottom.todayTrips} sub="scheduled today" />
-        <Stat label="Drivers On Duty" value={`${bottom.onDuty}/${bottom.driversTotal}`} tone="ok" />
-        <Stat label="Fuel Cost (30d)" value="—" tone="warn" />
-        <Stat label="Revenue (30d)" value={formatSar(bottom.revenue30d)} tone="ok" />
       </div>
 
       {/* AI summary widget modal (DASH.openAddWidget port). */}
