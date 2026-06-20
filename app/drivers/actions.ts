@@ -71,7 +71,7 @@ export async function createDriver(formData: FormData): Promise<ActionResult> {
   }
 
   revalidatePath("/drivers");
-  revalidatePath("/trucks");
+  revalidatePath("/fleet");
   return { error: null };
 }
 
@@ -88,6 +88,6 @@ export async function updateDriver(id: string, formData: FormData): Promise<Acti
   if (assignErr) return { error: assignErr };
 
   revalidatePath("/drivers");
-  revalidatePath("/trucks");
+  revalidatePath("/fleet");
   return { error: null };
 }
