@@ -12,9 +12,18 @@
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
+import {
+  DndContext, closestCenter, PointerSensor, KeyboardSensor,
+  useSensor, useSensors, type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext, arrayMove, rectSortingStrategy,
+  useSortable, sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { PageHeader, Stat, Btn, Section, StatusPill } from "@/components/ui";
 import { PieChart, AreaChart, BarChart } from "@/components/Charts";
-import { Activity, Plus, TrendingUp, TrendingDown, Droplets, Zap, X } from "lucide-react";
+import { Activity, Plus, TrendingUp, TrendingDown, Droplets, Zap, X, GripVertical } from "lucide-react";
 import { formatSar, cn } from "@/lib/utils";
 import { WATER_TYPE_LABELS, TRIP_STAGE_LABELS, type WaterType, type TripStage } from "@/lib/db-types";
 
@@ -123,7 +132,7 @@ const PERIOD_SUB: Record<PeriodKey, string> = { daily: "today", weekly: "last 7 
 
 // _widgetHtml() port: renders a widget card (stat grid / table / chart). noData
 // datasets show "No data yet" regardless of display, until their pages land.
-function WidgetCard({ w, spec, onRemove }: { w: Widget; spec: WidgetSpec; onRemove: () => void }) {
+function WidgetCard({ w, spec, onRemove, dragHandle }: { w: Widget; spec: WidgetSpec; onRemove: () => void; dragHandle?: ReactNode }) {
   let body: ReactNode;
   if (spec.noData) {
     body = <p className="text-sm muted py-4 text-center">No data yet</p>;
@@ -201,15 +210,51 @@ function WidgetCard({ w, spec, onRemove }: { w: Widget; spec: WidgetSpec; onRemo
             <Zap className="h-3 w-3 shrink-0" /> {w.request}
           </p>
         </div>
-        <button
-          onClick={onRemove}
-          aria-label="Remove summary"
-          className="h-7 w-7 rounded-lg grid place-items-center shrink-0 hover:bg-black/5 dark:hover:bg-white/5"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          {dragHandle}
+          <button
+            onClick={onRemove}
+            aria-label="Remove summary"
+            className="h-7 w-7 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       {body}
+    </div>
+  );
+}
+
+// Sortable wrapper — @dnd-kit. Wraps WidgetCard in a sortable node and injects a
+// drag handle (the rest of the card stays clickable, incl. the remove button).
+// Reorder is in-session only (mutates the widgets array; no persistence).
+function SortableWidget({ w, spec, onRemove }: { w: Widget; spec: WidgetSpec; onRemove: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: w.id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style}>
+      <WidgetCard
+        w={w}
+        spec={spec}
+        onRemove={onRemove}
+        dragHandle={
+          <button
+            type="button"
+            aria-label="Drag to reorder"
+            className="h-7 w-7 rounded-lg grid place-items-center cursor-grab active:cursor-grabbing touch-none muted hover:bg-black/5 dark:hover:bg-white/5"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+        }
+      />
     </div>
   );
 }
@@ -266,6 +311,23 @@ export default function DashboardClient({
     setModalOpen(false);
   }
 
+  // Drag-to-reorder widgets (@dnd-kit). distance:4 so a click on the remove/X
+  // button isn't swallowed by the drag sensor. Reorder is in-session only.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    setWidgets((prev) => {
+      const from = prev.findIndex((x) => x.id === active.id);
+      const to = prev.findIndex((x) => x.id === over.id);
+      if (from < 0 || to < 0) return prev;
+      return arrayMove(prev, from, to);
+    });
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -312,18 +374,23 @@ export default function DashboardClient({
         <span className="text-xs muted">· {periodSub}</span>
       </div>
 
-      {/* AI summary widgets (DASH.renderWidgets) — render above the KPI grid. */}
+      {/* AI summary widgets (DASH.renderWidgets) — render above the KPI grid.
+          Drag the grip handle to rearrange; order is kept in-session. */}
       {widgets.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {widgets.map((w) => (
-            <WidgetCard
-              key={w.id}
-              w={w}
-              spec={datasets[w.datasetKey]}
-              onRemove={() => setWidgets((prev) => prev.filter((x) => x.id !== w.id))}
-            />
-          ))}
-        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={widgets.map((w) => w.id)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {widgets.map((w) => (
+                <SortableWidget
+                  key={w.id}
+                  w={w}
+                  spec={datasets[w.datasetKey]}
+                  onRemove={() => setWidgets((prev) => prev.filter((x) => x.id !== w.id))}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       )}
 
       {/* 10 KPI tiles in one 5-col grid (2 rows). REAL: Active Trucks, Avg Fleet
