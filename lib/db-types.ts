@@ -114,6 +114,10 @@ export type Truck = {
   engine_hours: number | null;
   vin: string | null;
   assigned_driver_id: string | null;
+  // Added in 0005 — all nullable, render "—" when absent (no fake values).
+  last_service_date: string | null;
+  utilization_pct: number | null;
+  fuel_efficiency_km_per_l: number | null;
   active: boolean;
   created_at: string;
 };
