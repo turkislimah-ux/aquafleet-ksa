@@ -19,7 +19,7 @@ import { formatSar, cn } from "@/lib/utils";
 import { WATER_TYPE_LABELS, TRIP_STAGE_LABELS, type WaterType, type TripStage } from "@/lib/db-types";
 
 type Fleet = { total: number; active: number; idle: number; maint: number; oos: number; avgHealth: number };
-type Bottom = { todayTrips: number; onDuty: number; driversTotal: number; revenue30d: number };
+type Bottom = { onDuty: number; driversTotal: number };
 type LiveTrip = {
   id: string;
   ref: string | null;
@@ -30,13 +30,20 @@ type LiveTrip = {
   tankM3: number | null;
 };
 
-// Real chart series computed server-side (page.tsx). Volume = per-day Σ
-// tank_size_m3 over 30 days (hasData false → honest-empty); dailyTrips = per-day
-// trip count over 14 days. Fuel is intentionally absent (no schema source yet).
-export type DashboardCharts = {
+// Real chart series computed server-side (page.tsx), one PeriodSeries per window.
+// Global period selector (daily=today, weekly=last 7d, monthly=last 30d) picks
+// which precomputed set renders — no refetch, every number stays REAL. Each
+// series buckets per-day. Volume/revenue carry hasData → honest-empty when the
+// window has no source rows; fuel is always honest-empty (no schema source yet).
+export type PeriodKey = "daily" | "weekly" | "monthly";
+export type PeriodSeries = {
+  windowDays: number;
   volume: { labels: string[]; values: number[]; total: number; pct: number | null; hasData: boolean };
-  dailyTrips: { labels: string[]; counts: number[] };
+  trips: { labels: string[]; counts: number[]; total: number };
+  revenue: { labels: string[]; values: number[]; total: number; hasData: boolean };
+  fuel: { labels: string[]; values: number[]; hasData: boolean };
 };
+export type DashboardCharts = Record<PeriodKey, PeriodSeries>;
 
 // ---- AI summary widget engine types (ported from DASH/dashCompute) ----
 export type Tone = "ok" | "warn" | "bad" | "info";
@@ -106,6 +113,13 @@ const EXAMPLES = [
   "Revenue over the last 14 days",
   "Drivers on duty stats",
 ];
+
+// Global period selector. Windows per the approved spec: daily = today only,
+// weekly = last 7 days, monthly = last 30 days. PERIOD_SUB is the human label
+// used on every period-controlled tile/card so the window is always explicit.
+const PERIODS: PeriodKey[] = ["daily", "weekly", "monthly"];
+const PERIOD_LABEL: Record<PeriodKey, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
+const PERIOD_SUB: Record<PeriodKey, string> = { daily: "today", weekly: "last 7 days", monthly: "last 30 days" };
 
 // _widgetHtml() port: renders a widget card (stat grid / table / chart). noData
 // datasets show "No data yet" regardless of display, until their pages land.
@@ -229,6 +243,12 @@ export default function DashboardClient({
   const [req, setReq] = useState("");
   const [displayPref, setDisplayPref] = useState<string>("auto");
 
+  // Global period selector. Default monthly (30 daily buckets) — the richest
+  // view; daily collapses to a single bucket (today) given date-only trip data.
+  const [period, setPeriod] = useState<PeriodKey>("monthly");
+  const series = charts[period];
+  const periodSub = PERIOD_SUB[period];
+
   function generate() {
     const r = req.trim();
     if (!r) return;
@@ -270,6 +290,28 @@ export default function DashboardClient({
         </p>
       )}
 
+      {/* Global period selector — controls every time-based tile & chart. */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs muted">Period</span>
+        <div className="inline-flex rounded-lg border p-0.5" style={{ borderColor: "rgb(var(--border))" }}>
+          {PERIODS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPeriod(p)}
+              aria-pressed={period === p}
+              className={cn(
+                "px-3 py-1 text-xs rounded-md transition",
+                period === p ? "bg-brand-600 text-white shadow-soft" : "muted hover:bg-black/5 dark:hover:bg-white/5"
+              )}
+            >
+              {PERIOD_LABEL[p]}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs muted">· {periodSub}</span>
+      </div>
+
       {/* AI summary widgets (DASH.renderWidgets) — render above the KPI grid. */}
       {widgets.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -294,10 +336,10 @@ export default function DashboardClient({
         <Stat label="On-Time Delivery" value="—" sub="on schedule" tone="ok" />
         <Stat label="Open Work Orders" value="—" sub="active work orders" tone="warn" />
         <Stat label="Critical Alerts" value="—" sub="predictive AI" tone="bad" />
-        <Stat label="Trips Today" value={bottom.todayTrips} sub="scheduled today" />
+        <Stat label="Trips" value={series.trips.total} sub={periodSub} tone="info" />
         <Stat label="Drivers On Duty" value={`${bottom.onDuty}/${bottom.driversTotal}`} tone="ok" />
         <Stat label="Fuel Cost (30d)" value="—" tone="warn" />
-        <Stat label="Revenue (30d)" value={formatSar(bottom.revenue30d)} tone="ok" />
+        <Stat label="Revenue" value={formatSar(series.revenue.total)} sub={periodSub} tone="ok" />
       </div>
 
       {/* Volume Delivered (2/3, REAL Σ tank_size_m3/day or honest-empty) + Fleet Status (1/3, REAL). */}
@@ -305,27 +347,27 @@ export default function DashboardClient({
         <div className="lg:col-span-2 card p-4">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h3 className="font-semibold">Volume Delivered (30d)</h3>
+              <h3 className="font-semibold">Volume Delivered</h3>
               <p className="text-xs muted">
-                {charts.volume.hasData ? `${Math.round(charts.volume.total).toLocaleString("en-US")} m³` : "— m³"} · 30 days
+                {series.volume.hasData ? `${Math.round(series.volume.total).toLocaleString("en-US")} m³` : "— m³"} · {periodSub}
               </p>
             </div>
             {/* Real period-over-period %; hidden entirely when no data / prior=0. */}
-            {charts.volume.pct != null && (
-              charts.volume.pct >= 0 ? (
+            {series.volume.pct != null && (
+              series.volume.pct >= 0 ? (
                 <div className="text-emerald-600 text-xs flex items-center gap-1">
-                  <TrendingUp className="h-3 w-3" /> +{charts.volume.pct}%
+                  <TrendingUp className="h-3 w-3" /> +{series.volume.pct}%
                 </div>
               ) : (
                 <div className="text-rose-600 text-xs flex items-center gap-1">
-                  <TrendingDown className="h-3 w-3" /> {charts.volume.pct}%
+                  <TrendingDown className="h-3 w-3" /> {series.volume.pct}%
                 </div>
               )
             )}
           </div>
           <div className="h-64">
-            {charts.volume.hasData ? (
-              <AreaChart labels={charts.volume.labels} data={charts.volume.values} color="#0b7eea" className="h-full" />
+            {series.volume.hasData ? (
+              <AreaChart labels={series.volume.labels} data={series.volume.values} color="#0b7eea" className="h-full" />
             ) : (
               <div className="h-full grid place-items-center">
                 <p className="text-sm muted">No data yet</p>
@@ -356,9 +398,12 @@ export default function DashboardClient({
       {/* Daily Trips (2/3, REAL counts; Fuel honest-empty) + Operating Cost (1/3, honest-empty). */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="card p-4 lg:col-span-2">
-          <h3 className="font-semibold mb-3">Daily Trips & Fuel</h3>
+          <div className="mb-3">
+            <h3 className="font-semibold">Trips &amp; Fuel</h3>
+            <p className="text-xs muted">{series.trips.total} trips · {periodSub}</p>
+          </div>
           <div className="h-48">
-            <BarChart labels={charts.dailyTrips.labels} data={charts.dailyTrips.counts} className="h-full" />
+            <BarChart labels={series.trips.labels} data={series.trips.counts} className="h-full" />
           </div>
           {/* Fuel series intentionally absent — no fuel data in schema yet. */}
           <p className="text-xs muted mt-2">Fuel — no data yet</p>

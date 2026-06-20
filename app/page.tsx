@@ -56,11 +56,8 @@ export default async function DashboardPage() {
     ? +(healthVals.reduce((s, h) => s + h, 0) / healthVals.length).toFixed(1)
     : 0;
 
-  // ---- Bottom KPIs ----
-  const todayISO = new Date().toISOString().slice(0, 10);
-  const todayTrips = trips.filter((t) => t.trip_date === todayISO).length; // REAL
-
-  // Q2: "on duty" maps to driver status === "active" (no on_duty enum). REAL.
+  // ---- Snapshot KPI: drivers on duty (status === "active"). REAL. ----
+  // Q2: "on duty" maps to driver status === "active" (no on_duty enum).
   const onDuty = drivers.filter((d) => d.status === "active").length;
 
   // Q4: Revenue (30d) = Σ rate_sar for delivered trips in the last 30 days. REAL.
@@ -85,60 +82,73 @@ export default async function DashboardPage() {
       tankM3: t.tank_size_m3,
     }));
 
-  // ---- Volume Delivered (30d) — REAL per-day Σ tank_size_m3 ----
-  // Honest-empty: if NO trip in the 30-day window carries tank_size_m3, hasData
-  // is false and the client renders "No data yet" instead of a line. Badge % is
-  // current 30d total vs the preceding 30d; null (hidden) when empty or prior=0.
-  const VOL_DAYS = 30;
-  const volLabels: string[] = [];
-  const volKeys: string[] = [];
-  for (let i = VOL_DAYS - 1; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000);
-    volKeys.push(d.toISOString().slice(0, 10));
-    volLabels.push(`${d.getMonth() + 1}/${d.getDate()}`);
-  }
-  const volKeySet = new Set(volKeys);
-  const volMap: Record<string, number> = {};
-  trips.forEach((t) => {
-    if (t.tank_size_m3 == null) return;
-    const k = (t.trip_date ?? "").slice(0, 10);
-    if (volKeySet.has(k)) volMap[k] = (volMap[k] ?? 0) + t.tank_size_m3;
-  });
-  const volValues = volKeys.map((k) => +(volMap[k] ?? 0).toFixed(2));
-  const volHasData = Object.keys(volMap).length > 0;
-  const volTotal = volValues.reduce((s, v) => s + v, 0);
+  // ---- Period series (REAL) — one PeriodSeries per window for the global
+  // selector. Windows (approved): daily = today (1d), weekly = 7d, monthly = 30d,
+  // each bucketed per-day. Volume = Σ tank_size_m3 by trip_date; trips = count by
+  // trip_date; revenue = Σ rate_sar for delivered trips by delivered_at; fuel is
+  // honest-empty (no schema source yet). hasData drives the client empty state;
+  // changing period never invents data — empty windows stay "No data yet".
+  const isoDay = (offset: number) => new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10);
+  const dayLabel = (iso: string) => { const [, m, d] = iso.split("-"); return `${+m}/${+d}`; };
 
-  const prevVolKeys = new Set<string>();
-  for (let i = 2 * VOL_DAYS - 1; i >= VOL_DAYS; i--) {
-    prevVolKeys.add(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
-  }
-  let prevVolTotal = 0;
-  trips.forEach((t) => {
-    if (t.tank_size_m3 == null) return;
-    const k = (t.trip_date ?? "").slice(0, 10);
-    if (prevVolKeys.has(k)) prevVolTotal += t.tank_size_m3;
-  });
-  const volPct = volHasData && prevVolTotal > 0 ? +(((volTotal - prevVolTotal) / prevVolTotal) * 100).toFixed(1) : null;
+  function buildPeriod(windowDays: number) {
+    const keys: string[] = [];
+    const labels: string[] = [];
+    for (let i = windowDays - 1; i >= 0; i--) { const k = isoDay(i); keys.push(k); labels.push(dayLabel(k)); }
+    const keySet = new Set(keys);
 
-  // ---- Daily Trips (14d) — REAL per-day trip COUNT (always available) ----
-  const TRIP_DAYS = 14;
-  const tripLabels: string[] = [];
-  const tripKeys: string[] = [];
-  for (let i = TRIP_DAYS - 1; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000);
-    tripKeys.push(d.toISOString().slice(0, 10));
-    tripLabels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+    // volume — Σ tank_size_m3 by trip_date (skip null tank)
+    const volMap: Record<string, number> = {};
+    let volHasData = false;
+    trips.forEach((t) => {
+      if (t.tank_size_m3 == null) return;
+      const k = (t.trip_date ?? "").slice(0, 10);
+      if (keySet.has(k)) { volMap[k] = (volMap[k] ?? 0) + t.tank_size_m3; volHasData = true; }
+    });
+    const volValues = keys.map((k) => +(volMap[k] ?? 0).toFixed(2));
+    const volTotal = volValues.reduce((s, v) => s + v, 0);
+
+    // preceding equal-length window → period-over-period %
+    const prevSet = new Set<string>();
+    for (let i = 2 * windowDays - 1; i >= windowDays; i--) prevSet.add(isoDay(i));
+    let prevVolTotal = 0;
+    trips.forEach((t) => {
+      if (t.tank_size_m3 == null) return;
+      const k = (t.trip_date ?? "").slice(0, 10);
+      if (prevSet.has(k)) prevVolTotal += t.tank_size_m3;
+    });
+    const volPct = volHasData && prevVolTotal > 0 ? +(((volTotal - prevVolTotal) / prevVolTotal) * 100).toFixed(1) : null;
+
+    // trips — count by trip_date
+    const cntMap: Record<string, number> = {};
+    trips.forEach((t) => { const k = (t.trip_date ?? "").slice(0, 10); if (keySet.has(k)) cntMap[k] = (cntMap[k] ?? 0) + 1; });
+    const counts = keys.map((k) => cntMap[k] ?? 0);
+    const tripTotal = counts.reduce((s, v) => s + v, 0);
+
+    // revenue — Σ rate_sar for delivered trips by delivered_at; honest-empty if none
+    const revMap: Record<string, number> = {};
+    let revCount = 0;
+    trips.forEach((t) => {
+      if (t.stage !== "delivered") return;
+      const k = (t.delivered_at ?? "").slice(0, 10);
+      if (keySet.has(k)) { revMap[k] = (revMap[k] ?? 0) + (t.rate_sar ?? 0); revCount++; }
+    });
+    const revValues = keys.map((k) => Math.round(revMap[k] ?? 0));
+    const revTotal = revValues.reduce((s, v) => s + v, 0);
+
+    return {
+      windowDays,
+      volume: { labels, values: volValues, total: volTotal, pct: volPct, hasData: volHasData },
+      trips: { labels, counts, total: tripTotal },
+      revenue: { labels, values: revValues, total: revTotal, hasData: revCount > 0 },
+      fuel: { labels, values: keys.map(() => 0), hasData: false },
+    };
   }
-  const tripCountMap: Record<string, number> = {};
-  trips.forEach((t) => {
-    const k = (t.trip_date ?? "").slice(0, 10);
-    if (k) tripCountMap[k] = (tripCountMap[k] ?? 0) + 1;
-  });
-  const tripCounts = tripKeys.map((k) => tripCountMap[k] ?? 0);
 
   const charts: DashboardCharts = {
-    volume: { labels: volLabels, values: volValues, total: volTotal, pct: volPct, hasData: volHasData },
-    dailyTrips: { labels: tripLabels, counts: tripCounts },
+    daily: buildPeriod(1),
+    weekly: buildPeriod(7),
+    monthly: buildPeriod(30),
   };
 
   // ---- AI summary widget datasets (mirrors demo dashCompute, preview/pages-1.js:2240) ----
@@ -252,7 +262,7 @@ export default async function DashboardPage() {
   return (
     <DashboardClient
       fleet={{ total, active, idle, maint, oos, avgHealth }}
-      bottom={{ todayTrips, onDuty, driversTotal: drivers.length, revenue30d }}
+      bottom={{ onDuty, driversTotal: drivers.length }}
       liveTrips={liveTrips}
       charts={charts}
       datasets={datasets}
