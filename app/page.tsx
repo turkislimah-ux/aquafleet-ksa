@@ -82,73 +82,102 @@ export default async function DashboardPage() {
       tankM3: t.tank_size_m3,
     }));
 
-  // ---- Period series (REAL) — one PeriodSeries per window for the global
-  // selector. Windows (approved): daily = today (1d), weekly = 7d, monthly = 30d,
-  // each bucketed per-day. Volume = Σ tank_size_m3 by trip_date; trips = count by
-  // trip_date; revenue = Σ rate_sar for delivered trips by delivered_at; fuel is
-  // honest-empty (no schema source yet). hasData drives the client empty state;
-  // changing period never invents data — empty windows stay "No data yet".
+  // ---- Period data (REAL) for the global selector ----
+  // KPI TILES follow the window TOTAL: daily = today, weekly = last 7d, monthly =
+  // last 30d. CHARTS use GRANULARITY for a readable trend span: daily mode = last
+  // 30 days (per-day), weekly = last 12 weeks (per-week), monthly = last 12 months
+  // (per-month). Volume = Σ tank_size_m3 by trip_date; trips = count by trip_date;
+  // revenue = Σ rate_sar for delivered trips by delivered_at; fuel honest-empty (no
+  // schema source). hasData drives empty states; changing period never invents data.
   const isoDay = (offset: number) => new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10);
   const dayLabel = (iso: string) => { const [, m, d] = iso.split("-"); return `${+m}/${+d}`; };
+  const MONTH_LBL = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-  function buildPeriod(windowDays: number) {
-    const keys: string[] = [];
-    const labels: string[] = [];
-    for (let i = windowDays - 1; i >= 0; i--) { const k = isoDay(i); keys.push(k); labels.push(dayLabel(k)); }
-    const keySet = new Set(keys);
+  // Monday-anchored ISO week start (UTC), consistent with the rest of the file.
+  const weekStart = (iso: string) => {
+    const d = new Date(iso + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    return d.toISOString().slice(0, 10);
+  };
 
-    // volume — Σ tank_size_m3 by trip_date (skip null tank)
-    const volMap: Record<string, number> = {};
-    let volHasData = false;
+  // KPI tile totals over the last `windowDays` (trip count, revenue Σ).
+  function tileTotals(windowDays: number) {
+    const keySet = new Set<string>();
+    for (let i = windowDays - 1; i >= 0; i--) keySet.add(isoDay(i));
+    let tripCount = 0, revenue = 0, revHas = false;
     trips.forEach((t) => {
-      if (t.tank_size_m3 == null) return;
-      const k = (t.trip_date ?? "").slice(0, 10);
-      if (keySet.has(k)) { volMap[k] = (volMap[k] ?? 0) + t.tank_size_m3; volHasData = true; }
+      const td = (t.trip_date ?? "").slice(0, 10);
+      if (keySet.has(td)) tripCount += 1;
+      if (t.stage === "delivered") {
+        const dd = (t.delivered_at ?? "").slice(0, 10);
+        if (keySet.has(dd)) { revenue += t.rate_sar ?? 0; revHas = true; }
+      }
     });
-    const volValues = keys.map((k) => +(volMap[k] ?? 0).toFixed(2));
-    const volTotal = volValues.reduce((s, v) => s + v, 0);
+    return { trips: tripCount, revenue: Math.round(revenue), revenueHasData: revHas };
+  }
 
-    // preceding equal-length window → period-over-period %
-    const prevSet = new Set<string>();
-    for (let i = 2 * windowDays - 1; i >= windowDays; i--) prevSet.add(isoDay(i));
-    let prevVolTotal = 0;
+  // Chart trend over `labels`/`bucketOf` buckets. Volume Σ tank & trip count keyed
+  // on trip_date; revenue Σ rate keyed on delivered_at; fuel honest-empty. Volume
+  // badge = most-recent bucket vs the previous one (real point-over-point change).
+  function chartTrend(labels: string[], bucketOf: (iso: string) => number) {
+    const n = labels.length;
+    const vol = new Array<number>(n).fill(0); let volHas = false;
+    const cnt = new Array<number>(n).fill(0);
+    const rev = new Array<number>(n).fill(0); let revHas = false;
     trips.forEach((t) => {
-      if (t.tank_size_m3 == null) return;
-      const k = (t.trip_date ?? "").slice(0, 10);
-      if (prevSet.has(k)) prevVolTotal += t.tank_size_m3;
+      const td = (t.trip_date ?? "").slice(0, 10);
+      const bi = td ? bucketOf(td) : -1;
+      if (bi >= 0) {
+        cnt[bi] += 1;
+        if (t.tank_size_m3 != null) { vol[bi] += t.tank_size_m3; volHas = true; }
+      }
+      if (t.stage === "delivered") {
+        const dd = (t.delivered_at ?? "").slice(0, 10);
+        const ri = dd ? bucketOf(dd) : -1;
+        if (ri >= 0) { rev[ri] += t.rate_sar ?? 0; revHas = true; }
+      }
     });
-    const volPct = volHasData && prevVolTotal > 0 ? +(((volTotal - prevVolTotal) / prevVolTotal) * 100).toFixed(1) : null;
-
-    // trips — count by trip_date
-    const cntMap: Record<string, number> = {};
-    trips.forEach((t) => { const k = (t.trip_date ?? "").slice(0, 10); if (keySet.has(k)) cntMap[k] = (cntMap[k] ?? 0) + 1; });
-    const counts = keys.map((k) => cntMap[k] ?? 0);
-    const tripTotal = counts.reduce((s, v) => s + v, 0);
-
-    // revenue — Σ rate_sar for delivered trips by delivered_at; honest-empty if none
-    const revMap: Record<string, number> = {};
-    let revCount = 0;
-    trips.forEach((t) => {
-      if (t.stage !== "delivered") return;
-      const k = (t.delivered_at ?? "").slice(0, 10);
-      if (keySet.has(k)) { revMap[k] = (revMap[k] ?? 0) + (t.rate_sar ?? 0); revCount++; }
-    });
-    const revValues = keys.map((k) => Math.round(revMap[k] ?? 0));
-    const revTotal = revValues.reduce((s, v) => s + v, 0);
-
+    const last = vol[n - 1] ?? 0, prev = vol[n - 2] ?? 0;
+    const volPct = volHas && prev > 0 ? +(((last - prev) / prev) * 100).toFixed(1) : null;
     return {
-      windowDays,
-      volume: { labels, values: volValues, total: volTotal, pct: volPct, hasData: volHasData },
-      trips: { labels, counts, total: tripTotal },
-      revenue: { labels, values: revValues, total: revTotal, hasData: revCount > 0 },
-      fuel: { labels, values: keys.map(() => 0), hasData: false },
+      volume: { labels, values: vol.map((v) => +v.toFixed(2)), hasData: volHas, pct: volPct },
+      trips: { labels, counts: cnt },
+      revenue: { labels, values: rev.map((v) => Math.round(v)), hasData: revHas },
+      fuel: { labels, values: labels.map(() => 0), hasData: false },
     };
   }
 
+  // daily mode → last 30 days, per day
+  const dDays: string[] = [];
+  for (let i = 29; i >= 0; i--) dDays.push(isoDay(i));
+  const dIndex = new Map(dDays.map((k, i) => [k, i] as const));
+  const dailyTrend = chartTrend(dDays.map(dayLabel), (iso) => dIndex.get(iso) ?? -1);
+
+  // weekly mode → last 12 weeks, per Monday-anchored week
+  const wStarts: string[] = [];
+  const curWeek = weekStart(isoDay(0));
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(curWeek + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() - i * 7);
+    wStarts.push(d.toISOString().slice(0, 10));
+  }
+  const wIndex = new Map(wStarts.map((k, i) => [k, i] as const));
+  const weeklyTrend = chartTrend(wStarts.map(dayLabel), (iso) => wIndex.get(weekStart(iso)) ?? -1);
+
+  // monthly mode → last 12 months, per calendar month
+  const mKeys: string[] = [];
+  const nowM = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(Date.UTC(nowM.getUTCFullYear(), nowM.getUTCMonth() - i, 1));
+    mKeys.push(d.toISOString().slice(0, 7));
+  }
+  const mIndex = new Map(mKeys.map((k, i) => [k, i] as const));
+  const monthlyTrend = chartTrend(mKeys.map((m) => MONTH_LBL[+m.slice(5, 7) - 1]), (iso) => mIndex.get(iso.slice(0, 7)) ?? -1);
+
   const charts: DashboardCharts = {
-    daily: buildPeriod(1),
-    weekly: buildPeriod(7),
-    monthly: buildPeriod(30),
+    daily: { windowDays: 1, tile: tileTotals(1), ...dailyTrend },
+    weekly: { windowDays: 7, tile: tileTotals(7), ...weeklyTrend },
+    monthly: { windowDays: 30, tile: tileTotals(30), ...monthlyTrend },
   };
 
   // ---- AI summary widget datasets (mirrors demo dashCompute, preview/pages-1.js:2240) ----

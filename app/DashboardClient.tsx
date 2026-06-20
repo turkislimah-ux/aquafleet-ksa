@@ -39,18 +39,22 @@ type LiveTrip = {
   tankM3: number | null;
 };
 
-// Real chart series computed server-side (page.tsx), one PeriodSeries per window.
-// Global period selector (daily=today, weekly=last 7d, monthly=last 30d) picks
-// which precomputed set renders — no refetch, every number stays REAL. Each
-// series buckets per-day. Volume/revenue carry hasData → honest-empty when the
-// window has no source rows; fuel is always honest-empty (no schema source yet).
+// Real period data computed server-side (page.tsx). The global selector picks one
+// precomputed set — no refetch, every number stays REAL. Two distinct shapes:
+//   tile  → window TOTALS (daily=today, weekly=last 7d, monthly=last 30d) for the
+//           period-controlled KPI tiles (Trips, Revenue).
+//   charts→ GRANULARITY trend spans (daily=last 30d/day, weekly=last 12w/week,
+//           monthly=last 12mo/month) so a chart always shows a readable trend.
+// hasData drives honest-empty everywhere; changing period never invents data.
 export type PeriodKey = "daily" | "weekly" | "monthly";
+type ChartSeries = { labels: string[]; values: number[]; hasData: boolean };
 export type PeriodSeries = {
   windowDays: number;
-  volume: { labels: string[]; values: number[]; total: number; pct: number | null; hasData: boolean };
-  trips: { labels: string[]; counts: number[]; total: number };
-  revenue: { labels: string[]; values: number[]; total: number; hasData: boolean };
-  fuel: { labels: string[]; values: number[]; hasData: boolean };
+  tile: { trips: number; revenue: number; revenueHasData: boolean };
+  volume: ChartSeries & { pct: number | null };
+  trips: { labels: string[]; counts: number[] };
+  revenue: ChartSeries;
+  fuel: ChartSeries;
 };
 export type DashboardCharts = Record<PeriodKey, PeriodSeries>;
 
@@ -128,7 +132,10 @@ const EXAMPLES = [
 // used on every period-controlled tile/card so the window is always explicit.
 const PERIODS: PeriodKey[] = ["daily", "weekly", "monthly"];
 const PERIOD_LABEL: Record<PeriodKey, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
+// PERIOD_SUB = KPI tile window (the headline total). CHART_SPAN = the trend span a
+// chart card plots at this granularity. They intentionally differ per the spec.
 const PERIOD_SUB: Record<PeriodKey, string> = { daily: "today", weekly: "last 7 days", monthly: "last 30 days" };
+const CHART_SPAN: Record<PeriodKey, string> = { daily: "last 30 days", weekly: "last 12 weeks", monthly: "last 12 months" };
 
 // _widgetHtml() port: renders a widget card (stat grid / table / chart). noData
 // datasets show "No data yet" regardless of display, until their pages land.
@@ -292,7 +299,12 @@ export default function DashboardClient({
   // view; daily collapses to a single bucket (today) given date-only trip data.
   const [period, setPeriod] = useState<PeriodKey>("monthly");
   const series = charts[period];
-  const periodSub = PERIOD_SUB[period];
+  const periodSub = PERIOD_SUB[period];   // KPI tile window (today / 7d / 30d)
+  const chartSpan = CHART_SPAN[period];   // chart trend span (30d / 12w / 12mo)
+  // Chart-card headline totals = sum of the plotted granularity series.
+  const volChartTotal = series.volume.values.reduce((s, v) => s + v, 0);
+  const tripsChartTotal = series.trips.counts.reduce((s, v) => s + v, 0);
+  const revChartTotal = series.revenue.values.reduce((s, v) => s + v, 0);
 
   function generate() {
     const r = req.trim();
@@ -403,10 +415,10 @@ export default function DashboardClient({
         <Stat label="On-Time Delivery" value="—" sub="on schedule" tone="ok" />
         <Stat label="Open Work Orders" value="—" sub="active work orders" tone="warn" />
         <Stat label="Critical Alerts" value="—" sub="predictive AI" tone="bad" />
-        <Stat label="Trips" value={series.trips.total} sub={periodSub} tone="info" />
+        <Stat label="Trips" value={series.tile.trips} sub={periodSub} tone="info" />
         <Stat label="Drivers On Duty" value={`${bottom.onDuty}/${bottom.driversTotal}`} tone="ok" />
         <Stat label="Fuel Cost (30d)" value="—" tone="warn" />
-        <Stat label="Revenue" value={formatSar(series.revenue.total)} sub={periodSub} tone="ok" />
+        <Stat label="Revenue" value={series.tile.revenueHasData ? formatSar(series.tile.revenue) : "—"} sub={periodSub} tone="ok" />
       </div>
 
       {/* Volume Delivered (2/3, REAL Σ tank_size_m3/day or honest-empty) + Fleet Status (1/3, REAL). */}
@@ -416,7 +428,7 @@ export default function DashboardClient({
             <div>
               <h3 className="font-semibold">Volume Delivered</h3>
               <p className="text-xs muted">
-                {series.volume.hasData ? `${Math.round(series.volume.total).toLocaleString("en-US")} m³` : "— m³"} · {periodSub}
+                {series.volume.hasData ? `${Math.round(volChartTotal).toLocaleString("en-US")} m³` : "— m³"} · {chartSpan}
               </p>
             </div>
             {/* Real period-over-period %; hidden entirely when no data / prior=0. */}
@@ -467,7 +479,7 @@ export default function DashboardClient({
         <div className="card p-4 lg:col-span-2">
           <div className="mb-3">
             <h3 className="font-semibold">Trips &amp; Fuel</h3>
-            <p className="text-xs muted">{series.trips.total} trips · {periodSub}</p>
+            <p className="text-xs muted">{tripsChartTotal} trips · {chartSpan}</p>
           </div>
           <div className="h-48">
             <BarChart labels={series.trips.labels} data={series.trips.counts} className="h-full" />
@@ -493,7 +505,7 @@ export default function DashboardClient({
             <div>
               <h3 className="font-semibold">Revenue</h3>
               <p className="text-xs muted">
-                {series.revenue.hasData ? formatSar(series.revenue.total) : "— SAR"} · {periodSub}
+                {series.revenue.hasData ? formatSar(revChartTotal) : "— SAR"} · {chartSpan}
               </p>
             </div>
           </div>
@@ -513,7 +525,7 @@ export default function DashboardClient({
             <div>
               <h3 className="font-semibold">Fuel Consumption</h3>
               <p className="text-xs muted">
-                {series.fuel.hasData ? `${series.fuel.values.reduce((s, v) => s + v, 0).toLocaleString("en-US")} L` : "— L"} · {periodSub}
+                {series.fuel.hasData ? `${series.fuel.values.reduce((s, v) => s + v, 0).toLocaleString("en-US")} L` : "— L"} · {chartSpan}
               </p>
             </div>
           </div>
