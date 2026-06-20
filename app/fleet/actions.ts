@@ -74,6 +74,40 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
   return { error: null };
 }
 
+// Update an existing truck. Driver assignment is intentionally NOT handled here
+// — it stays in the dedicated Assign Driver modal so the single-source-of-truth
+// on trucks.assigned_driver_id is never touched by two paths. Plate stays
+// editable; the case-insensitive unique index rejects a collision (23505).
+export async function updateTruck(id: string, formData: FormData): Promise<ActionResult> {
+  if (!id) return { error: "Missing truck." };
+  const plate = str(formData.get("plate"));
+  if (!plate) return { error: "Plate is required." };
+
+  const row = {
+    plate,
+    model: nullable(formData.get("model")),
+    year: numOrNull(formData.get("year")),
+    capacity_m3: numOrNull(formData.get("capacity_m3")),
+    status: str(formData.get("status")) || "active",
+    home_station: nullable(formData.get("home_station")),
+    odometer_km: numOrNull(formData.get("odometer_km")),
+    engine_hours: numOrNull(formData.get("engine_hours")),
+    vin: nullable(formData.get("vin")),
+    last_service_date: nullable(formData.get("last_service_date")),
+  };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("trucks").update(row).eq("id", id);
+  if (error) {
+    if (error.code === "23505") return { error: `Plate "${plate}" already exists.` };
+    return { error: error.message };
+  }
+
+  revalidatePath("/fleet");
+  revalidatePath(`/fleet/${id}`);
+  return { error: null };
+}
+
 export async function assignDriver(truckId: string, driverId: string): Promise<ActionResult> {
   if (!truckId || !driverId) return { error: "Missing truck or driver." };
 

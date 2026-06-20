@@ -19,8 +19,9 @@ import {
 } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "../page";
 import { assignDriver, unassignDriver } from "../actions";
+import TruckFormModal from "../TruckFormModal";
 import { cn, formatNum } from "@/lib/utils";
-import { ArrowLeft, Users, X, Activity } from "lucide-react";
+import { ArrowLeft, Users, X, Activity, Pencil } from "lucide-react";
 
 function lastServiceLabel(iso: string | null): string {
   if (!iso) return "—";
@@ -62,6 +63,9 @@ export default function FleetDetailClient({
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignSaving, setAssignSaving] = useState(false);
+
+  // Edit Truck modal.
+  const [editOpen, setEditOpen] = useState(false);
 
   // driverId -> the truck currently holding them (busy-lock + "Current" marker).
   const truckByDriver = useMemo(() => {
@@ -147,6 +151,9 @@ export default function FleetDetailClient({
             <StatusPill status={truck.status} label={TRUCK_STATUS_LABELS[truck.status]} />
             <Btn variant="outline" onClick={openAssign}>
               <Users className="h-4 w-4" /> {truck.driverName ? "Change Driver" : "Assign Driver"}
+            </Btn>
+            <Btn variant="outline" onClick={() => setEditOpen(true)}>
+              <Pencil className="h-4 w-4" /> Edit Truck
             </Btn>
           </>
         }
@@ -248,6 +255,20 @@ export default function FleetDetailClient({
       </Card>
 
       {errorMsg && <p className="text-sm text-rose-600 dark:text-rose-400">{errorMsg}</p>}
+
+      {/* ---- Edit Truck modal ---- */}
+      {editOpen && (
+        <TruckFormModal
+          mode="edit"
+          truck={truck}
+          drivers={drivers}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => {
+            setEditOpen(false);
+            router.refresh();
+          }}
+        />
+      )}
 
       {/* ---- Assign Driver modal (same busy-lock as the list page) ---- */}
       {assignOpen && (

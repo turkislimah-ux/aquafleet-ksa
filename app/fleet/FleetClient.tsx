@@ -1,9 +1,9 @@
 "use client";
 
 // Client island for the Fleet page: 6 real KPIs, filter bar (search / status
-// chips / station), the truck roster table, and two modals — Add Truck (rejects
-// duplicate plates) and Assign Driver (busy drivers are locked; assigning frees
-// the driver from any other truck first).
+// chips / station), the truck roster table, and the modals — Add Truck, Edit
+// Truck (both via the shared TruckFormModal) and Assign Driver (busy drivers are
+// locked; assigning frees the driver from any other truck first).
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -17,9 +17,10 @@ import {
   STATION_OPTIONS,
 } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "./page";
-import { createTruck, assignDriver, unassignDriver } from "./actions";
+import { assignDriver, unassignDriver } from "./actions";
+import TruckFormModal from "./TruckFormModal";
 import { cn, formatNum } from "@/lib/utils";
-import { Filter, Truck as TruckIcon, Eye, Plus, Users, X } from "lucide-react";
+import { Filter, Truck as TruckIcon, Eye, Plus, Pencil, Users, X } from "lucide-react";
 
 type Kpis = {
   total: number;
@@ -39,12 +40,6 @@ const STATUS_CHIPS: Array<"all" | TruckStatus> = [
   "maintenance",
   "out_of_service",
 ];
-
-// Tank classes offered in Add Truck (mirrors the demo's m³ options).
-const CAPACITY_OPTIONS_M3 = [33, 18, 6] as const;
-
-const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
-const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
 function lastServiceLabel(iso: string | null): string {
   if (!iso) return "—";
@@ -72,10 +67,9 @@ export default function FleetClient({
   const [station, setStation] = useState<string>("all");
   const [q, setQ] = useState("");
 
-  // Add Truck modal
+  // Add / Edit Truck modals (shared TruckFormModal).
   const [addOpen, setAddOpen] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [editTruck, setEditTruck] = useState<TruckRow | null>(null);
 
   // Assign Driver modal — holds the truck whose driver is being changed.
   const [assignTruck, setAssignTruck] = useState<TruckRow | null>(null);
@@ -104,26 +98,14 @@ export default function FleetClient({
     [trucks, status, station, q],
   );
 
-  function openAdd() {
-    setAddError(null);
-    setAddOpen(true);
-  }
   function openAssign(tr: TruckRow) {
     setAssignError(null);
     setAssignTruck(tr);
   }
 
-  async function submitAdd(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setSaving(true);
-    setAddError(null);
-    const res = await createTruck(new FormData(e.currentTarget));
-    setSaving(false);
-    if (res.error) {
-      setAddError(res.error);
-      return;
-    }
+  function onTruckSaved() {
     setAddOpen(false);
+    setEditTruck(null);
     router.refresh();
   }
 
@@ -161,7 +143,7 @@ export default function FleetClient({
         title="Fleet"
         subtitle={`${kpis.total} trucks · Riyadh · 3 stations`}
         actions={
-          <Btn variant="primary" onClick={openAdd}>
+          <Btn variant="primary" onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4" /> Add Truck
           </Btn>
         }
@@ -315,13 +297,23 @@ export default function FleetClient({
                 </TD>
                 <TD className="text-xs">{lastServiceLabel(tr.last_service_date)}</TD>
                 <TD>
-                  <Link
-                    href={`/fleet/${tr.id}`}
-                    className="h-9 px-3 rounded-lg text-sm font-medium inline-flex items-center gap-2 border hover:bg-black/5 dark:hover:bg-white/5"
-                    style={{ borderColor: "rgb(var(--border))" }}
-                  >
-                    <Eye className="h-3.5 w-3.5" /> View
-                  </Link>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      title="Edit truck"
+                      onClick={() => setEditTruck(tr)}
+                      className="h-9 w-9 grid place-items-center rounded-lg border hover:bg-black/5 dark:hover:bg-white/5"
+                      style={{ borderColor: "rgb(var(--border))" }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <Link
+                      href={`/fleet/${tr.id}`}
+                      className="h-9 px-3 rounded-lg text-sm font-medium inline-flex items-center gap-2 border hover:bg-black/5 dark:hover:bg-white/5"
+                      style={{ borderColor: "rgb(var(--border))" }}
+                    >
+                      <Eye className="h-3.5 w-3.5" /> View
+                    </Link>
+                  </div>
                 </TD>
               </tr>
             ))}
@@ -331,99 +323,18 @@ export default function FleetClient({
 
       {/* ---- Add Truck modal ---- */}
       {addOpen && (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40"
-          onClick={() => setAddOpen(false)}
-        >
-          <div
-            className="card p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-lg font-semibold mb-1">Add New Truck</h2>
-            <p className="text-sm muted mb-4">Register a new water truck. Plate is required.</p>
-            <form onSubmit={submitAdd} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Plate *</span>
-                <input name="plate" required placeholder="e.g. 5041 ABJ" className={INPUT} style={INPUT_STYLE} />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Model</span>
-                <input name="model" placeholder="e.g. Mercedes-Benz Actros 3340" className={INPUT} style={INPUT_STYLE} />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Year</span>
-                <input name="year" type="number" min="1980" max="2030" className={INPUT} style={INPUT_STYLE} />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Capacity</span>
-                <select name="capacity_m3" defaultValue="33" className={INPUT} style={INPUT_STYLE}>
-                  {CAPACITY_OPTIONS_M3.map((c) => (
-                    <option key={c} value={c}>
-                      {c} m³
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Status</span>
-                <select name="status" defaultValue="active" className={INPUT} style={INPUT_STYLE}>
-                  {Object.entries(TRUCK_STATUS_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Station</span>
-                <select name="home_station" defaultValue="" className={INPUT} style={INPUT_STYLE}>
-                  <option value="">—</option>
-                  {STATION_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Odometer (km)</span>
-                <input name="odometer_km" type="number" min="0" defaultValue="0" className={INPUT} style={INPUT_STYLE} />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Engine hours</span>
-                <input name="engine_hours" type="number" min="0" defaultValue="0" className={INPUT} style={INPUT_STYLE} />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">VIN</span>
-                <input name="vin" className={INPUT} style={INPUT_STYLE} />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Assigned driver</span>
-                <select name="assigned_driver_id" defaultValue="" className={INPUT} style={INPUT_STYLE}>
-                  <option value="">Unassigned</option>
-                  {drivers.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+        <TruckFormModal mode="add" drivers={drivers} onClose={() => setAddOpen(false)} onSaved={onTruckSaved} />
+      )}
 
-              {addError && (
-                <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{addError}</p>
-              )}
-
-              <div className="flex justify-end gap-2 sm:col-span-2 mt-2">
-                <Btn variant="outline" onClick={() => setAddOpen(false)}>
-                  Cancel
-                </Btn>
-                <Btn type="submit" variant="primary">
-                  {saving ? "Saving…" : "Save"}
-                </Btn>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* ---- Edit Truck modal ---- */}
+      {editTruck && (
+        <TruckFormModal
+          mode="edit"
+          truck={editTruck}
+          drivers={drivers}
+          onClose={() => setEditTruck(null)}
+          onSaved={onTruckSaved}
+        />
       )}
 
       {/* ---- Assign Driver modal ---- */}
