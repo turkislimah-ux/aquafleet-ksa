@@ -417,6 +417,51 @@ export default function DashboardClient({
         </div>
       </div>
 
+      {/* Two standalone line charts (period-aware). Revenue = REAL Σ rate_sar of
+          delivered trips per bucket. Fuel = real, working chart that's honest-empty
+          today (no fuel schema) and lights up automatically once fuel data lands. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="font-semibold">Revenue</h3>
+              <p className="text-xs muted">
+                {series.revenue.hasData ? formatSar(series.revenue.total) : "— SAR"} · {periodSub}
+              </p>
+            </div>
+          </div>
+          <div className="h-56">
+            {series.revenue.hasData ? (
+              <AreaChart labels={series.revenue.labels} data={series.revenue.values} color="#10b981" className="h-full" />
+            ) : (
+              <div className="h-full grid place-items-center">
+                <p className="text-sm muted">No data yet</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="font-semibold">Fuel Consumption</h3>
+              <p className="text-xs muted">
+                {series.fuel.hasData ? `${series.fuel.values.reduce((s, v) => s + v, 0).toLocaleString("en-US")} L` : "— L"} · {periodSub}
+              </p>
+            </div>
+          </div>
+          <div className="h-56">
+            {series.fuel.hasData ? (
+              <AreaChart labels={series.fuel.labels} data={series.fuel.values} color="#f59e0b" className="h-full" />
+            ) : (
+              <div className="h-full grid place-items-center">
+                <p className="text-sm muted">No data yet</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Critical Predictive Alerts (PLACEHOLDER, table pending) + Live Trips (REAL). */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Section
