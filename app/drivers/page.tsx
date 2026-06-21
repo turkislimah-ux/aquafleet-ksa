@@ -8,6 +8,7 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Driver } from "@/lib/db-types";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
+import type { CommTrip, CommPeriod, CommExtra } from "./CommissionsTab";
 
 export const dynamic = "force-dynamic";
 
@@ -32,19 +33,39 @@ export default async function DriversPage() {
   const supabase = createClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const [driversRes, trucksRes, tripsRes] = await Promise.all([
-    supabase.from("drivers").select("*").order("created_at", { ascending: false }),
-    supabase.from("trucks").select("id, plate, model, status, home_station, assigned_driver_id").order("plate", { ascending: true }),
-    supabase
-      .from("trips")
-      .select("driver_id, ref, trip_date, stage, tank_size_m3, project:projects(name), customer:customers(name)")
-      .order("trip_date", { ascending: false }),
-  ]);
+  const [driversRes, trucksRes, tripsRes, commTripsRes, periodsRes, specialsRes, adjustmentsRes] =
+    await Promise.all([
+      supabase.from("drivers").select("*").order("created_at", { ascending: false }),
+      supabase.from("trucks").select("id, plate, model, status, home_station, assigned_driver_id").order("plate", { ascending: true }),
+      supabase
+        .from("trips")
+        .select("driver_id, ref, trip_date, stage, tank_size_m3, project:projects(name), customer:customers(name)")
+        .order("trip_date", { ascending: false }),
+      // Commissions base = delivered trips only (commission_sar stamped on Delivered).
+      supabase
+        .from("trips")
+        .select("driver_id, project_id, commission_sar, delivered_at")
+        .not("delivered_at", "is", null),
+      supabase.from("commission_periods").select("driver_id, month_key, payout_status, bonus_sar"),
+      supabase.from("commission_specials").select("driver_id, month_key, amount_sar"),
+      supabase.from("commission_adjustments").select("driver_id, month_key, amount_sar"),
+    ]);
 
   const drivers = (driversRes.data ?? []) as Driver[];
   const trucks = (trucksRes.data ?? []) as TruckLite[];
   const trips = (tripsRes.data ?? []) as TripJoin[];
-  const error = driversRes.error || trucksRes.error || tripsRes.error;
+  const commTrips = (commTripsRes.data ?? []) as CommTrip[];
+  const periods = (periodsRes.data ?? []) as CommPeriod[];
+  const specials = (specialsRes.data ?? []) as CommExtra[];
+  const adjustments = (adjustmentsRes.data ?? []) as CommExtra[];
+  const error =
+    driversRes.error ||
+    trucksRes.error ||
+    tripsRes.error ||
+    commTripsRes.error ||
+    periodsRes.error ||
+    specialsRes.error ||
+    adjustmentsRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -72,6 +93,10 @@ export default async function DriversPage() {
       trucks={trucks}
       trips30dByDriver={trips30dByDriver}
       recentByDriver={recentByDriver}
+      commTrips={commTrips}
+      periods={periods}
+      specials={specials}
+      adjustments={adjustments}
       error={error?.message ?? null}
     />
   );

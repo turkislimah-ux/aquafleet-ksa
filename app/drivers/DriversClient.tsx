@@ -26,6 +26,13 @@ import {
 } from "@/lib/db-types";
 import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
 import { createDriver, updateDriver } from "./actions";
+import CommissionsTab, {
+  buildCommissionRows,
+  CURRENT_MONTH_KEY,
+  type CommTrip,
+  type CommPeriod,
+  type CommExtra,
+} from "./CommissionsTab";
 
 export type TruckLite = {
   id: string;
@@ -69,12 +76,20 @@ export default function DriversClient({
   trucks,
   trips30dByDriver,
   recentByDriver,
+  commTrips,
+  periods,
+  specials,
+  adjustments,
   error,
 }: {
   drivers: Driver[];
   trucks: TruckLite[];
   trips30dByDriver: Record<string, number>;
   recentByDriver: Record<string, RecentTrip[]>;
+  commTrips: CommTrip[];
+  periods: CommPeriod[];
+  specials: CommExtra[];
+  adjustments: CommExtra[];
   error: string | null;
 }) {
   const router = useRouter();
@@ -100,6 +115,20 @@ export default function DriversClient({
   const avgSafety = safetyVals.length ? +(safetyVals.reduce((s, n) => s + n, 0) / safetyVals.length).toFixed(1) : null;
   const incidents = drivers.reduce((s, d) => s + (d.incidents_12mo ?? 0), 0);
   const expiring = drivers.filter((d) => d.license_expiry != null && d.license_expiry <= YEAR_END).length;
+
+  // Commissions tab badge = drivers with a still-pending payout this month.
+  const pendingPayouts = useMemo(
+    () =>
+      buildCommissionRows({
+        drivers,
+        trips: commTrips,
+        periods,
+        specials,
+        adjustments,
+        monthKey: CURRENT_MONTH_KEY,
+      }).filter((r) => r.status === "pending").length,
+    [drivers, commTrips, periods, specials, adjustments],
+  );
 
   function openNew() {
     setEditing(null);
@@ -167,7 +196,7 @@ export default function DriversClient({
       {/* Tab bar — underline style mirrors the demo. */}
       <div className="flex items-center gap-1 border-b mb-4 flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
         <TabBtn active={tab === "drivers"} onClick={() => setTab("drivers")} label="Drivers" badge={total} />
-        <TabBtn active={tab === "commissions"} onClick={() => setTab("commissions")} label="Commissions" />
+        <TabBtn active={tab === "commissions"} onClick={() => setTab("commissions")} label="Commissions" badge={pendingPayouts} />
         <TabBtn active={tab === "staff"} onClick={() => setTab("staff")} label="Management & Staff" badge={0} />
       </div>
 
@@ -262,7 +291,13 @@ export default function DriversClient({
       )}
 
       {tab === "commissions" && (
-        <div className="card p-8 text-center muted text-sm">Commission tracking — built in the next step.</div>
+        <CommissionsTab
+          drivers={drivers}
+          trips={commTrips}
+          periods={periods}
+          specials={specials}
+          adjustments={adjustments}
+        />
       )}
 
       {tab === "staff" && (
