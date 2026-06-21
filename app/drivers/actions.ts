@@ -33,6 +33,8 @@ function parse(formData: FormData) {
     home_station: nullable(formData.get("home_station")),
     hours_this_week: numOrNull(formData.get("hours_this_week")),
     incidents_12mo: numOrNull(formData.get("incidents_12mo")),
+    // Standalone monthly salary — display-only, never part of commission math.
+    salary_sar: numOrNull(formData.get("salary_sar")),
     active: formData.get("active") != null,
   };
 }
@@ -167,7 +169,8 @@ export async function addCommissionAdjustment(formData: FormData): Promise<Actio
   const note = nullable(formData.get("note"));
 
   if (!driver_id || !MONTH_KEY_RE.test(month_key)) return { error: "Missing driver or month." };
-  if (amount_sar == null || amount_sar === 0) return { error: "Enter a non-zero amount (negative deducts)." };
+  // No min/max/sign limiter — any real amount allowed (negative deducts).
+  if (amount_sar == null) return { error: "Enter an amount." };
 
   const supabase = createClient();
   const { error } = await supabase
@@ -185,7 +188,8 @@ export async function updateCommissionAdjustment(id: string, formData: FormData)
   const amount_sar = numOrNull(formData.get("amount_sar"));
   const date = nullable(formData.get("date"));
   const note = nullable(formData.get("note"));
-  if (amount_sar == null || amount_sar === 0) return { error: "Enter a non-zero amount (negative deducts)." };
+  // No min/max/sign limiter — any real amount allowed (negative deducts).
+  if (amount_sar == null) return { error: "Enter an amount." };
 
   const supabase = createClient();
   const { error } = await supabase
@@ -227,12 +231,26 @@ export async function setCommissionBonus(
 export async function setPayoutStatus(
   driverId: string,
   monthKey: string,
-  status: "pending" | "approved" | "paid",
+  status: "pending" | "approved" | "paid" | "denied",
+  reason?: string,
 ): Promise<ActionResult> {
   if (!driverId || !MONTH_KEY_RE.test(monthKey)) return { error: "Missing driver or month." };
-  if (!["pending", "approved", "paid"].includes(status)) return { error: "Invalid payout status." };
+  if (!["pending", "approved", "paid", "denied"].includes(status)) return { error: "Invalid payout status." };
 
   const supabase = createClient();
+
+  // STRICT pay: a payout can only be marked paid from an approved state.
+  if (status === "paid") {
+    const { data: cur, error: curErr } = await supabase
+      .from("commission_periods")
+      .select("payout_status")
+      .eq("driver_id", driverId)
+      .eq("month_key", monthKey)
+      .maybeSingle();
+    if (curErr) return { error: curErr.message };
+    if (cur?.payout_status !== "approved") return { error: "Approve the payout before marking it paid." };
+  }
+
   const { error } = await supabase
     .from("commission_periods")
     .upsert(
@@ -241,9 +259,50 @@ export async function setPayoutStatus(
         month_key: monthKey,
         payout_status: status,
         paid_at: status === "paid" ? new Date().toISOString() : null,
+        deny_reason: status === "denied" ? (reason ?? null) : null,
       },
       { onConflict: "driver_id,month_key" },
     );
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+// Per-item review state. Deny keeps the line VISIBLE but excludes it from totals
+// (UI does the exclusion) and records a reason. Restore (status='active') clears it.
+export async function setSpecialStatus(
+  id: string,
+  status: "active" | "denied",
+  reason?: string,
+): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  if (!["active", "denied"].includes(status)) return { error: "Invalid status." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("commission_specials")
+    .update({ status, deny_reason: status === "denied" ? (reason ?? null) : null })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function setAdjustmentStatus(
+  id: string,
+  status: "active" | "denied",
+  reason?: string,
+): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  if (!["active", "denied"].includes(status)) return { error: "Invalid status." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("commission_adjustments")
+    .update({ status, deny_reason: status === "denied" ? (reason ?? null) : null })
+    .eq("id", id);
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
