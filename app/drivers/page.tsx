@@ -46,9 +46,9 @@ export default async function DriversPage() {
         .from("trips")
         .select("driver_id, project_id, commission_sar, delivered_at")
         .not("delivered_at", "is", null),
-      supabase.from("commission_periods").select("driver_id, month_key, payout_status, bonus_sar"),
-      supabase.from("commission_specials").select("id, driver_id, month_key, label, amount_sar, date, note, is_special_trip"),
-      supabase.from("commission_adjustments").select("id, driver_id, month_key, label, amount_sar, date, note"),
+      supabase.from("commission_periods").select("driver_id, month_key, payout_status, bonus_sar, deny_reason"),
+      supabase.from("commission_specials").select("id, driver_id, month_key, label, amount_sar, date, note, is_special_trip, status, deny_reason"),
+      supabase.from("commission_adjustments").select("id, driver_id, month_key, label, amount_sar, date, note, status, deny_reason"),
       supabase.from("projects").select("id, name"),
     ]);
 

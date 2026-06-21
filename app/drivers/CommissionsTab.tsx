@@ -1,8 +1,8 @@
 "use client";
 
 // Commissions tab. Mirrors the demo's COM namespace: month selector, 4 KPIs,
-// status chips, per-driver payroll table, a real CSV export, and the per-driver
-// Breakdown modal (specials, adjustments, manager bonus, payout workflow).
+// status chips, per-driver payroll table, a real CSV export, and a per-driver
+// Breakdown modal — PLUS two manage popups (Specials/Bonuses, Adjustments).
 //
 // SINGLE SOURCE OF TRUTH for base pay = trips.commission_sar (stamped on Delivered
 // by lib/commission.ts). Base is NEVER stored as a commission line — it is derived
@@ -10,22 +10,32 @@
 // project. The three commission_* tables only carry the extras (payout status +
 // bonus, specials, adjustments). Total = base + specials + adjustments + bonus.
 //
+// REDESIGN (Batch 2):
+//   • Breakdown modal is a READ-ONLY REVIEW screen + payout decisions
+//     (Approve → Pay strictly from approved; Deny with reason; Reopen from denied).
+//   • Editing/adding/deleting of specials, the manager bonus, and adjustments lives
+//     in two manage popups, NOT in the Breakdown.
+//   • Per-item DENY: a special or adjustment can be denied (with a reason). A denied
+//     item stays VISIBLE but is EXCLUDED from every total/KPI/badge. Bonus is not
+//     denyable. Denied items are never deleted by a deny.
+//
 // DEVIATION from demo (approved): the demo lets you hand-edit each base line's
-// trip count / rate. We don't — base is computed-truth. Corrections happen only
-// through specials & adjustments, so the Breakdown shows base lines READ-ONLY.
+// trip count / rate. We don't — base is computed-truth.
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Plus, Pencil, Eye, Save, Trash2, Check, X, Banknote, Info } from "lucide-react";
+import { Download, Plus, Pencil, Eye, Save, Trash2, Check, X, Banknote, Info, Ban, RotateCcw } from "lucide-react";
 import { Stat, StatusPill } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import {
   addCommissionSpecial,
   updateCommissionSpecial,
   removeCommissionSpecial,
+  setSpecialStatus,
   addCommissionAdjustment,
   updateCommissionAdjustment,
   removeCommissionAdjustment,
+  setAdjustmentStatus,
   setCommissionBonus,
   setPayoutStatus,
   type ActionResult,
@@ -41,23 +51,29 @@ export type CommTrip = {
 export type CommPeriod = {
   driver_id: string;
   month_key: string;
-  payout_status: "pending" | "approved" | "paid";
+  payout_status: "pending" | "approved" | "paid" | "denied";
   bonus_sar: number;
+  deny_reason: string | null;
 };
+type ItemStatus = "active" | "denied";
 // Minimal shape buildCommissionRows needs; the full rows below extend it.
-export type CommExtra = { driver_id: string; month_key: string; amount_sar: number };
+export type CommExtra = { driver_id: string; month_key: string; amount_sar: number; status?: ItemStatus };
 export type CommSpecial = CommExtra & {
   id: string;
   label: string;
   date: string | null;
   note: string | null;
   is_special_trip: boolean;
+  status: ItemStatus;
+  deny_reason: string | null;
 };
 export type CommAdjustment = CommExtra & {
   id: string;
   label: string;
   date: string | null;
   note: string | null;
+  status: ItemStatus;
+  deny_reason: string | null;
 };
 
 export type DriverLite = { id: string; name: string; name_ar: string | null };
@@ -73,13 +89,18 @@ export type CommissionRow = {
   adjustments: number;
   bonus: number;
   total: number;
-  status: "pending" | "approved" | "paid";
+  status: CommPeriod["payout_status"];
 };
 
 type BaseLine = { projectId: string | null; projectName: string; trips: number; amount: number };
 
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+// A denied item never counts toward money. PURE predicate, used everywhere.
+function isActive(x: { status?: ItemStatus }): boolean {
+  return (x.status ?? "active") !== "denied";
 }
 
 // month_key of an ISO timestamp = "YYYY-MM" (matches lib/commission monthKeyOf).
@@ -117,6 +138,7 @@ function buildBaseLines(
 
 // Build per-driver commission rows for one month. PURE — reused by the tab body
 // and by the Commissions tab badge (current-month pending count) in DriversClient.
+// Denied specials & adjustments are EXCLUDED from the sums.
 export function buildCommissionRows(p: {
   drivers: DriverLite[];
   trips: CommTrip[];
@@ -134,8 +156,12 @@ export function buildCommissionRows(p: {
     const dt = trips.filter((t) => t.driver_id === d.id && t.delivered_at && monthKeyOf(t.delivered_at) === monthKey);
     const base = round2(dt.reduce((s, t) => s + (t.commission_sar ?? 0), 0));
     const projects = new Set(dt.map((t) => t.project_id).filter(Boolean)).size;
-    const sp = round2(specials.filter((x) => x.driver_id === d.id && x.month_key === monthKey).reduce((s, x) => s + x.amount_sar, 0));
-    const adj = round2(adjustments.filter((x) => x.driver_id === d.id && x.month_key === monthKey).reduce((s, x) => s + x.amount_sar, 0));
+    const sp = round2(
+      specials.filter((x) => x.driver_id === d.id && x.month_key === monthKey && isActive(x)).reduce((s, x) => s + x.amount_sar, 0),
+    );
+    const adj = round2(
+      adjustments.filter((x) => x.driver_id === d.id && x.month_key === monthKey && isActive(x)).reduce((s, x) => s + x.amount_sar, 0),
+    );
     const period = periods.find((x) => x.driver_id === d.id && x.month_key === monthKey) ?? null;
     const bonus = round2(period?.bonus_sar ?? 0);
     const status = period?.payout_status ?? "pending";
@@ -175,16 +201,19 @@ function monthLabel(key: string): string {
 }
 
 // Payout pill: map status → an existing statusTone token for the right color.
-// paid → green (active), approved → blue (scheduled→info), pending → amber (warning).
-const PAYOUT_TONE: Record<CommissionRow["status"], string> = {
+// paid → green (active), approved → blue (scheduled), pending → amber (warning),
+// denied → red (critical).
+const PAYOUT_TONE: Record<CommPeriod["payout_status"], string> = {
   paid: "active",
   approved: "scheduled",
   pending: "warning",
+  denied: "critical",
 };
-const PAYOUT_LABEL: Record<CommissionRow["status"], string> = {
+const PAYOUT_LABEL: Record<CommPeriod["payout_status"], string> = {
   paid: "Paid",
   approved: "Approved",
   pending: "Pending",
+  denied: "Denied",
 };
 
 function csvCell(v: string | number): string {
@@ -192,7 +221,7 @@ function csvCell(v: string | number): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const CHIPS = ["all", "pending", "approved", "paid"] as const;
+const CHIPS = ["all", "pending", "approved", "paid", "denied"] as const;
 type Filter = (typeof CHIPS)[number];
 
 const BORDER = { borderColor: "rgb(var(--border))" } as const;
@@ -227,6 +256,61 @@ function OutlineBtn({
   );
 }
 
+function PrimaryBtn({
+  onClick,
+  children,
+  disabled,
+  type = "button",
+}: {
+  onClick?: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+  type?: "button" | "submit";
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className="h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {children}
+    </button>
+  );
+}
+
+function DangerBtn({
+  onClick,
+  children,
+  disabled,
+  type = "button",
+}: {
+  onClick?: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+  type?: "button" | "submit";
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className="h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {children}
+    </button>
+  );
+}
+
+function SummaryCard({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="card p-3">
+      <div className="text-xs muted">{label}</div>
+      {children}
+    </div>
+  );
+}
+
 export default function CommissionsTab({
   drivers,
   trips,
@@ -245,9 +329,9 @@ export default function CommissionsTab({
   const [monthKey, setMonthKey] = useState(CURRENT_MONTH_KEY);
   const [filter, setFilter] = useState<Filter>("all");
   const [breakdownFor, setBreakdownFor] = useState<string | null>(null);
-  // Special & Adjustment editors are their own distinct modals (create or edit).
-  const [specialModal, setSpecialModal] = useState<{ driverId: string; entry: CommSpecial | null } | null>(null);
-  const [adjustModal, setAdjustModal] = useState<{ driverId: string; entry: CommAdjustment | null } | null>(null);
+  // Manage popups: each holds a driverId; the popup itself reads live props.
+  const [specialsFor, setSpecialsFor] = useState<string | null>(null);
+  const [adjustmentsFor, setAdjustmentsFor] = useState<string | null>(null);
 
   const months = useMemo(
     () => availableMonths(trips, periods, specials, adjustments),
@@ -268,6 +352,11 @@ export default function CommissionsTab({
 
   function chipCount(s: Filter): number {
     return s === "all" ? rows.length : rows.filter((r) => r.status === s).length;
+  }
+
+  const driverNameById = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers]);
+  function periodFor(driverId: string): CommPeriod | null {
+    return periods.find((p) => p.driver_id === driverId && p.month_key === monthKey) ?? null;
   }
 
   function exportCsv() {
@@ -395,7 +484,7 @@ export default function CommissionsTab({
                     <span className="muted text-[11px] ms-1">({r.trips} trips · {r.projects} projects)</span>
                   </td>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap tabular-nums" style={BORDER}>
-                    {r.specials > 0 ? <span className="text-emerald-600 dark:text-emerald-400 font-medium">+{formatSar(r.specials)}</span> : <span className="muted">—</span>}
+                    {r.specials + r.bonus > 0 ? <span className="text-emerald-600 dark:text-emerald-400 font-medium">+{formatSar(r.specials + r.bonus)}</span> : <span className="muted">—</span>}
                   </td>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap tabular-nums" style={BORDER}>
                     {r.adjustments !== 0 ? (
@@ -416,11 +505,11 @@ export default function CommissionsTab({
                     <div className="flex items-center justify-end gap-1.5">
                       {editable && (
                         <>
-                          <OutlineBtn onClick={() => setSpecialModal({ driverId: r.driverId, entry: null })}>
-                            <Plus className="h-3.5 w-3.5" /> Special
+                          <OutlineBtn onClick={() => setSpecialsFor(r.driverId)}>
+                            <Plus className="h-3.5 w-3.5" /> Specials / Bonuses
                           </OutlineBtn>
-                          <OutlineBtn onClick={() => setAdjustModal({ driverId: r.driverId, entry: null })}>
-                            <Plus className="h-3.5 w-3.5" /> Adjust
+                          <OutlineBtn onClick={() => setAdjustmentsFor(r.driverId)}>
+                            <Plus className="h-3.5 w-3.5" /> Adjustments
                           </OutlineBtn>
                         </>
                       )}
@@ -438,7 +527,8 @@ export default function CommissionsTab({
 
       <div className="text-[11px] muted mt-3 leading-relaxed">
         Rules: commission accrues per delivered trip based on the project&apos;s rate (auto-derived — not editable here).
-        Special trips &amp; manual adjustments are added on top. Manager can apply a discretionary monthly bonus.
+        Special trips &amp; manual adjustments are added on top; the Breakdown is review-only. A denied special or
+        adjustment stays visible but is excluded from the total.
       </div>
 
       {breakdownFor && (
@@ -451,28 +541,28 @@ export default function CommissionsTab({
           specials={specials}
           adjustments={adjustments}
           projectsById={projectsById}
-          onAddSpecial={(id) => setSpecialModal({ driverId: id, entry: null })}
-          onEditSpecial={(sp) => setSpecialModal({ driverId: sp.driver_id, entry: sp })}
-          onAddAdjust={(id) => setAdjustModal({ driverId: id, entry: null })}
-          onEditAdjust={(a) => setAdjustModal({ driverId: a.driver_id, entry: a })}
           onClose={() => setBreakdownFor(null)}
         />
       )}
 
-      {specialModal && (
-        <SpecialModal
-          driverId={specialModal.driverId}
+      {specialsFor && (
+        <SpecialsModal
+          driverId={specialsFor}
           monthKey={monthKey}
-          entry={specialModal.entry}
-          onClose={() => setSpecialModal(null)}
+          driverName={driverNameById.get(specialsFor) ?? specialsFor}
+          specials={specials}
+          period={periodFor(specialsFor)}
+          onClose={() => setSpecialsFor(null)}
         />
       )}
-      {adjustModal && (
-        <AdjustmentModal
-          driverId={adjustModal.driverId}
+
+      {adjustmentsFor && (
+        <AdjustmentsModal
+          driverId={adjustmentsFor}
           monthKey={monthKey}
-          entry={adjustModal.entry}
-          onClose={() => setAdjustModal(null)}
+          driverName={driverNameById.get(adjustmentsFor) ?? adjustmentsFor}
+          adjustments={adjustments}
+          onClose={() => setAdjustmentsFor(null)}
         />
       )}
     </div>
@@ -480,8 +570,9 @@ export default function CommissionsTab({
 }
 
 // ----------------------------------------------------------------------------
-// Breakdown modal — per driver, per month. All numbers recompute from props, so
-// after any write + router.refresh() the open modal reflects the new data.
+// Breakdown modal — READ-ONLY review + payout decisions. All numbers recompute
+// from props, so after any write + router.refresh() it reflects the new data.
+// No item editing here — that lives in the Specials/Adjustments manage popups.
 // ----------------------------------------------------------------------------
 function BreakdownModal({
   driverId,
@@ -492,10 +583,6 @@ function BreakdownModal({
   specials,
   adjustments,
   projectsById,
-  onAddSpecial,
-  onEditSpecial,
-  onAddAdjust,
-  onEditAdjust,
   onClose,
 }: {
   driverId: string;
@@ -506,15 +593,12 @@ function BreakdownModal({
   specials: CommSpecial[];
   adjustments: CommAdjustment[];
   projectsById: Record<string, string>;
-  onAddSpecial: (driverId: string) => void;
-  onEditSpecial: (entry: CommSpecial) => void;
-  onAddAdjust: (driverId: string) => void;
-  onEditAdjust: (entry: CommAdjustment) => void;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [denyOpen, setDenyOpen] = useState(false);
 
   const driver = drivers.find((d) => d.id === driverId);
   const baseLines = useMemo(() => buildBaseLines(trips, driverId, monthKey, projectsById), [trips, driverId, monthKey, projectsById]);
@@ -525,30 +609,27 @@ function BreakdownModal({
   const status = period?.payout_status ?? "pending";
 
   const base = round2(baseLines.reduce((s, l) => s + l.amount, 0));
-  const spSum = round2(mySpecials.reduce((s, x) => s + x.amount_sar, 0));
-  const adjSum = round2(myAdjustments.reduce((s, x) => s + x.amount_sar, 0));
+  const spSum = round2(mySpecials.filter(isActive).reduce((s, x) => s + x.amount_sar, 0));
+  const adjSum = round2(myAdjustments.filter(isActive).reduce((s, x) => s + x.amount_sar, 0));
   const total = round2(base + spSum + adjSum + bonus);
 
   const isCurrent = monthKey === CURRENT_MONTH_KEY;
-  const editable = isCurrent && status !== "paid";
+  const canDecide = isCurrent && status !== "paid";
 
-  const [bonusVal, setBonusVal] = useState(String(bonus));
-  useEffect(() => setBonusVal(String(bonus)), [bonus]);
-
-  async function run(fn: () => Promise<ActionResult>): Promise<boolean> {
+  async function run(fn: () => Promise<ActionResult>): Promise<void> {
     setBusy(true);
     setErr(null);
     const res = await fn();
     setBusy(false);
     if (res.error) {
       setErr(res.error);
-      return false;
+      return;
     }
     router.refresh();
-    return true;
   }
 
   const driverName = driver?.name ?? driverId;
+  const hasExtras = mySpecials.length > 0 || bonus !== 0;
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
@@ -557,12 +638,19 @@ function BreakdownModal({
           <h2 className="text-lg font-semibold">
             Commission Breakdown — {driverName}
             {driver?.name_ar ? <span className="muted font-normal"> · {driver.name_ar}</span> : null}
+            <span className="muted font-normal text-sm"> · review only</span>
           </h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
 
         <div className="space-y-4">
-          {!editable && (
+          {status === "denied" && (
+            <div className="rounded-lg p-3 text-xs flex items-start gap-2" style={{ background: "rgba(225,29,72,.10)", border: "1px solid rgba(225,29,72,.30)" }}>
+              <Ban className="h-4 w-4 text-rose-600 dark:text-rose-400 mt-0.5 shrink-0" />
+              <span className="text-rose-700 dark:text-rose-300">Payout denied{period?.deny_reason ? ` — ${period.deny_reason}` : ""}. {monthLabel(monthKey)}</span>
+            </div>
+          )}
+          {status !== "denied" && !canDecide && (
             <div className="rounded-lg p-3 text-xs flex items-start gap-2" style={{ background: "rgba(100,116,139,.10)", border: "1px solid rgb(var(--border))" }}>
               <Info className="h-4 w-4 muted mt-0.5 shrink-0" />
               <span>{status === "paid" ? "Paid — locked." : "Closed month — read-only."} {monthLabel(monthKey)}</span>
@@ -607,89 +695,256 @@ function BreakdownModal({
                 ))}
               </div>
             )}
-            <div className="text-[11px] muted mt-2">Base pay is auto-derived from each delivered trip&apos;s stamped commission. To correct it, add a special or an adjustment below.</div>
+            <div className="text-[11px] muted mt-2">Base pay is auto-derived from each delivered trip&apos;s stamped commission. Edit specials, the bonus, or adjustments from the row buttons.</div>
           </section>
 
-          {/* Specials / Bonuses */}
+          {/* Specials / Bonuses (read-only review; denied shown struck) */}
           <section>
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="font-semibold text-sm">Specials / Bonuses</h4>
-              {editable && (
-                <OutlineBtn onClick={() => onAddSpecial(driverId)}><Plus className="h-3.5 w-3.5" /> Add Special</OutlineBtn>
-              )}
-            </div>
-            {mySpecials.length === 0 ? (
-              <p className="muted text-sm">No special trips logged.</p>
+            <h4 className="font-semibold text-sm mb-2">Specials / Bonuses</h4>
+            {!hasExtras ? (
+              <p className="muted text-sm">No specials or bonus.</p>
             ) : (
               <div className="space-y-2">
-                {mySpecials.map((sp) => (
-                  <div key={sp.id} className="rounded-lg border p-3 flex items-center gap-3 flex-wrap" style={BORDER}>
-                    <div className="flex-1 min-w-[200px]">
-                      <div className="font-medium text-sm flex items-center gap-2">
-                        {sp.is_special_trip && <StatusPill status="scheduled" label="Special trip" />}
-                        {sp.label}
+                {mySpecials.map((sp) => {
+                  const denied = !isActive(sp);
+                  return (
+                    <div key={sp.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
+                      <div className="flex-1 min-w-[200px]">
+                        <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+                          {sp.is_special_trip && <StatusPill status="scheduled" label="Special trip" />}
+                          {denied && <StatusPill status="critical" label="Denied" />}
+                          <span className={denied ? "line-through" : ""}>{sp.label}</span>
+                        </div>
+                        <div className="text-[11px] muted">{[sp.date, sp.note].filter(Boolean).join(" · ") || "—"}</div>
+                        {denied && sp.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {sp.deny_reason}</div>}
                       </div>
-                      <div className="text-[11px] muted">{[sp.date, sp.note].filter(Boolean).join(" · ") || "—"}</div>
+                      <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}>+{formatSar(sp.amount_sar)}</div>
                     </div>
-                    <div className="text-emerald-600 dark:text-emerald-400 font-semibold tabular-nums">+{formatSar(sp.amount_sar)}</div>
-                    {editable && (
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => onEditSpecial(sp)} className="muted hover:text-[rgb(var(--fg))]" title="Edit">
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button type="button" disabled={busy} onClick={() => confirm("Remove this special?") && run(() => removeCommissionSpecial(sp.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    )}
+                  );
+                })}
+                {bonus !== 0 && (
+                  <div className="rounded-lg border p-3 flex items-center gap-3 flex-wrap" style={BORDER}>
+                    <div className="flex-1 min-w-[200px]">
+                      <div className="font-medium text-sm flex items-center gap-2"><Banknote className="h-4 w-4 muted" /> Manager Bonus</div>
+                      <div className="text-[11px] muted">Discretionary monthly bonus.</div>
+                    </div>
+                    <div className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">+{formatSar(bonus)}</div>
                   </div>
-                ))}
+                )}
               </div>
             )}
           </section>
 
-          {/* Adjustments */}
+          {/* Adjustments (read-only review; denied shown struck) */}
           <section>
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="font-semibold text-sm">Adjustments</h4>
-              {editable && (
-                <OutlineBtn onClick={() => onAddAdjust(driverId)}><Plus className="h-3.5 w-3.5" /> Add Adjustment</OutlineBtn>
-              )}
-            </div>
+            <h4 className="font-semibold text-sm mb-2">Adjustments</h4>
             {myAdjustments.length === 0 ? (
               <p className="muted text-sm">No adjustments.</p>
             ) : (
               <div className="space-y-2">
-                {myAdjustments.map((a) => (
-                  <div key={a.id} className="rounded-lg border p-3 flex items-center gap-3 flex-wrap" style={BORDER}>
-                    <div className="flex-1 min-w-[200px]">
-                      <div className="font-medium text-sm">{a.label}</div>
-                      <div className="text-[11px] muted">{[a.date, a.note].filter(Boolean).join(" · ") || "—"}</div>
-                    </div>
-                    <div className={(a.amount_sar > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400") + " font-semibold tabular-nums"}>
-                      {a.amount_sar > 0 ? "+" : ""}{formatSar(a.amount_sar)}
-                    </div>
-                    {editable && (
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => onEditAdjust(a)} className="muted hover:text-[rgb(var(--fg))]" title="Edit">
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button type="button" disabled={busy} onClick={() => confirm("Remove this adjustment?") && run(() => removeCommissionAdjustment(a.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                {myAdjustments.map((a) => {
+                  const denied = !isActive(a);
+                  return (
+                    <div key={a.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
+                      <div className="flex-1 min-w-[200px]">
+                        <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+                          {denied && <StatusPill status="critical" label="Denied" />}
+                          <span className={denied ? "line-through" : ""}>{a.label}</span>
+                        </div>
+                        <div className="text-[11px] muted">{[a.date, a.note].filter(Boolean).join(" · ") || "—"}</div>
+                        {denied && a.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {a.deny_reason}</div>}
                       </div>
-                    )}
-                  </div>
-                ))}
+                      <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : a.amount_sar > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
+                        {a.amount_sar > 0 ? "+" : ""}{formatSar(a.amount_sar)}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>
 
-          {/* Manager bonus */}
-          <section className="rounded-lg border p-3 flex items-center gap-3 flex-wrap" style={BORDER}>
+          {err && <p className="text-sm text-rose-600 dark:text-rose-400">{err}</p>}
+        </div>
+
+        {/* Footer — payout workflow. STRICT pay: Pay only from approved. */}
+        <div className="flex justify-end gap-2 mt-5 flex-wrap">
+          <OutlineBtn onClick={onClose}>Close</OutlineBtn>
+          {canDecide && status === "pending" && (
+            <>
+              <OutlineBtn onClick={() => run(() => setPayoutStatus(driverId, monthKey, "approved"))} disabled={busy}>
+                <Check className="h-3.5 w-3.5" /> Approve
+              </OutlineBtn>
+              <DangerBtn onClick={() => setDenyOpen(true)} disabled={busy}>
+                <Ban className="h-3.5 w-3.5" /> Deny
+              </DangerBtn>
+            </>
+          )}
+          {canDecide && status === "approved" && (
+            <>
+              <DangerBtn onClick={() => setDenyOpen(true)} disabled={busy}>
+                <Ban className="h-3.5 w-3.5" /> Deny
+              </DangerBtn>
+              <PrimaryBtn onClick={() => confirm("Mark this payout as PAID? This locks the month for this driver.") && run(() => setPayoutStatus(driverId, monthKey, "paid"))} disabled={busy}>
+                <Banknote className="h-3.5 w-3.5" /> Pay
+              </PrimaryBtn>
+            </>
+          )}
+          {canDecide && status === "denied" && (
+            <OutlineBtn onClick={() => run(() => setPayoutStatus(driverId, monthKey, "pending"))} disabled={busy}>
+              <RotateCcw className="h-3.5 w-3.5" /> Reopen
+            </OutlineBtn>
+          )}
+        </div>
+      </div>
+
+      {denyOpen && (
+        <DenyModal
+          title="Deny payout"
+          prompt={`Deny ${driverName}'s payout for ${monthLabel(monthKey)}. The reason is recorded.`}
+          onConfirm={(reason) => setPayoutStatus(driverId, monthKey, "denied", reason)}
+          onClose={() => setDenyOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Specials & Bonuses manage popup — add-special form + one combined table of
+// existing specials (edit / delete / deny) plus a Manager-Bonus row (inline
+// amount Set / Remove; bonus is never denyable).
+// ----------------------------------------------------------------------------
+function SpecialsModal({
+  driverId,
+  monthKey,
+  driverName,
+  specials,
+  period,
+  onClose,
+}: {
+  driverId: string;
+  monthKey: string;
+  driverName: string;
+  specials: CommSpecial[];
+  period: CommPeriod | null;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [editId, setEditId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [denyTarget, setDenyTarget] = useState<CommSpecial | null>(null);
+
+  const mySpecials = specials.filter((s) => s.driver_id === driverId && s.month_key === monthKey);
+  const editing = mySpecials.find((s) => s.id === editId) ?? null;
+  const bonus = round2(period?.bonus_sar ?? 0);
+  const [bonusVal, setBonusVal] = useState(String(bonus));
+  useEffect(() => setBonusVal(String(bonus)), [bonus]);
+
+  async function run(fn: () => Promise<ActionResult>): Promise<void> {
+    setBusy(true);
+    setErr(null);
+    const res = await fn();
+    setBusy(false);
+    if (res.error) {
+      setErr(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    fd.set("driver_id", driverId);
+    fd.set("month_key", monthKey);
+    setBusy(true);
+    setErr(null);
+    const res = editId ? await updateCommissionSpecial(editId, fd) : await addCommissionSpecial(fd);
+    setBusy(false);
+    if (res.error) {
+      setErr(res.error);
+      return;
+    }
+    router.refresh();
+    setEditId(null);
+    form.reset();
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <h2 className="text-lg font-semibold">Specials &amp; Bonuses — {driverName} <span className="muted font-normal text-sm">· {monthLabel(monthKey)}</span></h2>
+          <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
+        </div>
+
+        {/* Add / edit special form */}
+        <form key={editId ?? "new"} onSubmit={onSubmit} className="rounded-lg border p-3 grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4" style={BORDER}>
+          <div className="sm:col-span-2 text-sm font-semibold">{editId ? "Edit special" : "Add special"}</div>
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="muted text-xs">Label</span>
+            <input name="label" required defaultValue={editing?.label ?? ""} placeholder="e.g. Emergency desert run" className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted text-xs">Amount (SAR)</span>
+            <input name="amount_sar" type="number" min="0" step="10" required defaultValue={editing?.amount_sar ?? 250} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted text-xs">Date</span>
+            <input name="date" type="date" defaultValue={editing?.date ?? ""} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="muted text-xs">Note</span>
+            <input name="note" defaultValue={editing?.note ?? ""} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input name="is_special_trip" type="checkbox" defaultChecked={editing ? editing.is_special_trip : true} /> <span className="muted">Counts as a special trip</span>
+          </label>
+          <div className="flex justify-end gap-2 sm:col-span-2">
+            {editId && <OutlineBtn onClick={() => setEditId(null)}>Cancel edit</OutlineBtn>}
+            <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : editId ? "Update special" : "Add special"}</PrimaryBtn>
+          </div>
+        </form>
+
+        {/* Combined table: specials + the manager bonus row */}
+        <div className="space-y-2">
+          {mySpecials.length === 0 && bonus === 0 && <p className="muted text-sm">No specials or bonus yet.</p>}
+
+          {mySpecials.map((sp) => {
+            const denied = !isActive(sp);
+            return (
+              <div key={sp.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
+                <div className="flex-1 min-w-[180px]">
+                  <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+                    {sp.is_special_trip && <StatusPill status="scheduled" label="Special trip" />}
+                    {denied && <StatusPill status="critical" label="Denied" />}
+                    <span className={denied ? "line-through" : ""}>{sp.label}</span>
+                  </div>
+                  <div className="text-[11px] muted">{[sp.date, sp.note].filter(Boolean).join(" · ") || "—"}</div>
+                  {denied && sp.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {sp.deny_reason}</div>}
+                </div>
+                <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}>+{formatSar(sp.amount_sar)}</div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => setEditId(sp.id)} className="muted hover:text-[rgb(var(--fg))]" title="Edit"><Pencil className="h-4 w-4" /></button>
+                  {denied ? (
+                    <button type="button" disabled={busy} onClick={() => run(() => setSpecialStatus(sp.id, "active"))} className="muted hover:text-[rgb(var(--fg))] disabled:opacity-50" title="Restore"><RotateCcw className="h-4 w-4" /></button>
+                  ) : (
+                    <button type="button" disabled={busy} onClick={() => setDenyTarget(sp)} className="text-amber-600 dark:text-amber-400 hover:opacity-70 disabled:opacity-50" title="Deny"><Ban className="h-4 w-4" /></button>
+                  )}
+                  <button type="button" disabled={busy} onClick={() => confirm("Delete this special permanently?") && run(() => removeCommissionSpecial(sp.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Manager bonus row — inline Set / Remove, no deny */}
+          <div className="rounded-lg border p-3 flex items-center gap-3 flex-wrap" style={{ ...BORDER, background: "rgba(100,116,139,.06)" }}>
             <div className="flex-1 min-w-[180px]">
-              <div className="font-semibold text-sm">Manager Bonus</div>
-              <div className="text-[11px] muted">Discretionary monthly bonus.</div>
+              <div className="font-medium text-sm flex items-center gap-2"><Banknote className="h-4 w-4 muted" /> Manager Bonus</div>
+              <div className="text-[11px] muted">Discretionary monthly bonus (current: {formatSar(bonus)}).</div>
             </div>
             <input
               type="number"
@@ -697,97 +952,209 @@ function BreakdownModal({
               step="50"
               value={bonusVal}
               onChange={(e) => setBonusVal(e.target.value)}
-              disabled={!editable || busy}
+              disabled={busy}
               className="px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-28 tabular-nums disabled:opacity-60"
               style={INPUT_STYLE}
             />
-            {editable && (
-              <OutlineBtn onClick={() => run(() => setCommissionBonus(driverId, monthKey, Number(bonusVal) || 0))} disabled={busy}>
-                <Save className="h-3.5 w-3.5" /> Set bonus
-              </OutlineBtn>
-            )}
-          </section>
-
-          {err && <p className="text-sm text-rose-600 dark:text-rose-400">{err}</p>}
-        </div>
-
-        {/* Footer — payout workflow */}
-        <div className="flex justify-end gap-2 mt-5 flex-wrap">
-          <OutlineBtn onClick={onClose}>Close</OutlineBtn>
-          {editable && status === "pending" && (
-            <OutlineBtn onClick={() => run(() => setPayoutStatus(driverId, monthKey, "approved"))} disabled={busy}>
-              <Check className="h-3.5 w-3.5" /> Approve
+            <OutlineBtn onClick={() => run(() => setCommissionBonus(driverId, monthKey, Number(bonusVal) || 0))} disabled={busy}>
+              <Save className="h-3.5 w-3.5" /> Set
             </OutlineBtn>
-          )}
-          {editable && (
-            <PrimaryBtn onClick={() => confirm("Mark this payout as PAID? This locks the month for this driver.") && run(() => setPayoutStatus(driverId, monthKey, "paid"))} disabled={busy}>
-              <Banknote className="h-3.5 w-3.5" /> Mark paid
-            </PrimaryBtn>
-          )}
+            {bonus !== 0 && (
+              <button type="button" disabled={busy} onClick={() => confirm("Remove the manager bonus?") && run(() => setCommissionBonus(driverId, monthKey, 0))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove bonus"><Trash2 className="h-4 w-4" /></button>
+            )}
+          </div>
+        </div>
+
+        {err && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{err}</p>}
+
+        <div className="flex justify-end gap-2 mt-5">
+          <OutlineBtn onClick={onClose}>Close</OutlineBtn>
         </div>
       </div>
+
+      {denyTarget && (
+        <DenyModal
+          title="Deny special"
+          prompt={`Deny "${denyTarget.label}" (${formatSar(denyTarget.amount_sar)}). It stays visible but is excluded from the total.`}
+          onConfirm={(reason) => setSpecialStatus(denyTarget.id, "denied", reason)}
+          onClose={() => setDenyTarget(null)}
+        />
+      )}
     </div>
   );
 }
 
-function SummaryCard({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="card p-3">
-      <div className="text-xs muted">{label}</div>
-      {children}
-    </div>
-  );
-}
-
-function PrimaryBtn({
-  onClick,
-  children,
-  disabled,
-  type = "button",
-}: {
-  onClick?: () => void;
-  children: React.ReactNode;
-  disabled?: boolean;
-  type?: "button" | "submit";
-}) {
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      className="h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      {children}
-    </button>
-  );
-}
-
 // ----------------------------------------------------------------------------
-// Special editor — its own distinct modal (create or edit). Only special fields.
+// Adjustments manage popup — add-adjustment form + its own table of existing
+// adjustments (edit / delete / deny). Amount may be negative (a deduction);
+// no min/max/sign limiter.
 // ----------------------------------------------------------------------------
-function SpecialModal({
+function AdjustmentsModal({
   driverId,
   monthKey,
-  entry,
+  driverName,
+  adjustments,
   onClose,
 }: {
   driverId: string;
   monthKey: string;
-  entry: CommSpecial | null;
+  driverName: string;
+  adjustments: CommAdjustment[];
   onClose: () => void;
 }) {
   const router = useRouter();
+  const [editId, setEditId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [denyTarget, setDenyTarget] = useState<CommAdjustment | null>(null);
+
+  const myAdjustments = adjustments.filter((a) => a.driver_id === driverId && a.month_key === monthKey);
+  const editing = myAdjustments.find((a) => a.id === editId) ?? null;
+
+  async function run(fn: () => Promise<ActionResult>): Promise<void> {
+    setBusy(true);
+    setErr(null);
+    const res = await fn();
+    setBusy(false);
+    if (res.error) {
+      setErr(res.error);
+      return;
+    }
+    router.refresh();
+  }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     fd.set("driver_id", driverId);
     fd.set("month_key", monthKey);
     setBusy(true);
     setErr(null);
-    const res = entry ? await updateCommissionSpecial(entry.id, fd) : await addCommissionSpecial(fd);
+    const res = editId ? await updateCommissionAdjustment(editId, fd) : await addCommissionAdjustment(fd);
+    setBusy(false);
+    if (res.error) {
+      setErr(res.error);
+      return;
+    }
+    router.refresh();
+    setEditId(null);
+    form.reset();
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <h2 className="text-lg font-semibold">Adjustments — {driverName} <span className="muted font-normal text-sm">· {monthLabel(monthKey)}</span></h2>
+          <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
+        </div>
+
+        {/* Add / edit adjustment form */}
+        <form key={editId ?? "new"} onSubmit={onSubmit} className="rounded-lg border p-3 grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4" style={BORDER}>
+          <div className="sm:col-span-2 text-sm font-semibold">{editId ? "Edit adjustment" : "Add adjustment"}</div>
+          <p className="text-[11px] muted sm:col-span-2">Positive adds, negative deducts (e.g. uniform deduction). No limit.</p>
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="muted text-xs">Label</span>
+            <input name="label" required defaultValue={editing?.label ?? ""} placeholder="e.g. Uniform deduction" className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted text-xs">Amount (SAR)</span>
+            <input name="amount_sar" type="number" step="10" required defaultValue={editing?.amount_sar ?? -100} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted text-xs">Date</span>
+            <input name="date" type="date" defaultValue={editing?.date ?? ""} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="muted text-xs">Note</span>
+            <input name="note" defaultValue={editing?.note ?? ""} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <div className="flex justify-end gap-2 sm:col-span-2">
+            {editId && <OutlineBtn onClick={() => setEditId(null)}>Cancel edit</OutlineBtn>}
+            <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : editId ? "Update adjustment" : "Add adjustment"}</PrimaryBtn>
+          </div>
+        </form>
+
+        {/* Adjustments table */}
+        <div className="space-y-2">
+          {myAdjustments.length === 0 && <p className="muted text-sm">No adjustments yet.</p>}
+          {myAdjustments.map((a) => {
+            const denied = !isActive(a);
+            return (
+              <div key={a.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
+                <div className="flex-1 min-w-[180px]">
+                  <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+                    {denied && <StatusPill status="critical" label="Denied" />}
+                    <span className={denied ? "line-through" : ""}>{a.label}</span>
+                  </div>
+                  <div className="text-[11px] muted">{[a.date, a.note].filter(Boolean).join(" · ") || "—"}</div>
+                  {denied && a.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {a.deny_reason}</div>}
+                </div>
+                <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : a.amount_sar > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
+                  {a.amount_sar > 0 ? "+" : ""}{formatSar(a.amount_sar)}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => setEditId(a.id)} className="muted hover:text-[rgb(var(--fg))]" title="Edit"><Pencil className="h-4 w-4" /></button>
+                  {denied ? (
+                    <button type="button" disabled={busy} onClick={() => run(() => setAdjustmentStatus(a.id, "active"))} className="muted hover:text-[rgb(var(--fg))] disabled:opacity-50" title="Restore"><RotateCcw className="h-4 w-4" /></button>
+                  ) : (
+                    <button type="button" disabled={busy} onClick={() => setDenyTarget(a)} className="text-amber-600 dark:text-amber-400 hover:opacity-70 disabled:opacity-50" title="Deny"><Ban className="h-4 w-4" /></button>
+                  )}
+                  <button type="button" disabled={busy} onClick={() => confirm("Delete this adjustment permanently?") && run(() => removeCommissionAdjustment(a.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {err && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{err}</p>}
+
+        <div className="flex justify-end gap-2 mt-5">
+          <OutlineBtn onClick={onClose}>Close</OutlineBtn>
+        </div>
+      </div>
+
+      {denyTarget && (
+        <DenyModal
+          title="Deny adjustment"
+          prompt={`Deny "${denyTarget.label}" (${formatSar(denyTarget.amount_sar)}). It stays visible but is excluded from the total.`}
+          onConfirm={(reason) => setAdjustmentStatus(denyTarget.id, "denied", reason)}
+          onClose={() => setDenyTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// DenyModal — captures a required reason, then runs onConfirm. Reused for
+// per-item deny (special / adjustment) and payout-level deny.
+// ----------------------------------------------------------------------------
+function DenyModal({
+  title,
+  prompt,
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  prompt: string;
+  onConfirm: (reason: string) => Promise<ActionResult>;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (!reason.trim()) {
+      setErr("Enter a reason.");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    const res = await onConfirm(reason.trim());
     setBusy(false);
     if (res.error) {
       setErr(res.error);
@@ -798,110 +1165,30 @@ function SpecialModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] grid place-items-center p-4 bg-black/50" onClick={onClose}>
       <div className="card p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-semibold">{entry ? "Edit Special" : "Add Special"}</h2>
+        <div className="flex items-start justify-between mb-3">
+          <h2 className="text-lg font-semibold flex items-center gap-2"><Ban className="h-5 w-5 text-rose-600 dark:text-rose-400" /> {title}</h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
-        <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted text-xs">Label</span>
-            <input name="label" required defaultValue={entry?.label ?? ""} placeholder="e.g. Emergency desert run" className={INPUT} style={INPUT_STYLE} />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="muted text-xs">Amount (SAR)</span>
-            <input name="amount_sar" type="number" min="0" step="10" required defaultValue={entry?.amount_sar ?? 250} className={INPUT} style={INPUT_STYLE} />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="muted text-xs">Date</span>
-            <input name="date" type="date" defaultValue={entry?.date ?? ""} className={INPUT} style={INPUT_STYLE} />
-          </label>
-          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted text-xs">Note</span>
-            <input name="note" defaultValue={entry?.note ?? ""} className={INPUT} style={INPUT_STYLE} />
-          </label>
-          <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <input name="is_special_trip" type="checkbox" defaultChecked={entry ? entry.is_special_trip : true} /> <span className="muted">Counts as a special trip</span>
-          </label>
-          {err && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{err}</p>}
-          <div className="flex justify-end gap-2 sm:col-span-2 mt-1">
-            <OutlineBtn onClick={onClose}>Cancel</OutlineBtn>
-            <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : entry ? "Update" : "Add"}</PrimaryBtn>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// ----------------------------------------------------------------------------
-// Adjustment editor — its own distinct modal (create or edit). Adjustment fields
-// only; amount may be negative (a deduction).
-// ----------------------------------------------------------------------------
-function AdjustmentModal({
-  driverId,
-  monthKey,
-  entry,
-  onClose,
-}: {
-  driverId: string;
-  monthKey: string;
-  entry: CommAdjustment | null;
-  onClose: () => void;
-}) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    fd.set("driver_id", driverId);
-    fd.set("month_key", monthKey);
-    setBusy(true);
-    setErr(null);
-    const res = entry ? await updateCommissionAdjustment(entry.id, fd) : await addCommissionAdjustment(fd);
-    setBusy(false);
-    if (res.error) {
-      setErr(res.error);
-      return;
-    }
-    router.refresh();
-    onClose();
-  }
-
-  return (
-    <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={onClose}>
-      <div className="card p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-semibold">{entry ? "Edit Adjustment" : "Add Adjustment"}</h2>
-          <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
+        <p className="text-sm muted mb-3">{prompt}</p>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="muted text-xs">Reason (required)</span>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            autoFocus
+            placeholder="Why is this being denied?"
+            className="px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full"
+            style={INPUT_STYLE}
+          />
+        </label>
+        {err && <p className="text-sm text-rose-600 dark:text-rose-400 mt-2">{err}</p>}
+        <div className="flex justify-end gap-2 mt-4">
+          <OutlineBtn onClick={onClose}>Cancel</OutlineBtn>
+          <DangerBtn onClick={submit} disabled={busy}><Ban className="h-3.5 w-3.5" /> {busy ? "Denying…" : "Deny"}</DangerBtn>
         </div>
-        <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <p className="text-[11px] muted sm:col-span-2">Positive adds, negative deducts (e.g. uniform deduction).</p>
-          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted text-xs">Label</span>
-            <input name="label" required defaultValue={entry?.label ?? ""} placeholder="e.g. Uniform deduction" className={INPUT} style={INPUT_STYLE} />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="muted text-xs">Amount (SAR)</span>
-            <input name="amount_sar" type="number" step="10" required defaultValue={entry?.amount_sar ?? -100} className={INPUT} style={INPUT_STYLE} />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="muted text-xs">Date</span>
-            <input name="date" type="date" defaultValue={entry?.date ?? ""} className={INPUT} style={INPUT_STYLE} />
-          </label>
-          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted text-xs">Note</span>
-            <input name="note" defaultValue={entry?.note ?? ""} className={INPUT} style={INPUT_STYLE} />
-          </label>
-          {err && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{err}</p>}
-          <div className="flex justify-end gap-2 sm:col-span-2 mt-1">
-            <OutlineBtn onClick={onClose}>Cancel</OutlineBtn>
-            <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : entry ? "Update" : "Add"}</PrimaryBtn>
-          </div>
-        </form>
       </div>
     </div>
   );
