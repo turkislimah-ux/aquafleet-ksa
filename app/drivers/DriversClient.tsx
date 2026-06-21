@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Pencil, Eye, Star, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon } from "lucide-react";
 import { Btn, Stat, StatusPill, Bar, Table, TH, TD } from "@/components/ui";
+import { formatSar } from "@/lib/utils";
 import {
   type Driver,
   DRIVER_STATUS_LABELS,
@@ -227,6 +228,7 @@ export default function DriversClient({
                   <TH>Safety</TH>
                   <TH>Trips 30d</TH>
                   <TH>Rating</TH>
+                  <TH>Salary</TH>
                   <TH>License Exp</TH>
                   <TH className="text-end" />
                 </tr>
@@ -234,7 +236,7 @@ export default function DriversClient({
               <tbody>
                 {drivers.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                    <td colSpan={10} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                       No drivers yet.
                     </td>
                   </tr>
@@ -275,6 +277,9 @@ export default function DriversClient({
                         ) : (
                           <span className="muted">—</span>
                         )}
+                      </TD>
+                      <TD className="tabular-nums">
+                        {d.salary_sar != null ? formatSar(d.salary_sar) : <span className="muted">—</span>}
                       </TD>
                       <TD className={expSoon ? "text-amber-600 dark:text-amber-400 font-medium" : ""}>
                         {d.license_expiry ?? <span className="muted">—</span>}
@@ -380,6 +385,9 @@ export default function DriversClient({
               </Field>
               <Field label="Incidents (12mo)">
                 <input name="incidents_12mo" type="number" step="1" min="0" defaultValue={editing?.incidents_12mo ?? ""} className={INPUT} style={INPUT_STYLE} />
+              </Field>
+              <Field label="Salary (SAR / month)">
+                <input name="salary_sar" type="number" step="0.01" min="0" defaultValue={editing?.salary_sar ?? ""} placeholder="—" className={INPUT} style={INPUT_STYLE} />
               </Field>
               <label className="flex items-center gap-2 text-sm sm:col-span-2">
                 <input name="active" type="checkbox" defaultChecked={editing ? editing.active : true} />
@@ -510,6 +518,9 @@ function DriverDetail({
                   <span className={d.incidents_12mo != null && d.incidents_12mo > 0 ? "text-rose-600 dark:text-rose-400 font-semibold" : "font-semibold"}>
                     {d.incidents_12mo ?? "—"}
                   </span>
+                </Cell>
+                <Cell label="Salary (monthly)">
+                  <span className="font-semibold tabular-nums">{d.salary_sar != null ? formatSar(d.salary_sar) : "—"}</span>
                 </Cell>
               </div>
             </div>

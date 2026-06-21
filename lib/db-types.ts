@@ -101,6 +101,9 @@ export type Driver = {
   home_station: string | null;
   hours_this_week: number | null;
   incidents_12mo: number | null;
+  // Added in 0008 — standalone monthly salary (SAR). Display-only: never part of
+  // commission/payout math. Nullable, render "—" when unset.
+  salary_sar: number | null;
   active: boolean;
   created_at: string;
 };
