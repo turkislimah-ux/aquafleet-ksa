@@ -21,8 +21,10 @@ import { Stat, StatusPill } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import {
   addCommissionSpecial,
+  updateCommissionSpecial,
   removeCommissionSpecial,
   addCommissionAdjustment,
+  updateCommissionAdjustment,
   removeCommissionAdjustment,
   setCommissionBonus,
   setPayoutStatus,
@@ -194,6 +196,10 @@ const CHIPS = ["all", "pending", "approved", "paid"] as const;
 type Filter = (typeof CHIPS)[number];
 
 const BORDER = { borderColor: "rgb(var(--border))" } as const;
+// Header cells mirror the demo's `.tbl th`: .7rem uppercase, .05em tracking, a
+// subtle band, and roomy .5rem/.75rem padding (the demo's spacing, not tighter).
+const TH_CLS =
+  "text-start font-medium muted py-2 px-3 text-[.7rem] uppercase tracking-[.05em] whitespace-nowrap bg-black/[.02] dark:bg-white/[.02]";
 const INPUT = "px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
@@ -239,7 +245,9 @@ export default function CommissionsTab({
   const [monthKey, setMonthKey] = useState(CURRENT_MONTH_KEY);
   const [filter, setFilter] = useState<Filter>("all");
   const [breakdownFor, setBreakdownFor] = useState<string | null>(null);
-  const [initialForm, setInitialForm] = useState<"special" | "adjust" | null>(null);
+  // Special & Adjustment editors are their own distinct modals (create or edit).
+  const [specialModal, setSpecialModal] = useState<{ driverId: string; entry: CommSpecial | null } | null>(null);
+  const [adjustModal, setAdjustModal] = useState<{ driverId: string; entry: CommAdjustment | null } | null>(null);
 
   const months = useMemo(
     () => availableMonths(trips, periods, specials, adjustments),
@@ -260,11 +268,6 @@ export default function CommissionsTab({
 
   function chipCount(s: Filter): number {
     return s === "all" ? rows.length : rows.filter((r) => r.status === s).length;
-  }
-
-  function openBreakdown(driverId: string, form: "special" | "adjust" | null = null) {
-    setInitialForm(form);
-    setBreakdownFor(driverId);
   }
 
   function exportCsv() {
@@ -355,13 +358,13 @@ export default function CommissionsTab({
         <table className="w-full text-sm">
           <thead>
             <tr>
-              <th className="text-start font-medium muted py-2 px-3 text-xs uppercase tracking-wide whitespace-nowrap">Driver</th>
-              <th className="text-start font-medium muted py-2 px-3 text-xs uppercase tracking-wide whitespace-nowrap">Base (Projects × Trips)</th>
-              <th className="text-start font-medium muted py-2 px-3 text-xs uppercase tracking-wide whitespace-nowrap">Specials</th>
-              <th className="text-start font-medium muted py-2 px-3 text-xs uppercase tracking-wide whitespace-nowrap">Adjustments</th>
-              <th className="text-start font-medium muted py-2 px-3 text-xs uppercase tracking-wide whitespace-nowrap">Total</th>
-              <th className="text-start font-medium muted py-2 px-3 text-xs uppercase tracking-wide whitespace-nowrap">Payout</th>
-              <th className="py-2 px-3" />
+              <th className={TH_CLS}>Driver</th>
+              <th className={TH_CLS}>Base (Projects × Trips)</th>
+              <th className={TH_CLS}>Specials / Bonuses</th>
+              <th className={TH_CLS}>Adjustments</th>
+              <th className={TH_CLS}>Total</th>
+              <th className={TH_CLS}>Payout</th>
+              <th className="py-2 px-3 bg-black/[.02] dark:bg-white/[.02]" />
             </tr>
           </thead>
           <tbody>
@@ -413,15 +416,15 @@ export default function CommissionsTab({
                     <div className="flex items-center justify-end gap-1.5">
                       {editable && (
                         <>
-                          <OutlineBtn onClick={() => openBreakdown(r.driverId, "special")}>
+                          <OutlineBtn onClick={() => setSpecialModal({ driverId: r.driverId, entry: null })}>
                             <Plus className="h-3.5 w-3.5" /> Special
                           </OutlineBtn>
-                          <OutlineBtn onClick={() => openBreakdown(r.driverId, "adjust")}>
-                            <Pencil className="h-3.5 w-3.5" /> Adjust
+                          <OutlineBtn onClick={() => setAdjustModal({ driverId: r.driverId, entry: null })}>
+                            <Plus className="h-3.5 w-3.5" /> Adjust
                           </OutlineBtn>
                         </>
                       )}
-                      <OutlineBtn onClick={() => openBreakdown(r.driverId)}>
+                      <OutlineBtn onClick={() => setBreakdownFor(r.driverId)}>
                         <Eye className="h-3.5 w-3.5" /> Breakdown
                       </OutlineBtn>
                     </div>
@@ -448,8 +451,28 @@ export default function CommissionsTab({
           specials={specials}
           adjustments={adjustments}
           projectsById={projectsById}
-          initialForm={initialForm}
+          onAddSpecial={(id) => setSpecialModal({ driverId: id, entry: null })}
+          onEditSpecial={(sp) => setSpecialModal({ driverId: sp.driver_id, entry: sp })}
+          onAddAdjust={(id) => setAdjustModal({ driverId: id, entry: null })}
+          onEditAdjust={(a) => setAdjustModal({ driverId: a.driver_id, entry: a })}
           onClose={() => setBreakdownFor(null)}
+        />
+      )}
+
+      {specialModal && (
+        <SpecialModal
+          driverId={specialModal.driverId}
+          monthKey={monthKey}
+          entry={specialModal.entry}
+          onClose={() => setSpecialModal(null)}
+        />
+      )}
+      {adjustModal && (
+        <AdjustmentModal
+          driverId={adjustModal.driverId}
+          monthKey={monthKey}
+          entry={adjustModal.entry}
+          onClose={() => setAdjustModal(null)}
         />
       )}
     </div>
@@ -469,7 +492,10 @@ function BreakdownModal({
   specials,
   adjustments,
   projectsById,
-  initialForm,
+  onAddSpecial,
+  onEditSpecial,
+  onAddAdjust,
+  onEditAdjust,
   onClose,
 }: {
   driverId: string;
@@ -480,14 +506,15 @@ function BreakdownModal({
   specials: CommSpecial[];
   adjustments: CommAdjustment[];
   projectsById: Record<string, string>;
-  initialForm: "special" | "adjust" | null;
+  onAddSpecial: (driverId: string) => void;
+  onEditSpecial: (entry: CommSpecial) => void;
+  onAddAdjust: (driverId: string) => void;
+  onEditAdjust: (entry: CommAdjustment) => void;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [showSpecial, setShowSpecial] = useState(initialForm === "special");
-  const [showAdjust, setShowAdjust] = useState(initialForm === "adjust");
 
   const driver = drivers.find((d) => d.id === driverId);
   const baseLines = useMemo(() => buildBaseLines(trips, driverId, monthKey, projectsById), [trips, driverId, monthKey, projectsById]);
@@ -519,21 +546,6 @@ function BreakdownModal({
     }
     router.refresh();
     return true;
-  }
-
-  async function onAddSpecial(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    fd.set("driver_id", driverId);
-    fd.set("month_key", monthKey);
-    if (await run(() => addCommissionSpecial(fd))) setShowSpecial(false);
-  }
-  async function onAddAdjust(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    fd.set("driver_id", driverId);
-    fd.set("month_key", monthKey);
-    if (await run(() => addCommissionAdjustment(fd))) setShowAdjust(false);
   }
 
   const driverName = driver?.name ?? driverId;
@@ -598,41 +610,14 @@ function BreakdownModal({
             <div className="text-[11px] muted mt-2">Base pay is auto-derived from each delivered trip&apos;s stamped commission. To correct it, add a special or an adjustment below.</div>
           </section>
 
-          {/* Specials */}
+          {/* Specials / Bonuses */}
           <section>
             <div className="flex items-center justify-between mb-2">
-              <h4 className="font-semibold text-sm">Special Trips</h4>
-              {editable && !showSpecial && (
-                <OutlineBtn onClick={() => setShowSpecial(true)}><Plus className="h-3.5 w-3.5" /> Add Special</OutlineBtn>
+              <h4 className="font-semibold text-sm">Specials / Bonuses</h4>
+              {editable && (
+                <OutlineBtn onClick={() => onAddSpecial(driverId)}><Plus className="h-3.5 w-3.5" /> Add Special</OutlineBtn>
               )}
             </div>
-            {showSpecial && editable && (
-              <form onSubmit={onAddSpecial} className="rounded-lg border p-3 mb-2 grid grid-cols-1 sm:grid-cols-2 gap-3" style={BORDER}>
-                <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                  <span className="muted text-xs">Label</span>
-                  <input name="label" required placeholder="e.g. Emergency desert run" className={INPUT} style={INPUT_STYLE} />
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="muted text-xs">Amount (SAR)</span>
-                  <input name="amount_sar" type="number" min="0" step="10" defaultValue="250" required className={INPUT} style={INPUT_STYLE} />
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="muted text-xs">Date</span>
-                  <input name="date" type="date" className={INPUT} style={INPUT_STYLE} />
-                </label>
-                <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                  <span className="muted text-xs">Note</span>
-                  <input name="note" className={INPUT} style={INPUT_STYLE} />
-                </label>
-                <label className="flex items-center gap-2 text-sm sm:col-span-2">
-                  <input name="is_special_trip" type="checkbox" defaultChecked /> <span className="muted">Counts as a special trip</span>
-                </label>
-                <div className="flex justify-end gap-2 sm:col-span-2">
-                  <OutlineBtn onClick={() => setShowSpecial(false)}>Cancel</OutlineBtn>
-                  <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : "Add"}</PrimaryBtn>
-                </div>
-              </form>
-            )}
             {mySpecials.length === 0 ? (
               <p className="muted text-sm">No special trips logged.</p>
             ) : (
@@ -648,9 +633,14 @@ function BreakdownModal({
                     </div>
                     <div className="text-emerald-600 dark:text-emerald-400 font-semibold tabular-nums">+{formatSar(sp.amount_sar)}</div>
                     {editable && (
-                      <button type="button" disabled={busy} onClick={() => confirm("Remove this special?") && run(() => removeCommissionSpecial(sp.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => onEditSpecial(sp)} className="muted hover:text-[rgb(var(--fg))]" title="Edit">
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button type="button" disabled={busy} onClick={() => confirm("Remove this special?") && run(() => removeCommissionSpecial(sp.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -662,35 +652,10 @@ function BreakdownModal({
           <section>
             <div className="flex items-center justify-between mb-2">
               <h4 className="font-semibold text-sm">Adjustments</h4>
-              {editable && !showAdjust && (
-                <OutlineBtn onClick={() => setShowAdjust(true)}><Plus className="h-3.5 w-3.5" /> Add Adjustment</OutlineBtn>
+              {editable && (
+                <OutlineBtn onClick={() => onAddAdjust(driverId)}><Plus className="h-3.5 w-3.5" /> Add Adjustment</OutlineBtn>
               )}
             </div>
-            {showAdjust && editable && (
-              <form onSubmit={onAddAdjust} className="rounded-lg border p-3 mb-2 grid grid-cols-1 sm:grid-cols-2 gap-3" style={BORDER}>
-                <p className="text-[11px] muted sm:col-span-2">Positive adds, negative deducts (e.g. uniform deduction).</p>
-                <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                  <span className="muted text-xs">Label</span>
-                  <input name="label" required placeholder="e.g. Uniform deduction" className={INPUT} style={INPUT_STYLE} />
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="muted text-xs">Amount (SAR)</span>
-                  <input name="amount_sar" type="number" step="10" defaultValue="-100" required className={INPUT} style={INPUT_STYLE} />
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="muted text-xs">Date</span>
-                  <input name="date" type="date" className={INPUT} style={INPUT_STYLE} />
-                </label>
-                <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                  <span className="muted text-xs">Note</span>
-                  <input name="note" className={INPUT} style={INPUT_STYLE} />
-                </label>
-                <div className="flex justify-end gap-2 sm:col-span-2">
-                  <OutlineBtn onClick={() => setShowAdjust(false)}>Cancel</OutlineBtn>
-                  <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : "Add"}</PrimaryBtn>
-                </div>
-              </form>
-            )}
             {myAdjustments.length === 0 ? (
               <p className="muted text-sm">No adjustments.</p>
             ) : (
@@ -705,9 +670,14 @@ function BreakdownModal({
                       {a.amount_sar > 0 ? "+" : ""}{formatSar(a.amount_sar)}
                     </div>
                     {editable && (
-                      <button type="button" disabled={busy} onClick={() => confirm("Remove this adjustment?") && run(() => removeCommissionAdjustment(a.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => onEditAdjust(a)} className="muted hover:text-[rgb(var(--fg))]" title="Edit">
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button type="button" disabled={busy} onClick={() => confirm("Remove this adjustment?") && run(() => removeCommissionAdjustment(a.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -789,5 +759,150 @@ function PrimaryBtn({
     >
       {children}
     </button>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Special editor — its own distinct modal (create or edit). Only special fields.
+// ----------------------------------------------------------------------------
+function SpecialModal({
+  driverId,
+  monthKey,
+  entry,
+  onClose,
+}: {
+  driverId: string;
+  monthKey: string;
+  entry: CommSpecial | null;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    fd.set("driver_id", driverId);
+    fd.set("month_key", monthKey);
+    setBusy(true);
+    setErr(null);
+    const res = entry ? await updateCommissionSpecial(entry.id, fd) : await addCommissionSpecial(fd);
+    setBusy(false);
+    if (res.error) {
+      setErr(res.error);
+      return;
+    }
+    router.refresh();
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <div className="card p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <h2 className="text-lg font-semibold">{entry ? "Edit Special" : "Add Special"}</h2>
+          <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
+        </div>
+        <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="muted text-xs">Label</span>
+            <input name="label" required defaultValue={entry?.label ?? ""} placeholder="e.g. Emergency desert run" className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted text-xs">Amount (SAR)</span>
+            <input name="amount_sar" type="number" min="0" step="10" required defaultValue={entry?.amount_sar ?? 250} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted text-xs">Date</span>
+            <input name="date" type="date" defaultValue={entry?.date ?? ""} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="muted text-xs">Note</span>
+            <input name="note" defaultValue={entry?.note ?? ""} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input name="is_special_trip" type="checkbox" defaultChecked={entry ? entry.is_special_trip : true} /> <span className="muted">Counts as a special trip</span>
+          </label>
+          {err && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{err}</p>}
+          <div className="flex justify-end gap-2 sm:col-span-2 mt-1">
+            <OutlineBtn onClick={onClose}>Cancel</OutlineBtn>
+            <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : entry ? "Update" : "Add"}</PrimaryBtn>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Adjustment editor — its own distinct modal (create or edit). Adjustment fields
+// only; amount may be negative (a deduction).
+// ----------------------------------------------------------------------------
+function AdjustmentModal({
+  driverId,
+  monthKey,
+  entry,
+  onClose,
+}: {
+  driverId: string;
+  monthKey: string;
+  entry: CommAdjustment | null;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    fd.set("driver_id", driverId);
+    fd.set("month_key", monthKey);
+    setBusy(true);
+    setErr(null);
+    const res = entry ? await updateCommissionAdjustment(entry.id, fd) : await addCommissionAdjustment(fd);
+    setBusy(false);
+    if (res.error) {
+      setErr(res.error);
+      return;
+    }
+    router.refresh();
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <div className="card p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <h2 className="text-lg font-semibold">{entry ? "Edit Adjustment" : "Add Adjustment"}</h2>
+          <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
+        </div>
+        <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <p className="text-[11px] muted sm:col-span-2">Positive adds, negative deducts (e.g. uniform deduction).</p>
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="muted text-xs">Label</span>
+            <input name="label" required defaultValue={entry?.label ?? ""} placeholder="e.g. Uniform deduction" className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted text-xs">Amount (SAR)</span>
+            <input name="amount_sar" type="number" step="10" required defaultValue={entry?.amount_sar ?? -100} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted text-xs">Date</span>
+            <input name="date" type="date" defaultValue={entry?.date ?? ""} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="muted text-xs">Note</span>
+            <input name="note" defaultValue={entry?.note ?? ""} className={INPUT} style={INPUT_STYLE} />
+          </label>
+          {err && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{err}</p>}
+          <div className="flex justify-end gap-2 sm:col-span-2 mt-1">
+            <OutlineBtn onClick={onClose}>Cancel</OutlineBtn>
+            <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : entry ? "Update" : "Add"}</PrimaryBtn>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

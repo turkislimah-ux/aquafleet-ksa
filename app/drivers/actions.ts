@@ -130,6 +130,26 @@ export async function addCommissionSpecial(formData: FormData): Promise<ActionRe
   return { error: null };
 }
 
+export async function updateCommissionSpecial(id: string, formData: FormData): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  const label = str(formData.get("label")) || "Special trip";
+  const amount_sar = numOrNull(formData.get("amount_sar"));
+  const date = nullable(formData.get("date"));
+  const note = nullable(formData.get("note"));
+  const is_special_trip = formData.get("is_special_trip") != null;
+  if (amount_sar == null || amount_sar <= 0) return { error: "Enter a valid amount." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("commission_specials")
+    .update({ label, amount_sar, date, note, is_special_trip })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
 export async function removeCommissionSpecial(id: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("commission_specials").delete().eq("id", id);
@@ -153,6 +173,25 @@ export async function addCommissionAdjustment(formData: FormData): Promise<Actio
   const { error } = await supabase
     .from("commission_adjustments")
     .insert({ driver_id, month_key, label, amount_sar, date, note });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function updateCommissionAdjustment(id: string, formData: FormData): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  const label = str(formData.get("label")) || "Adjustment";
+  const amount_sar = numOrNull(formData.get("amount_sar"));
+  const date = nullable(formData.get("date"));
+  const note = nullable(formData.get("note"));
+  if (amount_sar == null || amount_sar === 0) return { error: "Enter a non-zero amount (negative deducts)." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("commission_adjustments")
+    .update({ label, amount_sar, date, note })
+    .eq("id", id);
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
