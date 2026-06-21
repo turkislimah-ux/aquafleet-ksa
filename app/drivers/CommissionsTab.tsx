@@ -122,8 +122,11 @@ export function buildCommissionRows(p: {
   specials: CommExtra[];
   adjustments: CommExtra[];
   monthKey: string;
+  // The tab lists EVERY driver (includeEmpty), even with 0 base. The tab badge
+  // counts only real pending payouts, so it omits this (zero-activity excluded).
+  includeEmpty?: boolean;
 }): CommissionRow[] {
-  const { drivers, trips, periods, specials, adjustments, monthKey } = p;
+  const { drivers, trips, periods, specials, adjustments, monthKey, includeEmpty = false } = p;
   const rows: CommissionRow[] = [];
   for (const d of drivers) {
     const dt = trips.filter((t) => t.driver_id === d.id && t.delivered_at && monthKeyOf(t.delivered_at) === monthKey);
@@ -134,8 +137,8 @@ export function buildCommissionRows(p: {
     const period = periods.find((x) => x.driver_id === d.id && x.month_key === monthKey) ?? null;
     const bonus = round2(period?.bonus_sar ?? 0);
     const status = period?.payout_status ?? "pending";
-    // Include a driver only if they have any commission activity this month.
-    if (base === 0 && sp === 0 && adj === 0 && bonus === 0 && period == null) continue;
+    // Tab shows all drivers; badge counts only those with real activity.
+    if (!includeEmpty && base === 0 && sp === 0 && adj === 0 && bonus === 0 && period == null) continue;
     rows.push({
       driverId: d.id,
       name: d.name,
@@ -243,7 +246,7 @@ export default function CommissionsTab({
     [trips, periods, specials, adjustments],
   );
   const rows = useMemo(
-    () => buildCommissionRows({ drivers, trips, periods, specials, adjustments, monthKey }),
+    () => buildCommissionRows({ drivers, trips, periods, specials, adjustments, monthKey, includeEmpty: true }),
     [drivers, trips, periods, specials, adjustments, monthKey],
   );
 
