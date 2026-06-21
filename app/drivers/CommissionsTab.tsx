@@ -41,148 +41,36 @@ import {
   type ActionResult,
 } from "./actions";
 
-// --- shared types (also imported by page.tsx for fetching, and DriversClient) ---
-export type CommTrip = {
-  driver_id: string | null;
-  project_id: string | null;
-  commission_sar: number | null;
-  delivered_at: string | null;
-};
-export type CommPeriod = {
-  driver_id: string;
-  month_key: string;
-  payout_status: "pending" | "approved" | "paid" | "denied";
-  bonus_sar: number;
-  deny_reason: string | null;
-};
-type ItemStatus = "active" | "denied";
-// Minimal shape buildCommissionRows needs; the full rows below extend it.
-export type CommExtra = { driver_id: string; month_key: string; amount_sar: number; status?: ItemStatus };
-export type CommSpecial = CommExtra & {
-  id: string;
-  label: string;
-  date: string | null;
-  note: string | null;
-  is_special_trip: boolean;
-  status: ItemStatus;
-  deny_reason: string | null;
-};
-export type CommAdjustment = CommExtra & {
-  id: string;
-  label: string;
-  date: string | null;
-  note: string | null;
-  status: ItemStatus;
-  deny_reason: string | null;
-};
+// Pure money math + shared types now live in a NON-client module so they are
+// unit-testable without React (see lib/commission-rows.ts and
+// scripts/commission-rows-check.ts). Import for local use here, and re-export so
+// the existing "./CommissionsTab" import sites (page.tsx, DriversClient) keep
+// resolving these from here unchanged.
+import {
+  round2,
+  isActive,
+  monthKeyOf,
+  buildBaseLines,
+  buildCommissionRows,
+  CURRENT_MONTH_KEY,
+  type CommTrip,
+  type CommPeriod,
+  type CommExtra,
+  type CommSpecial,
+  type CommAdjustment,
+  type DriverLite,
+} from "@/lib/commission-rows";
 
-export type DriverLite = { id: string; name: string; name_ar: string | null };
-
-export type CommissionRow = {
-  driverId: string;
-  name: string;
-  nameAr: string | null;
-  base: number;
-  trips: number;
-  projects: number;
-  specials: number;
-  adjustments: number;
-  bonus: number;
-  total: number;
-  status: CommPeriod["payout_status"];
-};
-
-type BaseLine = { projectId: string | null; projectName: string; trips: number; amount: number };
-
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
-
-// A denied item never counts toward money. PURE predicate, used everywhere.
-function isActive(x: { status?: ItemStatus }): boolean {
-  return (x.status ?? "active") !== "denied";
-}
-
-// month_key of an ISO timestamp = "YYYY-MM" (matches lib/commission monthKeyOf).
-function monthKeyOf(iso: string): string {
-  return iso.slice(0, 7);
-}
-
-export const CURRENT_MONTH_KEY = new Date().toISOString().slice(0, 7);
-
-// Per-project base lines for one driver+month (delivered trips only). PURE.
-function buildBaseLines(
-  trips: CommTrip[],
-  driverId: string,
-  monthKey: string,
-  projectsById: Record<string, string>,
-): BaseLine[] {
-  const map = new Map<string, BaseLine>();
-  for (const t of trips) {
-    if (t.driver_id !== driverId || !t.delivered_at || monthKeyOf(t.delivered_at) !== monthKey) continue;
-    const key = t.project_id ?? "—";
-    const cur =
-      map.get(key) ??
-      {
-        projectId: t.project_id,
-        projectName: t.project_id ? projectsById[t.project_id] ?? t.project_id : "Ad-hoc · no project",
-        trips: 0,
-        amount: 0,
-      };
-    cur.trips += 1;
-    cur.amount = round2(cur.amount + (t.commission_sar ?? 0));
-    map.set(key, cur);
-  }
-  return [...map.values()];
-}
-
-// Build per-driver commission rows for one month. PURE — reused by the tab body
-// and by the Commissions tab badge (current-month pending count) in DriversClient.
-// Denied specials & adjustments are EXCLUDED from the sums.
-export function buildCommissionRows(p: {
-  drivers: DriverLite[];
-  trips: CommTrip[];
-  periods: CommPeriod[];
-  specials: CommExtra[];
-  adjustments: CommExtra[];
-  monthKey: string;
-  // The tab lists EVERY driver (includeEmpty), even with 0 base. The tab badge
-  // counts only real pending payouts, so it omits this (zero-activity excluded).
-  includeEmpty?: boolean;
-}): CommissionRow[] {
-  const { drivers, trips, periods, specials, adjustments, monthKey, includeEmpty = false } = p;
-  const rows: CommissionRow[] = [];
-  for (const d of drivers) {
-    const dt = trips.filter((t) => t.driver_id === d.id && t.delivered_at && monthKeyOf(t.delivered_at) === monthKey);
-    const base = round2(dt.reduce((s, t) => s + (t.commission_sar ?? 0), 0));
-    const projects = new Set(dt.map((t) => t.project_id).filter(Boolean)).size;
-    const sp = round2(
-      specials.filter((x) => x.driver_id === d.id && x.month_key === monthKey && isActive(x)).reduce((s, x) => s + x.amount_sar, 0),
-    );
-    const adj = round2(
-      adjustments.filter((x) => x.driver_id === d.id && x.month_key === monthKey && isActive(x)).reduce((s, x) => s + x.amount_sar, 0),
-    );
-    const period = periods.find((x) => x.driver_id === d.id && x.month_key === monthKey) ?? null;
-    const bonus = round2(period?.bonus_sar ?? 0);
-    const status = period?.payout_status ?? "pending";
-    // Tab shows all drivers; badge counts only those with real activity.
-    if (!includeEmpty && base === 0 && sp === 0 && adj === 0 && bonus === 0 && period == null) continue;
-    rows.push({
-      driverId: d.id,
-      name: d.name,
-      nameAr: d.name_ar,
-      base,
-      trips: dt.length,
-      projects,
-      specials: sp,
-      adjustments: adj,
-      bonus,
-      total: round2(base + sp + adj + bonus),
-      status,
-    });
-  }
-  return rows;
-}
+export { buildCommissionRows, CURRENT_MONTH_KEY } from "@/lib/commission-rows";
+export type {
+  CommTrip,
+  CommPeriod,
+  CommExtra,
+  CommSpecial,
+  CommAdjustment,
+  DriverLite,
+  CommissionRow,
+} from "@/lib/commission-rows";
 
 // Months offered in the selector: any month with delivered trips or extras, plus
 // the current month, newest first.
