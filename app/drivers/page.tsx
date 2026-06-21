@@ -8,7 +8,7 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Driver } from "@/lib/db-types";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
-import type { CommTrip, CommPeriod, CommExtra } from "./CommissionsTab";
+import type { CommTrip, CommPeriod, CommSpecial, CommAdjustment } from "./CommissionsTab";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +33,7 @@ export default async function DriversPage() {
   const supabase = createClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, periodsRes, specialsRes, adjustmentsRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, periodsRes, specialsRes, adjustmentsRes, projectsRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       supabase.from("trucks").select("id, plate, model, status, home_station, assigned_driver_id").order("plate", { ascending: true }),
@@ -47,8 +47,9 @@ export default async function DriversPage() {
         .select("driver_id, project_id, commission_sar, delivered_at")
         .not("delivered_at", "is", null),
       supabase.from("commission_periods").select("driver_id, month_key, payout_status, bonus_sar"),
-      supabase.from("commission_specials").select("driver_id, month_key, amount_sar"),
-      supabase.from("commission_adjustments").select("driver_id, month_key, amount_sar"),
+      supabase.from("commission_specials").select("id, driver_id, month_key, label, amount_sar, date, note, is_special_trip"),
+      supabase.from("commission_adjustments").select("id, driver_id, month_key, label, amount_sar, date, note"),
+      supabase.from("projects").select("id, name"),
     ]);
 
   const drivers = (driversRes.data ?? []) as Driver[];
@@ -56,8 +57,10 @@ export default async function DriversPage() {
   const trips = (tripsRes.data ?? []) as TripJoin[];
   const commTrips = (commTripsRes.data ?? []) as CommTrip[];
   const periods = (periodsRes.data ?? []) as CommPeriod[];
-  const specials = (specialsRes.data ?? []) as CommExtra[];
-  const adjustments = (adjustmentsRes.data ?? []) as CommExtra[];
+  const specials = (specialsRes.data ?? []) as CommSpecial[];
+  const adjustments = (adjustmentsRes.data ?? []) as CommAdjustment[];
+  const projectsById: Record<string, string> = {};
+  for (const p of (projectsRes.data ?? []) as { id: string; name: string }[]) projectsById[p.id] = p.name;
   const error =
     driversRes.error ||
     trucksRes.error ||
@@ -65,7 +68,8 @@ export default async function DriversPage() {
     commTripsRes.error ||
     periodsRes.error ||
     specialsRes.error ||
-    adjustmentsRes.error;
+    adjustmentsRes.error ||
+    projectsRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -97,6 +101,7 @@ export default async function DriversPage() {
       periods={periods}
       specials={specials}
       adjustments={adjustments}
+      projectsById={projectsById}
       error={error?.message ?? null}
     />
   );

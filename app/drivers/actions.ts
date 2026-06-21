@@ -96,3 +96,117 @@ export async function updateDriver(id: string, formData: FormData): Promise<Acti
   revalidatePath("/fleet");
   return { error: null };
 }
+
+// ============================================================================
+// Commissions (Phase 6, WRITE). Base pay is NEVER written — it is derived live
+// from trips.commission_sar. These actions touch only the three extras tables:
+//   • commission_specials    — add/remove one-off special-trip payments.
+//   • commission_adjustments — add/remove manual corrections (±).
+//   • commission_periods      — manager bonus + payout state machine. One row
+//                               per (driver, month); upserted on first action.
+// ============================================================================
+
+const MONTH_KEY_RE = /^\d{4}-\d{2}$/;
+
+export async function addCommissionSpecial(formData: FormData): Promise<ActionResult> {
+  const driver_id = str(formData.get("driver_id"));
+  const month_key = str(formData.get("month_key"));
+  const label = str(formData.get("label")) || "Special trip";
+  const amount_sar = numOrNull(formData.get("amount_sar"));
+  const date = nullable(formData.get("date"));
+  const note = nullable(formData.get("note"));
+  const is_special_trip = formData.get("is_special_trip") != null;
+
+  if (!driver_id || !MONTH_KEY_RE.test(month_key)) return { error: "Missing driver or month." };
+  if (amount_sar == null || amount_sar <= 0) return { error: "Enter a valid amount." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("commission_specials")
+    .insert({ driver_id, month_key, label, amount_sar, date, note, is_special_trip });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function removeCommissionSpecial(id: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("commission_specials").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function addCommissionAdjustment(formData: FormData): Promise<ActionResult> {
+  const driver_id = str(formData.get("driver_id"));
+  const month_key = str(formData.get("month_key"));
+  const label = str(formData.get("label")) || "Adjustment";
+  const amount_sar = numOrNull(formData.get("amount_sar"));
+  const date = nullable(formData.get("date"));
+  const note = nullable(formData.get("note"));
+
+  if (!driver_id || !MONTH_KEY_RE.test(month_key)) return { error: "Missing driver or month." };
+  if (amount_sar == null || amount_sar === 0) return { error: "Enter a non-zero amount (negative deducts)." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("commission_adjustments")
+    .insert({ driver_id, month_key, label, amount_sar, date, note });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function removeCommissionAdjustment(id: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("commission_adjustments").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function setCommissionBonus(
+  driverId: string,
+  monthKey: string,
+  bonus: number,
+): Promise<ActionResult> {
+  if (!driverId || !MONTH_KEY_RE.test(monthKey)) return { error: "Missing driver or month." };
+  if (!Number.isFinite(bonus) || bonus < 0) return { error: "Bonus must be zero or positive." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("commission_periods")
+    .upsert({ driver_id: driverId, month_key: monthKey, bonus_sar: bonus }, { onConflict: "driver_id,month_key" });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function setPayoutStatus(
+  driverId: string,
+  monthKey: string,
+  status: "pending" | "approved" | "paid",
+): Promise<ActionResult> {
+  if (!driverId || !MONTH_KEY_RE.test(monthKey)) return { error: "Missing driver or month." };
+  if (!["pending", "approved", "paid"].includes(status)) return { error: "Invalid payout status." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("commission_periods")
+    .upsert(
+      {
+        driver_id: driverId,
+        month_key: monthKey,
+        payout_status: status,
+        paid_at: status === "paid" ? new Date().toISOString() : null,
+      },
+      { onConflict: "driver_id,month_key" },
+    );
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}

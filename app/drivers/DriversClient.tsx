@@ -31,7 +31,8 @@ import CommissionsTab, {
   CURRENT_MONTH_KEY,
   type CommTrip,
   type CommPeriod,
-  type CommExtra,
+  type CommSpecial,
+  type CommAdjustment,
 } from "./CommissionsTab";
 
 export type TruckLite = {
@@ -80,6 +81,7 @@ export default function DriversClient({
   periods,
   specials,
   adjustments,
+  projectsById,
   error,
 }: {
   drivers: Driver[];
@@ -88,8 +90,9 @@ export default function DriversClient({
   recentByDriver: Record<string, RecentTrip[]>;
   commTrips: CommTrip[];
   periods: CommPeriod[];
-  specials: CommExtra[];
-  adjustments: CommExtra[];
+  specials: CommSpecial[];
+  adjustments: CommAdjustment[];
+  projectsById: Record<string, string>;
   error: string | null;
 }) {
   const router = useRouter();
@@ -297,6 +300,7 @@ export default function DriversClient({
           periods={periods}
           specials={specials}
           adjustments={adjustments}
+          projectsById={projectsById}
         />
       )}
 
