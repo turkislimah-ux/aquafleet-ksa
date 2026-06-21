@@ -28,6 +28,11 @@ function parse(formData: FormData) {
     status: str(formData.get("status")) || "active",
     safety_score: numOrNull(formData.get("safety_score")),
     rating: numOrNull(formData.get("rating")),
+    phone: nullable(formData.get("phone")),
+    hire_date: nullable(formData.get("hire_date")),
+    home_station: nullable(formData.get("home_station")),
+    hours_this_week: numOrNull(formData.get("hours_this_week")),
+    incidents_12mo: numOrNull(formData.get("incidents_12mo")),
     active: formData.get("active") != null,
   };
 }

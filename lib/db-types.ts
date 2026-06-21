@@ -95,6 +95,12 @@ export type Driver = {
   status: DriverStatus;
   safety_score: number | null;
   rating: number | null;
+  // Added in 0006 — all nullable, render "—" when absent (no fake values).
+  phone: string | null;
+  hire_date: string | null;
+  home_station: string | null;
+  hours_this_week: number | null;
+  incidents_12mo: number | null;
   active: boolean;
   created_at: string;
 };
