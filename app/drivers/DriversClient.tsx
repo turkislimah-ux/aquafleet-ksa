@@ -28,13 +28,14 @@ import {
 import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
 import { createDriver, updateDriver } from "./actions";
 import CommissionsTab, {
-  buildCommissionRows,
-  CURRENT_MONTH_KEY,
-  type CommTrip,
-  type CommPeriod,
-  type CommSpecial,
-  type CommAdjustment,
+  buildCurrentRows,
+  type CommTripRow,
+  type CommCycle,
+  type CommSpecialRow,
+  type CommAdjustmentRow,
 } from "./CommissionsTab";
+import HistoryTab from "./HistoryTab";
+import type { CommPayout } from "@/lib/commission-rows";
 
 export type TruckLite = {
   id: string;
@@ -53,7 +54,7 @@ export type RecentTrip = {
   dest: string | null;
 };
 
-type Tab = "drivers" | "commissions" | "staff";
+type Tab = "drivers" | "commissions" | "history" | "staff";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -79,9 +80,10 @@ export default function DriversClient({
   trips30dByDriver,
   recentByDriver,
   commTrips,
-  periods,
+  cycles,
   specials,
   adjustments,
+  payouts,
   projectsById,
   error,
 }: {
@@ -89,10 +91,11 @@ export default function DriversClient({
   trucks: TruckLite[];
   trips30dByDriver: Record<string, number>;
   recentByDriver: Record<string, RecentTrip[]>;
-  commTrips: CommTrip[];
-  periods: CommPeriod[];
-  specials: CommSpecial[];
-  adjustments: CommAdjustment[];
+  commTrips: CommTripRow[];
+  cycles: CommCycle[];
+  specials: CommSpecialRow[];
+  adjustments: CommAdjustmentRow[];
+  payouts: CommPayout[];
   projectsById: Record<string, string>;
   error: string | null;
 }) {
@@ -120,18 +123,18 @@ export default function DriversClient({
   const incidents = drivers.reduce((s, d) => s + (d.incidents_12mo ?? 0), 0);
   const expiring = drivers.filter((d) => d.license_expiry != null && d.license_expiry <= YEAR_END).length;
 
-  // Commissions tab badge = drivers with a still-pending payout this month.
+  // Commissions tab badge = drivers whose current balance needs review (open
+  // cycle still pending, with something to review/pay).
   const pendingPayouts = useMemo(
     () =>
-      buildCommissionRows({
+      buildCurrentRows({
         drivers,
         trips: commTrips,
-        periods,
+        cycles,
         specials,
         adjustments,
-        monthKey: CURRENT_MONTH_KEY,
-      }).filter((r) => r.status === "pending").length,
-    [drivers, commTrips, periods, specials, adjustments],
+      }).filter((r) => r.payoutStatus === "pending" && r.hasActivity).length,
+    [drivers, commTrips, cycles, specials, adjustments],
   );
 
   function openNew() {
@@ -201,6 +204,7 @@ export default function DriversClient({
       <div className="flex items-center gap-1 border-b mb-4 flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
         <TabBtn active={tab === "drivers"} onClick={() => setTab("drivers")} label="Drivers" badge={total} />
         <TabBtn active={tab === "commissions"} onClick={() => setTab("commissions")} label="Commissions" badge={pendingPayouts} />
+        <TabBtn active={tab === "history"} onClick={() => setTab("history")} label="History" badge={payouts.length} />
         <TabBtn active={tab === "staff"} onClick={() => setTab("staff")} label="Management & Staff" badge={0} />
       </div>
 
@@ -302,12 +306,14 @@ export default function DriversClient({
         <CommissionsTab
           drivers={drivers}
           trips={commTrips}
-          periods={periods}
+          cycles={cycles}
           specials={specials}
           adjustments={adjustments}
           projectsById={projectsById}
         />
       )}
+
+      {tab === "history" && <HistoryTab payouts={payouts} drivers={drivers} />}
 
       {tab === "staff" && (
         <div className="card p-8 text-center muted text-sm">Management &amp; staff directory — built in a later step.</div>

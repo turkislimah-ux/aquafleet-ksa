@@ -1,23 +1,24 @@
 "use client";
 
-// Commissions tab. Mirrors the demo's COM namespace: month selector, 4 KPIs,
-// status chips, per-driver payroll table, a real CSV export, and a per-driver
-// Breakdown modal — PLUS two manage popups (Specials/Bonuses, Adjustments).
+// Commissions tab — ROLLING balance model (migration 0009). No month selector:
+// "current" = each driver's UNPAID delivered trips + UNPAID specials/adjustments
+// (payout_id IS NULL) + the open cycle's bonus. The Breakdown is the DECISION
+// CENTER: approve/deny/restore each line + the bonus, see the live total, then
+// Approve the payout and (strictly) Pay — which freezes a History snapshot and
+// resets the driver's current balance to zero.
 //
 // SINGLE SOURCE OF TRUTH for base pay = trips.commission_sar (stamped on Delivered
 // by lib/commission.ts). Base is NEVER stored as a commission line — it is derived
-// live: a driver's delivered trips in the selected month, summed and grouped by
-// project. The three commission_* tables only carry the extras (payout status +
-// bonus, specials, adjustments). Total = base + specials + adjustments + bonus.
+// live: a driver's unpaid delivered trips, summed and grouped by project. The three
+// commission_* tables only carry the extras (open-cycle bonus + status, specials,
+// adjustments). Total = base + Σ(specials≠denied) + Σ(adjustments≠denied) + bonus≠denied.
 //
-// REDESIGN (Batch 2):
-//   • Breakdown modal is a READ-ONLY REVIEW screen + payout decisions
-//     (Approve → Pay strictly from approved; Deny with reason; Reopen from denied).
-//   • Editing/adding/deleting of specials, the manager bonus, and adjustments lives
-//     in two manage popups, NOT in the Breakdown.
-//   • Per-item DENY: a special or adjustment can be denied (with a reason). A denied
-//     item stays VISIBLE but is EXCLUDED from every total/KPI/badge. Bonus is not
-//     denyable. Denied items are never deleted by a deny.
+// MONEY RULE: pending AND approved both COUNT; only DENIED is excluded. A denied
+// line stays visible (struck/greyed + reason) and is restorable until Pay.
+//
+// The two manage popups (Specials/Bonuses, Adjustments) are ADD / EDIT / DELETE
+// only — every approve/deny/restore decision lives in the Breakdown. Setting or
+// removing the bonus amount lives in the Specials popup; its review is in Breakdown.
 //
 // DEVIATION from demo (approved): the demo lets you hand-edit each base line's
 // trip count / rate. We don't — base is computed-truth.
@@ -37,68 +38,52 @@ import {
   removeCommissionAdjustment,
   setAdjustmentStatus,
   setCommissionBonus,
-  setPayoutStatus,
+  setBonusStatus,
+  approvePayout,
+  reopenPayout,
+  payCommission,
   type ActionResult,
 } from "./actions";
 
-// Pure money math + shared types now live in a NON-client module so they are
+// Pure money math + shared types live in a NON-client module so they are
 // unit-testable without React (see lib/commission-rows.ts and
 // scripts/commission-rows-check.ts). Import for local use here, and re-export so
 // the existing "./CommissionsTab" import sites (page.tsx, DriversClient) keep
 // resolving these from here unchanged.
 import {
   round2,
-  isActive,
-  monthKeyOf,
-  buildBaseLines,
-  buildCommissionRows,
+  countsForPay,
+  isUnpaid,
+  buildCurrentRows,
+  buildCurrentBaseLines,
   CURRENT_MONTH_KEY,
-  type CommTrip,
-  type CommPeriod,
-  type CommExtra,
-  type CommSpecial,
-  type CommAdjustment,
   type DriverLite,
+  type CommTripRow,
+  type CommCycle,
+  type CommSpecialRow,
+  type CommAdjustmentRow,
+  type ReviewStatus,
 } from "@/lib/commission-rows";
 
-export { buildCommissionRows, CURRENT_MONTH_KEY } from "@/lib/commission-rows";
+export { buildCurrentRows } from "@/lib/commission-rows";
 export type {
-  CommTrip,
-  CommPeriod,
-  CommExtra,
-  CommSpecial,
-  CommAdjustment,
   DriverLite,
-  CommissionRow,
+  CommTripRow,
+  CommCycle,
+  CommSpecialRow,
+  CommAdjustmentRow,
+  CurrentRow,
 } from "@/lib/commission-rows";
 
-// Months offered in the selector: any month with delivered trips or extras, plus
-// the current month, newest first.
-function availableMonths(trips: CommTrip[], periods: CommPeriod[], specials: CommExtra[], adjustments: CommExtra[]): string[] {
-  const set = new Set<string>([CURRENT_MONTH_KEY]);
-  for (const t of trips) if (t.delivered_at) set.add(monthKeyOf(t.delivered_at));
-  for (const x of periods) set.add(x.month_key);
-  for (const x of specials) set.add(x.month_key);
-  for (const x of adjustments) set.add(x.month_key);
-  return [...set].sort().reverse();
-}
-
-function monthLabel(key: string): string {
-  const [y, m] = key.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
-}
-
-// Payout pill: map status → an existing statusTone token for the right color.
-// paid → green (active), approved → blue (scheduled), pending → amber (warning),
+// Review pill: map a 3-state review → an existing statusTone token for color.
+// approved → blue (scheduled / ready to pay), pending → amber (warning),
 // denied → red (critical).
-const PAYOUT_TONE: Record<CommPeriod["payout_status"], string> = {
-  paid: "active",
+const STATUS_TONE: Record<ReviewStatus, string> = {
   approved: "scheduled",
   pending: "warning",
   denied: "critical",
 };
-const PAYOUT_LABEL: Record<CommPeriod["payout_status"], string> = {
-  paid: "Paid",
+const STATUS_LABEL: Record<ReviewStatus, string> = {
   approved: "Approved",
   pending: "Pending",
   denied: "Denied",
@@ -109,7 +94,7 @@ function csvCell(v: string | number): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const CHIPS = ["all", "pending", "approved", "paid", "denied"] as const;
+const CHIPS = ["all", "pending", "approved", "denied"] as const;
 type Filter = (typeof CHIPS)[number];
 
 const BORDER = { borderColor: "rgb(var(--border))" } as const;
@@ -167,6 +152,29 @@ function PrimaryBtn({
   );
 }
 
+function SuccessBtn({
+  onClick,
+  children,
+  disabled,
+  type = "button",
+}: {
+  onClick?: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+  type?: "button" | "submit";
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className="h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {children}
+    </button>
+  );
+}
+
 function DangerBtn({
   onClick,
   children,
@@ -202,60 +210,55 @@ function SummaryCard({ label, children }: { label: string; children: React.React
 export default function CommissionsTab({
   drivers,
   trips,
-  periods,
+  cycles,
   specials,
   adjustments,
   projectsById,
 }: {
   drivers: DriverLite[];
-  trips: CommTrip[];
-  periods: CommPeriod[];
-  specials: CommSpecial[];
-  adjustments: CommAdjustment[];
+  trips: CommTripRow[];
+  cycles: CommCycle[];
+  specials: CommSpecialRow[];
+  adjustments: CommAdjustmentRow[];
   projectsById: Record<string, string>;
 }) {
-  const [monthKey, setMonthKey] = useState(CURRENT_MONTH_KEY);
   const [filter, setFilter] = useState<Filter>("all");
   const [breakdownFor, setBreakdownFor] = useState<string | null>(null);
   // Manage popups: each holds a driverId; the popup itself reads live props.
   const [specialsFor, setSpecialsFor] = useState<string | null>(null);
   const [adjustmentsFor, setAdjustmentsFor] = useState<string | null>(null);
 
-  const months = useMemo(
-    () => availableMonths(trips, periods, specials, adjustments),
-    [trips, periods, specials, adjustments],
-  );
   const rows = useMemo(
-    () => buildCommissionRows({ drivers, trips, periods, specials, adjustments, monthKey, includeEmpty: true }),
-    [drivers, trips, periods, specials, adjustments, monthKey],
+    () => buildCurrentRows({ drivers, trips, cycles, specials, adjustments, includeEmpty: true }),
+    [drivers, trips, cycles, specials, adjustments],
   );
 
-  const list = filter === "all" ? rows : rows.filter((r) => r.status === filter);
-  const isCurrent = monthKey === CURRENT_MONTH_KEY;
+  const list = filter === "all" ? rows : rows.filter((r) => r.payoutStatus === filter);
 
   const pool = round2(rows.reduce((s, r) => s + r.total, 0));
-  const paid = round2(rows.filter((r) => r.status === "paid").reduce((s, r) => s + r.total, 0));
-  const pending = round2(rows.filter((r) => r.status === "pending").reduce((s, r) => s + r.total, 0));
-  const avg = rows.length ? round2(pool / rows.length) : 0;
+  const approvedSum = round2(rows.filter((r) => r.payoutStatus === "approved").reduce((s, r) => s + r.total, 0));
+  const pendingSum = round2(rows.filter((r) => r.payoutStatus === "pending").reduce((s, r) => s + r.total, 0));
+  const activeCount = rows.filter((r) => r.hasActivity).length;
+  const avg = activeCount ? round2(pool / activeCount) : 0;
 
   function chipCount(s: Filter): number {
-    return s === "all" ? rows.length : rows.filter((r) => r.status === s).length;
+    return s === "all" ? rows.length : rows.filter((r) => r.payoutStatus === s).length;
   }
 
   const driverNameById = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers]);
-  function periodFor(driverId: string): CommPeriod | null {
-    return periods.find((p) => p.driver_id === driverId && p.month_key === monthKey) ?? null;
+  function cycleFor(driverId: string): CommCycle | null {
+    return cycles.find((c) => c.driver_id === driverId) ?? null;
   }
 
   function exportCsv() {
-    const header = ["Driver", "Driver ID", "Base SAR", "Trips", "Projects", "Specials SAR", "Adjustments SAR", "Bonus SAR", "Total SAR", "Payout Status", "Month"];
-    const body = list.map((r) => [r.name, r.driverId, r.base, r.trips, r.projects, r.specials, r.adjustments, r.bonus, r.total, r.status, monthKey]);
+    const header = ["Driver", "Driver ID", "Base SAR", "Trips", "Projects", "Specials SAR", "Adjustments SAR", "Bonus SAR", "Total SAR", "Payout Status"];
+    const body = list.map((r) => [r.name, r.driverId, r.base, r.trips, r.projects, r.specials, r.adjustments, r.bonus, r.total, r.payoutStatus]);
     const csv = [header, ...body].map((row) => row.map(csvCell).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `commissions-${monthKey}.csv`;
+    a.download = `commissions-current.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -270,31 +273,12 @@ export default function CommissionsTab({
           <div>
             <h3 className="font-semibold">Driver Commissions</h3>
             <p className="text-xs muted">
-              {monthLabel(monthKey)}{" "}
-              {isCurrent ? (
-                <span className="text-brand-600 dark:text-brand-300">· Current month</span>
-              ) : (
-                <span className="muted">· Closed month — read-only</span>
-              )}
+              Current balance <span className="text-brand-600 dark:text-brand-300">· unpaid this cycle</span>
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
-          <label className="flex items-center gap-1.5">
-            <span className="muted text-xs">Month:</span>
-            <select
-              value={monthKey}
-              onChange={(e) => setMonthKey(e.target.value)}
-              className="px-2 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
-              style={INPUT_STYLE}
-            >
-              {months.map((m) => (
-                <option key={m} value={m}>{monthLabel(m)}</option>
-              ))}
-            </select>
-          </label>
-
           <div className="flex items-center gap-1 flex-wrap">
             {CHIPS.map((s) => (
               <button
@@ -307,7 +291,7 @@ export default function CommissionsTab({
                 }
                 style={filter === s ? undefined : BORDER}
               >
-                {s === "all" ? "All" : PAYOUT_LABEL[s]} <span className={filter === s ? "opacity-80" : "muted"}>{chipCount(s)}</span>
+                {s === "all" ? "All" : STATUS_LABEL[s]} <span className={filter === s ? "opacity-80" : "muted"}>{chipCount(s)}</span>
               </button>
             ))}
           </div>
@@ -325,9 +309,9 @@ export default function CommissionsTab({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        <Stat label="Total Payout (month)" value={formatSar(pool)} tone="info" />
-        <Stat label="Already Paid" value={formatSar(paid)} tone="ok" />
-        <Stat label="Pending Approval" value={formatSar(pending)} tone="warn" />
+        <Stat label="Current Pool" value={formatSar(pool)} tone="info" />
+        <Stat label="Approved (awaiting pay)" value={formatSar(approvedSum)} tone="ok" />
+        <Stat label="Pending Review" value={formatSar(pendingSum)} tone="warn" />
         <Stat label="Avg per Driver" value={formatSar(avg)} />
       </div>
 
@@ -348,12 +332,12 @@ export default function CommissionsTab({
             {list.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-6 px-3 border-t text-center muted text-sm" style={BORDER}>
-                  No commission records for this month.
+                  No commission activity in the current cycle.
                 </td>
               </tr>
             )}
             {list.map((r) => {
-              const editable = isCurrent && r.status !== "paid";
+              const editable = r.payoutStatus === "pending";
               return (
                 <tr key={r.driverId}>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap" style={BORDER}>
@@ -387,7 +371,7 @@ export default function CommissionsTab({
                     {formatSar(r.total)}
                   </td>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap" style={BORDER}>
-                    <StatusPill status={PAYOUT_TONE[r.status]} label={PAYOUT_LABEL[r.status]} />
+                    <StatusPill status={STATUS_TONE[r.payoutStatus]} label={STATUS_LABEL[r.payoutStatus]} />
                   </td>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap" style={BORDER}>
                     <div className="flex items-center justify-end gap-1.5">
@@ -415,17 +399,16 @@ export default function CommissionsTab({
 
       <div className="text-[11px] muted mt-3 leading-relaxed">
         Rules: commission accrues per delivered trip based on the project&apos;s rate (auto-derived — not editable here).
-        Special trips &amp; manual adjustments are added on top; the Breakdown is review-only. A denied special or
-        adjustment stays visible but is excluded from the total.
+        Specials, the bonus &amp; adjustments are added on top. Review each line in the Breakdown — pending &amp; approved
+        count, denied is excluded. Approve the payout, then Pay to freeze a History record and reset the balance to zero.
       </div>
 
       {breakdownFor && (
         <BreakdownModal
           driverId={breakdownFor}
-          monthKey={monthKey}
           drivers={drivers}
           trips={trips}
-          periods={periods}
+          cycles={cycles}
           specials={specials}
           adjustments={adjustments}
           projectsById={projectsById}
@@ -436,10 +419,9 @@ export default function CommissionsTab({
       {specialsFor && (
         <SpecialsModal
           driverId={specialsFor}
-          monthKey={monthKey}
           driverName={driverNameById.get(specialsFor) ?? specialsFor}
           specials={specials}
-          period={periodFor(specialsFor)}
+          cycle={cycleFor(specialsFor)}
           onClose={() => setSpecialsFor(null)}
         />
       )}
@@ -447,7 +429,6 @@ export default function CommissionsTab({
       {adjustmentsFor && (
         <AdjustmentsModal
           driverId={adjustmentsFor}
-          monthKey={monthKey}
           driverName={driverNameById.get(adjustmentsFor) ?? adjustmentsFor}
           adjustments={adjustments}
           onClose={() => setAdjustmentsFor(null)}
@@ -458,51 +439,58 @@ export default function CommissionsTab({
 }
 
 // ----------------------------------------------------------------------------
-// Breakdown modal — READ-ONLY review + payout decisions. All numbers recompute
-// from props, so after any write + router.refresh() it reflects the new data.
-// No item editing here — that lives in the Specials/Adjustments manage popups.
+// Breakdown modal — the DECISION CENTER. Per-line approve/deny/restore (specials,
+// adjustments, bonus), a LIVE total (pending+approved count, denied excluded),
+// then Approve payout → strict Pay. All numbers recompute from props, so after
+// any write + router.refresh() it reflects the new data.
 // ----------------------------------------------------------------------------
+type DenyTarget =
+  | { kind: "special"; id: string; label: string; amount: number }
+  | { kind: "adjustment"; id: string; label: string; amount: number }
+  | { kind: "bonus"; id: null; label: string; amount: number };
+
 function BreakdownModal({
   driverId,
-  monthKey,
   drivers,
   trips,
-  periods,
+  cycles,
   specials,
   adjustments,
   projectsById,
   onClose,
 }: {
   driverId: string;
-  monthKey: string;
   drivers: DriverLite[];
-  trips: CommTrip[];
-  periods: CommPeriod[];
-  specials: CommSpecial[];
-  adjustments: CommAdjustment[];
+  trips: CommTripRow[];
+  cycles: CommCycle[];
+  specials: CommSpecialRow[];
+  adjustments: CommAdjustmentRow[];
   projectsById: Record<string, string>;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [denyOpen, setDenyOpen] = useState(false);
+  const [denyTarget, setDenyTarget] = useState<DenyTarget | null>(null);
 
   const driver = drivers.find((d) => d.id === driverId);
-  const baseLines = useMemo(() => buildBaseLines(trips, driverId, monthKey, projectsById), [trips, driverId, monthKey, projectsById]);
-  const mySpecials = specials.filter((s) => s.driver_id === driverId && s.month_key === monthKey);
-  const myAdjustments = adjustments.filter((a) => a.driver_id === driverId && a.month_key === monthKey);
-  const period = periods.find((p) => p.driver_id === driverId && p.month_key === monthKey) ?? null;
-  const bonus = round2(period?.bonus_sar ?? 0);
-  const status = period?.payout_status ?? "pending";
+  const baseLines = useMemo(() => buildCurrentBaseLines(trips, driverId, projectsById), [trips, driverId, projectsById]);
+  const mySpecials = specials.filter((s) => s.driver_id === driverId && isUnpaid(s));
+  const myAdjustments = adjustments.filter((a) => a.driver_id === driverId && isUnpaid(a));
+  const cycle = cycles.find((c) => c.driver_id === driverId) ?? null;
+  const bonusAmt = round2(cycle?.bonus_sar ?? 0);
+  const bonusStatus: ReviewStatus = cycle?.bonus_status ?? "pending";
+  const payoutStatus: ReviewStatus = cycle?.payout_status ?? "pending";
 
   const base = round2(baseLines.reduce((s, l) => s + l.amount, 0));
-  const spSum = round2(mySpecials.filter(isActive).reduce((s, x) => s + x.amount_sar, 0));
-  const adjSum = round2(myAdjustments.filter(isActive).reduce((s, x) => s + x.amount_sar, 0));
-  const total = round2(base + spSum + adjSum + bonus);
+  const spSum = round2(mySpecials.filter(countsForPay).reduce((s, x) => s + x.amount_sar, 0));
+  const adjSum = round2(myAdjustments.filter(countsForPay).reduce((s, x) => s + x.amount_sar, 0));
+  const bonusInTotal = bonusAmt !== 0 && countsForPay({ status: bonusStatus }) ? bonusAmt : 0;
+  const total = round2(base + spSum + adjSum + bonusInTotal);
 
-  const isCurrent = monthKey === CURRENT_MONTH_KEY;
-  const canDecide = isCurrent && status !== "paid";
+  // pending → review lines + Approve payout. approved → frozen for pay (Reopen to edit).
+  const canReview = payoutStatus === "pending";
+  const driverName = driver?.name ?? driverId;
 
   async function run(fn: () => Promise<ActionResult>): Promise<void> {
     setBusy(true);
@@ -516,8 +504,38 @@ function BreakdownModal({
     router.refresh();
   }
 
-  const driverName = driver?.name ?? driverId;
-  const hasExtras = mySpecials.length > 0 || bonus !== 0;
+  // Per-line review controls (shown only while the payout is pending).
+  function itemControls(status: ReviewStatus, onApprove: () => void, onDeny: () => void, onRestore: () => void) {
+    if (!canReview) return null;
+    return (
+      <div className="flex items-center gap-1.5">
+        {status === "denied" ? (
+          <OutlineBtn onClick={onRestore} disabled={busy}><RotateCcw className="h-3.5 w-3.5" /> Restore</OutlineBtn>
+        ) : (
+          <>
+            {status === "pending" && (
+              <OutlineBtn onClick={onApprove} disabled={busy}><Check className="h-3.5 w-3.5" /> Approve</OutlineBtn>
+            )}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onDeny}
+              className="h-8 px-2.5 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 border border-rose-300/60 dark:border-rose-500/40 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"
+            >
+              <Ban className="h-3.5 w-3.5" /> Deny
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function onDenyConfirm(reason: string): Promise<ActionResult> {
+    if (!denyTarget) return Promise.resolve({ error: "No target." });
+    if (denyTarget.kind === "special") return setSpecialStatus(denyTarget.id, "denied", reason);
+    if (denyTarget.kind === "adjustment") return setAdjustmentStatus(denyTarget.id, "denied", reason);
+    return setBonusStatus(driverId, "denied", reason);
+  }
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
@@ -526,22 +544,21 @@ function BreakdownModal({
           <h2 className="text-lg font-semibold">
             Commission Breakdown — {driverName}
             {driver?.name_ar ? <span className="muted font-normal"> · {driver.name_ar}</span> : null}
-            <span className="muted font-normal text-sm"> · review only</span>
           </h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
 
         <div className="space-y-4">
-          {status === "denied" && (
-            <div className="rounded-lg p-3 text-xs flex items-start gap-2" style={{ background: "rgba(225,29,72,.10)", border: "1px solid rgba(225,29,72,.30)" }}>
-              <Ban className="h-4 w-4 text-rose-600 dark:text-rose-400 mt-0.5 shrink-0" />
-              <span className="text-rose-700 dark:text-rose-300">Payout denied{period?.deny_reason ? ` — ${period.deny_reason}` : ""}. {monthLabel(monthKey)}</span>
-            </div>
-          )}
-          {status !== "denied" && !canDecide && (
+          {/* State banner */}
+          {canReview ? (
             <div className="rounded-lg p-3 text-xs flex items-start gap-2" style={{ background: "rgba(100,116,139,.10)", border: "1px solid rgb(var(--border))" }}>
               <Info className="h-4 w-4 muted mt-0.5 shrink-0" />
-              <span>{status === "paid" ? "Paid — locked." : "Closed month — read-only."} {monthLabel(monthKey)}</span>
+              <span>Review each line below (Approve / Deny / Restore), then <strong>Approve payout</strong>. Pending and approved both count toward the total; denied is excluded.</span>
+            </div>
+          ) : (
+            <div className="rounded-lg p-3 text-xs flex items-start gap-2" style={{ background: "rgba(16,185,129,.10)", border: "1px solid rgba(16,185,129,.30)" }}>
+              <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
+              <span className="text-emerald-700 dark:text-emerald-300">Approved{cycle?.approved_by ? ` by ${cycle.approved_by}` : ""} — ready to pay. <strong>Pay</strong> freezes a History record and resets this driver&apos;s balance to zero. Reopen to edit again.</span>
             </div>
           )}
 
@@ -549,19 +566,19 @@ function BreakdownModal({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <SummaryCard label="Driver">
               <div className="font-medium">{driverName}</div>
-              <div className="text-[11px] muted">{monthLabel(monthKey)}</div>
+              <div className="text-[11px] muted">Current cycle</div>
             </SummaryCard>
             <SummaryCard label="Base (projects)">
               <div className="text-lg font-semibold tabular-nums">{formatSar(base)}</div>
             </SummaryCard>
             <SummaryCard label="Specials + Adjustments + Bonus">
-              <div className={"text-lg font-semibold tabular-nums " + (spSum + adjSum + bonus > 0 ? "text-emerald-600 dark:text-emerald-400" : spSum + adjSum + bonus < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
-                {formatSar(spSum + adjSum + bonus)}
+              <div className={"text-lg font-semibold tabular-nums " + (spSum + adjSum + bonusInTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : spSum + adjSum + bonusInTotal < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
+                {formatSar(spSum + adjSum + bonusInTotal)}
               </div>
             </SummaryCard>
-            <SummaryCard label="Month Total">
+            <SummaryCard label="Current Total">
               <div className="text-lg font-semibold tabular-nums text-brand-600 dark:text-brand-300">{formatSar(total)}</div>
-              <div className="mt-0.5"><StatusPill status={PAYOUT_TONE[status]} label={PAYOUT_LABEL[status]} /></div>
+              <div className="mt-0.5"><StatusPill status={STATUS_TONE[payoutStatus]} label={STATUS_LABEL[payoutStatus]} /></div>
             </SummaryCard>
           </div>
 
@@ -569,7 +586,7 @@ function BreakdownModal({
           <section>
             <h4 className="font-semibold text-sm mb-2">Projects &amp; Base Pay</h4>
             {baseLines.length === 0 ? (
-              <p className="muted text-sm">No delivered trips for this driver this month.</p>
+              <p className="muted text-sm">No unpaid delivered trips for this driver.</p>
             ) : (
               <div className="space-y-2">
                 {baseLines.map((l) => (
@@ -586,44 +603,68 @@ function BreakdownModal({
             <div className="text-[11px] muted mt-2">Base pay is auto-derived from each delivered trip&apos;s stamped commission. Edit specials, the bonus, or adjustments from the row buttons.</div>
           </section>
 
-          {/* Specials / Bonuses (read-only review; denied shown struck) */}
+          {/* Specials — review each */}
           <section>
-            <h4 className="font-semibold text-sm mb-2">Specials / Bonuses</h4>
-            {!hasExtras ? (
-              <p className="muted text-sm">No specials or bonus.</p>
+            <h4 className="font-semibold text-sm mb-2">Specials</h4>
+            {mySpecials.length === 0 ? (
+              <p className="muted text-sm">No specials.</p>
             ) : (
               <div className="space-y-2">
                 {mySpecials.map((sp) => {
-                  const denied = !isActive(sp);
+                  const denied = sp.status === "denied";
                   return (
                     <div key={sp.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
                       <div className="flex-1 min-w-[200px]">
                         <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
                           {sp.is_special_trip && <StatusPill status="scheduled" label="Special trip" />}
-                          {denied && <StatusPill status="critical" label="Denied" />}
+                          <StatusPill status={STATUS_TONE[sp.status]} label={STATUS_LABEL[sp.status]} />
                           <span className={denied ? "line-through" : ""}>{sp.label}</span>
                         </div>
                         <div className="text-[11px] muted">{[sp.date, sp.note].filter(Boolean).join(" · ") || "—"}</div>
                         {denied && sp.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {sp.deny_reason}</div>}
                       </div>
                       <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}>+{formatSar(sp.amount_sar)}</div>
+                      {itemControls(
+                        sp.status,
+                        () => run(() => setSpecialStatus(sp.id, "approved")),
+                        () => setDenyTarget({ kind: "special", id: sp.id, label: sp.label, amount: sp.amount_sar }),
+                        () => run(() => setSpecialStatus(sp.id, "pending")),
+                      )}
                     </div>
                   );
                 })}
-                {bonus !== 0 && (
-                  <div className="rounded-lg border p-3 flex items-center gap-3 flex-wrap" style={BORDER}>
-                    <div className="flex-1 min-w-[200px]">
-                      <div className="font-medium text-sm flex items-center gap-2"><Banknote className="h-4 w-4 muted" /> Manager Bonus</div>
-                      <div className="text-[11px] muted">Discretionary monthly bonus.</div>
-                    </div>
-                    <div className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">+{formatSar(bonus)}</div>
+              </div>
+            )}
+          </section>
+
+          {/* Bonus — reviewable line */}
+          <section>
+            <h4 className="font-semibold text-sm mb-2">Manager Bonus</h4>
+            {bonusAmt === 0 ? (
+              <p className="muted text-sm">No bonus set.</p>
+            ) : (
+              <div className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (bonusStatus === "denied" ? "opacity-60" : "")} style={BORDER}>
+                <div className="flex-1 min-w-[200px]">
+                  <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+                    <Banknote className="h-4 w-4 muted" />
+                    <StatusPill status={STATUS_TONE[bonusStatus]} label={STATUS_LABEL[bonusStatus]} />
+                    <span className={bonusStatus === "denied" ? "line-through" : ""}>Manager Bonus</span>
                   </div>
+                  <div className="text-[11px] muted">Discretionary bonus for the current cycle.</div>
+                  {bonusStatus === "denied" && cycle?.bonus_deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {cycle.bonus_deny_reason}</div>}
+                </div>
+                <div className={"font-semibold tabular-nums " + (bonusStatus === "denied" ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}>+{formatSar(bonusAmt)}</div>
+                {itemControls(
+                  bonusStatus,
+                  () => run(() => setBonusStatus(driverId, "approved")),
+                  () => setDenyTarget({ kind: "bonus", id: null, label: "Manager Bonus", amount: bonusAmt }),
+                  () => run(() => setBonusStatus(driverId, "pending")),
                 )}
               </div>
             )}
           </section>
 
-          {/* Adjustments (read-only review; denied shown struck) */}
+          {/* Adjustments — review each */}
           <section>
             <h4 className="font-semibold text-sm mb-2">Adjustments</h4>
             {myAdjustments.length === 0 ? (
@@ -631,12 +672,12 @@ function BreakdownModal({
             ) : (
               <div className="space-y-2">
                 {myAdjustments.map((a) => {
-                  const denied = !isActive(a);
+                  const denied = a.status === "denied";
                   return (
                     <div key={a.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
                       <div className="flex-1 min-w-[200px]">
                         <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
-                          {denied && <StatusPill status="critical" label="Denied" />}
+                          <StatusPill status={STATUS_TONE[a.status]} label={STATUS_LABEL[a.status]} />
                           <span className={denied ? "line-through" : ""}>{a.label}</span>
                         </div>
                         <div className="text-[11px] muted">{[a.date, a.note].filter(Boolean).join(" · ") || "—"}</div>
@@ -645,6 +686,12 @@ function BreakdownModal({
                       <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : a.amount_sar > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
                         {a.amount_sar > 0 ? "+" : ""}{formatSar(a.amount_sar)}
                       </div>
+                      {itemControls(
+                        a.status,
+                        () => run(() => setAdjustmentStatus(a.id, "approved")),
+                        () => setDenyTarget({ kind: "adjustment", id: a.id, label: a.label, amount: a.amount_sar }),
+                        () => run(() => setAdjustmentStatus(a.id, "pending")),
+                      )}
                     </div>
                   );
                 })}
@@ -655,43 +702,39 @@ function BreakdownModal({
           {err && <p className="text-sm text-rose-600 dark:text-rose-400">{err}</p>}
         </div>
 
-        {/* Footer — payout workflow. STRICT pay: Pay only from approved. */}
+        {/* Footer — Approve payout → strict Pay. */}
         <div className="flex justify-end gap-2 mt-5 flex-wrap">
           <OutlineBtn onClick={onClose}>Close</OutlineBtn>
-          {canDecide && status === "pending" && (
-            <>
-              <OutlineBtn onClick={() => run(() => setPayoutStatus(driverId, monthKey, "approved"))} disabled={busy}>
-                <Check className="h-3.5 w-3.5" /> Approve
-              </OutlineBtn>
-              <DangerBtn onClick={() => setDenyOpen(true)} disabled={busy}>
-                <Ban className="h-3.5 w-3.5" /> Deny
-              </DangerBtn>
-            </>
+          {payoutStatus === "pending" && (
+            <SuccessBtn onClick={() => run(() => approvePayout(driverId))} disabled={busy}>
+              <Check className="h-3.5 w-3.5" /> Approve payout
+            </SuccessBtn>
           )}
-          {canDecide && status === "approved" && (
+          {payoutStatus === "approved" && (
             <>
-              <DangerBtn onClick={() => setDenyOpen(true)} disabled={busy}>
-                <Ban className="h-3.5 w-3.5" /> Deny
-              </DangerBtn>
-              <PrimaryBtn onClick={() => confirm("Mark this payout as PAID? This locks the month for this driver.") && run(() => setPayoutStatus(driverId, monthKey, "paid"))} disabled={busy}>
-                <Banknote className="h-3.5 w-3.5" /> Pay
+              <OutlineBtn onClick={() => run(() => reopenPayout(driverId))} disabled={busy}>
+                <RotateCcw className="h-3.5 w-3.5" /> Reopen
+              </OutlineBtn>
+              <PrimaryBtn
+                onClick={() =>
+                  confirm("Pay this driver's current commission? This freezes a History record and resets the current balance to zero.") &&
+                  run(() => payCommission(driverId))
+                }
+                disabled={busy}
+              >
+                <Banknote className="h-3.5 w-3.5" /> Pay {formatSar(total)}
               </PrimaryBtn>
             </>
-          )}
-          {canDecide && status === "denied" && (
-            <OutlineBtn onClick={() => run(() => setPayoutStatus(driverId, monthKey, "pending"))} disabled={busy}>
-              <RotateCcw className="h-3.5 w-3.5" /> Reopen
-            </OutlineBtn>
           )}
         </div>
       </div>
 
-      {denyOpen && (
+      {denyTarget && (
         <DenyModal
-          title="Deny payout"
-          prompt={`Deny ${driverName}'s payout for ${monthLabel(monthKey)}. The reason is recorded.`}
-          onConfirm={(reason) => setPayoutStatus(driverId, monthKey, "denied", reason)}
-          onClose={() => setDenyOpen(false)}
+          title={`Deny ${denyTarget.kind}`}
+          prompt={`Deny "${denyTarget.label}" (${formatSar(denyTarget.amount)}). It stays visible but is excluded from the total until restored.`}
+          onConfirm={onDenyConfirm}
+          onClose={() => setDenyTarget(null)}
         />
       )}
     </div>
@@ -699,34 +742,31 @@ function BreakdownModal({
 }
 
 // ----------------------------------------------------------------------------
-// Specials & Bonuses manage popup — add-special form + one combined table of
-// existing specials (edit / delete / deny) plus a Manager-Bonus row (inline
-// amount Set / Remove; bonus is never denyable).
+// Specials & Bonuses manage popup — ADD / EDIT / DELETE only (review lives in the
+// Breakdown). Plus the Manager-Bonus row (inline amount Set / Remove). Status is
+// shown read-only for context; setting the bonus re-opens its review (→ pending).
 // ----------------------------------------------------------------------------
 function SpecialsModal({
   driverId,
-  monthKey,
   driverName,
   specials,
-  period,
+  cycle,
   onClose,
 }: {
   driverId: string;
-  monthKey: string;
   driverName: string;
-  specials: CommSpecial[];
-  period: CommPeriod | null;
+  specials: CommSpecialRow[];
+  cycle: CommCycle | null;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [editId, setEditId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [denyTarget, setDenyTarget] = useState<CommSpecial | null>(null);
 
-  const mySpecials = specials.filter((s) => s.driver_id === driverId && s.month_key === monthKey);
+  const mySpecials = specials.filter((s) => s.driver_id === driverId && isUnpaid(s));
   const editing = mySpecials.find((s) => s.id === editId) ?? null;
-  const bonus = round2(period?.bonus_sar ?? 0);
+  const bonus = round2(cycle?.bonus_sar ?? 0);
   const [bonusVal, setBonusVal] = useState(String(bonus));
   useEffect(() => setBonusVal(String(bonus)), [bonus]);
 
@@ -747,7 +787,7 @@ function SpecialsModal({
     const form = e.currentTarget;
     const fd = new FormData(form);
     fd.set("driver_id", driverId);
-    fd.set("month_key", monthKey);
+    fd.set("month_key", CURRENT_MONTH_KEY);
     setBusy(true);
     setErr(null);
     const res = editId ? await updateCommissionSpecial(editId, fd) : await addCommissionSpecial(fd);
@@ -765,7 +805,7 @@ function SpecialsModal({
     <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-semibold">Specials &amp; Bonuses — {driverName} <span className="muted font-normal text-sm">· {monthLabel(monthKey)}</span></h2>
+          <h2 className="text-lg font-semibold">Specials &amp; Bonuses — {driverName} <span className="muted font-normal text-sm">· current cycle</span></h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
 
@@ -797,42 +837,36 @@ function SpecialsModal({
           </div>
         </form>
 
-        {/* Combined table: specials + the manager bonus row */}
+        {/* Combined list: specials (edit/delete) + the manager bonus row */}
         <div className="space-y-2">
           {mySpecials.length === 0 && bonus === 0 && <p className="muted text-sm">No specials or bonus yet.</p>}
 
           {mySpecials.map((sp) => {
-            const denied = !isActive(sp);
+            const denied = sp.status === "denied";
             return (
               <div key={sp.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
                 <div className="flex-1 min-w-[180px]">
                   <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
                     {sp.is_special_trip && <StatusPill status="scheduled" label="Special trip" />}
-                    {denied && <StatusPill status="critical" label="Denied" />}
+                    <StatusPill status={STATUS_TONE[sp.status]} label={STATUS_LABEL[sp.status]} />
                     <span className={denied ? "line-through" : ""}>{sp.label}</span>
                   </div>
                   <div className="text-[11px] muted">{[sp.date, sp.note].filter(Boolean).join(" · ") || "—"}</div>
-                  {denied && sp.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {sp.deny_reason}</div>}
                 </div>
                 <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}>+{formatSar(sp.amount_sar)}</div>
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={() => setEditId(sp.id)} className="muted hover:text-[rgb(var(--fg))]" title="Edit"><Pencil className="h-4 w-4" /></button>
-                  {denied ? (
-                    <button type="button" disabled={busy} onClick={() => run(() => setSpecialStatus(sp.id, "active"))} className="muted hover:text-[rgb(var(--fg))] disabled:opacity-50" title="Restore"><RotateCcw className="h-4 w-4" /></button>
-                  ) : (
-                    <button type="button" disabled={busy} onClick={() => setDenyTarget(sp)} className="text-amber-600 dark:text-amber-400 hover:opacity-70 disabled:opacity-50" title="Deny"><Ban className="h-4 w-4" /></button>
-                  )}
                   <button type="button" disabled={busy} onClick={() => confirm("Delete this special permanently?") && run(() => removeCommissionSpecial(sp.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Delete"><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
             );
           })}
 
-          {/* Manager bonus row — inline Set / Remove, no deny */}
+          {/* Manager bonus row — inline Set / Remove. Review (approve/deny) is in the Breakdown. */}
           <div className="rounded-lg border p-3 flex items-center gap-3 flex-wrap" style={{ ...BORDER, background: "rgba(100,116,139,.06)" }}>
             <div className="flex-1 min-w-[180px]">
               <div className="font-medium text-sm flex items-center gap-2"><Banknote className="h-4 w-4 muted" /> Manager Bonus</div>
-              <div className="text-[11px] muted">Discretionary monthly bonus (current: {formatSar(bonus)}).</div>
+              <div className="text-[11px] muted">Discretionary bonus (current: {formatSar(bonus)}).</div>
             </div>
             <input
               type="number"
@@ -844,11 +878,11 @@ function SpecialsModal({
               className="px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-28 tabular-nums disabled:opacity-60"
               style={INPUT_STYLE}
             />
-            <OutlineBtn onClick={() => run(() => setCommissionBonus(driverId, monthKey, Number(bonusVal) || 0))} disabled={busy}>
+            <OutlineBtn onClick={() => run(() => setCommissionBonus(driverId, CURRENT_MONTH_KEY, Number(bonusVal) || 0))} disabled={busy}>
               <Save className="h-3.5 w-3.5" /> Set
             </OutlineBtn>
             {bonus !== 0 && (
-              <button type="button" disabled={busy} onClick={() => confirm("Remove the manager bonus?") && run(() => setCommissionBonus(driverId, monthKey, 0))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove bonus"><Trash2 className="h-4 w-4" /></button>
+              <button type="button" disabled={busy} onClick={() => confirm("Remove the manager bonus?") && run(() => setCommissionBonus(driverId, CURRENT_MONTH_KEY, 0))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove bonus"><Trash2 className="h-4 w-4" /></button>
             )}
           </div>
         </div>
@@ -859,44 +893,31 @@ function SpecialsModal({
           <OutlineBtn onClick={onClose}>Close</OutlineBtn>
         </div>
       </div>
-
-      {denyTarget && (
-        <DenyModal
-          title="Deny special"
-          prompt={`Deny "${denyTarget.label}" (${formatSar(denyTarget.amount_sar)}). It stays visible but is excluded from the total.`}
-          onConfirm={(reason) => setSpecialStatus(denyTarget.id, "denied", reason)}
-          onClose={() => setDenyTarget(null)}
-        />
-      )}
     </div>
   );
 }
 
 // ----------------------------------------------------------------------------
-// Adjustments manage popup — add-adjustment form + its own table of existing
-// adjustments (edit / delete / deny). Amount may be negative (a deduction);
-// no min/max/sign limiter.
+// Adjustments manage popup — ADD / EDIT / DELETE only (review lives in the
+// Breakdown). Amount may be negative (a deduction); no min/max/sign limiter.
 // ----------------------------------------------------------------------------
 function AdjustmentsModal({
   driverId,
-  monthKey,
   driverName,
   adjustments,
   onClose,
 }: {
   driverId: string;
-  monthKey: string;
   driverName: string;
-  adjustments: CommAdjustment[];
+  adjustments: CommAdjustmentRow[];
   onClose: () => void;
 }) {
   const router = useRouter();
   const [editId, setEditId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [denyTarget, setDenyTarget] = useState<CommAdjustment | null>(null);
 
-  const myAdjustments = adjustments.filter((a) => a.driver_id === driverId && a.month_key === monthKey);
+  const myAdjustments = adjustments.filter((a) => a.driver_id === driverId && isUnpaid(a));
   const editing = myAdjustments.find((a) => a.id === editId) ?? null;
 
   async function run(fn: () => Promise<ActionResult>): Promise<void> {
@@ -916,7 +937,7 @@ function AdjustmentsModal({
     const form = e.currentTarget;
     const fd = new FormData(form);
     fd.set("driver_id", driverId);
-    fd.set("month_key", monthKey);
+    fd.set("month_key", CURRENT_MONTH_KEY);
     setBusy(true);
     setErr(null);
     const res = editId ? await updateCommissionAdjustment(editId, fd) : await addCommissionAdjustment(fd);
@@ -934,7 +955,7 @@ function AdjustmentsModal({
     <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-semibold">Adjustments — {driverName} <span className="muted font-normal text-sm">· {monthLabel(monthKey)}</span></h2>
+          <h2 className="text-lg font-semibold">Adjustments — {driverName} <span className="muted font-normal text-sm">· current cycle</span></h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
 
@@ -964,31 +985,25 @@ function AdjustmentsModal({
           </div>
         </form>
 
-        {/* Adjustments table */}
+        {/* Adjustments list */}
         <div className="space-y-2">
           {myAdjustments.length === 0 && <p className="muted text-sm">No adjustments yet.</p>}
           {myAdjustments.map((a) => {
-            const denied = !isActive(a);
+            const denied = a.status === "denied";
             return (
               <div key={a.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
                 <div className="flex-1 min-w-[180px]">
                   <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
-                    {denied && <StatusPill status="critical" label="Denied" />}
+                    <StatusPill status={STATUS_TONE[a.status]} label={STATUS_LABEL[a.status]} />
                     <span className={denied ? "line-through" : ""}>{a.label}</span>
                   </div>
                   <div className="text-[11px] muted">{[a.date, a.note].filter(Boolean).join(" · ") || "—"}</div>
-                  {denied && a.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {a.deny_reason}</div>}
                 </div>
                 <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : a.amount_sar > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
                   {a.amount_sar > 0 ? "+" : ""}{formatSar(a.amount_sar)}
                 </div>
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={() => setEditId(a.id)} className="muted hover:text-[rgb(var(--fg))]" title="Edit"><Pencil className="h-4 w-4" /></button>
-                  {denied ? (
-                    <button type="button" disabled={busy} onClick={() => run(() => setAdjustmentStatus(a.id, "active"))} className="muted hover:text-[rgb(var(--fg))] disabled:opacity-50" title="Restore"><RotateCcw className="h-4 w-4" /></button>
-                  ) : (
-                    <button type="button" disabled={busy} onClick={() => setDenyTarget(a)} className="text-amber-600 dark:text-amber-400 hover:opacity-70 disabled:opacity-50" title="Deny"><Ban className="h-4 w-4" /></button>
-                  )}
                   <button type="button" disabled={busy} onClick={() => confirm("Delete this adjustment permanently?") && run(() => removeCommissionAdjustment(a.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Delete"><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
@@ -1002,22 +1017,13 @@ function AdjustmentsModal({
           <OutlineBtn onClick={onClose}>Close</OutlineBtn>
         </div>
       </div>
-
-      {denyTarget && (
-        <DenyModal
-          title="Deny adjustment"
-          prompt={`Deny "${denyTarget.label}" (${formatSar(denyTarget.amount_sar)}). It stays visible but is excluded from the total.`}
-          onConfirm={(reason) => setAdjustmentStatus(denyTarget.id, "denied", reason)}
-          onClose={() => setDenyTarget(null)}
-        />
-      )}
     </div>
   );
 }
 
 // ----------------------------------------------------------------------------
-// DenyModal — captures a required reason, then runs onConfirm. Reused for
-// per-item deny (special / adjustment) and payout-level deny.
+// DenyModal — captures a required reason, then runs onConfirm. Used for per-item
+// deny (special / adjustment / bonus) in the Breakdown.
 // ----------------------------------------------------------------------------
 function DenyModal({
   title,
@@ -1056,7 +1062,7 @@ function DenyModal({
     <div className="fixed inset-0 z-[70] grid place-items-center p-4 bg-black/50" onClick={onClose}>
       <div className="card p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-3">
-          <h2 className="text-lg font-semibold flex items-center gap-2"><Ban className="h-5 w-5 text-rose-600 dark:text-rose-400" /> {title}</h2>
+          <h2 className="text-lg font-semibold flex items-center gap-2 capitalize"><Ban className="h-5 w-5 text-rose-600 dark:text-rose-400" /> {title}</h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
         <p className="text-sm muted mb-3">{prompt}</p>

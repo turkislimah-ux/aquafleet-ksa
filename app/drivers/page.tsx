@@ -8,7 +8,13 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Driver } from "@/lib/db-types";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
-import type { CommTrip, CommPeriod, CommSpecial, CommAdjustment } from "./CommissionsTab";
+import type {
+  CommTripRow,
+  CommCycle,
+  CommSpecialRow,
+  CommAdjustmentRow,
+  CommPayout,
+} from "@/lib/commission-rows";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +39,7 @@ export default async function DriversPage() {
   const supabase = createClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, periodsRes, specialsRes, adjustmentsRes, projectsRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       supabase.from("trucks").select("id, plate, model, status, home_station, assigned_driver_id").order("plate", { ascending: true }),
@@ -41,24 +47,42 @@ export default async function DriversPage() {
         .from("trips")
         .select("driver_id, ref, trip_date, stage, tank_size_m3, project:projects(name), customer:customers(name)")
         .order("trip_date", { ascending: false }),
-      // Commissions base = delivered trips only (commission_sar stamped on Delivered).
+      // Commissions base = UNPAID delivered trips (commission_sar stamped on
+      // Delivered; payout_id IS NULL = still in the driver's current balance).
       supabase
         .from("trips")
-        .select("driver_id, project_id, commission_sar, delivered_at")
-        .not("delivered_at", "is", null),
-      supabase.from("commission_periods").select("driver_id, month_key, payout_status, bonus_sar, deny_reason"),
-      supabase.from("commission_specials").select("id, driver_id, month_key, label, amount_sar, date, note, is_special_trip, status, deny_reason"),
-      supabase.from("commission_adjustments").select("id, driver_id, month_key, label, amount_sar, date, note, status, deny_reason"),
+        .select("driver_id, project_id, commission_sar, delivered_at, payout_id")
+        .not("delivered_at", "is", null)
+        .is("payout_id", null),
+      // The open per-driver cycle (rolling). Bonus is reviewable.
+      supabase
+        .from("commission_periods")
+        .select("driver_id, bonus_sar, bonus_status, bonus_deny_reason, payout_status, approved_by, month_key, deny_reason"),
+      // Only UNPAID specials/adjustments are part of the current balance.
+      supabase
+        .from("commission_specials")
+        .select("id, driver_id, month_key, label, amount_sar, date, note, is_special_trip, status, deny_reason, payout_id")
+        .is("payout_id", null),
+      supabase
+        .from("commission_adjustments")
+        .select("id, driver_id, month_key, label, amount_sar, date, note, status, deny_reason, payout_id")
+        .is("payout_id", null),
       supabase.from("projects").select("id, name"),
+      // Frozen History records (newest first; client filters by driver).
+      supabase
+        .from("commission_payouts")
+        .select("id, driver_id, paid_at, approved_by, period_label, base_sar, specials_sar, adjustments_sar, bonus_sar, total_sar, snapshot")
+        .order("paid_at", { ascending: false }),
     ]);
 
   const drivers = (driversRes.data ?? []) as Driver[];
   const trucks = (trucksRes.data ?? []) as TruckLite[];
   const trips = (tripsRes.data ?? []) as TripJoin[];
-  const commTrips = (commTripsRes.data ?? []) as CommTrip[];
-  const periods = (periodsRes.data ?? []) as CommPeriod[];
-  const specials = (specialsRes.data ?? []) as CommSpecial[];
-  const adjustments = (adjustmentsRes.data ?? []) as CommAdjustment[];
+  const commTrips = (commTripsRes.data ?? []) as CommTripRow[];
+  const cycles = (cyclesRes.data ?? []) as CommCycle[];
+  const specials = (specialsRes.data ?? []) as CommSpecialRow[];
+  const adjustments = (adjustmentsRes.data ?? []) as CommAdjustmentRow[];
+  const payouts = (payoutsRes.data ?? []) as CommPayout[];
   const projectsById: Record<string, string> = {};
   for (const p of (projectsRes.data ?? []) as { id: string; name: string }[]) projectsById[p.id] = p.name;
   const error =
@@ -66,10 +90,11 @@ export default async function DriversPage() {
     trucksRes.error ||
     tripsRes.error ||
     commTripsRes.error ||
-    periodsRes.error ||
+    cyclesRes.error ||
     specialsRes.error ||
     adjustmentsRes.error ||
-    projectsRes.error;
+    projectsRes.error ||
+    payoutsRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -98,9 +123,10 @@ export default async function DriversPage() {
       trips30dByDriver={trips30dByDriver}
       recentByDriver={recentByDriver}
       commTrips={commTrips}
-      periods={periods}
+      cycles={cycles}
       specials={specials}
       adjustments={adjustments}
+      payouts={payouts}
       projectsById={projectsById}
       error={error?.message ?? null}
     />

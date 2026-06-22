@@ -2,6 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import {
+  buildCurrentBaseLines,
+  buildPayoutSnapshot,
+  type CommTripRow,
+  type CommExtraRow,
+  type CommCycle,
+} from "@/lib/commission-rows";
 
 export type ActionResult = { error: string | null };
 
@@ -210,6 +217,9 @@ export async function removeCommissionAdjustment(id: string): Promise<ActionResu
   return { error: null };
 }
 
+// Set/clear the open cycle's bonus. ONE open cycle row per driver now (0009),
+// so we upsert on driver_id; month_key is kept only as a human label. Changing
+// the bonus amount RE-OPENS its review (bonus_status → pending, reason cleared).
 export async function setCommissionBonus(
   driverId: string,
   monthKey: string,
@@ -221,47 +231,9 @@ export async function setCommissionBonus(
   const supabase = createClient();
   const { error } = await supabase
     .from("commission_periods")
-    .upsert({ driver_id: driverId, month_key: monthKey, bonus_sar: bonus }, { onConflict: "driver_id,month_key" });
-  if (error) return { error: error.message };
-
-  revalidatePath("/drivers");
-  return { error: null };
-}
-
-export async function setPayoutStatus(
-  driverId: string,
-  monthKey: string,
-  status: "pending" | "approved" | "paid" | "denied",
-  reason?: string,
-): Promise<ActionResult> {
-  if (!driverId || !MONTH_KEY_RE.test(monthKey)) return { error: "Missing driver or month." };
-  if (!["pending", "approved", "paid", "denied"].includes(status)) return { error: "Invalid payout status." };
-
-  const supabase = createClient();
-
-  // STRICT pay: a payout can only be marked paid from an approved state.
-  if (status === "paid") {
-    const { data: cur, error: curErr } = await supabase
-      .from("commission_periods")
-      .select("payout_status")
-      .eq("driver_id", driverId)
-      .eq("month_key", monthKey)
-      .maybeSingle();
-    if (curErr) return { error: curErr.message };
-    if (cur?.payout_status !== "approved") return { error: "Approve the payout before marking it paid." };
-  }
-
-  const { error } = await supabase
-    .from("commission_periods")
     .upsert(
-      {
-        driver_id: driverId,
-        month_key: monthKey,
-        payout_status: status,
-        paid_at: status === "paid" ? new Date().toISOString() : null,
-        deny_reason: status === "denied" ? (reason ?? null) : null,
-      },
-      { onConflict: "driver_id,month_key" },
+      { driver_id: driverId, month_key: monthKey, bonus_sar: bonus, bonus_status: "pending", bonus_deny_reason: null },
+      { onConflict: "driver_id" },
     );
   if (error) return { error: error.message };
 
@@ -269,21 +241,30 @@ export async function setPayoutStatus(
   return { error: null };
 }
 
-// Per-item review state. Deny keeps the line VISIBLE but excludes it from totals
-// (UI does the exclusion) and records a reason. Restore (status='active') clears it.
+// Per-item review state (rolling model: pending|approved|denied). Deny keeps the
+// line VISIBLE but excludes it from totals and records a reason; Restore returns
+// it to pending. Legacy "active" is normalized to "pending". Only UNPAID rows can
+// change — a paid line is frozen into a History snapshot.
+type ItemReview = "active" | "pending" | "approved" | "denied";
+function normReview(status: ItemReview): "pending" | "approved" | "denied" {
+  return status === "active" ? "pending" : status;
+}
+
 export async function setSpecialStatus(
   id: string,
-  status: "active" | "denied",
+  status: ItemReview,
   reason?: string,
 ): Promise<ActionResult> {
   if (!id) return { error: "Missing record." };
-  if (!["active", "denied"].includes(status)) return { error: "Invalid status." };
+  if (!["active", "pending", "approved", "denied"].includes(status)) return { error: "Invalid status." };
+  const next = normReview(status);
 
   const supabase = createClient();
   const { error } = await supabase
     .from("commission_specials")
-    .update({ status, deny_reason: status === "denied" ? (reason ?? null) : null })
-    .eq("id", id);
+    .update({ status: next, deny_reason: next === "denied" ? (reason ?? null) : null })
+    .eq("id", id)
+    .is("payout_id", null);
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
@@ -292,19 +273,197 @@ export async function setSpecialStatus(
 
 export async function setAdjustmentStatus(
   id: string,
-  status: "active" | "denied",
+  status: ItemReview,
   reason?: string,
 ): Promise<ActionResult> {
   if (!id) return { error: "Missing record." };
-  if (!["active", "denied"].includes(status)) return { error: "Invalid status." };
+  if (!["active", "pending", "approved", "denied"].includes(status)) return { error: "Invalid status." };
+  const next = normReview(status);
 
   const supabase = createClient();
   const { error } = await supabase
     .from("commission_adjustments")
-    .update({ status, deny_reason: status === "denied" ? (reason ?? null) : null })
-    .eq("id", id);
+    .update({ status: next, deny_reason: next === "denied" ? (reason ?? null) : null })
+    .eq("id", id)
+    .is("payout_id", null);
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
   return { error: null };
+}
+
+// ============================================================================
+// Rolling-cycle review + pay (migration 0009). The Breakdown is the decision
+// center: per-item approve/deny above, plus bonus review and the whole-payout
+// Approve → Pay gate here. Pay is STRICT (only from an approved cycle) and
+// atomic (pay_commission RPC snapshots, tags rows with payout_id, resets cycle).
+// ============================================================================
+
+// Make sure the driver's single open cycle row exists (created lazily on first
+// action). Idempotent: ignores the row if it is already there.
+async function ensureCycle(
+  supabase: ReturnType<typeof createClient>,
+  driverId: string,
+): Promise<string | null> {
+  const { error } = await supabase
+    .from("commission_periods")
+    .upsert({ driver_id: driverId }, { onConflict: "driver_id", ignoreDuplicates: true });
+  return error ? error.message : null;
+}
+
+// Review the bonus line (pending|approved|denied). Denied bonus drops from the total.
+export async function setBonusStatus(
+  driverId: string,
+  status: "pending" | "approved" | "denied",
+  reason?: string,
+): Promise<ActionResult> {
+  if (!driverId) return { error: "Missing driver." };
+  if (!["pending", "approved", "denied"].includes(status)) return { error: "Invalid status." };
+
+  const supabase = createClient();
+  const ensureErr = await ensureCycle(supabase, driverId);
+  if (ensureErr) return { error: ensureErr };
+
+  const { error } = await supabase
+    .from("commission_periods")
+    .update({ bonus_status: status, bonus_deny_reason: status === "denied" ? (reason ?? null) : null })
+    .eq("driver_id", driverId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+// Approve the whole payout: every remaining PENDING item + the bonus flips to
+// approved (denied lines stay denied), and the cycle moves to 'approved' — the
+// only state from which Pay is allowed.
+export async function approvePayout(driverId: string): Promise<ActionResult> {
+  if (!driverId) return { error: "Missing driver." };
+
+  const supabase = createClient();
+  const ensureErr = await ensureCycle(supabase, driverId);
+  if (ensureErr) return { error: ensureErr };
+
+  const flips = await Promise.all([
+    supabase
+      .from("commission_specials")
+      .update({ status: "approved" })
+      .eq("driver_id", driverId)
+      .is("payout_id", null)
+      .eq("status", "pending"),
+    supabase
+      .from("commission_adjustments")
+      .update({ status: "approved" })
+      .eq("driver_id", driverId)
+      .is("payout_id", null)
+      .eq("status", "pending"),
+    supabase
+      .from("commission_periods")
+      .update({ bonus_status: "approved" })
+      .eq("driver_id", driverId)
+      .eq("bonus_status", "pending"),
+  ]);
+  const flipErr = flips.find((r) => r.error)?.error;
+  if (flipErr) return { error: flipErr.message };
+
+  const { data: auth } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from("commission_periods")
+    .update({ payout_status: "approved", approved_by: auth?.user?.email ?? null })
+    .eq("driver_id", driverId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+// Re-open an approved cycle for more edits (back to pending). Item/bonus decisions
+// are preserved; the manager can still restore or re-deny before paying.
+export async function reopenPayout(driverId: string): Promise<ActionResult> {
+  if (!driverId) return { error: "Missing driver." };
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("commission_periods")
+    .update({ payout_status: "pending" })
+    .eq("driver_id", driverId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+// PAY the driver's current cycle. Builds the frozen snapshot in pure TS, then
+// calls the atomic pay_commission RPC. STRICT: the RPC raises unless the cycle
+// is 'approved'. On success the current balance resets to zero and a History
+// record appears.
+export async function payCommission(driverId: string, periodLabel?: string): Promise<ActionResult> {
+  if (!driverId) return { error: "Missing driver." };
+
+  const supabase = createClient();
+
+  // Gather the CURRENT (unpaid) inputs for the snapshot.
+  const [driverRes, tripsRes, specialsRes, adjustmentsRes, cycleRes, projectsRes] = await Promise.all([
+    supabase.from("drivers").select("id, name, name_ar").eq("id", driverId).maybeSingle(),
+    supabase
+      .from("trips")
+      .select("driver_id, project_id, commission_sar, delivered_at, payout_id")
+      .eq("driver_id", driverId)
+      .not("delivered_at", "is", null)
+      .is("payout_id", null),
+    supabase
+      .from("commission_specials")
+      .select("id, driver_id, label, amount_sar, status, deny_reason, payout_id")
+      .eq("driver_id", driverId)
+      .is("payout_id", null),
+    supabase
+      .from("commission_adjustments")
+      .select("id, driver_id, label, amount_sar, status, deny_reason, payout_id")
+      .eq("driver_id", driverId)
+      .is("payout_id", null),
+    supabase
+      .from("commission_periods")
+      .select("driver_id, bonus_sar, bonus_status, bonus_deny_reason, payout_status, approved_by, month_key, deny_reason")
+      .eq("driver_id", driverId)
+      .maybeSingle(),
+    supabase.from("projects").select("id, name"),
+  ]);
+
+  const firstErr =
+    driverRes.error || tripsRes.error || specialsRes.error || adjustmentsRes.error || cycleRes.error || projectsRes.error;
+  if (firstErr) return { error: firstErr.message };
+  if (!driverRes.data) return { error: "Driver not found." };
+
+  const projectsById: Record<string, string> = {};
+  for (const p of (projectsRes.data ?? []) as { id: string; name: string }[]) projectsById[p.id] = p.name;
+
+  const trips = (tripsRes.data ?? []) as CommTripRow[];
+  const specials = (specialsRes.data ?? []) as CommExtraRow[];
+  const adjustments = (adjustmentsRes.data ?? []) as CommExtraRow[];
+  const cycle = (cycleRes.data ?? null) as CommCycle | null;
+  const driver = driverRes.data as { id: string; name: string; name_ar: string | null };
+
+  const baseLines = buildCurrentBaseLines(trips, driverId, projectsById);
+  const label = periodLabel?.trim() || defaultPeriodLabel();
+  const snapshot = buildPayoutSnapshot({ driver, periodLabel: label, baseLines, specials, adjustments, cycle });
+
+  const { error } = await supabase.rpc("pay_commission", {
+    p_driver_id: driverId,
+    p_period_label: label,
+    p_base: snapshot.base,
+    p_specials: snapshot.specials,
+    p_adjustments: snapshot.adjustments,
+    p_bonus: snapshot.bonus,
+    p_total: snapshot.total,
+    p_snapshot: snapshot,
+    p_approved_by: cycle?.approved_by ?? null,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+// "Mon YYYY" label for a payout when the caller doesn't supply one.
+function defaultPeriodLabel(): string {
+  return new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }
