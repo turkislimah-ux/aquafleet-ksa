@@ -53,3 +53,19 @@ body {
   50% { opacity: 0.6; transform: scale(0.85); }
 }
 .animate-pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+
+/* History payout Print — isolate the frozen record (#history-print). Everything
+   else is hidden so the printout is just the payout, edge-to-edge. */
+@media print {
+  body * { visibility: hidden !important; }
+  #history-print, #history-print * { visibility: visible !important; }
+  #history-print {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 1rem;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .no-print { display: none !important; }
+}
