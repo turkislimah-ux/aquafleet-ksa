@@ -9,6 +9,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { STAGE_ORDER, STAGE_TIMESTAMP, MAX_BATCH_TRIPS, type TripStage } from "@/lib/db-types";
+import { commissionForDelivery, monthKeyOf } from "@/lib/commission";
 
 export type ActionResult = { error: string | null };
 
@@ -99,16 +100,86 @@ export async function updateTrip(id: string, formData: FormData): Promise<Action
 
 // The one path every stage change funnels through. Stamps the *_at column for
 // the stage being entered (re-stamps if a trip re-enters a stage).
+//
+// BASE PAY: trips.commission_sar is the single source of truth for base pay and
+// is stamped HERE, the moment a trip enters `delivered` — priced via the pure
+// engine (lib/commission) using the project's commission settings and how many
+// of this driver's trips on this project were already delivered this month (so
+// the scalable ramp resets monthly). Leaving `delivered` clears it. A trip that
+// has already been paid (payout_id set) is frozen: its commission is never
+// re-computed, since it is locked into a History snapshot.
 export async function setTripStage(id: string, stage: TripStage): Promise<ActionResult> {
   if (!STAGE_ORDER.includes(stage)) return { error: "Invalid stage." };
 
-  const row: Record<string, unknown> = { stage };
-  row[STAGE_TIMESTAMP[stage]] = new Date().toISOString();
-
   const supabase = createClient();
+
+  // We need the trip's driver/project + paid-lock state to decide commission.
+  const { data: trip, error: tripErr } = await supabase
+    .from("trips")
+    .select("driver_id, project_id, payout_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (tripErr) return { error: tripErr.message };
+
+  const nowIso = new Date().toISOString();
+  const row: Record<string, unknown> = { stage };
+  row[STAGE_TIMESTAMP[stage]] = nowIso;
+
+  // Only (re)price unpaid trips. Paid trips keep their frozen commission_sar.
+  if (trip && trip.payout_id == null) {
+    if (stage === "delivered") {
+      row.commission_sar = await priceDelivery(supabase, id, trip.driver_id, trip.project_id, nowIso);
+    } else {
+      // Leaving delivered (correction / re-route) → no base pay for a non-delivered trip.
+      row.commission_sar = null;
+    }
+  }
+
   const { error } = await supabase.from("trips").update(row).eq("id", id);
   if (error) return { error: error.message };
 
   revalidatePath("/trips");
+  revalidatePath("/drivers");
   return { error: null };
+}
+
+// Price a trip being delivered NOW. Ad-hoc trips (no driver or no project) earn
+// base 0 — only project trips carry a driver commission. PURE math lives in
+// lib/commission; this just gathers the inputs from the DB.
+async function priceDelivery(
+  supabase: ReturnType<typeof createClient>,
+  tripId: string,
+  driverId: string | null,
+  projectId: string | null,
+  deliveredIso: string,
+): Promise<number> {
+  if (!driverId || !projectId) return 0;
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("commission_value, commission_mode, commission_bump_pct")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (!project) return 0;
+
+  // How many of this driver's trips on this project were ALREADY delivered this
+  // same month (excluding this one). The new trip is the (prior + 1)-th.
+  const monthKey = monthKeyOf(deliveredIso);
+  const { data: prior } = await supabase
+    .from("trips")
+    .select("delivered_at")
+    .eq("driver_id", driverId)
+    .eq("project_id", projectId)
+    .not("delivered_at", "is", null)
+    .neq("id", tripId);
+  const priorThisMonth = (prior ?? []).filter(
+    (t: { delivered_at: string | null }) => t.delivered_at && monthKeyOf(t.delivered_at) === monthKey,
+  ).length;
+
+  return commissionForDelivery(
+    project.commission_value,
+    project.commission_mode,
+    project.commission_bump_pct,
+    priorThisMonth,
+  );
 }
