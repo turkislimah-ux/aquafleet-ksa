@@ -107,6 +107,36 @@ export async function updateDriver(id: string, formData: FormData): Promise<Acti
 }
 
 // ============================================================================
+// Management & support staff (Phase 7, WRITE). The non-driver people. Mirrors
+// the demo's Add Staff modal: name (+Arabic), role, station, email, phone,
+// active. No money here.
+// ============================================================================
+
+const STAFF_ROLES = ["fleet_manager", "ops_supervisor", "mechanic", "inventory_clerk", "dispatcher"];
+
+export async function createStaff(formData: FormData): Promise<ActionResult> {
+  const name = str(formData.get("name"));
+  const name_ar = nullable(formData.get("name_ar"));
+  const role = str(formData.get("role"));
+  const station = nullable(formData.get("station"));
+  const email = nullable(formData.get("email"));
+  const phone = nullable(formData.get("phone"));
+  const active = formData.get("active") != null;
+
+  if (!name) return { error: "Name is required." };
+  if (!STAFF_ROLES.includes(role)) return { error: "Pick a role." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("staff")
+    .insert({ name, name_ar, role, station, email, phone, active });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+// ============================================================================
 // Commissions (Phase 6, WRITE). Base pay is NEVER written — it is derived live
 // from trips.commission_sar. These actions touch only the three extras tables:
 //   • commission_specials    — add/remove one-off special-trip payments.

@@ -6,7 +6,7 @@
 // feed the Driver Detail modal. Both derived from one trips fetch.
 
 import { createClient } from "@/lib/supabase/server";
-import type { Driver } from "@/lib/db-types";
+import type { Driver, Staff } from "@/lib/db-types";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
 import type {
   CommTripRow,
@@ -39,7 +39,7 @@ export default async function DriversPage() {
   const supabase = createClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       supabase.from("trucks").select("id, plate, model, status, home_station, assigned_driver_id").order("plate", { ascending: true }),
@@ -73,6 +73,8 @@ export default async function DriversPage() {
         .from("commission_payouts")
         .select("id, driver_id, paid_at, approved_by, period_label, base_sar, specials_sar, adjustments_sar, bonus_sar, total_sar, snapshot")
         .order("paid_at", { ascending: false }),
+      // Management & support staff (newest first).
+      supabase.from("staff").select("*").order("created_at", { ascending: false }),
     ]);
 
   const drivers = (driversRes.data ?? []) as Driver[];
@@ -83,6 +85,7 @@ export default async function DriversPage() {
   const specials = (specialsRes.data ?? []) as CommSpecialRow[];
   const adjustments = (adjustmentsRes.data ?? []) as CommAdjustmentRow[];
   const payouts = (payoutsRes.data ?? []) as CommPayout[];
+  const staff = (staffRes.data ?? []) as Staff[];
   const projectsById: Record<string, string> = {};
   for (const p of (projectsRes.data ?? []) as { id: string; name: string }[]) projectsById[p.id] = p.name;
   const error =
@@ -94,7 +97,8 @@ export default async function DriversPage() {
     specialsRes.error ||
     adjustmentsRes.error ||
     projectsRes.error ||
-    payoutsRes.error;
+    payoutsRes.error ||
+    staffRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -127,6 +131,7 @@ export default async function DriversPage() {
       specials={specials}
       adjustments={adjustments}
       payouts={payouts}
+      staff={staff}
       projectsById={projectsById}
       error={error?.message ?? null}
     />

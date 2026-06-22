@@ -148,6 +148,49 @@ export const TRUCK_STATUS_LABELS: Record<TruckStatus, string> = {
 export const STATION_OPTIONS = ["South Station 1", "South Station 2", "North Station"] as const;
 
 // ---------------------------------------------------------------------------
+// Phase 7 — management & support staff (see 0010_staff.sql). The non-driver
+// people: office + workshop. Drivers live in `drivers`; everyone else here.
+// Reality match: the demo's "depot" is our "station" (free text, like
+// drivers.home_station).
+// ---------------------------------------------------------------------------
+
+export type StaffRole =
+  | "fleet_manager"
+  | "ops_supervisor"
+  | "mechanic"
+  | "inventory_clerk"
+  | "dispatcher";
+
+export type Staff = {
+  id: string;
+  name: string;
+  name_ar: string | null;
+  role: StaffRole;
+  station: string | null;
+  email: string | null;
+  phone: string | null;
+  active: boolean;
+  created_at: string;
+};
+
+export const STAFF_ROLE_LABELS: Record<StaffRole, string> = {
+  fleet_manager: "Fleet Manager",
+  ops_supervisor: "Ops Supervisor",
+  mechanic: "Mechanic",
+  inventory_clerk: "Inventory Clerk",
+  dispatcher: "Dispatcher",
+};
+
+// Modal/select order — matches the demo's Add Staff role list.
+export const STAFF_ROLE_OPTIONS: StaffRole[] = [
+  "fleet_manager",
+  "ops_supervisor",
+  "mechanic",
+  "inventory_clerk",
+  "dispatcher",
+];
+
+// ---------------------------------------------------------------------------
 // Phase 3 — trips + Kanban (see 0003_init_trips.sql).
 // A trip references a project OR a bare customer. Stage advances through four
 // columns; *_at is stamped on entering each stage. All stage changes funnel

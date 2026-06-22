@@ -20,6 +20,7 @@ import { Btn, Stat, StatusPill, Bar, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import {
   type Driver,
+  type Staff,
   DRIVER_STATUS_LABELS,
   TRUCK_STATUS_LABELS,
   STATION_OPTIONS,
@@ -35,6 +36,7 @@ import CommissionsTab, {
   type CommAdjustmentRow,
 } from "./CommissionsTab";
 import HistoryTab from "./HistoryTab";
+import StaffTab from "./StaffTab";
 import type { CommPayout } from "@/lib/commission-rows";
 
 export type TruckLite = {
@@ -84,6 +86,7 @@ export default function DriversClient({
   specials,
   adjustments,
   payouts,
+  staff,
   projectsById,
   error,
 }: {
@@ -96,6 +99,7 @@ export default function DriversClient({
   specials: CommSpecialRow[];
   adjustments: CommAdjustmentRow[];
   payouts: CommPayout[];
+  staff: Staff[];
   projectsById: Record<string, string>;
   error: string | null;
 }) {
@@ -188,7 +192,7 @@ export default function DriversClient({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Drivers</h1>
           <p className="muted text-sm mt-1">
-            {total} drivers · 0 support staff
+            {total} drivers · {staff.length} support staff
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -205,7 +209,7 @@ export default function DriversClient({
         <TabBtn active={tab === "drivers"} onClick={() => setTab("drivers")} label="Drivers" badge={total} />
         <TabBtn active={tab === "commissions"} onClick={() => setTab("commissions")} label="Commissions" badge={pendingPayouts} />
         <TabBtn active={tab === "history"} onClick={() => setTab("history")} label="History" badge={payouts.length} />
-        <TabBtn active={tab === "staff"} onClick={() => setTab("staff")} label="Management & Staff" badge={0} />
+        <TabBtn active={tab === "staff"} onClick={() => setTab("staff")} label="Management & Staff" badge={staff.length} />
       </div>
 
       {error && (
@@ -315,9 +319,7 @@ export default function DriversClient({
 
       {tab === "history" && <HistoryTab payouts={payouts} drivers={drivers} />}
 
-      {tab === "staff" && (
-        <div className="card p-8 text-center muted text-sm">Management &amp; staff directory — built in a later step.</div>
-      )}
+      {tab === "staff" && <StaffTab staff={staff} />}
 
       {detail && (
         <DriverDetail
