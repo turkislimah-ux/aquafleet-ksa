@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatSar } from "@/lib/utils";
 import { TRIP_STAGE_LABELS } from "@/lib/db-types";
+import { onLeaveTodaySet, effectiveDriverStatus, type LeavePeriod } from "@/lib/leave";
 import DashboardClient, { type Datasets, type DashboardCharts } from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +14,9 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const supabase = createClient();
+  const today = new Date().toISOString().slice(0, 10);
 
-  const [trucksRes, tripsRes, driversRes] = await Promise.all([
+  const [trucksRes, tripsRes, driversRes, leavePeriodsRes] = await Promise.all([
     supabase.from("trucks").select("id, status, health_score"),
     supabase
       .from("trips")
@@ -23,6 +25,13 @@ export default async function DashboardPage() {
       )
       .order("created_at", { ascending: false }),
     supabase.from("drivers").select("id, status"),
+    // On-leave-today only (DB does the date filter — no inline range check). Feeds
+    // lib/leave so the donut/on-duty reflect computed availability, not stored status.
+    supabase
+      .from("leave_periods")
+      .select("driver_id, staff_id, start_date, end_date")
+      .lte("start_date", today)
+      .gte("end_date", today),
   ]);
 
   type JoinedTrip = {
@@ -42,6 +51,10 @@ export default async function DashboardPage() {
   const trucks = trucksRes.data ?? [];
   const trips = (tripsRes.data ?? []) as unknown as JoinedTrip[];
   const drivers = driversRes.data ?? [];
+  // Computed on-leave-today (authoritative). stored drivers.status='on_leave' is no
+  // longer read directly — effectiveDriverStatus reconciles it with this set.
+  const leavePeriods = (leavePeriodsRes.data ?? []) as unknown as LeavePeriod[];
+  const onLeaveDrivers = onLeaveTodaySet(leavePeriods, today).drivers;
 
   // ---- Fleet KPIs (REAL: trucks.status, trucks.health_score) ----
   const total = trucks.length;
@@ -56,9 +69,10 @@ export default async function DashboardPage() {
     ? +(healthVals.reduce((s, h) => s + h, 0) / healthVals.length).toFixed(1)
     : 0;
 
-  // ---- Snapshot KPI: drivers on duty (status === "active"). REAL. ----
-  // Q2: "on duty" maps to driver status === "active" (no on_duty enum).
-  const onDuty = drivers.filter((d) => d.status === "active").length;
+  // ---- Snapshot KPI: drivers on duty. REAL. ----
+  // Q2: "on duty" maps to effective status === "active" (no on_duty enum). A driver
+  // on leave today is NOT on duty — computed status excludes them.
+  const onDuty = drivers.filter((d) => effectiveDriverStatus(d.status, onLeaveDrivers.has(d.id)) === "active").length;
 
   // Q4: Revenue (30d) = Σ rate_sar for delivered trips in the last 30 days. REAL.
   const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
@@ -195,11 +209,15 @@ export default async function DashboardPage() {
   const tripBy: Record<string, number> = {};
   trips.forEach((t) => { tripBy[t.stage] = (tripBy[t.stage] ?? 0) + 1; });
 
-  // drivers by status
+  // drivers by status — COMPUTED. On-leave-today drivers count as on_leave ONLY
+  // (removed from active), so slices stay mutually exclusive and sum to total.
   const driverStatusLabel: Record<string, string> = { active: "Active", on_leave: "On Leave", inactive: "Inactive" };
   const driverStatusColor: Record<string, string> = { active: "#10b981", on_leave: "#f59e0b", inactive: "#94a3b8" };
   const driverBy: Record<string, number> = {};
-  drivers.forEach((d) => { driverBy[d.status] = (driverBy[d.status] ?? 0) + 1; });
+  drivers.forEach((d) => {
+    const s = effectiveDriverStatus(d.status, onLeaveDrivers.has(d.id));
+    driverBy[s] = (driverBy[s] ?? 0) + 1;
+  });
 
   // revenue daily series (14d) — Σ rate_sar by trip_date
   const revMap: Record<string, number> = {};
@@ -286,7 +304,7 @@ export default async function DashboardPage() {
     depots: { title: "Trucks by depot", defaultDisplay: "chart", chartKind: "bars", noData: true },
   };
 
-  const error = trucksRes.error || tripsRes.error || driversRes.error;
+  const error = trucksRes.error || tripsRes.error || driversRes.error || leavePeriodsRes.error;
 
   return (
     <DashboardClient
