@@ -6,7 +6,7 @@
 // feed the Driver Detail modal. Both derived from one trips fetch.
 
 import { createClient } from "@/lib/supabase/server";
-import type { Driver, Staff } from "@/lib/db-types";
+import type { Driver, Staff, StaffRole } from "@/lib/db-types";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
 import type {
   CommTripRow,
@@ -39,7 +39,7 @@ export default async function DriversPage() {
   const supabase = createClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       supabase.from("trucks").select("id, plate, model, status, home_station, assigned_driver_id").order("plate", { ascending: true }),
@@ -73,8 +73,15 @@ export default async function DriversPage() {
         .from("commission_payouts")
         .select("id, driver_id, paid_at, approved_by, period_label, base_sar, specials_sar, adjustments_sar, bonus_sar, total_sar, snapshot")
         .order("paid_at", { ascending: false }),
-      // Management & support staff (newest first).
-      supabase.from("staff").select("*").order("created_at", { ascending: false }),
+      // Management & support staff — ACTIVE only (soft-deleted hidden), newest first.
+      supabase.from("staff").select("*").is("terminated_at", null).order("created_at", { ascending: false }),
+      // Roles lookup for the Add/Edit dropdown — active roles, defaults first.
+      supabase
+        .from("staff_roles")
+        .select("id, key, label, is_default, active, created_at")
+        .eq("active", true)
+        .order("is_default", { ascending: false })
+        .order("label", { ascending: true }),
     ]);
 
   const drivers = (driversRes.data ?? []) as Driver[];
@@ -86,6 +93,7 @@ export default async function DriversPage() {
   const adjustments = (adjustmentsRes.data ?? []) as CommAdjustmentRow[];
   const payouts = (payoutsRes.data ?? []) as CommPayout[];
   const staff = (staffRes.data ?? []) as Staff[];
+  const staffRoles = (staffRolesRes.data ?? []) as StaffRole[];
   const projectsById: Record<string, string> = {};
   for (const p of (projectsRes.data ?? []) as { id: string; name: string }[]) projectsById[p.id] = p.name;
   const error =
@@ -98,7 +106,8 @@ export default async function DriversPage() {
     adjustmentsRes.error ||
     projectsRes.error ||
     payoutsRes.error ||
-    staffRes.error;
+    staffRes.error ||
+    staffRolesRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -132,6 +141,7 @@ export default async function DriversPage() {
       adjustments={adjustments}
       payouts={payouts}
       staff={staff}
+      staffRoles={staffRoles}
       projectsById={projectsById}
       error={error?.message ?? null}
     />

@@ -21,6 +21,7 @@ import { formatSar } from "@/lib/utils";
 import {
   type Driver,
   type Staff,
+  type StaffRole,
   DRIVER_STATUS_LABELS,
   TRUCK_STATUS_LABELS,
   STATION_OPTIONS,
@@ -87,6 +88,7 @@ export default function DriversClient({
   adjustments,
   payouts,
   staff,
+  staffRoles,
   projectsById,
   error,
 }: {
@@ -100,6 +102,7 @@ export default function DriversClient({
   adjustments: CommAdjustmentRow[];
   payouts: CommPayout[];
   staff: Staff[];
+  staffRoles: StaffRole[];
   projectsById: Record<string, string>;
   error: string | null;
 }) {
@@ -319,7 +322,7 @@ export default function DriversClient({
 
       {tab === "history" && <HistoryTab payouts={payouts} drivers={drivers} />}
 
-      {tab === "staff" && <StaffTab staff={staff} />}
+      {tab === "staff" && <StaffTab staff={staff} staffRoles={staffRoles} />}
 
       {detail && (
         <DriverDetail
