@@ -14,7 +14,9 @@ import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Ban } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { type Staff, type StaffRole, STATION_OPTIONS } from "@/lib/db-types";
+import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { createStaff, updateStaff, terminateStaff, addStaffRole } from "./actions";
+import LeaveSection from "./LeaveSection";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -26,7 +28,19 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export default function StaffTab({ staff, staffRoles }: { staff: Staff[]; staffRoles: StaffRole[] }) {
+export default function StaffTab({
+  staff,
+  staffRoles,
+  leavePeriods,
+  leaveTypes,
+  today,
+}: {
+  staff: Staff[];
+  staffRoles: StaffRole[];
+  leavePeriods: LeavePeriod[];
+  leaveTypes: LeaveType[];
+  today: string;
+}) {
   const router = useRouter();
   const [detail, setDetail] = useState<Staff | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -37,6 +51,18 @@ export default function StaffTab({ staff, staffRoles }: { staff: Staff[]; staffR
   // staff_roles holds only active roles; an assigned role that was later
   // deactivated falls back to showing its raw key.
   const roleName = (key: string) => staffRoles.find((r) => r.key === key)?.label ?? key;
+
+  // COMPUTED on-leave-today for staff. Staff carry no status enum, so on-leave is
+  // derived purely from leave_periods (lib/leave) — never a stored flag.
+  const onLeaveStaff = useMemo(() => onLeaveTodaySet(leavePeriods, today).staff, [leavePeriods, today]);
+  const leaveByStaff = useMemo(() => {
+    const m = new Map<string, LeavePeriod[]>();
+    for (const p of leavePeriods) {
+      if (!p.staff_id) continue;
+      (m.get(p.staff_id) ?? m.set(p.staff_id, []).get(p.staff_id)!).push(p);
+    }
+    return m;
+  }, [leavePeriods]);
 
   function openNew() {
     setEditing(null);
@@ -107,7 +133,14 @@ export default function StaffTab({ staff, staffRoles }: { staff: Staff[]; staffR
                   {initials(p.name)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{p.name}</div>
+                  <div className="font-medium truncate flex items-center gap-1.5">
+                    <span className="truncate">{p.name}</span>
+                    {onLeaveStaff.has(p.id) && (
+                      <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
+                        On leave
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs muted truncate">
                     {roleName(p.role)}{p.station ? ` · ${p.station}` : ""}
                   </div>
@@ -139,7 +172,7 @@ export default function StaffTab({ staff, staffRoles }: { staff: Staff[]; staffR
                   </div>
                   <div className="text-xs muted">{roleName(detail.role)}</div>
                 </div>
-                <StatusBadge s={detail} />
+                <StatusBadge s={detail} onLeave={onLeaveStaff.has(detail.id)} />
               </div>
 
               <div className="card p-3 grid grid-cols-2 gap-2">
@@ -150,15 +183,20 @@ export default function StaffTab({ staff, staffRoles }: { staff: Staff[]; staffR
                 <Cell label="Status">
                   {detail.terminated_at
                     ? `Terminated · ${new Date(detail.terminated_at).toLocaleDateString()}`
-                    : detail.active ? "Active" : "Inactive"}
+                    : onLeaveStaff.has(detail.id)
+                      ? "On leave today"
+                      : detail.active ? "Active" : "Inactive"}
                 </Cell>
               </div>
 
-              {/* Reserved for the future leave system — not built yet. */}
-              <div className="card p-3">
-                <h4 className="font-semibold text-sm mb-1">Leave &amp; absence</h4>
-                <p className="muted text-xs">Leave management arrives in a later step.</p>
-              </div>
+              {/* Leave & absence — same reusable section as the driver detail. */}
+              <LeaveSection
+                kind="staff"
+                personId={detail.id}
+                periods={leaveByStaff.get(detail.id) ?? []}
+                leaveTypes={leaveTypes}
+                today={today}
+              />
             </div>
 
             <div className="flex justify-end gap-2 mt-5">
@@ -313,9 +351,11 @@ function RoleSelect({ roles, defaultKey }: { roles: StaffRole[]; defaultKey: str
   );
 }
 
-function StatusBadge({ s }: { s: Staff }) {
+function StatusBadge({ s, onLeave }: { s: Staff; onLeave: boolean }) {
   const base = "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ";
+  // Terminated wins; on-leave-today (computed) outranks plain active/inactive.
   if (s.terminated_at) return <span className={base + "bg-rose-500/10 text-rose-600 dark:text-rose-400"}>Terminated</span>;
+  if (onLeave) return <span className={base + "bg-amber-500/10 text-amber-600 dark:text-amber-400"}>On leave</span>;
   return s.active
     ? <span className={base + "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}>Active</span>
     : <span className={base + "bg-slate-500/10 text-slate-600 dark:text-slate-400"}>Inactive</span>;

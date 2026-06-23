@@ -343,7 +343,9 @@ export default function DriversClient({
 
       {tab === "history" && <HistoryTab payouts={payouts} drivers={drivers} />}
 
-      {tab === "staff" && <StaffTab staff={staff} staffRoles={staffRoles} />}
+      {tab === "staff" && (
+        <StaffTab staff={staff} staffRoles={staffRoles} leavePeriods={leavePeriods} leaveTypes={leaveTypes} today={today} />
+      )}
 
       {detail && (
         <DriverDetail
