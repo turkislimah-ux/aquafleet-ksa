@@ -7,6 +7,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import type { Driver, Staff, StaffRole } from "@/lib/db-types";
+import type { LeavePeriod, LeaveType } from "@/lib/leave";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
 import type {
   CommTripRow,
@@ -39,7 +40,7 @@ export default async function DriversPage() {
   const supabase = createClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       supabase.from("trucks").select("id, plate, model, status, home_station, assigned_driver_id").order("plate", { ascending: true }),
@@ -82,6 +83,18 @@ export default async function DriversPage() {
         .eq("active", true)
         .order("is_default", { ascending: false })
         .order("label", { ascending: true }),
+      // Leave & absence (0012). All periods (driver + staff); "on leave today"
+      // is computed client-side from these. Leave types for the picker.
+      supabase
+        .from("leave_periods")
+        .select("id, driver_id, staff_id, leave_type, start_date, end_date, note, created_at")
+        .order("start_date", { ascending: false }),
+      supabase
+        .from("leave_types")
+        .select("id, key, label, is_default, active, created_at")
+        .eq("active", true)
+        .order("is_default", { ascending: false })
+        .order("label", { ascending: true }),
     ]);
 
   const drivers = (driversRes.data ?? []) as Driver[];
@@ -94,6 +107,9 @@ export default async function DriversPage() {
   const payouts = (payoutsRes.data ?? []) as CommPayout[];
   const staff = (staffRes.data ?? []) as Staff[];
   const staffRoles = (staffRolesRes.data ?? []) as StaffRole[];
+  const leavePeriods = (leavePeriodsRes.data ?? []) as LeavePeriod[];
+  const leaveTypes = (leaveTypesRes.data ?? []) as LeaveType[];
+  const today = new Date().toISOString().slice(0, 10);
   const projectsById: Record<string, string> = {};
   for (const p of (projectsRes.data ?? []) as { id: string; name: string }[]) projectsById[p.id] = p.name;
   const error =
@@ -107,7 +123,9 @@ export default async function DriversPage() {
     projectsRes.error ||
     payoutsRes.error ||
     staffRes.error ||
-    staffRolesRes.error;
+    staffRolesRes.error ||
+    leavePeriodsRes.error ||
+    leaveTypesRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -142,6 +160,9 @@ export default async function DriversPage() {
       payouts={payouts}
       staff={staff}
       staffRoles={staffRoles}
+      leavePeriods={leavePeriods}
+      leaveTypes={leaveTypes}
+      today={today}
       projectsById={projectsById}
       error={error?.message ?? null}
     />

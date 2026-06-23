@@ -28,7 +28,9 @@ import {
   type TruckStatus,
 } from "@/lib/db-types";
 import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
+import { effectiveDriverStatus, onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { createDriver, updateDriver } from "./actions";
+import LeaveSection from "./LeaveSection";
 import CommissionsTab, {
   buildCurrentRows,
   type CommTripRow,
@@ -89,6 +91,9 @@ export default function DriversClient({
   payouts,
   staff,
   staffRoles,
+  leavePeriods,
+  leaveTypes,
+  today,
   projectsById,
   error,
 }: {
@@ -103,6 +108,9 @@ export default function DriversClient({
   payouts: CommPayout[];
   staff: Staff[];
   staffRoles: StaffRole[];
+  leavePeriods: LeavePeriod[];
+  leaveTypes: LeaveType[];
+  today: string;
   projectsById: Record<string, string>;
   error: string | null;
 }) {
@@ -121,6 +129,19 @@ export default function DriversClient({
     return m;
   }, [trucks]);
   const driverNameById = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers]);
+
+  // COMPUTED on-leave-today (authoritative). The stored drivers.status enum is no
+  // longer the source of on-leave truth — effectiveDriverStatus() reconciles them.
+  const onLeaveDrivers = useMemo(() => onLeaveTodaySet(leavePeriods, today).drivers, [leavePeriods, today]);
+  const driverLeaveById = useMemo(() => {
+    const m = new Map<string, LeavePeriod[]>();
+    for (const p of leavePeriods) {
+      if (!p.driver_id) continue;
+      (m.get(p.driver_id) ?? m.set(p.driver_id, []).get(p.driver_id)!).push(p);
+    }
+    return m;
+  }, [leavePeriods]);
+  const pillFor = (d: Driver) => driverPill(effectiveDriverStatus(d.status, onLeaveDrivers.has(d.id)));
 
   // KPIs — honest: averages/sums skip null, "On Duty" derived from assignment.
   const total = drivers.length;
@@ -267,7 +288,7 @@ export default function DriversClient({
                         </div>
                       </TD>
                       <TD>{d.home_station ?? <span className="muted">—</span>}</TD>
-                      <TD>{driverPill(d.status)}</TD>
+                      <TD>{pillFor(d)}</TD>
                       <TD>{truck ? <span className="font-mono text-xs">{truck.plate}</span> : <span className="muted">—</span>}</TD>
                       <TD>
                         {d.safety_score != null ? (
@@ -330,6 +351,10 @@ export default function DriversClient({
           truck={truckByDriver.get(detail.id) ?? null}
           trips30d={trips30dByDriver[detail.id] ?? 0}
           recent={recentByDriver[detail.id] ?? []}
+          leavePeriods={driverLeaveById.get(detail.id) ?? []}
+          leaveTypes={leaveTypes}
+          today={today}
+          onLeaveToday={onLeaveDrivers.has(detail.id)}
           onClose={() => setDetail(null)}
           onEdit={() => {
             const d = detail;
@@ -363,10 +388,14 @@ export default function DriversClient({
                 <input name="hire_date" type="date" defaultValue={editing?.hire_date ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
               <Field label="Status">
-                <select name="status" defaultValue={editing?.status ?? "active"} className={INPUT} style={INPUT_STYLE}>
-                  {Object.entries(DRIVER_STATUS_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
-                  ))}
+                {/* "On leave" is computed from leave periods (see Leave & absence
+                    in the detail view), never set manually — so it is omitted here. */}
+                <select name="status" defaultValue={editing?.status === "on_leave" ? "active" : editing?.status ?? "active"} className={INPUT} style={INPUT_STYLE}>
+                  {Object.entries(DRIVER_STATUS_LABELS)
+                    .filter(([v]) => v !== "on_leave")
+                    .map(([v, l]) => (
+                      <option key={v} value={v}>{l}</option>
+                    ))}
                 </select>
               </Field>
               <Field label="Station">
@@ -471,6 +500,10 @@ function DriverDetail({
   truck,
   trips30d,
   recent,
+  leavePeriods,
+  leaveTypes,
+  today,
+  onLeaveToday,
   onClose,
   onEdit,
 }: {
@@ -478,10 +511,17 @@ function DriverDetail({
   truck: TruckLite | null;
   trips30d: number;
   recent: RecentTrip[];
+  leavePeriods: LeavePeriod[];
+  leaveTypes: LeaveType[];
+  today: string;
+  onLeaveToday: boolean;
   onClose: () => void;
   onEdit: () => void;
 }) {
   const expSoon = d.license_expiry != null && d.license_expiry <= YEAR_END;
+  // Posture 2: leave never unassigns. Surface the conflict (holds a truck while
+  // on leave today) as a UI-only warning inside the leave section.
+  const truckConflict = onLeaveToday && truck != null;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
@@ -498,7 +538,7 @@ function DriverDetail({
               <div className="font-semibold">{d.name}{d.name_ar ? <span className="muted font-normal"> · {d.name_ar}</span> : null}</div>
               <div className="text-xs muted">{d.home_station ?? "—"}</div>
             </div>
-            {driverPill(d.status)}
+            {driverPill(effectiveDriverStatus(d.status, onLeaveToday))}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -579,6 +619,20 @@ function DriverDetail({
               ))
             )}
           </div>
+
+          {/* Leave & absence — same reusable section as the staff detail. */}
+          <LeaveSection
+            kind="driver"
+            personId={d.id}
+            periods={leavePeriods}
+            leaveTypes={leaveTypes}
+            today={today}
+            warning={
+              truckConflict
+                ? `On leave today but still assigned to ${truck!.plate}. Reassign the truck if someone else needs to drive it.`
+                : undefined
+            }
+          />
         </div>
 
         <div className="flex justify-end gap-2 mt-5">
