@@ -18,6 +18,7 @@ import {
   type DriverStatus,
 } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "../page";
+import { effectiveDriverStatus } from "@/lib/leave";
 import { assignDriver, unassignDriver } from "../actions";
 import TruckFormModal from "../TruckFormModal";
 import { cn, formatNum } from "@/lib/utils";
@@ -49,15 +50,20 @@ export default function FleetDetailClient({
   trucks,
   drivers,
   trips30d,
+  onLeaveDriverIds,
   errorMsg,
 }: {
   truck: TruckRow | null;
   trucks: TruckRow[];
   drivers: DriverLite[];
   trips30d: Record<string, number>;
+  onLeaveDriverIds: string[];
   errorMsg: string | null;
 }) {
   const router = useRouter();
+
+  // On-leave-today driver ids (computed availability — UI lock only, like the list page).
+  const onLeave = useMemo(() => new Set(onLeaveDriverIds), [onLeaveDriverIds]);
 
   // Assign Driver modal — open when non-null.
   const [assignOpen, setAssignOpen] = useState(false);
@@ -212,10 +218,11 @@ export default function FleetDetailClient({
                   </div>
                   <div>
                     <div className="font-medium">{driver.name}</div>
-                    <StatusPill
-                      status={driver.status}
-                      label={DRIVER_STATUS_LABELS[(driver.status in DRIVER_STATUS_LABELS ? driver.status : "inactive") as DriverStatus]}
-                    />
+                    {(() => {
+                      const storedKey = (driver.status in DRIVER_STATUS_LABELS ? driver.status : "inactive") as DriverStatus;
+                      const effKey = effectiveDriverStatus(storedKey, onLeave.has(driver.id));
+                      return <StatusPill status={effKey} label={DRIVER_STATUS_LABELS[effKey]} />;
+                    })()}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
@@ -318,8 +325,10 @@ export default function FleetDetailClient({
                   const busyTruck = truckByDriver.get(d.id);
                   const isCurrent = truck.assigned_driver_id === d.id;
                   const busyElsewhere = !!busyTruck && busyTruck.id !== truck.id;
-                  const locked = busyElsewhere && !isCurrent;
-                  const statusKey = (d.status in DRIVER_STATUS_LABELS ? d.status : "inactive") as DriverStatus;
+                  const onLeaveToday = onLeave.has(d.id);
+                  const locked = (busyElsewhere || onLeaveToday) && !isCurrent;
+                  const storedKey = (d.status in DRIVER_STATUS_LABELS ? d.status : "inactive") as DriverStatus;
+                  const effKey = effectiveDriverStatus(storedKey, onLeaveToday);
                   return (
                     <tr
                       key={d.id}
@@ -333,10 +342,14 @@ export default function FleetDetailClient({
                     >
                       <TD className="font-medium">{d.name}</TD>
                       <TD>
-                        <StatusPill status={d.status} label={DRIVER_STATUS_LABELS[statusKey]} />
+                        <StatusPill status={effKey} label={DRIVER_STATUS_LABELS[effKey]} />
                       </TD>
-                      <TD className={cn("text-xs", busyElsewhere ? "muted" : "text-emerald-600 dark:text-emerald-400 font-medium")}>
-                        {busyElsewhere ? `Already assigned · ${busyTruck!.plate}` : "Available"}
+                      <TD className={cn("text-xs", busyElsewhere || onLeaveToday ? "muted" : "text-emerald-600 dark:text-emerald-400 font-medium")}>
+                        {busyElsewhere
+                          ? `Already assigned · ${busyTruck!.plate}`
+                          : onLeaveToday
+                            ? "On leave today"
+                            : "Available"}
                       </TD>
                       <TD className="tabular-nums text-xs">{d.safety_score ?? "—"}</TD>
                       <TD className="tabular-nums text-xs">{trips30d[d.id] ?? 0}</TD>
