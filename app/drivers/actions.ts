@@ -112,28 +112,101 @@ export async function updateDriver(id: string, formData: FormData): Promise<Acti
 // active. No money here.
 // ============================================================================
 
-const STAFF_ROLES = ["fleet_manager", "ops_supervisor", "mechanic", "inventory_clerk", "dispatcher"];
+// role is a staff_roles.key (FK, migration 0011). Existence is enforced by the
+// DB FK; here we only require a non-empty value. station is labelled "Branch of
+// operation" in the UI but stays the `station` column.
+function parseStaff(formData: FormData) {
+  return {
+    name: str(formData.get("name")),
+    name_ar: nullable(formData.get("name_ar")),
+    role: str(formData.get("role")),
+    station: nullable(formData.get("station")),
+    email: nullable(formData.get("email")),
+    phone: nullable(formData.get("phone")),
+    active: formData.get("active") != null,
+  };
+}
 
 export async function createStaff(formData: FormData): Promise<ActionResult> {
-  const name = str(formData.get("name"));
-  const name_ar = nullable(formData.get("name_ar"));
-  const role = str(formData.get("role"));
-  const station = nullable(formData.get("station"));
-  const email = nullable(formData.get("email"));
-  const phone = nullable(formData.get("phone"));
-  const active = formData.get("active") != null;
-
-  if (!name) return { error: "Name is required." };
-  if (!STAFF_ROLES.includes(role)) return { error: "Pick a role." };
+  const row = parseStaff(formData);
+  if (!row.name) return { error: "Name is required." };
+  if (!row.role) return { error: "Pick a role." };
 
   const supabase = createClient();
-  const { error } = await supabase
-    .from("staff")
-    .insert({ name, name_ar, role, station, email, phone, active });
+  const { error } = await supabase.from("staff").insert(row);
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
   return { error: null };
+}
+
+export async function updateStaff(id: string, formData: FormData): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  const row = parseStaff(formData);
+  if (!row.name) return { error: "Name is required." };
+  if (!row.role) return { error: "Pick a role." };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("staff").update(row).eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+// Soft delete: keep the row, stamp terminated_at so the active grid hides it.
+export async function terminateStaff(id: string): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("staff")
+    .update({ terminated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+// Slug a typed role label into a stable lowercase key (FK target). Non-alnum
+// runs collapse to "_"; ends trimmed. "Site Welder" → "site_welder".
+function slugifyRole(label: string): string {
+  return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+// "Add custom role": insert a new staff_roles row and return its key. If the key
+// already exists, reuse it (re-activating a deactivated one). Immediately
+// selectable in the role dropdown after the caller refreshes.
+export async function addStaffRole(label: string): Promise<{ error: string | null; key?: string }> {
+  const clean = label.trim();
+  if (!clean) return { error: "Role name is required." };
+  const key = slugifyRole(clean);
+  if (!key) return { error: "Role name needs letters or numbers." };
+
+  const supabase = createClient();
+  const { data: existing, error: lookupErr } = await supabase
+    .from("staff_roles")
+    .select("key, active")
+    .eq("key", key)
+    .maybeSingle();
+  if (lookupErr) return { error: lookupErr.message };
+
+  if (existing) {
+    if (!existing.active) {
+      const { error } = await supabase.from("staff_roles").update({ active: true }).eq("key", key);
+      if (error) return { error: error.message };
+    }
+    revalidatePath("/drivers");
+    return { error: null, key };
+  }
+
+  const { error } = await supabase
+    .from("staff_roles")
+    .insert({ key, label: clean, is_default: false, active: true });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null, key };
 }
 
 // ============================================================================
