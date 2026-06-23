@@ -570,3 +570,129 @@ export async function payCommission(driverId: string, periodLabel?: string): Pro
 function defaultPeriodLabel(): string {
   return new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }
+
+// ============================================================================
+// Leave & absence (0012). NARROW model: a manager records a leave period
+// directly against ONE person (driver OR staff). No request/approve workflow,
+// no balances. "On leave today" is COMPUTED from these rows (see lib/leave.ts) —
+// never stored. DECOUPLED (Posture 2): recording leave NEVER unassigns a truck
+// and there is no server-side availability rejection; conflicts are surfaced as
+// UI-only warnings. Touches /drivers, /fleet, and / (dashboard donut).
+// ============================================================================
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function revalidateLeave() {
+  revalidatePath("/drivers");
+  revalidatePath("/fleet");
+  revalidatePath("/");
+}
+
+// kind decides which FK column carries the person; exactly one is set (the DB
+// check constraint enforces this too).
+function parseLeave(formData: FormData) {
+  const kind = str(formData.get("kind"));
+  const personId = str(formData.get("person_id"));
+  const leave_type = str(formData.get("leave_type"));
+  const start_date = str(formData.get("start_date"));
+  const end_date = str(formData.get("end_date"));
+  const note = nullable(formData.get("note"));
+  return { kind, personId, leave_type, start_date, end_date, note };
+}
+
+function validateLeave(p: ReturnType<typeof parseLeave>): string | null {
+  if (p.kind !== "driver" && p.kind !== "staff") return "Unknown person type.";
+  if (!p.personId) return "Missing person.";
+  if (!p.leave_type) return "Pick a leave type.";
+  if (!ISO_DATE_RE.test(p.start_date) || !ISO_DATE_RE.test(p.end_date)) return "Pick start and end dates.";
+  if (p.end_date < p.start_date) return "End date must be on or after the start date.";
+  return null;
+}
+
+export async function addLeave(formData: FormData): Promise<ActionResult> {
+  const p = parseLeave(formData);
+  const bad = validateLeave(p);
+  if (bad) return { error: bad };
+
+  const row = {
+    driver_id: p.kind === "driver" ? p.personId : null,
+    staff_id: p.kind === "staff" ? p.personId : null,
+    leave_type: p.leave_type,
+    start_date: p.start_date,
+    end_date: p.end_date,
+    note: p.note,
+  };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("leave_periods").insert(row);
+  if (error) return { error: error.message };
+
+  revalidateLeave();
+  return { error: null };
+}
+
+export async function updateLeave(id: string, formData: FormData): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  const p = parseLeave(formData);
+  const bad = validateLeave(p);
+  if (bad) return { error: bad };
+
+  // Person (driver/staff) is fixed at creation; only the period fields change.
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("leave_periods")
+    .update({ leave_type: p.leave_type, start_date: p.start_date, end_date: p.end_date, note: p.note })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidateLeave();
+  return { error: null };
+}
+
+export async function deleteLeave(id: string): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  const supabase = createClient();
+  const { error } = await supabase.from("leave_periods").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidateLeave();
+  return { error: null };
+}
+
+// "Add custom type": insert a leave_types row and return its key (mirrors
+// addStaffRole). Reuses/re-activates an existing key. Selectable after refresh.
+function slugifyKey(label: string): string {
+  return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+export async function addLeaveType(label: string): Promise<{ error: string | null; key?: string }> {
+  const clean = label.trim();
+  if (!clean) return { error: "Type name is required." };
+  const key = slugifyKey(clean);
+  if (!key) return { error: "Type name needs letters or numbers." };
+
+  const supabase = createClient();
+  const { data: existing, error: lookupErr } = await supabase
+    .from("leave_types")
+    .select("key, active")
+    .eq("key", key)
+    .maybeSingle();
+  if (lookupErr) return { error: lookupErr.message };
+
+  if (existing) {
+    if (!existing.active) {
+      const { error } = await supabase.from("leave_types").update({ active: true }).eq("key", key);
+      if (error) return { error: error.message };
+    }
+    revalidatePath("/drivers");
+    return { error: null, key };
+  }
+
+  const { error } = await supabase
+    .from("leave_types")
+    .insert({ key, label: clean, is_default: false, active: true });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null, key };
+}
