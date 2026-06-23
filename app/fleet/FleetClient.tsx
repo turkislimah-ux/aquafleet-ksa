@@ -16,6 +16,7 @@ import {
   type DriverStatus,
   STATION_OPTIONS,
 } from "@/lib/db-types";
+import { effectiveDriverStatus } from "@/lib/leave";
 import type { TruckRow, DriverLite } from "./page";
 import { assignDriver, unassignDriver } from "./actions";
 import TruckFormModal from "./TruckFormModal";
@@ -52,16 +53,21 @@ export default function FleetClient({
   trucks,
   drivers,
   trips30d,
+  onLeaveDriverIds,
   kpis,
   errorMsg,
 }: {
   trucks: TruckRow[];
   drivers: DriverLite[];
   trips30d: Record<string, number>;
+  onLeaveDriverIds: string[];
   kpis: Kpis;
   errorMsg: string | null;
 }) {
   const router = useRouter();
+  // Computed on-leave-today set (authoritative). Drives the pill + disables the
+  // assign row (UI only — assignDriver has no server-side availability rejection).
+  const onLeave = useMemo(() => new Set(onLeaveDriverIds), [onLeaveDriverIds]);
 
   const [status, setStatus] = useState<(typeof STATUS_CHIPS)[number]>("all");
   const [station, setStation] = useState<string>("all");
@@ -385,8 +391,11 @@ export default function FleetClient({
                   const busyTruck = truckByDriver.get(d.id);
                   const isCurrent = assignTruck.assigned_driver_id === d.id;
                   const busyElsewhere = !!busyTruck && busyTruck.id !== assignTruck.id;
-                  const locked = busyElsewhere && !isCurrent;
-                  const statusKey = (d.status in DRIVER_STATUS_LABELS ? d.status : "inactive") as DriverStatus;
+                  const onLeaveToday = onLeave.has(d.id);
+                  // UI-only lock: busy elsewhere OR on leave today (never the current driver).
+                  const locked = (busyElsewhere || onLeaveToday) && !isCurrent;
+                  const storedKey = (d.status in DRIVER_STATUS_LABELS ? d.status : "inactive") as DriverStatus;
+                  const effKey = effectiveDriverStatus(storedKey, onLeaveToday);
                   return (
                     <tr
                       key={d.id}
@@ -400,10 +409,10 @@ export default function FleetClient({
                     >
                       <TD className="font-medium">{d.name}</TD>
                       <TD>
-                        <StatusPill status={d.status} label={DRIVER_STATUS_LABELS[statusKey]} />
+                        <StatusPill status={effKey} label={DRIVER_STATUS_LABELS[effKey]} />
                       </TD>
-                      <TD className={cn("text-xs", busyElsewhere ? "muted" : "text-emerald-600 dark:text-emerald-400 font-medium")}>
-                        {busyElsewhere ? `Already assigned · ${busyTruck!.plate}` : "Available"}
+                      <TD className={cn("text-xs", busyElsewhere || onLeaveToday ? "muted" : "text-emerald-600 dark:text-emerald-400 font-medium")}>
+                        {busyElsewhere ? `Already assigned · ${busyTruck!.plate}` : onLeaveToday ? "On leave today" : "Available"}
                       </TD>
                       <TD className="tabular-nums text-xs">{d.safety_score ?? "—"}</TD>
                       <TD className="tabular-nums text-xs">{trips30d[d.id] ?? 0}</TD>

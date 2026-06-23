@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Truck } from "@/lib/db-types";
+import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
 import FleetClient from "./FleetClient";
 
 export const dynamic = "force-dynamic";
@@ -22,8 +23,9 @@ export default async function FleetPage() {
   // 30-day window for the per-driver trip count (Trips30d) used by the
   // Assign Driver modal + Detail driver card. UTC, consistent with the rest.
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
 
-  const [trucksRes, driversRes, tripsRes] = await Promise.all([
+  const [trucksRes, driversRes, tripsRes, leavePeriodsRes] = await Promise.all([
     supabase
       .from("trucks")
       .select("*, driver:drivers(name)")
@@ -36,6 +38,13 @@ export default async function FleetPage() {
       .from("trips")
       .select("driver_id, trip_date")
       .gte("trip_date", since),
+    // On-leave-today drivers (DB date filter — no inline range check). Feeds
+    // lib/leave so the assign list shows + disables on-leave drivers (UI only).
+    supabase
+      .from("leave_periods")
+      .select("driver_id, staff_id, start_date, end_date")
+      .lte("start_date", today)
+      .gte("end_date", today),
   ]);
 
   const trucks: TruckRow[] = ((trucksRes.data ?? []) as JoinedTruck[]).map((t) => ({
@@ -50,7 +59,11 @@ export default async function FleetPage() {
     if (tr.driver_id) trips30d[tr.driver_id] = (trips30d[tr.driver_id] ?? 0) + 1;
   }
 
-  const error = trucksRes.error || driversRes.error || tripsRes.error;
+  // Computed on-leave-today driver ids (authoritative availability signal).
+  const leavePeriods = (leavePeriodsRes.data ?? []) as unknown as LeavePeriod[];
+  const onLeaveDriverIds = Array.from(onLeaveTodaySet(leavePeriods, today).drivers);
+
+  const error = trucksRes.error || driversRes.error || tripsRes.error || leavePeriodsRes.error;
 
   // ---- KPI strip (6) — all REAL, nulls skipped, no division-by-zero ----
   const total = trucks.length;
@@ -81,6 +94,7 @@ export default async function FleetPage() {
       trucks={trucks}
       drivers={drivers}
       trips30d={trips30d}
+      onLeaveDriverIds={onLeaveDriverIds}
       kpis={kpis}
       errorMsg={error ? error.message : null}
     />
