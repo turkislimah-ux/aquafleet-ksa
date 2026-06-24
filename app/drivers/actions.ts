@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { slugifyKey, isValidSlug } from "@/lib/slug";
 import {
   buildCurrentBaseLines,
   buildPayoutSnapshot,
@@ -168,20 +169,16 @@ export async function terminateStaff(id: string): Promise<ActionResult> {
   return { error: null };
 }
 
-// Slug a typed role label into a stable lowercase key (FK target). Non-alnum
-// runs collapse to "_"; ends trimmed. "Site Welder" → "site_welder".
-function slugifyRole(label: string): string {
-  return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-}
-
 // "Add custom role": insert a new staff_roles row and return its key. If the key
 // already exists, reuse it (re-activating a deactivated one). Immediately
-// selectable in the role dropdown after the caller refreshes.
+// selectable in the role dropdown after the caller refreshes. Slug via the shared
+// lib/slug helper (same transform the form previews; DB CHECK is the hard floor).
 export async function addStaffRole(label: string): Promise<{ error: string | null; key?: string }> {
   const clean = label.trim();
   if (!clean) return { error: "Role name is required." };
-  const key = slugifyRole(clean);
+  const key = slugifyKey(clean);
   if (!key) return { error: "Role name needs letters or numbers." };
+  if (!isValidSlug(key)) return { error: "Label must start with a letter." };
 
   const supabase = createClient();
   const { data: existing, error: lookupErr } = await supabase
@@ -661,15 +658,13 @@ export async function deleteLeave(id: string): Promise<ActionResult> {
 
 // "Add custom type": insert a leave_types row and return its key (mirrors
 // addStaffRole). Reuses/re-activates an existing key. Selectable after refresh.
-function slugifyKey(label: string): string {
-  return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-}
-
+// Slug via the shared lib/slug helper (matches the form preview + DB CHECK).
 export async function addLeaveType(label: string): Promise<{ error: string | null; key?: string }> {
   const clean = label.trim();
   if (!clean) return { error: "Type name is required." };
   const key = slugifyKey(clean);
   if (!key) return { error: "Type name needs letters or numbers." };
+  if (!isValidSlug(key)) return { error: "Label must start with a letter." };
 
   const supabase = createClient();
   const { data: existing, error: lookupErr } = await supabase

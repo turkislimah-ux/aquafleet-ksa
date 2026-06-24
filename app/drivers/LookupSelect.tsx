@@ -10,6 +10,8 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui";
+import { slugifyKey, isValidSlug } from "@/lib/slug";
+import { cn } from "@/lib/utils";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -47,10 +49,20 @@ export default function LookupSelect({
     return Array.from(map, ([key, lbl]) => ({ key, label: lbl }));
   }, [items, extra, value]);
 
+  // Live slug preview/gate (mirrors the DB CHECK via lib/slug). Empty label →
+  // no preview, submit disabled. Invalid slug (starts with digit/_) → loud error.
+  const slug = slugifyKey(label);
+  const validSlug = isValidSlug(slug);
+  const canAdd = slug !== "" && validSlug;
+
   async function add() {
     const clean = label.trim();
     if (!clean) {
       setErr("Name is required.");
+      return;
+    }
+    if (!canAdd) {
+      setErr("Label must start with a letter.");
       return;
     }
     setBusy(true);
@@ -100,9 +112,21 @@ export default function LookupSelect({
             style={INPUT_STYLE}
             autoFocus
           />
-          <Btn type="button" variant="primary" onClick={add}>{busy ? "…" : "Add"}</Btn>
+          <Btn
+            type="button"
+            variant="primary"
+            onClick={add}
+            className={cn(!canAdd && "opacity-50 pointer-events-none")}
+          >
+            {busy ? "…" : "Add"}
+          </Btn>
           <Btn type="button" variant="outline" onClick={() => { setAdding(false); setErr(null); }}>Cancel</Btn>
         </div>
+      )}
+      {adding && label.trim() !== "" && slug !== "" && (
+        validSlug
+          ? <p className="text-xs muted">Will be saved as: {slug}</p>
+          : <p className="text-xs text-rose-600 dark:text-rose-400">Label must start with a letter.</p>
       )}
       {err && <p className="text-xs text-rose-600 dark:text-rose-400">{err}</p>}
       <input type="hidden" name={name} value={value} />

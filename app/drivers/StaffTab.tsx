@@ -15,6 +15,8 @@ import { Plus, X, Pencil, Ban } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { type Staff, type StaffRole, STATION_OPTIONS } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
+import { slugifyKey, isValidSlug } from "@/lib/slug";
+import { cn } from "@/lib/utils";
 import { createStaff, updateStaff, terminateStaff, addStaffRole } from "./actions";
 import LeaveSection from "./LeaveSection";
 
@@ -288,10 +290,20 @@ function RoleSelect({ roles, defaultKey }: { roles: StaffRole[]; defaultKey: str
     return Array.from(map, ([key, lbl]) => ({ key, label: lbl }));
   }, [roles, extra, value]);
 
+  // Live slug preview/gate (mirrors the DB CHECK via lib/slug). Empty label →
+  // no preview, submit disabled. Invalid slug (starts with digit/_) → loud error.
+  const slug = slugifyKey(label);
+  const validSlug = isValidSlug(slug);
+  const canAdd = slug !== "" && validSlug;
+
   async function onAdd() {
     const clean = label.trim();
     if (!clean) {
       setErr("Role name is required.");
+      return;
+    }
+    if (!canAdd) {
+      setErr("Label must start with a letter.");
       return;
     }
     setBusy(true);
@@ -341,9 +353,21 @@ function RoleSelect({ roles, defaultKey }: { roles: StaffRole[]; defaultKey: str
             style={INPUT_STYLE}
             autoFocus
           />
-          <Btn type="button" variant="primary" onClick={onAdd}>{busy ? "…" : "Add"}</Btn>
+          <Btn
+            type="button"
+            variant="primary"
+            onClick={onAdd}
+            className={cn(!canAdd && "opacity-50 pointer-events-none")}
+          >
+            {busy ? "…" : "Add"}
+          </Btn>
           <Btn type="button" variant="outline" onClick={() => { setAdding(false); setErr(null); }}>Cancel</Btn>
         </div>
+      )}
+      {adding && label.trim() !== "" && slug !== "" && (
+        validSlug
+          ? <p className="text-xs muted">Will be saved as: {slug}</p>
+          : <p className="text-xs text-rose-600 dark:text-rose-400">Label must start with a letter.</p>
       )}
       {err && <p className="text-xs text-rose-600 dark:text-rose-400">{err}</p>}
       <input type="hidden" name="role" value={value} />
