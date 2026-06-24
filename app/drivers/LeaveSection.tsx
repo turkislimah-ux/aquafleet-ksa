@@ -15,7 +15,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Trash2 } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { isOnLeaveToday, type LeavePeriod, type LeaveType } from "@/lib/leave";
+import { isOnLeaveToday, periodCoversToday, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { addLeave, updateLeave, deleteLeave, addLeaveType } from "./actions";
 import LookupSelect from "./LookupSelect";
 
@@ -143,7 +143,7 @@ export default function LeaveSection({
       ) : (
         <ul className="space-y-1.5">
           {sorted.map((p) => {
-            const covers = p.start_date <= today && today <= p.end_date;
+            const covers = periodCoversToday(p, today);
             return (
               <li
                 key={p.id}

@@ -33,8 +33,12 @@ export type LeavePeriod = {
   created_at: string;
 };
 
-// Does this single period cover `today`? Inclusive on both ends.
-function periodCoversToday(p: LeavePeriod, today: string): boolean {
+/**
+ * Returns true if a leave period covers the given date (inclusive on both ends).
+ * Canonical helper — any code that needs to ask "does this period span today/this date"
+ * MUST go through this function rather than reimplementing start_date <= today <= end_date.
+ */
+export function periodCoversToday(p: LeavePeriod, today: string): boolean {
   return p.start_date <= today && today <= p.end_date;
 }
 
