@@ -7,14 +7,15 @@
 //   - global "New trip" button (CreateTripForm)
 //   - one self-contained card per ACTIVE project: header + 4-column Kanban
 //   - a fallback "Direct customer trips" card for trips with no project
-// Stage changes still funnel through setTripStage (card click -> move menu).
-// Header buttons (Manage drivers / Add trip) land in Cluster 2 commit 2; the
-// report strip + driver table land in Cluster 4; card detail + commission stamp
-// land in Cluster 3.
+// Stage changes funnel through setTripStage, driven by ONE sequential action
+// button per card (Start trip -> Mark in transit -> Mark delivered), mirroring the
+// demo kanbanCard. Delivered cards show a static "Commission paid" badge. The old
+// Move-trip menu is gone. Route-focus click + reporting strip + driver table land
+// in later commits.
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Plus, Users } from "lucide-react";
+import { MapPin, Plus, Users, Play, ArrowRight, Check, Droplet } from "lucide-react";
 import { Btn, Stat } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import {
@@ -27,7 +28,6 @@ import {
   STAGE_ORDER,
   STAGE_STYLES,
   TRIP_STAGE_LABELS,
-  WATER_TYPE_LABELS,
 } from "@/lib/db-types";
 import { setTripStage } from "./actions";
 import CreateTripForm from "./CreateTripForm";
@@ -36,6 +36,7 @@ import ManageDriversModal from "../projects/ManageDriversModal";
 type TripRow = Trip & {
   linkedName: string;
   truckPlate: string | null;
+  truckCapacityM3: number | null;
   driverName: string | null;
 };
 
@@ -50,6 +51,7 @@ type ProjectHeader = {
   status: ProjectStatus;
   water_type: WaterType | null;
   default_station: string | null;
+  default_water_station: string;
   location: string | null;
   location_lat: number | null;
   location_lng: number | null;
@@ -60,24 +62,135 @@ type CustomerOption = { id: string; name: string; default_station: string | null
 type TruckOption = { id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null };
 type DriverOption = { id: string; name: string; status: DriverStatus };
 
-// Local YYYY-MM-DD (trip_date is a bare date, so compare in local time).
-function todayISO() {
-  const d = new Date();
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-}
-
 function projectDot(status: ProjectStatus) {
   return status === "active" ? "bg-emerald-500" : status === "paused" ? "bg-amber-500" : "bg-slate-400";
 }
 
-function TripCard({ trip, onClick }: { trip: TripRow; onClick: () => void }) {
+// Compact phase stamp "25 Jun · 14:32" (mirrors the demo's fmtPhaseStamp). "—" when
+// the timestamp is absent. Full timestamptz values render exact; the date-only
+// trip_date fallback (a never-stamped scheduled trip) shows a midnight-ish time.
+function fmtPhaseStamp(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${date} · ${time}`;
+}
+
+const ACTION_BTN =
+  "w-full mt-2 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition disabled:opacity-60";
+
+function TripCard({
+  trip,
+  ratePerTrip,
+  stationName,
+  busy,
+  onAdvance,
+}: {
+  trip: TripRow;
+  ratePerTrip: number;
+  stationName: string | null;
+  busy: boolean;
+  onAdvance: (to: TripStage) => void;
+}) {
   const s = STAGE_STYLES[trip.stage];
+  // Demo: t.tankSizeM3 || truck.capacityM3. Trip's own tank size wins; truck capacity is the fallback.
+  const tankSize = trip.tank_size_m3 ?? trip.truckCapacityM3 ?? null;
+
+  // Phase-timestamp rows — status-specific, mirrors the demo's phaseRows. Loading
+  // additionally shows the fill station (resolved key -> name upstream).
+  let phaseRows: React.ReactNode = null;
+  if (trip.stage === "scheduled") {
+    phaseRows = (
+      <div className="text-xs mt-1">
+        <span className="muted">Scheduled:</span>{" "}
+        <span className="tabular-nums">{fmtPhaseStamp(trip.scheduled_at ?? trip.trip_date)}</span>
+      </div>
+    );
+  } else if (trip.stage === "loading") {
+    phaseRows = (
+      <>
+        <div className="text-xs mt-1">
+          <span className="muted">Loading since:</span>{" "}
+          <span className="tabular-nums">
+            {fmtPhaseStamp(trip.loading_at ?? trip.scheduled_at ?? trip.trip_date)}
+          </span>
+        </div>
+        {stationName && (
+          <div className="text-xs mt-1 flex items-center gap-1">
+            <Droplet className="h-3 w-3 text-brand-500 shrink-0" />
+            Fill at: <b className="truncate">{stationName}</b>
+          </div>
+        )}
+      </>
+    );
+  } else if (trip.stage === "in_transit") {
+    phaseRows = (
+      <div className="text-xs mt-1">
+        <span className="muted">In transit since:</span>{" "}
+        <span className="tabular-nums">
+          {fmtPhaseStamp(trip.in_transit_at ?? trip.loading_at ?? trip.trip_date)}
+        </span>
+      </div>
+    );
+  } else if (trip.stage === "delivered") {
+    phaseRows = (
+      <div className="text-xs mt-1">
+        <span className="muted">Delivered:</span>{" "}
+        <span className="tabular-nums">{fmtPhaseStamp(trip.delivered_at ?? trip.trip_date)}</span>
+      </div>
+    );
+  }
+
+  // Contextual action — ONE sequential step, mirrors the demo's action(). Delivered
+  // is a static "Commission paid +<rate/trip>" badge (no action), matching the demo.
+  let action: React.ReactNode = null;
+  if (trip.stage === "scheduled") {
+    action = (
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onAdvance("loading")}
+        className={cn(ACTION_BTN, "bg-brand-600 hover:bg-brand-700 text-white")}
+      >
+        <Play className="h-3.5 w-3.5" /> {busy ? "…" : "Start trip"}
+      </button>
+    );
+  } else if (trip.stage === "loading") {
+    action = (
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onAdvance("in_transit")}
+        className={cn(ACTION_BTN, "border hover:bg-black/5 dark:hover:bg-white/5")}
+        style={{ borderColor: "rgb(var(--border))" }}
+      >
+        <ArrowRight className="h-3.5 w-3.5" /> {busy ? "…" : "Mark in transit"}
+      </button>
+    );
+  } else if (trip.stage === "in_transit") {
+    action = (
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onAdvance("delivered")}
+        className={cn(ACTION_BTN, "bg-emerald-600 hover:bg-emerald-700 text-white")}
+      >
+        <Check className="h-3.5 w-3.5" /> {busy ? "…" : "Mark delivered"}
+      </button>
+    );
+  } else if (trip.stage === "delivered") {
+    action = (
+      <span className={cn(ACTION_BTN, "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 cursor-default")}>
+        <Check className="h-3.5 w-3.5" /> Commission paid +{formatSar(ratePerTrip)}
+      </span>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={cn(
-        "card p-3 text-sm w-full text-start transition hover:shadow-soft hover:-translate-y-px",
+        "card p-3 text-sm w-full text-start",
         s.card,
         trip.stage === "delivered" && "opacity-[0.85]"
       )}
@@ -88,15 +201,15 @@ function TripCard({ trip, onClick }: { trip: TripRow; onClick: () => void }) {
         </span>
         <span className="font-mono text-xs muted truncate">
           {trip.truckPlate ?? "—"}
+          {tankSize ? ` · ${tankSize}m³` : ""}
         </span>
       </div>
       <div className="text-xs mt-1">
-        {trip.driverName ?? <span className="muted">Unassigned driver</span>}
+        {trip.driverName ?? <span className="muted">—</span>}
       </div>
-      <div className="text-xs muted mt-1">
-        {trip.water_station} · {WATER_TYPE_LABELS[trip.water_type]}
-      </div>
-    </button>
+      {phaseRows}
+      {action}
+    </div>
   );
 }
 
@@ -104,14 +217,18 @@ function ProjectCard({
   project,
   trips,
   assignedCount,
-  onCardClick,
+  stationsByKey,
+  advancingId,
+  onAdvance,
   onManage,
   onAdd,
 }: {
   project: ProjectHeader;
   trips: TripRow[];
   assignedCount: number;
-  onCardClick: (t: TripRow) => void;
+  stationsByKey: Record<string, string>;
+  advancingId: string | null;
+  onAdvance: (tripId: string, to: TripStage) => void;
   onManage: (p: ProjectHeader) => void;
   onAdd: (projectId: string) => void;
 }) {
@@ -185,7 +302,16 @@ function ProjectCard({
                 {cards.length === 0 ? (
                   <div className="text-center muted text-xs py-4">—</div>
                 ) : (
-                  cards.map((t) => <TripCard key={t.id} trip={t} onClick={() => onCardClick(t)} />)
+                  cards.map((t) => (
+                    <TripCard
+                      key={t.id}
+                      trip={t}
+                      ratePerTrip={t.commission_sar ?? project.rate_per_trip_sar}
+                      stationName={stationsByKey[t.water_station] ?? t.water_station}
+                      busy={advancingId === t.id}
+                      onAdvance={(to) => onAdvance(t.id, to)}
+                    />
+                  ))
                 )}
               </div>
             </div>
@@ -203,6 +329,8 @@ export default function ProjectsBoard({
   trucks,
   drivers,
   assignmentsByProject,
+  stationsByKey,
+  stations,
 }: {
   trips: TripRow[];
   projects: ProjectHeader[];
@@ -210,11 +338,11 @@ export default function ProjectsBoard({
   trucks: TruckOption[];
   drivers: DriverOption[];
   assignmentsByProject: Record<string, string[]>;
+  stationsByKey: Record<string, string>;
+  stations: { key: string; name: string }[];
 }) {
   const router = useRouter();
-  const [date, setDate] = useState<string>(todayISO());
-  const [menuTrip, setMenuTrip] = useState<TripRow | null>(null);
-  const [saving, setSaving] = useState<TripStage | null>(null);
+  const [advancingId, setAdvancingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [managing, setManaging] = useState<ProjectHeader | null>(null);
   const [addTripProjectId, setAddTripProjectId] = useState<string | null>(null);
@@ -229,12 +357,12 @@ export default function ProjectsBoard({
     0
   );
 
-  // Selected-day trips, split into per-project buckets + a direct-customer bucket.
-  const { byProject, directCustomer, dayCount } = useMemo(() => {
-    const dayTrips = trips.filter((t) => t.trip_date === date);
+  // All trips, split into per-project buckets + a direct-customer bucket.
+  // No date filter — the board shows every trip per project (demo behavior).
+  const { byProject, directCustomer } = useMemo(() => {
     const m = new Map<string, TripRow[]>();
     const direct: TripRow[] = [];
-    for (const t of dayTrips) {
+    for (const t of trips) {
       if (t.project_id) {
         const arr = m.get(t.project_id) ?? [];
         arr.push(t);
@@ -243,31 +371,22 @@ export default function ProjectsBoard({
         direct.push(t);
       }
     }
-    return { byProject: m, directCustomer: direct, dayCount: dayTrips.length };
-  }, [trips, date]);
+    return { byProject: m, directCustomer: direct };
+  }, [trips]);
 
   const activeList = projects.filter((p) => p.status === "active");
 
-  function openMenu(trip: TripRow) {
+  // Sequential, one-step advance (Start trip / Mark in transit / Mark delivered).
+  // Funnels through setTripStage, which stamps the *_at column and commission on delivered.
+  async function advance(tripId: string, to: TripStage) {
+    setAdvancingId(tripId);
     setError(null);
-    setMenuTrip(trip);
-  }
-  function closeMenu() {
-    setMenuTrip(null);
-    setSaving(null);
-  }
-
-  async function pickStage(stage: TripStage) {
-    if (!menuTrip || stage === menuTrip.stage) return;
-    setSaving(stage);
-    setError(null);
-    const res = await setTripStage(menuTrip.id, stage);
-    setSaving(null);
+    const res = await setTripStage(tripId, to);
+    setAdvancingId(null);
     if (res.error) {
       setError(res.error);
       return;
     }
-    closeMenu();
     router.refresh();
   }
 
@@ -281,19 +400,11 @@ export default function ProjectsBoard({
         <Stat label="Commission pool · month" value={formatSar(commissionPool)} tone="ok" />
       </div>
 
-      {/* Date navigation */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value || todayISO())}
-          className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
-          style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
-        />
-        <span className="text-sm muted">
-          {dayCount} {dayCount === 1 ? "trip" : "trips"} on this day
-        </span>
-      </div>
+      {error && (
+        <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">
+          {error}
+        </div>
+      )}
 
       {/* New-trip modal: own button = global; openForProject = per-project "Add trip". */}
       <CreateTripForm
@@ -301,6 +412,7 @@ export default function ProjectsBoard({
         customers={customers}
         trucks={trucks}
         drivers={drivers}
+        stations={stations}
         openForProject={addTripProjectId}
         onCloseControlled={() => setAddTripProjectId(null)}
       />
@@ -316,7 +428,9 @@ export default function ProjectsBoard({
               project={p}
               trips={byProject.get(p.id) ?? []}
               assignedCount={(assignmentsByProject[p.id] ?? []).length}
-              onCardClick={openMenu}
+              stationsByKey={stationsByKey}
+              advancingId={advancingId}
+              onAdvance={advance}
               onManage={setManaging}
               onAdd={setAddTripProjectId}
             />
@@ -356,7 +470,16 @@ export default function ProjectsBoard({
                         {cards.length === 0 ? (
                           <div className="text-center muted text-xs py-4">—</div>
                         ) : (
-                          cards.map((t) => <TripCard key={t.id} trip={t} onClick={() => openMenu(t)} />)
+                          cards.map((t) => (
+                            <TripCard
+                              key={t.id}
+                              trip={t}
+                              ratePerTrip={t.rate_sar ?? 0}
+                              stationName={stationsByKey[t.water_station] ?? t.water_station}
+                              busy={advancingId === t.id}
+                              onAdvance={(to) => advance(t.id, to)}
+                            />
+                          ))
                         )}
                       </div>
                     </div>
@@ -365,56 +488,6 @@ export default function ProjectsBoard({
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Move-trip menu (stage change funnel) */}
-      {menuTrip && (
-        <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={closeMenu}>
-          <div className="card p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-semibold">Move trip</h2>
-            <p className="text-sm muted mt-1 mb-4">
-              {menuTrip.ref ?? menuTrip.linkedName} · {menuTrip.water_station}
-            </p>
-
-            <div className="space-y-2">
-              {STAGE_ORDER.map((stage) => {
-                const s = STAGE_STYLES[stage];
-                const current = stage === menuTrip.stage;
-                return (
-                  <button
-                    key={stage}
-                    type="button"
-                    disabled={current || saving !== null}
-                    onClick={() => pickStage(stage)}
-                    className={cn(
-                      "w-full rounded-lg border px-3 py-2 text-sm flex items-center justify-between transition",
-                      current ? "opacity-60 cursor-default" : "hover:bg-black/5 dark:hover:bg-white/5"
-                    )}
-                    style={{ borderColor: "rgb(var(--border))" }}
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <span className={cn("h-2 w-2 rounded-full", s.dot)} />
-                      {TRIP_STAGE_LABELS[stage]}
-                    </span>
-                    {current ? (
-                      <span className="text-xs muted">Current</span>
-                    ) : saving === stage ? (
-                      <span className="text-xs muted">Saving…</span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-
-            {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
-
-            <div className="flex justify-end mt-4">
-              <Btn variant="outline" onClick={closeMenu}>
-                Cancel
-              </Btn>
-            </div>
-          </div>
         </div>
       )}
 

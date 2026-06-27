@@ -7,13 +7,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
   type WaterType,
   WATER_TYPE_LABELS,
-  STATION_OPTIONS,
   MAX_BATCH_TRIPS,
 } from "@/lib/db-types";
 import { createTrip } from "./actions";
@@ -22,9 +20,10 @@ type ProjectOption = {
   id: string;
   name: string;
   water_type: WaterType | null;
-  default_station: string | null;
+  default_water_station: string;
 };
 type CustomerOption = { id: string; name: string; default_station: string | null };
+type StationOption = { key: string; name: string };
 type TruckOption = { id: string; plate: string };
 type DriverOption = { id: string; name: string };
 
@@ -39,6 +38,7 @@ export default function CreateTripForm({
   customers,
   trucks,
   drivers,
+  stations,
   openForProject,
   onCloseControlled,
 }: {
@@ -46,6 +46,7 @@ export default function CreateTripForm({
   customers: CustomerOption[];
   trucks: TruckOption[];
   drivers: DriverOption[];
+  stations: StationOption[];
   // When set (from a project card's "Add trip"), open the modal pre-scoped to
   // that project. Full per-project rework (assigned-driver picker, tank/time)
   // lands in Cluster 5; this just preselects + locks the project.
@@ -62,19 +63,8 @@ export default function CreateTripForm({
   const [projectId, setProjectId] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [waterType, setWaterType] = useState<WaterType>("potable");
-  const [station, setStation] = useState<string>(STATION_OPTIONS[0]);
+  const [station, setStation] = useState<string>(stations[0]?.key ?? "");
 
-  const canCreate = projects.length > 0 || customers.length > 0;
-
-  function openNew() {
-    setError(null);
-    setKind(projects.length > 0 ? "project" : "customer");
-    setProjectId("");
-    setCustomerId("");
-    setWaterType("potable");
-    setStation(STATION_OPTIONS[0]);
-    setOpen(true);
-  }
   function close() {
     setOpen(false);
     onCloseControlled?.();
@@ -84,12 +74,15 @@ export default function CreateTripForm({
     setProjectId(id);
     const p = projects.find((x) => x.id === id);
     if (p?.water_type) setWaterType(p.water_type);
-    if (p?.default_station) setStation(p.default_station);
+    // Trip inherits the project's default water station (a valid lookup key);
+    // the driver can still change it in the form.
+    if (p?.default_water_station) setStation(p.default_water_station);
   }
   function onPickCustomer(id: string) {
+    // Direct-customer trips have no project default; the customer's old
+    // free-text default_station is the wrong concept (a depot name, not a
+    // water_stations key), so it is NOT used here — keep the chosen lookup key.
     setCustomerId(id);
-    const c = customers.find((x) => x.id === id);
-    if (c?.default_station) setStation(c.default_station);
   }
 
   // A project card's "Add trip" opens the modal pre-scoped to that project.
@@ -120,21 +113,6 @@ export default function CreateTripForm({
 
   return (
     <>
-      <div className="flex justify-end mb-4">
-        <Btn
-          variant="primary"
-          onClick={openNew}
-          className={canCreate ? "" : "opacity-50 pointer-events-none"}
-        >
-          <Plus className="h-4 w-4" /> New trip
-        </Btn>
-      </div>
-      {!canCreate && (
-        <p className="text-sm muted mb-4">
-          Create a customer or project first — a trip must link to one.
-        </p>
-      )}
-
       {open && (
         <div
           className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40"
@@ -229,9 +207,14 @@ export default function CreateTripForm({
                   className={INPUT}
                   style={INPUT_STYLE}
                 >
-                  {STATION_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
+                  {stations.length === 0 && (
+                    <option value="" disabled>
+                      No stations
+                    </option>
+                  )}
+                  {stations.map((s) => (
+                    <option key={s.key} value={s.key}>
+                      {s.name}
                     </option>
                   ))}
                 </select>
@@ -276,18 +259,6 @@ export default function CreateTripForm({
                     </option>
                   ))}
                 </select>
-              </label>
-
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Rate (SAR)</span>
-                <input
-                  name="rate_sar"
-                  type="number"
-                  step="any"
-                  min="0"
-                  className={INPUT}
-                  style={INPUT_STYLE}
-                />
               </label>
 
               <label className="flex flex-col gap-1 text-sm">

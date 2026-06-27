@@ -2,13 +2,14 @@ import { PageHeader } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
 import type { Trip, WaterType, CommissionMode, ProjectStatus, DriverStatus, ProjectDriver } from "@/lib/db-types";
 import ProjectsBoard from "./ProjectsBoard";
+import NewProjectModal from "./NewProjectModal";
 
 export const dynamic = "force-dynamic";
 
 type JoinedTrip = Trip & {
   project: { name: string } | null;
   customer: { name: string } | null;
-  truck: { plate: string } | null;
+  truck: { plate: string; capacity_m3: number | null } | null;
   driver: { name: string } | null;
 };
 
@@ -24,6 +25,7 @@ type ProjectHeader = {
   status: ProjectStatus;
   water_type: WaterType | null;
   default_station: string | null;
+  default_water_station: string;
   location: string | null;
   location_lat: number | null;
   location_lng: number | null;
@@ -33,18 +35,18 @@ type ProjectHeader = {
 export default async function TripsPage() {
   const supabase = createClient();
 
-  const [tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes] =
+  const [tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes, stationsRes] =
     await Promise.all([
       supabase
         .from("trips")
         .select(
-          "*, project:projects(name), customer:customers(name), truck:trucks(plate), driver:drivers(name)"
+          "*, project:projects(name), customer:customers(name), truck:trucks(plate, capacity_m3), driver:drivers(name)"
         )
         .order("created_at", { ascending: false }),
       supabase
         .from("projects")
         .select(
-          "id, name, customer_id, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, status, water_type, default_station, location, location_lat, location_lng, description"
+          "id, name, customer_id, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, status, water_type, default_station, default_water_station, location, location_lat, location_lng, description"
         )
         .order("name", { ascending: true }),
       supabase
@@ -60,14 +62,25 @@ export default async function TripsPage() {
         .select("id, name, status")
         .order("name", { ascending: true }),
       supabase.from("project_drivers").select("project_id, driver_id"),
+      supabase.from("water_stations").select("key, name, is_default"),
     ]);
 
   const trips = ((tripsRes.data ?? []) as JoinedTrip[]).map((t) => ({
     ...t,
     linkedName: t.project?.name ?? t.customer?.name ?? "—",
     truckPlate: t.truck?.plate ?? null,
+    truckCapacityM3: t.truck?.capacity_m3 ?? null,
     driverName: t.driver?.name ?? null,
   }));
+
+  // Water stations lookup. `stations` (full rows) feeds the New Project picker;
+  // `stationsByKey` resolves the trip card's "Fill at:" line (water_station is a
+  // FK key, so display needs the name).
+  const stations = (stationsRes.data ?? []) as { key: string; name: string; is_default: boolean }[];
+  const stationsByKey: Record<string, string> = {};
+  for (const s of stations) {
+    stationsByKey[s.key] = s.name;
+  }
 
   const projects = (projectsRes.data ?? []) as ProjectHeader[];
   const customers = (customersRes.data ?? []) as {
@@ -95,13 +108,15 @@ export default async function TripsPage() {
     customersRes.error ||
     trucksRes.error ||
     driversRes.error ||
-    assignmentsRes.error;
+    assignmentsRes.error ||
+    stationsRes.error;
 
   return (
     <div>
       <PageHeader
         title="Project Operations"
         subtitle="Each project runs its own Kanban — push trips through the board manually."
+        actions={<NewProjectModal drivers={drivers} stations={stations} />}
       />
       {error && (
         <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">
@@ -115,6 +130,8 @@ export default async function TripsPage() {
         trucks={trucks}
         drivers={drivers}
         assignmentsByProject={assignmentsByProject}
+        stationsByKey={stationsByKey}
+        stations={stations}
       />
     </div>
   );

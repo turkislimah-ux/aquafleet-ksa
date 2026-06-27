@@ -50,6 +50,9 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
   if (count < 1) count = 1;
   if (count > MAX_BATCH_TRIPS) return { error: `Max ${MAX_BATCH_TRIPS} trips at once.` };
 
+  // No money on creation: trips.rate_sar stays NULL (nullable). Project trips
+  // take their price from the project (rate_per_trip_sar); driver commission is
+  // computed + stamped by the engine on delivery (setTripStage → priceDelivery).
   const base: Record<string, unknown> = {
     project_id,
     customer_id,
@@ -57,7 +60,6 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
     water_type,
     truck_id: nullable(formData.get("truck_id")),
     driver_id: nullable(formData.get("driver_id")),
-    rate_sar: numOrNull(formData.get("rate_sar")),
   };
   // Only override the DB default (current_date) when a date is actually given.
   const trip_date = nullable(formData.get("trip_date"));
@@ -182,4 +184,76 @@ async function priceDelivery(
     project.commission_bump_pct,
     priorThisMonth,
   );
+}
+
+// ---------------------------------------------------------------------------
+// New Project flow (Trips page). Creates a customer + linked project + driver
+// assignments ATOMICALLY via the create_project_with_customer RPC (migration
+// 0016). This is a create-only path, deliberately separate from the shared
+// parse()/createProject/updateProject in app/projects — do NOT route through
+// those. Any failure inside the RPC rolls back the whole transaction (no
+// orphaned customer rows); the 1:1 violation comes back as friendly copy.
+// ---------------------------------------------------------------------------
+const CUSTOMER_TYPES = new Set(["construction", "government_office", "facility_management"]);
+
+export type NewProjectInput = {
+  cust_name: string;
+  cust_type: string;
+  contact_name: string | null;
+  phone: string | null;
+  delivery_address: string | null;
+  delivery_lat: number | null;
+  delivery_lng: number | null;
+  proj_name: string;
+  rate: number;
+  commission_mode: string;
+  commission_value: number;
+  commission_bump: number;
+  default_water_station: string;
+  description: string | null;
+  driver_ids: string[];
+};
+
+export async function createProjectWithCustomer(input: NewProjectInput): Promise<ActionResult> {
+  // Server is the real gate (client validation is UX only).
+  const custName = input.cust_name?.trim() ?? "";
+  const projName = input.proj_name?.trim() ?? "";
+  const station = input.default_water_station?.trim() ?? "";
+  const driverIds = Array.from(new Set((input.driver_ids ?? []).filter(Boolean)));
+
+  if (!custName) return { error: "Customer name is required." };
+  if (!CUSTOMER_TYPES.has(input.cust_type)) return { error: "Pick a valid customer type." };
+  if (!projName) return { error: "Project name is required." };
+  if (!station) return { error: "Default water station is required." };
+  if (driverIds.length === 0) return { error: "Assign at least one driver." };
+
+  const mode = input.commission_mode === "scalable" ? "scalable" : "fixed";
+  // Bump only applies in scalable mode; clamp 0–50.
+  const bump = mode === "scalable" ? Math.min(50, Math.max(0, input.commission_bump || 0)) : 0;
+  const rate = Number.isFinite(input.rate) ? input.rate : 0;
+  const commissionValue = Number.isFinite(input.commission_value) ? input.commission_value : 0;
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("create_project_with_customer", {
+    p_cust_name: custName,
+    p_cust_type: input.cust_type,
+    p_contact_name: input.contact_name?.trim() || null,
+    p_phone: input.phone?.trim() || null,
+    p_delivery_address: input.delivery_address?.trim() || null,
+    p_delivery_lat: input.delivery_lat,
+    p_delivery_lng: input.delivery_lng,
+    p_proj_name: projName,
+    p_rate: rate,
+    p_commission_mode: mode,
+    p_commission_value: commissionValue,
+    p_commission_bump: bump,
+    p_default_water_station: station,
+    p_description: input.description?.trim() || null,
+    p_driver_ids: driverIds,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/trips");
+  revalidatePath("/projects");
+  return { error: null };
 }
