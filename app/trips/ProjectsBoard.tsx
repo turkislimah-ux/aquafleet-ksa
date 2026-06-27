@@ -31,6 +31,7 @@ import {
 } from "@/lib/db-types";
 import { setTripStage } from "./actions";
 import CreateTripForm from "./CreateTripForm";
+import NewProjectModal from "./NewProjectModal";
 import ManageDriversModal from "../projects/ManageDriversModal";
 
 type TripRow = Trip & {
@@ -322,6 +323,17 @@ function ProjectCard({
   );
 }
 
+export type ProjectsBoardProps = {
+  trips: TripRow[];
+  projects: ProjectHeader[];
+  customers: CustomerOption[];
+  trucks: TruckOption[];
+  drivers: DriverOption[];
+  assignmentsByProject: Record<string, string[]>;
+  stationsByKey: Record<string, string>;
+  stations: { key: string; name: string }[];
+};
+
 export default function ProjectsBoard({
   trips,
   projects,
@@ -331,16 +343,7 @@ export default function ProjectsBoard({
   assignmentsByProject,
   stationsByKey,
   stations,
-}: {
-  trips: TripRow[];
-  projects: ProjectHeader[];
-  customers: CustomerOption[];
-  trucks: TruckOption[];
-  drivers: DriverOption[];
-  assignmentsByProject: Record<string, string[]>;
-  stationsByKey: Record<string, string>;
-  stations: { key: string; name: string }[];
-}) {
+}: ProjectsBoardProps) {
   const router = useRouter();
   const [advancingId, setAdvancingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -398,6 +401,11 @@ export default function ProjectsBoard({
         <Stat label="Pending pushes" value={pendingPushes} tone={pendingPushes > 0 ? "warn" : "ok"} />
         <Stat label="Running trips" value={running} tone="ok" />
         <Stat label="Commission pool · month" value={formatSar(commissionPool)} tone="ok" />
+      </div>
+
+      {/* New Project — Projects tab only, below the KPIs (relocated from the page header). */}
+      <div className="flex justify-end mb-4">
+        <NewProjectModal drivers={drivers} stations={stations} />
       </div>
 
       {error && (

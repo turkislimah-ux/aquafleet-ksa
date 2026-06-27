@@ -1,8 +1,6 @@
-import { PageHeader } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
 import type { Trip, WaterType, CommissionMode, ProjectStatus, DriverStatus, ProjectDriver } from "@/lib/db-types";
-import ProjectsBoard from "./ProjectsBoard";
-import NewProjectModal from "./NewProjectModal";
+import TripsTabs from "./TripsTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -112,27 +110,16 @@ export default async function TripsPage() {
     stationsRes.error;
 
   return (
-    <div>
-      <PageHeader
-        title="Project Operations"
-        subtitle="Each project runs its own Kanban — push trips through the board manually."
-        actions={<NewProjectModal drivers={drivers} stations={stations} />}
-      />
-      {error && (
-        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">
-          Failed to load trips: {error.message}
-        </p>
-      )}
-      <ProjectsBoard
-        trips={trips}
-        projects={projects}
-        customers={customers}
-        trucks={trucks}
-        drivers={drivers}
-        assignmentsByProject={assignmentsByProject}
-        stationsByKey={stationsByKey}
-        stations={stations}
-      />
-    </div>
+    <TripsTabs
+      error={error ? error.message : null}
+      trips={trips}
+      projects={projects}
+      customers={customers}
+      trucks={trucks}
+      drivers={drivers}
+      assignmentsByProject={assignmentsByProject}
+      stationsByKey={stationsByKey}
+      stations={stations}
+    />
   );
 }
