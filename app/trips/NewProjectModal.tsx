@@ -1,35 +1,18 @@
 "use client";
 
-// New Project flow for the Trips page — button (top-right in the PageHeader
-// actions slot) + modal. ONE submit creates a customer + a linked project +
-// driver assignments atomically via the create_project_with_customer RPC
-// (server action createProjectWithCustomer). There is NO existing-customer
-// dropdown: the form captures the customer (1:1 customer↔project, enforced by
-// migrations 0015/0016).
-//
-// rate vs commission are kept conceptually + visually distinct: "Customer rate
-// / trip" is REVENUE (what the customer pays); "Driver commission base" is
-// DRIVER PAY. The live preview is driven by the commission base (driver pay),
-// not the customer rate.
+// New Project trigger (Trips page, Projects tab — below the KPIs). Thin wrapper:
+// the "New Project" button + open state, delegating the whole form to the shared
+// ProjectModal in create mode. Edit ("Manage project") reuses the same modal from
+// CustomersTab. One submit creates a customer + linked project + driver
+// assignments atomically via createProjectWithCustomer (RPC, migration 0016).
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Plus, X, Check } from "lucide-react";
+import { useState } from "react";
+import { Plus } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { CUSTOMER_TYPE_LABELS } from "@/lib/db-types";
-import { formatSar } from "@/lib/utils";
-import { createProjectWithCustomer } from "./actions";
-
-const INPUT =
-  "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
-const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
+import ProjectModal from "./ProjectModal";
 
 type Driver = { id: string; name: string; status?: string };
 type Station = { key: string; name: string; is_default?: boolean };
-
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
 
 export default function NewProjectModal({
   drivers,
@@ -38,322 +21,20 @@ export default function NewProjectModal({
   drivers: Driver[];
   stations: Station[];
 }) {
-  const router = useRouter();
-  const defaultStation = useMemo(
-    () => stations.find((s) => s.is_default)?.key ?? stations[0]?.key ?? "",
-    [stations],
-  );
-
   const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Customer.
-  const [custName, setCustName] = useState("");
-  const [custType, setCustType] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [deliveryAddress, setDeliveryAddress] = useState("");
-  const [deliveryLat, setDeliveryLat] = useState("");
-  const [deliveryLng, setDeliveryLng] = useState("");
-
-  // Project.
-  const [projName, setProjName] = useState("");
-  const [rate, setRate] = useState("60");
-  const [commissionValue, setCommissionValue] = useState("60");
-  const [mode, setMode] = useState<"fixed" | "scalable">("fixed");
-  const [bump, setBump] = useState("5");
-  const [station, setStation] = useState(defaultStation);
-  const [description, setDescription] = useState("");
-
-  // Drivers.
-  const [selected, setSelected] = useState<string[]>([]);
-
-  function resetForm() {
-    setCustName("");
-    setCustType("");
-    setContactName("");
-    setPhone("");
-    setDeliveryAddress("");
-    setDeliveryLat("");
-    setDeliveryLng("");
-    setProjName("");
-    setRate("60");
-    setCommissionValue("60");
-    setMode("fixed");
-    setBump("5");
-    setStation(defaultStation);
-    setDescription("");
-    setSelected([]);
-    setError(null);
-  }
-
-  function openModal() {
-    resetForm();
-    setOpen(true);
-  }
-  function close() {
-    setOpen(false);
-    setError(null);
-  }
-
-  function toggleDriver(id: string) {
-    setSelected((prev) => (prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]));
-  }
-
-  // Live commission preview — driven by the DRIVER commission base + bump.
-  const base = Number(commissionValue) || 0;
-  const pct = Number(bump) || 0;
-  const preview = useMemo(
-    () => [1, 2, 3, 5, 10].map((n) => ({ n, pay: round2(base * (1 + (n - 1) * (pct / 100))) })),
-    [base, pct],
-  );
-
-  // Required: customer name + type, project name, station, ≥1 driver.
-  const canSubmit =
-    custName.trim() !== "" &&
-    custType !== "" &&
-    projName.trim() !== "" &&
-    station !== "" &&
-    selected.length > 0;
-
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!canSubmit) {
-      setError("Fill the required fields: customer name, customer type, project name, water station, and at least one driver.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    const res = await createProjectWithCustomer({
-      cust_name: custName,
-      cust_type: custType,
-      contact_name: contactName || null,
-      phone: phone || null,
-      delivery_address: deliveryAddress || null,
-      delivery_lat: deliveryLat === "" ? null : Number(deliveryLat),
-      delivery_lng: deliveryLng === "" ? null : Number(deliveryLng),
-      proj_name: projName,
-      rate: Number(rate) || 0,
-      commission_mode: mode,
-      commission_value: Number(commissionValue) || 0,
-      commission_bump: mode === "scalable" ? Number(bump) || 0 : 0,
-      default_water_station: station,
-      description: description || null,
-      driver_ids: selected,
-    });
-    setSaving(false);
-    if (res.error) {
-      setError(res.error);
-      return;
-    }
-    close();
-    router.refresh();
-  }
 
   return (
     <>
-      <Btn variant="primary" onClick={openModal}>
+      <Btn variant="primary" onClick={() => setOpen(true)}>
         <Plus className="h-4 w-4" /> New Project
       </Btn>
-
-      {open && (
-        <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
-          <div
-            className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <h2 className="text-lg font-semibold">New Project</h2>
-              <button type="button" onClick={close} className="muted hover:text-[rgb(var(--fg))]">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <p className="text-sm muted mb-4">
-              Spin up a new water-transport project. Creates the customer and its project together —
-              each project gets its own Kanban board.
-            </p>
-
-            <form onSubmit={onSubmit} className="space-y-5">
-              {/* Customer section. */}
-              <section className="space-y-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wide muted">Customer</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="muted">Customer name *</span>
-                    <input value={custName} onChange={(e) => setCustName(e.target.value)} required className={INPUT} style={INPUT_STYLE} placeholder="e.g. Bin Slimah Construction" />
-                  </label>
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="muted">Customer type *</span>
-                    <select value={custType} onChange={(e) => setCustType(e.target.value)} required className={INPUT} style={INPUT_STYLE}>
-                      <option value="" disabled>Select…</option>
-                      {Object.entries(CUSTOMER_TYPE_LABELS).map(([v, l]) => (
-                        <option key={v} value={v}>{l}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="muted">Contact name</span>
-                    <input value={contactName} onChange={(e) => setContactName(e.target.value)} className={INPUT} style={INPUT_STYLE} />
-                  </label>
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="muted">Phone</span>
-                    <input value={phone} onChange={(e) => setPhone(e.target.value)} className={INPUT} style={INPUT_STYLE} />
-                  </label>
-                  <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                    <span className="muted">Delivery site address</span>
-                    <input value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} className={INPUT} style={INPUT_STYLE} placeholder="e.g. Riyadh — King Salman Park" />
-                  </label>
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="muted">Delivery latitude</span>
-                    <input value={deliveryLat} onChange={(e) => setDeliveryLat(e.target.value)} type="number" step="any" className={INPUT} style={INPUT_STYLE} placeholder="24.7136" />
-                  </label>
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="muted">Delivery longitude</span>
-                    <input value={deliveryLng} onChange={(e) => setDeliveryLng(e.target.value)} type="number" step="any" className={INPUT} style={INPUT_STYLE} placeholder="46.6753" />
-                  </label>
-                </div>
-              </section>
-
-              {/* Project section. */}
-              <section className="space-y-3 border-t border-app pt-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide muted">Project</h3>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="muted">Project name *</span>
-                  <input value={projName} onChange={(e) => setProjName(e.target.value)} required className={INPUT} style={INPUT_STYLE} placeholder="e.g. King Salman Park" />
-                </label>
-
-                {/* Two distinct money fields. */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="flex flex-col gap-1 text-sm rounded-lg border border-app p-3">
-                    <span className="font-medium">Customer rate / trip (SAR)</span>
-                    <span className="muted text-[11px]">Revenue — what the customer pays per trip.</span>
-                    <input value={rate} onChange={(e) => setRate(e.target.value)} type="number" min="0" className={INPUT} style={INPUT_STYLE} />
-                  </label>
-                  <label className="flex flex-col gap-1 text-sm rounded-lg border border-app p-3">
-                    <span className="font-medium">Driver commission base (SAR)</span>
-                    <span className="muted text-[11px]">Driver pay — separate from the customer rate.</span>
-                    <input value={commissionValue} onChange={(e) => setCommissionValue(e.target.value)} type="number" min="0" className={INPUT} style={INPUT_STYLE} />
-                  </label>
-                </div>
-
-                {/* Commission mode + bump. */}
-                <div className="rounded-lg border border-app p-3 space-y-3">
-                  <span className="text-sm font-medium">Driver commission mode</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setMode("fixed")}
-                      className={`rounded-lg border px-3 py-2 text-left text-sm ${mode === "fixed" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
-                    >
-                      <div className="font-medium">Fixed</div>
-                      <div className="muted text-[11px]">Same commission every trip.</div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMode("scalable")}
-                      className={`rounded-lg border px-3 py-2 text-left text-sm ${mode === "scalable" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
-                    >
-                      <div className="font-medium">Scalable</div>
-                      <div className="muted text-[11px]">Grows per trip by a bump %.</div>
-                    </button>
-                  </div>
-                  {mode === "scalable" && (
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="muted">Bump % per trip (max 50)</span>
-                      <input
-                        value={bump}
-                        onChange={(e) => setBump(e.target.value)}
-                        type="number"
-                        min="0"
-                        max="50"
-                        className={INPUT}
-                        style={INPUT_STYLE}
-                      />
-                    </label>
-                  )}
-
-                  {/* Live preview — driven by the commission base. */}
-                  <div>
-                    {mode === "fixed" ? (
-                      <div className="muted text-xs">
-                        Driver earns <b className="text-emerald-600 dark:text-emerald-400">{formatSar(base)}</b> every trip.
-                      </div>
-                    ) : (
-                      <>
-                        <div className="muted text-xs mb-1">Driver commission (first 10 trips):</div>
-                        <div className="grid grid-cols-5 gap-1.5">
-                          {preview.map((p) => (
-                            <div key={p.n} className="rounded-lg border border-app px-2 py-1.5 text-center">
-                              <div className="text-[10px] muted">Trip {p.n}</div>
-                              <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                                {formatSar(p.pay)}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="muted">Default water station *</span>
-                  <select value={station} onChange={(e) => setStation(e.target.value)} required className={INPUT} style={INPUT_STYLE}>
-                    {stations.length === 0 && <option value="" disabled>No stations</option>}
-                    {stations.map((s) => (
-                      <option key={s.key} value={s.key}>{s.name}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="muted">Description</span>
-                  <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={INPUT} style={INPUT_STYLE} />
-                </label>
-              </section>
-
-              {/* Drivers section. */}
-              <section className="space-y-2 border-t border-app pt-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide muted">Drivers *</h3>
-                  <span className="muted text-[11px]">· {selected.length} selected</span>
-                </div>
-                <div className="rounded-lg border border-app divide-y divide-[rgb(var(--border))] max-h-56 overflow-y-auto scrollbar-thin">
-                  {drivers.length === 0 && (
-                    <div className="px-3 py-4 text-center text-sm muted">No drivers available.</div>
-                  )}
-                  {drivers.map((d) => {
-                    const on = selected.includes(d.id);
-                    return (
-                      <button
-                        type="button"
-                        key={d.id}
-                        onClick={() => toggleDriver(d.id)}
-                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm ${on ? "bg-brand-500/10" : "hover:bg-black/5 dark:hover:bg-white/5"}`}
-                      >
-                        <span className="truncate">{d.name}</span>
-                        <span className={`grid place-items-center h-5 w-5 rounded-full border ${on ? "bg-brand-600 border-brand-600 text-white" : "border-app"}`}>
-                          {on && <Check className="h-3 w-3" />}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-
-              {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
-
-              <div className="flex justify-end gap-2 border-t border-app pt-4">
-                <Btn variant="outline" onClick={close}>Cancel</Btn>
-                <Btn type="submit" variant="primary" className={!canSubmit ? "opacity-50 pointer-events-none" : ""}>
-                  {saving ? "Saving…" : "Create project"}
-                </Btn>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <ProjectModal
+        mode="create"
+        open={open}
+        onClose={() => setOpen(false)}
+        drivers={drivers}
+        stations={stations}
+      />
     </>
   );
 }

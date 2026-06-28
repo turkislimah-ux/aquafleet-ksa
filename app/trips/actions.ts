@@ -214,18 +214,33 @@ export type NewProjectInput = {
   driver_ids: string[];
 };
 
-export async function createProjectWithCustomer(input: NewProjectInput): Promise<ActionResult> {
-  // Server is the real gate (client validation is UX only).
+// Shared validate + normalize for the create AND update paths. The server is the
+// real gate (client validation is UX only). Returns either a friendly error or
+// the cleaned values; both actions feed the same shape to their RPC.
+type NormalizedProject = {
+  custName: string;
+  projName: string;
+  station: string;
+  driverIds: string[];
+  mode: "fixed" | "scalable";
+  bump: number;
+  rate: number;
+  commissionValue: number;
+};
+
+function normalizeProjectInput(
+  input: NewProjectInput,
+): { ok: false; error: string } | { ok: true; value: NormalizedProject } {
   const custName = input.cust_name?.trim() ?? "";
   const projName = input.proj_name?.trim() ?? "";
   const station = input.default_water_station?.trim() ?? "";
   const driverIds = Array.from(new Set((input.driver_ids ?? []).filter(Boolean)));
 
-  if (!custName) return { error: "Customer name is required." };
-  if (!CUSTOMER_TYPES.has(input.cust_type)) return { error: "Pick a valid customer type." };
-  if (!projName) return { error: "Project name is required." };
-  if (!station) return { error: "Default water station is required." };
-  if (driverIds.length === 0) return { error: "Assign at least one driver." };
+  if (!custName) return { ok: false, error: "Customer name is required." };
+  if (!CUSTOMER_TYPES.has(input.cust_type)) return { ok: false, error: "Pick a valid customer type." };
+  if (!projName) return { ok: false, error: "Project name is required." };
+  if (!station) return { ok: false, error: "Default water station is required." };
+  if (driverIds.length === 0) return { ok: false, error: "Assign at least one driver." };
 
   const mode = input.commission_mode === "scalable" ? "scalable" : "fixed";
   // Bump only applies in scalable mode; clamp 0–50.
@@ -233,8 +248,56 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
   const rate = Number.isFinite(input.rate) ? input.rate : 0;
   const commissionValue = Number.isFinite(input.commission_value) ? input.commission_value : 0;
 
+  return { ok: true, value: { custName, projName, station, driverIds, mode, bump, rate, commissionValue } };
+}
+
+export async function createProjectWithCustomer(input: NewProjectInput): Promise<ActionResult> {
+  const norm = normalizeProjectInput(input);
+  if (!norm.ok) return { error: norm.error };
+  const { custName, projName, station, driverIds, mode, bump, rate, commissionValue } = norm.value;
+
   const supabase = createClient();
   const { error } = await supabase.rpc("create_project_with_customer", {
+    p_cust_name: custName,
+    p_cust_type: input.cust_type,
+    p_contact_name: input.contact_name?.trim() || null,
+    p_phone: input.phone?.trim() || null,
+    p_delivery_address: input.delivery_address?.trim() || null,
+    p_delivery_lat: input.delivery_lat,
+    p_delivery_lng: input.delivery_lng,
+    p_proj_name: projName,
+    p_rate: rate,
+    p_commission_mode: mode,
+    p_commission_value: commissionValue,
+    p_commission_bump: bump,
+    p_default_water_station: station,
+    p_description: input.description?.trim() || null,
+    p_driver_ids: driverIds,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/trips");
+  revalidatePath("/projects");
+  return { error: null };
+}
+
+// Edit half (Manage project). Atomic update via the update_project_with_customer
+// RPC (migration 0017): customer + project + driver-diff in ONE transaction.
+// Same validation/normalization as create; only adds the project id. Deliberately
+// separate from the shared parse()/updateProject in app/projects.
+export type UpdateProjectInput = NewProjectInput & { project_id: string };
+
+export async function updateProjectWithCustomer(input: UpdateProjectInput): Promise<ActionResult> {
+  const projectId = input.project_id?.trim() ?? "";
+  if (!projectId) return { error: "Missing project id." };
+
+  const norm = normalizeProjectInput(input);
+  if (!norm.ok) return { error: norm.error };
+  const { custName, projName, station, driverIds, mode, bump, rate, commissionValue } = norm.value;
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("update_project_with_customer", {
+    p_project_id: projectId,
     p_cust_name: custName,
     p_cust_type: input.cust_type,
     p_contact_name: input.contact_name?.trim() || null,

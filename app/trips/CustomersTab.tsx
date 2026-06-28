@@ -1,19 +1,29 @@
 "use client";
 
-// Customers tab (Trips page). View-only overview: one row per customer (1:1 with
-// its project, enforced by the projects_customer_id_unique constraint). KPIs are a
-// current-calendar-month snapshot. The two row actions ("Manage project", "View
-// breakdown") are placeholders for now — the edit modal + per-customer breakdown
-// land in later commits.
+// Customers tab (Trips page). One row per customer (1:1 with its project, enforced
+// by the projects_customer_id_unique constraint). KPIs are a current-calendar-month
+// snapshot. "Manage project" opens the shared ProjectModal in edit mode (atomic
+// update via RPC 0017). "View breakdown" is still a placeholder (next commit).
 
 import { useMemo, useState } from "react";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import type { CommissionMode } from "@/lib/db-types";
+import ProjectModal, { type ProjectInitial } from "./ProjectModal";
 
-// Minimal shapes — the page passes wider objects (assignable to these).
-type CustomerLite = { id: string; name: string; delivery_site_address: string | null };
+// Minimal shapes — the page passes wider objects (assignable to these). These
+// carry every field the edit form pre-fills.
+type CustomerLite = {
+  id: string;
+  name: string;
+  customer_type: string;
+  contact_name: string | null;
+  phone: string | null;
+  delivery_site_address: string | null;
+  delivery_lat: number | null;
+  delivery_lng: number | null;
+};
 type ProjectLite = {
   id: string;
   name: string;
@@ -22,24 +32,56 @@ type ProjectLite = {
   commission_value: number;
   commission_mode: CommissionMode;
   commission_bump_pct: number;
+  default_water_station: string;
+  description: string | null;
 };
 type TripLite = { project_id: string | null; trip_date: string | null; delivered_at: string | null };
+type Driver = { id: string; name: string; status?: string };
+type Station = { key: string; name: string; is_default?: boolean };
 
 export type CustomersTabProps = {
   customers: CustomerLite[];
   projects: ProjectLite[];
   assignmentsByProject: Record<string, string[]>;
   trips: TripLite[];
+  drivers: Driver[];
+  stations: Station[];
 };
+
+// Build the edit-form pre-fill from a customer + its project + assigned drivers.
+function toInitial(c: CustomerLite, p: ProjectLite, driverIds: string[]): ProjectInitial {
+  return {
+    project_id: p.id,
+    cust_name: c.name,
+    cust_type: c.customer_type,
+    contact_name: c.contact_name ?? "",
+    phone: c.phone ?? "",
+    delivery_address: c.delivery_site_address ?? "",
+    delivery_lat: c.delivery_lat == null ? "" : String(c.delivery_lat),
+    delivery_lng: c.delivery_lng == null ? "" : String(c.delivery_lng),
+    proj_name: p.name,
+    rate: String(p.rate_per_trip_sar),
+    commission_value: String(p.commission_value),
+    commission_mode: p.commission_mode,
+    commission_bump: String(p.commission_bump_pct),
+    default_water_station: p.default_water_station,
+    description: p.description ?? "",
+    driver_ids: driverIds,
+  };
+}
 
 export default function CustomersTab({
   customers,
   projects,
   assignmentsByProject,
   trips,
+  drivers,
+  stations,
 }: CustomersTabProps) {
-  // Placeholder notice for the not-yet-built row actions.
+  // Placeholder notice for the not-yet-built View breakdown action.
   const [notice, setNotice] = useState<string | null>(null);
+  // Edit modal pre-fill (null = closed).
+  const [editing, setEditing] = useState<ProjectInitial | null>(null);
 
   const monthKey = monthKeyOf(new Date().toISOString());
 
@@ -168,7 +210,13 @@ export default function CustomersTab({
                     <TD className="tabular-nums">{deliveredThisMonth}</TD>
                     <TD>
                       <div className="inline-flex gap-2">
-                        <Btn variant="outline" onClick={() => setNotice("Manage project — coming next.")}>
+                        <Btn
+                          variant="outline"
+                          onClick={() =>
+                            project &&
+                            setEditing(toInitial(c, project, assignmentsByProject[project.id] ?? []))
+                          }
+                        >
                           Manage project
                         </Btn>
                         <Btn variant="outline" onClick={() => setNotice("View breakdown — coming next.")}>
@@ -183,6 +231,16 @@ export default function CustomersTab({
           </Table>
         </div>
       )}
+
+      {/* Shared form in EDIT mode — pre-filled from the clicked row. */}
+      <ProjectModal
+        mode="edit"
+        open={editing !== null}
+        initial={editing}
+        onClose={() => setEditing(null)}
+        drivers={drivers}
+        stations={stations}
+      />
     </div>
   );
 }

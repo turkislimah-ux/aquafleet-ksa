@@ -70,6 +70,8 @@ export default function TripsTabs({
           projects={boardProps.projects}
           assignmentsByProject={boardProps.assignmentsByProject}
           trips={boardProps.trips}
+          drivers={boardProps.drivers}
+          stations={boardProps.stations}
         />
       )}
     </div>

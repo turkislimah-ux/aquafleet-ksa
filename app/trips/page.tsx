@@ -49,7 +49,9 @@ export default async function TripsPage() {
         .order("name", { ascending: true }),
       supabase
         .from("customers")
-        .select("id, name, default_station, delivery_site_address")
+        .select(
+          "id, name, default_station, delivery_site_address, customer_type, contact_name, phone, delivery_lat, delivery_lng"
+        )
         .order("name", { ascending: true }),
       supabase
         .from("trucks")
@@ -86,6 +88,11 @@ export default async function TripsPage() {
     name: string;
     default_station: string | null;
     delivery_site_address: string | null;
+    customer_type: string;
+    contact_name: string | null;
+    phone: string | null;
+    delivery_lat: number | null;
+    delivery_lng: number | null;
   }[];
   const trucks = (trucksRes.data ?? []) as {
     id: string;

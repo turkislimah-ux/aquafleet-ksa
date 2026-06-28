@@ -64,6 +64,11 @@ type CustomerOption = {
   name: string;
   default_station: string | null;
   delivery_site_address: string | null;
+  customer_type: string;
+  contact_name: string | null;
+  phone: string | null;
+  delivery_lat: number | null;
+  delivery_lng: number | null;
 };
 type TruckOption = { id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null };
 type DriverOption = { id: string; name: string; status: DriverStatus };
