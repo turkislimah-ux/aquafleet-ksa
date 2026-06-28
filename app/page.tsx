@@ -16,12 +16,12 @@ export default async function DashboardPage() {
   const supabase = createClient();
   const today = new Date().toISOString().slice(0, 10);
 
-  const [trucksRes, tripsRes, driversRes, leavePeriodsRes] = await Promise.all([
+  const [trucksRes, tripsRes, driversRes, leavePeriodsRes, archivedProjectsRes] = await Promise.all([
     supabase.from("trucks").select("id, status, health_score"),
     supabase
       .from("trips")
       .select(
-        "id, ref, stage, trip_date, rate_sar, delivered_at, truck_id, water_station, water_type, tank_size_m3, truck:trucks(plate)"
+        "id, ref, stage, trip_date, rate_sar, delivered_at, truck_id, project_id, water_station, water_type, tank_size_m3, truck:trucks(plate)"
       )
       .order("created_at", { ascending: false }),
     supabase.from("drivers").select("id, status"),
@@ -32,6 +32,9 @@ export default async function DashboardPage() {
       .select("driver_id, staff_id, start_date, end_date")
       .lte("start_date", today)
       .gte("end_date", today),
+    // Archived project ids — live KPIs exclude their trips (trips with no project
+    // are kept). History/fleet views are unaffected; this is dashboard-only.
+    supabase.from("projects").select("id").not("archived_at", "is", null),
   ]);
 
   type JoinedTrip = {
@@ -42,6 +45,7 @@ export default async function DashboardPage() {
     rate_sar: number | null;
     delivered_at: string | null;
     truck_id: string | null;
+    project_id: string | null;
     water_station: string;
     water_type: "potable" | "non_potable";
     tank_size_m3: number | null;
@@ -49,7 +53,13 @@ export default async function DashboardPage() {
   };
 
   const trucks = trucksRes.data ?? [];
-  const trips = (tripsRes.data ?? []) as unknown as JoinedTrip[];
+  // Live KPIs exclude trips of archived projects; ad-hoc trips (no project) stay.
+  const archivedProjectIds = new Set(
+    ((archivedProjectsRes.data ?? []) as { id: string }[]).map((p) => p.id)
+  );
+  const trips = ((tripsRes.data ?? []) as unknown as JoinedTrip[]).filter(
+    (t) => t.project_id == null || !archivedProjectIds.has(t.project_id)
+  );
   const drivers = driversRes.data ?? [];
   // Computed on-leave-today (authoritative). stored drivers.status='on_leave' is no
   // longer read directly — effectiveDriverStatus reconciles it with this set.
@@ -304,7 +314,8 @@ export default async function DashboardPage() {
     depots: { title: "Trucks by depot", defaultDisplay: "chart", chartKind: "bars", noData: true },
   };
 
-  const error = trucksRes.error || tripsRes.error || driversRes.error || leavePeriodsRes.error;
+  const error =
+    trucksRes.error || tripsRes.error || driversRes.error || leavePeriodsRes.error || archivedProjectsRes.error;
 
   return (
     <DashboardClient

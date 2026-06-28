@@ -14,10 +14,12 @@ export default async function ProjectsPage() {
     supabase
       .from("projects")
       .select("*, customer:customers(name)")
+      .is("archived_at", null)
       .order("created_at", { ascending: false }),
     supabase
       .from("customers")
       .select("id, name")
+      .is("archived_at", null)
       .order("name", { ascending: true }),
     supabase
       .from("drivers")

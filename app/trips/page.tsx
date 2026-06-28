@@ -46,12 +46,14 @@ export default async function TripsPage() {
         .select(
           "id, name, customer_id, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, status, water_type, default_station, default_water_station, location, location_lat, location_lng, description"
         )
+        .is("archived_at", null)
         .order("name", { ascending: true }),
       supabase
         .from("customers")
         .select(
           "id, name, default_station, delivery_site_address, customer_type, contact_name, phone, delivery_lat, delivery_lng"
         )
+        .is("archived_at", null)
         .order("name", { ascending: true }),
       supabase
         .from("trucks")
@@ -83,6 +85,12 @@ export default async function TripsPage() {
   }
 
   const projects = (projectsRes.data ?? []) as ProjectHeader[];
+
+  // Hide trips whose project was archived (the projects query above is already
+  // active-only). Trips with NO project (ad-hoc / customer-only) are kept — they
+  // have no project lifecycle to follow.
+  const activeProjectIds = new Set(projects.map((p) => p.id));
+  const visibleTrips = trips.filter((t) => t.project_id == null || activeProjectIds.has(t.project_id));
   const customers = (customersRes.data ?? []) as {
     id: string;
     name: string;
@@ -120,7 +128,7 @@ export default async function TripsPage() {
   return (
     <TripsTabs
       error={error ? error.message : null}
-      trips={trips}
+      trips={visibleTrips}
       projects={projects}
       customers={customers}
       trucks={trucks}

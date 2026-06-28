@@ -326,3 +326,21 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
   revalidatePath("/projects");
   return { error: null };
 }
+
+// Soft-archive (Manage project → Danger zone). Flips the project AND its 1:1
+// customer to archived_at = now() ATOMICALLY via the archive_project RPC
+// (migration 0019). trips are NOT touched — they vanish from active views by the
+// page-level archived-project filter, but stay in the DB for history/restore.
+export async function archiveProject(projectId: string): Promise<ActionResult> {
+  const id = projectId?.trim() ?? "";
+  if (!id) return { error: "Missing project id." };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("archive_project", { p_project_id: id });
+  if (error) return { error: error.message };
+
+  revalidatePath("/trips");
+  revalidatePath("/projects");
+  revalidatePath("/customers");
+  return { error: null };
+}

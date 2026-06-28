@@ -18,7 +18,7 @@ import { X, Check } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { CUSTOMER_TYPE_LABELS, WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
 import { formatSar } from "@/lib/utils";
-import { createProjectWithCustomer, updateProjectWithCustomer } from "./actions";
+import { archiveProject, createProjectWithCustomer, updateProjectWithCustomer } from "./actions";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -99,11 +99,19 @@ export default function ProjectModal({
   // Drivers.
   const [selected, setSelected] = useState<string[]>([]);
 
+  // Danger zone (edit only): archive confirm step + type-to-confirm text.
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [archiving, setArchiving] = useState(false);
+
   // Seed the fields each time the modal opens: from `initial` in edit mode, or
   // back to create defaults otherwise.
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setConfirmingArchive(false);
+    setConfirmText("");
+    setArchiving(false);
     if (mode === "edit" && initial) {
       setCustName(initial.cust_name);
       setCustType(initial.cust_type);
@@ -214,6 +222,23 @@ export default function ProjectModal({
         : await createProjectWithCustomer(payload);
 
     setSaving(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    close();
+    router.refresh();
+  }
+
+  // Type-to-confirm: trimmed, case-sensitive exact match against the project name.
+  const archiveMatch = confirmText.trim() !== "" && confirmText.trim() === projName.trim();
+
+  async function onArchive() {
+    if (!isEdit || !initial?.project_id || !archiveMatch) return;
+    setArchiving(true);
+    setError(null);
+    const res = await archiveProject(initial.project_id);
+    setArchiving(false);
     if (res.error) {
       setError(res.error);
       return;
@@ -420,6 +445,68 @@ export default function ProjectModal({
               })}
             </div>
           </section>
+
+          {/* Danger zone — EDIT mode only. Soft-archive the project + its customer. */}
+          {isEdit && (
+            <section className="space-y-3 border-t border-rose-500/30 pt-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
+                Danger zone
+              </h3>
+              {!confirmingArchive ? (
+                <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 flex items-center justify-between gap-3">
+                  <div className="text-sm">
+                    <div className="font-medium">Remove / Cancel project</div>
+                    <div className="muted text-[11px]">
+                      Archives the project and its customer. Restorable later from the Archive page.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingArchive(true)}
+                    className="shrink-0 rounded-lg border border-rose-500/40 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                  >
+                    Remove / Cancel project
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 space-y-3">
+                  <p className="text-sm text-rose-700 dark:text-rose-300">
+                    This will archive <b>{projName}</b> and its customer and all its trips. You can
+                    restore it later from the Archive page. Type the project name to confirm.
+                  </p>
+                  <input
+                    value={confirmText}
+                    onChange={(e) => setConfirmText(e.target.value)}
+                    className={INPUT}
+                    style={INPUT_STYLE}
+                    placeholder={projName}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Btn
+                      variant="outline"
+                      onClick={() => {
+                        setConfirmingArchive(false);
+                        setConfirmText("");
+                      }}
+                    >
+                      Cancel
+                    </Btn>
+                    <button
+                      type="button"
+                      onClick={onArchive}
+                      disabled={!archiveMatch || archiving}
+                      className={
+                        "rounded-lg px-3 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 " +
+                        (!archiveMatch || archiving ? "opacity-50 pointer-events-none" : "")
+                      }
+                    >
+                      {archiving ? "Removing…" : "Remove project"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
 
           {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
 

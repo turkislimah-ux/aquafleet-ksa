@@ -10,6 +10,7 @@ export default async function CustomersPage() {
   const { data, error } = await supabase
     .from("customers")
     .select("*")
+    .is("archived_at", null)
     .order("created_at", { ascending: false });
 
   const customers = (data ?? []) as Customer[];
