@@ -11,6 +11,7 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/ui";
 import ProjectsBoard, { type ProjectsBoardProps } from "./ProjectsBoard";
+import CustomersTab from "./CustomersTab";
 
 type Tab = "projects" | "customers";
 
@@ -64,7 +65,12 @@ export default function TripsTabs({
       {tab === "projects" && <ProjectsBoard {...boardProps} />}
 
       {tab === "customers" && (
-        <div className="card p-10 text-center muted text-sm">Customer management coming next.</div>
+        <CustomersTab
+          customers={boardProps.customers}
+          projects={boardProps.projects}
+          assignmentsByProject={boardProps.assignmentsByProject}
+          trips={boardProps.trips}
+        />
       )}
     </div>
   );

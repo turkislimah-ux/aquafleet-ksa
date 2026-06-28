@@ -59,7 +59,12 @@ type ProjectHeader = {
   description: string | null;
 };
 
-type CustomerOption = { id: string; name: string; default_station: string | null };
+type CustomerOption = {
+  id: string;
+  name: string;
+  default_station: string | null;
+  delivery_site_address: string | null;
+};
 type TruckOption = { id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null };
 type DriverOption = { id: string; name: string; status: DriverStatus };
 
