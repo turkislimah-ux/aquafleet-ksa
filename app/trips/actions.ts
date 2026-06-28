@@ -8,7 +8,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { STAGE_ORDER, STAGE_TIMESTAMP, MAX_BATCH_TRIPS, type TripStage } from "@/lib/db-types";
+import { STAGE_ORDER, STAGE_TIMESTAMP, MAX_BATCH_TRIPS, type TripStage, type WaterType } from "@/lib/db-types";
 import { commissionForDelivery, monthKeyOf } from "@/lib/commission";
 
 export type ActionResult = { error: string | null };
@@ -31,7 +31,7 @@ function numOrNull(v: FormDataEntryValue | null) {
   return Number.isFinite(n) ? n : null;
 }
 
-function validWaterType(s: string) {
+function validWaterType(s: string): s is WaterType {
   return s === "potable" || s === "non_potable";
 }
 
@@ -210,6 +210,7 @@ export type NewProjectInput = {
   commission_value: number;
   commission_bump: number;
   default_water_station: string;
+  water_type: string;
   description: string | null;
   driver_ids: string[];
 };
@@ -221,6 +222,7 @@ type NormalizedProject = {
   custName: string;
   projName: string;
   station: string;
+  waterType: "potable" | "non_potable";
   driverIds: string[];
   mode: "fixed" | "scalable";
   bump: number;
@@ -234,13 +236,15 @@ function normalizeProjectInput(
   const custName = input.cust_name?.trim() ?? "";
   const projName = input.proj_name?.trim() ?? "";
   const station = input.default_water_station?.trim() ?? "";
+  // Drivers are OPTIONAL now — an empty set is valid (project with no drivers).
   const driverIds = Array.from(new Set((input.driver_ids ?? []).filter(Boolean)));
 
   if (!custName) return { ok: false, error: "Customer name is required." };
   if (!CUSTOMER_TYPES.has(input.cust_type)) return { ok: false, error: "Pick a valid customer type." };
   if (!projName) return { ok: false, error: "Project name is required." };
   if (!station) return { ok: false, error: "Default water station is required." };
-  if (driverIds.length === 0) return { ok: false, error: "Assign at least one driver." };
+  if (!validWaterType(input.water_type)) return { ok: false, error: "Pick a valid water type." };
+  const waterType = input.water_type;
 
   const mode = input.commission_mode === "scalable" ? "scalable" : "fixed";
   // Bump only applies in scalable mode; clamp 0–50.
@@ -248,13 +252,13 @@ function normalizeProjectInput(
   const rate = Number.isFinite(input.rate) ? input.rate : 0;
   const commissionValue = Number.isFinite(input.commission_value) ? input.commission_value : 0;
 
-  return { ok: true, value: { custName, projName, station, driverIds, mode, bump, rate, commissionValue } };
+  return { ok: true, value: { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue } };
 }
 
 export async function createProjectWithCustomer(input: NewProjectInput): Promise<ActionResult> {
   const norm = normalizeProjectInput(input);
   if (!norm.ok) return { error: norm.error };
-  const { custName, projName, station, driverIds, mode, bump, rate, commissionValue } = norm.value;
+  const { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue } = norm.value;
 
   const supabase = createClient();
   const { error } = await supabase.rpc("create_project_with_customer", {
@@ -271,6 +275,7 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
     p_commission_value: commissionValue,
     p_commission_bump: bump,
     p_default_water_station: station,
+    p_water_type: waterType,
     p_description: input.description?.trim() || null,
     p_driver_ids: driverIds,
   });
@@ -293,7 +298,7 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
 
   const norm = normalizeProjectInput(input);
   if (!norm.ok) return { error: norm.error };
-  const { custName, projName, station, driverIds, mode, bump, rate, commissionValue } = norm.value;
+  const { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue } = norm.value;
 
   const supabase = createClient();
   const { error } = await supabase.rpc("update_project_with_customer", {
@@ -311,6 +316,7 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
     p_commission_value: commissionValue,
     p_commission_bump: bump,
     p_default_water_station: station,
+    p_water_type: waterType,
     p_description: input.description?.trim() || null,
     p_driver_ids: driverIds,
   });

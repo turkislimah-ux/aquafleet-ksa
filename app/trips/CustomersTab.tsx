@@ -9,7 +9,7 @@ import { useMemo, useState } from "react";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
-import type { CommissionMode } from "@/lib/db-types";
+import type { CommissionMode, WaterType } from "@/lib/db-types";
 import ProjectModal, { type ProjectInitial } from "./ProjectModal";
 
 // Minimal shapes — the page passes wider objects (assignable to these). These
@@ -33,6 +33,7 @@ type ProjectLite = {
   commission_mode: CommissionMode;
   commission_bump_pct: number;
   default_water_station: string;
+  water_type: WaterType | null;
   description: string | null;
 };
 type TripLite = { project_id: string | null; trip_date: string | null; delivered_at: string | null };
@@ -65,6 +66,7 @@ function toInitial(c: CustomerLite, p: ProjectLite, driverIds: string[]): Projec
     commission_mode: p.commission_mode,
     commission_bump: String(p.commission_bump_pct),
     default_water_station: p.default_water_station,
+    water_type: p.water_type ?? "",
     description: p.description ?? "",
     driver_ids: driverIds,
   };
@@ -172,7 +174,12 @@ export default function CustomersTab({
                 <TH>Commission</TH>
                 <TH>Location</TH>
                 <TH>Drivers</TH>
-                <TH>Delivered (this month)</TH>
+                <TH>
+                  <span className="flex flex-col leading-tight">
+                    <span>Delivered</span>
+                    <span className="text-[11px] font-normal normal-case muted">(this month)</span>
+                  </span>
+                </TH>
                 <TH></TH>
               </tr>
             </thead>
@@ -192,7 +199,7 @@ export default function CustomersTab({
                       {project ? (
                         <span>
                           <span className="tabular-nums">{formatSar(project.commission_value)}</span>{" "}
-                          <span className="text-xs muted">
+                          <span className="text-xs text-emerald-600 dark:text-emerald-400">
                             ·{" "}
                             {project.commission_mode === "scalable"
                               ? `Scalable +${project.commission_bump_pct}%`

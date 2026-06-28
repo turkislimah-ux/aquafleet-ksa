@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, Check } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { CUSTOMER_TYPE_LABELS } from "@/lib/db-types";
+import { CUSTOMER_TYPE_LABELS, WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
 import { formatSar } from "@/lib/utils";
 import { createProjectWithCustomer, updateProjectWithCustomer } from "./actions";
 
@@ -43,6 +43,7 @@ export type ProjectInitial = {
   commission_mode: "fixed" | "scalable";
   commission_bump: string;
   default_water_station: string;
+  water_type: string;
   description: string;
   driver_ids: string[];
 };
@@ -91,6 +92,8 @@ export default function ProjectModal({
   const [commMode, setCommMode] = useState<"fixed" | "scalable">("fixed");
   const [bump, setBump] = useState("5");
   const [station, setStation] = useState(defaultStation);
+  // Project default water type — required. "" until picked (old projects may have NULL).
+  const [waterType, setWaterType] = useState<WaterType | "">("");
   const [description, setDescription] = useState("");
 
   // Drivers.
@@ -115,6 +118,11 @@ export default function ProjectModal({
       setCommMode(initial.commission_mode);
       setBump(initial.commission_bump);
       setStation(initial.default_water_station);
+      setWaterType(
+        initial.water_type === "potable" || initial.water_type === "non_potable"
+          ? initial.water_type
+          : "",
+      );
       setDescription(initial.description);
       setSelected(initial.driver_ids);
     } else {
@@ -131,6 +139,7 @@ export default function ProjectModal({
       setCommMode("fixed");
       setBump("5");
       setStation(defaultStation);
+      setWaterType("");
       setDescription("");
       setSelected([]);
     }
@@ -154,13 +163,14 @@ export default function ProjectModal({
     [base, pct],
   );
 
-  // Required: customer name + type, project name, station, ≥1 driver.
+  // Required: customer name + type, project name, station, water type. Drivers
+  // are OPTIONAL — a project can be created or saved with zero drivers.
   const canSubmit =
     custName.trim() !== "" &&
     custType !== "" &&
     projName.trim() !== "" &&
     station !== "" &&
-    selected.length > 0;
+    waterType !== "";
 
   const isEdit = mode === "edit";
 
@@ -168,7 +178,7 @@ export default function ProjectModal({
     e.preventDefault();
     if (!canSubmit) {
       setError(
-        "Fill the required fields: customer name, customer type, project name, water station, and at least one driver.",
+        "Fill the required fields: customer name, customer type, project name, water station, and water type.",
       );
       return;
     }
@@ -193,6 +203,7 @@ export default function ProjectModal({
       commission_value: Number(commissionValue) || 0,
       commission_bump: commMode === "scalable" ? Number(bump) || 0 : 0,
       default_water_station: station,
+      water_type: waterType,
       description: description || null,
       driver_ids: selected,
     };
@@ -354,15 +365,26 @@ export default function ProjectModal({
               </div>
             </div>
 
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">Default water station *</span>
-              <select value={station} onChange={(e) => setStation(e.target.value)} required className={INPUT} style={INPUT_STYLE}>
-                {stations.length === 0 && <option value="" disabled>No stations</option>}
-                {stations.map((s) => (
-                  <option key={s.key} value={s.key}>{s.name}</option>
-                ))}
-              </select>
-            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">Default water station *</span>
+                <select value={station} onChange={(e) => setStation(e.target.value)} required className={INPUT} style={INPUT_STYLE}>
+                  {stations.length === 0 && <option value="" disabled>No stations</option>}
+                  {stations.map((s) => (
+                    <option key={s.key} value={s.key}>{s.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">Default water type *</span>
+                <select value={waterType} onChange={(e) => setWaterType(e.target.value as WaterType)} required className={INPUT} style={INPUT_STYLE}>
+                  <option value="" disabled>Select…</option>
+                  {Object.entries(WATER_TYPE_LABELS).map(([v, l]) => (
+                    <option key={v} value={v}>{l}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
             <label className="flex flex-col gap-1 text-sm">
               <span className="muted">Description</span>
@@ -373,8 +395,8 @@ export default function ProjectModal({
           {/* Drivers section. */}
           <section className="space-y-2 border-t border-app pt-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wide muted">Drivers *</h3>
-              <span className="muted text-[11px]">· {selected.length} selected</span>
+              <h3 className="text-xs font-semibold uppercase tracking-wide muted">Drivers</h3>
+              <span className="muted text-[11px]">· {selected.length} selected · optional</span>
             </div>
             <div className="rounded-lg border border-app divide-y divide-[rgb(var(--border))] max-h-56 overflow-y-auto scrollbar-thin">
               {drivers.length === 0 && (
