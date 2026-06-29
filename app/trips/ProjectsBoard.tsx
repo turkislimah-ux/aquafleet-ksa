@@ -20,7 +20,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MapPin, Plus, Users, Play, ArrowRight, Check, Droplet, ChevronLeft, ChevronRight, Calendar,
+  MapPin, Plus, Users, Play, ArrowRight, Check, Droplet, ChevronLeft, ChevronRight, Calendar, History,
 } from "lucide-react";
 import { Btn, Stat } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
@@ -64,6 +64,12 @@ type ProjectHeader = {
   location_lng: number | null;
   description: string | null;
 };
+
+// Anchored-to-today delivery counts per project (Today / 7 / 30 / 90 windows).
+// Revenue is derived in the card (count × the project's rate), so only counts
+// travel as a prop.
+type ProjectReport = { dayN: number; weekN: number; monthN: number; quarterN: number };
+const EMPTY_REPORT: ProjectReport = { dayN: 0, weekN: 0, monthN: 0, quarterN: 0 };
 
 type CustomerOption = {
   id: string;
@@ -280,6 +286,7 @@ function TripCard({
 function ProjectCard({
   project,
   trips,
+  report,
   assignedCount,
   stationsByKey,
   advancingId,
@@ -289,6 +296,7 @@ function ProjectCard({
 }: {
   project: ProjectHeader;
   trips: TripRow[];
+  report: ProjectReport;
   assignedCount: number;
   stationsByKey: Record<string, string>;
   advancingId: string | null;
@@ -296,6 +304,15 @@ function ProjectCard({
   onManage: (p: ProjectHeader) => void;
   onAdd: (projectId: string) => void;
 }) {
+  // Deliveries report tiles — count primary, revenue (count × rate) secondary.
+  // Counts are anchored to today (computed in the parent), NOT the selected day.
+  const rate = project.rate_per_trip_sar;
+  const reportTiles: { label: string; count: number }[] = [
+    { label: "Today", count: report.dayN },
+    { label: "Last 7 days", count: report.weekN },
+    { label: "Last 30 days", count: report.monthN },
+    { label: "Last 90 days", count: report.quarterN },
+  ];
   return (
     <div className="card p-4">
       {/* Header (block A) */}
@@ -337,6 +354,32 @@ function ProjectCard({
         </div>
       </div>
       {project.description && <p className="text-sm muted mt-2">{project.description}</p>}
+
+      {/* Deliveries report strip (block B) — all 4 windows at once, anchored to
+          today (independent of the selected calendar day). Mirrors the demo's
+          reportingStrip; our addition = a revenue line under each count. */}
+      <div
+        className="mt-4 rounded-lg border grid grid-cols-2 md:grid-cols-[auto_repeat(4,minmax(0,1fr))] items-center gap-y-2 px-3 py-2"
+        style={{ borderColor: "rgb(var(--border))", background: "rgba(11,126,234,0.03)" }}
+      >
+        <div className="col-span-2 md:col-span-1 inline-flex items-center gap-1.5 pe-3 text-xs font-semibold muted">
+          <History className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
+          Deliveries report
+        </div>
+        {reportTiles.map((t) => (
+          <div
+            key={t.label}
+            className="flex flex-col items-start gap-0.5 px-3 border-s"
+            style={{ borderColor: "rgb(var(--border))" }}
+          >
+            <span className="text-[10px] uppercase tracking-wide font-semibold muted">{t.label}</span>
+            <span className="text-lg font-bold tabular-nums leading-none">{t.count}</span>
+            <span className="text-[11px] text-emerald-600 dark:text-emerald-400 tabular-nums">
+              {formatSar(t.count * rate)}
+            </span>
+          </div>
+        ))}
+      </div>
 
       {/* Kanban (block C) */}
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -440,6 +483,29 @@ export default function ProjectsBoard({
       ),
     [trips, selectedDay]
   );
+
+  // Deliveries report per project — Today / 7 / 30 / 90 windows, anchored to
+  // TODAY (delivered_at's local date), independent of selectedDay. Counts only;
+  // revenue is derived in the card. Window bounds are local YYYY-MM-DD keys, so
+  // lexicographic string compare == chronological compare.
+  const reportByProject = useMemo(() => {
+    const w7 = addDays(todayKey, -6);
+    const w30 = addDays(todayKey, -29);
+    const w90 = addDays(todayKey, -89);
+    const m = new Map<string, ProjectReport>();
+    for (const t of trips) {
+      if (!t.project_id || !t.delivered_at) continue;
+      const dk = dayKey(new Date(t.delivered_at));
+      if (dk > todayKey) continue; // future-dated delivery (shouldn't happen) — ignore
+      const cur = m.get(t.project_id) ?? { dayN: 0, weekN: 0, monthN: 0, quarterN: 0 };
+      if (dk === todayKey) cur.dayN += 1;
+      if (dk >= w7) cur.weekN += 1;
+      if (dk >= w30) cur.monthN += 1;
+      if (dk >= w90) cur.quarterN += 1;
+      m.set(t.project_id, cur);
+    }
+    return m;
+  }, [trips, todayKey]);
 
   // Per-day distinct project pills for the calendar strip (across ALL trips, not
   // just the selected day). Keyed by trip_date; only projects present in `projects`.
@@ -613,10 +679,10 @@ export default function ProjectsBoard({
 
       {/* KPI row — scoped to the selected day. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <Stat label="Active projects · day" value={activeProjects} tone="info" />
-        <Stat label="Pending pushes · day" value={pendingPushes} tone={pendingPushes > 0 ? "warn" : "ok"} />
-        <Stat label="Running trips · day" value={running} tone="ok" />
-        <Stat label="Commission · day" value={formatSar(commissionDay)} tone="ok" />
+        <Stat label="Active projects (day)" value={activeProjects} tone="info" />
+        <Stat label="Pending pushes (day)" value={pendingPushes} tone={pendingPushes > 0 ? "warn" : "ok"} />
+        <Stat label="Running trips (day)" value={running} tone="ok" />
+        <Stat label="Commission (day)" value={formatSar(commissionDay)} tone="ok" />
       </div>
 
       {/* New Project — Projects tab only, below the KPIs (relocated from the page header). */}
@@ -652,6 +718,7 @@ export default function ProjectsBoard({
               key={p.id}
               project={p}
               trips={byProject.get(p.id) ?? []}
+              report={reportByProject.get(p.id) ?? EMPTY_REPORT}
               assignedCount={(assignmentsByProject[p.id] ?? []).length}
               stationsByKey={stationsByKey}
               advancingId={advancingId}
