@@ -41,6 +41,7 @@ export default function CreateTripForm({
   stations,
   openForProject,
   onCloseControlled,
+  defaultDate,
 }: {
   projects: ProjectOption[];
   customers: CustomerOption[];
@@ -52,6 +53,8 @@ export default function CreateTripForm({
   // lands in Cluster 5; this just preselects + locks the project.
   openForProject?: string | null;
   onCloseControlled?: () => void;
+  // Pre-fill the trip date (the board's selected calendar day). Still editable.
+  defaultDate?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -64,6 +67,9 @@ export default function CreateTripForm({
   const [customerId, setCustomerId] = useState("");
   const [waterType, setWaterType] = useState<WaterType>("potable");
   const [station, setStation] = useState<string>(stations[0]?.key ?? "");
+  // Controlled trip date — seeded from the board's selected day, reseeded when it
+  // changes. Free to edit; the manager can still pick any date in the form.
+  const [tripDate, setTripDate] = useState<string>(defaultDate ?? "");
 
   function close() {
     setOpen(false);
@@ -84,6 +90,11 @@ export default function CreateTripForm({
     // water_stations key), so it is NOT used here — keep the chosen lookup key.
     setCustomerId(id);
   }
+
+  // Reseed the date when the board's selected day changes.
+  useEffect(() => {
+    setTripDate(defaultDate ?? "");
+  }, [defaultDate]);
 
   // A project card's "Add trip" opens the modal pre-scoped to that project.
   useEffect(() => {
@@ -263,7 +274,14 @@ export default function CreateTripForm({
 
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">Trip date</span>
-                <input name="trip_date" type="date" className={INPUT} style={INPUT_STYLE} />
+                <input
+                  name="trip_date"
+                  type="date"
+                  value={tripDate}
+                  onChange={(e) => setTripDate(e.target.value)}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                />
               </label>
 
               <label className="flex flex-col gap-1 text-sm">

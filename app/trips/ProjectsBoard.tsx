@@ -1,21 +1,27 @@
 "use client";
 
-// Project-stacked Trips board (Path B, Cluster 2). Replaces the old flat by-day
-// board. Layout, top to bottom:
-//   - global KPI row (active projects / pending pushes / running / commission pool)
-//   - date picker (defaults today) + day trip count
-//   - global "New trip" button (CreateTripForm)
-//   - one self-contained card per ACTIVE project: header + 4-column Kanban
+// Project-stacked Trips board (Path B, Cluster 2). DAY-SCOPED: a weekly calendar
+// strip at the top selects a single day; the KPIs and every project Kanban are
+// filtered to that day. Layout, top to bottom:
+//   - week calendar strip (Sun→Sat day cards, ‹ › week nav, today highlight,
+//     per-day project pills) — selects the active day
+//   - KPI row, scoped to the selected day (distinct projects today / pending /
+//     running / commission earned on the day)
+//   - "New Project" button (CreateTripForm's per-project "Add trip" pre-fills the
+//     selected day as the trip date)
+//   - one self-contained card per ACTIVE project: header + 4-column Kanban,
+//     showing only that day's trips
 //   - a fallback "Direct customer trips" card for trips with no project
-// Stage changes funnel through setTripStage, driven by ONE sequential action
-// button per card (Start trip -> Mark in transit -> Mark delivered), mirroring the
-// demo kanbanCard. Delivered cards show a static "Commission paid" badge. The old
-// Move-trip menu is gone. Route-focus click + reporting strip + driver table land
-// in later commits.
+// The single day-filter point is `dayTrips` (trip_date === selectedDay), which
+// feeds both the KPIs and the per-project grouping. Stage columns and ProjectCard
+// internals are unchanged — they just receive fewer trips. Stage changes funnel
+// through setTripStage (Start trip -> Mark in transit -> Mark delivered).
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Plus, Users, Play, ArrowRight, Check, Droplet } from "lucide-react";
+import {
+  MapPin, Plus, Users, Play, ArrowRight, Check, Droplet, ChevronLeft, ChevronRight, Calendar,
+} from "lucide-react";
 import { Btn, Stat } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import {
@@ -86,6 +92,53 @@ function fmtPhaseStamp(iso: string | null): string {
   const date = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
   const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
   return `${date} · ${time}`;
+}
+
+// --- Day-calendar helpers. All keys are local "YYYY-MM-DD" (matches the trips
+// trip_date date column, which is TZ-free). Using local components (not
+// toISOString, which is UTC) keeps "today" aligned with the user's clock. -------
+const WEEKDAY_LBL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function dayKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function parseKey(key: string): Date {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d); // local midnight, not UTC
+}
+function addDays(key: string, n: number): string {
+  const d = parseKey(key);
+  d.setDate(d.getDate() + n);
+  return dayKey(d);
+}
+function weekStartOf(key: string): string {
+  const d = parseKey(key);
+  d.setDate(d.getDate() - d.getDay()); // back to Sunday
+  return dayKey(d);
+}
+
+// Deterministic decorative pill color per project id (hash → fixed palette).
+// Same id => same color forever. No status meaning, no legend.
+const PILL_PALETTE = [
+  "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+  "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+  "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300",
+  "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
+  "bg-lime-500/15 text-lime-700 dark:text-lime-300",
+  "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300",
+  "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+];
+function pillColor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return PILL_PALETTE[h % PILL_PALETTE.length];
 }
 
 const ACTION_BTN =
@@ -360,22 +413,94 @@ export default function ProjectsBoard({
   const [managing, setManaging] = useState<ProjectHeader | null>(null);
   const [addTripProjectId, setAddTripProjectId] = useState<string | null>(null);
 
-  // KPI row — GLOBAL across all projects and all dates (demo behavior).
-  const activeProjects = projects.filter((p) => p.status === "active").length;
-  const pendingPushes = trips.filter((t) => t.stage === "scheduled").length;
-  const running = trips.filter((t) => t.stage === "loading" || t.stage === "in_transit").length;
-  const monthKey = new Date().toISOString().slice(0, 7);
-  const commissionPool = trips.reduce(
-    (sum, t) => (t.delivered_at && t.delivered_at.slice(0, 7) === monthKey ? sum + (t.commission_sar ?? 0) : sum),
-    0
+  // Calendar state — selected day + the visible week (Sunday key). Default today.
+  const todayKey = dayKey(new Date());
+  const [selectedDay, setSelectedDay] = useState(todayKey);
+  const [weekStart, setWeekStart] = useState(() => weekStartOf(todayKey));
+
+  // THE single day-filter point — everything below scopes to this.
+  const dayTrips = useMemo(() => trips.filter((t) => t.trip_date === selectedDay), [trips, selectedDay]);
+
+  // KPI row — all scoped to the selected day. Commission is the ONE asymmetry:
+  // it counts trips DELIVERED that day (delivered_at's local date), not trip_date.
+  const activeProjects = useMemo(
+    () => new Set(dayTrips.filter((t) => t.project_id).map((t) => t.project_id)).size,
+    [dayTrips]
+  );
+  const pendingPushes = dayTrips.filter((t) => t.stage === "scheduled").length;
+  const running = dayTrips.filter((t) => t.stage === "loading" || t.stage === "in_transit").length;
+  const commissionDay = useMemo(
+    () =>
+      trips.reduce(
+        (sum, t) =>
+          t.delivered_at && dayKey(new Date(t.delivered_at)) === selectedDay
+            ? sum + (t.commission_sar ?? 0)
+            : sum,
+        0
+      ),
+    [trips, selectedDay]
   );
 
-  // All trips, split into per-project buckets + a direct-customer bucket.
-  // No date filter — the board shows every trip per project (demo behavior).
+  // Per-day distinct project pills for the calendar strip (across ALL trips, not
+  // just the selected day). Keyed by trip_date; only projects present in `projects`.
+  const projectsByDay = useMemo(() => {
+    const nameById = new Map(projects.map((p) => [p.id, p.name] as const));
+    const seen = new Map<string, Set<string>>();
+    const m = new Map<string, { id: string; name: string }[]>();
+    for (const t of trips) {
+      if (!t.project_id || !t.trip_date) continue;
+      const name = nameById.get(t.project_id);
+      if (!name) continue;
+      let set = seen.get(t.trip_date);
+      if (!set) {
+        set = new Set();
+        seen.set(t.trip_date, set);
+      }
+      if (set.has(t.project_id)) continue;
+      set.add(t.project_id);
+      const arr = m.get(t.trip_date) ?? [];
+      arr.push({ id: t.project_id, name });
+      m.set(t.trip_date, arr);
+    }
+    return m;
+  }, [trips, projects]);
+
+  // Right-header label: selected day relative to TODAY. Real date math via
+  // addDays (parseKey → Date.setDate), so month/year boundaries roll correctly.
+  const selectedDayLabel = useMemo(() => {
+    if (selectedDay === todayKey) return "Today";
+    if (selectedDay === addDays(todayKey, -1)) return "Yesterday";
+    if (selectedDay === addDays(todayKey, 1)) return "Tomorrow";
+    const d = parseKey(selectedDay);
+    return `${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
+  }, [selectedDay, todayKey]);
+
+  // The 7 visible day cells (Sun→Sat) for the current week.
+  const weekDays = useMemo(() => {
+    return Array.from({ length: 7 }, (_, i) => {
+      const key = addDays(weekStart, i);
+      const d = parseKey(key);
+      return { key, dow: d.getDay(), dayNum: d.getDate(), month: d.getMonth() };
+    });
+  }, [weekStart]);
+
+  // "22 – 28 Jun 2026" style range label for the week header.
+  const weekRangeLabel = useMemo(() => {
+    const first = weekDays[0];
+    const last = weekDays[6];
+    const y = parseKey(last.key).getFullYear();
+    const span =
+      first.month === last.month
+        ? `${first.dayNum} – ${last.dayNum} ${MONTH_SHORT[last.month]}`
+        : `${first.dayNum} ${MONTH_SHORT[first.month]} – ${last.dayNum} ${MONTH_SHORT[last.month]}`;
+    return `${span} ${y}`;
+  }, [weekDays]);
+
+  // Day-scoped: split THIS DAY's trips into per-project buckets + a direct bucket.
   const { byProject, directCustomer } = useMemo(() => {
     const m = new Map<string, TripRow[]>();
     const direct: TripRow[] = [];
-    for (const t of trips) {
+    for (const t of dayTrips) {
       if (t.project_id) {
         const arr = m.get(t.project_id) ?? [];
         arr.push(t);
@@ -385,7 +510,7 @@ export default function ProjectsBoard({
       }
     }
     return { byProject: m, directCustomer: direct };
-  }, [trips]);
+  }, [dayTrips]);
 
   const activeList = projects.filter((p) => p.status === "active");
 
@@ -405,12 +530,93 @@ export default function ProjectsBoard({
 
   return (
     <div>
-      {/* KPI row */}
+      {/* Week calendar strip — Sun→Sat day cards; selects the active day. */}
+      <div className="card p-4 mb-4">
+        {/* Three-part header: title (left) · week-of pill (center) · nav (right) */}
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2 min-w-0">
+            <Calendar className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
+            <span className="text-sm font-semibold truncate">Project Calendar</span>
+          </div>
+          <div className="flex-1 flex items-center justify-center gap-1.5">
+            <Btn variant="outline" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="Previous week">
+              <ChevronLeft className="h-4 w-4" />
+            </Btn>
+            <span
+              className="inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium tabular-nums"
+              style={{ borderColor: "rgb(var(--border))" }}
+            >
+              <span className="muted me-1">Week of</span>
+              {weekRangeLabel}
+            </span>
+            <Btn variant="outline" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="Next week">
+              <ChevronRight className="h-4 w-4" />
+            </Btn>
+          </div>
+          <span className="text-sm font-medium muted shrink-0 tabular-nums">{selectedDayLabel}</span>
+        </div>
+        <div className="grid grid-cols-7 gap-2">
+          {weekDays.map((d) => {
+            const isToday = d.key === todayKey;
+            const isSelected = d.key === selectedDay;
+            const pills = projectsByDay.get(d.key) ?? [];
+            return (
+              <button
+                key={d.key}
+                type="button"
+                onClick={() => setSelectedDay(d.key)}
+                className={cn(
+                  "rounded-lg border p-2.5 text-start transition min-h-[9rem] flex flex-col",
+                  isSelected
+                    ? "border-brand-500 ring-1 ring-brand-500 bg-brand-500/5"
+                    : "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+                )}
+                style={!isSelected ? { borderColor: "rgb(var(--border))" } : undefined}
+              >
+                {/* Inline day header: "SUN 9" + Today tag */}
+                <div className="flex items-baseline justify-between gap-1">
+                  <span className="inline-flex items-baseline gap-1.5 min-w-0">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide muted">
+                      {WEEKDAY_LBL[d.dow]}
+                    </span>
+                    <span className="text-lg font-semibold tabular-nums leading-none">{d.dayNum}</span>
+                  </span>
+                  {isToday && (
+                    <span className="text-[10px] font-medium text-brand-600 dark:text-brand-400 shrink-0">
+                      Today
+                    </span>
+                  )}
+                </div>
+                {/* Pills stacked vertically, each full-width on its own row */}
+                <div className="mt-2 flex flex-col gap-1">
+                  {pills.slice(0, 3).map((p) => (
+                    <span
+                      key={p.id}
+                      title={p.name}
+                      className={cn(
+                        "block w-full rounded px-1.5 py-0.5 text-[9px] font-medium truncate",
+                        pillColor(p.id)
+                      )}
+                    >
+                      {p.name}
+                    </span>
+                  ))}
+                  {pills.length > 3 && (
+                    <span className="block w-full text-[9px] muted px-1.5 py-0.5">+{pills.length - 3} more</span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* KPI row — scoped to the selected day. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <Stat label="Active projects" value={activeProjects} tone="info" />
-        <Stat label="Pending pushes" value={pendingPushes} tone={pendingPushes > 0 ? "warn" : "ok"} />
-        <Stat label="Running trips" value={running} tone="ok" />
-        <Stat label="Commission pool · month" value={formatSar(commissionPool)} tone="ok" />
+        <Stat label="Active projects · day" value={activeProjects} tone="info" />
+        <Stat label="Pending pushes · day" value={pendingPushes} tone={pendingPushes > 0 ? "warn" : "ok"} />
+        <Stat label="Running trips · day" value={running} tone="ok" />
+        <Stat label="Commission · day" value={formatSar(commissionDay)} tone="ok" />
       </div>
 
       {/* New Project — Projects tab only, below the KPIs (relocated from the page header). */}
@@ -433,6 +639,7 @@ export default function ProjectsBoard({
         stations={stations}
         openForProject={addTripProjectId}
         onCloseControlled={() => setAddTripProjectId(null)}
+        defaultDate={selectedDay}
       />
 
       {/* Project-stacked board */}
