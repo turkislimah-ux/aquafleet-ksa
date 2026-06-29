@@ -13,11 +13,34 @@
 // hence the disclaimer in the header.
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, Printer } from "lucide-react";
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+} from "recharts";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { WATER_TYPE_LABELS, type CommissionMode } from "@/lib/db-types";
+
+// Chart palette — emerald for money (consistent with the report), slate/amber for
+// the rest. Hex (not Tailwind tokens) so the SVG fills survive print.
+const C_REVENUE = "#059669"; // emerald-600
+const C_TRIPS = "#0b7eea"; // brand blue
+const C_DELIVERED = "#059669"; // emerald-600
+const C_NOT_DELIVERED = "#f59e0b"; // amber-500
 
 // Widened trip shape — every field is already present at runtime (the page
 // passes full trip rows); we only need this subset for the report.
@@ -49,6 +72,12 @@ function monthLabel(key: string): string {
   return `${MONTH_LBL[Number(m) - 1] ?? m} ${y}`;
 }
 
+// "2026-06" → "Jun 26" (compact axis tick for the 6-month trend).
+function shortMonthLabel(key: string): string {
+  const [y, m] = key.split("-");
+  return `${MONTH_LBL[Number(m) - 1] ?? m} ${y.slice(2)}`;
+}
+
 const UNASSIGNED = "__unassigned__";
 
 export default function BreakdownReport({
@@ -75,11 +104,27 @@ export default function BreakdownReport({
   const currentMonth = monthKeyOf(new Date().toISOString());
   const [selMonth, setSelMonth] = useState(currentMonth);
 
+  // Portal target only exists after mount (no document during SSR).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   // Reset to the current month each time the report opens.
   useEffect(() => {
     if (open) setSelMonth(currentMonth);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, project?.id]);
+
+  // Print: tag <body> so the print CSS can drop the app chrome from flow and let
+  // the report paginate (static flow), then untag once the dialog closes.
+  function handlePrint() {
+    document.body.classList.add("printing-breakdown");
+    const cleanup = () => {
+      document.body.classList.remove("printing-breakdown");
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+    window.print();
+  }
 
   const rate = project?.rate_per_trip_sar ?? 0;
 
@@ -191,7 +236,70 @@ export default function BreakdownReport({
     [driverRows],
   );
 
-  if (!open || !project) return null;
+  // --- Chart 1 data: 6-month trend, window ENDS at the selected month. -----
+  // Revenue = delivered-count(by delivered_at) × current rate; trips = total
+  // count (by trip_date). Same bases as the sections, so the selected month's
+  // bar reconciles with the Financial/Operational numbers. Empty months = 0.
+  const trendData = useMemo(() => {
+    const [sy, sm] = selMonth.split("-").map(Number);
+    const keys: string[] = [];
+    for (let i = 5; i >= 0; i--) {
+      let yy = sy;
+      let mm = sm - i;
+      while (mm <= 0) {
+        mm += 12;
+        yy -= 1;
+      }
+      keys.push(`${yy}-${String(mm).padStart(2, "0")}`);
+    }
+    const deliv = new Map<string, number>();
+    const tot = new Map<string, number>();
+    for (const t of projectTrips) {
+      if (t.delivered_at) {
+        const k = monthKeyOf(t.delivered_at);
+        deliv.set(k, (deliv.get(k) ?? 0) + 1);
+      }
+      if (t.trip_date) {
+        const k = monthKeyOf(t.trip_date);
+        tot.set(k, (tot.get(k) ?? 0) + 1);
+      }
+    }
+    return keys.map((k) => ({
+      label: shortMonthLabel(k),
+      revenue: (deliv.get(k) ?? 0) * rate,
+      trips: tot.get(k) ?? 0,
+    }));
+  }, [projectTrips, selMonth, rate]);
+
+  // --- Chart 2 data: trips per day in the selected month (by trip_date). ---
+  // Current/incomplete month: only days up to today get bars.
+  const dailyData = useMemo(() => {
+    const [y, m] = selMonth.split("-").map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const lastDay =
+      selMonth === currentMonth ? Math.min(daysInMonth, new Date().getDate()) : daysInMonth;
+    const counts = new Map<number, number>();
+    for (const t of totalInMonth) {
+      if (!t.trip_date) continue;
+      const d = Number(t.trip_date.slice(8, 10));
+      if (d) counts.set(d, (counts.get(d) ?? 0) + 1);
+    }
+    const arr: { day: string; trips: number }[] = [];
+    for (let d = 1; d <= lastDay; d++) arr.push({ day: String(d), trips: counts.get(d) ?? 0 });
+    return arr;
+  }, [totalInMonth, selMonth, currentMonth]);
+
+  // --- Chart 3 data: delivered vs not-delivered (reuses section values). ----
+  const statusData = useMemo(
+    () => [
+      { name: "Delivered", value: deliveredCount },
+      { name: "Not delivered", value: notDelivered },
+    ],
+    [deliveredCount, notDelivered],
+  );
+  const hasStatusData = deliveredCount + notDelivered > 0;
+
+  if (!open || !project || !mounted) return null;
 
   const monthInProgress = selMonth === currentMonth;
   const commType =
@@ -204,8 +312,11 @@ export default function BreakdownReport({
     day: "numeric",
   });
 
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+  return createPortal(
+    <div
+      className="breakdown-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40"
+      onClick={onClose}
+    >
       <div
         className="card p-0 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -228,7 +339,7 @@ export default function BreakdownReport({
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <Btn variant="outline" onClick={() => window.print()}>
+            <Btn variant="outline" onClick={handlePrint}>
               <Printer className="h-4 w-4" /> Print / Save as PDF
             </Btn>
             <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]">
@@ -290,7 +401,7 @@ export default function BreakdownReport({
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">
               Financial · {monthLabel(selMonth)}
             </h3>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 break-inside-avoid">
               <Stat label="Trips delivered" value={deliveredCount} tone="info" />
               <Stat label="Revenue" value={formatSar(revenue)} tone="ok" />
               <Stat label="Commission paid" value={formatSar(commission)} tone="warn" />
@@ -303,14 +414,73 @@ export default function BreakdownReport({
             </div>
           </section>
 
-          {/* Charts land here in Commit 2 — intentionally left as a slot. */}
+          {/* Chart 1 — 6-month trend (revenue + trips, dual axis). Window ends
+              at the selected month. Fixed-height wrapper so the SVG keeps a box
+              in print (no viewport => %-height collapses to zero). */}
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wide muted">
+              6-month trend (ending {monthLabel(selMonth)})
+            </h3>
+            <div
+              className="rounded-lg border border-app p-3 break-inside-avoid"
+              style={{ height: 280 }}
+            >
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={trendData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.25)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis
+                    yAxisId="rev"
+                    tick={{ fontSize: 11 }}
+                    width={56}
+                    tickFormatter={(v) => `${v}`}
+                  />
+                  <YAxis
+                    yAxisId="trips"
+                    orientation="right"
+                    tick={{ fontSize: 11 }}
+                    width={32}
+                    allowDecimals={false}
+                  />
+                  <Tooltip
+                    formatter={(value, name) =>
+                      name === "Revenue" ? [formatSar(Number(value)), name] : [value, name]
+                    }
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Line
+                    yAxisId="rev"
+                    type="monotone"
+                    dataKey="revenue"
+                    name="Revenue"
+                    stroke={C_REVENUE}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                  />
+                  <Line
+                    yAxisId="trips"
+                    type="monotone"
+                    dataKey="trips"
+                    name="Trips"
+                    stroke={C_TRIPS}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="text-[11px] muted">
+              Revenue = delivered trips × current rate (by delivery date). Trips = all scheduled
+              trips (by trip date). Months with no activity show as zero.
+            </p>
+          </section>
 
           {/* Section 2 — Operational. */}
           <section className="space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">
               Operational · {monthLabel(selMonth)}
             </h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 break-inside-avoid">
               <Stat label="Total trips" value={totalCount} tone="info" />
               <Stat label="Delivered" value={deliveredCount} tone="ok" />
               <Stat label="Not delivered" value={notDelivered} tone="warn" />
@@ -328,6 +498,61 @@ export default function BreakdownReport({
               <div className="rounded-lg border border-app p-3">
                 <div className="muted text-[11px] uppercase tracking-wide mb-1">Water types seen</div>
                 <div>{waterTypesUsed.length ? waterTypesUsed.join(", ") : <span className="muted">—</span>}</div>
+              </div>
+            </div>
+          </section>
+
+          {/* In-month charts — trips/day (bar) + delivered split (donut). The
+              donut reuses the section's deliveredCount / notDelivered, so it
+              matches the Operational numbers exactly. */}
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wide muted">
+              {monthLabel(selMonth)} · daily activity & delivery split
+            </h3>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Chart 2 — trips per day. */}
+              <div className="rounded-lg border border-app p-3 break-inside-avoid" style={{ height: 260 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.25)" />
+                    <XAxis dataKey="day" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 11 }} width={28} allowDecimals={false} />
+                    <Tooltip
+                      labelFormatter={(d) => `Day ${d}`}
+                      formatter={(value) => [value, "Trips"]}
+                    />
+                    <Bar dataKey="trips" name="Trips" fill={C_TRIPS} radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Chart 3 — delivered vs not-delivered. */}
+              <div className="rounded-lg border border-app p-3 break-inside-avoid" style={{ height: 260 }}>
+                {hasStatusData ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={statusData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius="55%"
+                        outerRadius="80%"
+                        paddingAngle={2}
+                      >
+                        <Cell fill={C_DELIVERED} />
+                        <Cell fill={C_NOT_DELIVERED} />
+                      </Pie>
+                      <Tooltip formatter={(value, name) => [value, name]} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="grid h-full place-items-center text-sm muted">
+                    No trips this month.
+                  </div>
+                )}
               </div>
             </div>
           </section>
@@ -410,6 +635,7 @@ export default function BreakdownReport({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

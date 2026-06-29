@@ -61,8 +61,11 @@ body {
   body * { visibility: hidden !important; }
   #history-print, #history-print *,
   #breakdown-print, #breakdown-print * { visibility: visible !important; }
-  #history-print,
-  #breakdown-print {
+  .no-print { display: none !important; }
+
+  /* History payout — a single record. Absolute + inset:0 pins it edge-to-edge
+     for a clean one-page printout (it fits a page). */
+  #history-print {
     position: absolute;
     inset: 0;
     margin: 0;
@@ -70,12 +73,40 @@ body {
     max-height: none !important;
     overflow: visible !important;
   }
-  /* Keep report colors (e.g. the emerald rate/commission numbers) from
-     flattening to black when printed. print-color-adjust is inherited, so
-     setting it on the container covers all descendants. */
+
+  /* Breakdown report — a MULTI-section document that must PAGINATE. An absolute/
+     fixed container clips to a single page, so the report flows in NORMAL static
+     flow instead. The modal is portaled to <body> (class .breakdown-print-portal)
+     and printed with the body.printing-breakdown marker, so we can drop the app
+     chrome from flow entirely (no blank leading pages) and un-clip the modal's
+     scroll container (max-height/overflow). */
+  body.printing-breakdown > *:not(.breakdown-print-portal) { display: none !important; }
+
+  .breakdown-print-portal,
+  .breakdown-print-portal > * {
+    position: static !important;
+    inset: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
   #breakdown-print {
+    position: static !important;
+    margin: 0;
+    padding: 1rem;
+    max-height: none !important;
+    overflow: visible !important;
+    /* print-color-adjust is inherited — keep the emerald numbers / chart fills
+       from flattening to black in the PDF. */
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  .no-print { display: none !important; }
+
+  /* Page-break hygiene: don't slice a chart or KPI row in half; long driver
+     tables may still break across pages, but never mid-row. */
+  #breakdown-print table tr { break-inside: avoid; }
 }
