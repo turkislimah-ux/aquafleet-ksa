@@ -3,7 +3,7 @@
 // Customers tab (Trips page). One row per customer (1:1 with its project, enforced
 // by the projects_customer_id_unique constraint). KPIs are a current-calendar-month
 // snapshot. "Manage project" opens the shared ProjectModal in edit mode (atomic
-// update via RPC 0017). "View breakdown" is still a placeholder (next commit).
+// update via RPC 0017). "View breakdown" opens the per-project monthly report.
 
 import { useMemo, useState } from "react";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
@@ -11,6 +11,7 @@ import { formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import type { CommissionMode, WaterType } from "@/lib/db-types";
 import ProjectModal, { type ProjectInitial } from "./ProjectModal";
+import BreakdownReport from "./BreakdownReport";
 
 // Minimal shapes — the page passes wider objects (assignable to these). These
 // carry every field the edit form pre-fills.
@@ -36,7 +37,19 @@ type ProjectLite = {
   water_type: WaterType | null;
   description: string | null;
 };
-type TripLite = { project_id: string | null; trip_date: string | null; delivered_at: string | null };
+// Wider than the KPI math needs — the extra fields (driver_id, commission_sar,
+// water_station, water_type, stage) feed the BreakdownReport, which the page
+// already passes at runtime.
+type TripLite = {
+  project_id: string | null;
+  trip_date: string | null;
+  delivered_at: string | null;
+  driver_id: string | null;
+  commission_sar: number | null;
+  water_station: string;
+  water_type: string;
+  stage: string;
+};
 type Driver = { id: string; name: string; status?: string };
 type Station = { key: string; name: string; is_default?: boolean };
 
@@ -80,10 +93,16 @@ export default function CustomersTab({
   drivers,
   stations,
 }: CustomersTabProps) {
-  // Placeholder notice for the not-yet-built View breakdown action.
-  const [notice, setNotice] = useState<string | null>(null);
   // Edit modal pre-fill (null = closed).
   const [editing, setEditing] = useState<ProjectInitial | null>(null);
+  // Breakdown report (null = closed). Carries the clicked project + customer
+  // identity (name/contact/phone) for the report header.
+  const [breakdown, setBreakdown] = useState<{
+    project: ProjectLite;
+    customerName: string;
+    contactName: string | null;
+    phone: string | null;
+  } | null>(null);
 
   const monthKey = monthKeyOf(new Date().toISOString());
 
@@ -149,15 +168,6 @@ export default function CustomersTab({
         <Stat label="Trips · month" value={tripsThisMonth} tone="ok" />
         <Stat label="Revenue · month" value={formatSar(revenueThisMonth)} tone="ok" />
       </div>
-
-      {notice && (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-brand-500/30 bg-brand-500/10 px-3 py-2 text-sm text-brand-700 dark:text-brand-300">
-          <span>{notice}</span>
-          <button type="button" onClick={() => setNotice(null)} className="text-xs underline">
-            Dismiss
-          </button>
-        </div>
-      )}
 
       {customers.length === 0 ? (
         <div className="card p-10 text-center muted text-sm">
@@ -226,7 +236,18 @@ export default function CustomersTab({
                         >
                           Manage project
                         </Btn>
-                        <Btn variant="outline" onClick={() => setNotice("View breakdown — coming next.")}>
+                        <Btn
+                          variant="outline"
+                          onClick={() =>
+                            project &&
+                            setBreakdown({
+                              project,
+                              customerName: c.name,
+                              contactName: c.contact_name,
+                              phone: c.phone,
+                            })
+                          }
+                        >
                           View breakdown
                         </Btn>
                       </div>
@@ -245,6 +266,19 @@ export default function CustomersTab({
         open={editing !== null}
         initial={editing}
         onClose={() => setEditing(null)}
+        drivers={drivers}
+        stations={stations}
+      />
+
+      {/* Per-project monthly Breakdown report (numbers + tables + print). */}
+      <BreakdownReport
+        open={breakdown !== null}
+        onClose={() => setBreakdown(null)}
+        project={breakdown?.project ?? null}
+        customerName={breakdown?.customerName ?? ""}
+        contactName={breakdown?.contactName ?? null}
+        phone={breakdown?.phone ?? null}
+        trips={trips}
         drivers={drivers}
         stations={stations}
       />
