@@ -95,7 +95,7 @@ type CustomerOption = {
   delivery_lat: number | null;
   delivery_lng: number | null;
 };
-type TruckOption = { id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null };
+type TruckOption = { id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null; last_service_date: string | null };
 type DriverOption = { id: string; name: string; status: DriverStatus };
 
 function projectDot(status: ProjectStatus) {
@@ -649,6 +649,19 @@ export default function ProjectsBoard({
     return m;
   }, [trips, selectedDay, drivers, trucks, assignmentsByProject, projects]);
 
+  // driver_id -> [project name…] for the project form's driver roster (which
+  // projects each driver already serves). Inverts assignmentsByProject + names.
+  const driverProjectNames = useMemo(() => {
+    const nameById = new Map(projects.map((p) => [p.id, p.name] as const));
+    const m: Record<string, string[]> = {};
+    for (const [pid, ids] of Object.entries(assignmentsByProject)) {
+      const name = nameById.get(pid);
+      if (!name) continue;
+      for (const did of ids) (m[did] ??= []).push(name);
+    }
+    return m;
+  }, [projects, assignmentsByProject]);
+
   // Per-day distinct project pills for the calendar strip (across ALL trips, not
   // just the selected day). Keyed by trip_date; only projects present in `projects`.
   const projectsByDay = useMemo(() => {
@@ -829,7 +842,12 @@ export default function ProjectsBoard({
 
       {/* New Project — Projects tab only, below the KPIs (relocated from the page header). */}
       <div className="flex justify-end mb-4">
-        <NewProjectModal drivers={drivers} stations={stations} />
+        <NewProjectModal
+          drivers={drivers}
+          trucks={trucks}
+          driverProjectNames={driverProjectNames}
+          stations={stations}
+        />
       </div>
 
       {error && (

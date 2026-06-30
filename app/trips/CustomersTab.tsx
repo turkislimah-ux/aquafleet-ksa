@@ -51,6 +51,12 @@ type TripLite = {
   stage: string;
 };
 type Driver = { id: string; name: string; status?: string };
+type TruckLite = {
+  id: string;
+  plate: string;
+  assigned_driver_id: string | null;
+  last_service_date: string | null;
+};
 type Station = { key: string; name: string; is_default?: boolean };
 
 export type CustomersTabProps = {
@@ -59,6 +65,7 @@ export type CustomersTabProps = {
   assignmentsByProject: Record<string, string[]>;
   trips: TripLite[];
   drivers: Driver[];
+  trucks: TruckLite[];
   stations: Station[];
 };
 
@@ -91,6 +98,7 @@ export default function CustomersTab({
   assignmentsByProject,
   trips,
   drivers,
+  trucks,
   stations,
 }: CustomersTabProps) {
   // Edit modal pre-fill (null = closed).
@@ -117,6 +125,18 @@ export default function CustomersTab({
     for (const p of projects) m.set(p.id, p);
     return m;
   }, [projects]);
+
+  // driver_id -> [project name…] for the edit modal's driver roster.
+  const driverProjectNames = useMemo(() => {
+    const nameById = new Map(projects.map((p) => [p.id, p.name] as const));
+    const m: Record<string, string[]> = {};
+    for (const [pid, ids] of Object.entries(assignmentsByProject)) {
+      const name = nameById.get(pid);
+      if (!name) continue;
+      for (const did of ids) (m[did] ??= []).push(name);
+    }
+    return m;
+  }, [projects, assignmentsByProject]);
 
   // Per-project DELIVERED trip count for THIS calendar month (keyed by
   // delivered_at — same basis as the Revenue KPI, so the two reconcile).
@@ -267,6 +287,8 @@ export default function CustomersTab({
         initial={editing}
         onClose={() => setEditing(null)}
         drivers={drivers}
+        trucks={trucks}
+        driverProjectNames={driverProjectNames}
         stations={stations}
       />
 

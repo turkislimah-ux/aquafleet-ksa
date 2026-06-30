@@ -12,13 +12,23 @@ import { Btn } from "@/components/ui";
 import ProjectModal from "./ProjectModal";
 
 type Driver = { id: string; name: string; status?: string };
+type TruckLite = {
+  id: string;
+  plate: string;
+  assigned_driver_id: string | null;
+  last_service_date: string | null;
+};
 type Station = { key: string; name: string; is_default?: boolean };
 
 export default function NewProjectModal({
   drivers,
+  trucks,
+  driverProjectNames,
   stations,
 }: {
   drivers: Driver[];
+  trucks: TruckLite[];
+  driverProjectNames: Record<string, string[]>;
   stations: Station[];
 }) {
   const [open, setOpen] = useState(false);
@@ -33,6 +43,8 @@ export default function NewProjectModal({
         open={open}
         onClose={() => setOpen(false)}
         drivers={drivers}
+        trucks={trucks}
+        driverProjectNames={driverProjectNames}
         stations={stations}
       />
     </>

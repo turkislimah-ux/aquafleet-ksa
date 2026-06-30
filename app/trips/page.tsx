@@ -57,7 +57,7 @@ export default async function TripsPage() {
         .order("name", { ascending: true }),
       supabase
         .from("trucks")
-        .select("id, plate, capacity_m3, assigned_driver_id")
+        .select("id, plate, capacity_m3, assigned_driver_id, last_service_date")
         .order("plate", { ascending: true }),
       supabase
         .from("drivers")
@@ -107,6 +107,7 @@ export default async function TripsPage() {
     plate: string;
     capacity_m3: number | null;
     assigned_driver_id: string | null;
+    last_service_date: string | null;
   }[];
   const drivers = (driversRes.data ?? []) as { id: string; name: string; status: DriverStatus }[];
 

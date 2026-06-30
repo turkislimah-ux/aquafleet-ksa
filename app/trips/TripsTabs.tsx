@@ -71,6 +71,7 @@ export default function TripsTabs({
           assignmentsByProject={boardProps.assignmentsByProject}
           trips={boardProps.trips}
           drivers={boardProps.drivers}
+          trucks={boardProps.trucks}
           stations={boardProps.stations}
         />
       )}

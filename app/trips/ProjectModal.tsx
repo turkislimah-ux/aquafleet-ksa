@@ -14,17 +14,24 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Check } from "lucide-react";
+import { X } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { CUSTOMER_TYPE_LABELS, WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
 import { formatSar } from "@/lib/utils";
 import { archiveProject, createProjectWithCustomer, updateProjectWithCustomer } from "./actions";
+import DriverRosterTable from "./DriverRosterTable";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
 type Driver = { id: string; name: string; status?: string };
+type TruckLite = {
+  id: string;
+  plate: string;
+  assigned_driver_id: string | null;
+  last_service_date: string | null;
+};
 type Station = { key: string; name: string; is_default?: boolean };
 
 // Pre-fill payload for edit mode. All numbers are kept as strings (form inputs).
@@ -57,6 +64,8 @@ export default function ProjectModal({
   onClose,
   mode,
   drivers,
+  trucks,
+  driverProjectNames,
   stations,
   initial,
 }: {
@@ -64,6 +73,8 @@ export default function ProjectModal({
   onClose: () => void;
   mode: "create" | "edit";
   drivers: Driver[];
+  trucks: TruckLite[];
+  driverProjectNames: Record<string, string[]>;
   stations: Station[];
   initial?: ProjectInitial | null;
 }) {
@@ -423,27 +434,13 @@ export default function ProjectModal({
               <h3 className="text-xs font-semibold uppercase tracking-wide muted">Drivers</h3>
               <span className="muted text-[11px]">· {selected.length} selected · optional</span>
             </div>
-            <div className="rounded-lg border border-app divide-y divide-[rgb(var(--border))] max-h-56 overflow-y-auto scrollbar-thin">
-              {drivers.length === 0 && (
-                <div className="px-3 py-4 text-center text-sm muted">No drivers available.</div>
-              )}
-              {drivers.map((d) => {
-                const on = selected.includes(d.id);
-                return (
-                  <button
-                    type="button"
-                    key={d.id}
-                    onClick={() => toggleDriver(d.id)}
-                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm ${on ? "bg-brand-500/10" : "hover:bg-black/5 dark:hover:bg-white/5"}`}
-                  >
-                    <span className="truncate">{d.name}</span>
-                    <span className={`grid place-items-center h-5 w-5 rounded-full border ${on ? "bg-brand-600 border-brand-600 text-white" : "border-app"}`}>
-                      {on && <Check className="h-3 w-3" />}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            <DriverRosterTable
+              drivers={drivers}
+              trucks={trucks}
+              driverProjectNames={driverProjectNames}
+              selected={selected}
+              onToggle={toggleDriver}
+            />
           </section>
 
           {/* Danger zone — EDIT mode only. Soft-archive the project + its customer. */}
