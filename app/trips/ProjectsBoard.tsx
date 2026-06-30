@@ -949,6 +949,8 @@ export default function ProjectsBoard({
         <ManageDriversModal
           project={{ id: managing.id, name: managing.name }}
           drivers={drivers}
+          trucks={trucks}
+          driverProjectNames={driverProjectNames}
           assigned={assignmentsByProject[managing.id] ?? []}
           onClose={() => setManaging(null)}
         />

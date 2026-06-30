@@ -4,7 +4,7 @@
 // createProject / updateProject server actions. Needs the customer list for
 // the customer dropdown.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Users } from "lucide-react";
 import { Btn, Table, TH, TD, StatusPill } from "@/components/ui";
@@ -19,6 +19,12 @@ import ManageDriversModal, { type DriverOption } from "./ManageDriversModal";
 
 type CustomerOption = { id: string; name: string };
 type ProjectRow = Project & { customerName: string };
+type TruckLite = {
+  id: string;
+  plate: string;
+  assigned_driver_id: string | null;
+  last_service_date: string | null;
+};
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -28,14 +34,28 @@ export default function ProjectForm({
   projects,
   customers,
   drivers,
+  trucks,
   assignmentsByProject,
 }: {
   projects: ProjectRow[];
   customers: CustomerOption[];
   drivers: DriverOption[];
+  trucks: TruckLite[];
   assignmentsByProject: Record<string, string[]>;
 }) {
   const router = useRouter();
+
+  // driver_id -> [project name…] for the Manage-drivers roster table.
+  const driverProjectNames = useMemo(() => {
+    const nameById = new Map(projects.map((p) => [p.id, p.name] as const));
+    const m: Record<string, string[]> = {};
+    for (const [pid, ids] of Object.entries(assignmentsByProject)) {
+      const name = nameById.get(pid);
+      if (!name) continue;
+      for (const did of ids) (m[did] ??= []).push(name);
+    }
+    return m;
+  }, [projects, assignmentsByProject]);
   const [editing, setEditing] = useState<ProjectRow | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -199,6 +219,8 @@ export default function ProjectForm({
         <ManageDriversModal
           project={{ id: managing.id, name: managing.name }}
           drivers={drivers}
+          trucks={trucks}
+          driverProjectNames={driverProjectNames}
           assigned={assignmentsByProject[managing.id] ?? []}
           onClose={() => setManaging(null)}
         />

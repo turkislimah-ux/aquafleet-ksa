@@ -7,22 +7,31 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { cn } from "@/lib/utils";
-import { DRIVER_STATUS_LABELS, type DriverStatus } from "@/lib/db-types";
+import { type DriverStatus } from "@/lib/db-types";
+import DriverRosterTable from "../trips/DriverRosterTable";
 import { setProjectDrivers } from "./actions";
 
 export type DriverOption = { id: string; name: string; status: DriverStatus };
+type TruckLite = {
+  id: string;
+  plate: string;
+  assigned_driver_id: string | null;
+  last_service_date: string | null;
+};
 
 export default function ManageDriversModal({
   project,
   drivers,
+  trucks,
+  driverProjectNames,
   assigned,
   onClose,
 }: {
   project: { id: string; name: string };
   drivers: DriverOption[];
+  trucks: TruckLite[];
+  driverProjectNames: Record<string, string[]>;
   assigned: string[];
   onClose: () => void;
 }) {
@@ -64,43 +73,13 @@ export default function ManageDriversModal({
           {project.name} · {selected.size} selected
         </p>
 
-        {drivers.length === 0 ? (
-          <p className="text-sm muted">No drivers exist yet — add drivers first.</p>
-        ) : (
-          <div
-            className="rounded-lg border divide-y max-h-[50vh] overflow-y-auto scrollbar-thin"
-            style={{ borderColor: "rgb(var(--border))" }}
-          >
-            {drivers.map((d) => {
-              const on = selected.has(d.id);
-              return (
-                <button
-                  key={d.id}
-                  type="button"
-                  onClick={() => toggle(d.id)}
-                  className={cn(
-                    "w-full flex items-center justify-between px-3 py-2 text-sm text-start transition",
-                    on ? "bg-emerald-500/10" : "hover:bg-black/5 dark:hover:bg-white/5"
-                  )}
-                  style={{ borderColor: "rgb(var(--border))" }}
-                >
-                  <span className="flex flex-col">
-                    <span className="font-medium">{d.name}</span>
-                    <span className="text-xs muted">{DRIVER_STATUS_LABELS[d.status]}</span>
-                  </span>
-                  <span
-                    className={cn(
-                      "h-5 w-5 rounded-full grid place-items-center border transition",
-                      on ? "bg-emerald-500 border-emerald-500 text-white" : "border-current muted"
-                    )}
-                  >
-                    {on && <Check className="h-3.5 w-3.5" />}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <DriverRosterTable
+          drivers={drivers}
+          trucks={trucks}
+          driverProjectNames={driverProjectNames}
+          selected={Array.from(selected)}
+          onToggle={toggle}
+        />
 
         {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
 

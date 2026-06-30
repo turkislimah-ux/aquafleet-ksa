@@ -10,7 +10,7 @@ type JoinedProject = Project & { customer: { name: string } | null };
 export default async function ProjectsPage() {
   const supabase = createClient();
 
-  const [projectsRes, customersRes, driversRes, assignmentsRes] = await Promise.all([
+  const [projectsRes, customersRes, driversRes, trucksRes, assignmentsRes] = await Promise.all([
     supabase
       .from("projects")
       .select("*, customer:customers(name)")
@@ -25,6 +25,10 @@ export default async function ProjectsPage() {
       .from("drivers")
       .select("id, name, status")
       .order("name", { ascending: true }),
+    supabase
+      .from("trucks")
+      .select("id, plate, assigned_driver_id, last_service_date")
+      .order("plate", { ascending: true }),
     supabase.from("project_drivers").select("project_id, driver_id"),
   ]);
 
@@ -34,6 +38,12 @@ export default async function ProjectsPage() {
   }));
   const customers = (customersRes.data ?? []) as { id: string; name: string }[];
   const drivers = (driversRes.data ?? []) as { id: string; name: string; status: DriverStatus }[];
+  const trucks = (trucksRes.data ?? []) as {
+    id: string;
+    plate: string;
+    assigned_driver_id: string | null;
+    last_service_date: string | null;
+  }[];
 
   // Map project_id -> [driver_id, …] for the Manage-drivers modal pre-check.
   const assignmentsByProject: Record<string, string[]> = {};
@@ -42,7 +52,7 @@ export default async function ProjectsPage() {
   }
 
   const error =
-    projectsRes.error || customersRes.error || driversRes.error || assignmentsRes.error;
+    projectsRes.error || customersRes.error || driversRes.error || trucksRes.error || assignmentsRes.error;
 
   return (
     <div>
@@ -56,6 +66,7 @@ export default async function ProjectsPage() {
         projects={projects}
         customers={customers}
         drivers={drivers}
+        trucks={trucks}
         assignmentsByProject={assignmentsByProject}
       />
     </div>
