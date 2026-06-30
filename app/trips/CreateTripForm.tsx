@@ -5,7 +5,7 @@
 // pre-fills water type + station (both still overridable). Count stamps out a
 // batch of identical trips in one insert. The board itself lives in TripBoard.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ import {
   MAX_BATCH_TRIPS,
 } from "@/lib/db-types";
 import { createTrip } from "./actions";
+import DriverDutyTable from "./DriverDutyTable";
 
 type ProjectOption = {
   id: string;
@@ -24,10 +25,29 @@ type ProjectOption = {
 };
 type CustomerOption = { id: string; name: string; default_station: string | null };
 type StationOption = { key: string; name: string };
-type TruckOption = { id: string; plate: string };
+type TruckOption = { id: string; plate: string; assigned_driver_id: string | null };
 type DriverOption = { id: string; name: string };
+// Trip rows needed for the per-driver duty figures. on-duty is day-scoped
+// (trip_date), last-delivered is all-time (delivered_at).
+type TripLite = {
+  driver_id: string | null;
+  stage: string;
+  trip_date: string | null;
+  delivered_at: string | null;
+};
 
 type Kind = "project" | "customer";
+
+const MONTH_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+// ISO timestamp → "DD Mon YYYY" in LOCAL time (matches the app's delivered-day basis).
+function fmtDeliveredLocal(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getDate()} ${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+}
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -38,6 +58,9 @@ export default function CreateTripForm({
   customers,
   trucks,
   drivers,
+  trips,
+  assignmentsByProject,
+  selectedDay,
   stations,
   openForProject,
   onCloseControlled,
@@ -47,6 +70,10 @@ export default function CreateTripForm({
   customers: CustomerOption[];
   trucks: TruckOption[];
   drivers: DriverOption[];
+  trips: TripLite[];
+  assignmentsByProject: Record<string, string[]>;
+  // The board's selected calendar day — scopes the duty table's On-Duty count.
+  selectedDay: string;
   stations: StationOption[];
   // When set (from a project card's "Add trip"), open the modal pre-scoped to
   // that project. Full per-project rework (assigned-driver picker, tank/time)
@@ -67,6 +94,9 @@ export default function CreateTripForm({
   const [customerId, setCustomerId] = useState("");
   const [waterType, setWaterType] = useState<WaterType>("potable");
   const [station, setStation] = useState<string>(stations[0]?.key ?? "");
+  // Single-select operational driver (null = unassigned). Truck is DERIVED from
+  // this driver (one truck per driver) — there is no separate truck selector.
+  const [driverId, setDriverId] = useState<string | null>(null);
   // Controlled trip date — seeded from the board's selected day, reseeded when it
   // changes. Free to edit; the manager can still pick any date in the form.
   const [tripDate, setTripDate] = useState<string>(defaultDate ?? "");
@@ -78,6 +108,8 @@ export default function CreateTripForm({
 
   function onPickProject(id: string) {
     setProjectId(id);
+    // The visible driver set changes with the project — drop any stale pick.
+    setDriverId(null);
     const p = projects.find((x) => x.id === id);
     if (p?.water_type) setWaterType(p.water_type);
     // Trip inherits the project's default water station (a valid lookup key);
@@ -89,6 +121,61 @@ export default function CreateTripForm({
     // free-text default_station is the wrong concept (a depot name, not a
     // water_stations key), so it is NOT used here — keep the chosen lookup key.
     setCustomerId(id);
+  }
+
+  // Switch link kind — reset the driver pick (project mode shows assigned drivers,
+  // customer mode shows all; a pick from one set may be invalid in the other).
+  function pickKind(next: Kind) {
+    setKind(next);
+    setDriverId(null);
+  }
+
+  // Per-driver duty figures. On-duty = undelivered trips on the SELECTED day
+  // (trip_date === selectedDay && stage ≠ delivered), across all projects — so the
+  // column moves with the calendar. Last-delivered = most recent delivery anywhere
+  // (all-time, a historical figure). Keyed by driver_id.
+  const dutyByDriver = useMemo(() => {
+    const m: Record<string, { onDuty: number; lastDeliveredAt: string | null }> = {};
+    for (const t of trips) {
+      if (!t.driver_id) continue;
+      const cur = (m[t.driver_id] ??= { onDuty: 0, lastDeliveredAt: null });
+      if (t.trip_date === selectedDay && t.stage !== "delivered") cur.onDuty += 1;
+      if (t.delivered_at && (cur.lastDeliveredAt === null || t.delivered_at > cur.lastDeliveredAt)) {
+        cur.lastDeliveredAt = t.delivered_at;
+      }
+    }
+    // Format the delivered timestamp once, here, so the table stays presentational.
+    const out: Record<string, { onDuty: number; lastDelivered: string | null }> = {};
+    for (const [id, v] of Object.entries(m)) {
+      out[id] = {
+        onDuty: v.onDuty,
+        lastDelivered: v.lastDeliveredAt ? fmtDeliveredLocal(v.lastDeliveredAt) : null,
+      };
+    }
+    return out;
+  }, [trips, selectedDay]);
+
+  // Drivers shown in the duty table: a project's assigned drivers in project mode,
+  // or ALL drivers in customer/no-project mode.
+  const visibleDrivers = useMemo(() => {
+    if (kind === "project") {
+      if (!projectId) return [];
+      const ids = new Set(assignmentsByProject[projectId] ?? []);
+      return drivers.filter((d) => ids.has(d.id));
+    }
+    return drivers;
+  }, [kind, projectId, assignmentsByProject, drivers]);
+
+  // Truck is implied by the driver (one truck per driver) — derive its id for the
+  // hidden truck_id input. No truck → "" → action's nullable() stores NULL.
+  const derivedTruckId = useMemo(() => {
+    if (!driverId) return "";
+    return trucks.find((t) => t.assigned_driver_id === driverId)?.id ?? "";
+  }, [driverId, trucks]);
+
+  // Toggle-select: re-clicking the chosen driver clears it (driver is optional).
+  function onSelectDriver(id: string) {
+    setDriverId((prev) => (prev === id ? null : id));
   }
 
   // Reseed the date when the board's selected day changes.
@@ -139,7 +226,7 @@ export default function CreateTripForm({
               <div className="sm:col-span-2 flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setKind("project")}
+                  onClick={() => pickKind("project")}
                   disabled={projects.length === 0}
                   className={cn(
                     "h-9 px-3 rounded-lg text-sm font-medium border flex-1",
@@ -152,7 +239,7 @@ export default function CreateTripForm({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setKind("customer")}
+                  onClick={() => pickKind("customer")}
                   disabled={customers.length === 0}
                   className={cn(
                     "h-9 px-3 rounded-lg text-sm font-medium border flex-1",
@@ -248,29 +335,21 @@ export default function CreateTripForm({
                 </select>
               </label>
 
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Truck</span>
-                <select name="truck_id" defaultValue="" className={INPUT} style={INPUT_STYLE}>
-                  <option value="">Unassigned</option>
-                  {trucks.map((tr) => (
-                    <option key={tr.id} value={tr.id}>
-                      {tr.plate}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Driver</span>
-                <select name="driver_id" defaultValue="" className={INPUT} style={INPUT_STYLE}>
-                  <option value="">Unassigned</option>
-                  {drivers.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {/* Driver + truck — one operational pick. The driver's assigned truck
+                  is implied, so there is no separate truck selector; truck_id is
+                  derived from the chosen driver and submitted via a hidden input. */}
+              <div className="sm:col-span-2 flex flex-col gap-1 text-sm">
+                <span className="muted">Driver {driverId ? "" : "· unassigned"}</span>
+                <DriverDutyTable
+                  drivers={visibleDrivers}
+                  trucks={trucks}
+                  dutyByDriver={dutyByDriver}
+                  selected={driverId}
+                  onSelect={onSelectDriver}
+                />
+                <input type="hidden" name="driver_id" value={driverId ?? ""} />
+                <input type="hidden" name="truck_id" value={derivedTruckId} />
+              </div>
 
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">Trip date</span>

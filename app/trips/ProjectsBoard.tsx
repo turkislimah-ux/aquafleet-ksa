@@ -862,6 +862,9 @@ export default function ProjectsBoard({
         customers={customers}
         trucks={trucks}
         drivers={drivers}
+        trips={trips}
+        assignmentsByProject={assignmentsByProject}
+        selectedDay={selectedDay}
         stations={stations}
         openForProject={addTripProjectId}
         onCloseControlled={() => setAddTripProjectId(null)}
