@@ -22,7 +22,7 @@ import { useRouter } from "next/navigation";
 import {
   MapPin, Plus, Users, Play, ArrowRight, Check, Droplet, ChevronLeft, ChevronRight, Calendar, History,
 } from "lucide-react";
-import { Btn, Stat } from "@/components/ui";
+import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import {
   type Trip,
@@ -34,6 +34,7 @@ import {
   STAGE_ORDER,
   STAGE_STYLES,
   TRIP_STAGE_LABELS,
+  DRIVER_STATUS_LABELS,
 } from "@/lib/db-types";
 import { setTripStage } from "./actions";
 import CreateTripForm from "./CreateTripForm";
@@ -70,6 +71,18 @@ type ProjectHeader = {
 // travel as a prop.
 type ProjectReport = { dayN: number; weekN: number; monthN: number; quarterN: number };
 const EMPTY_REPORT: ProjectReport = { dayN: 0, weekN: 0, monthN: 0, quarterN: 0 };
+
+// One row of the per-project driver summary. trips/commission are DAY-SCOPED
+// (selectedDay); lastTripDate is all-time (most recent trip_date on the project).
+type DriverRow = {
+  id: string;
+  name: string;
+  status: DriverStatus;
+  truckPlate: string | null;
+  tripsDay: number;
+  commissionDay: number;
+  lastTripDate: string | null;
+};
 
 type CustomerOption = {
   id: string;
@@ -145,6 +158,20 @@ function pillColor(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return PILL_PALETTE[h % PILL_PALETTE.length];
+}
+
+// Driver-avatar initials (first + last word). Mirrors the demo's initials().
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0][0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
+  return (first + last).toUpperCase();
+}
+// "30 Jun 2026" from a local YYYY-MM-DD key (parseKey keeps it local, no TZ shift).
+function fmtDayKey(key: string): string {
+  const d = parseKey(key);
+  return `${d.getDate()} ${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 const ACTION_BTN =
@@ -287,6 +314,7 @@ function ProjectCard({
   project,
   trips,
   report,
+  driverRows,
   assignedCount,
   stationsByKey,
   advancingId,
@@ -297,6 +325,7 @@ function ProjectCard({
   project: ProjectHeader;
   trips: TripRow[];
   report: ProjectReport;
+  driverRows: DriverRow[];
   assignedCount: number;
   stationsByKey: Record<string, string>;
   advancingId: string | null;
@@ -425,6 +454,68 @@ function ProjectCard({
           );
         })}
       </div>
+
+      {/* Driver summary (block D) — assigned drivers; trips + commission scoped to
+          the SELECTED day (moves with the calendar); last trip is all-time.
+          Mirrors the demo's driverSummaryTable. */}
+      <div className="mt-4 rounded-lg border overflow-hidden" style={{ borderColor: "rgb(var(--border))" }}>
+        <div
+          className="flex items-center gap-2 px-3 py-2 border-b"
+          style={{ borderColor: "rgb(var(--border))" }}
+        >
+          <Users className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <span className="font-semibold text-sm">Drivers operating this project</span>
+          <span className="muted text-xs ms-auto">
+            {driverRows.length} {driverRows.length === 1 ? "driver" : "drivers"}
+          </span>
+        </div>
+        {driverRows.length === 0 ? (
+          <p className="muted text-sm p-3 text-center">No drivers assigned.</p>
+        ) : (
+          <Table>
+            <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+              <tr>
+                <TH>Driver</TH>
+                <TH>Truck</TH>
+                <TH>Duty status</TH>
+                <TH>Trips (day)</TH>
+                <TH>Commission (day)</TH>
+                <TH>Last trip</TH>
+              </tr>
+            </thead>
+            <tbody>
+              {driverRows.map((r) => (
+                <tr key={r.id} className="hover:bg-black/[0.02] dark:hover:bg-white/[0.03]">
+                  <TD>
+                    <div className="flex items-center gap-2">
+                      <div className="h-7 w-7 rounded-full bg-brand-600 text-white grid place-items-center text-[11px] font-semibold shrink-0">
+                        {initials(r.name)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm truncate">{r.name}</div>
+                        <div className="text-[11px] muted font-mono truncate">#{r.id.slice(0, 8)}</div>
+                      </div>
+                    </div>
+                  </TD>
+                  <TD className="font-mono text-xs">
+                    {r.truckPlate ?? <span className="muted">—</span>}
+                  </TD>
+                  <TD>
+                    <StatusPill status={r.status} label={DRIVER_STATUS_LABELS[r.status]} />
+                  </TD>
+                  <TD className="tabular-nums font-medium">{r.tripsDay}</TD>
+                  <TD className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
+                    {formatSar(r.commissionDay)}
+                  </TD>
+                  <TD className="text-xs">
+                    {r.lastTripDate ? fmtDayKey(r.lastTripDate) : <span className="muted">—</span>}
+                  </TD>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </div>
     </div>
   );
 }
@@ -506,6 +597,57 @@ export default function ProjectsBoard({
     }
     return m;
   }, [trips, todayKey]);
+
+  // Driver summary rows per project. trips/commission are scoped to selectedDay
+  // (so the table moves with the calendar); lastTripDate is all-time. Assigned
+  // drivers always appear, even with zero trips that day.
+  const driverRowsByProject = useMemo(() => {
+    const truckByDriver = new Map<string, string>();
+    for (const tr of trucks) if (tr.assigned_driver_id) truckByDriver.set(tr.assigned_driver_id, tr.plate);
+    const driverById = new Map(drivers.map((d) => [d.id, d] as const));
+
+    // Aggregate per project|driver from the FULL trip set in one pass.
+    type Agg = { tripsDay: number; commissionDay: number; lastTripDate: string | null };
+    const agg = new Map<string, Agg>();
+    for (const t of trips) {
+      if (!t.project_id || !t.driver_id) continue;
+      const key = `${t.project_id}|${t.driver_id}`;
+      let a = agg.get(key);
+      if (!a) {
+        a = { tripsDay: 0, commissionDay: 0, lastTripDate: null };
+        agg.set(key, a);
+      }
+      if (t.trip_date === selectedDay) {
+        a.tripsDay += 1;
+        a.commissionDay += t.commission_sar ?? 0;
+      }
+      if (t.trip_date && (a.lastTripDate === null || t.trip_date > a.lastTripDate)) {
+        a.lastTripDate = t.trip_date;
+      }
+    }
+
+    const m = new Map<string, DriverRow[]>();
+    for (const p of projects) {
+      const ids = assignmentsByProject[p.id] ?? [];
+      const rows: DriverRow[] = [];
+      for (const id of ids) {
+        const d = driverById.get(id);
+        if (!d) continue; // mirror demo's filter(Boolean) on missing drivers
+        const a = agg.get(`${p.id}|${id}`);
+        rows.push({
+          id,
+          name: d.name,
+          status: d.status,
+          truckPlate: truckByDriver.get(id) ?? null,
+          tripsDay: a?.tripsDay ?? 0,
+          commissionDay: a?.commissionDay ?? 0,
+          lastTripDate: a?.lastTripDate ?? null,
+        });
+      }
+      m.set(p.id, rows);
+    }
+    return m;
+  }, [trips, selectedDay, drivers, trucks, assignmentsByProject, projects]);
 
   // Per-day distinct project pills for the calendar strip (across ALL trips, not
   // just the selected day). Keyed by trip_date; only projects present in `projects`.
@@ -719,6 +861,7 @@ export default function ProjectsBoard({
               project={p}
               trips={byProject.get(p.id) ?? []}
               report={reportByProject.get(p.id) ?? EMPTY_REPORT}
+              driverRows={driverRowsByProject.get(p.id) ?? []}
               assignedCount={(assignmentsByProject[p.id] ?? []).length}
               stationsByKey={stationsByKey}
               advancingId={advancingId}
