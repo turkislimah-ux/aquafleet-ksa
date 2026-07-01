@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { formatSar } from "@/lib/utils";
+import { formatSar, todayKey } from "@/lib/utils";
 import { TRIP_STAGE_LABELS } from "@/lib/db-types";
 import { onLeaveTodaySet, effectiveDriverStatus, type LeavePeriod } from "@/lib/leave";
 import DashboardClient, { type Datasets, type DashboardCharts } from "./DashboardClient";
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const supabase = createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayKey(); // local (matches trip day-math), not UTC
 
   const [trucksRes, tripsRes, driversRes, leavePeriodsRes, archivedProjectsRes] = await Promise.all([
     supabase.from("trucks").select("id, status, health_score"),

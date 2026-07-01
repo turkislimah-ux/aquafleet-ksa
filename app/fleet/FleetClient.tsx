@@ -13,10 +13,10 @@ import {
   type TruckStatus,
   TRUCK_STATUS_LABELS,
   DRIVER_STATUS_LABELS,
-  type DriverStatus,
   STATION_OPTIONS,
 } from "@/lib/db-types";
 import { effectiveDriverStatus } from "@/lib/leave";
+import { coerceStoredStatus } from "@/lib/driver-state";
 import type { TruckRow, DriverLite } from "./page";
 import { assignDriver, unassignDriver } from "./actions";
 import TruckFormModal from "./TruckFormModal";
@@ -394,7 +394,7 @@ export default function FleetClient({
                   const onLeaveToday = onLeave.has(d.id);
                   // UI-only lock: busy elsewhere OR on leave today (never the current driver).
                   const locked = (busyElsewhere || onLeaveToday) && !isCurrent;
-                  const storedKey = (d.status in DRIVER_STATUS_LABELS ? d.status : "inactive") as DriverStatus;
+                  const storedKey = coerceStoredStatus(d.status);
                   const effKey = effectiveDriverStatus(storedKey, onLeaveToday);
                   return (
                     <tr

@@ -8,6 +8,7 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Driver, Staff, StaffRole } from "@/lib/db-types";
 import type { LeavePeriod, LeaveType } from "@/lib/leave";
+import { todayKey } from "@/lib/utils";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
 import type {
   CommTripRow,
@@ -109,7 +110,7 @@ export default async function DriversPage() {
   const staffRoles = (staffRolesRes.data ?? []) as StaffRole[];
   const leavePeriods = (leavePeriodsRes.data ?? []) as LeavePeriod[];
   const leaveTypes = (leaveTypesRes.data ?? []) as LeaveType[];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayKey(); // local (matches trip day-math), not UTC
   const projectsById: Record<string, string> = {};
   for (const p of (projectsRes.data ?? []) as { id: string; name: string }[]) projectsById[p.id] = p.name;
   const error =
