@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Truck } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
+import { todayKey } from "@/lib/utils";
 import type { TruckRow, DriverLite } from "../page";
 import FleetDetailClient from "./FleetDetailClient";
 
@@ -21,7 +22,7 @@ export default async function FleetDetailPage({
   const supabase = createClient();
 
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayKey(); // local (matches trip day-math), not UTC
 
   const [trucksRes, driversRes, tripsRes, leavePeriodsRes] = await Promise.all([
     supabase.from("trucks").select("*, driver:drivers(name)"),

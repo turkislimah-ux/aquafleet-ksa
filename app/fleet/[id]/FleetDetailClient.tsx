@@ -15,10 +15,10 @@ import { PageHeader, Card, Stat, StatusPill, Section, Btn, Table, TH, TD } from 
 import {
   TRUCK_STATUS_LABELS,
   DRIVER_STATUS_LABELS,
-  type DriverStatus,
 } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "../page";
 import { effectiveDriverStatus } from "@/lib/leave";
+import { coerceStoredStatus } from "@/lib/driver-state";
 import { assignDriver, unassignDriver } from "../actions";
 import TruckFormModal from "../TruckFormModal";
 import { cn, formatNum } from "@/lib/utils";
@@ -219,7 +219,7 @@ export default function FleetDetailClient({
                   <div>
                     <div className="font-medium">{driver.name}</div>
                     {(() => {
-                      const storedKey = (driver.status in DRIVER_STATUS_LABELS ? driver.status : "inactive") as DriverStatus;
+                      const storedKey = coerceStoredStatus(driver.status);
                       const effKey = effectiveDriverStatus(storedKey, onLeave.has(driver.id));
                       return <StatusPill status={effKey} label={DRIVER_STATUS_LABELS[effKey]} />;
                     })()}
@@ -327,7 +327,7 @@ export default function FleetDetailClient({
                   const busyElsewhere = !!busyTruck && busyTruck.id !== truck.id;
                   const onLeaveToday = onLeave.has(d.id);
                   const locked = (busyElsewhere || onLeaveToday) && !isCurrent;
-                  const storedKey = (d.status in DRIVER_STATUS_LABELS ? d.status : "inactive") as DriverStatus;
+                  const storedKey = coerceStoredStatus(d.status);
                   const effKey = effectiveDriverStatus(storedKey, onLeaveToday);
                   return (
                     <tr
