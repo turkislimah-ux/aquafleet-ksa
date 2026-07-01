@@ -4,22 +4,24 @@
 // pass booleans; this file never fetches.
 //
 // Precedence (first match wins):
+//   !active                          -> 'deactivated'  (the drivers.active flag)
 //   onLeave                          -> 'on_leave'
 //   !hasTruck                        -> 'off_duty'
 //   hasTruck && !hasActiveProject    -> 'idle'
 //   hasTruck &&  hasActiveProject    -> 'active'
 //
 // Fact resolution lives at the call site:
+//   active           = drivers.active (deactivation flag)
 //   hasTruck         = some trucks row has assigned_driver_id === driver.id
 //   hasActiveProject = project_drivers joined to a NON-archived project
 //   onLeave          = resolveOnLeave(periods, driverId, date) — reuses lib/leave
 
 import { periodCoversToday, type LeavePeriod } from "./leave";
-import { DRIVER_STATUS_LABELS, type DriverStatus } from "./db-types";
 
-export type DriverState = "active" | "idle" | "off_duty" | "on_leave";
+export type DriverState = "active" | "idle" | "off_duty" | "on_leave" | "deactivated";
 
 export type DriverFacts = {
+  active: boolean;
   hasTruck: boolean;
   hasActiveProject: boolean;
   onLeave: boolean;
@@ -31,6 +33,7 @@ export type DriverFacts = {
 // keeps the signature stable as later commits thread contextual dates.
 export function driverStatusOn(date: string, facts: DriverFacts): DriverState {
   void date;
+  if (!facts.active) return "deactivated";
   if (facts.onLeave) return "on_leave";
   if (!facts.hasTruck) return "off_duty";
   if (!facts.hasActiveProject) return "idle";
@@ -42,6 +45,7 @@ export const DRIVER_STATE_LABELS: Record<DriverState, string> = {
   idle: "Idle",
   off_duty: "Off duty",
   on_leave: "On leave",
+  deactivated: "Deactivated",
 };
 
 // Resolve the on-leave fact for one driver on an arbitrary date, reusing the
@@ -57,11 +61,26 @@ export function resolveOnLeave(
   return false;
 }
 
-// Fold-in of the coercion the recon found duplicated 3x (FleetClient,
-// FleetDetailClient x2). Normalizes an unknown stored drivers.status string to a
-// valid DriverStatus, defaulting unrecognized values to 'inactive'. This is
-// output-preserving — kept so the existing effectiveDriverStatus pills stay
-// byte-identical until Commit 2 migrates them to the 4-state model above.
-export function coerceStoredStatus(status: string): DriverStatus {
-  return (status in DRIVER_STATUS_LABELS ? status : "inactive") as DriverStatus;
+// Build a driver_id -> DriverState map for a set of drivers on `date`. Callers
+// pass pre-built membership sets (truck / active-project) and the raw leave
+// periods; onLeave is resolved per driver via resolveOnLeave. Used by every
+// server surface that renders a derived driver pill, so the resolution lives in
+// exactly one place.
+export function buildDriverStateMap(
+  drivers: { id: string; active: boolean }[],
+  truckDriverIds: Set<string>,
+  activeProjectDriverIds: Set<string>,
+  periods: LeavePeriod[],
+  date: string,
+): Record<string, DriverState> {
+  const out: Record<string, DriverState> = {};
+  for (const d of drivers) {
+    out[d.id] = driverStatusOn(date, {
+      active: d.active,
+      hasTruck: truckDriverIds.has(d.id),
+      hasActiveProject: activeProjectDriverIds.has(d.id),
+      onLeave: resolveOnLeave(periods, d.id, date),
+    });
+  }
+  return out;
 }

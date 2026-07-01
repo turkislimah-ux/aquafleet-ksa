@@ -9,6 +9,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui";
 import { type DriverStatus } from "@/lib/db-types";
+import { type DriverState } from "@/lib/driver-state";
 import DriverRosterTable from "../trips/DriverRosterTable";
 import { setProjectDrivers } from "./actions";
 
@@ -26,6 +27,7 @@ export default function ManageDriversModal({
   trucks,
   driverProjectNames,
   assigned,
+  driverStateById,
   onClose,
 }: {
   project: { id: string; name: string };
@@ -33,6 +35,7 @@ export default function ManageDriversModal({
   trucks: TruckLite[];
   driverProjectNames: Record<string, string[]>;
   assigned: string[];
+  driverStateById?: Record<string, DriverState>;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -79,6 +82,7 @@ export default function ManageDriversModal({
           driverProjectNames={driverProjectNames}
           selected={Array.from(selected)}
           onToggle={toggle}
+          stateByDriver={driverStateById}
         />
 
         {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}

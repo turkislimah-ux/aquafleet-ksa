@@ -1,5 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Trip, WaterType, CommissionMode, ProjectStatus, DriverStatus, ProjectDriver } from "@/lib/db-types";
+import type { LeavePeriod } from "@/lib/leave";
+import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
+import { todayKey } from "@/lib/utils";
 import TripsTabs from "./TripsTabs";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +36,8 @@ type ProjectHeader = {
 export default async function TripsPage() {
   const supabase = createClient();
 
-  const [tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes, stationsRes] =
+  const today = todayKey(); // local (matches trip day-math), not UTC
+  const [tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes, stationsRes, leavePeriodsRes] =
     await Promise.all([
       supabase
         .from("trips")
@@ -61,10 +65,16 @@ export default async function TripsPage() {
         .order("plate", { ascending: true }),
       supabase
         .from("drivers")
-        .select("id, name, status")
+        .select("id, name, status, active")
         .order("name", { ascending: true }),
       supabase.from("project_drivers").select("project_id, driver_id"),
       supabase.from("water_stations").select("key, name, is_default"),
+      // On-leave-today (DB date filter) → onLeave fact for the derived-state pill.
+      supabase
+        .from("leave_periods")
+        .select("id, driver_id, staff_id, leave_type, start_date, end_date, note, created_at")
+        .lte("start_date", today)
+        .gte("end_date", today),
     ]);
 
   const trips = ((tripsRes.data ?? []) as JoinedTrip[]).map((t) => ({
@@ -109,13 +119,28 @@ export default async function TripsPage() {
     assigned_driver_id: string | null;
     last_service_date: string | null;
   }[];
-  const drivers = (driversRes.data ?? []) as { id: string; name: string; status: DriverStatus }[];
+  const drivers = (driversRes.data ?? []) as { id: string; name: string; status: DriverStatus; active: boolean }[];
 
   // Map project_id -> [driver_id, …] for the Manage-drivers modal + driver count.
   const assignmentsByProject: Record<string, string[]> = {};
   for (const a of (assignmentsRes.data ?? []) as Pick<ProjectDriver, "project_id" | "driver_id">[]) {
     (assignmentsByProject[a.project_id] ??= []).push(a.driver_id);
   }
+
+  // ---- Derived driver state map (lib/driver-state) ----
+  // hasActiveProject = a project_drivers row on a NON-archived project. `projects`
+  // above is already active-only, so activeProjectIds is exactly that set.
+  const truckDriverIds = new Set(
+    trucks.map((t) => t.assigned_driver_id).filter((id): id is string => id != null)
+  );
+  const activeProjectDriverIds = new Set<string>();
+  for (const a of (assignmentsRes.data ?? []) as Pick<ProjectDriver, "project_id" | "driver_id">[]) {
+    if (activeProjectIds.has(a.project_id)) activeProjectDriverIds.add(a.driver_id);
+  }
+  const leavePeriods = (leavePeriodsRes.data ?? []) as unknown as LeavePeriod[];
+  const driverStateById: Record<string, DriverState> = buildDriverStateMap(
+    drivers, truckDriverIds, activeProjectDriverIds, leavePeriods, today,
+  );
 
   const error =
     tripsRes.error ||
@@ -124,7 +149,8 @@ export default async function TripsPage() {
     trucksRes.error ||
     driversRes.error ||
     assignmentsRes.error ||
-    stationsRes.error;
+    stationsRes.error ||
+    leavePeriodsRes.error;
 
   return (
     <TripsTabs
@@ -137,6 +163,7 @@ export default async function TripsPage() {
       assignmentsByProject={assignmentsByProject}
       stationsByKey={stationsByKey}
       stations={stations}
+      driverStateById={driverStateById}
     />
   );
 }

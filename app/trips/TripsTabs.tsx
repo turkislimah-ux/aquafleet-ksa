@@ -73,6 +73,7 @@ export default function TripsTabs({
           drivers={boardProps.drivers}
           trucks={boardProps.trucks}
           stations={boardProps.stations}
+          driverStateById={boardProps.driverStateById}
         />
       )}
     </div>

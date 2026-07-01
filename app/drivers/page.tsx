@@ -8,6 +8,7 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Driver, Staff, StaffRole } from "@/lib/db-types";
 import type { LeavePeriod, LeaveType } from "@/lib/leave";
+import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { todayKey } from "@/lib/utils";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
 import type {
@@ -41,7 +42,7 @@ export default async function DriversPage() {
   const supabase = createClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, projectDriversRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       supabase.from("trucks").select("id, plate, model, status, home_station, assigned_driver_id").order("plate", { ascending: true }),
@@ -69,7 +70,7 @@ export default async function DriversPage() {
         .from("commission_adjustments")
         .select("id, driver_id, month_key, label, amount_sar, date, note, status, deny_reason, payout_id")
         .is("payout_id", null),
-      supabase.from("projects").select("id, name"),
+      supabase.from("projects").select("id, name, archived_at"),
       // Frozen History records (newest first; client filters by driver).
       supabase
         .from("commission_payouts")
@@ -96,6 +97,8 @@ export default async function DriversPage() {
         .eq("active", true)
         .order("is_default", { ascending: false })
         .order("label", { ascending: true }),
+      // Project↔driver membership → hasActiveProject fact for the derived pill.
+      supabase.from("project_drivers").select("project_id, driver_id"),
     ]);
 
   const drivers = (driversRes.data ?? []) as Driver[];
@@ -112,7 +115,27 @@ export default async function DriversPage() {
   const leaveTypes = (leaveTypesRes.data ?? []) as LeaveType[];
   const today = todayKey(); // local (matches trip day-math), not UTC
   const projectsById: Record<string, string> = {};
-  for (const p of (projectsRes.data ?? []) as { id: string; name: string }[]) projectsById[p.id] = p.name;
+  const activeProjectIds = new Set<string>();
+  for (const p of (projectsRes.data ?? []) as { id: string; name: string; archived_at: string | null }[]) {
+    projectsById[p.id] = p.name;
+    if (p.archived_at == null) activeProjectIds.add(p.id);
+  }
+
+  // ---- Derived driver state map (lib/driver-state) ----
+  const truckDriverIds = new Set(
+    (trucks as { assigned_driver_id: string | null }[])
+      .map((t) => t.assigned_driver_id)
+      .filter((id): id is string => id != null)
+  );
+  const activeProjectDriverIds = new Set(
+    ((projectDriversRes.data ?? []) as { project_id: string; driver_id: string }[])
+      .filter((r) => activeProjectIds.has(r.project_id))
+      .map((r) => r.driver_id)
+  );
+  const driverStateById: Record<string, DriverState> = buildDriverStateMap(
+    drivers, truckDriverIds, activeProjectDriverIds, leavePeriods, today,
+  );
+
   const error =
     driversRes.error ||
     trucksRes.error ||
@@ -126,7 +149,8 @@ export default async function DriversPage() {
     staffRes.error ||
     staffRolesRes.error ||
     leavePeriodsRes.error ||
-    leaveTypesRes.error;
+    leaveTypesRes.error ||
+    projectDriversRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -165,6 +189,7 @@ export default async function DriversPage() {
       leaveTypes={leaveTypes}
       today={today}
       projectsById={projectsById}
+      driverStateById={driverStateById}
       error={error?.message ?? null}
     />
   );

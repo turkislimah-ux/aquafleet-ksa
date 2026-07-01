@@ -10,6 +10,7 @@ import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import type { CommissionMode, WaterType } from "@/lib/db-types";
+import { type DriverState } from "@/lib/driver-state";
 import ProjectModal, { type ProjectInitial } from "./ProjectModal";
 import BreakdownReport from "./BreakdownReport";
 
@@ -67,6 +68,7 @@ export type CustomersTabProps = {
   drivers: Driver[];
   trucks: TruckLite[];
   stations: Station[];
+  driverStateById: Record<string, DriverState>;
 };
 
 // Build the edit-form pre-fill from a customer + its project + assigned drivers.
@@ -100,6 +102,7 @@ export default function CustomersTab({
   drivers,
   trucks,
   stations,
+  driverStateById,
 }: CustomersTabProps) {
   // Edit modal pre-fill (null = closed).
   const [editing, setEditing] = useState<ProjectInitial | null>(null);
@@ -290,6 +293,7 @@ export default function CustomersTab({
         trucks={trucks}
         driverProjectNames={driverProjectNames}
         stations={stations}
+        driverStateById={driverStateById}
       />
 
       {/* Per-project monthly Breakdown report (numbers + tables + print). */}

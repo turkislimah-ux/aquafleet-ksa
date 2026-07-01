@@ -36,6 +36,7 @@ import {
   TRIP_STAGE_LABELS,
   DRIVER_STATUS_LABELS,
 } from "@/lib/db-types";
+import { type DriverState } from "@/lib/driver-state";
 import { setTripStage } from "./actions";
 import CreateTripForm from "./CreateTripForm";
 import NewProjectModal from "./NewProjectModal";
@@ -529,6 +530,7 @@ export type ProjectsBoardProps = {
   assignmentsByProject: Record<string, string[]>;
   stationsByKey: Record<string, string>;
   stations: { key: string; name: string }[];
+  driverStateById: Record<string, DriverState>;
 };
 
 export default function ProjectsBoard({
@@ -540,6 +542,7 @@ export default function ProjectsBoard({
   assignmentsByProject,
   stationsByKey,
   stations,
+  driverStateById,
 }: ProjectsBoardProps) {
   const router = useRouter();
   const [advancingId, setAdvancingId] = useState<string | null>(null);
@@ -847,6 +850,7 @@ export default function ProjectsBoard({
           trucks={trucks}
           driverProjectNames={driverProjectNames}
           stations={stations}
+          driverStateById={driverStateById}
         />
       </div>
 
@@ -869,6 +873,7 @@ export default function ProjectsBoard({
         openForProject={addTripProjectId}
         onCloseControlled={() => setAddTripProjectId(null)}
         defaultDate={selectedDay}
+        driverStateById={driverStateById}
       />
 
       {/* Project-stacked board */}
@@ -955,6 +960,7 @@ export default function ProjectsBoard({
           trucks={trucks}
           driverProjectNames={driverProjectNames}
           assigned={assignmentsByProject[managing.id] ?? []}
+          driverStateById={driverStateById}
           onClose={() => setManaging(null)}
         />
       )}

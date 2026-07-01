@@ -15,6 +15,7 @@ import {
   MAX_BATCH_TRIPS,
 } from "@/lib/db-types";
 import { createTrip } from "./actions";
+import { type DriverState } from "@/lib/driver-state";
 import DriverDutyTable from "./DriverDutyTable";
 
 type ProjectOption = {
@@ -65,6 +66,7 @@ export default function CreateTripForm({
   openForProject,
   onCloseControlled,
   defaultDate,
+  driverStateById,
 }: {
   projects: ProjectOption[];
   customers: CustomerOption[];
@@ -75,6 +77,8 @@ export default function CreateTripForm({
   // The board's selected calendar day — scopes the duty table's On-Duty count.
   selectedDay: string;
   stations: StationOption[];
+  // Derived driver-state map for the duty table's Status pill (display only).
+  driverStateById: Record<string, DriverState>;
   // When set (from a project card's "Add trip"), open the modal pre-scoped to
   // that project. Full per-project rework (assigned-driver picker, tank/time)
   // lands in Cluster 5; this just preselects + locks the project.
@@ -346,6 +350,7 @@ export default function CreateTripForm({
                   dutyByDriver={dutyByDriver}
                   selected={driverId}
                   onSelect={onSelectDriver}
+                  stateByDriver={driverStateById}
                 />
                 <input type="hidden" name="driver_id" value={driverId ?? ""} />
                 <input type="hidden" name="truck_id" value={derivedTruckId} />

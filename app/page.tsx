@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatSar, todayKey } from "@/lib/utils";
 import { TRIP_STAGE_LABELS } from "@/lib/db-types";
-import { onLeaveTodaySet, effectiveDriverStatus, type LeavePeriod } from "@/lib/leave";
+import { type LeavePeriod } from "@/lib/leave";
+import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import DashboardClient, { type Datasets, type DashboardCharts } from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
@@ -16,15 +17,15 @@ export default async function DashboardPage() {
   const supabase = createClient();
   const today = todayKey(); // local (matches trip day-math), not UTC
 
-  const [trucksRes, tripsRes, driversRes, leavePeriodsRes, archivedProjectsRes] = await Promise.all([
-    supabase.from("trucks").select("id, status, health_score"),
+  const [trucksRes, tripsRes, driversRes, leavePeriodsRes, archivedProjectsRes, projectDriversRes] = await Promise.all([
+    supabase.from("trucks").select("id, status, health_score, assigned_driver_id"),
     supabase
       .from("trips")
       .select(
         "id, ref, stage, trip_date, rate_sar, delivered_at, truck_id, project_id, water_station, water_type, tank_size_m3, truck:trucks(plate)"
       )
       .order("created_at", { ascending: false }),
-    supabase.from("drivers").select("id, status"),
+    supabase.from("drivers").select("id, status, active"),
     // On-leave-today only (DB does the date filter — no inline range check). Feeds
     // lib/leave so the donut/on-duty reflect computed availability, not stored status.
     supabase
@@ -35,6 +36,9 @@ export default async function DashboardPage() {
     // Archived project ids — live KPIs exclude their trips (trips with no project
     // are kept). History/fleet views are unaffected; this is dashboard-only.
     supabase.from("projects").select("id").not("archived_at", "is", null),
+    // Project↔driver membership — feeds the derived hasActiveProject fact (a driver
+    // with a truck but no NON-archived project is "idle", not "active").
+    supabase.from("project_drivers").select("project_id, driver_id"),
   ]);
 
   type JoinedTrip = {
@@ -61,10 +65,29 @@ export default async function DashboardPage() {
     (t) => t.project_id == null || !archivedProjectIds.has(t.project_id)
   );
   const drivers = driversRes.data ?? [];
-  // Computed on-leave-today (authoritative). stored drivers.status='on_leave' is no
-  // longer read directly — effectiveDriverStatus reconciles it with this set.
+  // Raw leave periods feed the derived-state map below (onLeave fact per driver);
+  // stored drivers.status is no longer read for display.
   const leavePeriods = (leavePeriodsRes.data ?? []) as unknown as LeavePeriod[];
-  const onLeaveDrivers = onLeaveTodaySet(leavePeriods, today).drivers;
+
+  // ---- Derived driver state (single source of truth, lib/driver-state) ----
+  // Resolve the three membership facts here; buildDriverStateMap folds in onLeave.
+  const truckDriverIds = new Set(
+    (trucks as { assigned_driver_id: string | null }[])
+      .map((t) => t.assigned_driver_id)
+      .filter((id): id is string => id != null)
+  );
+  const activeProjectDriverIds = new Set(
+    ((projectDriversRes.data ?? []) as { project_id: string; driver_id: string }[])
+      .filter((r) => r.project_id != null && !archivedProjectIds.has(r.project_id))
+      .map((r) => r.driver_id)
+  );
+  const driverStateById = buildDriverStateMap(
+    drivers as { id: string; active: boolean }[],
+    truckDriverIds,
+    activeProjectDriverIds,
+    leavePeriods,
+    today,
+  );
 
   // ---- Fleet KPIs (REAL: trucks.status, trucks.health_score) ----
   const total = trucks.length;
@@ -80,9 +103,9 @@ export default async function DashboardPage() {
     : 0;
 
   // ---- Snapshot KPI: drivers on duty. REAL. ----
-  // Q2: "on duty" maps to effective status === "active" (no on_duty enum). A driver
-  // on leave today is NOT on duty — computed status excludes them.
-  const onDuty = drivers.filter((d) => effectiveDriverStatus(d.status, onLeaveDrivers.has(d.id)) === "active").length;
+  // "On duty" = derived state 'active' (has truck AND a non-archived project, not on
+  // leave, not deactivated). Idle/off_duty/on_leave/deactivated are NOT on duty.
+  const onDuty = drivers.filter((d) => driverStateById[d.id] === "active").length;
 
   // Q4: Revenue (30d) = Σ rate_sar for delivered trips in the last 30 days. REAL.
   const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
@@ -219,13 +242,16 @@ export default async function DashboardPage() {
   const tripBy: Record<string, number> = {};
   trips.forEach((t) => { tripBy[t.stage] = (tripBy[t.stage] ?? 0) + 1; });
 
-  // drivers by status — COMPUTED. On-leave-today drivers count as on_leave ONLY
-  // (removed from active), so slices stay mutually exclusive and sum to total.
-  const driverStatusLabel: Record<string, string> = { active: "Active", on_leave: "On Leave", inactive: "Inactive" };
-  const driverStatusColor: Record<string, string> = { active: "#10b981", on_leave: "#f59e0b", inactive: "#94a3b8" };
+  // drivers by DERIVED state — 5 mutually-exclusive buckets (sum to total).
+  const driverStatusLabel: Record<string, string> = {
+    active: "Active", idle: "Idle", off_duty: "Off duty", on_leave: "On leave", deactivated: "Deactivated",
+  };
+  const driverStatusColor: Record<string, string> = {
+    active: "#10b981", idle: "#3b82f6", off_duty: "#0b7eea", on_leave: "#f59e0b", deactivated: "#94a3b8",
+  };
   const driverBy: Record<string, number> = {};
   drivers.forEach((d) => {
-    const s = effectiveDriverStatus(d.status, onLeaveDrivers.has(d.id));
+    const s = driverStateById[d.id];
     driverBy[s] = (driverBy[s] ?? 0) + 1;
   });
 

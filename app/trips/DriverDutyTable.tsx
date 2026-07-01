@@ -11,7 +11,8 @@
 // Truck-by-driver is derived here from the flat `trucks` list (0/1 per driver).
 
 import { useMemo } from "react";
-import { Table, TH, TD } from "@/components/ui";
+import { Table, TH, TD, StatusPill } from "@/components/ui";
+import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 
 type Driver = { id: string; name: string; status?: string };
 type TruckLite = { id: string; plate: string; assigned_driver_id: string | null };
@@ -23,12 +24,15 @@ export default function DriverDutyTable({
   dutyByDriver,
   selected,
   onSelect,
+  stateByDriver,
 }: {
   drivers: Driver[];
   trucks: TruckLite[];
   dutyByDriver: Record<string, Duty>;
   selected: string | null;
   onSelect: (id: string) => void;
+  // Derived driver-state map (display-only Status pill). Optional: omit to hide.
+  stateByDriver?: Record<string, DriverState>;
 }) {
   const truckByDriver = useMemo(() => {
     const m = new Map<string, TruckLite>();
@@ -52,6 +56,7 @@ export default function DriverDutyTable({
             <tr>
               <TH></TH>
               <TH>Driver</TH>
+              {stateByDriver && <TH>Status</TH>}
               <TH>Assigned truck</TH>
               <TH>On duty</TH>
               <TH>Last delivered</TH>
@@ -87,6 +92,15 @@ export default function DriverDutyTable({
                     </span>
                   </TD>
                   <TD className="font-medium">{d.name}</TD>
+                  {stateByDriver && (
+                    <TD>
+                      {stateByDriver[d.id] ? (
+                        <StatusPill status={stateByDriver[d.id]} label={DRIVER_STATE_LABELS[stateByDriver[d.id]]} />
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </TD>
+                  )}
                   <TD>
                     {truck ? (
                       <span className="tabular-nums">{truck.plate}</span>

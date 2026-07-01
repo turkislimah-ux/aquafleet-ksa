@@ -19,6 +19,7 @@ import { Btn } from "@/components/ui";
 import { CUSTOMER_TYPE_LABELS, WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
 import { formatSar } from "@/lib/utils";
 import { archiveProject, createProjectWithCustomer, updateProjectWithCustomer } from "./actions";
+import { type DriverState } from "@/lib/driver-state";
 import DriverRosterTable from "./DriverRosterTable";
 
 const INPUT =
@@ -68,6 +69,7 @@ export default function ProjectModal({
   driverProjectNames,
   stations,
   initial,
+  driverStateById,
 }: {
   open: boolean;
   onClose: () => void;
@@ -77,6 +79,7 @@ export default function ProjectModal({
   driverProjectNames: Record<string, string[]>;
   stations: Station[];
   initial?: ProjectInitial | null;
+  driverStateById?: Record<string, DriverState>;
 }) {
   const router = useRouter();
   const defaultStation = useMemo(
@@ -440,6 +443,7 @@ export default function ProjectModal({
               driverProjectNames={driverProjectNames}
               selected={selected}
               onToggle={toggleDriver}
+              stateByDriver={driverStateById}
             />
           </section>
 

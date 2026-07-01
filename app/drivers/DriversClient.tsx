@@ -28,7 +28,8 @@ import {
   type TruckStatus,
 } from "@/lib/db-types";
 import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
-import { effectiveDriverStatus, onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
+import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
+import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 import { createDriver, updateDriver } from "./actions";
 import LeaveSection from "./LeaveSection";
 import CommissionsTab, {
@@ -75,8 +76,9 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-function driverPill(s: Driver["status"]) {
-  return <StatusPill status={s} label={DRIVER_STATUS_LABELS[s]} />;
+// Derived-state pill (single source of truth, lib/driver-state).
+function driverStatePill(s: DriverState) {
+  return <StatusPill status={s} label={DRIVER_STATE_LABELS[s]} />;
 }
 
 export default function DriversClient({
@@ -95,6 +97,7 @@ export default function DriversClient({
   leaveTypes,
   today,
   projectsById,
+  driverStateById,
   error,
 }: {
   drivers: Driver[];
@@ -112,6 +115,7 @@ export default function DriversClient({
   leaveTypes: LeaveType[];
   today: string;
   projectsById: Record<string, string>;
+  driverStateById: Record<string, DriverState>;
   error: string | null;
 }) {
   const router = useRouter();
@@ -130,8 +134,8 @@ export default function DriversClient({
   }, [trucks]);
   const driverNameById = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers]);
 
-  // COMPUTED on-leave-today (authoritative). The stored drivers.status enum is no
-  // longer the source of on-leave truth — effectiveDriverStatus() reconciles them.
+  // COMPUTED on-leave-today (authoritative). Used for the detail modal's leave
+  // section; the derived pill comes from driverStateById (server-resolved).
   const onLeaveDrivers = useMemo(() => onLeaveTodaySet(leavePeriods, today).drivers, [leavePeriods, today]);
   const driverLeaveById = useMemo(() => {
     const m = new Map<string, LeavePeriod[]>();
@@ -141,7 +145,7 @@ export default function DriversClient({
     }
     return m;
   }, [leavePeriods]);
-  const pillFor = (d: Driver) => driverPill(effectiveDriverStatus(d.status, onLeaveDrivers.has(d.id)));
+  const pillFor = (d: Driver) => driverStatePill(driverStateById[d.id] ?? "off_duty");
 
   // KPIs — honest: averages/sums skip null, "On Duty" derived from assignment.
   const total = drivers.length;
@@ -357,6 +361,7 @@ export default function DriversClient({
           leaveTypes={leaveTypes}
           today={today}
           onLeaveToday={onLeaveDrivers.has(detail.id)}
+          state={driverStateById[detail.id] ?? "off_duty"}
           onClose={() => setDetail(null)}
           onEdit={() => {
             const d = detail;
@@ -506,6 +511,7 @@ function DriverDetail({
   leaveTypes,
   today,
   onLeaveToday,
+  state,
   onClose,
   onEdit,
 }: {
@@ -517,6 +523,7 @@ function DriverDetail({
   leaveTypes: LeaveType[];
   today: string;
   onLeaveToday: boolean;
+  state: DriverState;
   onClose: () => void;
   onEdit: () => void;
 }) {
@@ -540,7 +547,7 @@ function DriverDetail({
               <div className="font-semibold">{d.name}{d.name_ar ? <span className="muted font-normal"> · {d.name_ar}</span> : null}</div>
               <div className="text-xs muted">{d.home_station ?? "—"}</div>
             </div>
-            {driverPill(effectiveDriverStatus(d.status, onLeaveToday))}
+            {driverStatePill(state)}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">

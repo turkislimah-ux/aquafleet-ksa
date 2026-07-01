@@ -12,13 +12,9 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Card, Stat, StatusPill, Section, Btn, Table, TH, TD } from "@/components/ui";
-import {
-  TRUCK_STATUS_LABELS,
-  DRIVER_STATUS_LABELS,
-} from "@/lib/db-types";
+import { TRUCK_STATUS_LABELS } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "../page";
-import { effectiveDriverStatus } from "@/lib/leave";
-import { coerceStoredStatus } from "@/lib/driver-state";
+import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 import { assignDriver, unassignDriver } from "../actions";
 import TruckFormModal from "../TruckFormModal";
 import { cn, formatNum } from "@/lib/utils";
@@ -51,6 +47,7 @@ export default function FleetDetailClient({
   drivers,
   trips30d,
   onLeaveDriverIds,
+  driverStateById,
   errorMsg,
 }: {
   truck: TruckRow | null;
@@ -58,6 +55,7 @@ export default function FleetDetailClient({
   drivers: DriverLite[];
   trips30d: Record<string, number>;
   onLeaveDriverIds: string[];
+  driverStateById: Record<string, DriverState>;
   errorMsg: string | null;
 }) {
   const router = useRouter();
@@ -219,9 +217,8 @@ export default function FleetDetailClient({
                   <div>
                     <div className="font-medium">{driver.name}</div>
                     {(() => {
-                      const storedKey = coerceStoredStatus(driver.status);
-                      const effKey = effectiveDriverStatus(storedKey, onLeave.has(driver.id));
-                      return <StatusPill status={effKey} label={DRIVER_STATUS_LABELS[effKey]} />;
+                      const state = driverStateById[driver.id] ?? "off_duty";
+                      return <StatusPill status={state} label={DRIVER_STATE_LABELS[state]} />;
                     })()}
                   </div>
                 </div>
@@ -327,8 +324,7 @@ export default function FleetDetailClient({
                   const busyElsewhere = !!busyTruck && busyTruck.id !== truck.id;
                   const onLeaveToday = onLeave.has(d.id);
                   const locked = (busyElsewhere || onLeaveToday) && !isCurrent;
-                  const storedKey = coerceStoredStatus(d.status);
-                  const effKey = effectiveDriverStatus(storedKey, onLeaveToday);
+                  const state = driverStateById[d.id] ?? "off_duty";
                   return (
                     <tr
                       key={d.id}
@@ -342,7 +338,7 @@ export default function FleetDetailClient({
                     >
                       <TD className="font-medium">{d.name}</TD>
                       <TD>
-                        <StatusPill status={effKey} label={DRIVER_STATUS_LABELS[effKey]} />
+                        <StatusPill status={state} label={DRIVER_STATE_LABELS[state]} />
                       </TD>
                       <TD className={cn("text-xs", busyElsewhere || onLeaveToday ? "muted" : "text-emerald-600 dark:text-emerald-400 font-medium")}>
                         {busyElsewhere

@@ -14,6 +14,7 @@ import {
   COMMISSION_MODE_LABELS,
   PROJECT_STATUS_LABELS,
 } from "@/lib/db-types";
+import { type DriverState } from "@/lib/driver-state";
 import { createProject, updateProject } from "./actions";
 import ManageDriversModal, { type DriverOption } from "./ManageDriversModal";
 
@@ -36,12 +37,14 @@ export default function ProjectForm({
   drivers,
   trucks,
   assignmentsByProject,
+  driverStateById,
 }: {
   projects: ProjectRow[];
   customers: CustomerOption[];
   drivers: DriverOption[];
   trucks: TruckLite[];
   assignmentsByProject: Record<string, string[]>;
+  driverStateById: Record<string, DriverState>;
 }) {
   const router = useRouter();
 
@@ -222,6 +225,7 @@ export default function ProjectForm({
           trucks={trucks}
           driverProjectNames={driverProjectNames}
           assigned={assignmentsByProject[managing.id] ?? []}
+          driverStateById={driverStateById}
           onClose={() => setManaging(null)}
         />
       )}

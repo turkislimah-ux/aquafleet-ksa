@@ -12,11 +12,9 @@ import { PageHeader, Card, Stat, StatusPill, Bar, Btn, Table, TH, TD } from "@/c
 import {
   type TruckStatus,
   TRUCK_STATUS_LABELS,
-  DRIVER_STATUS_LABELS,
   STATION_OPTIONS,
 } from "@/lib/db-types";
-import { effectiveDriverStatus } from "@/lib/leave";
-import { coerceStoredStatus } from "@/lib/driver-state";
+import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 import type { TruckRow, DriverLite } from "./page";
 import { assignDriver, unassignDriver } from "./actions";
 import TruckFormModal from "./TruckFormModal";
@@ -54,6 +52,7 @@ export default function FleetClient({
   drivers,
   trips30d,
   onLeaveDriverIds,
+  driverStateById,
   kpis,
   errorMsg,
 }: {
@@ -61,6 +60,7 @@ export default function FleetClient({
   drivers: DriverLite[];
   trips30d: Record<string, number>;
   onLeaveDriverIds: string[];
+  driverStateById: Record<string, DriverState>;
   kpis: Kpis;
   errorMsg: string | null;
 }) {
@@ -394,8 +394,7 @@ export default function FleetClient({
                   const onLeaveToday = onLeave.has(d.id);
                   // UI-only lock: busy elsewhere OR on leave today (never the current driver).
                   const locked = (busyElsewhere || onLeaveToday) && !isCurrent;
-                  const storedKey = coerceStoredStatus(d.status);
-                  const effKey = effectiveDriverStatus(storedKey, onLeaveToday);
+                  const state = driverStateById[d.id] ?? "off_duty";
                   return (
                     <tr
                       key={d.id}
@@ -409,7 +408,7 @@ export default function FleetClient({
                     >
                       <TD className="font-medium">{d.name}</TD>
                       <TD>
-                        <StatusPill status={effKey} label={DRIVER_STATUS_LABELS[effKey]} />
+                        <StatusPill status={state} label={DRIVER_STATE_LABELS[state]} />
                       </TD>
                       <TD className={cn("text-xs", busyElsewhere || onLeaveToday ? "muted" : "text-emerald-600 dark:text-emerald-400 font-medium")}>
                         {busyElsewhere ? `Already assigned · ${busyTruck!.plate}` : onLeaveToday ? "On leave today" : "Available"}

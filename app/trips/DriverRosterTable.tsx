@@ -11,7 +11,8 @@
 
 import { useMemo } from "react";
 import { Check } from "lucide-react";
-import { Table, TH, TD } from "@/components/ui";
+import { Table, TH, TD, StatusPill } from "@/components/ui";
+import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 
 type Driver = { id: string; name: string; status?: string };
 type TruckLite = {
@@ -40,12 +41,15 @@ export default function DriverRosterTable({
   driverProjectNames,
   selected,
   onToggle,
+  stateByDriver,
 }: {
   drivers: Driver[];
   trucks: TruckLite[];
   driverProjectNames: Record<string, string[]>;
   selected: string[];
   onToggle: (id: string) => void;
+  // Derived driver-state map (display-only Status pill). Optional: omit to hide.
+  stateByDriver?: Record<string, DriverState>;
 }) {
   // driver_id → its truck (0/1 per driver via the unique partial index).
   const truckByDriver = useMemo(() => {
@@ -70,6 +74,7 @@ export default function DriverRosterTable({
             <tr>
               <TH></TH>
               <TH>Driver</TH>
+              {stateByDriver && <TH>Status</TH>}
               <TH>Assigned truck</TH>
               <TH>Last serviced</TH>
               <TH>Project(s)</TH>
@@ -101,6 +106,15 @@ export default function DriverRosterTable({
                     </span>
                   </TD>
                   <TD className="font-medium">{d.name}</TD>
+                  {stateByDriver && (
+                    <TD>
+                      {stateByDriver[d.id] ? (
+                        <StatusPill status={stateByDriver[d.id]} label={DRIVER_STATE_LABELS[stateByDriver[d.id]]} />
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </TD>
+                  )}
                   <TD>
                     {truck ? (
                       <span className="tabular-nums">{truck.plate}</span>

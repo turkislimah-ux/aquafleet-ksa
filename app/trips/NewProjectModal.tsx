@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
 import { Btn } from "@/components/ui";
+import { type DriverState } from "@/lib/driver-state";
 import ProjectModal from "./ProjectModal";
 
 type Driver = { id: string; name: string; status?: string };
@@ -25,11 +26,13 @@ export default function NewProjectModal({
   trucks,
   driverProjectNames,
   stations,
+  driverStateById,
 }: {
   drivers: Driver[];
   trucks: TruckLite[];
   driverProjectNames: Record<string, string[]>;
   stations: Station[];
+  driverStateById?: Record<string, DriverState>;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -46,6 +49,7 @@ export default function NewProjectModal({
         trucks={trucks}
         driverProjectNames={driverProjectNames}
         stations={stations}
+        driverStateById={driverStateById}
       />
     </>
   );
