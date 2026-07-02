@@ -22,7 +22,6 @@ import {
   type Driver,
   type Staff,
   type StaffRole,
-  DRIVER_STATUS_LABELS,
   TRUCK_STATUS_LABELS,
   STATION_OPTIONS,
   type TruckStatus,
@@ -393,17 +392,6 @@ export default function DriversClient({
               </Field>
               <Field label="Hire date">
                 <input name="hire_date" type="date" defaultValue={editing?.hire_date ?? ""} className={INPUT} style={INPUT_STYLE} />
-              </Field>
-              <Field label="Status">
-                {/* "On leave" is computed from leave periods (see Leave & absence
-                    in the detail view), never set manually — so it is omitted here. */}
-                <select name="status" defaultValue={editing?.status === "on_leave" ? "active" : editing?.status ?? "active"} className={INPUT} style={INPUT_STYLE}>
-                  {Object.entries(DRIVER_STATUS_LABELS)
-                    .filter(([v]) => v !== "on_leave")
-                    .map(([v, l]) => (
-                      <option key={v} value={v}>{l}</option>
-                    ))}
-                </select>
               </Field>
               <Field label="Station">
                 <select name="home_station" defaultValue={editing?.home_station ?? ""} className={INPUT} style={INPUT_STYLE}>

@@ -8,8 +8,6 @@
 // `today` is always passed in as an ISO date string (YYYY-MM-DD) so callers
 // control the clock (server "now" sliced to a date) and tests stay deterministic.
 
-import type { DriverStatus } from "./db-types";
-
 // One row of the leave_types lookup table (extensible; built-ins seeded).
 export type LeaveType = {
   id: string;
@@ -71,18 +69,4 @@ export function onLeaveTodaySet(
     if (p.staff_id) staff.add(p.staff_id);
   }
   return { drivers, staff };
-}
-
-// Effective driver status for display. Computed leave WINS: if on leave today,
-// status is "on_leave" regardless of the stored value. Otherwise the stored
-// "on_leave" enum is no longer authoritative — collapse it to "active" so the
-// only source of on-leave truth is leave_periods. All other stored values pass
-// through unchanged.
-export function effectiveDriverStatus(
-  stored: DriverStatus,
-  onLeaveToday: boolean,
-): DriverStatus {
-  if (onLeaveToday) return "on_leave";
-  if (stored === "on_leave") return "active";
-  return stored;
 }

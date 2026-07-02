@@ -33,7 +33,9 @@ function parse(formData: FormData) {
     name_ar: nullable(formData.get("name_ar")),
     iqama_number: nullable(formData.get("iqama_number")),
     license_expiry: nullable(formData.get("license_expiry")),
-    status: str(formData.get("status")) || "active",
+    // status is dead (Commit 4): derived driver state (lib/driver-state.ts)
+    // reads drivers.active, not this column. No longer written from the form —
+    // the DB column + NOT NULL DEFAULT 'active' stay untouched.
     safety_score: numOrNull(formData.get("safety_score")),
     rating: numOrNull(formData.get("rating")),
     phone: nullable(formData.get("phone")),
