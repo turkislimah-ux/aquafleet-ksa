@@ -74,6 +74,7 @@ export default function TripsTabs({
           trucks={boardProps.trucks}
           stations={boardProps.stations}
           driverStateById={boardProps.driverStateById}
+          leaveUnavailable={boardProps.leaveLoadFailed}
         />
       )}
     </div>

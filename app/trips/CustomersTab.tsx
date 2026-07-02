@@ -69,6 +69,8 @@ export type CustomersTabProps = {
   trucks: TruckLite[];
   stations: Station[];
   driverStateById: Record<string, DriverState>;
+  // Fail-safe: leave data failed to load — block NEW roster selections.
+  leaveUnavailable?: boolean;
 };
 
 // Build the edit-form pre-fill from a customer + its project + assigned drivers.
@@ -103,6 +105,7 @@ export default function CustomersTab({
   trucks,
   stations,
   driverStateById,
+  leaveUnavailable,
 }: CustomersTabProps) {
   // Edit modal pre-fill (null = closed).
   const [editing, setEditing] = useState<ProjectInitial | null>(null);
@@ -294,6 +297,7 @@ export default function CustomersTab({
         driverProjectNames={driverProjectNames}
         stations={stations}
         driverStateById={driverStateById}
+        leaveUnavailable={leaveUnavailable}
       />
 
       {/* Per-project monthly Breakdown report (numbers + tables + print). */}

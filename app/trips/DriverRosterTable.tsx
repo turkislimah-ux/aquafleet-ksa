@@ -42,6 +42,7 @@ export default function DriverRosterTable({
   selected,
   onToggle,
   stateByDriver,
+  leaveUnavailable,
 }: {
   drivers: Driver[];
   trucks: TruckLite[];
@@ -49,7 +50,12 @@ export default function DriverRosterTable({
   selected: string[];
   onToggle: (id: string) => void;
   // Derived driver-state map (display-only Status pill). Optional: omit to hide.
+  // Also drives roster gating: on_leave (today) and deactivated are BLOCKED here
+  // (off_duty / no-truck drivers stay rosterable).
   stateByDriver?: Record<string, DriverState>;
+  // Fail-safe: leave data failed to load — block NEW selections (don't fail-open).
+  // Already-selected drivers are preserved (locked, not dropped).
+  leaveUnavailable?: boolean;
 }) {
   // driver_id → its truck (0/1 per driver via the unique partial index).
   const truckByDriver = useMemo(() => {
@@ -86,13 +92,31 @@ export default function DriverRosterTable({
               const truck = truckByDriver.get(d.id) ?? null;
               const serviced = truck ? fmtServiceDate(truck.last_service_date) : null;
               const projNames = driverProjectNames[d.id] ?? [];
+              // Roster gating: on_leave (today) + deactivated are BLOCKED. off_duty
+              // (no truck) stays selectable. On leave-load failure, block everything.
+              // LOCK blocked rows (no toggle) — this both prevents NEW selection and
+              // preserves an ALREADY-selected driver who just became blocked (their
+              // assignment is never silently dropped).
+              const state = stateByDriver?.[d.id];
+              const blockedByState = state === "on_leave" || state === "deactivated";
+              const locked = !!leaveUnavailable || blockedByState;
+              const reason =
+                state === "deactivated"
+                  ? "Deactivated"
+                  : state === "on_leave"
+                    ? "On leave"
+                    : leaveUnavailable
+                      ? "Leave unavailable"
+                      : null;
               return (
                 <tr
                   key={d.id}
-                  onClick={() => onToggle(d.id)}
+                  onClick={locked ? undefined : () => onToggle(d.id)}
                   className={
-                    "cursor-pointer " +
-                    (on ? "bg-brand-500/10" : "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]")
+                    locked
+                      ? "cursor-not-allowed " + (on ? "opacity-70 bg-brand-500/5" : "opacity-50")
+                      : "cursor-pointer " +
+                        (on ? "bg-brand-500/10" : "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]")
                   }
                 >
                   <TD>
@@ -105,7 +129,15 @@ export default function DriverRosterTable({
                       {on && <Check className="h-3 w-3" />}
                     </span>
                   </TD>
-                  <TD className="font-medium">{d.name}</TD>
+                  <TD className="font-medium">
+                    {d.name}
+                    {locked && reason && (
+                      <div className="text-[11px] font-normal text-amber-600 dark:text-amber-400">
+                        {reason}
+                        {on ? " · kept" : ""}
+                      </div>
+                    )}
+                  </TD>
                   {stateByDriver && (
                     <TD>
                       {stateByDriver[d.id] ? (

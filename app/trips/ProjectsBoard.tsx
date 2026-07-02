@@ -34,9 +34,9 @@ import {
   STAGE_ORDER,
   STAGE_STYLES,
   TRIP_STAGE_LABELS,
-  DRIVER_STATUS_LABELS,
 } from "@/lib/db-types";
-import { type DriverState } from "@/lib/driver-state";
+import { type DriverState, DRIVER_STATE_LABELS } from "@/lib/driver-state";
+import { type LeavePeriod } from "@/lib/leave";
 import { setTripStage } from "./actions";
 import CreateTripForm from "./CreateTripForm";
 import NewProjectModal from "./NewProjectModal";
@@ -78,7 +78,7 @@ const EMPTY_REPORT: ProjectReport = { dayN: 0, weekN: 0, monthN: 0, quarterN: 0 
 type DriverRow = {
   id: string;
   name: string;
-  status: DriverStatus;
+  status: DriverState; // derived (Commit 2), NOT raw stored drivers.status
   truckPlate: string | null;
   tripsDay: number;
   commissionDay: number;
@@ -485,8 +485,18 @@ function ProjectCard({
               </tr>
             </thead>
             <tbody>
-              {driverRows.map((r) => (
-                <tr key={r.id} className="hover:bg-black/[0.02] dark:hover:bg-white/[0.03]">
+              {driverRows.map((r) => {
+                // Cosmetic-only de-emphasis — off_duty/on_leave rows dim; active,
+                // idle, deactivated stay normal weight. Read-only table: no
+                // interaction/disable change, just an at-a-glance signal.
+                const muted = r.status === "off_duty" || r.status === "on_leave";
+                return (
+                <tr
+                  key={r.id}
+                  className={
+                    "hover:bg-black/[0.02] dark:hover:bg-white/[0.03] " + (muted ? "opacity-60" : "")
+                  }
+                >
                   <TD>
                     <div className="flex items-center gap-2">
                       <div className="h-7 w-7 rounded-full bg-brand-600 text-white grid place-items-center text-[11px] font-semibold shrink-0">
@@ -502,7 +512,9 @@ function ProjectCard({
                     {r.truckPlate ?? <span className="muted">—</span>}
                   </TD>
                   <TD>
-                    <StatusPill status={r.status} label={DRIVER_STATUS_LABELS[r.status]} />
+                    {/* Pill's own classes (tone/color/dot) are untouched — it just
+                        rides the row's opacity like every other cell. */}
+                    <StatusPill status={r.status} label={DRIVER_STATE_LABELS[r.status]} />
                   </TD>
                   <TD className="tabular-nums font-medium">{r.tripsDay}</TD>
                   <TD className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
@@ -512,7 +524,8 @@ function ProjectCard({
                     {r.lastTripDate ? fmtDayKey(r.lastTripDate) : <span className="muted">—</span>}
                   </TD>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </Table>
         )}
@@ -531,6 +544,10 @@ export type ProjectsBoardProps = {
   stationsByKey: Record<string, string>;
   stations: { key: string; name: string }[];
   driverStateById: Record<string, DriverState>;
+  // FULL leave periods (any date) — Add Trip resolves on-leave for the selected day.
+  leavePeriods: LeavePeriod[];
+  // Fail-safe flag: leave data failed to load → block/flag in assignment surfaces.
+  leaveLoadFailed: boolean;
 };
 
 export default function ProjectsBoard({
@@ -543,6 +560,8 @@ export default function ProjectsBoard({
   stationsByKey,
   stations,
   driverStateById,
+  leavePeriods,
+  leaveLoadFailed,
 }: ProjectsBoardProps) {
   const router = useRouter();
   const [advancingId, setAdvancingId] = useState<string | null>(null);
@@ -640,7 +659,12 @@ export default function ProjectsBoard({
         rows.push({
           id,
           name: d.name,
-          status: d.status,
+          // Derived state (Commit 2), not raw d.status. Fallback "off_duty" if a
+          // driver is somehow missing from driverStateById — shouldn't happen
+          // (same drivers array feeds both), but degrade to the safe "not
+          // working" default, never "active" (fail-closed, same spirit as the
+          // leave gate). Never crash the summary table either way.
+          status: driverStateById[id] ?? "off_duty",
           truckPlate: truckByDriver.get(id) ?? null,
           tripsDay: a?.tripsDay ?? 0,
           commissionDay: a?.commissionDay ?? 0,
@@ -650,7 +674,7 @@ export default function ProjectsBoard({
       m.set(p.id, rows);
     }
     return m;
-  }, [trips, selectedDay, drivers, trucks, assignmentsByProject, projects]);
+  }, [trips, selectedDay, drivers, trucks, assignmentsByProject, projects, driverStateById]);
 
   // driver_id -> [project name…] for the project form's driver roster (which
   // projects each driver already serves). Inverts assignmentsByProject + names.
@@ -851,6 +875,7 @@ export default function ProjectsBoard({
           driverProjectNames={driverProjectNames}
           stations={stations}
           driverStateById={driverStateById}
+          leaveUnavailable={leaveLoadFailed}
         />
       </div>
 
@@ -874,6 +899,8 @@ export default function ProjectsBoard({
         onCloseControlled={() => setAddTripProjectId(null)}
         defaultDate={selectedDay}
         driverStateById={driverStateById}
+        leavePeriods={leavePeriods}
+        leaveLoadFailed={leaveLoadFailed}
       />
 
       {/* Project-stacked board */}
@@ -961,6 +988,7 @@ export default function ProjectsBoard({
           driverProjectNames={driverProjectNames}
           assigned={assignmentsByProject[managing.id] ?? []}
           driverStateById={driverStateById}
+          leaveUnavailable={leaveLoadFailed}
           onClose={() => setManaging(null)}
         />
       )}

@@ -25,6 +25,8 @@ export default function DriverDutyTable({
   selected,
   onSelect,
   stateByDriver,
+  leaveBlockedIds,
+  leaveUnavailable,
 }: {
   drivers: Driver[];
   trucks: TruckLite[];
@@ -33,6 +35,12 @@ export default function DriverDutyTable({
   onSelect: (id: string) => void;
   // Derived driver-state map (display-only Status pill). Optional: omit to hide.
   stateByDriver?: Record<string, DriverState>;
+  // driver_ids on leave for the SELECTED trip day (parent resolves via
+  // resolveOnLeave). A blocked driver can't take a trip that day.
+  leaveBlockedIds?: Set<string>;
+  // Fail-safe: leave data failed to load — block EVERYONE (don't fail-open into
+  // "nobody on leave"). Shows a distinct reason.
+  leaveUnavailable?: boolean;
 }) {
   const truckByDriver = useMemo(() => {
     const m = new Map<string, TruckLite>();
@@ -66,9 +74,24 @@ export default function DriverDutyTable({
             {drivers.map((d) => {
               const on = selected === d.id;
               const truck = truckByDriver.get(d.id) ?? null;
-              // No truck → can't dispatch: row is fogged + not selectable. (Truck is
-              // auto-derived from the driver, so a pickable driver always has one.)
-              const disabled = !truck;
+              // BLOCKED (fogged + not selectable) if ANY: deactivated, on leave for
+              // the selected trip day, or no truck (can't dispatch). deactivated is
+              // read from the derived state map (date-agnostic active flag); leave is
+              // resolved for the selected day by the parent. Reason priority:
+              // deactivated > leave > no-truck.
+              const deactivated = stateByDriver?.[d.id] === "deactivated";
+              const onLeaveSel = !!leaveUnavailable || !!leaveBlockedIds?.has(d.id);
+              const noTruck = !truck;
+              const disabled = deactivated || onLeaveSel || noTruck;
+              const reason = deactivated
+                ? "Deactivated"
+                : onLeaveSel
+                  ? leaveUnavailable
+                    ? "Leave unavailable"
+                    : "On leave"
+                  : noTruck
+                    ? "No truck"
+                    : null;
               const duty = dutyByDriver[d.id] ?? { onDuty: 0, lastDelivered: null };
               return (
                 <tr
@@ -91,7 +114,14 @@ export default function DriverDutyTable({
                       {on && <span className="h-2 w-2 rounded-full bg-brand-600" />}
                     </span>
                   </TD>
-                  <TD className="font-medium">{d.name}</TD>
+                  <TD className="font-medium">
+                    {d.name}
+                    {disabled && reason && (
+                      <div className="text-[11px] font-normal text-amber-600 dark:text-amber-400">
+                        {reason}
+                      </div>
+                    )}
+                  </TD>
                   {stateByDriver && (
                     <TD>
                       {stateByDriver[d.id] ? (

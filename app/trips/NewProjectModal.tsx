@@ -27,12 +27,15 @@ export default function NewProjectModal({
   driverProjectNames,
   stations,
   driverStateById,
+  leaveUnavailable,
 }: {
   drivers: Driver[];
   trucks: TruckLite[];
   driverProjectNames: Record<string, string[]>;
   stations: Station[];
   driverStateById?: Record<string, DriverState>;
+  // Fail-safe: leave data failed to load — block NEW roster selections.
+  leaveUnavailable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -50,6 +53,7 @@ export default function NewProjectModal({
         driverProjectNames={driverProjectNames}
         stations={stations}
         driverStateById={driverStateById}
+        leaveUnavailable={leaveUnavailable}
       />
     </>
   );

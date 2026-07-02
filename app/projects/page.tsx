@@ -84,6 +84,8 @@ export default async function ProjectsPage() {
     leavePeriods,
     today
   );
+  // Fail-safe: if leave data failed to load, roster selection must NOT fail-open.
+  const leaveLoadFailed = !!leavePeriodsRes.error;
 
   const error =
     projectsRes.error ||
@@ -108,6 +110,7 @@ export default async function ProjectsPage() {
         trucks={trucks}
         assignmentsByProject={assignmentsByProject}
         driverStateById={driverStateById}
+        leaveLoadFailed={leaveLoadFailed}
       />
     </div>
   );

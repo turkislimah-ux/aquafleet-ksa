@@ -28,6 +28,7 @@ export default function ManageDriversModal({
   driverProjectNames,
   assigned,
   driverStateById,
+  leaveUnavailable,
   onClose,
 }: {
   project: { id: string; name: string };
@@ -36,6 +37,8 @@ export default function ManageDriversModal({
   driverProjectNames: Record<string, string[]>;
   assigned: string[];
   driverStateById?: Record<string, DriverState>;
+  // Fail-safe: leave data failed to load — block NEW roster selections.
+  leaveUnavailable?: boolean;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -83,6 +86,7 @@ export default function ManageDriversModal({
           selected={Array.from(selected)}
           onToggle={toggle}
           stateByDriver={driverStateById}
+          leaveUnavailable={leaveUnavailable}
         />
 
         {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}

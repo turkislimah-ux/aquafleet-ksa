@@ -69,12 +69,12 @@ export default async function TripsPage() {
         .order("name", { ascending: true }),
       supabase.from("project_drivers").select("project_id, driver_id"),
       supabase.from("water_stations").select("key, name, is_default"),
-      // On-leave-today (DB date filter) → onLeave fact for the derived-state pill.
+      // FULL leave periods (NOT today-prefiltered): the pill still resolves "today"
+      // via buildDriverStateMap, but Add Trip also needs on-leave for an ARBITRARY
+      // selected calendar day, so the raw periods must cover any date.
       supabase
         .from("leave_periods")
-        .select("id, driver_id, staff_id, leave_type, start_date, end_date, note, created_at")
-        .lte("start_date", today)
-        .gte("end_date", today),
+        .select("id, driver_id, staff_id, leave_type, start_date, end_date, note, created_at"),
     ]);
 
   const trips = ((tripsRes.data ?? []) as JoinedTrip[]).map((t) => ({
@@ -141,6 +141,9 @@ export default async function TripsPage() {
   const driverStateById: Record<string, DriverState> = buildDriverStateMap(
     drivers, truckDriverIds, activeProjectDriverIds, leavePeriods, today,
   );
+  // Fail-safe: if leave data failed to load, the assignment surfaces must NOT
+  // fail-open (treat everyone as available). This flag blocks/flags instead.
+  const leaveLoadFailed = !!leavePeriodsRes.error;
 
   const error =
     tripsRes.error ||
@@ -164,6 +167,8 @@ export default async function TripsPage() {
       stationsByKey={stationsByKey}
       stations={stations}
       driverStateById={driverStateById}
+      leavePeriods={leavePeriods}
+      leaveLoadFailed={leaveLoadFailed}
     />
   );
 }

@@ -70,6 +70,7 @@ export default function ProjectModal({
   stations,
   initial,
   driverStateById,
+  leaveUnavailable,
 }: {
   open: boolean;
   onClose: () => void;
@@ -80,6 +81,8 @@ export default function ProjectModal({
   stations: Station[];
   initial?: ProjectInitial | null;
   driverStateById?: Record<string, DriverState>;
+  // Fail-safe: leave data failed to load — block NEW roster selections.
+  leaveUnavailable?: boolean;
 }) {
   const router = useRouter();
   const defaultStation = useMemo(
@@ -444,6 +447,7 @@ export default function ProjectModal({
               selected={selected}
               onToggle={toggleDriver}
               stateByDriver={driverStateById}
+              leaveUnavailable={leaveUnavailable}
             />
           </section>
 

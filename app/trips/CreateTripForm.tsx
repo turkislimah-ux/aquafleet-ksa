@@ -15,7 +15,8 @@ import {
   MAX_BATCH_TRIPS,
 } from "@/lib/db-types";
 import { createTrip } from "./actions";
-import { type DriverState } from "@/lib/driver-state";
+import { type DriverState, resolveOnLeave } from "@/lib/driver-state";
+import { type LeavePeriod } from "@/lib/leave";
 import DriverDutyTable from "./DriverDutyTable";
 
 type ProjectOption = {
@@ -67,6 +68,8 @@ export default function CreateTripForm({
   onCloseControlled,
   defaultDate,
   driverStateById,
+  leavePeriods,
+  leaveLoadFailed,
 }: {
   projects: ProjectOption[];
   customers: CustomerOption[];
@@ -79,6 +82,10 @@ export default function CreateTripForm({
   stations: StationOption[];
   // Derived driver-state map for the duty table's Status pill (display only).
   driverStateById: Record<string, DriverState>;
+  // FULL leave periods (any date) — used to gate drivers on leave for the trip day.
+  leavePeriods: LeavePeriod[];
+  // Fail-safe: leave data failed to load → block everyone in the duty table.
+  leaveLoadFailed: boolean;
   // When set (from a project card's "Add trip"), open the modal pre-scoped to
   // that project. Full per-project rework (assigned-driver picker, tank/time)
   // lands in Cluster 5; this just preselects + locks the project.
@@ -158,6 +165,16 @@ export default function CreateTripForm({
     }
     return out;
   }, [trips, selectedDay]);
+
+  // driver_ids on leave for the SELECTED trip day (trip_date the manager picked).
+  // Resolved from the FULL leave periods via the canonical range check. A driver
+  // on leave that day can't take the trip. Recomputed when the day changes.
+  const leaveBlockedIds = useMemo(() => {
+    const s = new Set<string>();
+    const day = tripDate || selectedDay;
+    for (const d of drivers) if (resolveOnLeave(leavePeriods, d.id, day)) s.add(d.id);
+    return s;
+  }, [drivers, leavePeriods, tripDate, selectedDay]);
 
   // Drivers shown in the duty table: a project's assigned drivers in project mode,
   // or ALL drivers in customer/no-project mode.
@@ -351,6 +368,8 @@ export default function CreateTripForm({
                   selected={driverId}
                   onSelect={onSelectDriver}
                   stateByDriver={driverStateById}
+                  leaveBlockedIds={leaveBlockedIds}
+                  leaveUnavailable={leaveLoadFailed}
                 />
                 <input type="hidden" name="driver_id" value={driverId ?? ""} />
                 <input type="hidden" name="truck_id" value={derivedTruckId} />

@@ -38,6 +38,7 @@ export default function ProjectForm({
   trucks,
   assignmentsByProject,
   driverStateById,
+  leaveLoadFailed,
 }: {
   projects: ProjectRow[];
   customers: CustomerOption[];
@@ -45,6 +46,8 @@ export default function ProjectForm({
   trucks: TruckLite[];
   assignmentsByProject: Record<string, string[]>;
   driverStateById: Record<string, DriverState>;
+  // Fail-safe: leave data failed to load — block NEW roster selections.
+  leaveLoadFailed?: boolean;
 }) {
   const router = useRouter();
 
@@ -226,6 +229,7 @@ export default function ProjectForm({
           driverProjectNames={driverProjectNames}
           assigned={assignmentsByProject[managing.id] ?? []}
           driverStateById={driverStateById}
+          leaveUnavailable={leaveLoadFailed}
           onClose={() => setManaging(null)}
         />
       )}
