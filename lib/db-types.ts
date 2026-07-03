@@ -105,6 +105,10 @@ export type Driver = {
   // commission/payout math. Nullable, render "—" when unset.
   salary_sar: number | null;
   active: boolean;
+  // Soft delete (0020): NULL = active; a timestamp = terminated. termination_date
+  // is the effective last-working-day the manager picked (may be in the past).
+  terminated_at: string | null;
+  termination_date: string | null;
   created_at: string;
 };
 

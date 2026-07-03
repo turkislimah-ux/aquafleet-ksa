@@ -33,9 +33,12 @@ export default async function FleetPage() {
       .from("trucks")
       .select("*, driver:drivers(name)")
       .order("created_at", { ascending: false }),
+    // Terminated drivers must never reach buildDriverStateMap or the Assign
+    // Driver picker — filtered at the fetch.
     supabase
       .from("drivers")
       .select("id, name, status, active, safety_score, rating")
+      .is("terminated_at", null)
       .order("name", { ascending: true }),
     supabase
       .from("trips")
@@ -54,11 +57,19 @@ export default async function FleetPage() {
     supabase.from("project_drivers").select("project_id, driver_id"),
   ]);
 
+  const drivers = (driversRes.data ?? []) as DriverLite[];
+  // driver:drivers(name) is an UNFILTERED SQL join — it resolves against the full
+  // drivers table regardless of the active-only `drivers` fetch above. A truck
+  // still pointing at a terminated driver would otherwise keep showing their
+  // name. Gate display against the active-driver id set instead.
+  const activeDriverIds = new Set(drivers.map((d) => d.id));
   const trucks: TruckRow[] = ((trucksRes.data ?? []) as JoinedTruck[]).map((t) => ({
     ...t,
-    driverName: t.driver?.name ?? null,
+    driverName:
+      t.assigned_driver_id && activeDriverIds.has(t.assigned_driver_id)
+        ? t.driver?.name ?? null
+        : null,
   }));
-  const drivers = (driversRes.data ?? []) as DriverLite[];
 
   // Per-driver trip count over the last 30 days (REAL — derived, not stored).
   const trips30d: Record<string, number> = {};

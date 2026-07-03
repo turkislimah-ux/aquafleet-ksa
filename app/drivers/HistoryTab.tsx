@@ -37,9 +37,13 @@ function fmtDate(iso: string): string {
 export default function HistoryTab({
   payouts,
   drivers,
+  dropdownDrivers,
 }: {
   payouts: CommPayout[];
+  // Unfiltered (terminated included) — name-resolution must work on old records.
   drivers: DriverLite[];
+  // Active ∪ terminated-with-payout-history — scopes the "Driver" filter <select>.
+  dropdownDrivers: DriverLite[];
 }) {
   const [driverFilter, setDriverFilter] = useState<string>("all");
   const [open, setOpen] = useState<CommPayout | null>(null);
@@ -78,7 +82,7 @@ export default function HistoryTab({
             style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
           >
             <option value="all">All drivers</option>
-            {drivers.map((d) => (
+            {dropdownDrivers.map((d) => (
               <option key={d.id} value={d.id}>{d.name}</option>
             ))}
           </select>

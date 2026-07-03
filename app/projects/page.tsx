@@ -26,9 +26,12 @@ export default async function ProjectsPage() {
         .select("id, name")
         .is("archived_at", null)
         .order("name", { ascending: true }),
+      // Terminated drivers must never reach buildDriverStateMap or the
+      // Manage-drivers picker — filtered at the fetch.
       supabase
         .from("drivers")
         .select("id, name, status, active")
+        .is("terminated_at", null)
         .order("name", { ascending: true }),
       supabase
         .from("trucks")

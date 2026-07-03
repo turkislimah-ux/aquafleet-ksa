@@ -37,7 +37,10 @@ export default async function TripsPage() {
   const supabase = createClient();
 
   const today = todayKey(); // local (matches trip day-math), not UTC
-  const [tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes, stationsRes, leavePeriodsRes] =
+  const [
+    tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes,
+    stationsRes, leavePeriodsRes, terminatedDriversRes,
+  ] =
     await Promise.all([
       supabase
         .from("trips")
@@ -63,9 +66,12 @@ export default async function TripsPage() {
         .from("trucks")
         .select("id, plate, capacity_m3, assigned_driver_id, last_service_date")
         .order("plate", { ascending: true }),
+      // Terminated drivers must never reach buildDriverStateMap or the
+      // duty/roster pickers — filtered at the fetch.
       supabase
         .from("drivers")
         .select("id, name, status, active")
+        .is("terminated_at", null)
         .order("name", { ascending: true }),
       supabase.from("project_drivers").select("project_id, driver_id"),
       supabase.from("water_stations").select("key, name, is_default"),
@@ -75,6 +81,14 @@ export default async function TripsPage() {
       supabase
         .from("leave_periods")
         .select("id, driver_id, staff_id, leave_type, start_date, end_date, note, created_at"),
+      // Terminated drivers' termination_date — needed to hide their FUTURE trips
+      // (trip_date > termination_date) from active views below, while keeping
+      // past trips visible as history. Small separate fetch since the main
+      // `drivers` query above is active-only (terminated_at is null).
+      supabase
+        .from("drivers")
+        .select("id, termination_date")
+        .not("terminated_at", "is", null),
     ]);
 
   const trips = ((tripsRes.data ?? []) as JoinedTrip[]).map((t) => ({
@@ -100,7 +114,22 @@ export default async function TripsPage() {
   // active-only). Trips with NO project (ad-hoc / customer-only) are kept — they
   // have no project lifecycle to follow.
   const activeProjectIds = new Set(projects.map((p) => p.id));
-  const visibleTrips = trips.filter((t) => t.project_id == null || activeProjectIds.has(t.project_id));
+  // Terminated-driver lookup: hide a trip iff its driver is terminated AND the
+  // trip is in the future relative to that driver's termination_date. Trips on
+  // or before termination_date stay visible (history). Strict boundary: `>`.
+  const terminationDateByDriverId = new Map(
+    ((terminatedDriversRes.data ?? []) as { id: string; termination_date: string | null }[])
+      .filter((d) => d.termination_date != null)
+      .map((d) => [d.id, d.termination_date as string])
+  );
+  const visibleTrips = trips.filter((t) => {
+    if (t.project_id != null && !activeProjectIds.has(t.project_id)) return false;
+    if (t.driver_id) {
+      const termDate = terminationDateByDriverId.get(t.driver_id);
+      if (termDate && t.trip_date > termDate) return false;
+    }
+    return true;
+  });
   const customers = (customersRes.data ?? []) as {
     id: string;
     name: string;
@@ -153,7 +182,8 @@ export default async function TripsPage() {
     driversRes.error ||
     assignmentsRes.error ||
     stationsRes.error ||
-    leavePeriodsRes.error;
+    leavePeriodsRes.error ||
+    terminatedDriversRes.error;
 
   return (
     <TripsTabs

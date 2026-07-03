@@ -25,7 +25,9 @@ export default async function DashboardPage() {
         "id, ref, stage, trip_date, rate_sar, delivered_at, truck_id, project_id, water_station, water_type, tank_size_m3, truck:trucks(plate)"
       )
       .order("created_at", { ascending: false }),
-    supabase.from("drivers").select("id, status, active"),
+    // Terminated drivers must never reach buildDriverStateMap (no pill, no
+    // appearance) — filtered at the fetch.
+    supabase.from("drivers").select("id, status, active").is("terminated_at", null),
     // On-leave-today only (DB does the date filter — no inline range check). Feeds
     // lib/leave so the donut/on-duty reflect computed availability, not stored status.
     supabase

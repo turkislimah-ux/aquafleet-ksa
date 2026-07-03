@@ -29,7 +29,7 @@ import {
 import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
-import { createDriver, updateDriver } from "./actions";
+import { createDriver, updateDriver, terminateDriver } from "./actions";
 import LeaveSection from "./LeaveSection";
 import CommissionsTab, {
   buildCurrentRows,
@@ -82,6 +82,8 @@ function driverStatePill(s: DriverState) {
 
 export default function DriversClient({
   drivers,
+  allDrivers,
+  commissionDrivers,
   trucks,
   trips30dByDriver,
   recentByDriver,
@@ -99,7 +101,12 @@ export default function DriversClient({
   driverStateById,
   error,
 }: {
+  // ACTIVE roster only (terminated_at is null) — KPIs, roster grid, pickers.
   drivers: Driver[];
+  // Every driver ever, terminated included — History name-resolution only.
+  allDrivers: Driver[];
+  // Active ∪ terminated-with-nonzero-balance — Commissions tab.
+  commissionDrivers: Driver[];
   trucks: TruckLite[];
   trips30dByDriver: Record<string, number>;
   recentByDriver: Record<string, RecentTrip[]>;
@@ -131,7 +138,9 @@ export default function DriversClient({
     for (const t of trucks) if (t.assigned_driver_id) m.set(t.assigned_driver_id, t);
     return m;
   }, [trucks]);
-  const driverNameById = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers]);
+  // Unfiltered — a truck can still point at a just-terminated driver until
+  // reassigned, and this also resolves old records elsewhere in this file.
+  const driverNameById = useMemo(() => new Map(allDrivers.map((d) => [d.id, d.name])), [allDrivers]);
 
   // COMPUTED on-leave-today (authoritative). Used for the detail modal's leave
   // section; the derived pill comes from driverStateById (server-resolved).
@@ -155,18 +164,27 @@ export default function DriversClient({
   const expiring = drivers.filter((d) => d.license_expiry != null && d.license_expiry <= YEAR_END).length;
 
   // Commissions tab badge = drivers whose current balance needs review (open
-  // cycle still pending, with something to review/pay).
+  // cycle still pending, with something to review/pay). commissionDrivers so a
+  // terminated driver with an unsettled balance still counts.
   const pendingPayouts = useMemo(
     () =>
       buildCurrentRows({
-        drivers,
+        drivers: commissionDrivers,
         trips: commTrips,
         cycles,
         specials,
         adjustments,
       }).filter((r) => r.payoutStatus === "pending" && r.hasActivity).length,
-    [drivers, commTrips, cycles, specials, adjustments],
+    [commissionDrivers, commTrips, cycles, specials, adjustments],
   );
+
+  // History dropdown: active drivers ∪ terminated drivers who have payout
+  // history (so their old records stay filterable). Name-resolution itself
+  // (driverNameById above) stays unfiltered — this only scopes the <select>.
+  const historyDropdownDrivers = useMemo(() => {
+    const paidIds = new Set(payouts.map((p) => p.driver_id));
+    return allDrivers.filter((d) => !d.terminated_at || paidIds.has(d.id));
+  }, [allDrivers, payouts]);
 
   function openNew() {
     setEditing(null);
@@ -335,7 +353,7 @@ export default function DriversClient({
 
       {tab === "commissions" && (
         <CommissionsTab
-          drivers={drivers}
+          drivers={commissionDrivers}
           trips={commTrips}
           cycles={cycles}
           specials={specials}
@@ -344,7 +362,9 @@ export default function DriversClient({
         />
       )}
 
-      {tab === "history" && <HistoryTab payouts={payouts} drivers={drivers} />}
+      {tab === "history" && (
+        <HistoryTab payouts={payouts} drivers={allDrivers} dropdownDrivers={historyDropdownDrivers} />
+      )}
 
       {tab === "staff" && (
         <StaffTab staff={staff} staffRoles={staffRoles} leavePeriods={leavePeriods} leaveTypes={leaveTypes} today={today} />
@@ -510,10 +530,35 @@ function DriverDetail({
   onClose: () => void;
   onEdit: () => void;
 }) {
+  const router = useRouter();
   const expSoon = d.license_expiry != null && d.license_expiry <= YEAR_END;
   // Posture 2: leave never unassigns. Surface the conflict (holds a truck while
   // on leave today) as a UI-only warning inside the leave section.
   const truckConflict = onLeaveToday && truck != null;
+
+  // Danger zone — soft-delete termination (mirrors ProjectModal's archive
+  // confirm pattern). Past dates allowed, future dates blocked via max=today.
+  const [confirmingTerminate, setConfirmingTerminate] = useState(false);
+  const [terminationDate, setTerminationDate] = useState(today);
+  const [confirmText, setConfirmText] = useState("");
+  const [terminating, setTerminating] = useState(false);
+  const [termError, setTermError] = useState<string | null>(null);
+  const terminateMatch = confirmText.trim() !== "" && confirmText.trim() === d.name.trim();
+
+  async function onTerminate() {
+    if (!terminateMatch || !terminationDate || terminating) return;
+    setTerminating(true);
+    setTermError(null);
+    const res = await terminateDriver(d.id, terminationDate);
+    setTerminating(false);
+    if (res.error) {
+      setTermError(res.error);
+      return;
+    }
+    onClose();
+    router.refresh();
+  }
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
@@ -625,6 +670,87 @@ function DriverDetail({
                 : undefined
             }
           />
+
+          {/* Danger zone — soft-delete termination. Terminated drivers vanish
+              from every active surface; history + any unsettled balance stay. */}
+          {!d.terminated_at && (
+            <section className="space-y-3 border-t border-rose-500/30 pt-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
+                Danger zone
+              </h3>
+              {!confirmingTerminate ? (
+                <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 flex items-center justify-between gap-3">
+                  <div className="text-sm">
+                    <div className="font-medium">Terminate driver</div>
+                    <div className="muted text-[11px]">
+                      Removes {d.name} from all active views. History and balance are preserved.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingTerminate(true)}
+                    className="shrink-0 rounded-lg border border-rose-500/40 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                  >
+                    Terminate driver
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 space-y-3">
+                  <p className="text-sm text-rose-700 dark:text-rose-300">
+                    This will terminate <b>{d.name}</b> and remove them from all active views.
+                    Their history and any unsettled commission balance are preserved. This can
+                    be restored later from the Archive page.
+                  </p>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="muted">Termination date *</span>
+                    <input
+                      type="date"
+                      required
+                      value={terminationDate}
+                      max={today}
+                      onChange={(e) => setTerminationDate(e.target.value)}
+                      className={INPUT}
+                      style={INPUT_STYLE}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="muted">Type &quot;{d.name}&quot; to confirm</span>
+                    <input
+                      value={confirmText}
+                      onChange={(e) => setConfirmText(e.target.value)}
+                      className={INPUT}
+                      style={INPUT_STYLE}
+                      placeholder={d.name}
+                    />
+                  </label>
+                  {termError && <p className="text-sm text-rose-600 dark:text-rose-400">{termError}</p>}
+                  <div className="flex justify-end gap-2">
+                    <Btn
+                      variant="outline"
+                      onClick={() => {
+                        setConfirmingTerminate(false);
+                        setConfirmText("");
+                        setTermError(null);
+                      }}
+                    >
+                      Cancel
+                    </Btn>
+                    <button
+                      type="button"
+                      onClick={onTerminate}
+                      disabled={!terminateMatch || !terminationDate || terminating}
+                      className={
+                        "rounded-lg px-3 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 " +
+                        (!terminateMatch || !terminationDate || terminating ? "opacity-50 pointer-events-none" : "")
+                      }
+                    >
+                      {terminating ? "Terminating…" : "Terminate driver"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 mt-5">

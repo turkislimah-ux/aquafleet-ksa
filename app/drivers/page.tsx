@@ -11,12 +11,13 @@ import type { LeavePeriod, LeaveType } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { todayKey } from "@/lib/utils";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
-import type {
-  CommTripRow,
-  CommCycle,
-  CommSpecialRow,
-  CommAdjustmentRow,
-  CommPayout,
+import {
+  buildCurrentRows,
+  type CommTripRow,
+  type CommCycle,
+  type CommSpecialRow,
+  type CommAdjustmentRow,
+  type CommPayout,
 } from "@/lib/commission-rows";
 
 export const dynamic = "force-dynamic";
@@ -101,7 +102,20 @@ export default async function DriversPage() {
       supabase.from("project_drivers").select("project_id, driver_id"),
     ]);
 
-  const drivers = (driversRes.data ?? []) as Driver[];
+  // ---- Driver set split (termination) ----------------------------------
+  // ONE unfiltered fetch feeds all three consumers with different visibility
+  // rules; the split happens here in JS, not via extra queries.
+  //   allDrivers        — every driver row, terminated included. Feeds History
+  //                        name-resolution (old payouts must still resolve).
+  //   activeDrivers     — terminated_at is null. Feeds the roster/KPIs and
+  //                        buildDriverStateMap (a terminated driver must never
+  //                        reach the state pill).
+  //   commissionDrivers — activeDrivers PLUS any terminated driver whose
+  //                        rolling balance ≠ 0 (owed either way). Feeds the
+  //                        Commissions tab so an unsettled terminated driver
+  //                        stays visible until paid to zero.
+  const allDrivers = (driversRes.data ?? []) as Driver[];
+  const activeDrivers = allDrivers.filter((d) => !d.terminated_at);
   const trucks = (trucksRes.data ?? []) as TruckLite[];
   const trips = (tripsRes.data ?? []) as TripJoin[];
   const commTrips = (commTripsRes.data ?? []) as CommTripRow[];
@@ -122,6 +136,8 @@ export default async function DriversPage() {
   }
 
   // ---- Derived driver state map (lib/driver-state) ----
+  // activeDrivers only — a terminated driver must never reach this map (no
+  // pill, no appearance on any active surface that reads driverStateById).
   const truckDriverIds = new Set(
     (trucks as { assigned_driver_id: string | null }[])
       .map((t) => t.assigned_driver_id)
@@ -133,7 +149,20 @@ export default async function DriversPage() {
       .map((r) => r.driver_id)
   );
   const driverStateById: Record<string, DriverState> = buildDriverStateMap(
-    drivers, truckDriverIds, activeProjectDriverIds, leavePeriods, today,
+    activeDrivers, truckDriverIds, activeProjectDriverIds, leavePeriods, today,
+  );
+
+  // ---- Commissions driver set: activeDrivers ∪ terminated-with-balance ----
+  // buildCurrentRows is driver-set-agnostic (pure); run it once over EVERY
+  // driver to get each one's rolling total, then keep a terminated driver
+  // only while that total is non-zero (owed either direction). Settled to
+  // exactly 0 → drops off, matching the active roster.
+  const balanceByDriver: Record<string, number> = {};
+  for (const r of buildCurrentRows({ drivers: allDrivers, trips: commTrips, cycles, specials, adjustments, includeEmpty: true })) {
+    balanceByDriver[r.driverId] = r.total;
+  }
+  const commissionDrivers = allDrivers.filter(
+    (d) => !d.terminated_at || (balanceByDriver[d.id] ?? 0) !== 0,
   );
 
   const error =
@@ -174,7 +203,9 @@ export default async function DriversPage() {
 
   return (
     <DriversClient
-      drivers={drivers}
+      drivers={activeDrivers}
+      allDrivers={allDrivers}
+      commissionDrivers={commissionDrivers}
       trucks={trucks}
       trips30dByDriver={trips30dByDriver}
       recentByDriver={recentByDriver}

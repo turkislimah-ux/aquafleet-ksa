@@ -112,6 +112,28 @@ export async function updateDriver(id: string, formData: FormData): Promise<Acti
   return { error: null };
 }
 
+// Soft delete: keep the row (history/balance intact), stamp terminated_at so
+// every active surface (roster/trips/fleet/dashboard/pickers) hides it.
+// termination_date is the manager-picked effective date (may be past, never future).
+export async function terminateDriver(id: string, terminationDate: string): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  if (!terminationDate) return { error: "Termination date is required." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("drivers")
+    .update({ terminated_at: new Date().toISOString(), termination_date: terminationDate })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  revalidatePath("/fleet");
+  revalidatePath("/trips");
+  revalidatePath("/projects");
+  revalidatePath("/");
+  return { error: null };
+}
+
 // ============================================================================
 // Management & support staff (Phase 7, WRITE). The non-driver people. Mirrors
 // the demo's Add Staff modal: name (+Arabic), role, station, email, phone,
