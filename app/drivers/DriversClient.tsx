@@ -424,11 +424,6 @@ export default function DriversClient({
               <Field label="Salary (SAR / month)">
                 <input name="salary_sar" type="number" step="0.01" min="0" defaultValue={editing?.salary_sar ?? ""} placeholder="—" className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <label className="flex items-center gap-2 text-sm sm:col-span-2">
-                <input name="active" type="checkbox" defaultChecked={editing ? editing.active : true} />
-                <span>Active</span>
-              </label>
-
               {formError && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{formError}</p>}
 
               <div className="flex justify-end gap-2 sm:col-span-2 mt-2">

@@ -104,7 +104,7 @@ export default async function DashboardPage() {
 
   // ---- Snapshot KPI: drivers on duty. REAL. ----
   // "On duty" = derived state 'active' (has truck AND a non-archived project, not on
-  // leave, not deactivated). Idle/off_duty/on_leave/deactivated are NOT on duty.
+  // leave). Idle/off_duty/on_leave are NOT on duty.
   const onDuty = drivers.filter((d) => driverStateById[d.id] === "active").length;
 
   // Q4: Revenue (30d) = Σ rate_sar for delivered trips in the last 30 days. REAL.
@@ -242,12 +242,12 @@ export default async function DashboardPage() {
   const tripBy: Record<string, number> = {};
   trips.forEach((t) => { tripBy[t.stage] = (tripBy[t.stage] ?? 0) + 1; });
 
-  // drivers by DERIVED state — 5 mutually-exclusive buckets (sum to total).
+  // drivers by DERIVED state — 4 mutually-exclusive buckets (sum to total).
   const driverStatusLabel: Record<string, string> = {
-    active: "Active", idle: "Idle", off_duty: "Off duty", on_leave: "On leave", deactivated: "Deactivated",
+    active: "Active", idle: "Idle", off_duty: "Off duty", on_leave: "On leave",
   };
   const driverStatusColor: Record<string, string> = {
-    active: "#10b981", idle: "#3b82f6", off_duty: "#0b7eea", on_leave: "#f59e0b", deactivated: "#94a3b8",
+    active: "#10b981", idle: "#3b82f6", off_duty: "#0b7eea", on_leave: "#f59e0b",
   };
   const driverBy: Record<string, number> = {};
   drivers.forEach((d) => {

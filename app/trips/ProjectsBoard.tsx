@@ -487,8 +487,8 @@ function ProjectCard({
             <tbody>
               {driverRows.map((r) => {
                 // Cosmetic-only de-emphasis — off_duty/on_leave rows dim; active,
-                // idle, deactivated stay normal weight. Read-only table: no
-                // interaction/disable change, just an at-a-glance signal.
+                // idle stay normal weight. Read-only table: no interaction/disable
+                // change, just an at-a-glance signal.
                 const muted = r.status === "off_duty" || r.status === "on_leave";
                 return (
                 <tr

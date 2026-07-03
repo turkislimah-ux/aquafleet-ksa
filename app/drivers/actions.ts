@@ -45,7 +45,10 @@ function parse(formData: FormData) {
     incidents_12mo: numOrNull(formData.get("incidents_12mo")),
     // Standalone monthly salary — display-only, never part of commission math.
     salary_sar: numOrNull(formData.get("salary_sar")),
-    active: formData.get("active") != null,
+    // active: dropped (Commit 2, termination sequence) — drivers.active no
+    // longer written from the form; derived state's "deactivated" branch is
+    // gone, termination (0020, terminated_at) supersedes it. Column stays in
+    // DB (dead), deletion deferred.
   };
 }
 

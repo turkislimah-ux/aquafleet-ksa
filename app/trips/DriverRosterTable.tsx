@@ -50,8 +50,8 @@ export default function DriverRosterTable({
   selected: string[];
   onToggle: (id: string) => void;
   // Derived driver-state map (display-only Status pill). Optional: omit to hide.
-  // Also drives roster gating: on_leave (today) and deactivated are BLOCKED here
-  // (off_duty / no-truck drivers stay rosterable).
+  // Also drives roster gating: on_leave (today) is BLOCKED here (off_duty /
+  // no-truck drivers stay rosterable).
   stateByDriver?: Record<string, DriverState>;
   // Fail-safe: leave data failed to load — block NEW selections (don't fail-open).
   // Already-selected drivers are preserved (locked, not dropped).
@@ -92,22 +92,20 @@ export default function DriverRosterTable({
               const truck = truckByDriver.get(d.id) ?? null;
               const serviced = truck ? fmtServiceDate(truck.last_service_date) : null;
               const projNames = driverProjectNames[d.id] ?? [];
-              // Roster gating: on_leave (today) + deactivated are BLOCKED. off_duty
-              // (no truck) stays selectable. On leave-load failure, block everything.
+              // Roster gating: on_leave (today) is BLOCKED. off_duty (no truck)
+              // stays selectable. On leave-load failure, block everything.
               // LOCK blocked rows (no toggle) — this both prevents NEW selection and
               // preserves an ALREADY-selected driver who just became blocked (their
               // assignment is never silently dropped).
               const state = stateByDriver?.[d.id];
-              const blockedByState = state === "on_leave" || state === "deactivated";
+              const blockedByState = state === "on_leave";
               const locked = !!leaveUnavailable || blockedByState;
               const reason =
-                state === "deactivated"
-                  ? "Deactivated"
-                  : state === "on_leave"
-                    ? "On leave"
-                    : leaveUnavailable
-                      ? "Leave unavailable"
-                      : null;
+                state === "on_leave"
+                  ? "On leave"
+                  : leaveUnavailable
+                    ? "Leave unavailable"
+                    : null;
               return (
                 <tr
                   key={d.id}

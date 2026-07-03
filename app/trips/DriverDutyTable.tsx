@@ -74,24 +74,19 @@ export default function DriverDutyTable({
             {drivers.map((d) => {
               const on = selected === d.id;
               const truck = truckByDriver.get(d.id) ?? null;
-              // BLOCKED (fogged + not selectable) if ANY: deactivated, on leave for
-              // the selected trip day, or no truck (can't dispatch). deactivated is
-              // read from the derived state map (date-agnostic active flag); leave is
-              // resolved for the selected day by the parent. Reason priority:
-              // deactivated > leave > no-truck.
-              const deactivated = stateByDriver?.[d.id] === "deactivated";
+              // BLOCKED (fogged + not selectable) if ANY: on leave for the selected
+              // trip day, or no truck (can't dispatch). Leave is resolved for the
+              // selected day by the parent. Reason priority: leave > no-truck.
               const onLeaveSel = !!leaveUnavailable || !!leaveBlockedIds?.has(d.id);
               const noTruck = !truck;
-              const disabled = deactivated || onLeaveSel || noTruck;
-              const reason = deactivated
-                ? "Deactivated"
-                : onLeaveSel
-                  ? leaveUnavailable
-                    ? "Leave unavailable"
-                    : "On leave"
-                  : noTruck
-                    ? "No truck"
-                    : null;
+              const disabled = onLeaveSel || noTruck;
+              const reason = onLeaveSel
+                ? leaveUnavailable
+                  ? "Leave unavailable"
+                  : "On leave"
+                : noTruck
+                  ? "No truck"
+                  : null;
               const duty = dutyByDriver[d.id] ?? { onDuty: 0, lastDelivered: null };
               return (
                 <tr
