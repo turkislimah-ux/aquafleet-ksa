@@ -101,7 +101,11 @@ export async function updateTrip(id: string, formData: FormData): Promise<Action
 }
 
 // The one path every stage change funnels through. Stamps the *_at column for
-// the stage being entered (re-stamps if a trip re-enters a stage).
+// the stage being entered (re-stamps if a trip re-enters a stage), and NULLs
+// the *_at columns of every stage AFTER the target in STAGE_ORDER — so a
+// backward move (e.g. delivered -> loading) leaves no stale later-stage
+// timestamps behind. Forward moves are unaffected: those later columns are
+// already null, so nulling them again is a no-op.
 //
 // BASE PAY: trips.commission_sar is the single source of truth for base pay and
 // is stamped HERE, the moment a trip enters `delivered` — priced via the pure
@@ -110,7 +114,11 @@ export async function updateTrip(id: string, formData: FormData): Promise<Action
 // the scalable ramp resets monthly). Leaving `delivered` clears it. A trip that
 // has already been paid (payout_id set) is frozen: its commission is never
 // re-computed, since it is locked into a History snapshot.
-export async function setTripStage(id: string, stage: TripStage): Promise<ActionResult> {
+//
+// `waterStation` is OPTIONAL — when passed (Commit 2's phase picker will let a
+// station change ride along with a stage move), trips.water_station is also
+// set; when omitted (every existing caller today), the column is untouched.
+export async function setTripStage(id: string, stage: TripStage, waterStation?: string): Promise<ActionResult> {
   if (!STAGE_ORDER.includes(stage)) return { error: "Invalid stage." };
 
   const supabase = createClient();
@@ -127,6 +135,16 @@ export async function setTripStage(id: string, stage: TripStage): Promise<Action
   const row: Record<string, unknown> = { stage };
   row[STAGE_TIMESTAMP[stage]] = nowIso;
 
+  // Clear every LATER stage's timestamp (STAGE_ORDER slice after the target).
+  const targetIdx = STAGE_ORDER.indexOf(stage);
+  for (const laterStage of STAGE_ORDER.slice(targetIdx + 1)) {
+    row[STAGE_TIMESTAMP[laterStage]] = null;
+  }
+
+  if (waterStation !== undefined) {
+    row.water_station = waterStation;
+  }
+
   // Only (re)price unpaid trips. Paid trips keep their frozen commission_sar.
   if (trip && trip.payout_id == null) {
     if (stage === "delivered") {
@@ -142,6 +160,23 @@ export async function setTripStage(id: string, stage: TripStage): Promise<Action
 
   revalidatePath("/trips");
   revalidatePath("/drivers");
+  return { error: null };
+}
+
+// Station-only edit (inline click-to-edit on the loading card). Deliberately
+// BYPASSES setTripStage: that function always re-stamps the current stage's
+// *_at, nulls every later-stage *_at, and recomputes/nulls commission_sar on
+// EVERY call — none of which a pure station edit should trigger. This action
+// writes water_station alone, no stage, no timestamps, no commission. Empty
+// string is allowed (direct-customer trips are never required to have one).
+export async function setTripStation(id: string, waterStation: string): Promise<ActionResult> {
+  if (!id) return { error: "Missing trip." };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("trips").update({ water_station: waterStation }).eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/trips");
   return { error: null };
 }
 

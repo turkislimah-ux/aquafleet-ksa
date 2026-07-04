@@ -20,7 +20,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MapPin, Plus, Users, Play, ArrowRight, Check, Droplet, ChevronLeft, ChevronRight, Calendar, History,
+  MapPin, Plus, Users, Play, ArrowRight, Check, Droplet, ChevronLeft, ChevronRight, ChevronDown, Calendar, History,
 } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
@@ -37,7 +37,7 @@ import {
 } from "@/lib/db-types";
 import { type DriverState, DRIVER_STATE_LABELS } from "@/lib/driver-state";
 import { type LeavePeriod } from "@/lib/leave";
-import { setTripStage } from "./actions";
+import { setTripStage, setTripStation } from "./actions";
 import CreateTripForm from "./CreateTripForm";
 import NewProjectModal from "./NewProjectModal";
 import ManageDriversModal from "../projects/ManageDriversModal";
@@ -186,6 +186,8 @@ function TripCard({
   onAdvance,
   showPlate,
   blurred,
+  stations,
+  onStationChange,
 }: {
   trip: TripRow;
   ratePerTrip: number;
@@ -199,6 +201,11 @@ function TripCard({
   // General no-truck rule (Part D): incomplete trip + driver currently has no
   // truck. Visual-only — never applied to delivered cards.
   blurred: boolean;
+  // Inline fill-station edit (loading stage only) — options mirror Add-Trip's
+  // water_station select; onStationChange fires setTripStation (station-only,
+  // no stage move, no commission side effect).
+  stations: { key: string; name: string }[];
+  onStationChange: (station: string) => void;
 }) {
   const s = STAGE_STYLES[trip.stage];
   // Demo: t.tankSizeM3 || truck.capacityM3. Trip's own tank size wins; truck capacity is the fallback.
@@ -215,6 +222,10 @@ function TripCard({
       </div>
     );
   } else if (trip.stage === "loading") {
+    // Station key may be stale (removed from the current stations list) — keep
+    // it selectable/resolvable by injecting a synthetic option for it, so the
+    // control never silently falls back to "Set station" for a real value.
+    const hasCurrentOption = !trip.water_station || stations.some((st) => st.key === trip.water_station);
     phaseRows = (
       <>
         <div className="text-xs mt-1">
@@ -223,12 +234,38 @@ function TripCard({
             {fmtPhaseStamp(trip.loading_at ?? trip.scheduled_at ?? trip.trip_date)}
           </span>
         </div>
-        {stationName && (
-          <div className="text-xs mt-1 flex items-center gap-1">
-            <Droplet className="h-3 w-3 text-brand-500 shrink-0" />
-            Fill at: <b className="truncate">{stationName}</b>
-          </div>
-        )}
+        <div className="text-xs mt-1 flex items-center gap-1.5">
+          <Droplet className="h-3 w-3 text-brand-500 shrink-0" />
+          <span className="muted">Fill at:</span>
+          {/* Chip-styled native <select> — reads as an editable control at rest
+              (tinted pill + chevron, hover/focus states) and opens the browser's
+              own dropdown on click; onChange applies instantly via setTripStation
+              (station-only write, no stage/timestamp/commission touch). */}
+          <span className="relative inline-flex items-center min-w-0">
+            <select
+              aria-label="Fill station"
+              value={trip.water_station}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => onStationChange(e.target.value)}
+              className={cn(
+                "appearance-none rounded-full ps-2 pe-5 py-0.5 text-xs font-medium max-w-[9rem] truncate cursor-pointer",
+                "ring-1 ring-inset transition-colors focus:outline-none focus:ring-2",
+                stationName
+                  ? "bg-brand-500/10 text-brand-700 dark:text-brand-300 ring-brand-500/25 hover:bg-brand-500/20 focus:ring-brand-500/40"
+                  : "bg-black/5 dark:bg-white/10 text-slate-500 dark:text-slate-400 ring-slate-500/25 hover:bg-black/10 dark:hover:bg-white/15 focus:ring-slate-500/30"
+              )}
+            >
+              <option value="">Set station</option>
+              {!hasCurrentOption && <option value={trip.water_station}>{stationName}</option>}
+              {stations.map((st) => (
+                <option key={st.key} value={st.key}>
+                  {st.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="h-3 w-3 absolute end-1.5 pointer-events-none opacity-60" />
+          </span>
+        </div>
       </>
     );
   } else if (trip.stage === "in_transit") {
@@ -241,11 +278,21 @@ function TripCard({
       </div>
     );
   } else if (trip.stage === "delivered") {
+    // Read-only historical fact — no chip, no select, never fires setTripStation.
+    // "Filled at" (past tense) distinguishes it from loading's live "Fill at" editor.
     phaseRows = (
-      <div className="text-xs mt-1">
-        <span className="muted">Delivered:</span>{" "}
-        <span className="tabular-nums">{fmtPhaseStamp(trip.delivered_at ?? trip.trip_date)}</span>
-      </div>
+      <>
+        <div className="text-xs mt-1">
+          <span className="muted">Delivered:</span>{" "}
+          <span className="tabular-nums">{fmtPhaseStamp(trip.delivered_at ?? trip.trip_date)}</span>
+        </div>
+        {stationName && (
+          <div className="text-xs mt-1 flex items-center gap-1">
+            <Droplet className="h-3 w-3 text-brand-500 shrink-0" />
+            <span className="muted">Filled at:</span> <b className="truncate">{stationName}</b>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -334,6 +381,8 @@ function ProjectCard({
   onAdd,
   activeTruckIds,
   driverIdsWithTruck,
+  stations,
+  onStationChange,
 }: {
   project: ProjectHeader;
   trips: TripRow[];
@@ -347,6 +396,8 @@ function ProjectCard({
   onAdd: (projectId: string) => void;
   activeTruckIds: Set<string>;
   driverIdsWithTruck: Set<string>;
+  stations: { key: string; name: string }[];
+  onStationChange: (tripId: string, station: string) => void;
 }) {
   // Deliveries report tiles — count primary, revenue (count × rate) secondary.
   // Counts are anchored to today (computed in the parent), NOT the selected day.
@@ -463,6 +514,8 @@ function ProjectCard({
                       onAdvance={(to) => onAdvance(t.id, to)}
                       showPlate={!!t.truck_id && activeTruckIds.has(t.truck_id)}
                       blurred={t.stage !== "delivered" && !!t.driver_id && !driverIdsWithTruck.has(t.driver_id)}
+                      stations={stations}
+                      onStationChange={(station) => onStationChange(t.id, station)}
                     />
                   ))
                 )}
@@ -803,6 +856,18 @@ export default function ProjectsBoard({
     router.refresh();
   }
 
+  // Station-only edit (loading stage) — dedicated action, no stage move, no
+  // *_at re-stamp, no commission recompute. See setTripStation (actions.ts).
+  async function changeStation(tripId: string, station: string) {
+    setError(null);
+    const res = await setTripStation(tripId, station);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
   return (
     <div>
       {/* Week calendar strip — Sun→Sat day cards; selects the active day. */}
@@ -950,6 +1015,8 @@ export default function ProjectsBoard({
               onAdd={setAddTripProjectId}
               activeTruckIds={activeTruckIds}
               driverIdsWithTruck={driverIdsWithTruck}
+              stations={stations}
+              onStationChange={changeStation}
             />
           ))}
 
@@ -997,6 +1064,8 @@ export default function ProjectsBoard({
                               onAdvance={(to) => advance(t.id, to)}
                               showPlate={!!t.truck_id && activeTruckIds.has(t.truck_id)}
                               blurred={t.stage !== "delivered" && !!t.driver_id && !driverIdsWithTruck.has(t.driver_id)}
+                              stations={stations}
+                              onStationChange={(station) => changeStation(t.id, station)}
                             />
                           ))
                         )}
