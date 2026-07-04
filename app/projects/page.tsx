@@ -33,9 +33,12 @@ export default async function ProjectsPage() {
         .select("id, name, status, active")
         .is("terminated_at", null)
         .order("name", { ascending: true }),
+      // Terminated trucks vanish from the roster pickers (0020); frees their
+      // driver via the truckDriverIds set below (model A: no truck = off_duty).
       supabase
         .from("trucks")
         .select("id, plate, assigned_driver_id, last_service_date")
+        .is("terminated_at", null)
         .order("plate", { ascending: true }),
       supabase.from("project_drivers").select("project_id, driver_id"),
       supabase

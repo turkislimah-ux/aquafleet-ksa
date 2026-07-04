@@ -29,9 +29,14 @@ export default async function FleetPage() {
   const today = todayKey(); // local (matches trip day-math), not UTC
 
   const [trucksRes, driversRes, tripsRes, leavePeriodsRes, activeProjectsRes, projectDriversRes] = await Promise.all([
+    // Terminated trucks vanish from the fleet list entirely (0020) — restorable
+    // later from Archive. Filtering here also frees their driver: the
+    // truckDriverIds set below is built from this array, so a terminated
+    // truck's assigned_driver_id simply never enters it -> off_duty.
     supabase
       .from("trucks")
       .select("*, driver:drivers(name)")
+      .is("terminated_at", null)
       .order("created_at", { ascending: false }),
     // Terminated drivers must never reach buildDriverStateMap or the Assign
     // Driver picker — filtered at the fetch.

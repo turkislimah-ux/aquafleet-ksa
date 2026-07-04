@@ -26,7 +26,10 @@ export default async function FleetDetailPage({
   const today = todayKey(); // local (matches trip day-math), not UTC
 
   const [trucksRes, driversRes, tripsRes, leavePeriodsRes, activeProjectsRes, projectDriversRes] = await Promise.all([
-    supabase.from("trucks").select("*, driver:drivers(name)"),
+    // Terminated trucks are filtered out here too — a direct URL to a
+    // terminated truck's id resolves to `truck: null` below (FleetDetailClient
+    // already renders a "Truck not found" fallback for that case; no crash).
+    supabase.from("trucks").select("*, driver:drivers(name)").is("terminated_at", null),
     // Terminated drivers must never reach buildDriverStateMap or the Assign
     // Driver picker — filtered at the fetch.
     supabase

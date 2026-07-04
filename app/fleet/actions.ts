@@ -136,3 +136,41 @@ export async function unassignDriver(truckId: string): Promise<ActionResult> {
   revalidatePath("/drivers");
   return { error: null };
 }
+
+// Soft-delete truck termination (0020, mirrors terminateDriver). A terminated
+// truck vanishes from every active surface via the `terminated_at is null`
+// filter applied at each fetch (app/page.tsx, fleet, trips, projects, drivers)
+// — its assigned_driver_id is NEVER nulled here; the driver is freed purely
+// because the truck no longer appears in the active truckDriverIds set that
+// feeds buildDriverStateMap (model A: no truck = off_duty). Trip history keeps
+// resolving because trips.truck_id + the terminated truck row are untouched —
+// only the terminated_at marker is set. Restorable later from Archive.
+export async function terminateTruck(
+  id: string,
+  args: { reason: "sold" | "total_loss"; price: number; releasedDate: string },
+): Promise<ActionResult> {
+  if (!id) return { error: "Missing truck." };
+  if (args.reason !== "sold" && args.reason !== "total_loss") return { error: "Invalid termination reason." };
+  if (!Number.isFinite(args.price) || args.price < 0) return { error: "Price must be zero or greater." };
+  if (!args.releasedDate) return { error: "Released date is required." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("trucks")
+    .update({
+      terminated_at: new Date().toISOString(),
+      termination_reason: args.reason,
+      termination_price: args.price,
+      released_date: args.releasedDate,
+    })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/fleet");
+  revalidatePath(`/fleet/${id}`);
+  revalidatePath("/drivers");
+  revalidatePath("/trips");
+  revalidatePath("/projects");
+  revalidatePath("/");
+  return { error: null };
+}

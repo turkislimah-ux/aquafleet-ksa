@@ -18,7 +18,9 @@ export default async function DashboardPage() {
   const today = todayKey(); // local (matches trip day-math), not UTC
 
   const [trucksRes, tripsRes, driversRes, leavePeriodsRes, archivedProjectsRes, projectDriversRes] = await Promise.all([
-    supabase.from("trucks").select("id, status, health_score, assigned_driver_id"),
+    // Terminated trucks must never reach the KPI strip / driver-state facts —
+    // filtered at the fetch (frees their driver to off_duty via the missing row).
+    supabase.from("trucks").select("id, status, health_score, assigned_driver_id").is("terminated_at", null),
     supabase
       .from("trips")
       .select(

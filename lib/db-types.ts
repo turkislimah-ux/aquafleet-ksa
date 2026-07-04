@@ -133,6 +133,16 @@ export type Truck = {
   fuel_efficiency_km_per_l: number | null;
   active: boolean;
   created_at: string;
+  // Added in 0020 — soft-delete termination (mirrors drivers). NULL = active.
+  terminated_at: string | null;
+  termination_reason: "sold" | "total_loss" | null;
+  termination_price: number | null;
+  released_date: string | null;
+};
+
+export const TRUCK_TERMINATION_REASON_LABELS: Record<"sold" | "total_loss", string> = {
+  sold: "Sold",
+  total_loss: "Total loss",
 };
 
 export const DRIVER_STATUS_LABELS: Record<DriverStatus, string> = {

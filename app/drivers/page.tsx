@@ -46,7 +46,13 @@ export default async function DriversPage() {
   const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, projectDriversRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
-      supabase.from("trucks").select("id, plate, model, status, home_station, assigned_driver_id").order("plate", { ascending: true }),
+      // Terminated trucks vanish from the driver-detail "Current Assignment"
+      // resolution (0020) — a driver on a just-terminated truck reads unassigned.
+      supabase
+        .from("trucks")
+        .select("id, plate, model, status, home_station, assigned_driver_id")
+        .is("terminated_at", null)
+        .order("plate", { ascending: true }),
       supabase
         .from("trips")
         .select("driver_id, ref, trip_date, stage, tank_size_m3, project:projects(name), customer:customers(name)")

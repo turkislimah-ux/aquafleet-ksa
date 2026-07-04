@@ -62,9 +62,13 @@ export default async function TripsPage() {
         )
         .is("archived_at", null)
         .order("name", { ascending: true }),
+      // Terminated trucks are filtered out (0020) — this is also THE set that
+      // resolves the no-truck blur + plate-strip rules in ProjectsBoard, so a
+      // terminated truck's plate/driver-link disappear from active cards.
       supabase
         .from("trucks")
         .select("id, plate, capacity_m3, assigned_driver_id, last_service_date")
+        .is("terminated_at", null)
         .order("plate", { ascending: true }),
       // Terminated drivers must never reach buildDriverStateMap or the
       // duty/roster pickers — filtered at the fetch.

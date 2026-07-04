@@ -184,12 +184,21 @@ function TripCard({
   stationName,
   busy,
   onAdvance,
+  showPlate,
+  blurred,
 }: {
   trip: TripRow;
   ratePerTrip: number;
   stationName: string | null;
   busy: boolean;
   onAdvance: (to: TripStage) => void;
+  // Truck plate resolves against the ACTIVE truck set (see ProjectsBoard) —
+  // a terminated truck's plate disappears from the card even though the
+  // embedded join (trip.truckPlate) still holds the real value for history.
+  showPlate: boolean;
+  // General no-truck rule (Part D): incomplete trip + driver currently has no
+  // truck. Visual-only — never applied to delivered cards.
+  blurred: boolean;
 }) {
   const s = STAGE_STYLES[trip.stage];
   // Demo: t.tankSizeM3 || truck.capacityM3. Trip's own tank size wins; truck capacity is the fallback.
@@ -290,7 +299,8 @@ function TripCard({
       className={cn(
         "card p-3 text-sm w-full text-start",
         s.card,
-        trip.stage === "delivered" && "opacity-[0.85]"
+        trip.stage === "delivered" && "opacity-[0.85]",
+        blurred && "opacity-50 grayscale-[0.5]"
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -298,7 +308,7 @@ function TripCard({
           {trip.ref ?? <span className="muted font-sans">No ref</span>}
         </span>
         <span className="font-mono text-xs muted truncate">
-          {trip.truckPlate ?? "—"}
+          {showPlate ? trip.truckPlate ?? "—" : "—"}
           {tankSize ? ` · ${tankSize}m³` : ""}
         </span>
       </div>
@@ -322,6 +332,8 @@ function ProjectCard({
   onAdvance,
   onManage,
   onAdd,
+  activeTruckIds,
+  driverIdsWithTruck,
 }: {
   project: ProjectHeader;
   trips: TripRow[];
@@ -333,6 +345,8 @@ function ProjectCard({
   onAdvance: (tripId: string, to: TripStage) => void;
   onManage: (p: ProjectHeader) => void;
   onAdd: (projectId: string) => void;
+  activeTruckIds: Set<string>;
+  driverIdsWithTruck: Set<string>;
 }) {
   // Deliveries report tiles — count primary, revenue (count × rate) secondary.
   // Counts are anchored to today (computed in the parent), NOT the selected day.
@@ -447,6 +461,8 @@ function ProjectCard({
                       stationName={stationsByKey[t.water_station] ?? t.water_station}
                       busy={advancingId === t.id}
                       onAdvance={(to) => onAdvance(t.id, to)}
+                      showPlate={!!t.truck_id && activeTruckIds.has(t.truck_id)}
+                      blurred={t.stage !== "delivered" && !!t.driver_id && !driverIdsWithTruck.has(t.driver_id)}
                     />
                   ))
                 )}
@@ -576,6 +592,17 @@ export default function ProjectsBoard({
 
   // THE single day-filter point — everything below scopes to this.
   const dayTrips = useMemo(() => trips.filter((t) => t.trip_date === selectedDay), [trips, selectedDay]);
+
+  // `trucks` is ALREADY filtered to active-only upstream (terminated_at is
+  // null, app/trips/page.tsx) — a terminated truck's id/driver link simply
+  // never appears here. Reused by both the plate-strip (Part C) and the
+  // general no-truck blur (Part D) rules below; trip cards themselves are
+  // NEVER hidden by either — only their plate/opacity change.
+  const activeTruckIds = useMemo(() => new Set(trucks.map((t) => t.id)), [trucks]);
+  const driverIdsWithTruck = useMemo(
+    () => new Set(trucks.filter((t) => t.assigned_driver_id).map((t) => t.assigned_driver_id as string)),
+    [trucks]
+  );
 
   // KPI row — all scoped to the selected day. Commission is the ONE asymmetry:
   // it counts trips DELIVERED that day (delivered_at's local date), not trip_date.
@@ -921,6 +948,8 @@ export default function ProjectsBoard({
               onAdvance={advance}
               onManage={setManaging}
               onAdd={setAddTripProjectId}
+              activeTruckIds={activeTruckIds}
+              driverIdsWithTruck={driverIdsWithTruck}
             />
           ))}
 
@@ -966,6 +995,8 @@ export default function ProjectsBoard({
                               stationName={stationsByKey[t.water_station] ?? t.water_station}
                               busy={advancingId === t.id}
                               onAdvance={(to) => advance(t.id, to)}
+                              showPlate={!!t.truck_id && activeTruckIds.has(t.truck_id)}
+                              blurred={t.stage !== "delivered" && !!t.driver_id && !driverIdsWithTruck.has(t.driver_id)}
                             />
                           ))
                         )}

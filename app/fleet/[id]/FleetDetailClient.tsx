@@ -15,10 +15,13 @@ import { PageHeader, Card, Stat, StatusPill, Section, Btn, Table, TH, TD } from 
 import { TRUCK_STATUS_LABELS } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "../page";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
-import { assignDriver, unassignDriver } from "../actions";
+import { assignDriver, unassignDriver, terminateTruck } from "../actions";
 import TruckFormModal from "../TruckFormModal";
-import { cn, formatNum } from "@/lib/utils";
+import { cn, formatNum, todayKey } from "@/lib/utils";
 import { ArrowLeft, Users, X, Activity, Pencil } from "lucide-react";
+
+const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
+const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
 function lastServiceLabel(iso: string | null): string {
   if (!iso) return "—";
@@ -135,6 +138,43 @@ export default function FleetDetailClient({
       return;
     }
     setAssignOpen(false);
+    router.refresh();
+  }
+
+  // Danger zone — soft-delete termination (mirrors DriversClient's terminate
+  // flow). Two entry buttons preset the reason; the confirm form is shared.
+  const today = todayKey(); // local (matches trip day-math), not UTC
+  const [termReason, setTermReason] = useState<"sold" | "total_loss" | null>(null);
+  const [termPrice, setTermPrice] = useState("");
+  const [termDate, setTermDate] = useState(today);
+  const [termConfirmText, setTermConfirmText] = useState("");
+  const [terminating, setTerminating] = useState(false);
+  const [termError, setTermError] = useState<string | null>(null);
+
+  const priceNum = termPrice.trim() === "" ? NaN : Number(termPrice);
+  const priceValid = Number.isFinite(priceNum) && priceNum >= 0;
+  const plateMatch = termConfirmText.trim() !== "" && termConfirmText.trim() === truck.plate.trim();
+  const termCanConfirm = !!termReason && priceValid && !!termDate && plateMatch;
+
+  function openTerm(reason: "sold" | "total_loss") {
+    setTermReason(reason);
+    setTermPrice("");
+    setTermDate(today);
+    setTermConfirmText("");
+    setTermError(null);
+  }
+
+  async function onTerminateTruck() {
+    if (!truck || !termReason || !termCanConfirm || terminating) return;
+    setTerminating(true);
+    setTermError(null);
+    const res = await terminateTruck(truck.id, { reason: termReason, price: priceNum, releasedDate: termDate });
+    setTerminating(false);
+    if (res.error) {
+      setTermError(res.error);
+      return;
+    }
+    router.push("/fleet");
     router.refresh();
   }
 
@@ -257,6 +297,114 @@ export default function FleetDetailClient({
         </div>
         <p className="text-sm muted p-6 text-center">No maintenance history</p>
       </Card>
+
+      {/* Danger zone — soft-delete termination. Terminated trucks vanish from
+          every active surface; trip history keeps resolving. Restorable later
+          from Archive. */}
+      {!truck.terminated_at && (
+        <section className="space-y-3 border-t border-rose-500/30 pt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
+            Danger zone
+          </h3>
+          {!termReason ? (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm">
+                <div className="font-medium">Terminate truck</div>
+                <div className="muted text-[11px]">
+                  Removes {truck.plate} from all active views. Trip history is preserved.
+                </div>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => openTerm("sold")}
+                  className="rounded-lg border border-rose-500/40 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                >
+                  Deactivate — Sold
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openTerm("total_loss")}
+                  className="rounded-lg border border-rose-500/40 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                >
+                  Total loss
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 space-y-3">
+              <p className="text-sm text-rose-700 dark:text-rose-300">
+                This will mark <b>{truck.plate}</b> as{" "}
+                <b>{termReason === "sold" ? "sold" : "total loss"}</b> and remove it from the
+                active fleet. Its trip history is preserved. Restorable later from Archive.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="muted">Price (SAR) *</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    required
+                    value={termPrice}
+                    onChange={(e) => setTermPrice(e.target.value)}
+                    className={INPUT}
+                    style={INPUT_STYLE}
+                    placeholder="0.00"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="muted">Released date *</span>
+                  <input
+                    type="date"
+                    required
+                    value={termDate}
+                    onChange={(e) => setTermDate(e.target.value)}
+                    className={INPUT}
+                    style={INPUT_STYLE}
+                  />
+                </label>
+              </div>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">Type &quot;{truck.plate}&quot; to confirm</span>
+                <input
+                  value={termConfirmText}
+                  onChange={(e) => setTermConfirmText(e.target.value)}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                  placeholder={truck.plate}
+                />
+              </label>
+              {termError && <p className="text-sm text-rose-600 dark:text-rose-400">{termError}</p>}
+              <div className="flex justify-end gap-2">
+                <Btn
+                  variant="outline"
+                  onClick={() => {
+                    setTermReason(null);
+                    setTermConfirmText("");
+                    setTermError(null);
+                  }}
+                >
+                  Cancel
+                </Btn>
+                <button
+                  type="button"
+                  onClick={onTerminateTruck}
+                  disabled={!termCanConfirm || terminating}
+                  className={
+                    "rounded-lg px-3 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 " +
+                    (!termCanConfirm || terminating ? "opacity-50 pointer-events-none" : "")
+                  }
+                >
+                  {terminating
+                    ? "Terminating…"
+                    : `Confirm ${termReason === "sold" ? "sale" : "total loss"}`}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {errorMsg && <p className="text-sm text-rose-600 dark:text-rose-400">{errorMsg}</p>}
 
