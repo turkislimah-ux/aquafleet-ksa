@@ -21,6 +21,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   MapPin, Plus, Users, Play, ArrowRight, Check, Droplet, ChevronLeft, ChevronRight, ChevronDown, Calendar, History,
+  X, Lock, AlertTriangle, Trash2,
 } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
@@ -37,7 +38,7 @@ import {
 } from "@/lib/db-types";
 import { type DriverState, DRIVER_STATE_LABELS } from "@/lib/driver-state";
 import { type LeavePeriod } from "@/lib/leave";
-import { setTripStage, setTripStation } from "./actions";
+import { setTripStage, setTripStation, deleteTrip } from "./actions";
 import CreateTripForm from "./CreateTripForm";
 import NewProjectModal from "./NewProjectModal";
 import ManageDriversModal from "../projects/ManageDriversModal";
@@ -188,6 +189,7 @@ function TripCard({
   blurred,
   stations,
   onStationChange,
+  onOpenPicker,
 }: {
   trip: TripRow;
   ratePerTrip: number;
@@ -206,6 +208,11 @@ function TripCard({
   // no stage move, no commission side effect).
   stations: { key: string; name: string }[];
   onStationChange: (station: string) => void;
+  // Commit 2 — click the whole card to open the any-stage phase picker. The
+  // per-stage advance button and the loading chip's <select> both call
+  // e.stopPropagation() so they keep firing their OWN action instead of also
+  // opening the picker.
+  onOpenPicker: () => void;
 }) {
   const s = STAGE_STYLES[trip.stage];
   // Demo: t.tankSizeM3 || truck.capacityM3. Trip's own tank size wins; truck capacity is the fallback.
@@ -304,7 +311,10 @@ function TripCard({
       <button
         type="button"
         disabled={busy}
-        onClick={() => onAdvance("loading")}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAdvance("loading");
+        }}
         className={cn(ACTION_BTN, "bg-brand-600 hover:bg-brand-700 text-white")}
       >
         <Play className="h-3.5 w-3.5" /> {busy ? "…" : "Start trip"}
@@ -315,7 +325,10 @@ function TripCard({
       <button
         type="button"
         disabled={busy}
-        onClick={() => onAdvance("in_transit")}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAdvance("in_transit");
+        }}
         className={cn(ACTION_BTN, "border hover:bg-black/5 dark:hover:bg-white/5")}
         style={{ borderColor: "rgb(var(--border))" }}
       >
@@ -327,7 +340,10 @@ function TripCard({
       <button
         type="button"
         disabled={busy}
-        onClick={() => onAdvance("delivered")}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAdvance("delivered");
+        }}
         className={cn(ACTION_BTN, "bg-emerald-600 hover:bg-emerald-700 text-white")}
       >
         <Check className="h-3.5 w-3.5" /> {busy ? "…" : "Mark delivered"}
@@ -343,8 +359,23 @@ function TripCard({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpenPicker}
+      onKeyDown={(e) => {
+        // Only the card itself, not a nested control (button/select) that
+        // already handles its own key. Enter/Space opens the picker, same as
+        // clicking the card body.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenPicker();
+        }
+      }}
       className={cn(
-        "card p-3 text-sm w-full text-start",
+        "card p-3 text-sm w-full text-start cursor-pointer transition",
+        "hover:ring-1 hover:ring-brand-500/30 hover:bg-black/[0.015] dark:hover:bg-white/[0.02]",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50",
         s.card,
         trip.stage === "delivered" && "opacity-[0.85]",
         blurred && "opacity-50 grayscale-[0.5]"
@@ -368,6 +399,322 @@ function TripCard({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Phase picker (Commit 2) — click any trip card to jump it to ANY of the four
+// stages directly (not just the next one), and adjust its fill station in the
+// same place. Every apply funnels through setTripStage — the single funnel —
+// with the station riding along as its optional waterStation param; this
+// modal never calls setTripStation (that stays the loading chip's dedicated,
+// side-effect-free path).
+//
+// Confirmation is computed fresh on every Apply click, not pre-rendered:
+//   - leavingDelivered: current stage is delivered and the chosen target isn't
+//     — this always clears the stamped commission + delivered_at, so it's
+//     always confirmed.
+//   - stationReason: the station differs from the trip's stored one AND a
+//     stage move is also happening. A same-stage station tweak alone needs no
+//     confirmation (it isn't a "reversal" of anything) and applies straight
+//     through.
+// Either reason (or both) shows ONE combined confirm step inside this same
+// card — no second stacked overlay. Neither reason → Apply commits immediately.
+//
+// PAID lock: a trip with payout_id set is frozen into a commission History
+// snapshot server-side (setTripStage already refuses to re-price it). The
+// spec only requires blocking BACKWARD moves for a paid trip, but re-stamping
+// delivered_at via a same-stage station edit would silently rewrite the date
+// on an already-snapshotted record for zero financial effect — so this picker
+// goes further and makes the WHOLE picker read-only once paid, not just the
+// backward options. Viewing still works; nothing is mutable.
+function PhasePickerModal({
+  trip,
+  stations,
+  stationsByKey,
+  busy,
+  onApply,
+  onDelete,
+  onClose,
+}: {
+  trip: TripRow;
+  stations: { key: string; name: string }[];
+  stationsByKey: Record<string, string>;
+  busy: boolean;
+  onApply: (tripId: string, target: TripStage, station?: string) => Promise<boolean>;
+  // Hard delete (Commit 3) — permanent, non-delivered trips only. Returns
+  // success same as onApply.
+  onDelete: (tripId: string) => Promise<boolean>;
+  onClose: () => void;
+}) {
+  const paid = trip.payout_id != null;
+  // Delete gate: stage !== "delivered" is the WHOLE rule. Commission is only
+  // ever stamped on delivered (setTripStage), and pay_commission only tags
+  // rows where delivered_at is not null — so a paid trip is always delivered,
+  // meaning this single check already excludes every paid trip too. No
+  // separate payout_id check needed here.
+  const deletable = trip.stage !== "delivered";
+  const [target, setTarget] = useState<TripStage>(trip.stage);
+  const [station, setStation] = useState<string>(trip.water_station);
+  // Picker has 3 views: the pick screen, the phase-move confirm, and the
+  // delete confirm — mutually exclusive, never stacked.
+  const [view, setView] = useState<"pick" | "move-confirm" | "delete-confirm">("pick");
+  const [err, setErr] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+
+  const movingPhase = target !== trip.stage;
+  const stationChanged = station !== trip.water_station;
+  const leavingDelivered = trip.stage === "delivered" && movingPhase;
+  const stationReason = movingPhase && stationChanged;
+  const noChange = !movingPhase && !stationChanged;
+
+  const hasCurrentOption = !trip.water_station || stations.some((st) => st.key === trip.water_station);
+  const currentStationName = stationsByKey[trip.water_station] ?? trip.water_station;
+  const nextStationName = stationsByKey[station] ?? station;
+
+  async function apply() {
+    setErr(null);
+    const ok = await onApply(trip.id, target, stationChanged ? station : undefined);
+    if (ok) onClose();
+    else setErr("Could not move this trip. Try again.");
+  }
+
+  function handleApplyClick() {
+    if (noChange || paid || busy) return;
+    if (leavingDelivered || stationReason) {
+      setView("move-confirm");
+      return;
+    }
+    apply();
+  }
+
+  async function confirmDelete() {
+    setDeleteErr(null);
+    setDeleting(true);
+    const ok = await onDelete(trip.id);
+    setDeleting(false);
+    if (ok) onClose();
+    else setDeleteErr("Could not delete this trip. Try again.");
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <div className="card p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        {view === "pick" ? (
+          <>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold">Move trip</h2>
+                <p className="text-xs muted font-mono mt-0.5">{trip.ref ?? "No ref"}</p>
+              </div>
+              <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]" aria-label="Close">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {paid && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg bg-slate-500/10 ring-1 ring-inset ring-slate-500/20 px-3 py-2 text-xs">
+                <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5 text-slate-500 dark:text-slate-400" />
+                <span className="muted">
+                  Paid — this trip's commission is locked into a History record. Stage and station can't be changed.
+                </span>
+              </div>
+            )}
+
+            {/* Stage list — natural progression order, current stage tagged.
+                Any row is selectable (forward or backward) unless paid. */}
+            <div className="mt-4 space-y-1.5">
+              {STAGE_ORDER.map((stage) => {
+                const isCurrent = stage === trip.stage;
+                const isSelected = stage === target;
+                const st = STAGE_STYLES[stage];
+                const disabled = paid && !isCurrent;
+                return (
+                  <button
+                    key={stage}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setTarget(stage)}
+                    className={cn(
+                      "w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-start transition ring-1 ring-inset",
+                      isSelected
+                        ? "ring-brand-500 bg-brand-500/10"
+                        : "ring-transparent hover:bg-black/[0.03] dark:hover:bg-white/[0.04]",
+                      disabled && "opacity-50 cursor-not-allowed"
+                    )}
+                  >
+                    <span className={cn("h-2 w-2 rounded-full shrink-0", st.dot)} />
+                    <span className="font-medium flex-1">{TRIP_STAGE_LABELS[stage]}</span>
+                    {isCurrent && (
+                      <span className="rounded-full bg-black/5 dark:bg-white/10 px-1.5 py-0.5 text-[10px] font-medium muted">
+                        Current
+                      </span>
+                    )}
+                    {disabled && <Lock className="h-3 w-3 muted shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Fill station — same options as the loading chip, but usable at
+                any stage here (the card's inline chip stays loading-only). */}
+            <label className="mt-4 flex flex-col gap-1 text-sm">
+              <span className="muted text-xs">Fill station</span>
+              <select
+                aria-label="Fill station"
+                value={station}
+                disabled={paid}
+                onChange={(e) => setStation(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full disabled:opacity-50"
+                style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
+              >
+                <option value="">Set station</option>
+                {!hasCurrentOption && <option value={trip.water_station}>{currentStationName}</option>}
+                {stations.map((st) => (
+                  <option key={st.key} value={st.key}>
+                    {st.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {err && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{err}</p>}
+
+            <div className="flex justify-end gap-2 mt-5">
+              <Btn variant="outline" onClick={onClose}>
+                Cancel
+              </Btn>
+              <button
+                type="button"
+                disabled={noChange || paid || busy}
+                onClick={handleApplyClick}
+                className="h-9 px-4 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+              >
+                {busy ? "Moving…" : "Apply"}
+              </button>
+            </div>
+
+            {/* Danger zone — hard delete. Non-delivered trips only; a delivered
+                trip (paid or not) shows no delete control at all. Mirrors the
+                rose danger-zone language used for project archive (ProjectModal). */}
+            {deletable && (
+              <section className="mt-5 pt-4 border-t border-rose-500/30 space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
+                  Danger zone
+                </h3>
+                <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 flex items-center justify-between gap-3">
+                  <div className="text-sm">
+                    <div className="font-medium">Delete trip</div>
+                    <div className="muted text-[11px]">Permanent — cannot be undone. No Archive recovery.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setView("delete-confirm")}
+                    className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-rose-500/40 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                  </button>
+                </div>
+              </section>
+            )}
+          </>
+        ) : view === "move-confirm" ? (
+          <>
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-500" /> Confirm move
+              </h2>
+              <button
+                type="button"
+                onClick={() => setView("pick")}
+                className="muted hover:text-[rgb(var(--fg))]"
+                aria-label="Back"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <ul className="mt-3 space-y-2 text-sm">
+              {leavingDelivered && (
+                <li className="flex gap-2">
+                  <span className="text-amber-500 shrink-0">•</span>
+                  <span>
+                    Reverses the recorded delivery — clears the delivered timestamp and commission
+                    {trip.commission_sar != null && (
+                      <>
+                        {" "}
+                        (currently <b>{formatSar(trip.commission_sar)}</b>)
+                      </>
+                    )}
+                    .
+                  </span>
+                </li>
+              )}
+              {stationReason && (
+                <li className="flex gap-2">
+                  <span className="text-amber-500 shrink-0">•</span>
+                  <span>
+                    Fill station changes from <b>{currentStationName || "—"}</b> to{" "}
+                    <b>{nextStationName || "—"}</b>.
+                  </span>
+                </li>
+              )}
+            </ul>
+            {err && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{err}</p>}
+            <div className="flex justify-end gap-2 mt-5">
+              <Btn variant="outline" onClick={() => setView("pick")}>
+                Cancel
+              </Btn>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={apply}
+                className="h-9 px-4 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+              >
+                {busy ? "Moving…" : "Confirm move"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Delete-confirm — the app's one HARD-delete warning. Wording is
+                deliberately blunt: no "archive", no "restore later" escape
+                hatch exists here, unlike every other destructive action. */}
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="text-lg font-semibold flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                <AlertTriangle className="h-5 w-5" /> Delete trip permanently
+              </h2>
+              <button
+                type="button"
+                onClick={() => setView("pick")}
+                className="muted hover:text-[rgb(var(--fg))]"
+                aria-label="Back"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-700 dark:text-rose-300">
+              This permanently deletes trip <b className="font-mono">{trip.ref ?? "this trip"}</b>. This cannot be
+              undone — there is no Archive to restore it from.
+            </div>
+            {deleteErr && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{deleteErr}</p>}
+            <div className="flex justify-end gap-2 mt-5">
+              <Btn variant="outline" onClick={() => setView("pick")}>
+                Cancel
+              </Btn>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={confirmDelete}
+                className="h-9 px-4 rounded-lg text-sm font-medium bg-rose-600 hover:bg-rose-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> {deleting ? "Deleting…" : "Delete permanently"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProjectCard({
   project,
   trips,
@@ -383,6 +730,7 @@ function ProjectCard({
   driverIdsWithTruck,
   stations,
   onStationChange,
+  onOpenPicker,
 }: {
   project: ProjectHeader;
   trips: TripRow[];
@@ -398,6 +746,7 @@ function ProjectCard({
   driverIdsWithTruck: Set<string>;
   stations: { key: string; name: string }[];
   onStationChange: (tripId: string, station: string) => void;
+  onOpenPicker: (trip: TripRow) => void;
 }) {
   // Deliveries report tiles — count primary, revenue (count × rate) secondary.
   // Counts are anchored to today (computed in the parent), NOT the selected day.
@@ -516,6 +865,7 @@ function ProjectCard({
                       blurred={t.stage !== "delivered" && !!t.driver_id && !driverIdsWithTruck.has(t.driver_id)}
                       stations={stations}
                       onStationChange={(station) => onStationChange(t.id, station)}
+                      onOpenPicker={() => onOpenPicker(t)}
                     />
                   ))
                 )}
@@ -637,6 +987,8 @@ export default function ProjectsBoard({
   const [error, setError] = useState<string | null>(null);
   const [managing, setManaging] = useState<ProjectHeader | null>(null);
   const [addTripProjectId, setAddTripProjectId] = useState<string | null>(null);
+  // Commit 2 — the trip currently open in the any-stage phase picker (null = closed).
+  const [pickerTrip, setPickerTrip] = useState<TripRow | null>(null);
 
   // Calendar state — selected day + the visible week (Sunday key). Default today.
   const todayKey = dayKey(new Date());
@@ -868,6 +1220,37 @@ export default function ProjectsBoard({
     router.refresh();
   }
 
+  // Any-direction phase move (Commit 2's picker) — same setTripStage funnel as
+  // advance(), just with an arbitrary target instead of "the next stage", and
+  // an optional station riding along. Returns success so the modal knows
+  // whether to close itself or stay open and show the error.
+  async function movePhase(tripId: string, target: TripStage, station?: string) {
+    setAdvancingId(tripId);
+    setError(null);
+    const res = await setTripStage(tripId, target, station);
+    setAdvancingId(null);
+    if (res.error) {
+      setError(res.error);
+      return false;
+    }
+    router.refresh();
+    return true;
+  }
+
+  // Hard delete (Commit 3) — permanent, non-delivered trips only. The picker
+  // already hides the control for delivered trips; deleteTrip re-checks stage
+  // server-side regardless (double gate — never trust the UI alone).
+  async function removeTrip(tripId: string) {
+    setError(null);
+    const res = await deleteTrip(tripId);
+    if (res.error) {
+      setError(res.error);
+      return false;
+    }
+    router.refresh();
+    return true;
+  }
+
   return (
     <div>
       {/* Week calendar strip — Sun→Sat day cards; selects the active day. */}
@@ -1017,6 +1400,7 @@ export default function ProjectsBoard({
               driverIdsWithTruck={driverIdsWithTruck}
               stations={stations}
               onStationChange={changeStation}
+              onOpenPicker={setPickerTrip}
             />
           ))}
 
@@ -1066,6 +1450,7 @@ export default function ProjectsBoard({
                               blurred={t.stage !== "delivered" && !!t.driver_id && !driverIdsWithTruck.has(t.driver_id)}
                               stations={stations}
                               onStationChange={(station) => changeStation(t.id, station)}
+                              onOpenPicker={() => setPickerTrip(t)}
                             />
                           ))
                         )}
@@ -1090,6 +1475,19 @@ export default function ProjectsBoard({
           driverStateById={driverStateById}
           leaveUnavailable={leaveLoadFailed}
           onClose={() => setManaging(null)}
+        />
+      )}
+
+      {/* Any-stage phase picker (Commit 2) — opened by clicking any trip card. */}
+      {pickerTrip && (
+        <PhasePickerModal
+          trip={pickerTrip}
+          stations={stations}
+          stationsByKey={stationsByKey}
+          busy={advancingId === pickerTrip.id}
+          onApply={movePhase}
+          onDelete={removeTrip}
+          onClose={() => setPickerTrip(null)}
         />
       )}
     </div>

@@ -229,6 +229,11 @@ export type Trip = {
   in_transit_at: string | null;
   delivered_at: string | null;
   created_at: string;
+  // Added in 0009 — set once a delivered trip is swept into a commission
+  // payout snapshot (History). NULL = still in the driver's current/unpaid
+  // balance. A trip with this set is frozen: setTripStage never re-prices it,
+  // and the Kanban phase picker (Commit 2) blocks moving it backward.
+  payout_id: string | null;
 };
 
 export const WATER_TYPE_LABELS: Record<WaterType, string> = {

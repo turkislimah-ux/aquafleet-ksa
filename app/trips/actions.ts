@@ -180,6 +180,37 @@ export async function setTripStation(id: string, waterStation: string): Promise<
   return { error: null };
 }
 
+// Permanent (hard) delete — the one hard-delete in an otherwise all-soft-delete
+// app. Gate is a single rule: stage !== "delivered". Commission is only ever
+// stamped on delivered (setTripStage), and pay_commission only tags rows where
+// delivered_at is not null — so a paid trip is always delivered, meaning this
+// one check already excludes every paid trip too; no separate payout_id check.
+// No table has a FK on trips.id (checked: no `references public.trips` in any
+// migration), so a non-delivered trip deletes clean — no orphans, no cascade.
+// Re-checks the stage SERVER-SIDE regardless of what the UI already hid —
+// never trust the picker's own gate alone.
+export async function deleteTrip(id: string): Promise<ActionResult> {
+  if (!id) return { error: "Missing trip." };
+
+  const supabase = createClient();
+  const { data: trip, error: tripErr } = await supabase
+    .from("trips")
+    .select("stage")
+    .eq("id", id)
+    .maybeSingle();
+  if (tripErr) return { error: tripErr.message };
+  if (!trip) return { error: null }; // already gone — nothing to do
+
+  if (trip.stage === "delivered") return { error: "Delivered trips can't be deleted." };
+
+  const { error } = await supabase.from("trips").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/trips");
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
 // Price a trip being delivered NOW. Ad-hoc trips (no driver or no project) earn
 // base 0 — only project trips carry a driver commission. PURE math lives in
 // lib/commission; this just gathers the inputs from the DB.
