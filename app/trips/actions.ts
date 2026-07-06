@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { STAGE_ORDER, STAGE_TIMESTAMP, MAX_BATCH_TRIPS, type TripStage, type WaterType } from "@/lib/db-types";
 import { commissionForDelivery, monthKeyOf } from "@/lib/commission";
+import { slugifyKey, isValidSlug } from "@/lib/slug";
 
 export type ActionResult = { error: string | null };
 
@@ -408,5 +409,168 @@ export async function archiveProject(projectId: string): Promise<ActionResult> {
   revalidatePath("/trips");
   revalidatePath("/projects");
   revalidatePath("/customers");
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Water station management (Trips page → "Manage stations"). water_stations
+// (migration 0014 + 0021: coords + fill_cost added). `key` is the immutable FK
+// target for trips.water_station / projects.default_water_station — it is
+// generated ONCE on create (slug of the name, same lib/slug helper + pattern
+// as staff_roles/leave_types) and NEVER present in the update payload below,
+// so an edit can never touch it. Renaming only changes `name`; every existing
+// trip/project keeps resolving through the unchanged key.
+//
+// Soft-delete only: deactivate sets active=false (no hard delete). Re-adding a
+// deactivated station's exact name reuses + reactivates its key (mirrors
+// addStaffRole/addLeaveType) instead of erroring or creating a duplicate row.
+// ---------------------------------------------------------------------------
+
+export type WaterStationInput = {
+  name: string;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  fill_cost: number | null;
+};
+
+export async function createWaterStation(
+  input: WaterStationInput,
+): Promise<{ error: string | null; key?: string }> {
+  const clean = input.name?.trim() ?? "";
+  if (!clean) return { error: "Station name is required." };
+  const key = slugifyKey(clean);
+  if (!key) return { error: "Station name needs letters or numbers." };
+  if (!isValidSlug(key)) return { error: "Name must start with a letter." };
+
+  const supabase = createClient();
+  const { data: existing, error: lookupErr } = await supabase
+    .from("water_stations")
+    .select("key, active")
+    .eq("key", key)
+    .maybeSingle();
+  if (lookupErr) return { error: lookupErr.message };
+
+  const fields = {
+    name: clean,
+    city: input.city?.trim() || null,
+    latitude: input.latitude,
+    longitude: input.longitude,
+    fill_cost: input.fill_cost,
+  };
+
+  if (existing) {
+    if (existing.active) return { error: "A station with this name already exists." };
+    // Reuse + reactivate the deactivated row, refreshed with this submission's fields.
+    const { error } = await supabase
+      .from("water_stations")
+      .update({ ...fields, active: true })
+      .eq("key", key);
+    if (error) return { error: error.message };
+    revalidatePath("/trips");
+    return { error: null, key };
+  }
+
+  const { error } = await supabase
+    .from("water_stations")
+    .insert({ key, ...fields, is_default: false, active: true });
+  if (error) return { error: error.message };
+
+  revalidatePath("/trips");
+  return { error: null, key };
+}
+
+// Edit — name/city/coords/cost only. `key` is deliberately NOT a parameter here:
+// there is nothing in this function that could change it even by mistake.
+export async function updateWaterStation(key: string, input: WaterStationInput): Promise<ActionResult> {
+  if (!key) return { error: "Missing station." };
+  const clean = input.name?.trim() ?? "";
+  if (!clean) return { error: "Station name is required." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("water_stations")
+    .update({
+      name: clean,
+      city: input.city?.trim() || null,
+      latitude: input.latitude,
+      longitude: input.longitude,
+      fill_cost: input.fill_cost,
+    })
+    .eq("key", key);
+  if (error) return { error: error.message };
+
+  revalidatePath("/trips");
+  return { error: null };
+}
+
+export type StationReassignment = { project_id: string; new_key: string };
+
+// Deactivate (soft-delete). Refuses to silently or randomly reassign: if any
+// ACTIVE project still points to this station as its default, the caller must
+// supply an explicit replacement for EVERY affected project before the
+// deactivation is applied. Called first with no `reassignments` to discover the
+// affected list (returns it via `needsReassignment` instead of an error), then
+// called again once the manager has picked replacements for all of them.
+export async function deactivateWaterStation(
+  key: string,
+  reassignments?: StationReassignment[],
+): Promise<{ error: string | null; needsReassignment?: { id: string; name: string }[] }> {
+  if (!key) return { error: "Missing station." };
+  const supabase = createClient();
+
+  // Archived projects don't need a live default — only non-archived ones count.
+  const { data: affectedRaw, error: findErr } = await supabase
+    .from("projects")
+    .select("id, name")
+    .eq("default_water_station", key)
+    .is("archived_at", null);
+  if (findErr) return { error: findErr.message };
+  const affected = (affectedRaw ?? []) as { id: string; name: string }[];
+
+  if (affected.length > 0) {
+    const provided = new Map((reassignments ?? []).map((r) => [r.project_id, r.new_key]));
+    const missing = affected.filter((p) => !provided.has(p.id));
+    if (missing.length > 0) {
+      // Nothing applied yet — hand the affected list back so the UI can prompt
+      // for a replacement per project. No default is ever picked automatically.
+      return { error: null, needsReassignment: affected };
+    }
+
+    // Every affected project has a chosen replacement — validate each one is a
+    // real, ACTIVE, different station before touching anything (never trust the
+    // picker's own gate alone).
+    const { data: activeStations, error: activeErr } = await supabase
+      .from("water_stations")
+      .select("key")
+      .eq("active", true);
+    if (activeErr) return { error: activeErr.message };
+    const activeKeys = new Set((activeStations ?? []).map((s: { key: string }) => s.key));
+
+    for (const p of affected) {
+      const newKey = provided.get(p.id)!;
+      if (newKey === key) {
+        return { error: `Replacement for "${p.name}" can't be the station being deactivated.` };
+      }
+      if (!activeKeys.has(newKey)) {
+        return { error: `Replacement station for "${p.name}" is not valid.` };
+      }
+    }
+
+    for (const p of affected) {
+      const newKey = provided.get(p.id)!;
+      const { error } = await supabase
+        .from("projects")
+        .update({ default_water_station: newKey })
+        .eq("id", p.id);
+      if (error) return { error: error.message };
+    }
+  }
+
+  const { error } = await supabase.from("water_stations").update({ active: false }).eq("key", key);
+  if (error) return { error: error.message };
+
+  revalidatePath("/trips");
+  revalidatePath("/projects");
   return { error: null };
 }

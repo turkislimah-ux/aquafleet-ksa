@@ -41,6 +41,7 @@ import { type LeavePeriod } from "@/lib/leave";
 import { setTripStage, setTripStation, deleteTrip } from "./actions";
 import CreateTripForm from "./CreateTripForm";
 import NewProjectModal from "./NewProjectModal";
+import WaterStationsModal from "./WaterStationsModal";
 import ManageDriversModal from "../projects/ManageDriversModal";
 
 type TripRow = Trip & {
@@ -99,6 +100,18 @@ type CustomerOption = {
 };
 type TruckOption = { id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null; last_service_date: string | null };
 type DriverOption = { id: string; name: string; status: DriverStatus };
+// Full water_stations row (active + inactive) — feeds the "Manage stations" popup.
+type WaterStationRow = {
+  id: string;
+  key: string;
+  name: string;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  fill_cost: number | null;
+  is_default: boolean;
+  active: boolean;
+};
 
 function projectDot(status: ProjectStatus) {
   return status === "active" ? "bg-emerald-500" : status === "paused" ? "bg-amber-500" : "bg-slate-400";
@@ -962,6 +975,8 @@ export type ProjectsBoardProps = {
   assignmentsByProject: Record<string, string[]>;
   stationsByKey: Record<string, string>;
   stations: { key: string; name: string }[];
+  // Full rows (active + inactive) — "Manage stations" popup only.
+  allStations: WaterStationRow[];
   driverStateById: Record<string, DriverState>;
   // FULL leave periods (any date) — Add Trip resolves on-leave for the selected day.
   leavePeriods: LeavePeriod[];
@@ -978,6 +993,7 @@ export default function ProjectsBoard({
   assignmentsByProject,
   stationsByKey,
   stations,
+  allStations,
   driverStateById,
   leavePeriods,
   leaveLoadFailed,
@@ -989,6 +1005,8 @@ export default function ProjectsBoard({
   const [addTripProjectId, setAddTripProjectId] = useState<string | null>(null);
   // Commit 2 — the trip currently open in the any-stage phase picker (null = closed).
   const [pickerTrip, setPickerTrip] = useState<TripRow | null>(null);
+  // Water station management popup (null = closed).
+  const [managingStations, setManagingStations] = useState(false);
 
   // Calendar state — selected day + the visible week (Sunday key). Default today.
   const todayKey = dayKey(new Date());
@@ -1342,8 +1360,12 @@ export default function ProjectsBoard({
         <Stat label="Commission (day)" value={formatSar(commissionDay)} tone="ok" />
       </div>
 
-      {/* New Project — Projects tab only, below the KPIs (relocated from the page header). */}
-      <div className="flex justify-end mb-4">
+      {/* New Project + Manage stations — Projects tab only, below the KPIs
+          (relocated from the page header). */}
+      <div className="flex justify-end gap-2 mb-4">
+        <Btn variant="outline" onClick={() => setManagingStations(true)}>
+          <Droplet className="h-4 w-4" /> Manage stations
+        </Btn>
         <NewProjectModal
           drivers={drivers}
           trucks={trucks}
@@ -1353,6 +1375,13 @@ export default function ProjectsBoard({
           leaveUnavailable={leaveLoadFailed}
         />
       </div>
+      {managingStations && (
+        <WaterStationsModal
+          open={managingStations}
+          onClose={() => setManagingStations(false)}
+          stations={allStations}
+        />
+      )}
 
       {error && (
         <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">

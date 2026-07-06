@@ -39,7 +39,7 @@ export default async function TripsPage() {
   const today = todayKey(); // local (matches trip day-math), not UTC
   const [
     tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes,
-    stationsRes, leavePeriodsRes, terminatedDriversRes,
+    stationsRes, allStationsRes, leavePeriodsRes, terminatedDriversRes,
   ] =
     await Promise.all([
       supabase
@@ -78,7 +78,17 @@ export default async function TripsPage() {
         .is("terminated_at", null)
         .order("name", { ascending: true }),
       supabase.from("project_drivers").select("project_id, driver_id"),
-      supabase.from("water_stations").select("key, name, is_default"),
+      // Pickers (Add Trip, phase picker, Manage Project, loading chip) — ACTIVE
+      // stations only, so a deactivated station naturally disappears from every
+      // selection surface without touching any of that UI directly.
+      supabase.from("water_stations").select("key, name, is_default").eq("active", true).order("name", { ascending: true }),
+      // Every station row (active + inactive), full columns — feeds the "Manage
+      // stations" popup AND stationsByKey (name resolution must still work for
+      // old trips pointing at a since-deactivated station's key).
+      supabase
+        .from("water_stations")
+        .select("id, key, name, city, latitude, longitude, fill_cost, is_default, active")
+        .order("name", { ascending: true }),
       // FULL leave periods (NOT today-prefiltered): the pill still resolves "today"
       // via buildDriverStateMap, but Add Trip also needs on-leave for an ARBITRARY
       // selected calendar day, so the raw periods must cover any date.
@@ -103,12 +113,27 @@ export default async function TripsPage() {
     driverName: t.driver?.name ?? null,
   }));
 
-  // Water stations lookup. `stations` (full rows) feeds the New Project picker;
-  // `stationsByKey` resolves the trip card's "Fill at:" line (water_station is a
-  // FK key, so display needs the name).
+  // Water stations lookup. `stations` (active-only) feeds every SELECTION picker
+  // (New Project, Add Trip, phase picker, loading chip). `allStations` (every
+  // row, active + inactive, full columns) feeds the "Manage stations" popup.
+  // `stationsByKey` resolves the trip card's "Fill at:" line and must cover
+  // inactive stations too — an old trip pointing at a deactivated key still
+  // needs to show its name.
   const stations = (stationsRes.data ?? []) as { key: string; name: string; is_default: boolean }[];
+  type WaterStationRow = {
+    id: string;
+    key: string;
+    name: string;
+    city: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    fill_cost: number | null;
+    is_default: boolean;
+    active: boolean;
+  };
+  const allStations = (allStationsRes.data ?? []) as WaterStationRow[];
   const stationsByKey: Record<string, string> = {};
-  for (const s of stations) {
+  for (const s of allStations) {
     stationsByKey[s.key] = s.name;
   }
 
@@ -186,6 +211,7 @@ export default async function TripsPage() {
     driversRes.error ||
     assignmentsRes.error ||
     stationsRes.error ||
+    allStationsRes.error ||
     leavePeriodsRes.error ||
     terminatedDriversRes.error;
 
@@ -200,6 +226,7 @@ export default async function TripsPage() {
       assignmentsByProject={assignmentsByProject}
       stationsByKey={stationsByKey}
       stations={stations}
+      allStations={allStations}
       driverStateById={driverStateById}
       leavePeriods={leavePeriods}
       leaveLoadFailed={leaveLoadFailed}
