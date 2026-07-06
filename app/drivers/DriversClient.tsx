@@ -22,10 +22,11 @@ import {
   type Driver,
   type Staff,
   type StaffRole,
+  type OperationStation,
   TRUCK_STATUS_LABELS,
-  STATION_OPTIONS,
   type TruckStatus,
 } from "@/lib/db-types";
+import OperationStationField from "@/components/OperationStationField";
 import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
@@ -96,6 +97,7 @@ export default function DriversClient({
   staffRoles,
   leavePeriods,
   leaveTypes,
+  operationStations,
   today,
   projectsById,
   driverStateById,
@@ -119,6 +121,7 @@ export default function DriversClient({
   staffRoles: StaffRole[];
   leavePeriods: LeavePeriod[];
   leaveTypes: LeaveType[];
+  operationStations: OperationStation[];
   today: string;
   projectsById: Record<string, string>;
   driverStateById: Record<string, DriverState>;
@@ -141,6 +144,16 @@ export default function DriversClient({
   // Unfiltered — a truck can still point at a just-terminated driver until
   // reassigned, and this also resolves old records elsewhere in this file.
   const driverNameById = useMemo(() => new Map(allDrivers.map((d) => [d.id, d.name])), [allDrivers]);
+  // uuid -> name, built from ALL operation_stations rows (active + inactive) so
+  // a driver/truck already based at a since-deactivated station still resolves
+  // to its name here instead of a raw uuid or blank.
+  const stationNameById = useMemo(
+    () => new Map(operationStations.map((s) => [s.id, s.name])),
+    [operationStations],
+  );
+  function stationName(id: string | null): string | null {
+    return id ? stationNameById.get(id) ?? null : null;
+  }
 
   // COMPUTED on-leave-today (authoritative). Used for the detail modal's leave
   // section; the derived pill comes from driverStateById (server-resolved).
@@ -308,7 +321,7 @@ export default function DriversClient({
                           </div>
                         </div>
                       </TD>
-                      <TD>{d.home_station ?? <span className="muted">—</span>}</TD>
+                      <TD>{stationName(d.home_station) ?? <span className="muted">—</span>}</TD>
                       <TD>{pillFor(d)}</TD>
                       <TD>{truck ? <span className="font-mono text-xs">{truck.plate}</span> : <span className="muted">—</span>}</TD>
                       <TD>
@@ -367,7 +380,7 @@ export default function DriversClient({
       )}
 
       {tab === "staff" && (
-        <StaffTab staff={staff} staffRoles={staffRoles} leavePeriods={leavePeriods} leaveTypes={leaveTypes} today={today} />
+        <StaffTab staff={staff} staffRoles={staffRoles} leavePeriods={leavePeriods} leaveTypes={leaveTypes} operationStations={operationStations} today={today} />
       )}
 
       {detail && (
@@ -381,6 +394,7 @@ export default function DriversClient({
           today={today}
           onLeaveToday={onLeaveDrivers.has(detail.id)}
           state={driverStateById[detail.id] ?? "off_duty"}
+          stationName={stationName}
           onClose={() => setDetail(null)}
           onEdit={() => {
             const d = detail;
@@ -413,14 +427,12 @@ export default function DriversClient({
               <Field label="Hire date">
                 <input name="hire_date" type="date" defaultValue={editing?.hire_date ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Station">
-                <select name="home_station" defaultValue={editing?.home_station ?? ""} className={INPUT} style={INPUT_STYLE}>
-                  <option value="">—</option>
-                  {STATION_OPTIONS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </Field>
+              <OperationStationField
+                name="home_station"
+                stations={operationStations}
+                defaultValue={editing?.home_station ?? null}
+                label="Station"
+              />
               <Field label="Current truck">
                 <select name="truck_id" defaultValue={currentTruckId} className={INPUT} style={INPUT_STYLE}>
                   <option value="">Unassigned</option>
@@ -515,6 +527,7 @@ function DriverDetail({
   today,
   onLeaveToday,
   state,
+  stationName,
   onClose,
   onEdit,
 }: {
@@ -527,6 +540,7 @@ function DriverDetail({
   today: string;
   onLeaveToday: boolean;
   state: DriverState;
+  stationName: (id: string | null) => string | null;
   onClose: () => void;
   onEdit: () => void;
 }) {
@@ -573,7 +587,7 @@ function DriverDetail({
             <Avatar name={d.name} size="lg" />
             <div className="flex-1 min-w-0">
               <div className="font-semibold">{d.name}{d.name_ar ? <span className="muted font-normal"> · {d.name_ar}</span> : null}</div>
-              <div className="text-xs muted">{d.home_station ?? "—"}</div>
+              <div className="text-xs muted">{stationName(d.home_station) ?? "—"}</div>
             </div>
             {driverStatePill(state)}
           </div>
@@ -626,7 +640,7 @@ function DriverDetail({
                   <div className="font-medium">
                     <Link href={`/fleet/${truck.id}`} className="text-brand-600 dark:text-brand-300 hover:underline font-mono">{truck.plate}</Link>
                   </div>
-                  <div className="text-xs muted">{[truck.model, truck.home_station].filter(Boolean).join(" · ") || "—"}</div>
+                  <div className="text-xs muted">{[truck.model, stationName(truck.home_station)].filter(Boolean).join(" · ") || "—"}</div>
                 </div>
                 <StatusPill status={truck.status} label={TRUCK_STATUS_LABELS[truck.status]} />
               </div>

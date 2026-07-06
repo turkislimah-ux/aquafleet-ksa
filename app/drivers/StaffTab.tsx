@@ -13,12 +13,13 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Ban } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { type Staff, type StaffRole, STATION_OPTIONS } from "@/lib/db-types";
+import { type Staff, type StaffRole, type OperationStation } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
 import { cn } from "@/lib/utils";
 import { createStaff, updateStaff, terminateStaff, addStaffRole } from "./actions";
 import LeaveSection from "./LeaveSection";
+import OperationStationField from "@/components/OperationStationField";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -35,12 +36,14 @@ export default function StaffTab({
   staffRoles,
   leavePeriods,
   leaveTypes,
+  operationStations,
   today,
 }: {
   staff: Staff[];
   staffRoles: StaffRole[];
   leavePeriods: LeavePeriod[];
   leaveTypes: LeaveType[];
+  operationStations: OperationStation[];
   today: string;
 }) {
   const router = useRouter();
@@ -53,6 +56,13 @@ export default function StaffTab({
   // staff_roles holds only active roles; an assigned role that was later
   // deactivated falls back to showing its raw key.
   const roleName = (key: string) => staffRoles.find((r) => r.key === key)?.label ?? key;
+  // uuid -> name, built from ALL operation_stations rows (active + inactive) so
+  // a staff member based at a since-deactivated station still resolves here.
+  const stationNameById = useMemo(
+    () => new Map(operationStations.map((s) => [s.id, s.name])),
+    [operationStations],
+  );
+  const stationName = (id: string | null) => (id ? stationNameById.get(id) ?? null : null);
 
   // COMPUTED on-leave-today for staff. Staff carry no status enum, so on-leave is
   // derived purely from leave_periods (lib/leave) — never a stored flag.
@@ -144,7 +154,7 @@ export default function StaffTab({
                     )}
                   </div>
                   <div className="text-xs muted truncate">
-                    {roleName(p.role)}{p.station ? ` · ${p.station}` : ""}
+                    {roleName(p.role)}{stationName(p.station) ? ` · ${stationName(p.station)}` : ""}
                   </div>
                   <div className="text-[11px] muted truncate">{p.phone ?? "—"}</div>
                 </div>
@@ -179,7 +189,7 @@ export default function StaffTab({
 
               <div className="card p-3 grid grid-cols-2 gap-2">
                 <Cell label="Role">{roleName(detail.role)}</Cell>
-                <Cell label="Branch of operation">{detail.station ?? <span className="muted">—</span>}</Cell>
+                <Cell label="Branch of operation">{stationName(detail.station) ?? <span className="muted">—</span>}</Cell>
                 <Cell label="Email">{detail.email ?? <span className="muted">—</span>}</Cell>
                 <Cell label="Phone">{detail.phone ?? <span className="muted">—</span>}</Cell>
                 <Cell label="Status">
@@ -235,14 +245,12 @@ export default function StaffTab({
               <Field label="Role">
                 <RoleSelect roles={staffRoles} defaultKey={editing?.role ?? staffRoles[0]?.key ?? ""} />
               </Field>
-              <Field label="Branch of operation">
-                <select name="station" defaultValue={editing?.station ?? ""} className={INPUT} style={INPUT_STYLE}>
-                  <option value="">—</option>
-                  {STATION_OPTIONS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </Field>
+              <OperationStationField
+                name="station"
+                stations={operationStations}
+                defaultValue={editing?.station ?? null}
+                label="Branch of operation"
+              />
               <Field label="Email">
                 <input name="email" type="email" defaultValue={editing?.email ?? ""} placeholder="name@aquafleet.sa" className={INPUT} style={INPUT_STYLE} />
               </Field>

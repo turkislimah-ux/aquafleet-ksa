@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Truck } from "@/lib/db-types";
+import type { Truck, OperationStation } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { todayKey } from "@/lib/utils";
@@ -28,7 +28,7 @@ export default async function FleetPage() {
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   const today = todayKey(); // local (matches trip day-math), not UTC
 
-  const [trucksRes, driversRes, tripsRes, leavePeriodsRes, activeProjectsRes, projectDriversRes] = await Promise.all([
+  const [trucksRes, driversRes, tripsRes, leavePeriodsRes, activeProjectsRes, projectDriversRes, operationStationsRes] = await Promise.all([
     // Terminated trucks vanish from the fleet list entirely (0020) — restorable
     // later from Archive. Filtering here also frees their driver: the
     // truckDriverIds set below is built from this array, so a terminated
@@ -60,6 +60,13 @@ export default async function FleetPage() {
     // fact for the derived driver-state pill (truck but no active project = idle).
     supabase.from("projects").select("id").is("archived_at", null),
     supabase.from("project_drivers").select("project_id, driver_id"),
+    // Operation stations (0022) — the truck/driver/staff BASE. ALL rows (active
+    // + inactive): feeds the truck form's picker (must resolve an already-
+    // assigned-but-deactivated station) AND the filter dropdown/table name lookup.
+    supabase
+      .from("operation_stations")
+      .select("id, name, latitude, longitude, active, created_at")
+      .order("name", { ascending: true }),
   ]);
 
   const drivers = (driversRes.data ?? []) as DriverLite[];
@@ -102,9 +109,11 @@ export default async function FleetPage() {
     drivers, truckDriverIds, activeProjectDriverIds, leavePeriods, today,
   );
 
+  const operationStations = (operationStationsRes.data ?? []) as OperationStation[];
+
   const error =
     trucksRes.error || driversRes.error || tripsRes.error || leavePeriodsRes.error ||
-    activeProjectsRes.error || projectDriversRes.error;
+    activeProjectsRes.error || projectDriversRes.error || operationStationsRes.error;
 
   // ---- KPI strip (6) — all REAL, nulls skipped, no division-by-zero ----
   const total = trucks.length;
@@ -137,6 +146,7 @@ export default async function FleetPage() {
       trips30d={trips30d}
       onLeaveDriverIds={onLeaveDriverIds}
       driverStateById={driverStateById}
+      operationStations={operationStations}
       kpis={kpis}
       errorMsg={error ? error.message : null}
     />

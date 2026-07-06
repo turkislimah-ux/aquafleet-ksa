@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Card, Stat, StatusPill, Section, Btn, Table, TH, TD } from "@/components/ui";
-import { TRUCK_STATUS_LABELS } from "@/lib/db-types";
+import { TRUCK_STATUS_LABELS, type OperationStation } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "../page";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 import { assignDriver, unassignDriver, terminateTruck } from "../actions";
@@ -51,6 +51,7 @@ export default function FleetDetailClient({
   trips30d,
   onLeaveDriverIds,
   driverStateById,
+  operationStations,
   errorMsg,
 }: {
   truck: TruckRow | null;
@@ -59,6 +60,7 @@ export default function FleetDetailClient({
   trips30d: Record<string, number>;
   onLeaveDriverIds: string[];
   driverStateById: Record<string, DriverState>;
+  operationStations: OperationStation[];
   errorMsg: string | null;
 }) {
   const router = useRouter();
@@ -80,6 +82,13 @@ export default function FleetDetailClient({
     for (const t of trucks) if (t.assigned_driver_id) m.set(t.assigned_driver_id, t);
     return m;
   }, [trucks]);
+
+  // uuid -> name, built from ALL operation_stations rows (active + inactive) so
+  // a truck based at a since-deactivated station still resolves here.
+  const stationNameById = useMemo(
+    () => new Map(operationStations.map((s) => [s.id, s.name])),
+    [operationStations],
+  );
 
   if (!truck) {
     return (
@@ -105,7 +114,7 @@ export default function FleetDetailClient({
     truck.model,
     truck.year ? String(truck.year) : null,
     truck.capacity_m3 != null ? `${truck.capacity_m3} m³` : null,
-    truck.home_station,
+    truck.home_station ? stationNameById.get(truck.home_station) ?? null : null,
   ].filter(Boolean);
 
   function openAssign() {
@@ -414,6 +423,7 @@ export default function FleetDetailClient({
           mode="edit"
           truck={truck}
           drivers={drivers}
+          operationStations={operationStations}
           onClose={() => setEditOpen(false)}
           onSaved={() => {
             setEditOpen(false);

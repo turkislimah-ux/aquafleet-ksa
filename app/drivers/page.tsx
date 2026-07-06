@@ -6,7 +6,7 @@
 // feed the Driver Detail modal. Both derived from one trips fetch.
 
 import { createClient } from "@/lib/supabase/server";
-import type { Driver, Staff, StaffRole } from "@/lib/db-types";
+import type { Driver, Staff, StaffRole, OperationStation } from "@/lib/db-types";
 import type { LeavePeriod, LeaveType } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { todayKey } from "@/lib/utils";
@@ -43,7 +43,7 @@ export default async function DriversPage() {
   const supabase = createClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, projectDriversRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, projectDriversRes, operationStationsRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       // Terminated trucks vanish from the driver-detail "Current Assignment"
@@ -106,6 +106,13 @@ export default async function DriversPage() {
         .order("label", { ascending: true }),
       // Project↔driver membership → hasActiveProject fact for the derived pill.
       supabase.from("project_drivers").select("project_id, driver_id"),
+      // Operation stations (0022) — the driver/truck/staff BASE. ALL rows (active
+      // + inactive): the picker needs inactive rows too, to resolve an
+      // already-assigned-but-deactivated station instead of rendering blank.
+      supabase
+        .from("operation_stations")
+        .select("id, name, latitude, longitude, active, created_at")
+        .order("name", { ascending: true }),
     ]);
 
   // ---- Driver set split (termination) ----------------------------------
@@ -133,6 +140,7 @@ export default async function DriversPage() {
   const staffRoles = (staffRolesRes.data ?? []) as StaffRole[];
   const leavePeriods = (leavePeriodsRes.data ?? []) as LeavePeriod[];
   const leaveTypes = (leaveTypesRes.data ?? []) as LeaveType[];
+  const operationStations = (operationStationsRes.data ?? []) as OperationStation[];
   const today = todayKey(); // local (matches trip day-math), not UTC
   const projectsById: Record<string, string> = {};
   const activeProjectIds = new Set<string>();
@@ -185,7 +193,8 @@ export default async function DriversPage() {
     staffRolesRes.error ||
     leavePeriodsRes.error ||
     leaveTypesRes.error ||
-    projectDriversRes.error;
+    projectDriversRes.error ||
+    operationStationsRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -224,6 +233,7 @@ export default async function DriversPage() {
       staffRoles={staffRoles}
       leavePeriods={leavePeriods}
       leaveTypes={leaveTypes}
+      operationStations={operationStations}
       today={today}
       projectsById={projectsById}
       driverStateById={driverStateById}

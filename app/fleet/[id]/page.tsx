@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Truck } from "@/lib/db-types";
+import type { Truck, OperationStation } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { todayKey } from "@/lib/utils";
@@ -25,7 +25,7 @@ export default async function FleetDetailPage({
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   const today = todayKey(); // local (matches trip day-math), not UTC
 
-  const [trucksRes, driversRes, tripsRes, leavePeriodsRes, activeProjectsRes, projectDriversRes] = await Promise.all([
+  const [trucksRes, driversRes, tripsRes, leavePeriodsRes, activeProjectsRes, projectDriversRes, operationStationsRes] = await Promise.all([
     // Terminated trucks are filtered out here too — a direct URL to a
     // terminated truck's id resolves to `truck: null` below (FleetDetailClient
     // already renders a "Truck not found" fallback for that case; no crash).
@@ -48,6 +48,13 @@ export default async function FleetDetailPage({
     // Non-archived projects + membership → hasActiveProject fact for derived state.
     supabase.from("projects").select("id").is("archived_at", null),
     supabase.from("project_drivers").select("project_id, driver_id"),
+    // Operation stations (0022) — ALL rows (active + inactive), same reasons as
+    // app/fleet/page.tsx: the Edit Truck modal's picker + this truck's own
+    // station-name resolution both need inactive rows too.
+    supabase
+      .from("operation_stations")
+      .select("id, name, latitude, longitude, active, created_at")
+      .order("name", { ascending: true }),
   ]);
 
   const drivers = (driversRes.data ?? []) as DriverLite[];
@@ -88,9 +95,11 @@ export default async function FleetDetailPage({
   );
 
   const truck = trucks.find((t) => t.id === id) ?? null;
+  const operationStations = (operationStationsRes.data ?? []) as OperationStation[];
   const errorMsg =
     trucksRes.error?.message ?? driversRes.error?.message ?? tripsRes.error?.message ??
-    leavePeriodsRes.error?.message ?? activeProjectsRes.error?.message ?? projectDriversRes.error?.message ?? null;
+    leavePeriodsRes.error?.message ?? activeProjectsRes.error?.message ?? projectDriversRes.error?.message ??
+    operationStationsRes.error?.message ?? null;
 
   return (
     <FleetDetailClient
@@ -100,6 +109,7 @@ export default async function FleetDetailPage({
       trips30d={trips30d}
       onLeaveDriverIds={onLeaveDriverIds}
       driverStateById={driverStateById}
+      operationStations={operationStations}
       errorMsg={errorMsg}
     />
   );

@@ -8,9 +8,10 @@
 
 import { useState } from "react";
 import { Btn } from "@/components/ui";
-import { TRUCK_STATUS_LABELS, STATION_OPTIONS } from "@/lib/db-types";
+import { TRUCK_STATUS_LABELS, type OperationStation } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "./page";
 import { createTruck, updateTruck } from "./actions";
+import OperationStationField from "@/components/OperationStationField";
 
 const CAPACITY_OPTIONS_M3 = [33, 18, 6] as const;
 
@@ -26,12 +27,14 @@ export default function TruckFormModal({
   mode,
   truck,
   drivers,
+  operationStations,
   onClose,
   onSaved,
 }: {
   mode: "add" | "edit";
   truck?: TruckRow | null;
   drivers: DriverLite[];
+  operationStations: OperationStation[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -130,22 +133,12 @@ export default function TruckFormModal({
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Station</span>
-            <select
-              name="home_station"
-              defaultValue={t?.home_station ?? ""}
-              className={INPUT}
-              style={INPUT_STYLE}
-            >
-              <option value="">—</option>
-              {STATION_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </label>
+          <OperationStationField
+            name="home_station"
+            stations={operationStations}
+            defaultValue={t?.home_station ?? null}
+            label="Station"
+          />
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">Odometer (km)</span>
             <input

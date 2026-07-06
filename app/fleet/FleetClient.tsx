@@ -11,8 +11,8 @@ import { useRouter } from "next/navigation";
 import { PageHeader, Card, Stat, StatusPill, Bar, Btn, Table, TH, TD } from "@/components/ui";
 import {
   type TruckStatus,
+  type OperationStation,
   TRUCK_STATUS_LABELS,
-  STATION_OPTIONS,
 } from "@/lib/db-types";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 import type { TruckRow, DriverLite } from "./page";
@@ -53,6 +53,7 @@ export default function FleetClient({
   trips30d,
   onLeaveDriverIds,
   driverStateById,
+  operationStations,
   kpis,
   errorMsg,
 }: {
@@ -61,6 +62,7 @@ export default function FleetClient({
   trips30d: Record<string, number>;
   onLeaveDriverIds: string[];
   driverStateById: Record<string, DriverState>;
+  operationStations: OperationStation[];
   kpis: Kpis;
   errorMsg: string | null;
 }) {
@@ -88,6 +90,22 @@ export default function FleetClient({
     for (const t of trucks) if (t.assigned_driver_id) m.set(t.assigned_driver_id, t);
     return m;
   }, [trucks]);
+
+  // uuid -> name, built from ALL operation_stations rows (active + inactive) so
+  // a truck based at a since-deactivated station still resolves here.
+  const stationNameById = useMemo(
+    () => new Map(operationStations.map((s) => [s.id, s.name])),
+    [operationStations],
+  );
+  // Filter dropdown options: active stations, PLUS any inactive station a truck
+  // in this list is still currently based at (so the filter can still find it,
+  // and its name still resolves — matches OperationStationField's same rule).
+  const stationFilterOptions = useMemo(() => {
+    const assignedIds = new Set(
+      trucks.map((t) => t.home_station).filter((id): id is string => id != null),
+    );
+    return operationStations.filter((s) => s.active || assignedIds.has(s.id));
+  }, [operationStations, trucks]);
 
   const list = useMemo(
     () =>
@@ -210,9 +228,9 @@ export default function FleetClient({
             style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
           >
             <option value="all">All Stations</option>
-            {STATION_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
+            {stationFilterOptions.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}{!s.active ? " (deactivated)" : ""}
               </option>
             ))}
           </select>
@@ -263,7 +281,7 @@ export default function FleetClient({
                   {tr.model ?? "—"}
                   {tr.year ? <span className="muted"> · {tr.year}</span> : null}
                 </TD>
-                <TD>{tr.home_station ?? "—"}</TD>
+                <TD>{tr.home_station ? stationNameById.get(tr.home_station) ?? "—" : "—"}</TD>
                 <TD>
                   <StatusPill status={tr.status} label={TRUCK_STATUS_LABELS[tr.status]} />
                 </TD>
@@ -329,7 +347,13 @@ export default function FleetClient({
 
       {/* ---- Add Truck modal ---- */}
       {addOpen && (
-        <TruckFormModal mode="add" drivers={drivers} onClose={() => setAddOpen(false)} onSaved={onTruckSaved} />
+        <TruckFormModal
+          mode="add"
+          drivers={drivers}
+          operationStations={operationStations}
+          onClose={() => setAddOpen(false)}
+          onSaved={onTruckSaved}
+        />
       )}
 
       {/* ---- Edit Truck modal ---- */}
@@ -338,6 +362,7 @@ export default function FleetClient({
           mode="edit"
           truck={editTruck}
           drivers={drivers}
+          operationStations={operationStations}
           onClose={() => setEditTruck(null)}
           onSaved={onTruckSaved}
         />

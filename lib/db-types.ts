@@ -98,6 +98,7 @@ export type Driver = {
   // Added in 0006 — all nullable, render "—" when absent (no fake values).
   phone: string | null;
   hire_date: string | null;
+  // FK -> operation_stations.id (migration 0022; nullable, on delete set null).
   home_station: string | null;
   hours_this_week: number | null;
   incidents_12mo: number | null;
@@ -122,6 +123,7 @@ export type Truck = {
   capacity_m3: number | null;
   status: TruckStatus;
   health_score: number | null;
+  // FK -> operation_stations.id (migration 0022; nullable, on delete set null).
   home_station: string | null;
   odometer_km: number | null;
   engine_hours: number | null;
@@ -158,14 +160,27 @@ export const TRUCK_STATUS_LABELS: Record<TruckStatus, string> = {
   out_of_service: "Out of service",
 };
 
-// Riyadh-only operation: 3 water stations (placeholder labels for now).
-export const STATION_OPTIONS = ["South Station 1", "South Station 2", "North Station"] as const;
+// Operation stations (migration 0022) — the truck/driver/staff BASE (where
+// they start from). Separate from water_stations (where a truck FILLS, see
+// migration 0014's "do NOT unify" note). `drivers.home_station`,
+// `trucks.home_station`, and `staff.station` are all uuid FKs into this table
+// (nullable, on delete set null). No slug key: legacy free-text values were
+// wiped to null before the FK was added, so there's nothing to reconcile.
+export type OperationStation = {
+  id: string;
+  name: string;
+  latitude: number | null;
+  longitude: number | null;
+  active: boolean;
+  created_at: string;
+};
 
 // ---------------------------------------------------------------------------
 // Phase 7 — management & support staff (0010) + roles lookup & soft-delete
 // (0011). The non-driver people: office + workshop. Drivers live in `drivers`;
 // everyone else here. Reality match: the demo's "depot" is our "station",
-// labelled "Branch of operation" in the UI (free text, like drivers.home_station).
+// labelled "Branch of operation" in the UI (FK -> operation_stations.id, like
+// drivers.home_station).
 //
 // Roles are a first-class lookup table (staff_roles); staff.role is a FK to
 // staff_roles.key. The 5 built-ins are seeded (is_default=true); managers can
@@ -189,6 +204,7 @@ export type Staff = {
   // FK → staff_roles.key (built-in or custom).
   role: string;
   // Column is `station`; shown as "Branch of operation" in the UI.
+  // FK -> operation_stations.id (migration 0022; nullable, on delete set null).
   station: string | null;
   email: string | null;
   phone: string | null;
