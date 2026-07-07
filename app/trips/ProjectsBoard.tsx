@@ -38,6 +38,7 @@ import {
 } from "@/lib/db-types";
 import { type DriverState, DRIVER_STATE_LABELS } from "@/lib/driver-state";
 import { type LeavePeriod } from "@/lib/leave";
+import { pillColor } from "@/lib/project-colors";
 import { setTripStage, setTripStation, deleteTrip } from "./actions";
 import CreateTripForm from "./CreateTripForm";
 import NewProjectModal from "./NewProjectModal";
@@ -155,25 +156,8 @@ function weekStartOf(key: string): string {
   return dayKey(d);
 }
 
-// Deterministic decorative pill color per project id (hash → fixed palette).
-// Same id => same color forever. No status meaning, no legend.
-const PILL_PALETTE = [
-  "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  "bg-sky-500/15 text-sky-700 dark:text-sky-300",
-  "bg-violet-500/15 text-violet-700 dark:text-violet-300",
-  "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-  "bg-rose-500/15 text-rose-700 dark:text-rose-300",
-  "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300",
-  "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
-  "bg-lime-500/15 text-lime-700 dark:text-lime-300",
-  "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300",
-  "bg-teal-500/15 text-teal-700 dark:text-teal-300",
-];
-function pillColor(id: string): string {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return PILL_PALETTE[h % PILL_PALETTE.length];
-}
+// pillColor now lives in lib/project-colors.ts (shared with the Drivers/Fleet
+// "Assigned Project" columns, so a project is the same color everywhere).
 
 // Driver-avatar initials (first + last word). Mirrors the demo's initials().
 function initials(name: string): string {
@@ -735,6 +719,7 @@ function ProjectCard({
   driverRows,
   assignedCount,
   stationsByKey,
+  customerName,
   advancingId,
   onAdvance,
   onManage,
@@ -751,6 +736,9 @@ function ProjectCard({
   driverRows: DriverRow[];
   assignedCount: number;
   stationsByKey: Record<string, string>;
+  // This project's customer name (1:1 via project.customer_id) — shown in the
+  // card header (block A), below the project title, replacing the old short-id.
+  customerName: string;
   advancingId: string | null;
   onAdvance: (tripId: string, to: TripStage) => void;
   onManage: (p: ProjectHeader) => void;
@@ -780,7 +768,7 @@ function ProjectCard({
             <h3 className="text-base font-semibold truncate">{project.name}</h3>
           </div>
           <div className="mt-1 flex items-center gap-2 text-xs muted flex-wrap">
-            <span className="font-mono">#{project.id.slice(0, 8)}</span>
+            <span>{customerName}</span>
             {project.location && (
               <>
                 <span>·</span>
@@ -1126,6 +1114,10 @@ export default function ProjectsBoard({
     return m;
   }, [trips, selectedDay, drivers, trucks, assignmentsByProject, projects, driverStateById]);
 
+  // Customer name lookup (id -> name) — resolves each project's 1:1 customer
+  // for the Kanban card's customer-name display.
+  const customersById = useMemo(() => new Map(customers.map((c) => [c.id, c.name] as const)), [customers]);
+
   // driver_id -> [project name…] for the project form's driver roster (which
   // projects each driver already serves). Inverts assignmentsByProject + names.
   const driverProjectNames = useMemo(() => {
@@ -1421,6 +1413,7 @@ export default function ProjectsBoard({
               driverRows={driverRowsByProject.get(p.id) ?? []}
               assignedCount={(assignmentsByProject[p.id] ?? []).length}
               stationsByKey={stationsByKey}
+              customerName={customersById.get(p.customer_id) ?? "—"}
               advancingId={advancingId}
               onAdvance={advance}
               onManage={setManaging}

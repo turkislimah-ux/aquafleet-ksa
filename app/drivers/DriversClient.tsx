@@ -16,8 +16,9 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Pencil, Eye, Star, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon } from "lucide-react";
-import { Btn, Stat, StatusPill, Bar, Table, TH, TD } from "@/components/ui";
-import { formatSar } from "@/lib/utils";
+import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
+import { cn, formatSar } from "@/lib/utils";
+import { pillColor } from "@/lib/project-colors";
 import {
   type Driver,
   type Staff,
@@ -100,6 +101,7 @@ export default function DriversClient({
   operationStations,
   today,
   projectsById,
+  activeProjectNamesByDriver,
   driverStateById,
   error,
 }: {
@@ -124,6 +126,9 @@ export default function DriversClient({
   operationStations: OperationStation[];
   today: string;
   projectsById: Record<string, string>;
+  // driver_id -> stacked {id, name} of their active (non-archived) projects.
+  // id feeds pillColor() so a project's pill color matches the Trips board.
+  activeProjectNamesByDriver: Record<string, { id: string; name: string }[]>;
   driverStateById: Record<string, DriverState>;
   error: string | null;
 }) {
@@ -291,7 +296,7 @@ export default function DriversClient({
                   <TH>Station</TH>
                   <TH>Status</TH>
                   <TH>Truck</TH>
-                  <TH>Safety</TH>
+                  <TH>Assigned Project</TH>
                   <TH>Trips 30d</TH>
                   <TH>Rating</TH>
                   <TH>Salary</TH>
@@ -325,10 +330,20 @@ export default function DriversClient({
                       <TD>{pillFor(d)}</TD>
                       <TD>{truck ? <span className="font-mono text-xs">{truck.plate}</span> : <span className="muted">—</span>}</TD>
                       <TD>
-                        {d.safety_score != null ? (
-                          <div className="w-24">
-                            <div className="text-[11px] tabular-nums mb-0.5">{d.safety_score}</div>
-                            <Bar value={d.safety_score} />
+                        {(activeProjectNamesByDriver[d.id]?.length ?? 0) > 0 ? (
+                          <div className="flex flex-col gap-1">
+                            {activeProjectNamesByDriver[d.id].map((p) => (
+                              <span
+                                key={p.id}
+                                title={p.name}
+                                className={cn(
+                                  "inline-block w-fit max-w-[10rem] rounded px-1.5 py-0.5 text-[11px] font-medium truncate",
+                                  pillColor(p.id)
+                                )}
+                              >
+                                {p.name}
+                              </span>
+                            ))}
                           </div>
                         ) : (
                           <span className="muted">—</span>

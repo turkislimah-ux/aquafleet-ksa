@@ -49,7 +49,6 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
     status: str(formData.get("status")) || "active",
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
-    engine_hours: numOrNull(formData.get("engine_hours")),
     vin: nullable(formData.get("vin")),
     assigned_driver_id: nullable(formData.get("assigned_driver_id")),
     active: true,
@@ -91,7 +90,6 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
     status: str(formData.get("status")) || "active",
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
-    engine_hours: numOrNull(formData.get("engine_hours")),
     vin: nullable(formData.get("vin")),
     last_service_date: nullable(formData.get("last_service_date")),
   };

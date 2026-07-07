@@ -56,9 +56,11 @@ export default async function FleetPage() {
       .select("driver_id, staff_id, start_date, end_date")
       .lte("start_date", today)
       .gte("end_date", today),
-    // Non-archived project ids + project↔driver membership → the hasActiveProject
-    // fact for the derived driver-state pill (truck but no active project = idle).
-    supabase.from("projects").select("id").is("archived_at", null),
+    // Non-archived projects (id + name) + project↔driver membership → the
+    // hasActiveProject fact for the derived driver-state pill (truck but no
+    // active project = idle), AND the names feed the truck table's "Assigned
+    // Project" column.
+    supabase.from("projects").select("id, name").is("archived_at", null),
     supabase.from("project_drivers").select("project_id, driver_id"),
     // Operation stations (0022) — the truck/driver/staff BASE. ALL rows (active
     // + inactive): feeds the truck form's picker (must resolve an already-
@@ -94,9 +96,9 @@ export default async function FleetPage() {
   const onLeaveDriverIds = Array.from(onLeaveTodaySet(leavePeriods, today).drivers);
 
   // ---- Derived driver state map (lib/driver-state) ----
-  const activeProjectIds = new Set(
-    ((activeProjectsRes.data ?? []) as { id: string }[]).map((p) => p.id)
-  );
+  const activeProjects = (activeProjectsRes.data ?? []) as { id: string; name: string }[];
+  const activeProjectIds = new Set(activeProjects.map((p) => p.id));
+  const activeProjectNameById = new Map(activeProjects.map((p) => [p.id, p.name] as const));
   const truckDriverIds = new Set(
     trucks.map((t) => t.assigned_driver_id).filter((id): id is string => id != null)
   );
@@ -108,6 +110,18 @@ export default async function FleetPage() {
   const driverStateById: Record<string, DriverState> = buildDriverStateMap(
     drivers, truckDriverIds, activeProjectDriverIds, leavePeriods, today,
   );
+
+  // driver_id -> stacked {id, name} of their active projects — the truck
+  // table's "Assigned Project" column resolves through a truck's assigned
+  // driver. Carries the id so the pill can be colored via lib/project-colors'
+  // pillColor(id), matching the same project's color on the Trips board.
+  const activeProjectNamesByDriver: Record<string, { id: string; name: string }[]> = {};
+  for (const r of (projectDriversRes.data ?? []) as { project_id: string; driver_id: string }[]) {
+    const name = activeProjectNameById.get(r.project_id);
+    if (!name) continue;
+    const arr = (activeProjectNamesByDriver[r.driver_id] ??= []);
+    if (!arr.some((p) => p.id === r.project_id)) arr.push({ id: r.project_id, name });
+  }
 
   const operationStations = (operationStationsRes.data ?? []) as OperationStation[];
 
@@ -146,6 +160,7 @@ export default async function FleetPage() {
       trips30d={trips30d}
       onLeaveDriverIds={onLeaveDriverIds}
       driverStateById={driverStateById}
+      activeProjectNamesByDriver={activeProjectNamesByDriver}
       operationStations={operationStations}
       kpis={kpis}
       errorMsg={error ? error.message : null}

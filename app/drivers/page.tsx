@@ -166,6 +166,20 @@ export default async function DriversPage() {
     activeDrivers, truckDriverIds, activeProjectDriverIds, leavePeriods, today,
   );
 
+  // driver_id -> stacked {id, name} of their active (non-archived) projects —
+  // Drivers table's "Assigned Project" column. Carries the id (not just the
+  // name) so the pill can be colored via lib/project-colors' pillColor(id),
+  // matching the same project's color on the Trips board. Reuses the
+  // already-fetched project_drivers rows + projectsById map; no new query.
+  const activeProjectNamesByDriver: Record<string, { id: string; name: string }[]> = {};
+  for (const r of (projectDriversRes.data ?? []) as { project_id: string; driver_id: string }[]) {
+    if (!activeProjectIds.has(r.project_id)) continue;
+    const name = projectsById[r.project_id];
+    if (!name) continue;
+    const arr = (activeProjectNamesByDriver[r.driver_id] ??= []);
+    if (!arr.some((p) => p.id === r.project_id)) arr.push({ id: r.project_id, name });
+  }
+
   // ---- Commissions driver set: activeDrivers ∪ terminated-with-balance ----
   // buildCurrentRows is driver-set-agnostic (pure); run it once over EVERY
   // driver to get each one's rolling total, then keep a terminated driver
@@ -236,6 +250,7 @@ export default async function DriversPage() {
       operationStations={operationStations}
       today={today}
       projectsById={projectsById}
+      activeProjectNamesByDriver={activeProjectNamesByDriver}
       driverStateById={driverStateById}
       error={error?.message ?? null}
     />

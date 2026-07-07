@@ -354,7 +354,15 @@ export default function BreakdownReport({
           <div className="flex items-start justify-between gap-6">
             {/* Left: project / customer / contact overview. */}
             <div>
-              <h2 className="text-xl font-semibold">{project.name}</h2>
+              <h2 className="text-xl font-semibold">
+                {project.name}
+                {/* Reference id for the formal report — the same short id the
+                    Kanban header used to show before it switched to the
+                    customer name. Report keeps it; board doesn't need it. */}
+                <span className="ms-2 align-middle font-mono text-xs font-normal muted">
+                  #{project.id.slice(0, 8)}
+                </span>
+              </h2>
               <p className="text-sm muted">
                 {customerName} · {monthLabel(selMonth)}
                 {monthInProgress && (

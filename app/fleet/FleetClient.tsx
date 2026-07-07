@@ -19,6 +19,7 @@ import type { TruckRow, DriverLite } from "./page";
 import { assignDriver, unassignDriver } from "./actions";
 import TruckFormModal from "./TruckFormModal";
 import { cn, formatNum } from "@/lib/utils";
+import { pillColor } from "@/lib/project-colors";
 import { Filter, Truck as TruckIcon, Eye, Plus, Pencil, Users, X } from "lucide-react";
 
 type Kpis = {
@@ -53,6 +54,7 @@ export default function FleetClient({
   trips30d,
   onLeaveDriverIds,
   driverStateById,
+  activeProjectNamesByDriver,
   operationStations,
   kpis,
   errorMsg,
@@ -62,6 +64,10 @@ export default function FleetClient({
   trips30d: Record<string, number>;
   onLeaveDriverIds: string[];
   driverStateById: Record<string, DriverState>;
+  // driver_id -> stacked {id, name} of their active projects — resolved per
+  // truck via its assigned driver. id feeds pillColor() so a project's pill
+  // color matches the Trips board.
+  activeProjectNamesByDriver: Record<string, { id: string; name: string }[]>;
   operationStations: OperationStation[];
   kpis: Kpis;
   errorMsg: string | null;
@@ -248,6 +254,7 @@ export default function FleetClient({
               <TH>Station</TH>
               <TH>Status</TH>
               <TH>Driver</TH>
+              <TH>Assigned Project</TH>
               <TH>Health</TH>
               <TH>Capacity</TH>
               <TH>Odometer</TH>
@@ -259,7 +266,7 @@ export default function FleetClient({
             {list.length === 0 && (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={11}
                   className="py-6 px-3 border-t text-center muted text-sm"
                   style={{ borderColor: "rgb(var(--border))" }}
                 >
@@ -302,6 +309,29 @@ export default function FleetClient({
                       <Plus className="h-3.5 w-3.5" /> Assign Driver
                     </Btn>
                   )}
+                </TD>
+                <TD>
+                  {(() => {
+                    const projs = tr.assigned_driver_id ? activeProjectNamesByDriver[tr.assigned_driver_id] : undefined;
+                    return projs && projs.length > 0 ? (
+                      <div className="flex flex-col gap-1">
+                        {projs.map((p) => (
+                          <span
+                            key={p.id}
+                            title={p.name}
+                            className={cn(
+                              "inline-block w-fit max-w-[10rem] rounded px-1.5 py-0.5 text-[11px] font-medium truncate",
+                              pillColor(p.id)
+                            )}
+                          >
+                            {p.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="muted">—</span>
+                    );
+                  })()}
                 </TD>
                 <TD>
                   {tr.health_score != null ? (

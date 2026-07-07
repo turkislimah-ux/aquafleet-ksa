@@ -151,17 +151,6 @@ export default function TruckFormModal({
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Engine hours</span>
-            <input
-              name="engine_hours"
-              type="number"
-              min="0"
-              defaultValue={t?.engine_hours ?? 0}
-              className={INPUT}
-              style={INPUT_STYLE}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
             <span className="muted">VIN</span>
             <input name="vin" defaultValue={t?.vin ?? ""} className={INPUT} style={INPUT_STYLE} />
           </label>
