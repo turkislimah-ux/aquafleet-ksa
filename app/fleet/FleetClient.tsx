@@ -294,16 +294,15 @@ export default function FleetClient({
                 </TD>
                 <TD>
                   {tr.driverName ? (
-                    <span className="inline-flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      title="Change driver"
+                      onClick={() => openAssign(tr)}
+                      className="inline-flex items-center gap-1.5 -mx-2 rounded-md px-2 py-1 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <Users className="h-3.5 w-3.5 muted shrink-0" />
                       <span>{tr.driverName}</span>
-                      <button
-                        title="Change driver"
-                        onClick={() => openAssign(tr)}
-                        className="h-6 w-6 grid place-items-center rounded-md hover:bg-black/5 dark:hover:bg-white/5"
-                      >
-                        <Users className="h-3.5 w-3.5" />
-                      </button>
-                    </span>
+                    </button>
                   ) : (
                     <Btn variant="outline" onClick={() => openAssign(tr)}>
                       <Plus className="h-3.5 w-3.5" /> Assign Driver

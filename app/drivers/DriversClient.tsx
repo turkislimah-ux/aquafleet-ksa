@@ -32,6 +32,10 @@ import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 import { createDriver, updateDriver, terminateDriver } from "./actions";
+// Reused, not duplicated — the same unassign action the Fleet table's "Change
+// driver"/unassign flow already calls (app/fleet/actions.ts). One place clears
+// trucks.assigned_driver_id.
+import { unassignDriver } from "@/app/fleet/actions";
 import LeaveSection from "./LeaveSection";
 import CommissionsTab, {
   buildCurrentRows,
@@ -559,6 +563,25 @@ function DriverDetail({
   // on leave today) as a UI-only warning inside the leave section.
   const truckConflict = onLeaveToday && truck != null;
 
+  // Unassign the driver's truck from this view — reuses Fleet's unassignDriver
+  // (same server action, one place clears trucks.assigned_driver_id). No
+  // confirm step (per decision): immediate on click. Driver keeps projects,
+  // loses the truck, so derived state falls to off_duty.
+  const [unassigning, setUnassigning] = useState(false);
+  const [unassignErr, setUnassignErr] = useState<string | null>(null);
+  async function onUnassignTruck() {
+    if (!truck || unassigning) return;
+    setUnassigning(true);
+    setUnassignErr(null);
+    const res = await unassignDriver(truck.id);
+    setUnassigning(false);
+    if (res.error) {
+      setUnassignErr(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
   // Danger zone — soft-delete termination (mirrors ProjectModal's archive
   // confirm pattern). Past dates allowed, future dates blocked via max=today.
   const [confirmingTerminate, setConfirmingTerminate] = useState(false);
@@ -652,10 +675,14 @@ function DriverDetail({
                   <div className="text-xs muted">{[truck.model, stationName(truck.home_station)].filter(Boolean).join(" · ") || "—"}</div>
                 </div>
                 <StatusPill status={truck.status} label={TRUCK_STATUS_LABELS[truck.status]} />
+                <Btn variant="outline" onClick={onUnassignTruck} className="shrink-0">
+                  {unassigning ? "Unassigning…" : "Unassign"}
+                </Btn>
               </div>
             ) : (
               <p className="muted text-sm">No truck assigned</p>
             )}
+            {unassignErr && <p className="text-sm text-rose-600 dark:text-rose-400 mt-2">{unassignErr}</p>}
           </div>
 
           {/* Recent trips */}
