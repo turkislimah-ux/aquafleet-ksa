@@ -26,6 +26,12 @@ function numOrNull(v: FormDataEntryValue | null) {
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
+// duty_hours is NOT NULL (DB default 10) — empty/invalid input must never
+// write null. Falls back to `fallback` (10) instead.
+function numOrDefault(v: FormDataEntryValue | null, fallback: number) {
+  const n = numOrNull(v);
+  return n ?? fallback;
+}
 
 function parse(formData: FormData) {
   return {
@@ -36,13 +42,14 @@ function parse(formData: FormData) {
     // status is dead (Commit 4): derived driver state (lib/driver-state.ts)
     // reads drivers.active, not this column. No longer written from the form —
     // the DB column + NOT NULL DEFAULT 'active' stay untouched.
-    safety_score: numOrNull(formData.get("safety_score")),
-    rating: numOrNull(formData.get("rating")),
+    // safety_score/rating/hours_this_week/incidents_12mo (Commit B, 0023):
+    // form controls removed, no longer written — columns stay in DB, dead.
     phone: nullable(formData.get("phone")),
     hire_date: nullable(formData.get("hire_date")),
     home_station: nullable(formData.get("home_station")),
-    hours_this_week: numOrNull(formData.get("hours_this_week")),
-    incidents_12mo: numOrNull(formData.get("incidents_12mo")),
+    // Added in 0023 — duty_hours is NOT NULL, falls back to 10 (never null).
+    duty_hours: numOrDefault(formData.get("duty_hours"), 10),
+    iqama_expiry: nullable(formData.get("iqama_expiry")),
     // Standalone monthly salary — display-only, never part of commission math.
     salary_sar: numOrNull(formData.get("salary_sar")),
     // active: dropped (Commit 2, termination sequence) — drivers.active no
@@ -152,6 +159,11 @@ function parseStaff(formData: FormData) {
     email: nullable(formData.get("email")),
     phone: nullable(formData.get("phone")),
     active: formData.get("active") != null,
+    // Added in 0023 — duty_hours is NOT NULL, falls back to 10 (never null);
+    // hire_date/iqama_expiry are optional.
+    duty_hours: numOrDefault(formData.get("duty_hours"), 10),
+    hire_date: nullable(formData.get("hire_date")),
+    iqama_expiry: nullable(formData.get("iqama_expiry")),
   };
 }
 

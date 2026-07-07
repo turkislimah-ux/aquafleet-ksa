@@ -456,17 +456,11 @@ export default function DriversClient({
                   ))}
                 </select>
               </Field>
-              <Field label="Safety score">
-                <input name="safety_score" type="number" step="1" min="0" max="100" defaultValue={editing?.safety_score ?? ""} className={INPUT} style={INPUT_STYLE} />
+              <Field label="Duty hours">
+                <input name="duty_hours" type="number" step="1" min="0" defaultValue={editing?.duty_hours ?? 10} className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Rating">
-                <input name="rating" type="number" step="0.1" min="0" max="5" defaultValue={editing?.rating ?? ""} className={INPUT} style={INPUT_STYLE} />
-              </Field>
-              <Field label="Hours this week">
-                <input name="hours_this_week" type="number" step="0.1" min="0" defaultValue={editing?.hours_this_week ?? ""} className={INPUT} style={INPUT_STYLE} />
-              </Field>
-              <Field label="Incidents (12mo)">
-                <input name="incidents_12mo" type="number" step="1" min="0" defaultValue={editing?.incidents_12mo ?? ""} className={INPUT} style={INPUT_STYLE} />
+              <Field label="Iqama expiry">
+                <input name="iqama_expiry" type="date" defaultValue={editing?.iqama_expiry ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
               <Field label="Salary (SAR / month)">
                 <input name="salary_sar" type="number" step="0.01" min="0" defaultValue={editing?.salary_sar ?? ""} placeholder="—" className={INPUT} style={INPUT_STYLE} />

@@ -102,6 +102,11 @@ export type Driver = {
   home_station: string | null;
   hours_this_week: number | null;
   incidents_12mo: number | null;
+  // Added in 0023 — replaces the dead safety/rating/hours/incidents fields
+  // above (columns stay, form no longer reads/writes them). duty_hours is
+  // NOT NULL (DB default 10); iqama_expiry is optional.
+  duty_hours: number;
+  iqama_expiry: string | null;
   // Added in 0008 — standalone monthly salary (SAR). Display-only: never part of
   // commission/payout math. Nullable, render "—" when unset.
   salary_sar: number | null;
@@ -212,6 +217,11 @@ export type Staff = {
   // Soft delete (0011): NULL = active; a timestamp = left/terminated.
   terminated_at: string | null;
   created_at: string;
+  // Added in 0023 — duty_hours is NOT NULL (DB default 10); hire_date /
+  // iqama_expiry are optional.
+  duty_hours: number;
+  hire_date: string | null;
+  iqama_expiry: string | null;
 };
 
 // ---------------------------------------------------------------------------

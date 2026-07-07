@@ -245,6 +245,9 @@ export default function StaffTab({
               <Field label="Role">
                 <RoleSelect roles={staffRoles} defaultKey={editing?.role ?? staffRoles[0]?.key ?? ""} />
               </Field>
+              <Field label="Duty hours">
+                <input name="duty_hours" type="number" step="1" min="0" defaultValue={editing?.duty_hours ?? 10} className={INPUT} style={INPUT_STYLE} />
+              </Field>
               <OperationStationField
                 name="station"
                 stations={operationStations}
@@ -256,6 +259,12 @@ export default function StaffTab({
               </Field>
               <Field label="Phone">
                 <input name="phone" defaultValue={editing?.phone ?? ""} placeholder="+966 5…" className={INPUT} style={INPUT_STYLE} />
+              </Field>
+              <Field label="Hiring date">
+                <input name="hire_date" type="date" defaultValue={editing?.hire_date ?? ""} className={INPUT} style={INPUT_STYLE} />
+              </Field>
+              <Field label="Iqama expiry">
+                <input name="iqama_expiry" type="date" defaultValue={editing?.iqama_expiry ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
               <label className="flex items-center gap-2 text-sm sm:col-span-2">
                 <input name="active" type="checkbox" defaultChecked={editing ? editing.active : true} />
