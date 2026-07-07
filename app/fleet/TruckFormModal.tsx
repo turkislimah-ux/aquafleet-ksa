@@ -133,12 +133,6 @@ export default function TruckFormModal({
               ))}
             </select>
           </label>
-          <OperationStationField
-            name="home_station"
-            stations={operationStations}
-            defaultValue={t?.home_station ?? null}
-            label="Station"
-          />
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">Odometer (km)</span>
             <input
@@ -150,6 +144,12 @@ export default function TruckFormModal({
               style={INPUT_STYLE}
             />
           </label>
+          <OperationStationField
+            name="home_station"
+            stations={operationStations}
+            defaultValue={t?.home_station ?? null}
+            label="Station"
+          />
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">VIN</span>
             <input name="vin" defaultValue={t?.vin ?? ""} className={INPUT} style={INPUT_STYLE} />

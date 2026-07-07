@@ -582,6 +582,9 @@ function BreakdownModal({
             </SummaryCard>
           </div>
 
+          {/* Separator — sets Base Pay apart from the summary cards above. */}
+          <hr className="my-4 border-t" style={BORDER} />
+
           {/* Base lines (read-only — computed-truth) */}
           <section>
             <h4 className="font-semibold text-sm mb-2">Projects &amp; Base Pay</h4>
@@ -602,6 +605,9 @@ function BreakdownModal({
             )}
             <div className="text-[11px] muted mt-2">Base pay is auto-derived from each delivered trip&apos;s stamped commission. Edit specials, the bonus, or adjustments from the row buttons.</div>
           </section>
+
+          {/* Separator — sets Base Pay apart from Specials/Bonus/Adjustments below. */}
+          <hr className="my-4 border-t" style={BORDER} />
 
           {/* Specials — review each */}
           <section>
