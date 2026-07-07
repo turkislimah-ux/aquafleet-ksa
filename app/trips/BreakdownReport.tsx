@@ -318,7 +318,7 @@ export default function BreakdownReport({
       onClick={onClose}
     >
       <div
-        className="card p-0 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin"
+        className="card p-0 w-full max-w-5xl max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Toolbar — not printed. */}

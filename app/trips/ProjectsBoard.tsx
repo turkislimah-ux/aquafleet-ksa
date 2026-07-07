@@ -494,7 +494,7 @@ function PhasePickerModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
-      <div className="card p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+      <div className="card p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         {view === "pick" ? (
           <>
             <div className="flex items-start justify-between gap-2">

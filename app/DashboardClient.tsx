@@ -592,7 +592,7 @@ export default function DashboardClient({
       {modalOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/50" onClick={closeModal}>
           <div
-            className="card w-full max-w-lg p-5 space-y-3 max-h-[90vh] overflow-y-auto"
+            className="card w-full max-w-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">

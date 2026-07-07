@@ -109,7 +109,7 @@ export default function CustomerForm({ customers }: { customers: Customer[] }) {
 
       {open && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
-          <div className="card p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
+          <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-semibold mb-4">{editing ? "Edit customer" : "New customer"}</h2>
             <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <label className="flex flex-col gap-1 text-sm sm:col-span-2">

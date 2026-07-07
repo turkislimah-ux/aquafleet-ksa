@@ -98,7 +98,7 @@ export default function OperationStationsModal({
   return createPortal(
     <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={close}>
       <div
-        className="card p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto scrollbar-thin"
+        className="card p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         {view === "list" ? (

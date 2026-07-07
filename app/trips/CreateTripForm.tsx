@@ -238,7 +238,7 @@ export default function CreateTripForm({
           onClick={close}
         >
           <div
-            className="card p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin"
+            className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-lg font-semibold mb-4">New trip</h2>

@@ -439,7 +439,7 @@ export default function FleetDetailClient({
           onClick={() => setAssignOpen(false)}
         >
           <div
-            className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin"
+            className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between mb-1">
