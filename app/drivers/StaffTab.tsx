@@ -157,6 +157,7 @@ export default function StaffTab({
                     {roleName(p.role)}{stationName(p.station) ? ` · ${stationName(p.station)}` : ""}
                   </div>
                   <div className="text-[11px] muted truncate">{p.phone ?? "—"}</div>
+                  {p.email && <div className="text-[11px] muted truncate">{p.email}</div>}
                 </div>
               </button>
             ))}

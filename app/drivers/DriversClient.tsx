@@ -325,7 +325,7 @@ export default function DriversClient({
       {/* Header — action is tab-aware (New driver on Drivers tab). */}
       <div className="flex items-start justify-between mb-5 gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Drivers</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Staff</h1>
           <p className="muted text-sm mt-1">
             {total} drivers · {staff.length} support staff
           </p>

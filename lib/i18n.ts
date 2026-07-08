@@ -6,7 +6,7 @@ export const dict = {
   nav: {
     dashboard: { en: "Dashboard", ar: "لوحة التحكم" },
     fleet: { en: "Fleet", ar: "الأسطول" },
-    drivers: { en: "Drivers & People", ar: "السائقون والموظفون" },
+    drivers: { en: "Staff", ar: "الموظفون" },
     trips: { en: "Trips", ar: "الرحلات" },
     routes: { en: "Route Optimization", ar: "تحسين المسارات" },
     maintenance: { en: "Maintenance", ar: "الصيانة" },
