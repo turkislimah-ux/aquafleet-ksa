@@ -15,7 +15,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Pencil, Eye, Star, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon } from "lucide-react";
+import { Plus, Pencil, Eye, Star, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon, AlertTriangle, Trash2 } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
@@ -24,6 +24,7 @@ import {
   type Staff,
   type StaffRole,
   type OperationStation,
+  type DriverIncident,
   TRUCK_STATUS_LABELS,
   type TruckStatus,
 } from "@/lib/db-types";
@@ -31,7 +32,15 @@ import OperationStationField from "@/components/OperationStationField";
 import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
-import { createDriver, updateDriver, terminateDriver } from "./actions";
+import {
+  createDriver,
+  updateDriver,
+  terminateDriver,
+  createDriverIncident,
+  updateDriverIncident,
+  deleteDriverIncident,
+  type DriverIncidentInput,
+} from "./actions";
 // Reused, not duplicated — the same unassign action the Fleet table's "Change
 // driver"/unassign flow already calls (app/fleet/actions.ts). One place clears
 // trucks.assigned_driver_id.
@@ -103,6 +112,7 @@ export default function DriversClient({
   leavePeriods,
   leaveTypes,
   operationStations,
+  driverIncidents,
   today,
   projectsById,
   activeProjectNamesByDriver,
@@ -128,6 +138,10 @@ export default function DriversClient({
   leavePeriods: LeavePeriod[];
   leaveTypes: LeaveType[];
   operationStations: OperationStation[];
+  // Unfiltered across ALL drivers (termination included) — a soft-deleted
+  // driver's incidents persist and must still resolve if their detail is ever
+  // viewed.
+  driverIncidents: DriverIncident[];
   today: string;
   projectsById: Record<string, string>;
   // driver_id -> stacked {id, name} of their active (non-archived) projects.
@@ -143,6 +157,49 @@ export default function DriversClient({
   const [editing, setEditing] = useState<Driver | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Add-incident mini form, lives inside the Add/Edit driver form (below the
+  // station field) but is its own button/handler, NOT a nested <form> — the
+  // outer element here already IS a <form> (driver save), and nesting forms
+  // is invalid HTML5 / breaks submit routing (see OperationStationsModal).
+  // Only shown when editing an EXISTING driver: a new driver has no id yet to
+  // attach an incident to.
+  const [incidentDate, setIncidentDate] = useState("");
+  const [incidentType, setIncidentType] = useState("");
+  const [incidentDesc, setIncidentDesc] = useState("");
+  const [incidentSaving, setIncidentSaving] = useState(false);
+  const [incidentError, setIncidentError] = useState<string | null>(null);
+  const [incidentAdded, setIncidentAdded] = useState(false);
+
+  function resetIncidentForm() {
+    setIncidentDate("");
+    setIncidentType("");
+    setIncidentDesc("");
+    setIncidentError(null);
+    setIncidentAdded(false);
+  }
+
+  async function onAddIncident() {
+    if (!editing || incidentSaving) return;
+    setIncidentSaving(true);
+    setIncidentError(null);
+    setIncidentAdded(false);
+    const res = await createDriverIncident(editing.id, {
+      incidentDate,
+      type: incidentType,
+      description: incidentDesc,
+    });
+    setIncidentSaving(false);
+    if (res.error) {
+      setIncidentError(res.error);
+      return;
+    }
+    setIncidentDate("");
+    setIncidentType("");
+    setIncidentDesc("");
+    setIncidentAdded(true);
+    router.refresh();
+  }
 
   // Assignment is single-source-of-truth on the truck. Derive driver → truck.
   const truckByDriver = useMemo(() => {
@@ -175,6 +232,15 @@ export default function DriversClient({
     }
     return m;
   }, [leavePeriods]);
+  // driver_id -> their incidents. Built from the unfiltered fetch, so a
+  // terminated driver's incidents still resolve if their detail is ever shown.
+  const driverIncidentsById = useMemo(() => {
+    const m = new Map<string, DriverIncident[]>();
+    for (const inc of driverIncidents) {
+      (m.get(inc.driver_id) ?? m.set(inc.driver_id, []).get(inc.driver_id)!).push(inc);
+    }
+    return m;
+  }, [driverIncidents]);
   const pillFor = (d: Driver) => driverStatePill(driverStateById[d.id] ?? "off_duty");
 
   // KPIs — honest: averages/sums skip null, "On Duty" derived from assignment.
@@ -211,11 +277,13 @@ export default function DriversClient({
   function openNew() {
     setEditing(null);
     setFormError(null);
+    resetIncidentForm();
     setFormOpen(true);
   }
   function openEdit(d: Driver) {
     setEditing(d);
     setFormError(null);
+    resetIncidentForm();
     setFormOpen(true);
   }
   function closeForm() {
@@ -410,6 +478,7 @@ export default function DriversClient({
           recent={recentByDriver[detail.id] ?? []}
           leavePeriods={driverLeaveById.get(detail.id) ?? []}
           leaveTypes={leaveTypes}
+          incidents={driverIncidentsById.get(detail.id) ?? []}
           today={today}
           onLeaveToday={onLeaveDrivers.has(detail.id)}
           state={driverStateById[detail.id] ?? "off_duty"}
@@ -452,6 +521,69 @@ export default function DriversClient({
                 defaultValue={editing?.home_station ?? null}
                 label="Station"
               />
+
+              {/* Add incident — existing driver only (no id to attach to on a
+                  brand-new, unsaved driver). Not a nested <form>: a plain
+                  button+handler, since this whole modal already IS a <form>.
+                  Full incident list + Edit/Delete live in the driver View. */}
+              <div className="sm:col-span-2 rounded-lg border p-3 space-y-2" style={{ borderColor: "rgb(var(--border))" }}>
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <AlertTriangle className="h-4 w-4 muted" /> Add incident
+                </div>
+                {!editing ? (
+                  <p className="text-xs muted">Save this driver first to add incidents.</p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="flex flex-col gap-1 text-sm">
+                        <span className="muted">Incident date</span>
+                        <input
+                          type="date"
+                          value={incidentDate}
+                          max={today}
+                          onChange={(e) => setIncidentDate(e.target.value)}
+                          className={INPUT}
+                          style={INPUT_STYLE}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-sm">
+                        <span className="muted">Type</span>
+                        <input
+                          value={incidentType}
+                          onChange={(e) => setIncidentType(e.target.value)}
+                          placeholder="e.g. Work accident, Truck accident"
+                          className={INPUT}
+                          style={INPUT_STYLE}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+                        <span className="muted">Description (optional)</span>
+                        <textarea
+                          value={incidentDesc}
+                          onChange={(e) => setIncidentDesc(e.target.value)}
+                          rows={2}
+                          className={INPUT}
+                          style={INPUT_STYLE}
+                        />
+                      </label>
+                    </div>
+                    {incidentError && <p className="text-xs text-rose-600 dark:text-rose-400">{incidentError}</p>}
+                    {incidentAdded && <p className="text-xs text-emerald-600 dark:text-emerald-400">Incident added.</p>}
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={onAddIncident}
+                        disabled={incidentSaving || !incidentDate || !incidentType.trim()}
+                        className="h-9 px-3 rounded-lg text-sm font-medium border disabled:opacity-50"
+                        style={INPUT_STYLE}
+                      >
+                        {incidentSaving ? "Adding…" : "Add incident"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
               <Field label="Current truck">
                 <select name="truck_id" defaultValue={currentTruckId} className={INPUT} style={INPUT_STYLE}>
                   <option value="">Unassigned</option>
@@ -537,6 +669,7 @@ function DriverDetail({
   recent,
   leavePeriods,
   leaveTypes,
+  incidents,
   today,
   onLeaveToday,
   state,
@@ -550,6 +683,7 @@ function DriverDetail({
   recent: RecentTrip[];
   leavePeriods: LeavePeriod[];
   leaveTypes: LeaveType[];
+  incidents: DriverIncident[];
   today: string;
   onLeaveToday: boolean;
   state: DriverState;
@@ -707,6 +841,11 @@ function DriverDetail({
             )}
           </div>
 
+          {/* Incidents — persist for terminated drivers too (unfiltered fetch,
+              plain FK survives soft-delete); add happens from the Edit form,
+              edit/delete happen here. */}
+          <IncidentsSection incidents={incidents} />
+
           {/* Leave & absence — same reusable section as the staff detail. */}
           <LeaveSection
             kind="driver"
@@ -808,6 +947,143 @@ function DriverDetail({
           <Btn variant="primary" onClick={onEdit}><Pencil className="h-3.5 w-3.5" /> Edit</Btn>
         </div>
       </div>
+    </div>
+  );
+}
+
+// View-only-plus-mutate list: shows a driver's incidents (newest first) with
+// inline Edit/Delete. Adding a NEW incident happens from the driver Add/Edit
+// form instead (see the "Add incident" block there) — this section only ever
+// edits/deletes rows that already exist. Delete is a real hard delete (log
+// entry, not a financial/operational record) — small window.confirm() gate,
+// same pattern as LeaveSection's onDelete.
+function IncidentsSection({ incidents }: { incidents: DriverIncident[] }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState<DriverIncident | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editType, setEditType] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const sorted = [...incidents].sort((a, b) => (a.incident_date < b.incident_date ? 1 : -1));
+
+  function openEdit(inc: DriverIncident) {
+    setEditing(inc);
+    setEditDate(inc.incident_date);
+    setEditType(inc.type);
+    setEditDesc(inc.description ?? "");
+    setError(null);
+  }
+  function closeEdit() {
+    setEditing(null);
+    setError(null);
+  }
+
+  async function onSave() {
+    if (!editing || saving) return;
+    setSaving(true);
+    setError(null);
+    const res = await updateDriverIncident(editing.id, {
+      incidentDate: editDate,
+      type: editType,
+      description: editDesc,
+    });
+    setSaving(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    closeEdit();
+    router.refresh();
+  }
+
+  async function onDelete(inc: DriverIncident) {
+    if (!confirm(`Delete this "${inc.type}" incident?`)) return;
+    setDeletingId(inc.id);
+    const res = await deleteDriverIncident(inc.id);
+    setDeletingId(null);
+    if (res.error) {
+      alert(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
+  return (
+    <div className="card p-3">
+      <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4" /> Incidents
+      </h4>
+      {sorted.length === 0 ? (
+        <p className="muted text-sm">No incidents recorded.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {sorted.map((inc) => (
+            <li key={inc.id} className="rounded-lg border border-app px-3 py-2">
+              {editing?.id === inc.id ? (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="date"
+                      value={editDate}
+                      onChange={(e) => setEditDate(e.target.value)}
+                      className={INPUT}
+                      style={INPUT_STYLE}
+                    />
+                    <input
+                      value={editType}
+                      onChange={(e) => setEditType(e.target.value)}
+                      className={INPUT}
+                      style={INPUT_STYLE}
+                    />
+                  </div>
+                  <textarea
+                    value={editDesc}
+                    onChange={(e) => setEditDesc(e.target.value)}
+                    rows={2}
+                    className={INPUT}
+                    style={INPUT_STYLE}
+                  />
+                  {error && <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
+                  <div className="flex justify-end gap-2">
+                    <Btn variant="outline" onClick={closeEdit}>Cancel</Btn>
+                    <Btn variant="primary" onClick={onSave}>{saving ? "Saving…" : "Save"}</Btn>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{inc.type}</div>
+                    <div className="text-xs muted">{inc.incident_date}</div>
+                    {inc.description && <div className="text-xs muted mt-0.5">{inc.description}</div>}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(inc)}
+                      className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 muted"
+                      aria-label="Edit incident"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDelete(inc)}
+                      disabled={deletingId === inc.id}
+                      className="p-1.5 rounded-md text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"
+                      aria-label="Delete incident"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

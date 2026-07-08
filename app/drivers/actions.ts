@@ -730,3 +730,71 @@ export async function addLeaveType(label: string): Promise<{ error: string | nul
   revalidatePath("/drivers");
   return { error: null, key };
 }
+
+// ============================================================================
+// Driver incidents (0024). A permanent log entry (work accident, truck
+// accident, etc) tied to one driver. Survives driver soft-delete (plain FK to
+// drivers(id) — the row always exists under termination). Hard delete is
+// correct here: it's a small log entry the user is correcting, not a
+// financial/operational record that needs an audit trail.
+// ============================================================================
+
+export type DriverIncidentInput = {
+  incidentDate: string;
+  type: string;
+  description: string | null;
+};
+
+function validateIncident(input: DriverIncidentInput): string | null {
+  if (!ISO_DATE_RE.test(input.incidentDate)) return "Pick an incident date.";
+  if (!input.type.trim()) return "Type is required.";
+  return null;
+}
+
+export async function createDriverIncident(driverId: string, input: DriverIncidentInput): Promise<ActionResult> {
+  if (!driverId) return { error: "Missing driver." };
+  const bad = validateIncident(input);
+  if (bad) return { error: bad };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("driver_incidents").insert({
+    driver_id: driverId,
+    incident_date: input.incidentDate,
+    type: input.type.trim(),
+    description: input.description?.trim() || null,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function updateDriverIncident(id: string, input: DriverIncidentInput): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  const bad = validateIncident(input);
+  if (bad) return { error: bad };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("driver_incidents")
+    .update({
+      incident_date: input.incidentDate,
+      type: input.type.trim(),
+      description: input.description?.trim() || null,
+    })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function deleteDriverIncident(id: string): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  const supabase = createClient();
+  const { error } = await supabase.from("driver_incidents").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}

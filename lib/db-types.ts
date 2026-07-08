@@ -118,6 +118,18 @@ export type Driver = {
   created_at: string;
 };
 
+// Added in 0024 — driver incident log (work/truck accidents, etc). Survives
+// driver soft-delete: plain FK to drivers(id), the driver row always exists
+// under termination (never hard-deleted), so incidents persist with it.
+export type DriverIncident = {
+  id: string;
+  driver_id: string;
+  incident_date: string;
+  type: string;
+  description: string | null;
+  created_at: string;
+};
+
 export type TruckStatus = "active" | "idle" | "maintenance" | "out_of_service";
 
 export type Truck = {
