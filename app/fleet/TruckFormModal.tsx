@@ -12,6 +12,7 @@ import { TRUCK_STATUS_LABELS, type OperationStation } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "./page";
 import { createTruck, updateTruck } from "./actions";
 import OperationStationField from "@/components/OperationStationField";
+import PlateInput from "@/components/PlateInput";
 
 const CAPACITY_OPTIONS_M3 = [33, 18, 6] as const;
 
@@ -69,17 +70,7 @@ export default function TruckFormModal({
           {isEdit ? `Update truck details · ${t?.plate ?? ""}` : "Register a new water truck. Plate is required."}
         </p>
         <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Plate *</span>
-            <input
-              name="plate"
-              required
-              defaultValue={t?.plate ?? ""}
-              placeholder="e.g. 5041 ABJ"
-              className={INPUT}
-              style={INPUT_STYLE}
-            />
-          </label>
+          <PlateInput name="plate" defaultValue={t?.plate ?? null} />
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">Model</span>
             <input
