@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Ban } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { type Staff, type StaffRole, type OperationStation } from "@/lib/db-types";
-import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
+import { onLeaveTodaySet, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
 import { cn } from "@/lib/utils";
 import { createStaff, updateStaff, terminateStaff, addStaffRole } from "./actions";
@@ -75,6 +75,14 @@ export default function StaffTab({
     }
     return m;
   }, [leavePeriods]);
+  // Current-year leave-day total per staff member (card badge). Year comes
+  // from `today` (Riyadh local date, passed in — never re-derived here).
+  const currentYear = Number(today.slice(0, 4));
+  const leaveDaysByStaff = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const [staffId, periods] of leaveByStaff) m.set(staffId, leaveDaysInYear(periods, currentYear));
+    return m;
+  }, [leaveByStaff, currentYear]);
 
   function openNew() {
     setEditing(null);
@@ -131,13 +139,23 @@ export default function StaffTab({
           <p className="muted text-sm py-6 text-center">No staff yet.</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {staff.map((p) => (
+            {staff.map((p) => {
+              const leaveDays = leaveDaysByStaff.get(p.id) ?? 0;
+              return (
+              <div key={p.id} className="relative">
+                {leaveDays > 0 && (
+                  <span
+                    className="absolute -top-1.5 -left-1.5 z-10 rounded-full bg-amber-500 text-white text-[10px] font-semibold px-1.5 py-0.5 shadow"
+                    title={`${leaveDays} leave day${leaveDays === 1 ? "" : "s"} this year`}
+                  >
+                    {leaveDays}d leave
+                  </span>
+                )}
               <button
-                key={p.id}
                 type="button"
                 onClick={() => setDetail(p)}
                 className={
-                  "text-start rounded-lg border border-app p-3 flex items-center gap-3 hover:bg-black/5 dark:hover:bg-white/5 transition " +
+                  "w-full text-start rounded-lg border border-app p-3 flex items-center gap-3 hover:bg-black/5 dark:hover:bg-white/5 transition " +
                   (p.active ? "" : "opacity-60")
                 }
               >
@@ -160,7 +178,9 @@ export default function StaffTab({
                   {p.email && <div className="text-[11px] muted truncate">{p.email}</div>}
                 </div>
               </button>
-            ))}
+              </div>
+              );
+            })}
           </div>
         )}
       </div>

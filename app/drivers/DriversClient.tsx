@@ -764,7 +764,8 @@ function DriverDetail({
               <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><Phone className="h-4 w-4" /> Contact &amp; ID</h4>
               <div className="grid grid-cols-2 gap-2">
                 <Cell label="Phone">{d.phone ?? <span className="muted">—</span>}</Cell>
-                <Cell label="Iqama"><span className="font-mono text-xs">{d.iqama_number ?? "—"}</span></Cell>
+                <Cell label="Iqama number"><span className="font-mono text-xs">{d.iqama_number ?? "—"}</span></Cell>
+                <Cell label="Iqama expiry">{d.iqama_expiry ?? <span className="muted">—</span>}</Cell>
                 <Cell label="License expiry"><span className={expSoon ? "text-amber-600 dark:text-amber-400 font-medium" : ""}>{d.license_expiry ?? "—"}</span></Cell>
                 <Cell label="Hire date">{d.hire_date ?? <span className="muted">—</span>}</Cell>
               </div>
@@ -774,17 +775,20 @@ function DriverDetail({
             <div className="card p-3">
               <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><Shield className="h-4 w-4" /> Employment</h4>
               <div className="grid grid-cols-2 gap-2">
-                <Cell label="Safety score"><span className="font-semibold tabular-nums">{d.safety_score ?? "—"}</span></Cell>
+                <Cell label="Trips 30d"><span className="font-semibold tabular-nums">{trips30d}</span></Cell>
+                <Cell label="Duty hours"><span className="font-semibold tabular-nums">{d.duty_hours}</span></Cell>
+                {/* Read-only — rating column is dead (no form input), reserved
+                    for later use. Display only, never editable here. */}
                 <Cell label="Rating">
                   {d.rating != null ? (
                     <span className="inline-flex items-center gap-1 font-semibold"><Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500" /> {d.rating}</span>
                   ) : <span className="muted">—</span>}
                 </Cell>
-                <Cell label="Trips 30d"><span className="font-semibold tabular-nums">{trips30d}</span></Cell>
-                <Cell label="Hours this week"><span className="font-semibold tabular-nums">{d.hours_this_week ?? "—"}</span></Cell>
-                <Cell label="Incidents (12mo)">
-                  <span className={d.incidents_12mo != null && d.incidents_12mo > 0 ? "text-rose-600 dark:text-rose-400 font-semibold" : "font-semibold"}>
-                    {d.incidents_12mo ?? "—"}
+                {/* Live count — reuses the `incidents` prop already passed in
+                    (driverIncidentsById lookup one level up), no new fetch. */}
+                <Cell label="Incidents">
+                  <span className={incidents.length > 0 ? "text-rose-600 dark:text-rose-400 font-semibold" : "font-semibold"}>
+                    {incidents.length} incident{incidents.length === 1 ? "" : "s"}
                   </span>
                 </Cell>
                 <Cell label="Salary (monthly)">

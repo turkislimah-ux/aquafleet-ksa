@@ -15,7 +15,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Trash2 } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { isOnLeaveToday, periodCoversToday, type LeavePeriod, type LeaveType } from "@/lib/leave";
+import { isOnLeaveToday, periodCoversToday, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { addLeave, updateLeave, deleteLeave, addLeaveType } from "./actions";
 import LookupSelect from "./LookupSelect";
 
@@ -52,6 +52,9 @@ export default function LeaveSection({
   const [error, setError] = useState<string | null>(null);
 
   const onLeave = isOnLeaveToday(periods, kind, personId, today);
+  // Current-year total (Riyadh local date, via the `today` the caller already
+  // derived from todayKey() — never re-derived here with `new Date()`).
+  const yearDays = leaveDaysInYear(periods, Number(today.slice(0, 4)));
   const typeLabel = (key: string) => leaveTypes.find((t) => t.key === key)?.label ?? key;
   const defaultType = leaveTypes.find((t) => t.is_default)?.key ?? leaveTypes[0]?.key ?? "";
 
@@ -123,6 +126,7 @@ export default function LeaveSection({
               Available
             </span>
           )}
+          <span className="text-xs muted">{yearDays} day{yearDays === 1 ? "" : "s"} this year</span>
         </div>
         {!formOpen && (
           <Btn variant="outline" onClick={openNew}>

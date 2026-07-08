@@ -70,3 +70,39 @@ export function onLeaveTodaySet(
   }
   return { drivers, staff };
 }
+
+// Inclusive day count between two ISO dates (both ends count — Mar 1 to Mar 5
+// is 5 days). Date.UTC is used purely for integer day-difference arithmetic on
+// already-fixed calendar dates (not "now") — this sidesteps local-timezone DST
+// shifts that could otherwise off-by-one a plain `new Date(iso)` diff. It is
+// NOT the "what is today" concern (callers must derive `year` from the app's
+// local-date helper, e.g. todayKey(), never from a fresh `new Date()` here).
+function daysBetweenInclusive(startIso: string, endIso: string): number {
+  const [sy, sm, sd] = startIso.split("-").map(Number);
+  const [ey, em, ed] = endIso.split("-").map(Number);
+  const startUtc = Date.UTC(sy, sm - 1, sd);
+  const endUtc = Date.UTC(ey, em - 1, ed);
+  return Math.round((endUtc - startUtc) / 86400000) + 1;
+}
+
+/**
+ * Total inclusive days on leave within `year`, summed across every period,
+ * each period CLIPPED to that year's Jan 1 – Dec 31 boundary. A period that
+ * doesn't overlap `year` at all contributes 0. Pure — string comparisons on
+ * ISO dates are safe here (YYYY-MM-DD sorts lexically = chronologically).
+ */
+export function leaveDaysInYear(
+  periods: { start_date: string; end_date: string }[],
+  year: number,
+): number {
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  let total = 0;
+  for (const p of periods) {
+    const start = p.start_date > yearStart ? p.start_date : yearStart;
+    const end = p.end_date < yearEnd ? p.end_date : yearEnd;
+    if (start > end) continue; // no overlap with this year
+    total += daysBetweenInclusive(start, end);
+  }
+  return total;
+}
