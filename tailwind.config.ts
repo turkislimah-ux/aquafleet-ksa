@@ -4,6 +4,30 @@ const config: Config = {
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    // lib/ holds shared literal-string Tailwind class tokens (e.g.
+    // STAGE_STYLES in lib/db-types.ts, PILL_PALETTE in lib/project-colors.ts)
+    // — without this glob, JIT never scans those files and silently drops
+    // every class that doesn't ALSO happen to appear verbatim somewhere
+    // under app/**/components/** (root cause of the Kanban phase colors not
+    // rendering — diagnosed 2026-07-08).
+    "./lib/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
+  // Belt-and-suspenders for the exact Kanban STAGE_STYLES tokens (lib/db-types.ts)
+  // — guarantees these specific classes are always generated even if a future
+  // edit to lib/ somehow falls outside the content glob's scan. Updated for the
+  // demo-pixel-match pass: column top-accent + header label (per stage), the
+  // three action-button treatments, and the delivered paid chip/station chip.
+  safelist: [
+    "border-t-[3px]",
+    "border-t-blue-500", "text-blue-700", "dark:text-blue-400", "bg-blue-500",
+    "border-t-amber-500", "text-amber-700", "dark:text-amber-400", "bg-amber-500",
+    "border-t-orange-600", "text-orange-900", "dark:text-orange-400", "bg-orange-600",
+    "border-t-emerald-500", "text-emerald-700", "dark:text-emerald-400", "bg-emerald-500",
+    "bg-emerald-500/10", "dark:text-emerald-300",
+    "bg-brand-600", "hover:bg-brand-700",
+    "border-amber-500", "hover:bg-amber-500/10",
+    "hover:bg-emerald-600",
+    "bg-brand-500/10", "border-brand-600", "dark:text-brand-300",
   ],
   theme: {
     extend: {

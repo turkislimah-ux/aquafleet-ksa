@@ -297,28 +297,57 @@ export const STAGE_TIMESTAMP: Record<TripStage, "scheduled_at" | "loading_at" | 
   delivered: "delivered_at",
 };
 
-// Distinct, readable per-stage colors (slate / amber / sky / emerald). Tailwind
-// classes for the card accent + the column header chip.
-export const STAGE_STYLES: Record<TripStage, { card: string; dot: string; chip: string }> = {
+// Fixed phase color mapping (Kanban polish): scheduled=blue, loading=amber,
+// in_transit=orange, delivered=green. ONE source of truth — every render site
+// reads off the SAME per-stage token here.
+//
+// Pixel-matched to the ORIGINAL demo spec (preview/, read-only) — exact hex
+// values pulled from preview/app.css `.kanban-col`/`.kanban-col-head` rules:
+//   scheduled: header #1d4ed8 (blue-700) / column accent #3b82f6 (blue-500)
+//   loading:   header #b45309 (amber-700) / column accent #f59e0b (amber-500)
+//   in_transit:header #7c2d12 (orange-900) / column accent #ea580c (orange-600)
+//   delivered: header #047857 (emerald-700) / column accent #10b981 (emerald-500)
+// All four match Tailwind's default palette exactly (demo was hand-hex'd to
+// Tailwind's own scale) — verified by name below, not just by eye.
+//
+// Color lives ONLY on the column (accent top-border + header label text) and
+// on the card's own action button/paid-badge — the card container itself is
+// plain/neutral (preview/app.css .kanban-card has a flat neutral border, no
+// per-card color) — see app/trips/ProjectsBoard.tsx TripCard/StageColumn.
+//   columnBorder — column box's 3px top accent (StageColumn)
+//   headerText   — column header's uppercase label color (StageColumn)
+//   dot          — small status dot (PhasePickerModal's stage list only —
+//                  the Kanban column header itself has no dot, per the demo)
+//   chip         — soft tinted status badge; only "delivered" actually has
+//                  one (its "Commission paid" tag) — the others are never
+//                  rendered, kept "" rather than a copy-pasted duplicate.
+export const STAGE_STYLES: Record<
+  TripStage,
+  { columnBorder: string; headerText: string; dot: string; chip: string }
+> = {
   scheduled: {
-    card: "border-t-[3px] border-t-slate-400",
-    dot: "bg-slate-400",
-    chip: "bg-slate-500/10 text-slate-700 dark:text-slate-300 ring-slate-500/20",
+    columnBorder: "border-t-blue-500",
+    headerText: "text-blue-700 dark:text-blue-400",
+    dot: "bg-blue-500",
+    chip: "",
   },
   loading: {
-    card: "border-t-[3px] border-t-amber-500",
+    columnBorder: "border-t-amber-500",
+    headerText: "text-amber-700 dark:text-amber-400",
     dot: "bg-amber-500",
-    chip: "bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20",
+    chip: "",
   },
   in_transit: {
-    card: "border-t-[3px] border-t-sky-500",
-    dot: "bg-sky-500",
-    chip: "bg-sky-500/10 text-sky-700 dark:text-sky-300 ring-sky-500/20",
+    columnBorder: "border-t-orange-600",
+    headerText: "text-orange-900 dark:text-orange-400",
+    dot: "bg-orange-600",
+    chip: "",
   },
   delivered: {
-    card: "border-t-[3px] border-t-emerald-500",
+    columnBorder: "border-t-emerald-500",
+    headerText: "text-emerald-700 dark:text-emerald-400",
     dot: "bg-emerald-500",
-    chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20",
+    chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
   },
 };
 

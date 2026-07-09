@@ -20,7 +20,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MapPin, Plus, Users, Play, ArrowRight, Check, Droplet, ChevronLeft, ChevronRight, ChevronDown, Calendar, History,
+  MapPin, Plus, Users, Play, Truck, Check, Droplet, ChevronLeft, ChevronRight, ChevronDown, Calendar, History,
   X, Lock, AlertTriangle, Trash2,
 } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
@@ -176,6 +176,25 @@ function fmtDayKey(key: string): string {
 const ACTION_BTN =
   "w-full mt-2 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition disabled:opacity-60";
 
+// DELIBERATE DEVIATION from preview/app.css .kanban-action-* (which uses one
+// fixed outline treatment + a target-color "turns green when done" success
+// button) — Turki's explicit rule instead: every action button is SOLID
+// filled in the card's OWN CURRENT-stage color (the column/header it sits
+// under), never the destination stage's color. Colors match STAGE_STYLES'
+// per-stage tokens (lib/db-types.ts) so column accent and button always
+// agree:
+//   Start trip        (on a scheduled card) -> solid blue   (brand-600, same
+//                       hex as scheduled's blue-500 family / Btn primary)
+//   Mark in transit    (on a loading card)   -> solid amber  (amber-500,
+//                       matches STAGE_STYLES.loading.dot)
+//   Mark delivered     (on an in_transit card)-> solid orange (orange-600,
+//                       matches STAGE_STYLES.in_transit.dot/columnBorder)
+// Delivered's own "Commission paid" badge is unaffected (still s.chip, static,
+// not a transition button).
+const ACTION_PRIMARY = "bg-brand-600 hover:bg-brand-700 text-white";
+const ACTION_SOLID_AMBER = "bg-amber-500 hover:bg-amber-600 text-white";
+const ACTION_SOLID_ORANGE = "bg-orange-600 hover:bg-orange-700 text-white";
+
 function TripCard({
   trip,
   ratePerTrip,
@@ -238,26 +257,28 @@ function TripCard({
             {fmtPhaseStamp(trip.loading_at ?? trip.scheduled_at ?? trip.trip_date)}
           </span>
         </div>
-        <div className="text-xs mt-1 flex items-center gap-1.5">
-          <Droplet className="h-3 w-3 text-brand-500 shrink-0" />
-          <span className="muted">Fill at:</span>
-          {/* Chip-styled native <select> — reads as an editable control at rest
-              (tinted pill + chevron, hover/focus states) and opens the browser's
-              own dropdown on click; onChange applies instantly via setTripStation
-              (station-only write, no stage/timestamp/commission touch). */}
-          <span className="relative inline-flex items-center min-w-0">
+        {/* Left-accent-bar chip (pixel-matched to preview/app.css .kanban-station:
+            border-s-2 + soft brand tint, not a rounded pill) wrapping a native
+            <select> — still opens the browser's own dropdown; onChange applies
+            instantly via setTripStation (station-only write, no stage/
+            timestamp/commission touch). */}
+        <div
+          className={cn(
+            "text-xs mt-1 flex items-center gap-1.5 rounded ps-2 pe-1 py-1 border-s-2",
+            stationName
+              ? "bg-brand-500/10 border-brand-600 text-brand-700 dark:text-brand-300"
+              : "bg-black/5 dark:bg-white/10 border-slate-400 dark:border-slate-500 text-slate-500 dark:text-slate-400"
+          )}
+        >
+          <Droplet className="h-3 w-3 shrink-0" />
+          <span className="opacity-80 shrink-0">Fill at:</span>
+          <span className="relative inline-flex items-center min-w-0 flex-1">
             <select
               aria-label="Fill station"
               value={trip.water_station}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => onStationChange(e.target.value)}
-              className={cn(
-                "appearance-none rounded-full ps-2 pe-5 py-0.5 text-xs font-medium max-w-[9rem] truncate cursor-pointer",
-                "ring-1 ring-inset transition-colors focus:outline-none focus:ring-2",
-                stationName
-                  ? "bg-brand-500/10 text-brand-700 dark:text-brand-300 ring-brand-500/25 hover:bg-brand-500/20 focus:ring-brand-500/40"
-                  : "bg-black/5 dark:bg-white/10 text-slate-500 dark:text-slate-400 ring-slate-500/25 hover:bg-black/10 dark:hover:bg-white/15 focus:ring-slate-500/30"
-              )}
+              className="appearance-none bg-transparent font-semibold truncate max-w-[8rem] pe-4 cursor-pointer focus:outline-none"
             >
               <option value="">Set station</option>
               {!hasCurrentOption && <option value={trip.water_station}>{stationName}</option>}
@@ -267,7 +288,7 @@ function TripCard({
                 </option>
               ))}
             </select>
-            <ChevronDown className="h-3 w-3 absolute end-1.5 pointer-events-none opacity-60" />
+            <ChevronDown className="h-3 w-3 absolute end-0 pointer-events-none opacity-60" />
           </span>
         </div>
       </>
@@ -302,6 +323,9 @@ function TripCard({
 
   // Contextual action — ONE sequential step, mirrors the demo's action(). Delivered
   // is a static "Commission paid +<rate/trip>" badge (no action), matching the demo.
+  // Each button is solid-filled in the card's OWN current-stage color (see the
+  // ACTION_PRIMARY/SOLID_AMBER/SOLID_ORANGE comment above) with a phase-fitting
+  // icon: Play (start), Truck (moving to transit), Check (delivered/done).
   let action: React.ReactNode = null;
   if (trip.stage === "scheduled") {
     action = (
@@ -312,7 +336,7 @@ function TripCard({
           e.stopPropagation();
           onAdvance("loading");
         }}
-        className={cn(ACTION_BTN, "bg-brand-600 hover:bg-brand-700 text-white")}
+        className={cn(ACTION_BTN, ACTION_PRIMARY)}
       >
         <Play className="h-3.5 w-3.5" /> {busy ? "…" : "Start trip"}
       </button>
@@ -326,10 +350,9 @@ function TripCard({
           e.stopPropagation();
           onAdvance("in_transit");
         }}
-        className={cn(ACTION_BTN, "border hover:bg-black/5 dark:hover:bg-white/5")}
-        style={{ borderColor: "rgb(var(--border))" }}
+        className={cn(ACTION_BTN, ACTION_SOLID_AMBER)}
       >
-        <ArrowRight className="h-3.5 w-3.5" /> {busy ? "…" : "Mark in transit"}
+        <Truck className="h-3.5 w-3.5" /> {busy ? "…" : "Mark in transit"}
       </button>
     );
   } else if (trip.stage === "in_transit") {
@@ -341,14 +364,14 @@ function TripCard({
           e.stopPropagation();
           onAdvance("delivered");
         }}
-        className={cn(ACTION_BTN, "bg-emerald-600 hover:bg-emerald-700 text-white")}
+        className={cn(ACTION_BTN, ACTION_SOLID_ORANGE)}
       >
         <Check className="h-3.5 w-3.5" /> {busy ? "…" : "Mark delivered"}
       </button>
     );
   } else if (trip.stage === "delivered") {
     action = (
-      <span className={cn(ACTION_BTN, "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 cursor-default")}>
+      <span className={cn(ACTION_BTN, s.chip, "cursor-default")}>
         <Check className="h-3.5 w-3.5" /> Commission paid +{formatSar(ratePerTrip)}
       </span>
     );
@@ -370,17 +393,21 @@ function TripCard({
         }
       }}
       className={cn(
+        // Card itself is plain/neutral (pixel-matched to preview/app.css
+        // .kanban-card: flat neutral border, no per-card phase color) — color
+        // lives on the column (StageColumn) and the action button/paid-badge.
         "card p-3 text-sm w-full text-start cursor-pointer transition",
         "hover:ring-1 hover:ring-brand-500/30 hover:bg-black/[0.015] dark:hover:bg-white/[0.02]",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50",
-        s.card,
         trip.stage === "delivered" && "opacity-[0.85]",
         blurred && "opacity-50 grayscale-[0.5]"
       )}
     >
       <div className="flex items-center justify-between gap-2">
+        {/* Ref — plain bold mono text, no pill (matches preview/app.css
+            .kanban-ref: font-weight:600, no background/color). */}
         <span className="font-mono text-xs font-semibold">
-          {trip.ref ?? <span className="muted font-sans">No ref</span>}
+          {trip.ref ?? <span className="muted font-sans opacity-80">No ref</span>}
         </span>
         <span className="font-mono text-xs muted truncate">
           {showPlate ? trip.truckPlate ?? "—" : "—"}
@@ -392,6 +419,105 @@ function TripCard({
       </div>
       {phaseRows}
       {action}
+      {/* Route hint (loading/in_transit only) — text+icon layout pixel-matched
+          to preview/app.css .kanban-hint ("Click for route" + pin, .6rem,
+          gap .25rem), but muted/DISABLED: the route-optimization destination
+          isn't decided yet, so unlike the demo's clickable version this must
+          NOT navigate or read as a working link. No onClick/stopPropagation
+          of its own — pointer-events-none means a click here just falls
+          through to the card's own onOpenPicker, same as clicking anywhere
+          else on the card. aria-hidden since it's non-functional chrome, not
+          an actionable hint, for assistive tech. */}
+      {(trip.stage === "loading" || trip.stage === "in_transit") && (
+        <div
+          aria-hidden="true"
+          className="mt-1 flex items-center gap-1 text-[0.6rem] text-slate-400 dark:text-slate-500 opacity-60 pointer-events-none"
+        >
+          <MapPin className="h-3 w-3 shrink-0" />
+          <span>Click for route</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One Kanban column: header + its card list. Shared by both Kanban renders in
+// this file (per-project board + the "Direct customer trips" fallback) so the
+// header treatment can't drift between the two copies. Stage-filtering/sorting
+// of `cards` stays with the caller — delivered is sorted most-recent-first,
+// uncapped (the column itself scrolls, see max-h below).
+//
+// Pixel-matched to the ORIGINAL demo (preview/app.css .kanban-col /
+// .kanban-col-head) — the column BOX gets a 3px colored top accent
+// (columnBorder) plus a subtle neutral fill; the header inside is a plain row
+// (no fill, no ring) with a colored bold uppercase label (headerText) and a
+// neutral bottom divider — no dot (the demo's column header never had one;
+// the dot is PhasePickerModal's stage-list idiom only, kept there as-is).
+// This is the ONLY place phase color lives on the column chrome.
+function StageColumn({
+  stage,
+  cards,
+  getRate,
+  stationsByKey,
+  advancingId,
+  activeTruckIds,
+  driverIdsWithTruck,
+  stations,
+  onAdvance,
+  onStationChange,
+  onOpenPicker,
+}: {
+  stage: TripStage;
+  cards: TripRow[];
+  getRate: (t: TripRow) => number;
+  stationsByKey: Record<string, string>;
+  advancingId: string | null;
+  activeTruckIds: Set<string>;
+  driverIdsWithTruck: Set<string>;
+  stations: { key: string; name: string }[];
+  onAdvance: (tripId: string, to: TripStage) => void;
+  onStationChange: (tripId: string, station: string) => void;
+  onOpenPicker: (trip: TripRow) => void;
+}) {
+  const s = STAGE_STYLES[stage];
+  return (
+    <div
+      className={cn(
+        "rounded-lg overflow-hidden border-t-[3px] bg-black/[0.015] dark:bg-white/[0.02]",
+        s.columnBorder
+      )}
+      style={{ borderInline: "1px solid rgb(var(--border))", borderBottom: "1px solid rgb(var(--border))" }}
+    >
+      <div
+        className={cn("flex items-center justify-between px-3 py-2.5 text-xs font-bold uppercase tracking-wide border-b", s.headerText)}
+        style={{ borderColor: "rgb(var(--border))" }}
+      >
+        <span>{TRIP_STAGE_LABELS[stage]}</span>
+        <span className="rounded-full bg-black/5 dark:bg-white/10 px-2 py-0.5 text-xs tabular-nums muted normal-case font-semibold">
+          {cards.length}
+        </span>
+      </div>
+      <div className="p-2 space-y-2 max-h-[22rem] overflow-y-auto scrollbar-thin">
+        {cards.length === 0 ? (
+          <div className="text-center muted text-xs py-4">—</div>
+        ) : (
+          cards.map((t) => (
+            <TripCard
+              key={t.id}
+              trip={t}
+              ratePerTrip={getRate(t)}
+              stationName={stationsByKey[t.water_station] ?? t.water_station}
+              busy={advancingId === t.id}
+              onAdvance={(to) => onAdvance(t.id, to)}
+              showPlate={!!t.truck_id && activeTruckIds.has(t.truck_id)}
+              blurred={t.stage !== "delivered" && !!t.driver_id && !driverIdsWithTruck.has(t.driver_id)}
+              stations={stations}
+              onStationChange={(station) => onStationChange(t.id, station)}
+              onOpenPicker={() => onOpenPicker(t)}
+            />
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -831,61 +957,49 @@ function ProjectCard({
         {STAGE_ORDER.map((stage) => {
           let cards = trips.filter((t) => t.stage === stage);
           if (stage === "delivered") {
-            cards = [...cards]
-              .sort((a, b) => (b.delivered_at ?? "").localeCompare(a.delivered_at ?? ""))
-              .slice(0, 6);
+            // Most-recent-first; NO cap — the column scrolls internally
+            // (max-h + overflow-y-auto in StageColumn) so it must show every
+            // delivered trip, not just a slice.
+            cards = [...cards].sort((a, b) => (b.delivered_at ?? "").localeCompare(a.delivered_at ?? ""));
           }
-          const s = STAGE_STYLES[stage];
           return (
-            <div key={stage} className="rounded-lg p-2" style={{ background: "rgb(var(--bg))" }}>
-              <div
-                className={cn(
-                  "flex items-center justify-between rounded-md px-2 py-1 text-xs font-medium mb-2 ring-1 ring-inset",
-                  s.chip
-                )}
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
-                  {TRIP_STAGE_LABELS[stage]}
-                </span>
-                <span className="rounded-full bg-black/5 dark:bg-white/10 px-1.5">{cards.length}</span>
-              </div>
-              <div className="space-y-2 max-h-[22rem] overflow-y-auto scrollbar-thin">
-                {cards.length === 0 ? (
-                  <div className="text-center muted text-xs py-4">—</div>
-                ) : (
-                  cards.map((t) => (
-                    <TripCard
-                      key={t.id}
-                      trip={t}
-                      ratePerTrip={t.commission_sar ?? project.rate_per_trip_sar}
-                      stationName={stationsByKey[t.water_station] ?? t.water_station}
-                      busy={advancingId === t.id}
-                      onAdvance={(to) => onAdvance(t.id, to)}
-                      showPlate={!!t.truck_id && activeTruckIds.has(t.truck_id)}
-                      blurred={t.stage !== "delivered" && !!t.driver_id && !driverIdsWithTruck.has(t.driver_id)}
-                      stations={stations}
-                      onStationChange={(station) => onStationChange(t.id, station)}
-                      onOpenPicker={() => onOpenPicker(t)}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
+            <StageColumn
+              key={stage}
+              stage={stage}
+              cards={cards}
+              getRate={(t) => t.commission_sar ?? project.rate_per_trip_sar}
+              stationsByKey={stationsByKey}
+              advancingId={advancingId}
+              activeTruckIds={activeTruckIds}
+              driverIdsWithTruck={driverIdsWithTruck}
+              stations={stations}
+              onAdvance={onAdvance}
+              onStationChange={onStationChange}
+              onOpenPicker={onOpenPicker}
+            />
           );
         })}
       </div>
 
       {/* Driver summary (block D) — assigned drivers; trips + commission scoped to
           the SELECTED day (moves with the calendar); last trip is all-time.
-          Mirrors the demo's driverSummaryTable. */}
-      <div className="mt-4 rounded-lg border overflow-hidden" style={{ borderColor: "rgb(var(--border))" }}>
+          Pixel-matched to preview/app.css .driver-table-wrap/.driver-table-head:
+          flush INSIDE the project card (border-top divider only, no own
+          rounded/bordered box — bleeds to the card's edges via -mx-4 -mb-4 and
+          picks up the card's own bottom corner radius), emerald-tinted header
+          strip (bg rgba(16,185,129,.05)), and the wrap's tighter th/td padding
+          + smaller th font-size than the base .tbl (forced with `!` since TH/TD
+          are shared app-wide primitives with their own defaults). */}
+      <div
+        className="-mx-4 -mb-4 mt-4 border-t overflow-hidden rounded-b-[0.875rem]"
+        style={{ borderColor: "rgb(var(--border))" }}
+      >
         <div
-          className="flex items-center gap-2 px-3 py-2 border-b"
+          className="flex items-center gap-2 px-[1.1rem] py-2 border-b bg-emerald-500/5 text-[0.78rem]"
           style={{ borderColor: "rgb(var(--border))" }}
         >
           <Users className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-          <span className="font-semibold text-sm">Drivers operating this project</span>
+          <span className="font-semibold">Drivers operating this project</span>
           <span className="muted text-xs ms-auto">
             {driverRows.length} {driverRows.length === 1 ? "driver" : "drivers"}
           </span>
@@ -896,12 +1010,12 @@ function ProjectCard({
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH>Driver</TH>
-                <TH>Truck</TH>
-                <TH>Duty status</TH>
-                <TH>Trips (day)</TH>
-                <TH>Commission (day)</TH>
-                <TH>Last trip</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Driver</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Truck</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Duty status</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Trips (day)</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Commission (day)</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Last trip</TH>
               </tr>
             </thead>
             <tbody>
@@ -917,9 +1031,12 @@ function ProjectCard({
                     "hover:bg-black/[0.02] dark:hover:bg-white/[0.03] " + (muted ? "opacity-60" : "")
                   }
                 >
-                  <TD>
+                  <TD className="!py-2 !px-3">
                     <div className="flex items-center gap-2">
-                      <div className="h-7 w-7 rounded-full bg-brand-600 text-white grid place-items-center text-[11px] font-semibold shrink-0">
+                      {/* Avatar bg is brand-700 (#0c66bf), pixel-matched to
+                          preview/pages-1.js driverSummaryTable's inline
+                          style="background:#0c66bf" (not brand-600). */}
+                      <div className="h-7 w-7 rounded-full bg-brand-700 text-white grid place-items-center text-[11px] font-semibold shrink-0">
                         {initials(r.name)}
                       </div>
                       <div className="min-w-0">
@@ -928,19 +1045,19 @@ function ProjectCard({
                       </div>
                     </div>
                   </TD>
-                  <TD className="font-mono text-xs">
+                  <TD className="!py-2 !px-3 font-mono text-xs">
                     {r.truckPlate ?? <span className="muted">—</span>}
                   </TD>
-                  <TD>
+                  <TD className="!py-2 !px-3">
                     {/* Pill's own classes (tone/color/dot) are untouched — it just
                         rides the row's opacity like every other cell. */}
                     <StatusPill status={r.status} label={DRIVER_STATE_LABELS[r.status]} />
                   </TD>
-                  <TD className="tabular-nums font-medium">{r.tripsDay}</TD>
-                  <TD className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
+                  <TD className="!py-2 !px-3 tabular-nums font-medium">{r.tripsDay}</TD>
+                  <TD className="!py-2 !px-3 tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
                     {formatSar(r.commissionDay)}
                   </TD>
-                  <TD className="text-xs">
+                  <TD className="!py-2 !px-3 text-xs">
                     {r.lastTripDate ? fmtDayKey(r.lastTripDate) : <span className="muted">—</span>}
                   </TD>
                 </tr>
@@ -1437,47 +1554,25 @@ export default function ProjectsBoard({
                 {STAGE_ORDER.map((stage) => {
                   let cards = directCustomer.filter((t) => t.stage === stage);
                   if (stage === "delivered") {
-                    cards = [...cards]
-                      .sort((a, b) => (b.delivered_at ?? "").localeCompare(a.delivered_at ?? ""))
-                      .slice(0, 6);
+                    // Most-recent-first; NO cap (see the per-project board's
+                    // same fix above — the column scrolls internally).
+                    cards = [...cards].sort((a, b) => (b.delivered_at ?? "").localeCompare(a.delivered_at ?? ""));
                   }
-                  const s = STAGE_STYLES[stage];
                   return (
-                    <div key={stage} className="rounded-lg p-2" style={{ background: "rgb(var(--bg))" }}>
-                      <div
-                        className={cn(
-                          "flex items-center justify-between rounded-md px-2 py-1 text-xs font-medium mb-2 ring-1 ring-inset",
-                          s.chip
-                        )}
-                      >
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
-                          {TRIP_STAGE_LABELS[stage]}
-                        </span>
-                        <span className="rounded-full bg-black/5 dark:bg-white/10 px-1.5">{cards.length}</span>
-                      </div>
-                      <div className="space-y-2 max-h-[22rem] overflow-y-auto scrollbar-thin">
-                        {cards.length === 0 ? (
-                          <div className="text-center muted text-xs py-4">—</div>
-                        ) : (
-                          cards.map((t) => (
-                            <TripCard
-                              key={t.id}
-                              trip={t}
-                              ratePerTrip={t.rate_sar ?? 0}
-                              stationName={stationsByKey[t.water_station] ?? t.water_station}
-                              busy={advancingId === t.id}
-                              onAdvance={(to) => advance(t.id, to)}
-                              showPlate={!!t.truck_id && activeTruckIds.has(t.truck_id)}
-                              blurred={t.stage !== "delivered" && !!t.driver_id && !driverIdsWithTruck.has(t.driver_id)}
-                              stations={stations}
-                              onStationChange={(station) => changeStation(t.id, station)}
-                              onOpenPicker={() => setPickerTrip(t)}
-                            />
-                          ))
-                        )}
-                      </div>
-                    </div>
+                    <StageColumn
+                      key={stage}
+                      stage={stage}
+                      cards={cards}
+                      getRate={(t) => t.rate_sar ?? 0}
+                      stationsByKey={stationsByKey}
+                      advancingId={advancingId}
+                      activeTruckIds={activeTruckIds}
+                      driverIdsWithTruck={driverIdsWithTruck}
+                      stations={stations}
+                      onAdvance={advance}
+                      onStationChange={changeStation}
+                      onOpenPicker={setPickerTrip}
+                    />
                   );
                 })}
               </div>
