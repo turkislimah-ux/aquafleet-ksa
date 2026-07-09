@@ -10,8 +10,10 @@
 //
 //   fixed    : every delivered trip pays `base`.
 //   scalable : the n-th delivered trip pays  base * (1 + (n-1) * bump%/100),
-//              where n is THIS driver's trip number ON THIS PROJECT within the
-//              current CALENDAR MONTH (resets to 1 each month).
+//              where n is THIS driver's trip number ON THIS PROJECT within a
+//              single SCHEDULED day (trips.trip_date — resets to 1 each day,
+//              bucketed by the day the trip is FOR, not the click-time it was
+//              marked delivered).
 
 import type { CommissionMode } from "./db-types";
 
@@ -57,47 +59,60 @@ export function commissionForDelivery(
 
 // "YYYY-MM" for an ISO timestamp. Derived from the UTC instant (deterministic
 // across machines). Month-boundary deliveries are bucketed by UTC date.
+// Used for REPORTING/payroll-period grouping (BreakdownReport, CustomersTab,
+// commission-rows.ts's payout cycles) — NOT for scaling position (see
+// dailyDriverProjectCommission below for that).
 export function monthKeyOf(iso: string): string {
   return iso.slice(0, 7);
 }
 
-type DeliveredLite = { delivered_at: string | null };
+type DeliveredLite = { id: string; trip_date: string; delivered_at: string | null };
 
-export type MonthlyCommission = {
-  monthKey: string;
+export type DailyCommission = {
+  dayKey: string;
   count: number;
   total: number;
   perTrip: { n: number; delivered_at: string; commission: number }[];
 };
 
 /**
- * Roll up one driver's commission on one project for a single calendar month.
- * `trips` is that driver's delivered trips on that project (any months); rows
- * are filtered to `monthKey`, sorted by delivered_at ascending, numbered
- * n = 1..k, and each priced. Because numbering is scoped to `monthKey`, the
- * scalable ramp resets every month automatically.
+ * Roll up one driver's commission on one project for a single scheduled DAY
+ * (`trips.trip_date` — the day the trip is FOR, a plain `date` column, not
+ * `delivered_at`). `trips` is that driver's delivered trips on that project
+ * (any days); rows are filtered to `dayKey` by `trip_date` (NOT by when they
+ * were clicked delivered), sorted by `delivered_at` ascending (tiebreak `id`
+ * ascending) for within-day order, numbered n = 1..k, and each priced.
+ * Because bucketing is by `trip_date`, the scalable ramp resets per
+ * scheduled day regardless of when trips are actually clicked delivered —
+ * clicking several different-day trips in one session does NOT collapse
+ * them into one bucket, and a trip delivered late still scales under the
+ * day it was FOR, not the day it was clicked.
  *
  * Trips with a null delivered_at are ignored (not yet delivered = no commission).
  */
-export function monthlyDriverProjectCommission(
+export function dailyDriverProjectCommission(
   trips: DeliveredLite[],
   base: number,
   mode: CommissionMode,
   bumpPct: number,
-  monthKey: string
-): MonthlyCommission {
-  const inMonth = trips
-    .filter((t): t is { delivered_at: string } => !!t.delivered_at)
-    .filter((t) => monthKeyOf(t.delivered_at) === monthKey)
-    .sort((a, b) => (a.delivered_at < b.delivered_at ? -1 : a.delivered_at > b.delivered_at ? 1 : 0));
+  dayKey: string
+): DailyCommission {
+  const inDay = trips
+    .filter((t): t is DeliveredLite & { delivered_at: string } => !!t.delivered_at)
+    .filter((t) => t.trip_date === dayKey)
+    .sort((a, b) =>
+      a.delivered_at !== b.delivered_at
+        ? a.delivered_at < b.delivered_at ? -1 : 1
+        : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    );
 
-  const perTrip = inMonth.map((t, i) => {
+  const perTrip = inDay.map((t, i) => {
     const n = i + 1;
     return { n, delivered_at: t.delivered_at, commission: commissionForNthTrip(base, mode, bumpPct, n) };
   });
 
   return {
-    monthKey,
+    dayKey,
     count: perTrip.length,
     total: round2(perTrip.reduce((s, p) => s + p.commission, 0)),
     perTrip,

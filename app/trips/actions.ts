@@ -9,7 +9,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { STAGE_ORDER, STAGE_TIMESTAMP, MAX_BATCH_TRIPS, type TripStage, type WaterType } from "@/lib/db-types";
-import { commissionForDelivery, monthKeyOf } from "@/lib/commission";
+import { commissionForDelivery, commissionForNthTrip } from "@/lib/commission";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
 
 export type ActionResult = { error: string | null };
@@ -111,10 +111,11 @@ export async function updateTrip(id: string, formData: FormData): Promise<Action
 // BASE PAY: trips.commission_sar is the single source of truth for base pay and
 // is stamped HERE, the moment a trip enters `delivered` — priced via the pure
 // engine (lib/commission) using the project's commission settings and how many
-// of this driver's trips on this project were already delivered this month (so
-// the scalable ramp resets monthly). Leaving `delivered` clears it. A trip that
-// has already been paid (payout_id set) is frozen: its commission is never
-// re-computed, since it is locked into a History snapshot.
+// of this driver's trips on this project were already delivered for the same
+// SCHEDULED day (trips.trip_date — so the scalable ramp resets per scheduled
+// day, not by when it happens to be clicked). Leaving `delivered` clears it.
+// A trip that has already been paid (payout_id set) is frozen: its commission
+// is never re-computed, since it is locked into a History snapshot.
 //
 // `waterStation` is OPTIONAL — when passed (Commit 2's phase picker will let a
 // station change ride along with a stage move), trips.water_station is also
@@ -124,10 +125,13 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
 
   const supabase = createClient();
 
-  // We need the trip's driver/project + paid-lock state to decide commission.
+  // We need the trip's driver/project + paid-lock state to decide commission,
+  // and its trip_date (the SCHEDULED day, not click-time) so any stage change
+  // knows which day's ramp to recompute. trip_date never changes here, so
+  // there's no "old" vs "new" day the way delivered_at used to have.
   const { data: trip, error: tripErr } = await supabase
     .from("trips")
-    .select("driver_id, project_id, payout_id")
+    .select("driver_id, project_id, payout_id, trip_date")
     .eq("id", id)
     .maybeSingle();
   if (tripErr) return { error: tripErr.message };
@@ -149,7 +153,7 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
   // Only (re)price unpaid trips. Paid trips keep their frozen commission_sar.
   if (trip && trip.payout_id == null) {
     if (stage === "delivered") {
-      row.commission_sar = await priceDelivery(supabase, id, trip.driver_id, trip.project_id, nowIso);
+      row.commission_sar = await priceDelivery(supabase, id, trip.driver_id, trip.project_id, trip.trip_date);
     } else {
       // Leaving delivered (correction / re-route) → no base pay for a non-delivered trip.
       row.commission_sar = null;
@@ -158,6 +162,20 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
 
   const { error } = await supabase.from("trips").update(row).eq("id", id);
   if (error) return { error: error.message };
+
+  // Reconcile the whole driver+project+trip_date ramp — not just this trip. A
+  // pushback out of `delivered` removes this trip from the sequence, which
+  // shifts the trip-number (n) of every trip scheduled that same day that was
+  // delivered AFTER it, so their commission_sar must reprice down. Entering
+  // `delivered` is also reconciled here (defensive: covers backdated/
+  // out-of-order delivered_at) even though the fresh trip normally sorts last
+  // and doesn't disturb existing n's. trip_date doesn't change with stage, so
+  // the SAME bucket is recomputed either direction. Paid trips are never
+  // overwritten (see helper).
+  if (trip?.driver_id && trip?.project_id && trip.trip_date) {
+    const recomputeErr = await recomputeDailyCommission(supabase, trip.driver_id, trip.project_id, trip.trip_date);
+    if (recomputeErr) return { error: recomputeErr };
+  }
 
   revalidatePath("/trips");
   revalidatePath("/drivers");
@@ -220,7 +238,7 @@ async function priceDelivery(
   tripId: string,
   driverId: string | null,
   projectId: string | null,
-  deliveredIso: string,
+  tripDate: string,
 ): Promise<number> {
   if (!driverId || !projectId) return 0;
 
@@ -231,26 +249,111 @@ async function priceDelivery(
     .maybeSingle();
   if (!project) return 0;
 
-  // How many of this driver's trips on this project were ALREADY delivered this
-  // same month (excluding this one). The new trip is the (prior + 1)-th.
-  const monthKey = monthKeyOf(deliveredIso);
+  // How many of this driver's trips on this project were ALREADY delivered
+  // for this same SCHEDULED day (trip_date — excluding this one), regardless
+  // of when they were actually clicked delivered. The new trip is the
+  // (prior + 1)-th. `trip_date` is a plain date column, so this is a direct
+  // equality filter — no timezone bounds needed.
   const { data: prior } = await supabase
     .from("trips")
     .select("delivered_at")
     .eq("driver_id", driverId)
     .eq("project_id", projectId)
+    .eq("trip_date", tripDate)
     .not("delivered_at", "is", null)
     .neq("id", tripId);
-  const priorThisMonth = (prior ?? []).filter(
-    (t: { delivered_at: string | null }) => t.delivered_at && monthKeyOf(t.delivered_at) === monthKey,
-  ).length;
+  const priorToday = (prior ?? []).length;
 
   return commissionForDelivery(
     project.commission_value,
     project.commission_mode,
     project.commission_bump_pct,
-    priorThisMonth,
+    priorToday,
   );
+}
+
+// Re-derive commission_sar for an ENTIRE driver+project+DAY ramp and write
+// the corrected values back in one batch. Needed whenever a trip's delivered
+// status changes in a way that can shift OTHER trips' position in the
+// sequence (a pushback out of `delivered` removes a slot, renumbering every
+// later trip scheduled that day) — a single-trip priceDelivery() call can't
+// fix that. The scalable ramp resets PER SCHEDULED DAY (trips.trip_date) —
+// see dailyDriverProjectCommission in lib/commission.ts.
+//
+// Position semantics: PAID trips still occupy a slot and still count toward
+// the n fed into the formula (mirrors priceDelivery's own "prior" count,
+// which never filters by payout_id) — this preserves the existing/intended
+// economics and keeps a driver's later unpaid trips priced consistently with
+// what was already paid out. Only the WRITE is skipped for paid trips: their
+// commission_sar is a frozen History snapshot and is never touched here.
+async function recomputeDailyCommission(
+  supabase: ReturnType<typeof createClient>,
+  driverId: string,
+  projectId: string,
+  dayKey: string,
+): Promise<string | null> {
+  const { data: project } = await supabase
+    .from("projects")
+    .select("commission_value, commission_mode, commission_bump_pct")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (!project) return null;
+
+  // Scope to the SCHEDULED day IN SQL via a direct trip_date equality filter
+  // (a plain date column — no timezone bounds needed) rather than fetching
+  // this driver+project's all-time trips and filtering in JS — keeps the
+  // round trip small regardless of trip history length.
+  const { data: trips } = await supabase
+    .from("trips")
+    .select("id, delivered_at, payout_id")
+    .eq("driver_id", driverId)
+    .eq("project_id", projectId)
+    .eq("trip_date", dayKey)
+    .not("delivered_at", "is", null);
+
+  const rows = (trips ?? []) as { id: string; delivered_at: string; payout_id: string | null }[];
+  // Within-day order: delivered_at ascending (actual completion order — the
+  // only sub-day signal, since trip_date has no time component), tiebreak id
+  // ascending for determinism.
+  const sorted = [...rows].sort((a, b) =>
+    a.delivered_at !== b.delivered_at
+      ? a.delivered_at < b.delivered_at ? -1 : 1
+      : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  );
+
+  // Skip the write for paid trips (payout_id != null) — their slot still
+  // counts toward n above, it just isn't re-stamped.
+  const updates = sorted
+    .map((t, i) => ({
+      id: t.id,
+      payout_id: t.payout_id,
+      commission_sar: commissionForNthTrip(
+        project.commission_value,
+        project.commission_mode,
+        project.commission_bump_pct,
+        i + 1,
+      ),
+    }))
+    .filter((t) => t.payout_id == null)
+    .map(({ id, commission_sar }) => ({ id, commission_sar }));
+
+  if (updates.length === 0) return null;
+
+  // Plain UPDATEs, not upsert. upsert() emits INSERT ... ON CONFLICT under the
+  // hood, and PostgREST's insert path validates ALL NOT NULL columns against
+  // the payload (e.g. water_station) even though the row already exists and
+  // the conflict branch would only ever touch commission_sar — so upsert with
+  // a {id, commission_sar}-only payload 500s on every call. UPDATE has no
+  // insert path, so it only ever touches the column named. N is small (one
+  // driver+project+month's delivered trips), so N parallel updates over one
+  // batch SELECT is correct and simple — no separate RPC needed.
+  const results = await Promise.all(
+    updates.map(({ id, commission_sar }) =>
+      supabase.from("trips").update({ commission_sar }).eq("id", id),
+    ),
+  );
+  const failed = results.find((r) => r.error);
+  return failed?.error?.message ?? null;
 }
 
 // ---------------------------------------------------------------------------
