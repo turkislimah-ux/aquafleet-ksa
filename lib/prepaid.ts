@@ -147,3 +147,67 @@ export function buildStatement(
     return { ...e, runningBalance: running };
   });
 }
+
+// ---------------------------------------------------------------------------
+// Covered / unpaid engine (spec §5, prepaid-only, HIGHEST-RISK LOGIC).
+//
+// TOTAL-BALANCE MODEL (locked): this is a PRESENTATION SPLIT of the single
+// derived balance — sum(top-ups) − sum(consumed trip rates) — not a per-top-up
+// allocation. It never tracks which top-up "pays" which trip. Top-ups form one
+// pool (summed, order among themselves doesn't matter — same as derivedBalance's
+// credit side); trips drain the pool FIFO via consumingTrips (THE shared
+// "what consumes balance" function — split here, never recomputed).
+//
+// Whole-trip coverage: a trip is Covered only if its full rate fits in the
+// remaining pool. The FIRST trip that doesn't fit, and every trip after it
+// (in FIFO order), goes Unpaid — no trip splitting, no skip-and-try-next.
+// Leftover that couldn't cover the next whole trip freezes in remainingBalance
+// (never partially spent) and rolls forward to the next call automatically,
+// since this is a pure function recomputed fresh from current rows every time
+// — a later top-up (any topup_date) just enlarges the pool next call, which
+// can flip a previously-unpaid trip back to covered with no special-case code.
+//
+// Invariant (enforced by the harness on every case): coveredTotal + unpaidTotal
+// === sum of every consumingTrips() amount, and remainingBalance − unpaidTotal
+// === derivedBalance(topups, trips, asOfDate) for the same inputs — proving
+// this can never disagree with the displayed balance.
+export type CoveredUnpaidResult = {
+  covered: ConsumptionEntry[];
+  unpaid: ConsumptionEntry[];
+  coveredTotal: number;
+  unpaidTotal: number;
+  // Leftover pool after only-covered trips subtracted. Always >= 0 — never
+  // driven negative (unlike derivedBalance, which subtracts every consumed
+  // trip unconditionally and can go negative to show total over-balance).
+  remainingBalance: number;
+};
+
+export function splitCoveredUnpaid(
+  topups: TopupLite[],
+  trips: ConsumingTrip[],
+  asOfDate?: string,
+): CoveredUnpaidResult {
+  let pool = round2(
+    topups.filter((t) => asOfDate == null || t.topup_date <= asOfDate).reduce((s, t) => s + t.amount_sar, 0),
+  );
+
+  const entries = consumingTrips(trips, asOfDate);
+  const covered: ConsumptionEntry[] = [];
+  const unpaid: ConsumptionEntry[] = [];
+  let hitWall = false;
+
+  for (const e of entries) {
+    if (!hitWall && pool >= e.amount) {
+      covered.push(e);
+      pool = round2(pool - e.amount);
+    } else {
+      hitWall = true;
+      unpaid.push(e);
+    }
+  }
+
+  const coveredTotal = round2(covered.reduce((s, e) => s + e.amount, 0));
+  const unpaidTotal = round2(unpaid.reduce((s, e) => s + e.amount, 0));
+
+  return { covered, unpaid, coveredTotal, unpaidTotal, remainingBalance: pool };
+}
