@@ -31,7 +31,10 @@
 // balance and the covered/unpaid split can never disagree on which trips
 // count, their amounts, or their order.
 
-function round2(n: number): number {
+// Exported — lib/vat.ts (Finance Commit 4) reuses this exact rounding
+// definition rather than redefining its own, so every money value in the
+// Finance feature rounds identically (round-half-up to 2dp / halalas).
+export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
