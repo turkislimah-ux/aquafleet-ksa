@@ -9,7 +9,7 @@ import { useMemo, useState } from "react";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
-import type { CommissionMode, WaterType } from "@/lib/db-types";
+import type { CommissionMode, WaterType, PaymentMode } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
 import ProjectModal, { type ProjectInitial } from "./ProjectModal";
 import BreakdownReport from "./BreakdownReport";
@@ -37,6 +37,8 @@ type ProjectLite = {
   default_water_station: string;
   water_type: WaterType | null;
   description: string | null;
+  // Finance (0025). NULL = unset.
+  payment_mode: PaymentMode | null;
 };
 // Wider than the KPI math needs — the extra fields (driver_id, commission_sar,
 // water_station, water_type, stage) feed the BreakdownReport, which the page
@@ -93,6 +95,7 @@ function toInitial(c: CustomerLite, p: ProjectLite, driverIds: string[]): Projec
     water_type: p.water_type ?? "",
     description: p.description ?? "",
     driver_ids: driverIds,
+    payment_mode: p.payment_mode ?? "",
   };
 }
 

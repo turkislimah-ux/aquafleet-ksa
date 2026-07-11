@@ -147,6 +147,16 @@ relevant skill(s) **when the task calls for it**:
 
 - **Finance/Invoice PRD** is committed at `.planning/finance-invoice-spec.md` — the
   next big feature to build (~8 staged commits), pending Turki's final review.
+  - **Progress: Commit 1 (data model, migration `0025`) done and committed.** Next up:
+    Commit 2 (prepaid balance ledger). Commit sequence lives in spec §13.
+- **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
+  `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
+  touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`
+  default, wired into `CustomerForm.tsx`/`app/customers/actions.ts`/`lib/db-types.ts`),
+  to avoid a breaking change to an actively-used column outside that commit's scope.
+  Turki confirmed `pay_as_you_go` ≈ `prepaid` (same concept) — so reconciling the two
+  is a clean concept-merge, not resolving two different things. Do this next time
+  customer app code is touched.
 - **Deferred:** Archive page (restore UI for soft-deleted records — `preview/archive.js`
   is the spec; rising priority), Maintenance page (+ truck-derived-state), Route
   Optimization (`preview/map.js`), stored-status column cleanup migration.

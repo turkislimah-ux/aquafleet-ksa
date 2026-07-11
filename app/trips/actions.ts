@@ -383,6 +383,10 @@ export type NewProjectInput = {
   water_type: string;
   description: string | null;
   driver_ids: string[];
+  // Finance (0025). Forced choice at the form layer — no default. Validated
+  // below to be exactly "postpaid" | "prepaid" (never written as NULL from
+  // this flow; NULL only exists on rows created before this field existed).
+  payment_mode: string;
 };
 
 // Shared validate + normalize for the create AND update paths. The server is the
@@ -398,6 +402,7 @@ type NormalizedProject = {
   bump: number;
   rate: number;
   commissionValue: number;
+  paymentMode: "postpaid" | "prepaid";
 };
 
 function normalizeProjectInput(
@@ -415,6 +420,10 @@ function normalizeProjectInput(
   if (!station) return { ok: false, error: "Default water station is required." };
   if (!validWaterType(input.water_type)) return { ok: false, error: "Pick a valid water type." };
   const waterType = input.water_type;
+  if (input.payment_mode !== "postpaid" && input.payment_mode !== "prepaid") {
+    return { ok: false, error: "Pick a payment mode (postpaid or prepaid)." };
+  }
+  const paymentMode = input.payment_mode;
 
   const mode = input.commission_mode === "scalable" ? "scalable" : "fixed";
   // Bump only applies in scalable mode; clamp 0–50.
@@ -422,13 +431,13 @@ function normalizeProjectInput(
   const rate = Number.isFinite(input.rate) ? input.rate : 0;
   const commissionValue = Number.isFinite(input.commission_value) ? input.commission_value : 0;
 
-  return { ok: true, value: { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue } };
+  return { ok: true, value: { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue, paymentMode } };
 }
 
 export async function createProjectWithCustomer(input: NewProjectInput): Promise<ActionResult> {
   const norm = normalizeProjectInput(input);
   if (!norm.ok) return { error: norm.error };
-  const { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue } = norm.value;
+  const { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue, paymentMode } = norm.value;
 
   const supabase = createClient();
   const { error } = await supabase.rpc("create_project_with_customer", {
@@ -448,6 +457,7 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
     p_water_type: waterType,
     p_description: input.description?.trim() || null,
     p_driver_ids: driverIds,
+    p_payment_mode: paymentMode,
   });
   if (error) return { error: error.message };
 
@@ -468,7 +478,7 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
 
   const norm = normalizeProjectInput(input);
   if (!norm.ok) return { error: norm.error };
-  const { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue } = norm.value;
+  const { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue, paymentMode } = norm.value;
 
   const supabase = createClient();
   const { error } = await supabase.rpc("update_project_with_customer", {
@@ -489,6 +499,7 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
     p_water_type: waterType,
     p_description: input.description?.trim() || null,
     p_driver_ids: driverIds,
+    p_payment_mode: paymentMode,
   });
   if (error) return { error: error.message };
 

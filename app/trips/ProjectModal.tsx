@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { CUSTOMER_TYPE_LABELS, WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
+import { CUSTOMER_TYPE_LABELS, WATER_TYPE_LABELS, type WaterType, type PaymentMode } from "@/lib/db-types";
 import { formatSar } from "@/lib/utils";
 import { archiveProject, createProjectWithCustomer, updateProjectWithCustomer } from "./actions";
 import { type DriverState } from "@/lib/driver-state";
@@ -54,6 +54,9 @@ export type ProjectInitial = {
   water_type: string;
   description: string;
   driver_ids: string[];
+  // Finance (0025). "" = unset (pre-Finance rows) — form still forces an
+  // explicit pick before save, same as a brand-new project.
+  payment_mode: PaymentMode | "";
 };
 
 function round2(n: number): number {
@@ -102,6 +105,11 @@ export default function ProjectModal({
   const [deliveryLat, setDeliveryLat] = useState("");
   const [deliveryLng, setDeliveryLng] = useState("");
 
+  // Payment/Rate (Finance 0025). Forced choice — starts unselected in BOTH
+  // modes (never defaulted), even in edit mode for a pre-Finance project
+  // whose payment_mode is still NULL/"" in the DB.
+  const [paymentMode, setPaymentMode] = useState<PaymentMode | "">("");
+
   // Project. `commMode` is the COMMISSION mode — distinct from the `mode` prop.
   const [projName, setProjName] = useState("");
   const [rate, setRate] = useState("60");
@@ -139,6 +147,7 @@ export default function ProjectModal({
       setDeliveryLng(initial.delivery_lng);
       setProjName(initial.proj_name);
       setRate(initial.rate);
+      setPaymentMode(initial.payment_mode);
       setCommissionValue(initial.commission_value);
       setCommMode(initial.commission_mode);
       setBump(initial.commission_bump);
@@ -160,6 +169,7 @@ export default function ProjectModal({
       setDeliveryLng("");
       setProjName("");
       setRate("60");
+      setPaymentMode("");
       setCommissionValue("60");
       setCommMode("fixed");
       setBump("5");
@@ -188,14 +198,16 @@ export default function ProjectModal({
     [base, pct],
   );
 
-  // Required: customer name + type, project name, station, water type. Drivers
-  // are OPTIONAL — a project can be created or saved with zero drivers.
+  // Required: customer name + type, project name, station, water type, AND
+  // payment mode (Finance 0025 — no default, must be an explicit pick).
+  // Drivers are OPTIONAL — a project can be created or saved with zero drivers.
   const canSubmit =
     custName.trim() !== "" &&
     custType !== "" &&
     projName.trim() !== "" &&
     station !== "" &&
-    waterType !== "";
+    waterType !== "" &&
+    paymentMode !== "";
 
   const isEdit = mode === "edit";
 
@@ -203,10 +215,13 @@ export default function ProjectModal({
     e.preventDefault();
     if (!canSubmit) {
       setError(
-        "Fill the required fields: customer name, customer type, project name, water station, and water type.",
+        "Fill the required fields: customer name, customer type, project name, water station, water type, and payment mode.",
       );
       return;
     }
+    // paymentMode is narrowed to PaymentMode (excludes "") here — canSubmit
+    // above already required it, and TS's aliased-condition narrowing carries
+    // that through (same reason payload.payment_mode below type-checks).
     if (isEdit && !initial?.project_id) {
       setError("Missing project id.");
       return;
@@ -231,6 +246,7 @@ export default function ProjectModal({
       water_type: waterType,
       description: description || null,
       driver_ids: selected,
+      payment_mode: paymentMode,
     };
 
     const res =
@@ -325,27 +341,58 @@ export default function ProjectModal({
             </div>
           </section>
 
-          {/* Project section. */}
+          {/* Payment & Rate section — Finance (0025). payment_mode is a forced
+              choice (no default): the toggle starts unselected in both modes
+              and blocks submit until picked. Customer rate/trip lives here
+              too (it's revenue, same bucket as how the customer pays). */}
           <section className="space-y-3 border-t border-app pt-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide muted">Project</h3>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">Project name *</span>
-              <input value={projName} onChange={(e) => setProjName(e.target.value)} required className={INPUT} style={INPUT_STYLE} placeholder="e.g. King Salman Park" />
-            </label>
+            <h3 className="text-xs font-semibold uppercase tracking-wide muted">Payment &amp; Rate</h3>
 
-            {/* Two distinct money fields. */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="flex flex-col gap-1 text-sm rounded-lg border border-app p-3">
-                <span className="font-medium">Customer rate / trip (SAR)</span>
-                <span className="muted text-[11px]">Revenue — what the customer pays per trip.</span>
-                <input value={rate} onChange={(e) => setRate(e.target.value)} type="number" min="0" className={INPUT} style={INPUT_STYLE} />
-              </label>
-              <label className="flex flex-col gap-1 text-sm rounded-lg border border-app p-3">
-                <span className="font-medium">Driver commission base (SAR)</span>
-                <span className="muted text-[11px]">Driver pay — separate from the customer rate.</span>
-                <input value={commissionValue} onChange={(e) => setCommissionValue(e.target.value)} type="number" min="0" className={INPUT} style={INPUT_STYLE} />
-              </label>
+            <div className="space-y-1.5">
+              <span className="text-sm font-medium">Payment mode *</span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMode("postpaid")}
+                  className={`rounded-lg border px-3 py-2 text-left text-sm ${paymentMode === "postpaid" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
+                >
+                  <div className="font-medium">Postpaid</div>
+                  <div className="muted text-[11px]">Invoiced after delivery — pays per period.</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentMode("prepaid")}
+                  className={`rounded-lg border px-3 py-2 text-left text-sm ${paymentMode === "prepaid" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
+                >
+                  <div className="font-medium">Prepaid</div>
+                  <div className="muted text-[11px]">Runs on a top-up balance — trips draw it down.</div>
+                </button>
+              </div>
+              {paymentMode === "" && (
+                <p className="muted text-[11px]">Required — pick how this customer pays.</p>
+              )}
             </div>
+
+            <label className="flex flex-col gap-1 text-sm rounded-lg border border-app p-3">
+              <span className="font-medium">Customer rate / trip (SAR)</span>
+              <span className="muted text-[11px]">
+                {paymentMode === "prepaid"
+                  ? "Revenue — what each delivered trip draws from the prepaid balance."
+                  : "Revenue — what the customer pays per trip."}
+              </span>
+              <input value={rate} onChange={(e) => setRate(e.target.value)} type="number" min="0" className={INPUT} style={INPUT_STYLE} />
+            </label>
+          </section>
+
+          {/* Commission section — driver pay. Unchanged behavior, own section now. */}
+          <section className="space-y-3 border-t border-app pt-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide muted">Commission</h3>
+
+            <label className="flex flex-col gap-1 text-sm rounded-lg border border-app p-3">
+              <span className="font-medium">Driver commission base (SAR)</span>
+              <span className="muted text-[11px]">Driver pay — separate from the customer rate.</span>
+              <input value={commissionValue} onChange={(e) => setCommissionValue(e.target.value)} type="number" min="0" className={INPUT} style={INPUT_STYLE} />
+            </label>
 
             {/* Commission mode + bump. */}
             <div className="rounded-lg border border-app p-3 space-y-3">
@@ -406,6 +453,16 @@ export default function ProjectModal({
                 )}
               </div>
             </div>
+          </section>
+
+          {/* Operation section — trip-management: project identity, water
+              station/type, description, and the driver roster. */}
+          <section className="space-y-3 border-t border-app pt-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide muted">Operation</h3>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="muted">Project name *</span>
+              <input value={projName} onChange={(e) => setProjName(e.target.value)} required className={INPUT} style={INPUT_STYLE} placeholder="e.g. King Salman Park" />
+            </label>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="flex flex-col gap-1 text-sm">
@@ -432,12 +489,9 @@ export default function ProjectModal({
               <span className="muted">Description</span>
               <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={INPUT} style={INPUT_STYLE} />
             </label>
-          </section>
 
-          {/* Drivers section. */}
-          <section className="space-y-2 border-t border-app pt-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wide muted">Drivers</h3>
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-sm font-medium">Drivers</span>
               <span className="muted text-[11px]">· {selected.length} selected · optional</span>
             </div>
             <DriverRosterTable

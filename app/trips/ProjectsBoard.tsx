@@ -62,6 +62,9 @@ type ProjectHeader = {
   commission_bump_pct: number;
   status: ProjectStatus;
   water_type: WaterType | null;
+  // Finance (0025). Not used on this board — carried through so the prop
+  // chain into CustomersTab (which does use it) type-checks.
+  payment_mode: "postpaid" | "prepaid" | null;
   default_station: string | null;
   default_water_station: string;
   location: string | null;

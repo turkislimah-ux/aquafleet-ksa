@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Trip, WaterType, CommissionMode, ProjectStatus, DriverStatus, ProjectDriver } from "@/lib/db-types";
+import type { Trip, WaterType, CommissionMode, ProjectStatus, DriverStatus, ProjectDriver, PaymentMode } from "@/lib/db-types";
 import type { LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { todayKey } from "@/lib/utils";
@@ -25,6 +25,8 @@ type ProjectHeader = {
   commission_bump_pct: number;
   status: ProjectStatus;
   water_type: WaterType | null;
+  // Finance (0025). NULL = unset.
+  payment_mode: PaymentMode | null;
   default_station: string | null;
   default_water_station: string;
   location: string | null;
@@ -51,7 +53,7 @@ export default async function TripsPage() {
       supabase
         .from("projects")
         .select(
-          "id, name, customer_id, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, status, water_type, default_station, default_water_station, location, location_lat, location_lng, description"
+          "id, name, customer_id, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, status, water_type, payment_mode, default_station, default_water_station, location, location_lat, location_lng, description"
         )
         .is("archived_at", null)
         .order("name", { ascending: true }),

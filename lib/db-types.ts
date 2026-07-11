@@ -25,6 +25,10 @@ export type ProjectStatus = "active" | "paused" | "ended";
 
 export type WaterType = "potable" | "non_potable";
 
+// Finance (0025) — postpaid|prepaid, nullable/no-default: "unset" must stay
+// detectable, never silently defaulted (finance-invoice-spec.md §4.1).
+export type PaymentMode = "postpaid" | "prepaid";
+
 export type Project = {
   id: string;
   customer_id: string;
@@ -40,6 +44,8 @@ export type Project = {
   end_date: string | null;
   status: ProjectStatus;
   water_type: WaterType | null;
+  // Finance (0025). NULL = unset — do not default in app code either.
+  payment_mode: PaymentMode | null;
   default_station: string | null;
   // Demo header fields (Path B).
   location: string | null;
@@ -272,6 +278,24 @@ export type Trip = {
   // balance. A trip with this set is frozen: setTripStage never re-prices it,
   // and the Kanban phase picker (Commit 2) blocks moving it backward.
   payout_id: string | null;
+  // Added in 0025 (finance) — SEPARATE lock from payout_id (§3: do not
+  // conflate driver commission vs customer invoice). NULL = not on any
+  // invoice yet. "Locked" is derived (invoice_id set AND that invoice's
+  // status = 'paid'), enforced in app code, not here.
+  invoice_id: string | null;
+};
+
+// customer_topups row (0025) — a prepaid customer's credit ledger entries.
+// See lib/prepaid.ts for the derived-balance/statement math built on top.
+export type CustomerTopup = {
+  id: string;
+  customer_id: string;
+  amount_sar: number; // pre-VAT
+  topup_date: string;
+  note: string | null;
+  reference: string | null;
+  entered_by: string | null;
+  created_at: string;
 };
 
 export const WATER_TYPE_LABELS: Record<WaterType, string> = {
