@@ -12,8 +12,10 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/ui";
 import ProjectsBoard, { type ProjectsBoardProps } from "./ProjectsBoard";
 import CustomersTab from "./CustomersTab";
+import FinanceTab from "./FinanceTab";
+import type { TopupRow } from "./page";
 
-type Tab = "projects" | "customers";
+type Tab = "projects" | "customers" | "finance";
 
 const HEADER: Record<Tab, { title: string; subtitle: string }> = {
   projects: {
@@ -24,16 +26,22 @@ const HEADER: Record<Tab, { title: string; subtitle: string }> = {
     title: "Manage Customers",
     subtitle: "View and manage every customer, their project, rate, and assigned drivers.",
   },
+  finance: {
+    title: "Finance",
+    subtitle: "Prepaid balances, top-ups, and customer statements — pre-VAT.",
+  },
 };
 
 export default function TripsTabs({
   error,
+  topups,
   ...boardProps
-}: ProjectsBoardProps & { error: string | null }) {
+}: ProjectsBoardProps & { error: string | null; topups: TopupRow[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const tab: Tab = searchParams.get("tab") === "customers" ? "customers" : "projects";
+  const tabParam = searchParams.get("tab");
+  const tab: Tab = tabParam === "customers" ? "customers" : tabParam === "finance" ? "finance" : "projects";
 
   function setTab(next: Tab) {
     const params = new URLSearchParams(searchParams.toString());
@@ -56,6 +64,7 @@ export default function TripsTabs({
       >
         <TabBtn active={tab === "projects"} onClick={() => setTab("projects")} label="Projects" />
         <TabBtn active={tab === "customers"} onClick={() => setTab("customers")} label="Customers" />
+        <TabBtn active={tab === "finance"} onClick={() => setTab("finance")} label="Finance" />
       </div>
 
       {error && (
@@ -75,6 +84,15 @@ export default function TripsTabs({
           stations={boardProps.stations}
           driverStateById={boardProps.driverStateById}
           leaveUnavailable={boardProps.leaveLoadFailed}
+        />
+      )}
+
+      {tab === "finance" && (
+        <FinanceTab
+          customers={boardProps.customers}
+          projects={boardProps.projects}
+          trips={boardProps.trips}
+          topups={topups}
         />
       )}
     </div>

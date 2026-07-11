@@ -35,13 +35,24 @@ type ProjectHeader = {
   description: string | null;
 };
 
+// customer_topups row (Finance tab) — see lib/prepaid.ts for the derived
+// balance/statement math built on top.
+export type TopupRow = {
+  id: string;
+  customer_id: string;
+  amount_sar: number;
+  topup_date: string;
+  note: string | null;
+  reference: string | null;
+};
+
 export default async function TripsPage() {
   const supabase = createClient();
 
   const today = todayKey(); // local (matches trip day-math), not UTC
   const [
     tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes,
-    stationsRes, allStationsRes, leavePeriodsRes, terminatedDriversRes,
+    stationsRes, allStationsRes, leavePeriodsRes, terminatedDriversRes, topupsRes,
   ] =
     await Promise.all([
       supabase
@@ -105,6 +116,12 @@ export default async function TripsPage() {
         .from("drivers")
         .select("id, termination_date")
         .not("terminated_at", "is", null),
+      // Finance tab ledger source — see lib/prepaid.ts for derived balance/
+      // statement math built on top of this + trips.
+      supabase
+        .from("customer_topups")
+        .select("id, customer_id, amount_sar, topup_date, note, reference")
+        .order("topup_date", { ascending: false }),
     ]);
 
   const trips = ((tripsRes.data ?? []) as JoinedTrip[]).map((t) => ({
@@ -180,6 +197,7 @@ export default async function TripsPage() {
     last_service_date: string | null;
   }[];
   const drivers = (driversRes.data ?? []) as { id: string; name: string; status: DriverStatus; active: boolean }[];
+  const topups = (topupsRes.data ?? []) as TopupRow[];
 
   // Map project_id -> [driver_id, …] for the Manage-drivers modal + driver count.
   const assignmentsByProject: Record<string, string[]> = {};
@@ -215,7 +233,8 @@ export default async function TripsPage() {
     stationsRes.error ||
     allStationsRes.error ||
     leavePeriodsRes.error ||
-    terminatedDriversRes.error;
+    terminatedDriversRes.error ||
+    topupsRes.error;
 
   return (
     <TripsTabs
@@ -232,6 +251,7 @@ export default async function TripsPage() {
       driverStateById={driverStateById}
       leavePeriods={leavePeriods}
       leaveLoadFailed={leaveLoadFailed}
+      topups={topups}
     />
   );
 }

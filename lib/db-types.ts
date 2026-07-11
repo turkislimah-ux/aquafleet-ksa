@@ -29,6 +29,11 @@ export type WaterType = "potable" | "non_potable";
 // detectable, never silently defaulted (finance-invoice-spec.md §4.1).
 export type PaymentMode = "postpaid" | "prepaid";
 
+export const PAYMENT_MODE_LABELS: Record<PaymentMode, string> = {
+  postpaid: "Postpaid",
+  prepaid: "Prepaid",
+};
+
 export type Project = {
   id: string;
   customer_id: string;
