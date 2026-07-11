@@ -18,6 +18,13 @@ export type Customer = {
   default_station: string | null;
   active: boolean;
   created_at: string;
+  // Finance (0025): buyer tax identity for invoice snapshots. Finance
+  // (0027): email, for 5c's mailto link + buyer contact on the invoice.
+  // All nullable/optional — not every customer has these filled in yet.
+  vat_number: string | null;
+  cr_number: string | null;
+  billing_address: string | null;
+  email: string | null;
 };
 
 export type CommissionMode = "fixed" | "scalable";
@@ -301,6 +308,93 @@ export type CustomerTopup = {
   reference: string | null;
   entered_by: string | null;
   created_at: string;
+};
+
+// company_settings row (0025) — singleton seller identity, appears on every
+// invoice's seller_snapshot at confirm time.
+export type CompanySettings = {
+  id: true;
+  legal_name: string;
+  vat_number: string | null;
+  cr_number: string | null;
+  address: string | null;
+  updated_at: string;
+};
+
+// invoice_special_charges row (0025) — mutable while the parent invoice is
+// draft/review; frozen into invoices.special_charges_snapshot at confirm.
+export type InvoiceSpecialCharge = {
+  id: string;
+  invoice_id: string;
+  label: string;
+  amount_sar: number; // pre-VAT
+  created_at: string;
+};
+
+// Finance Commit 5 (0027): Draft -> Review -> Confirmed -> Paid, + Void.
+// See lib/invoice.ts for the assembly logic and CLAUDE.md/finance-invoice-
+// spec.md for the lifecycle rules.
+export type InvoiceStatus = "draft" | "review" | "confirmed" | "paid" | "void";
+export type InvoicePaymentMethod = "cash" | "bank_transfer";
+
+// A frozen line, as stored in invoices.covered_lines / unpaid_lines (jsonb)
+// once confirmed — see lib/invoice.ts InvoiceLine for the pre-confirm shape
+// this is snapshotted from.
+export type InvoiceLineSnapshot = {
+  id: string; // trip id, or a special-charge id for charge lines
+  kind: "trip" | "charge";
+  trip_date: string | null; // null for charge lines
+  description: string;
+  amount_sar: number; // pre-VAT
+  vat_sar: number; // display-only per-line VAT (see lib/vat.ts)
+};
+
+// invoices row (0025, widened 0027). Line items are NEVER stored pre-confirm
+// (draft/review stay live-recomputed from lib/invoice.ts); covered_lines/
+// unpaid_lines/special_charges_snapshot/*_trip_ids are null until confirmed,
+// then frozen forever (see 0027 migration header for why).
+export type Invoice = {
+  id: string;
+  // No project_id column — project is 1:1 with customer (lib/prepaid.ts
+  // header), so it's derived via customer_id, not duplicated here.
+  customer_id: string;
+  period_start: string;
+  period_end: string;
+  status: InvoiceStatus;
+  invoice_number: number | null;
+  vat_ref: string | null; // PLACEHOLDER format pending approval — see 0027 header
+
+  seller_snapshot: CompanySettings | null;
+  buyer_snapshot: Pick<Customer, "name" | "vat_number" | "cr_number" | "billing_address"> | null;
+
+  covered_lines: InvoiceLineSnapshot[] | null;
+  unpaid_lines: InvoiceLineSnapshot[] | null;
+  special_charges_snapshot: { id: string; label: string; amount_sar: number; vat_sar: number }[] | null;
+  covered_trip_ids: string[] | null;
+  unpaid_trip_ids: string[] | null;
+
+  payment_method: InvoicePaymentMethod | null;
+  proof_of_payment_path: string | null;
+
+  covered_subtotal_sar: number;
+  covered_vat_sar: number;
+  covered_total_sar: number;
+  amount_due_subtotal_sar: number;
+  amount_due_vat_sar: number;
+  amount_due_sar: number;
+  grand_subtotal_sar: number;
+  grand_vat_sar: number;
+  grand_total_sar: number;
+
+  created_at: string;
+  reviewed_at: string | null;
+  confirmed_at: string | null;
+  voided_at: string | null;
+  void_reason: string | null;
+  paid_at: string | null;
+  unpaid_at: string | null;
+  unpaid_reason: string | null;
+  unpaid_by: string | null;
 };
 
 export const WATER_TYPE_LABELS: Record<WaterType, string> = {
