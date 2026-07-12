@@ -22,8 +22,9 @@ import { PAYMENT_MODE_LABELS, type PaymentMode } from "@/lib/db-types";
 import { derivedBalance, type ConsumingTrip, type TopupStatementInput } from "@/lib/prepaid";
 import TopupModal, { type TopupCustomerOption } from "./TopupModal";
 import StatementModal from "./StatementModal";
+import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
 
-type CustomerLite = { id: string; name: string };
+type CustomerLite = { id: string; name: string; email: string | null };
 type ProjectLite = {
   id: string;
   customer_id: string;
@@ -54,6 +55,7 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
   const [topupTarget, setTopupTarget] = useState<TopupCustomerOption | null | "global">(null);
   const [statementFor, setStatementFor] = useState<{ customerId: string; customerName: string } | null>(null);
+  const [invoicesFor, setInvoicesFor] = useState<InvoiceCustomer | null>(null);
 
   const projectByCustomer = useMemo(() => {
     const m = new Map<string, ProjectLite>();
@@ -250,24 +252,36 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
                     )}
                   </TD>
                   <TD>
-                    {r.mode === "prepaid" ? (
-                      <div className="inline-flex gap-2">
+                    <div className="inline-flex gap-2">
+                      {r.mode === "prepaid" && (
+                        <>
+                          <Btn
+                            variant="outline"
+                            onClick={() => setTopupTarget({ id: r.customer.id, name: r.customer.name })}
+                          >
+                            Record top-up
+                          </Btn>
+                          <Btn
+                            variant="outline"
+                            onClick={() => setStatementFor({ customerId: r.customer.id, customerName: r.customer.name })}
+                          >
+                            View statement
+                          </Btn>
+                        </>
+                      )}
+                      {r.mode === "prepaid" ? (
                         <Btn
                           variant="outline"
-                          onClick={() => setTopupTarget({ id: r.customer.id, name: r.customer.name })}
+                          onClick={() => setInvoicesFor({ id: r.customer.id, name: r.customer.name, email: r.customer.email })}
                         >
-                          Record top-up
+                          Invoices
                         </Btn>
-                        <Btn
-                          variant="outline"
-                          onClick={() => setStatementFor({ customerId: r.customer.id, customerName: r.customer.name })}
-                        >
-                          View statement
-                        </Btn>
-                      </div>
-                    ) : (
-                      <span className="muted text-xs">No ledger</span>
-                    )}
+                      ) : r.project ? (
+                        <span className="muted text-xs">Postpaid — invoicing coming soon</span>
+                      ) : (
+                        <span className="muted text-xs">No project</span>
+                      )}
+                    </div>
                   </TD>
                 </tr>
               ))}
@@ -290,6 +304,8 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
         topups={activeStatementRow?.customerTopups ?? []}
         trips={activeStatementRow?.consuming ?? []}
       />
+
+      <InvoicesModal open={invoicesFor !== null} onClose={() => setInvoicesFor(null)} customer={invoicesFor} />
     </div>
   );
 }

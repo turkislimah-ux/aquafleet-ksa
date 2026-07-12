@@ -337,6 +337,19 @@ export type InvoiceSpecialCharge = {
 export type InvoiceStatus = "draft" | "review" | "confirmed" | "paid" | "void";
 export type InvoicePaymentMethod = "cash" | "bank_transfer";
 
+// 5c: shared display labels, same convention as PAYMENT_MODE_LABELS above.
+export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
+  draft: "Draft",
+  review: "Review",
+  confirmed: "Confirmed",
+  paid: "Paid",
+  void: "Void",
+};
+export const PAYMENT_METHOD_LABELS: Record<InvoicePaymentMethod, string> = {
+  cash: "Cash",
+  bank_transfer: "Bank transfer",
+};
+
 // A frozen line, as stored in invoices.covered_lines / unpaid_lines (jsonb)
 // once confirmed — see lib/invoice.ts InvoiceLine for the pre-confirm shape
 // this is snapshotted from.

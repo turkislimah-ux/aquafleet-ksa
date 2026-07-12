@@ -28,10 +28,12 @@ export function todayKey(): string {
 
 export function statusTone(s: string): "ok" | "warn" | "bad" | "info" | "muted" {
   switch (s) {
-    case "active": case "on_duty": case "delivered": case "completed": return "ok";
-    case "idle": case "scheduled": case "loading": case "off_duty": return "info";
-    case "maintenance": case "in_progress": case "awaiting_parts": case "warning": case "training": case "in_transit": return "warn";
-    case "out_of_service": case "cancelled": case "critical": return "bad";
+    case "active": case "on_duty": case "delivered": case "completed": case "paid": return "ok";
+    case "idle": case "scheduled": case "loading": case "off_duty": case "confirmed": return "info";
+    case "maintenance": case "in_progress": case "awaiting_parts": case "warning": case "training": case "in_transit": case "review": return "warn";
+    case "out_of_service": case "cancelled": case "critical": case "void": return "bad";
+    // "draft" falls through to muted — an invoice draft is the one lifecycle
+    // status that isn't ok/warn/bad/info, just "not started yet".
     default: return "muted";
   }
 }

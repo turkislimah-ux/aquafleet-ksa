@@ -109,4 +109,34 @@ body {
   /* Page-break hygiene: don't slice a chart or KPI row in half; long driver
      tables may still break across pages, but never mid-row. */
   #breakdown-print table tr { break-inside: avoid; }
+
+  /* Invoice document (Finance 5c) — same portal/paginate pattern as the
+     breakdown report above, just a second id/class/marker set so both can
+     coexist (only one is ever open at a time in practice, but this keeps
+     them independent rather than sharing a marker). */
+  #invoice-print, #invoice-print * { visibility: visible !important; }
+  body.printing-invoice > *:not(.invoice-print-portal) { display: none !important; }
+
+  .invoice-print-portal,
+  .invoice-print-portal > * {
+    position: static !important;
+    inset: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  #invoice-print {
+    position: static !important;
+    margin: 0;
+    padding: 1rem;
+    max-height: none !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  #invoice-print table tr { break-inside: avoid; }
 }

@@ -14,6 +14,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type SpecialChargeInput } from "@/lib/invoice";
 import type { ConsumingTrip, TopupLite } from "@/lib/prepaid";
+import type { Invoice } from "@/lib/db-types";
 
 export type ActionResult<T = undefined> = { error: string | null; data?: T };
 
@@ -160,6 +161,50 @@ export async function previewInvoice(invoiceId: string): Promise<ActionResult<In
   return { error: null, data: assembly };
 }
 
+// Raw row read — the ONLY correct source for confirmed/paid/void display.
+// Unlike previewInvoice() (always live-recomputes, correct for draft/review
+// only), this reads the frozen snapshot columns exactly as confirm_invoice()
+// wrote them, so a Confirmed invoice's displayed numbers never drift from
+// what was actually confirmed even if underlying trips change afterward.
+export async function getInvoice(invoiceId: string): Promise<ActionResult<Invoice>> {
+  const supabase = createClient();
+  const { data, error } = await supabase.from("invoices").select("*").eq("id", invoiceId).single();
+  if (error || !data) return { error: error?.message ?? "Invoice not found." };
+  return { error: null, data: data as Invoice };
+}
+
+// Invoice history for one customer — newest period first. Powers the
+// per-customer "Invoices" list (5c).
+export async function listInvoicesForCustomer(customerId: string): Promise<ActionResult<Invoice[]>> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("*")
+    .eq("customer_id", customerId)
+    .order("period_start", { ascending: false });
+  if (error) return { error: error.message };
+  return { error: null, data: (data ?? []) as Invoice[] };
+}
+
+// invoice-proofs is a PRIVATE Storage bucket — proof_of_payment_path can
+// only be viewed via a short-lived signed URL, never a public link.
+export async function getProofSignedUrl(invoiceId: string): Promise<ActionResult<{ url: string }>> {
+  const supabase = createClient();
+  const { data: invoice, error: invErr } = await supabase
+    .from("invoices")
+    .select("proof_of_payment_path")
+    .eq("id", invoiceId)
+    .single();
+  if (invErr || !invoice) return { error: invErr?.message ?? "Invoice not found." };
+  if (!invoice.proof_of_payment_path) return { error: "No proof of payment on file for this invoice." };
+
+  const { data, error } = await supabase.storage
+    .from(PROOF_BUCKET)
+    .createSignedUrl(invoice.proof_of_payment_path, 300);
+  if (error || !data) return { error: error?.message ?? "Could not generate a link to the proof file." };
+  return { error: null, data: { url: data.signedUrl } };
+}
+
 // ---------------------------------------------------------------------------
 // Draft <-> Review — freely reversible, single-row updates, no RPC needed
 // (no number/VAT ref claimed yet at either status).
@@ -274,7 +319,9 @@ export async function markInvoicePaid(formData: FormData): Promise<ActionResult>
     if (!(file instanceof File) || file.size === 0) {
       return { error: "bank_transfer requires a proof-of-payment file." };
     }
-    proofPath = `${invoiceId}/${Date.now()}-${file.name}`;
+    const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
+    const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
+    proofPath = `${invoiceId}/proof-${Date.now()}.${ext}`;
     const { error: uploadErr } = await supabase.storage.from(PROOF_BUCKET).upload(proofPath, file, {
       contentType: file.type || "application/octet-stream",
     });
@@ -294,9 +341,13 @@ export async function markInvoicePaid(formData: FormData): Promise<ActionResult>
 // ---------------------------------------------------------------------------
 // Un-pay — gated admin action (the approval gate/warning is a UI concern,
 // 5c). Unlocks every trip this invoice locked; invoice returns to Confirmed.
+// "by" is derived server-side from the authenticated user, same convention
+// as app/drivers/actions.ts's approved_by — never a UI text input.
 // ---------------------------------------------------------------------------
-export async function unpayInvoice(invoiceId: string, reason: string, by: string): Promise<ActionResult> {
+export async function unpayInvoice(invoiceId: string, reason: string): Promise<ActionResult> {
   const supabase = createClient();
+  const { data: auth } = await supabase.auth.getUser();
+  const by = auth?.user?.email ?? "unknown";
   const { error } = await supabase.rpc("unpay_invoice", { p_invoice_id: invoiceId, p_reason: reason, p_by: by });
   if (error) return { error: error.message };
   revalidatePath("/trips");

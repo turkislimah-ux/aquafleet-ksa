@@ -71,7 +71,10 @@ export default async function TripsPage() {
       supabase
         .from("customers")
         .select(
-          "id, name, default_station, delivery_site_address, customer_type, contact_name, phone, delivery_lat, delivery_lng"
+          // Finance 5c: vat_number/cr_number/billing_address/email added —
+          // buyer identity + mailto target for the invoice UI. Additive only;
+          // Projects/Customers tabs simply don't read the extra fields.
+          "id, name, default_station, delivery_site_address, customer_type, contact_name, phone, delivery_lat, delivery_lng, vat_number, cr_number, billing_address, email"
         )
         .is("archived_at", null)
         .order("name", { ascending: true }),
@@ -188,6 +191,10 @@ export default async function TripsPage() {
     phone: string | null;
     delivery_lat: number | null;
     delivery_lng: number | null;
+    vat_number: string | null;
+    cr_number: string | null;
+    billing_address: string | null;
+    email: string | null;
   }[];
   const trucks = (trucksRes.data ?? []) as {
     id: string;

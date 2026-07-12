@@ -101,6 +101,12 @@ type CustomerOption = {
   phone: string | null;
   delivery_lat: number | null;
   delivery_lng: number | null;
+  // Finance 5c: buyer identity + mailto target, unused by the board itself —
+  // just flowing through to FinanceTab/InvoicesModal.
+  vat_number: string | null;
+  cr_number: string | null;
+  billing_address: string | null;
+  email: string | null;
 };
 type TruckOption = { id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null; last_service_date: string | null };
 type DriverOption = { id: string; name: string; status: DriverStatus };
