@@ -290,10 +290,22 @@ export type Trip = {
   // balance. A trip with this set is frozen: setTripStage never re-prices it,
   // and the Kanban phase picker (Commit 2) blocks moving it backward.
   payout_id: string | null;
-  // Added in 0025 (finance) — SEPARATE lock from payout_id (§3: do not
-  // conflate driver commission vs customer invoice). NULL = not on any
-  // invoice yet. "Locked" is derived (invoice_id set AND that invoice's
-  // status = 'paid'), enforced in app code, not here.
+  // Added in 0025 (finance) — SEPARATE from payout_id (§3: do not conflate
+  // driver commission vs customer invoice). NULL = not reserved by any
+  // invoice.
+  //
+  // RESERVED vs LOCKED (0030 — reserve-at-draft; do not conflate these):
+  //   - RESERVED: invoice_id is set. Exclusive to that invoice (no other
+  //     non-void invoice may bill this trip), but the trip stays fully
+  //     EDITABLE/reversible. Set the moment the trip lands on a draft
+  //     invoice; cleared only when that invoice is voided or deleted (see
+  //     migration 0030's create_draft_invoice/sync_draft_reservation/
+  //     void_invoice/delete_draft_invoice). Un-paying a paid invoice does
+  //     NOT release — trips stay reserved to it.
+  //   - LOCKED: invoice_id set AND that invoice's status = 'paid'. THIS is
+  //     the immutable state (no edit/stage/reversal/delete) — derived, enforced
+  //     in app code, not here. Only paid status locks; draft/review/confirmed
+  //     reservation never does.
   invoice_id: string | null;
 };
 

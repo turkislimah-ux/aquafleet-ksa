@@ -76,12 +76,29 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
   return { error: null };
 }
 
+// No live caller today (checked — nothing in app/trips/*.tsx invokes this;
+// setTripStage/setTripStation cover every current edit surface). Guarded
+// anyway per the lock rule ("no edit" while locked) so a future edit UI
+// inherits the freeze for free instead of re-discovering this the hard way.
 export async function updateTrip(id: string, formData: FormData): Promise<ActionResult> {
   const water_station = str(formData.get("water_station"));
   if (!water_station) return { error: "Water station is required." };
 
   const water_type = str(formData.get("water_type")) || "potable";
   if (!validWaterType(water_type)) return { error: "Invalid water type." };
+
+  const supabase = createClient();
+
+  const { data: trip, error: tripErr } = await supabase
+    .from("trips")
+    .select("payout_id, invoice_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (tripErr) return { error: tripErr.message };
+  if (!trip) return { error: "Trip not found." };
+  if (await isTripLocked(supabase, trip)) {
+    return { error: "This trip is locked (paid) and can no longer be edited." };
+  }
 
   const row: Record<string, unknown> = {
     water_station,
@@ -93,12 +110,36 @@ export async function updateTrip(id: string, formData: FormData): Promise<Action
   const trip_date = nullable(formData.get("trip_date"));
   if (trip_date) row.trip_date = trip_date;
 
-  const supabase = createClient();
   const { error } = await supabase.from("trips").update(row).eq("id", id);
   if (error) return { error: error.message };
 
   revalidatePath("/trips");
   return { error: null };
+}
+
+// Finance bug fix — a trip is LOCKED (no stage change, no edit, no
+// reversal, no delete) if EITHER of two INDEPENDENT conditions holds (§3):
+//   - commission lock: payout_id is set (snapshotted into a History payout).
+//   - invoice lock: invoice_id is set AND that invoice's status = 'paid'.
+// These are separate axes — a trip can be commission-locked, invoice-locked,
+// both, or neither. Do NOT treat "invoice_id is set" alone as locked — that
+// is RESERVED (draft/confirmed, not yet paid), which must stay fully
+// editable; see lib/db-types.ts's Trip.invoice_id comment (migration 0030).
+// Checked in app code, not the DB — mirrors the existing payout_id pattern
+// (migration 0025 §8's design note: "matches how payout_id locking already
+// works, checked in setTripStage, not the DB").
+async function isTripLocked(
+  supabase: ReturnType<typeof createClient>,
+  trip: { payout_id: string | null; invoice_id?: string | null },
+): Promise<boolean> {
+  if (trip.payout_id != null) return true;
+  if (!trip.invoice_id) return false;
+  const { data: invoice } = await supabase
+    .from("invoices")
+    .select("status")
+    .eq("id", trip.invoice_id)
+    .maybeSingle();
+  return invoice?.status === "paid";
 }
 
 // The one path every stage change funnels through. Stamps the *_at column for
@@ -131,10 +172,19 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
   // there's no "old" vs "new" day the way delivered_at used to have.
   const { data: trip, error: tripErr } = await supabase
     .from("trips")
-    .select("driver_id, project_id, payout_id, trip_date")
+    .select("driver_id, project_id, payout_id, trip_date, invoice_id")
     .eq("id", id)
     .maybeSingle();
   if (tripErr) return { error: tripErr.message };
+  if (!trip) return { error: "Trip not found." };
+
+  // Server-side re-check — never trust the picker's own gate alone (same
+  // discipline as deleteTrip below). Locked trips get NO stage change at
+  // all, forward or backward — this is the real freeze; the payout_id-only
+  // repricing-skip further down is unrelated (commission math, not a gate).
+  if (await isTripLocked(supabase, trip)) {
+    return { error: "This trip is locked (paid) and can no longer be changed." };
+  }
 
   const nowIso = new Date().toISOString();
   const row: Record<string, unknown> = { stage };
@@ -202,12 +252,15 @@ export async function setTripStation(id: string, waterStation: string): Promise<
 // Permanent (hard) delete — the one hard-delete in an otherwise all-soft-delete
 // app. Gate is a single rule: stage !== "delivered". Commission is only ever
 // stamped on delivered (setTripStage), and pay_commission only tags rows where
-// delivered_at is not null — so a paid trip is always delivered, meaning this
-// one check already excludes every paid trip too; no separate payout_id check.
-// No table has a FK on trips.id (checked: no `references public.trips` in any
-// migration), so a non-delivered trip deletes clean — no orphans, no cascade.
-// Re-checks the stage SERVER-SIDE regardless of what the UI already hid —
-// never trust the picker's own gate alone.
+// delivered_at is not null — so a commission-paid trip is always delivered.
+// An invoice-locked trip is ALSO always delivered — only delivered trips are
+// ever billed (see isTripLocked's comment / lib/prepaid.ts's consumingTrips)
+// — so this one check already excludes BOTH locks too; no separate
+// payout_id/invoice check needed here. No table has a FK on trips.id
+// (checked: no `references public.trips` in any migration), so a
+// non-delivered trip deletes clean — no orphans, no cascade. Re-checks the
+// stage SERVER-SIDE regardless of what the UI already hid — never trust the
+// picker's own gate alone.
 export async function deleteTrip(id: string): Promise<ActionResult> {
   if (!id) return { error: "Missing trip." };
 

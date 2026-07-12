@@ -43,6 +43,19 @@
 // line, and amountDue/grand end up numerically identical (same input line
 // set) — not "close", exactly equal, since they're the same calculateVat
 // call in that case.
+//
+// RESERVE-AT-DRAFT EXCLUSION (Finance Commit 6, reserved != locked — see
+// lib/db-types.ts Trip.invoice_id comment and migration 0030 header):
+// `reservedElsewhereTripIds` removes trips already reserved by ANOTHER
+// non-void invoice from the billable output, so the same trip can never
+// appear on two invoices at once. This filter is applied AFTER
+// splitCoveredUnpaid/consumingTrips run on the FULL trip history (see
+// PERIOD-MEMBERSHIP RULE above) — it is a display/billing filter on the
+// already-computed split, never a pre-filter on the input trips array.
+// Excluding a trip here does NOT change the FIFO pool math for every OTHER
+// trip in the split (a reserved-elsewhere trip still consumed its share of
+// balance when it was walked by splitCoveredUnpaid — this filter only hides
+// it from THIS invoice's line items, it doesn't un-consume it).
 
 import { consumingTrips, splitCoveredUnpaid, type ConsumingTrip, type TopupLite } from "./prepaid";
 import { calculateVat, type VatLineItem, type VatLinePreview } from "./vat";
@@ -122,6 +135,10 @@ export type AssembleInvoiceInput = {
   sellerSnapshot?: unknown;
   buyerSnapshot?: unknown;
   customerEmail?: string | null;
+  // Trip ids reserved by ANOTHER non-void invoice — excluded from this
+  // invoice's output. See the RESERVE-AT-DRAFT EXCLUSION note above. Default
+  // empty (no exclusion) so existing callers/harness cases are unaffected.
+  reservedElsewhereTripIds?: Iterable<string>;
 };
 
 function toVatItems(entries: { id: string; trip_date: string; amount: number }[]): VatLineItem[] {
@@ -159,6 +176,7 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     sellerSnapshot = null,
     buyerSnapshot = null,
     customerEmail = null,
+    reservedElsewhereTripIds,
   } = input;
 
   if (paymentMode == null) {
@@ -168,16 +186,18 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   }
 
   const inPeriod = (d: string) => d >= periodStart && d <= periodEnd;
+  const reservedElsewhere = new Set(reservedElsewhereTripIds ?? []);
+  const notReservedElsewhere = (e: { id: string }) => !reservedElsewhere.has(e.id);
 
   let coveredEntries: { id: string; trip_date: string; amount: number }[] = [];
   let unpaidTripEntries: { id: string; trip_date: string; amount: number }[] = [];
 
   if (paymentMode === "prepaid") {
     const split = splitCoveredUnpaid(topups, trips, periodEnd);
-    coveredEntries = split.covered.filter((e) => inPeriod(e.trip_date));
-    unpaidTripEntries = split.unpaid.filter((e) => inPeriod(e.trip_date));
+    coveredEntries = split.covered.filter((e) => inPeriod(e.trip_date)).filter(notReservedElsewhere);
+    unpaidTripEntries = split.unpaid.filter((e) => inPeriod(e.trip_date)).filter(notReservedElsewhere);
   } else {
-    unpaidTripEntries = consumingTrips(trips, periodEnd).filter((e) => inPeriod(e.trip_date));
+    unpaidTripEntries = consumingTrips(trips, periodEnd).filter((e) => inPeriod(e.trip_date)).filter(notReservedElsewhere);
   }
 
   const coveredTripDateById = new Map(coveredEntries.map((e) => [e.id, e.trip_date]));

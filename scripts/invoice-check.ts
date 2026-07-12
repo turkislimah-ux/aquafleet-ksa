@@ -224,6 +224,75 @@ function checkTrue(name: string, cond: boolean) {
   check("passthrough: customerEmail", r.customerEmail, "acme@example.com");
 }
 
+// --- Reserve-at-draft exclusion (0030): a trip reserved by ANOTHER invoice --
+// --- is excluded from THIS invoice's output — proof that exclusion is a ----
+// --- POST-split display filter, not a pool-math re-drain. ------------------
+// Pool = 200. FIFO t1(100)/t2(100)/t3(100): t1 covered (pool->100), t2
+// covered (pool->0), t3 doesn't fit -> unpaid. t2 is reserved by another
+// invoice. If exclusion were (wrongly) applied BEFORE the FIFO walk, t3
+// would flip to covered once t2 "disappears" (100 fits in the freed pool).
+// The correct behavior: t3 stays unpaid — the pool was already spent on t2
+// when it was walked, exclusion only hides t2 from this invoice's tables
+// afterward, it doesn't un-spend the pool.
+{
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-01", delivered_at: "2026-06-01T10:00:00Z", rate_sar: 100 },
+    { id: "t2", trip_date: "2026-06-02", delivered_at: "2026-06-02T10:00:00Z", rate_sar: 100 },
+    { id: "t3", trip_date: "2026-06-03", delivered_at: "2026-06-03T10:00:00Z", rate_sar: 100 },
+  ];
+  const topups: TopupLite[] = [{ id: "top1", amount_sar: 200, topup_date: "2026-06-01" }];
+  const r = assembleInvoice({
+    customerId: "c1",
+    paymentMode: "prepaid",
+    periodStart: "2026-06-01",
+    periodEnd: "2026-06-30",
+    trips,
+    topups,
+    specialCharges: [],
+    reservedElsewhereTripIds: ["t2"],
+  });
+  check("reserve-exclusion: t2 (reserved elsewhere) absent from coveredLines", r.coveredLines.map((l) => l.id), ["t1"]);
+  checkTrue("reserve-exclusion: t3 stays Unpaid (pool already spent on t2, not un-drained by exclusion)", r.unpaidLines.some((l) => l.id === "t3"));
+  check("reserve-exclusion: t2 absent from unpaidLines too (never appears anywhere on this invoice)", r.unpaidLines.some((l) => l.id === "t2"), false);
+  check("reserve-exclusion: covered totals recomputed over remaining line only", r.covered, { subtotal: 100, vat: 15, total: 115 });
+}
+
+// --- Reserve-at-draft exclusion — postpaid: reserved-elsewhere trip simply -
+// --- drops out of the single billable table. --------------------------------
+{
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-05", delivered_at: "2026-06-05T10:00:00Z", rate_sar: 300 },
+    { id: "t2", trip_date: "2026-06-10", delivered_at: "2026-06-10T10:00:00Z", rate_sar: 300 },
+  ];
+  const r = assembleInvoice({
+    customerId: "c1",
+    paymentMode: "postpaid",
+    periodStart: "2026-06-01",
+    periodEnd: "2026-06-30",
+    trips,
+    topups: [],
+    specialCharges: [],
+    reservedElsewhereTripIds: ["t2"],
+  });
+  check("postpaid reserve-exclusion: only t1 billable", r.unpaidLines.map((l) => l.id), ["t1"]);
+  check("postpaid reserve-exclusion: amountDue = just t1", r.amountDue, { subtotal: 300, vat: 45, total: 345 });
+}
+
+// --- No exclusion given (default) — existing callers/behavior unaffected ---
+{
+  const trips: ConsumingTrip[] = [{ id: "t1", trip_date: "2026-06-05", delivered_at: "2026-06-05T10:00:00Z", rate_sar: 300 }];
+  const r = assembleInvoice({
+    customerId: "c1",
+    paymentMode: "postpaid",
+    periodStart: "2026-06-01",
+    periodEnd: "2026-06-30",
+    trips,
+    topups: [],
+    specialCharges: [],
+  });
+  check("no reservedElsewhereTripIds param: nothing excluded, t1 present", r.unpaidLines.map((l) => l.id), ["t1"]);
+}
+
 // --- Special-charge lock: editable Draft/Review only, frozen from Confirm --
 // --- onward (mirrors the actions' guard — see app/trips/invoiceActions.ts) --
 {

@@ -50,6 +50,11 @@ type TripRow = Trip & {
   truckPlate: string | null;
   truckCapacityM3: number | null;
   driverName: string | null;
+  // Finance bug fix — TRUE iff trip.invoice_id points at a status='paid'
+  // invoice (computed server-side in page.tsx from the paid-only id set).
+  // Distinct from merely "reserved" (invoice_id set, invoice not yet paid,
+  // still editable) — see the PAID/INVOICE lock note on PhasePickerModal.
+  invoiceLocked: boolean;
 };
 
 type ProjectHeader = {
@@ -550,13 +555,20 @@ function StageColumn({
 // Either reason (or both) shows ONE combined confirm step inside this same
 // card — no second stacked overlay. Neither reason → Apply commits immediately.
 //
-// PAID lock: a trip with payout_id set is frozen into a commission History
-// snapshot server-side (setTripStage already refuses to re-price it). The
-// spec only requires blocking BACKWARD moves for a paid trip, but re-stamping
-// delivered_at via a same-stage station edit would silently rewrite the date
-// on an already-snapshotted record for zero financial effect — so this picker
-// goes further and makes the WHOLE picker read-only once paid, not just the
-// backward options. Viewing still works; nothing is mutable.
+// LOCKED = two INDEPENDENT freezes, either one alone locks the trip (§3):
+//   - commissionLocked: payout_id set — commission is snapshotted into a
+//     History payout server-side (setTripStage already refuses to re-price
+//     it).
+//   - invoiceLocked: trip.invoice_id points at a status='paid' invoice
+//     (computed in page.tsx — see TripRow). NOT the same as "reserved": a
+//     trip on a DRAFT/CONFIRMED (unpaid) invoice has invoice_id set too but
+//     stays fully editable — only a PAID invoice locks. Do not conflate.
+// The spec only requires blocking BACKWARD moves for a locked trip, but
+// re-stamping delivered_at via a same-stage station edit would silently
+// rewrite the date on an already-snapshotted/billed record for zero
+// financial effect — so this picker goes further and makes the WHOLE picker
+// read-only once locked, not just the backward options. Viewing still works;
+// nothing is mutable.
 function PhasePickerModal({
   trip,
   stations,
@@ -576,12 +588,16 @@ function PhasePickerModal({
   onDelete: (tripId: string) => Promise<boolean>;
   onClose: () => void;
 }) {
-  const paid = trip.payout_id != null;
+  const commissionLocked = trip.payout_id != null;
+  const invoiceLocked = trip.invoiceLocked;
+  const locked = commissionLocked || invoiceLocked;
   // Delete gate: stage !== "delivered" is the WHOLE rule. Commission is only
   // ever stamped on delivered (setTripStage), and pay_commission only tags
-  // rows where delivered_at is not null — so a paid trip is always delivered,
-  // meaning this single check already excludes every paid trip too. No
-  // separate payout_id check needed here.
+  // rows where delivered_at is not null — so a commission-paid trip is
+  // always delivered. An invoice-locked trip is ALSO always delivered (only
+  // delivered trips are ever billed — see lib/prepaid.ts's consumingTrips /
+  // lib/invoice.ts). So this single check already excludes BOTH locks too —
+  // no separate payout_id/invoiceLocked check needed here.
   const deletable = trip.stage !== "delivered";
   const [target, setTarget] = useState<TripStage>(trip.stage);
   const [station, setStation] = useState<string>(trip.water_station);
@@ -610,7 +626,7 @@ function PhasePickerModal({
   }
 
   function handleApplyClick() {
-    if (noChange || paid || busy) return;
+    if (noChange || locked || busy) return;
     if (leavingDelivered || stationReason) {
       setView("move-confirm");
       return;
@@ -642,23 +658,28 @@ function PhasePickerModal({
               </button>
             </div>
 
-            {paid && (
+            {locked && (
               <div className="mt-3 flex items-start gap-2 rounded-lg bg-slate-500/10 ring-1 ring-inset ring-slate-500/20 px-3 py-2 text-xs">
                 <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5 text-slate-500 dark:text-slate-400" />
                 <span className="muted">
-                  Paid — this trip's commission is locked into a History record. Stage and station can't be changed.
+                  {commissionLocked && invoiceLocked
+                    ? "Paid — commission is settled and the customer invoice is paid. Stage and station can't be changed."
+                    : commissionLocked
+                      ? "Paid — this trip's commission is locked into a History record. Stage and station can't be changed."
+                      : "Invoice paid — the customer has been billed for this trip. Stage and station can't be changed."}
                 </span>
               </div>
             )}
 
             {/* Stage list — natural progression order, current stage tagged.
-                Any row is selectable (forward or backward) unless paid. */}
+                Any row is selectable (forward or backward) unless locked
+                (commission paid or invoice paid — either freezes it). */}
             <div className="mt-4 space-y-1.5">
               {STAGE_ORDER.map((stage) => {
                 const isCurrent = stage === trip.stage;
                 const isSelected = stage === target;
                 const st = STAGE_STYLES[stage];
-                const disabled = paid && !isCurrent;
+                const disabled = locked && !isCurrent;
                 return (
                   <button
                     key={stage}
@@ -693,7 +714,7 @@ function PhasePickerModal({
               <select
                 aria-label="Fill station"
                 value={station}
-                disabled={paid}
+                disabled={locked}
                 onChange={(e) => setStation(e.target.value)}
                 className="px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full disabled:opacity-50"
                 style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
@@ -716,7 +737,7 @@ function PhasePickerModal({
               </Btn>
               <button
                 type="button"
-                disabled={noChange || paid || busy}
+                disabled={noChange || locked || busy}
                 onClick={handleApplyClick}
                 className="h-9 px-4 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
               >

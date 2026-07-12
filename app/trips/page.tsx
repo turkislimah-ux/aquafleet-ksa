@@ -53,6 +53,7 @@ export default async function TripsPage() {
   const [
     tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes,
     stationsRes, allStationsRes, leavePeriodsRes, terminatedDriversRes, topupsRes,
+    paidInvoicesRes,
   ] =
     await Promise.all([
       supabase
@@ -125,7 +126,20 @@ export default async function TripsPage() {
         .from("customer_topups")
         .select("id, customer_id, amount_sar, topup_date, note, reference")
         .order("topup_date", { ascending: false }),
+      // Finance bug fix — invoice-lock (§3, two independent locks: payout_id
+      // commission-lock OR paid-invoice lock). ids-only, status='paid' scoped
+      // in SQL — the board only needs to know WHICH invoices are paid, not
+      // their full rows. RESERVED (draft/confirmed, not yet paid) invoices are
+      // deliberately excluded — reserved trips stay editable, only paid locks.
+      supabase.from("invoices").select("id").eq("status", "paid"),
     ]);
+
+  // Paid-invoice lock (Finance bug fix): a trip is LOCKED when its invoice_id
+  // points at an invoice whose status = 'paid' — NOT merely when invoice_id is
+  // set (that's RESERVED, still editable; see lib/db-types.ts's Trip.invoice_id
+  // comment / migration 0030). Computed here, once, from the paid-only id set
+  // fetched above, so ProjectsBoard never has to re-derive it per trip.
+  const paidInvoiceIds = new Set((paidInvoicesRes.data ?? []).map((i) => (i as { id: string }).id));
 
   const trips = ((tripsRes.data ?? []) as JoinedTrip[]).map((t) => ({
     ...t,
@@ -133,6 +147,7 @@ export default async function TripsPage() {
     truckPlate: t.truck?.plate ?? null,
     truckCapacityM3: t.truck?.capacity_m3 ?? null,
     driverName: t.driver?.name ?? null,
+    invoiceLocked: t.invoice_id != null && paidInvoiceIds.has(t.invoice_id),
   }));
 
   // Water stations lookup. `stations` (active-only) feeds every SELECTION picker

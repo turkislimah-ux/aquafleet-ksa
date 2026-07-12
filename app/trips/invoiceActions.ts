@@ -21,28 +21,34 @@ export type ActionResult<T = undefined> = { error: string | null; data?: T };
 const PROOF_BUCKET = "invoice-proofs";
 
 // ---------------------------------------------------------------------------
-// Shared: fetch everything assembleInvoice() needs for one invoice row and
-// run it. Used by both the read-only preview (draft/review display) and by
-// confirmInvoice() right before it snapshots the result. Always re-fetches
-// live — draft/review NEVER read a stored snapshot, per the locked design
-// (see migration 0027 header).
+// Shared: fetch everything assembleInvoice() needs for a customer/period and
+// run it, applying the reserve-at-draft exclusion (migration 0030 — see
+// lib/invoice.ts's RESERVE-AT-DRAFT EXCLUSION note). `excludeInvoiceId` is
+// the invoice we're assembling FOR — trips it already reserves are treated
+// as "ours", not "reserved elsewhere"; pass null when no invoice exists yet
+// (createDraftInvoice's pre-create assembly). `invoiceId` (when given) also
+// scopes the special-charges fetch — a not-yet-created draft has none.
+//
+// Used by: previewInvoice() (read-only display, draft/review), confirmInvoice()
+// (right before it snapshots the result), createDraftInvoice() (pre-create,
+// to compute the initial reservation set), and setInvoiceReview() (to
+// re-sync reservation before the status flip). Always re-fetches live —
+// draft/review NEVER read a stored snapshot, per the locked design (see
+// migration 0027 header).
 // ---------------------------------------------------------------------------
-async function assembleForInvoice(
-  invoiceId: string,
-): Promise<{ error: string | null; assembly?: InvoiceAssembly; sellerRow?: unknown; buyerRow?: unknown }> {
+async function assembleForCustomerPeriod(params: {
+  customerId: string;
+  periodStart: string;
+  periodEnd: string;
+  invoiceId: string | null;
+}): Promise<{ error: string | null; assembly?: InvoiceAssembly; sellerRow?: unknown; buyerRow?: unknown }> {
+  const { customerId, periodStart, periodEnd, invoiceId } = params;
   const supabase = createClient();
-
-  const { data: invoice, error: invErr } = await supabase
-    .from("invoices")
-    .select("id, customer_id, period_start, period_end, status")
-    .eq("id", invoiceId)
-    .single();
-  if (invErr || !invoice) return { error: invErr?.message ?? "Invoice not found." };
 
   const { data: customer, error: custErr } = await supabase
     .from("customers")
     .select("id, name, vat_number, cr_number, billing_address, email")
-    .eq("id", invoice.customer_id)
+    .eq("id", customerId)
     .single();
   if (custErr || !customer) return { error: custErr?.message ?? "Customer not found." };
 
@@ -51,17 +57,19 @@ async function assembleForInvoice(
   const { data: project, error: projErr } = await supabase
     .from("projects")
     .select("id, rate_per_trip_sar, payment_mode")
-    .eq("customer_id", invoice.customer_id)
+    .eq("customer_id", customerId)
     .single();
   if (projErr || !project) return { error: projErr?.message ?? "No project found for this customer." };
 
   // Full trip history for the project (not period-filtered — see
   // lib/invoice.ts's PERIOD-MEMBERSHIP RULE), rate resolved from the
   // project's rate_per_trip_sar, never trips.rate_sar (same convention as
-  // app/trips/FinanceTab.tsx).
+  // app/trips/FinanceTab.tsx). invoice_id fetched to compute the
+  // reserved-elsewhere set (0030) — a trip reserved by ANY invoice other
+  // than the one we're assembling for is excluded.
   const { data: tripRows, error: tripErr } = await supabase
     .from("trips")
-    .select("id, trip_date, delivered_at")
+    .select("id, trip_date, delivered_at, invoice_id")
     .eq("project_id", project.id);
   if (tripErr) return { error: tripErr.message };
   const trips: ConsumingTrip[] = (tripRows ?? []).map((t) => ({
@@ -70,28 +78,34 @@ async function assembleForInvoice(
     delivered_at: t.delivered_at,
     rate_sar: project.rate_per_trip_sar,
   }));
+  const reservedElsewhereTripIds = (tripRows ?? [])
+    .filter((t) => t.invoice_id != null && t.invoice_id !== invoiceId)
+    .map((t) => t.id);
 
   const { data: topupRows, error: topupErr } = await supabase
     .from("customer_topups")
     .select("id, amount_sar, topup_date")
-    .eq("customer_id", invoice.customer_id);
+    .eq("customer_id", customerId);
   if (topupErr) return { error: topupErr.message };
   const topups: TopupLite[] = topupRows ?? [];
 
-  const { data: chargeRows, error: chargeErr } = await supabase
-    .from("invoice_special_charges")
-    .select("id, label, amount_sar")
-    .eq("invoice_id", invoiceId);
-  if (chargeErr) return { error: chargeErr.message };
-  const specialCharges: SpecialChargeInput[] = chargeRows ?? [];
+  let specialCharges: SpecialChargeInput[] = [];
+  if (invoiceId) {
+    const { data: chargeRows, error: chargeErr } = await supabase
+      .from("invoice_special_charges")
+      .select("id, label, amount_sar")
+      .eq("invoice_id", invoiceId);
+    if (chargeErr) return { error: chargeErr.message };
+    specialCharges = chargeRows ?? [];
+  }
 
   const { data: seller } = await supabase.from("company_settings").select("*").eq("id", true).single();
 
   const assembly = assembleInvoice({
-    customerId: invoice.customer_id,
+    customerId,
     paymentMode: project.payment_mode,
-    periodStart: invoice.period_start,
-    periodEnd: invoice.period_end,
+    periodStart,
+    periodEnd,
     trips,
     topups,
     specialCharges,
@@ -103,13 +117,49 @@ async function assembleForInvoice(
       billing_address: customer.billing_address,
     },
     customerEmail: customer.email,
+    reservedElsewhereTripIds,
   });
 
   return { error: null, assembly, sellerRow: seller, buyerRow: customer };
 }
 
+// Convenience wrapper for an EXISTING invoice — reads its customer/period/
+// status off the row, then delegates to assembleForCustomerPeriod above.
+async function assembleForInvoice(
+  invoiceId: string,
+): Promise<{ error: string | null; assembly?: InvoiceAssembly; sellerRow?: unknown; buyerRow?: unknown }> {
+  const supabase = createClient();
+  const { data: invoice, error: invErr } = await supabase
+    .from("invoices")
+    .select("id, customer_id, period_start, period_end, status")
+    .eq("id", invoiceId)
+    .single();
+  if (invErr || !invoice) return { error: invErr?.message ?? "Invoice not found." };
+
+  return assembleForCustomerPeriod({
+    customerId: invoice.customer_id,
+    periodStart: invoice.period_start,
+    periodEnd: invoice.period_end,
+    invoiceId,
+  });
+}
+
+// The trip ids an invoice's CURRENT assembly should reserve — union of
+// covered + unpaid trip lines (charges aren't trips, nothing to reserve for
+// those). Reused by createDraftInvoice() (pre-create) and setInvoiceReview()
+// (re-sync) so both compute "what should be reserved" identically.
+function desiredReservationTripIds(assembly: InvoiceAssembly): string[] {
+  return [...assembly.coveredLines, ...assembly.unpaidLines]
+    .filter((l) => l.kind === "trip")
+    .map((l) => l.id);
+}
+
 // ---------------------------------------------------------------------------
-// Draft
+// Draft — reserve-at-draft (0030): the initial trip set is computed here (in
+// TS, via assembleForCustomerPeriod — same math previewInvoice() will show)
+// and reserved atomically alongside the insert by create_draft_invoice()
+// (SQL). This is an EXPLICIT user action (clicking "Create draft" in
+// InvoicesModal) — never triggered by a read/view.
 // ---------------------------------------------------------------------------
 export async function createDraftInvoice(
   customerId: string,
@@ -117,14 +167,34 @@ export async function createDraftInvoice(
   periodEnd: string,
 ): Promise<ActionResult<{ id: string }>> {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("invoices")
-    .insert({ customer_id: customerId, period_start: periodStart, period_end: periodEnd })
-    .select("id")
-    .single();
+
+  const { error: assembleErr, assembly } = await assembleForCustomerPeriod({
+    customerId,
+    periodStart,
+    periodEnd,
+    invoiceId: null,
+  });
+  if (assembleErr || !assembly) return { error: assembleErr ?? "Could not assemble the new invoice." };
+
+  const { data, error } = await supabase.rpc("create_draft_invoice", {
+    p_customer_id: customerId,
+    p_period_start: periodStart,
+    p_period_end: periodEnd,
+    p_trip_ids: desiredReservationTripIds(assembly),
+  });
   if (error || !data) return { error: error?.message ?? "Could not create draft invoice." };
   revalidatePath("/trips");
   return { error: null, data: { id: data.id } };
+}
+
+// Abandons a draft, releasing its reserved trips (0030 — draft-only, see
+// migration header; a Review invoice must Back-to-Draft first).
+export async function deleteDraftInvoice(invoiceId: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.rpc("delete_draft_invoice", { p_invoice_id: invoiceId });
+  if (error) return { error: error.message };
+  revalidatePath("/trips");
+  return { error: null };
 }
 
 export async function addSpecialCharge(invoiceId: string, label: string, amountSar: number): Promise<ActionResult> {
@@ -209,8 +279,25 @@ export async function getProofSignedUrl(invoiceId: string): Promise<ActionResult
 // Draft <-> Review — freely reversible, single-row updates, no RPC needed
 // (no number/VAT ref claimed yet at either status).
 // ---------------------------------------------------------------------------
+// Draft -> Review is an EXPLICIT user action ("Move to Review" click) — the
+// right place to re-sync reservation (0030) against however the trip set
+// may have drifted since the draft was created (new deliveries, etc.), so
+// what gets reserved matches exactly what's about to be reviewed. Sync runs
+// BEFORE the status flip; if it fails (a genuine double-book race), the
+// invoice stays in draft rather than moving to review with a stale/conflicted
+// reservation.
 export async function setInvoiceReview(invoiceId: string): Promise<ActionResult> {
   const supabase = createClient();
+
+  const { error: assembleErr, assembly } = await assembleForInvoice(invoiceId);
+  if (assembleErr || !assembly) return { error: assembleErr ?? "Could not assemble invoice for review." };
+
+  const { error: syncErr } = await supabase.rpc("sync_draft_reservation", {
+    p_invoice_id: invoiceId,
+    p_trip_ids: desiredReservationTripIds(assembly),
+  });
+  if (syncErr) return { error: syncErr.message };
+
   const { data, error } = await supabase
     .from("invoices")
     .update({ status: "review", reviewed_at: new Date().toISOString() })
@@ -340,9 +427,11 @@ export async function markInvoicePaid(formData: FormData): Promise<ActionResult>
 
 // ---------------------------------------------------------------------------
 // Un-pay — gated admin action (the approval gate/warning is a UI concern,
-// 5c). Unlocks every trip this invoice locked; invoice returns to Confirmed.
-// "by" is derived server-side from the authenticated user, same convention
-// as app/drivers/actions.ts's approved_by — never a UI text input.
+// 5c). Invoice returns to Confirmed; trips stay RESERVED to it (0030 —
+// un-pay reverses payment, not reservation; only void/delete release trips
+// now — see migration 0030's unpay_invoice()). "by" is derived server-side
+// from the authenticated user, same convention as app/drivers/actions.ts's
+// approved_by — never a UI text input.
 // ---------------------------------------------------------------------------
 export async function unpayInvoice(invoiceId: string, reason: string): Promise<ActionResult> {
   const supabase = createClient();

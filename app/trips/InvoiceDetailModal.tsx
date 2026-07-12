@@ -37,6 +37,7 @@ import {
   voidInvoice,
   markInvoicePaid,
   unpayInvoice,
+  deleteDraftInvoice,
   getProofSignedUrl,
   getCompanyEmail,
 } from "./invoiceActions";
@@ -110,6 +111,7 @@ export default function InvoiceDetailModal({
   const [payMethod, setPayMethod] = useState<"cash" | "bank_transfer">("cash");
   const [unpaying, setUnpaying] = useState(false);
   const [unpayReason, setUnpayReason] = useState("");
+  const [deletingDraft, setDeletingDraft] = useState(false);
 
   // Email templates (0028/0029): company email for the signature line, and
   // the open/closed state of the type-picker modal.
@@ -168,6 +170,7 @@ export default function InvoiceDetailModal({
     setPayMethod("cash");
     setUnpaying(false);
     setUnpayReason("");
+    setDeletingDraft(false);
     setChargeLabel("");
     setChargeAmount("");
     setEmailPickerOpen(false);
@@ -221,6 +224,24 @@ export default function InvoiceDetailModal({
       return;
     }
     window.open(r.data.url, "_blank", "noopener,noreferrer");
+  }
+
+  // Deletion removes the row entirely (0030 — draft-only, releases reserved
+  // trips) — unlike other actions, refresh()/load() would fail afterward
+  // since invoiceId no longer resolves, so this goes straight back to the
+  // invoice list instead.
+  async function onDeleteDraft() {
+    if (!invoiceId) return;
+    setBusy(true);
+    setActionError(null);
+    const res = await deleteDraftInvoice(invoiceId);
+    setBusy(false);
+    if (res.error) {
+      setActionError(res.error);
+      return;
+    }
+    onMutated();
+    onBack();
   }
 
   async function onMarkPaid(e: React.FormEvent<HTMLFormElement>) {
@@ -371,10 +392,24 @@ export default function InvoiceDetailModal({
 
             {/* Actions — status-dependent, not printed. */}
             <div className="no-print border-t border-app pt-4 space-y-3">
-              {status === "draft" && (
-                <Btn variant="primary" onClick={() => runAction(() => setInvoiceReview(invoiceId))} className={busy ? "opacity-50 pointer-events-none" : ""}>
-                  Move to Review
-                </Btn>
+              {status === "draft" && !deletingDraft && (
+                <div className="flex items-center gap-2">
+                  <Btn variant="primary" onClick={() => runAction(() => setInvoiceReview(invoiceId))} className={busy ? "opacity-50 pointer-events-none" : ""}>
+                    Move to Review
+                  </Btn>
+                  <Btn variant="outline" onClick={() => setDeletingDraft(true)} className={busy ? "opacity-50 pointer-events-none" : ""}>
+                    <Trash2 className="h-4 w-4" /> Delete draft
+                  </Btn>
+                </div>
+              )}
+              {status === "draft" && deletingDraft && (
+                <GuardBox
+                  warning="Deletes this draft and releases every trip it had reserved, freeing them for another invoice. This cannot be undone."
+                  busy={busy}
+                  confirmLabel="Yes, delete draft"
+                  onCancel={() => setDeletingDraft(false)}
+                  onConfirm={onDeleteDraft}
+                />
               )}
 
               {status === "review" && !confirmingConfirm && (

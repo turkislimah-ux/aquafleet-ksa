@@ -276,7 +276,7 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
                           </Btn>
                         </>
                       )}
-                      {r.mode === "prepaid" ? (
+                      {r.mode === "prepaid" || r.mode === "postpaid" ? (
                         <Btn
                           variant="outline"
                           onClick={() => setInvoicesFor({ id: r.customer.id, name: r.customer.name, email: r.customer.email })}
@@ -284,7 +284,9 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
                           Invoices
                         </Btn>
                       ) : r.project ? (
-                        <span className="muted text-xs">Postpaid — invoicing coming soon</span>
+                        // payment_mode unset (legacy pre-0025 project) — stays
+                        // blocked, assembleInvoice() throws on a null mode.
+                        <span className="muted text-xs">Set payment mode to invoice</span>
                       ) : (
                         <span className="muted text-xs">No project</span>
                       )}
