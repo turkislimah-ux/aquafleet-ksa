@@ -38,7 +38,24 @@ import {
   markInvoicePaid,
   unpayInvoice,
   getProofSignedUrl,
+  getCompanyEmail,
 } from "./invoiceActions";
+
+// Fallback company email — used in template bodies/signatures whenever
+// company_settings.email is unset. mailto cannot set the actual From
+// address (opens in the user's own mail client) — this is reference text
+// only, never the "to" or a forced sender.
+const FALLBACK_COMPANY_EMAIL = "info@binslimah.com";
+
+// Four purpose-specific mailto templates (Finance email templates, 0028/0029).
+// Each maps to a distinct tone/purpose picked by the user before mailto opens.
+type EmailType = "statement" | "payment_due" | "reminder" | "generic";
+const EMAIL_TYPE_META: Record<EmailType, { label: string; hint: string }> = {
+  statement: { label: "Monthly report / statement", hint: "Activity summary for the period." },
+  payment_due: { label: "Payment due", hint: "This invoice is now due — request payment." },
+  reminder: { label: "Payment reminder", hint: "Follow-up nudge for an outstanding balance." },
+  generic: { label: "Plain / generic", hint: "Minimal — just the invoice reference." },
+};
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -94,6 +111,11 @@ export default function InvoiceDetailModal({
   const [unpaying, setUnpaying] = useState(false);
   const [unpayReason, setUnpayReason] = useState("");
 
+  // Email templates (0028/0029): company email for the signature line, and
+  // the open/closed state of the type-picker modal.
+  const [companyEmail, setCompanyEmail] = useState<string | null>(null);
+  const [emailPickerOpen, setEmailPickerOpen] = useState(false);
+
   async function load() {
     if (!invoiceId) return;
     setLoading(true);
@@ -148,7 +170,9 @@ export default function InvoiceDetailModal({
     setUnpayReason("");
     setChargeLabel("");
     setChargeAmount("");
+    setEmailPickerOpen(false);
     load();
+    getCompanyEmail().then((r) => setCompanyEmail(r.data?.email ?? null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, invoiceId]);
 
@@ -220,9 +244,17 @@ export default function InvoiceDetailModal({
 
   const status = raw?.status;
   const editable = raw ? canEditSpecialCharges(raw.status) : false;
-  const mailHref = buildMailto(raw, view, customerEmail);
+  const canEmail = !!(raw && view && customerEmail);
+
+  function sendTemplate(type: EmailType) {
+    if (!raw || !view || !customerEmail) return;
+    const href = buildMailtoFor(type, raw, view, customerEmail, companyEmail);
+    setEmailPickerOpen(false);
+    window.location.href = href;
+  }
 
   return createPortal(
+    <>
     <div className="invoice-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <div
         className="card p-0 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin"
@@ -237,13 +269,11 @@ export default function InvoiceDetailModal({
             {status && <StatusPill status={status} label={INVOICE_STATUS_LABELS[status]} />}
           </div>
           <div className="flex items-center gap-2">
-            <span title={!mailHref && raw && view ? "No customer email on file" : undefined}>
+            <span title={!canEmail && raw && view ? "No customer email on file" : undefined}>
               <Btn
                 variant="outline"
-                onClick={() => {
-                  if (mailHref) window.location.href = mailHref;
-                }}
-                className={!mailHref ? "opacity-50 pointer-events-none" : ""}
+                onClick={() => canEmail && setEmailPickerOpen(true)}
+                className={!canEmail ? "opacity-50 pointer-events-none" : ""}
               >
                 <Mail className="h-4 w-4" /> Email
               </Btn>
@@ -452,7 +482,37 @@ export default function InvoiceDetailModal({
           </div>
         )}
       </div>
-    </div>,
+    </div>
+
+    {emailPickerOpen && (
+      <div
+        className="no-print fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40"
+        onClick={() => setEmailPickerOpen(false)}
+      >
+        <div className="card p-5 w-full max-w-sm space-y-3" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Email invoice — choose type</h3>
+            <button type="button" onClick={() => setEmailPickerOpen(false)} className="muted hover:text-[rgb(var(--fg))]">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="space-y-2">
+            {(Object.keys(EMAIL_TYPE_META) as EmailType[]).map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => sendTemplate(type)}
+                className="w-full text-left rounded-lg border border-app px-3 py-2 text-sm hover:border-brand-500 hover:bg-brand-500/10"
+              >
+                <div className="font-medium">{EMAIL_TYPE_META[type].label}</div>
+                <div className="muted text-[11px]">{EMAIL_TYPE_META[type].hint}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+    </>,
     document.body,
   );
 }
@@ -604,21 +664,82 @@ function GuardBox({
   );
 }
 
-function buildMailto(raw: Invoice | null, view: View | null, customerEmail: string | null): string | null {
-  if (!raw || !view || !customerEmail) return null;
+// Builds the mailto: URI for one of the 4 template types. mailto only
+// controls "to"/subject/body — it cannot set the From address, so
+// companyEmail is referenced in the signature only, never used as a sender.
+function buildMailtoFor(
+  type: EmailType,
+  raw: Invoice,
+  view: View,
+  customerEmail: string,
+  companyEmail: string | null,
+): string {
   const ref = raw.invoice_number ? `#${raw.invoice_number}` : `(draft, ${raw.period_start} to ${raw.period_end})`;
-  const subject = `Invoice ${ref} — ${view.buyerSnapshot?.name ?? ""}`;
-  const body = [
-    `Invoice ${ref}`,
-    `Period: ${raw.period_start} to ${raw.period_end}`,
-    raw.vat_ref ? `VAT ref: ${raw.vat_ref}` : null,
-    "",
-    `Grand Total: ${formatSar(view.grand.total)}`,
-    `Amount Due: ${formatSar(view.amountDue.total)}`,
-    "",
-    "Please find the invoice attached.",
-  ]
-    .filter((l) => l !== null)
-    .join("\n");
+  const buyerName = view.buyerSnapshot?.name ?? "Customer";
+  const period = `${raw.period_start} to ${raw.period_end}`;
+  const vatLine = raw.vat_ref ? `VAT ref: ${raw.vat_ref}` : null;
+  const grand = formatSar(view.grand.total);
+  const due = formatSar(view.amountDue.total);
+  const signature = ["Kind regards,", "Bin Slimah Group", companyEmail || FALLBACK_COMPANY_EMAIL];
+
+  let subject: string;
+  let bodyLines: (string | null)[];
+
+  switch (type) {
+    case "statement":
+      subject = `Statement — ${buyerName} — ${period}`;
+      bodyLines = [
+        `Dear ${buyerName},`,
+        "",
+        `Please find below a summary of your account activity for the period ${period}.`,
+        "",
+        `Invoice ${ref}`,
+        vatLine,
+        `Grand Total: ${grand}`,
+        `Amount Due: ${due}`,
+        "",
+        "If you have any questions about this statement, please don't hesitate to reach out.",
+        "",
+        ...signature,
+      ];
+      break;
+    case "payment_due":
+      subject = `Payment due — Invoice ${ref} — ${buyerName}`;
+      bodyLines = [
+        `Dear ${buyerName},`,
+        "",
+        `This is to confirm that invoice ${ref} for the period ${period} is now due for payment.`,
+        "",
+        vatLine,
+        `Amount Due: ${due}`,
+        "",
+        "Kindly arrange payment at your earliest convenience. Please let us know if you need any further information to process this.",
+        "",
+        ...signature,
+      ];
+      break;
+    case "reminder":
+      subject = `Reminder — Payment outstanding for Invoice ${ref}`;
+      bodyLines = [
+        `Dear ${buyerName},`,
+        "",
+        `This is a friendly reminder that invoice ${ref} for the period ${period} remains outstanding.`,
+        "",
+        vatLine,
+        `Amount Due: ${due}`,
+        "",
+        "We would appreciate it if you could arrange payment at your earliest convenience. If payment has already been made, please disregard this message.",
+        "",
+        ...signature,
+      ];
+      break;
+    case "generic":
+    default:
+      subject = `Invoice ${ref}`;
+      bodyLines = [`Dear ${buyerName},`, "", `Please find attached invoice ${ref} for the period ${period}.`, "", ...signature];
+      break;
+  }
+
+  const body = bodyLines.filter((l) => l !== null).join("\n");
   return `mailto:${encodeURIComponent(customerEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }

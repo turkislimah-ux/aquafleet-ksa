@@ -353,3 +353,31 @@ export async function unpayInvoice(invoiceId: string, reason: string): Promise<A
   revalidatePath("/trips");
   return { error: null };
 }
+
+// ---------------------------------------------------------------------------
+// Company settings — email only (0029). Minimal get/set pair for the small
+// Finance-tab form; NOT a full settings screen (deferred). Table is a
+// singleton (id = true) — no id param needed.
+// ---------------------------------------------------------------------------
+export async function getCompanyEmail(): Promise<ActionResult<{ email: string | null }>> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("company_settings")
+    .select("email")
+    .eq("id", true)
+    .single();
+  if (error) return { error: error.message };
+  return { error: null, data: { email: data?.email ?? null } };
+}
+
+export async function updateCompanyEmail(email: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const trimmed = email.trim();
+  const { error } = await supabase
+    .from("company_settings")
+    .update({ email: trimmed || null, updated_at: new Date().toISOString() })
+    .eq("id", true);
+  if (error) return { error: error.message };
+  revalidatePath("/trips");
+  return { error: null };
+}

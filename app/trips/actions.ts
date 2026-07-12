@@ -371,6 +371,8 @@ export type NewProjectInput = {
   cust_type: string;
   contact_name: string | null;
   phone: string | null;
+  // Finance email (0028). Optional, mirrors contact_name/phone.
+  cust_email: string | null;
   delivery_address: string | null;
   delivery_lat: number | null;
   delivery_lng: number | null;
@@ -458,6 +460,7 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
     p_description: input.description?.trim() || null,
     p_driver_ids: driverIds,
     p_payment_mode: paymentMode,
+    p_cust_email: input.cust_email?.trim() || null,
   });
   if (error) return { error: error.message };
 
@@ -500,6 +503,7 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
     p_description: input.description?.trim() || null,
     p_driver_ids: driverIds,
     p_payment_mode: paymentMode,
+    p_cust_email: input.cust_email?.trim() || null,
   });
   if (error) return { error: error.message };
 

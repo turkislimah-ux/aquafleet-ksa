@@ -23,6 +23,7 @@ import { derivedBalance, type ConsumingTrip, type TopupStatementInput } from "@/
 import TopupModal, { type TopupCustomerOption } from "./TopupModal";
 import StatementModal from "./StatementModal";
 import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
+import CompanySettingsModal from "./CompanySettingsModal";
 
 type CustomerLite = { id: string; name: string; email: string | null };
 type ProjectLite = {
@@ -56,6 +57,7 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
   const [topupTarget, setTopupTarget] = useState<TopupCustomerOption | null | "global">(null);
   const [statementFor, setStatementFor] = useState<{ customerId: string; customerName: string } | null>(null);
   const [invoicesFor, setInvoicesFor] = useState<InvoiceCustomer | null>(null);
+  const [companySettingsOpen, setCompanySettingsOpen] = useState(false);
 
   const projectByCustomer = useMemo(() => {
     const m = new Map<string, ProjectLite>();
@@ -211,13 +213,18 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
             </button>
           ))}
         </div>
-        <Btn
-          variant="primary"
-          onClick={() => setTopupTarget("global")}
-          className={prepaidCustomerOptions.length === 0 ? "opacity-50 pointer-events-none" : ""}
-        >
-          Record top-up
-        </Btn>
+        <div className="flex items-center gap-2">
+          <Btn variant="outline" onClick={() => setCompanySettingsOpen(true)}>
+            Company settings
+          </Btn>
+          <Btn
+            variant="primary"
+            onClick={() => setTopupTarget("global")}
+            className={prepaidCustomerOptions.length === 0 ? "opacity-50 pointer-events-none" : ""}
+          >
+            Record top-up
+          </Btn>
+        </div>
       </div>
 
       {filteredRows.length === 0 ? (
@@ -306,6 +313,8 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
       />
 
       <InvoicesModal open={invoicesFor !== null} onClose={() => setInvoicesFor(null)} customer={invoicesFor} />
+
+      <CompanySettingsModal open={companySettingsOpen} onClose={() => setCompanySettingsOpen(false)} />
     </div>
   );
 }

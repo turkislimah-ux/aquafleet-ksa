@@ -42,6 +42,8 @@ export type ProjectInitial = {
   cust_type: string;
   contact_name: string;
   phone: string;
+  // Finance email (0028). "" = unset — optional, mirrors contact_name/phone.
+  cust_email: string;
   delivery_address: string;
   delivery_lat: string;
   delivery_lng: string;
@@ -101,6 +103,7 @@ export default function ProjectModal({
   const [custType, setCustType] = useState("");
   const [contactName, setContactName] = useState("");
   const [phone, setPhone] = useState("");
+  const [custEmail, setCustEmail] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryLat, setDeliveryLat] = useState("");
   const [deliveryLng, setDeliveryLng] = useState("");
@@ -142,6 +145,7 @@ export default function ProjectModal({
       setCustType(initial.cust_type);
       setContactName(initial.contact_name);
       setPhone(initial.phone);
+      setCustEmail(initial.cust_email);
       setDeliveryAddress(initial.delivery_address);
       setDeliveryLat(initial.delivery_lat);
       setDeliveryLng(initial.delivery_lng);
@@ -164,6 +168,7 @@ export default function ProjectModal({
       setCustType("");
       setContactName("");
       setPhone("");
+      setCustEmail("");
       setDeliveryAddress("");
       setDeliveryLat("");
       setDeliveryLng("");
@@ -234,6 +239,7 @@ export default function ProjectModal({
       cust_type: custType,
       contact_name: contactName || null,
       phone: phone || null,
+      cust_email: custEmail || null,
       delivery_address: deliveryAddress || null,
       delivery_lat: deliveryLat === "" ? null : Number(deliveryLat),
       delivery_lng: deliveryLng === "" ? null : Number(deliveryLng),
@@ -325,6 +331,10 @@ export default function ProjectModal({
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">Phone</span>
                 <input value={phone} onChange={(e) => setPhone(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">Email</span>
+                <input value={custEmail} onChange={(e) => setCustEmail(e.target.value)} type="email" className={INPUT} style={INPUT_STYLE} placeholder="e.g. billing@customer.com" />
               </label>
               <label className="flex flex-col gap-1 text-sm sm:col-span-2">
                 <span className="muted">Delivery site address</span>

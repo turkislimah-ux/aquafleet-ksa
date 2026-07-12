@@ -22,6 +22,8 @@ type CustomerLite = {
   customer_type: string;
   contact_name: string | null;
   phone: string | null;
+  // Finance email (0028).
+  email: string | null;
   delivery_site_address: string | null;
   delivery_lat: number | null;
   delivery_lng: number | null;
@@ -83,6 +85,7 @@ function toInitial(c: CustomerLite, p: ProjectLite, driverIds: string[]): Projec
     cust_type: c.customer_type,
     contact_name: c.contact_name ?? "",
     phone: c.phone ?? "",
+    cust_email: c.email ?? "",
     delivery_address: c.delivery_site_address ?? "",
     delivery_lat: c.delivery_lat == null ? "" : String(c.delivery_lat),
     delivery_lng: c.delivery_lng == null ? "" : String(c.delivery_lng),

@@ -145,10 +145,21 @@ relevant skill(s) **when the task calls for it**:
        eat the card's own phase-picker click).
   - Turki verifies against the demo image before commit.
 
-- **Finance/Invoice PRD** is committed at `.planning/finance-invoice-spec.md` — the
-  next big feature to build (~8 staged commits), pending Turki's final review.
-  - **Progress: Commit 1 (data model, migration `0025`) done and committed.** Next up:
-    Commit 2 (prepaid balance ledger). Commit sequence lives in spec §13.
+- **Finance/Invoice PRD** is committed at `.planning/finance-invoice-spec.md`.
+  - **Prepaid invoicing: COMPLETE end-to-end, through commit `815c541`.** Data model
+    (migration `0025`), project popup + `payment_mode` (migration `0026`), Finance tab,
+    prepaid ledger, covered/unpaid engine, VAT, invoice lifecycle (migration `0027`) +
+    full UI (draft/review/confirm/pay/void, print, mailto). All money-logic harnesses
+    green.
+  - **Deferred — Finance:**
+    1. Customer email + company/user email fields. No customer has an email yet and no
+       field exists to set one, so the invoice Email/mailto button stays disabled. Customer
+       email likely belongs in the Customer section of the 4-section project popup; company
+       email in `company_settings`.
+    2. Postpaid invoicing — own commit. The covered/unpaid engine is prepaid-only.
+    3. PDF generation — print is browser-print for now. Proof-of-payment storage upload
+       already works.
+    4. Effective-dated commission config — still deferred (commission, not invoicing).
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
   touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`
