@@ -16,7 +16,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { X, Printer, Mail, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { X, Printer, Mail, Plus, Trash2, AlertTriangle, Download } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
@@ -40,6 +40,7 @@ import {
   deleteDraftInvoice,
   getProofSignedUrl,
   getCompanyEmail,
+  getInvoicePdf,
 } from "./invoiceActions";
 
 // Fallback company email — used in template bodies/signatures whenever
@@ -118,6 +119,12 @@ export default function InvoiceDetailModal({
   const [companyEmail, setCompanyEmail] = useState<string | null>(null);
   const [emailPickerOpen, setEmailPickerOpen] = useState(false);
 
+  // Download PDF (hosted Chrome-to-PDF API, lib/pdf.ts). Separate busy/error
+  // state from the lifecycle-action `busy`/`actionError` above — downloading
+  // is read-only and shouldn't disable the lifecycle buttons or vice versa.
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
   async function load() {
     if (!invoiceId) return;
     setLoading(true);
@@ -174,6 +181,7 @@ export default function InvoiceDetailModal({
     setChargeLabel("");
     setChargeAmount("");
     setEmailPickerOpen(false);
+    setPdfError(null);
     load();
     getCompanyEmail().then((r) => setCompanyEmail(r.data?.email ?? null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,6 +201,31 @@ export default function InvoiceDetailModal({
     };
     window.addEventListener("afterprint", cleanup);
     window.print();
+  }
+
+  async function handleDownloadPdf() {
+    if (!invoiceId || downloadingPdf) return;
+    setDownloadingPdf(true);
+    setPdfError(null);
+    const r = await getInvoicePdf(invoiceId);
+    setDownloadingPdf(false);
+    if (r.error || !r.data) {
+      setPdfError(r.error ?? "Could not generate the PDF.");
+      return;
+    }
+    // Server Actions can't stream a Blob directly — bytes arrive as base64;
+    // decode to a Blob here and trigger a normal browser download via a
+    // throwaway <a download> (no navigation, works across browsers).
+    const bytes = Uint8Array.from(atob(r.data.base64), (c) => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = r.data.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   async function runAction(fn: () => Promise<{ error: string | null }>) {
@@ -302,6 +335,15 @@ export default function InvoiceDetailModal({
             <Btn variant="outline" onClick={handlePrint}>
               <Printer className="h-4 w-4" /> Print
             </Btn>
+            <span title={pdfError ?? undefined}>
+              <Btn
+                variant="outline"
+                onClick={handleDownloadPdf}
+                className={downloadingPdf ? "opacity-50 pointer-events-none" : ""}
+              >
+                <Download className="h-4 w-4" /> {downloadingPdf ? "Generating…" : "Download PDF"}
+              </Btn>
+            </span>
             <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]">
               <X className="h-5 w-5" />
             </button>
@@ -389,6 +431,7 @@ export default function InvoiceDetailModal({
             )}
 
             {actionError && <p className="text-sm text-rose-600 dark:text-rose-400 no-print">{actionError}</p>}
+            {pdfError && <p className="text-sm text-rose-600 dark:text-rose-400 no-print">{pdfError}</p>}
 
             {/* Actions — status-dependent, not printed. */}
             <div className="no-print border-t border-app pt-4 space-y-3">
