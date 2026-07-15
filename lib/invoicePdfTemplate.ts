@@ -80,8 +80,7 @@ export type PdfIdentity = {
 // the snapshot-vs-live branch and produces this; this file only renders it.
 export type PdfInvoiceData = {
   status: InvoiceStatus;
-  invoiceNumber: number | null;
-  vatRef: string | null;
+  invoiceNumber: string | null;
   periodStart: string;
   periodEnd: string;
   seller: PdfIdentity;
@@ -262,7 +261,6 @@ export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
     </div>
     <div class="header-meta">
       <p>${label("Invoice No.", "رقم الفاتورة")}: <strong dir="ltr">${esc(ref)}</strong></p>
-      ${data.vatRef ? `<p>${label("VAT Ref.", "الرقم المرجعي الضريبي")}: <span dir="ltr">${esc(data.vatRef)}</span></p>` : ""}
       <p>${label("Period", "الفترة")}: <span dir="ltr">${esc(data.periodStart)} → ${esc(data.periodEnd)}</span></p>
       <p>${label("Status", "الحالة")}: <strong>${esc(STATUS_LABEL_EN[data.status])} / ${esc(STATUS_LABEL_AR[data.status])}</strong></p>
     </div>

@@ -537,9 +537,9 @@ export async function getUndeliveredTripsForInvoice(invoiceId: string): Promise<
 // ---------------------------------------------------------------------------
 // Confirm — THE atomic Review -> Confirmed transition. Assembly runs here in
 // TS (pure, harnessed); the SQL function only persists the already-computed
-// result alongside the gap-free number + VAT ref claim, atomically.
+// result alongside the gap-free invoice number claim, atomically.
 // ---------------------------------------------------------------------------
-export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ invoiceNumber: number }>> {
+export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ invoiceNumber: string }>> {
   const supabase = createClient();
 
   const { data: invoice } = await supabase.from("invoices").select("status").eq("id", invoiceId).single();
@@ -577,7 +577,7 @@ export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ 
   });
   if (error) return { error: error.message };
   revalidatePath("/trips");
-  return { error: null, data: { invoiceNumber: data?.invoice_number ?? 0 } };
+  return { error: null, data: { invoiceNumber: data?.invoice_number ?? "" } };
 }
 
 // ---------------------------------------------------------------------------
@@ -738,7 +738,6 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
     pdfData = {
       status: inv.status,
       invoiceNumber: inv.invoice_number,
-      vatRef: inv.vat_ref,
       periodStart: inv.period_start,
       periodEnd: inv.period_end,
       seller: toIdentity(seller?.legal_name, seller?.vat_number ?? null, seller?.cr_number ?? null, seller?.address ?? null),
@@ -760,7 +759,6 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
     pdfData = {
       status: inv.status,
       invoiceNumber: inv.invoice_number,
-      vatRef: inv.vat_ref,
       periodStart: inv.period_start,
       periodEnd: inv.period_end,
       seller: toIdentity(seller?.legal_name, seller?.vat_number ?? null, seller?.cr_number ?? null, seller?.address ?? null),

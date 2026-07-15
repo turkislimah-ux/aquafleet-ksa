@@ -547,7 +547,6 @@ export default function InvoiceDetailModal({
                     {raw.period_start} → {raw.period_end}
                   </p>
                 )}
-                {raw.vat_ref && <p className="text-sm muted">VAT ref: {raw.vat_ref}</p>}
               </div>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <IdentityBlock title="Seller" name={view.sellerSnapshot?.legal_name ?? null} vat={view.sellerSnapshot?.vat_number ?? null} cr={view.sellerSnapshot?.cr_number ?? null} address={view.sellerSnapshot?.address ?? null} />
@@ -1191,7 +1190,6 @@ function buildMailtoFor(
   const ref = raw.invoice_number ? `#${raw.invoice_number}` : `(draft, ${raw.period_start} to ${raw.period_end})`;
   const buyerName = view.buyerSnapshot?.name ?? "Customer";
   const period = `${raw.period_start} to ${raw.period_end}`;
-  const vatLine = raw.vat_ref ? `VAT ref: ${raw.vat_ref}` : null;
   const grand = formatSar(view.grand.total);
   const due = formatSar(view.amountDue.total);
   const signature = ["Kind regards,", "Bin Slimah Group", companyEmail || FALLBACK_COMPANY_EMAIL];
@@ -1208,7 +1206,6 @@ function buildMailtoFor(
         `Please find below a summary of your account activity for the period ${period}.`,
         "",
         `Invoice ${ref}`,
-        vatLine,
         `Grand Total: ${grand}`,
         `Amount Due: ${due}`,
         "",
@@ -1224,7 +1221,6 @@ function buildMailtoFor(
         "",
         `This is to confirm that invoice ${ref} for the period ${period} is now due for payment.`,
         "",
-        vatLine,
         `Amount Due: ${due}`,
         "",
         "Kindly arrange payment at your earliest convenience. Please let us know if you need any further information to process this.",
@@ -1239,7 +1235,6 @@ function buildMailtoFor(
         "",
         `This is a friendly reminder that invoice ${ref} for the period ${period} remains outstanding.`,
         "",
-        vatLine,
         `Amount Due: ${due}`,
         "",
         "We would appreciate it if you could arrange payment at your earliest convenience. If payment has already been made, please disregard this message.",

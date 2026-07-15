@@ -412,8 +412,10 @@ export type Invoice = {
   period_start: string;
   period_end: string;
   status: InvoiceStatus;
-  invoice_number: number | null;
-  vat_ref: string | null; // PLACEHOLDER format pending approval — see 0027 header
+  // Text, not int (0034) — lossless cast from the old integer scheme so old
+  // rows ('7') and new rows ('026-000001', <yyy>-<6-digit-count>, annual
+  // reset) coexist forever. Null until confirmed (draft/review unnumbered).
+  invoice_number: string | null;
 
   seller_snapshot: CompanySettings | null;
   buyer_snapshot: Pick<Customer, "name" | "vat_number" | "cr_number" | "billing_address"> | null;
