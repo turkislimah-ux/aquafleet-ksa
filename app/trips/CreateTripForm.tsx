@@ -103,7 +103,11 @@ export default function CreateTripForm({
   const [kind, setKind] = useState<Kind>("project");
   const [projectId, setProjectId] = useState("");
   const [customerId, setCustomerId] = useState("");
-  const [waterType, setWaterType] = useState<WaterType>("potable");
+  // No hardcoded fallback (was a silent "potable" default, masking the
+  // project's own configured water type) — "" until either the picked
+  // project supplies its water_type (onPickProject) or the manager picks one
+  // explicitly (direct-customer trips have no project to inherit from).
+  const [waterType, setWaterType] = useState<WaterType | "">("");
   const [station, setStation] = useState<string>(stations[0]?.key ?? "");
   // Single-select operational driver (null = unassigned). Truck is DERIVED from
   // this driver (one truck per driver) — there is no separate truck selector.
@@ -136,9 +140,13 @@ export default function CreateTripForm({
 
   // Switch link kind — reset the driver pick (project mode shows assigned drivers,
   // customer mode shows all; a pick from one set may be invalid in the other).
+  // Also drop any project-inherited water type when moving to a direct-customer
+  // trip — there's no project to default from there, so force an explicit pick
+  // rather than silently carrying over the last project's value.
   function pickKind(next: Kind) {
     setKind(next);
     setDriverId(null);
+    if (next === "customer") setWaterType("");
   }
 
   // Per-driver duty figures. On-duty = undelivered trips on the SELECTED day
@@ -343,11 +351,19 @@ export default function CreateTripForm({
                 <span className="muted">Water type *</span>
                 <select
                   name="water_type"
+                  required
                   value={waterType}
                   onChange={(e) => setWaterType(e.target.value as WaterType)}
                   className={INPUT}
                   style={INPUT_STYLE}
                 >
+                  {/* Pre-filled from the project's own configured water type
+                      (onPickProject) — this placeholder only ever shows for a
+                      direct-customer trip (no project to inherit from), never
+                      silently defaults. */}
+                  <option value="" disabled>
+                    Select…
+                  </option>
                   {Object.entries(WATER_TYPE_LABELS).map(([v, l]) => (
                     <option key={v} value={v}>
                       {l}

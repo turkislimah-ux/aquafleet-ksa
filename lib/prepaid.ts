@@ -45,6 +45,11 @@ export type ConsumingTrip = {
   // RESOLVED pre-VAT rate for this trip (its project's rate_per_trip_sar at
   // call time) — see header note. NOT the raw trips.rate_sar column.
   rate_sar: number;
+  // Additive, display-only (Finance polish batch A). Never read by any money
+  // math below — purely passenger data threaded through to statement/invoice
+  // display (trip-ref link, water-type grouping label).
+  ref?: string | null;
+  water_type?: "potable" | "non_potable" | null;
 };
 
 export type ConsumptionEntry = {
@@ -52,6 +57,9 @@ export type ConsumptionEntry = {
   trip_date: string;
   delivered_at: string;
   amount: number;
+  // Additive passenger fields — see ConsumingTrip.
+  ref?: string | null;
+  water_type?: "potable" | "non_potable" | null;
 };
 
 export type TopupLite = {
@@ -72,7 +80,14 @@ export function consumingTrips(trips: ConsumingTrip[], asOfDate?: string): Consu
   return trips
     .filter((t): t is ConsumingTrip & { delivered_at: string } => t.delivered_at != null)
     .filter((t) => asOfDate == null || t.trip_date <= asOfDate)
-    .map((t) => ({ id: t.id, trip_date: t.trip_date, delivered_at: t.delivered_at, amount: round2(t.rate_sar) }))
+    .map((t) => ({
+      id: t.id,
+      trip_date: t.trip_date,
+      delivered_at: t.delivered_at,
+      amount: round2(t.rate_sar),
+      ref: t.ref,
+      water_type: t.water_type,
+    }))
     .sort((a, b) =>
       a.trip_date !== b.trip_date
         ? a.trip_date < b.trip_date ? -1 : 1
@@ -103,6 +118,9 @@ export type StatementEntry = {
   runningBalance: number;
   note?: string | null;
   reference?: string | null;
+  // Additive passenger fields (trip debits only) — see ConsumingTrip.
+  ref?: string | null;
+  water_type?: "potable" | "non_potable" | null;
 };
 
 export type TopupStatementInput = TopupLite & { note?: string | null; reference?: string | null };
@@ -136,6 +154,8 @@ export function buildStatement(
     amount: round2(-e.amount),
     note: null as string | null,
     reference: null as string | null,
+    ref: e.ref ?? null,
+    water_type: e.water_type ?? null,
   }));
 
   const merged = [...credits, ...debits].sort((a, b) => {

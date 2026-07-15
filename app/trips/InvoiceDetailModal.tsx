@@ -20,11 +20,14 @@ import { X, Printer, Mail, Plus, Trash2, AlertTriangle, Download } from "lucide-
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
+import { groupInvoiceLines } from "@/lib/invoiceDisplay";
+import TripRefLink from "@/components/TripRefLink";
 import {
   INVOICE_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
   type Invoice,
   type InvoiceLineSnapshot,
+  type WaterType,
 } from "@/lib/db-types";
 import {
   getInvoice,
@@ -71,6 +74,10 @@ type View = {
   grand: Totals;
   sellerSnapshot: { legal_name: string; vat_number: string | null; cr_number: string | null; address: string | null } | null;
   buyerSnapshot: { name: string; vat_number: string | null; cr_number: string | null; billing_address: string | null } | null;
+  // Display-only fallback (Finance polish batch C) — the project's CURRENT
+  // water_type, used when a frozen/old line's own water_type is null. Never
+  // written back to a stored snapshot.
+  projectWaterType: WaterType | null;
 };
 
 export default function InvoiceDetailModal({
@@ -94,7 +101,7 @@ export default function InvoiceDetailModal({
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [raw, setRaw] = useState<Invoice | null>(null);
+  const [raw, setRaw] = useState<(Invoice & { projectWaterType: WaterType | null }) | null>(null);
   const [view, setView] = useState<View | null>(null);
 
   const [busy, setBusy] = useState(false);
@@ -152,6 +159,7 @@ export default function InvoiceDetailModal({
         grand: p.data.grand,
         sellerSnapshot: (p.data.sellerSnapshot as View["sellerSnapshot"]) ?? null,
         buyerSnapshot: (p.data.buyerSnapshot as View["buyerSnapshot"]) ?? null,
+        projectWaterType: r.data.projectWaterType,
       });
     } else {
       setView({
@@ -162,6 +170,7 @@ export default function InvoiceDetailModal({
         grand: { subtotal: r.data.grand_subtotal_sar, vat: r.data.grand_vat_sar, total: r.data.grand_total_sar },
         sellerSnapshot: r.data.seller_snapshot,
         buyerSnapshot: r.data.buyer_snapshot,
+        projectWaterType: r.data.projectWaterType,
       });
     }
     setLoading(false);
@@ -381,7 +390,12 @@ export default function InvoiceDetailModal({
             {/* Covered table — omitted entirely when empty (postpaid, or a
                 prepaid customer with nothing yet covered this period). */}
             {view.coveredLines.length > 0 && (
-              <LineTable title="Covered (paid from prepaid balance)" lines={view.coveredLines} totals={view.covered} />
+              <LineTable
+                title="Covered (paid from prepaid balance)"
+                lines={view.coveredLines}
+                totals={view.covered}
+                fallbackWaterType={view.projectWaterType}
+              />
             )}
 
             {/* Unpaid / Amount Due table — always shown, this IS the
@@ -394,6 +408,7 @@ export default function InvoiceDetailModal({
               onRemoveCharge={(id) =>
                 runAction(() => removeSpecialCharge(invoiceId, id))
               }
+              fallbackWaterType={view.projectWaterType}
             />
 
             {editable && (
@@ -628,13 +643,24 @@ function LineTable({
   totals,
   editable,
   onRemoveCharge,
+  fallbackWaterType,
 }: {
   title: string;
   lines: InvoiceLineSnapshot[];
   totals: Totals;
   editable?: boolean;
   onRemoveCharge?: (id: string) => void;
+  // Display-only fallback (Finance polish batch C) — project's CURRENT
+  // water_type, used when a line's own snapshot water_type is null (pre-
+  // water_type-field invoice). Never mutates the frozen snapshot.
+  fallbackWaterType?: WaterType | null;
 }) {
+  // Presentation-only: collapse per-trip lines into grouped summary rows
+  // (one row per project rate — see lib/invoiceDisplay.ts). VAT is NOT shown
+  // per row — it appears only in the document-level totals passed in via
+  // `totals` (untouched money logic). Charge lines still render one row each.
+  const rows = groupInvoiceLines(lines, fallbackWaterType);
+
   return (
     <section className="space-y-2 break-inside-avoid">
       <h3 className="text-xs font-semibold uppercase tracking-wide muted">{title}</h3>
@@ -644,44 +670,72 @@ function LineTable({
             <tr>
               <TH>Date</TH>
               <TH>Description</TH>
+              <TH>Type</TH>
+              <TH>Quantity</TH>
+              <TH>Price</TH>
               <TH>Amount</TH>
-              <TH>VAT</TH>
               {editable && <TH></TH>}
             </tr>
           </thead>
           <tbody>
-            {lines.length === 0 ? (
+            {rows.length === 0 ? (
               <tr>
                 <TD className="muted">Nothing here.</TD>
+                <TD>{""}</TD>
+                <TD>{""}</TD>
                 <TD>{""}</TD>
                 <TD>{""}</TD>
                 <TD>{""}</TD>
                 {editable && <TD>{""}</TD>}
               </tr>
             ) : (
-              lines.map((l) => (
-                <tr key={l.id}>
-                  <TD>{l.trip_date ?? <span className="muted">—</span>}</TD>
-                  <TD>{l.description}</TD>
-                  <TD className="tabular-nums">{formatSar(l.amount_sar)}</TD>
-                  <TD className="tabular-nums muted">{formatSar(l.vat_sar)}</TD>
-                  {editable && (
+              rows.map((r) =>
+                r.type === "trip-group" ? (
+                  <tr key={r.key}>
+                    <TD>{r.periodLabel}</TD>
                     <TD>
-                      {l.kind === "charge" && onRemoveCharge && (
-                        <button type="button" onClick={() => onRemoveCharge(l.id)} className="muted hover:text-rose-600 dark:hover:text-rose-400 no-print">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                      {r.firstTripId ? (
+                        <TripRefLink tripId={r.firstTripId} label={r.refRangeLabel} />
+                      ) : (
+                        <span className="muted">{r.refRangeLabel}</span>
                       )}
                     </TD>
-                  )}
-                </tr>
-              ))
+                    <TD>{r.typeLabel}</TD>
+                    <TD className="tabular-nums">{r.quantity}</TD>
+                    <TD className="tabular-nums">{formatSar(r.price)}</TD>
+                    <TD className="tabular-nums">{formatSar(r.amount)}</TD>
+                    {editable && <TD>{""}</TD>}
+                  </tr>
+                ) : (
+                  <tr key={r.key}>
+                    <TD>{r.dateLabel === "—" ? <span className="muted">—</span> : r.dateLabel}</TD>
+                    <TD>{r.description}</TD>
+                    <TD className="muted">—</TD>
+                    <TD className="muted">—</TD>
+                    <TD className="muted">—</TD>
+                    <TD className="tabular-nums">{formatSar(r.amount)}</TD>
+                    {editable && (
+                      <TD>
+                        {onRemoveCharge && (
+                          <button type="button" onClick={() => onRemoveCharge(r.id)} className="muted hover:text-rose-600 dark:hover:text-rose-400 no-print">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </TD>
+                    )}
+                  </tr>
+                ),
+              )
             )}
             <tr>
               <TD className="font-medium">{""}</TD>
               <TD className="font-medium">Subtotal / VAT / Total</TD>
+              <TD className="muted">{""}</TD>
+              <TD className="muted">{""}</TD>
               <TD className="tabular-nums font-medium">{formatSar(totals.subtotal)}</TD>
-              <TD className="tabular-nums font-medium">{formatSar(totals.vat)}</TD>
+              <TD className="tabular-nums font-medium">
+                {formatSar(totals.total)} <span className="muted font-normal">(VAT {formatSar(totals.vat)})</span>
+              </TD>
               {editable && <TD>{""}</TD>}
             </tr>
           </tbody>

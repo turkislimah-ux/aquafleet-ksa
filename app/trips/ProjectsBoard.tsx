@@ -17,7 +17,7 @@
 // internals are unchanged — they just receive fewer trips. Stage changes funnel
 // through setTripStage (Start trip -> Mark in transit -> Mark delivered).
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   MapPin, Plus, Users, Play, Truck, Check, Droplet, ChevronLeft, ChevronRight, ChevronDown, Calendar, History,
@@ -39,6 +39,8 @@ import {
 import { type DriverState, DRIVER_STATE_LABELS } from "@/lib/driver-state";
 import { type LeavePeriod } from "@/lib/leave";
 import { pillColor } from "@/lib/project-colors";
+import { formatTripRef } from "@/lib/trip-ref";
+import { useIncomingTripHighlight } from "@/lib/tripHighlight";
 import { setTripStage, setTripStation, deleteTrip } from "./actions";
 import CreateTripForm from "./CreateTripForm";
 import NewProjectModal from "./NewProjectModal";
@@ -220,6 +222,8 @@ function TripCard({
   stations,
   onStationChange,
   onOpenPicker,
+  highlighted,
+  onHighlightHover,
 }: {
   trip: TripRow;
   ratePerTrip: number;
@@ -243,6 +247,11 @@ function TripCard({
   // e.stopPropagation() so they keep firing their OWN action instead of also
   // opening the picker.
   onOpenPicker: () => void;
+  // Clickable-ref-from-invoice highlight (Finance polish batch A —
+  // lib/tripHighlight.ts). Cleared on hover, never on click, so the picker
+  // still opens normally.
+  highlighted?: boolean;
+  onHighlightHover?: () => void;
 }) {
   const s = STAGE_STYLES[trip.stage];
   // Demo: t.tankSizeM3 || truck.capacityM3. Trip's own tank size wins; truck capacity is the fallback.
@@ -393,9 +402,11 @@ function TripCard({
 
   return (
     <div
+      id={highlighted ? `trip-card-${trip.id}` : undefined}
       role="button"
       tabIndex={0}
       onClick={onOpenPicker}
+      onMouseEnter={highlighted ? onHighlightHover : undefined}
       onKeyDown={(e) => {
         // Only the card itself, not a nested control (button/select) that
         // already handles its own key. Enter/Space opens the picker, same as
@@ -411,17 +422,22 @@ function TripCard({
         // .kanban-card: flat neutral border, no per-card phase color) — color
         // lives on the column (StageColumn) and the action button/paid-badge.
         "card p-3 text-sm w-full text-start cursor-pointer transition",
-        "hover:ring-1 hover:ring-brand-500/30 hover:bg-black/[0.015] dark:hover:bg-white/[0.02]",
+        "hover:ring-1 hover:ring-brand-500/30",
+        "hover:bg-black/[0.015] dark:hover:bg-white/[0.02]",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50",
         trip.stage === "delivered" && "opacity-[0.85]",
-        blurred && "opacity-50 grayscale-[0.5]"
+        blurred && "opacity-50 grayscale-[0.5]",
+        // Clickable-ref-from-invoice highlight (Finance polish batch A/C) —
+        // clears on hover, never on click. `.trip-highlight` (globals.css)
+        // not a Tailwind ring — see that file for why.
+        highlighted && "trip-highlight"
       )}
     >
       <div className="flex items-center justify-between gap-2">
         {/* Ref — plain bold mono text, no pill (matches preview/app.css
             .kanban-ref: font-weight:600, no background/color). */}
         <span className="font-mono text-xs font-semibold">
-          {trip.ref ?? <span className="muted font-sans opacity-80">No ref</span>}
+          {trip.ref ? formatTripRef(trip.ref) : <span className="muted font-sans opacity-80">No ref</span>}
         </span>
         <span className="font-mono text-xs muted truncate">
           {showPlate ? trip.truckPlate ?? "—" : "—"}
@@ -480,6 +496,8 @@ function StageColumn({
   onAdvance,
   onStationChange,
   onOpenPicker,
+  highlightedTripId,
+  onHighlightHover,
 }: {
   stage: TripStage;
   cards: TripRow[];
@@ -492,6 +510,9 @@ function StageColumn({
   onAdvance: (tripId: string, to: TripStage) => void;
   onStationChange: (tripId: string, station: string) => void;
   onOpenPicker: (trip: TripRow) => void;
+  // Clickable-ref-from-invoice highlight (Finance polish batch A).
+  highlightedTripId?: string | null;
+  onHighlightHover?: () => void;
 }) {
   const s = STAGE_STYLES[stage];
   return (
@@ -528,6 +549,8 @@ function StageColumn({
               stations={stations}
               onStationChange={(station) => onStationChange(t.id, station)}
               onOpenPicker={() => onOpenPicker(t)}
+              highlighted={t.id === highlightedTripId}
+              onHighlightHover={onHighlightHover}
             />
           ))
         )}
@@ -651,7 +674,7 @@ function PhasePickerModal({
             <div className="flex items-start justify-between gap-2">
               <div>
                 <h2 className="text-lg font-semibold">Move trip</h2>
-                <p className="text-xs muted font-mono mt-0.5">{trip.ref ?? "No ref"}</p>
+                <p className="text-xs muted font-mono mt-0.5">{formatTripRef(trip.ref)}</p>
               </div>
               <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]" aria-label="Close">
                 <X className="h-5 w-5" />
@@ -844,7 +867,7 @@ function PhasePickerModal({
               </button>
             </div>
             <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-700 dark:text-rose-300">
-              This permanently deletes trip <b className="font-mono">{trip.ref ?? "this trip"}</b>. This cannot be
+              This permanently deletes trip <b className="font-mono">{trip.ref ? formatTripRef(trip.ref) : "this trip"}</b>. This cannot be
               undone — there is no Archive to restore it from.
             </div>
             {deleteErr && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{deleteErr}</p>}
@@ -885,6 +908,8 @@ function ProjectCard({
   stations,
   onStationChange,
   onOpenPicker,
+  highlightedTripId,
+  onHighlightHover,
 }: {
   project: ProjectHeader;
   trips: TripRow[];
@@ -904,6 +929,9 @@ function ProjectCard({
   stations: { key: string; name: string }[];
   onStationChange: (tripId: string, station: string) => void;
   onOpenPicker: (trip: TripRow) => void;
+  // Clickable-ref-from-invoice highlight (Finance polish batch A).
+  highlightedTripId?: string | null;
+  onHighlightHover?: () => void;
 }) {
   // Deliveries report tiles — count primary, revenue (count × rate) secondary.
   // Counts are anchored to today (computed in the parent), NOT the selected day.
@@ -1006,6 +1034,8 @@ function ProjectCard({
               onAdvance={onAdvance}
               onStationChange={onStationChange}
               onOpenPicker={onOpenPicker}
+              highlightedTripId={highlightedTripId}
+              onHighlightHover={onHighlightHover}
             />
           );
         })}
@@ -1147,6 +1177,23 @@ export default function ProjectsBoard({
   const todayKey = dayKey(new Date());
   const [selectedDay, setSelectedDay] = useState(todayKey);
   const [weekStart, setWeekStart] = useState(() => weekStartOf(todayKey));
+
+  // Clickable-ref-from-invoice highlight (Finance polish batch A — lib/tripHighlight.ts).
+  // Board is day-scoped (dayTrips above), so landing on a highlighted trip must
+  // also jump the calendar to that trip's own day, not just scroll/ring it.
+  const { highlightedTripId, correctedDay, clearHighlight } = useIncomingTripHighlight(trips);
+  useEffect(() => {
+    if (correctedDay && correctedDay !== selectedDay) {
+      setSelectedDay(correctedDay);
+      setWeekStart(weekStartOf(correctedDay));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [correctedDay]);
+  useEffect(() => {
+    if (!highlightedTripId) return;
+    const el = document.getElementById(`trip-card-${highlightedTripId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightedTripId, selectedDay]);
 
   // THE single day-filter point — everything below scopes to this.
   const dayTrips = useMemo(() => trips.filter((t) => t.trip_date === selectedDay), [trips, selectedDay]);
@@ -1570,6 +1617,8 @@ export default function ProjectsBoard({
               stations={stations}
               onStationChange={changeStation}
               onOpenPicker={setPickerTrip}
+              highlightedTripId={highlightedTripId}
+              onHighlightHover={clearHighlight}
             />
           ))}
 
@@ -1602,6 +1651,8 @@ export default function ProjectsBoard({
                       onAdvance={advance}
                       onStationChange={changeStation}
                       onOpenPicker={setPickerTrip}
+                      highlightedTripId={highlightedTripId}
+                      onHighlightHover={clearHighlight}
                     />
                   );
                 })}

@@ -43,6 +43,14 @@ body {
 .muted { color: rgb(var(--muted)); }
 .border-app { border-color: rgb(var(--border)); }
 
+/* Trip-highlight ring: outline, not a Tailwind ring — .card's box-shadow
+   below always overwrote a ring's box-shadow (same specificity, later rule). */
+.trip-highlight {
+  outline: 2px solid #229dff;
+  outline-offset: 2px;
+  border-radius: 0.875rem;
+}
+
 .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 4px; }
 
@@ -139,4 +147,32 @@ body {
     print-color-adjust: exact !important;
   }
   #invoice-print table tr { break-inside: avoid; }
+
+  /* Statement (Finance polish batch A) — same portal/paginate pattern as
+     invoice/breakdown above, third independent id/class/marker set. */
+  #statement-print, #statement-print * { visibility: visible !important; }
+  body.printing-statement > *:not(.statement-print-portal) { display: none !important; }
+
+  .statement-print-portal,
+  .statement-print-portal > * {
+    position: static !important;
+    inset: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  #statement-print {
+    position: static !important;
+    margin: 0;
+    padding: 1rem;
+    max-height: none !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  #statement-print table tr { break-inside: avoid; }
 }

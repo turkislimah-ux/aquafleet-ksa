@@ -145,21 +145,26 @@ relevant skill(s) **when the task calls for it**:
        eat the card's own phase-picker click).
   - Turki verifies against the demo image before commit.
 
-- **Finance/Invoice PRD** is committed at `.planning/finance-invoice-spec.md`.
-  - **Prepaid invoicing: COMPLETE end-to-end, through commit `815c541`.** Data model
-    (migration `0025`), project popup + `payment_mode` (migration `0026`), Finance tab,
-    prepaid ledger, covered/unpaid engine, VAT, invoice lifecycle (migration `0027`) +
-    full UI (draft/review/confirm/pay/void, print, mailto). All money-logic harnesses
-    green.
+- **Finance/Invoice PRD** is committed at `.planning/finance-invoice-spec.md` —
+  **COMPLETE end-to-end, through commit `0562d2a`.** Data model (migration `0025`),
+  project popup + `payment_mode` (migration `0026`), Finance tab, prepaid ledger,
+  covered/unpaid engine, VAT, invoice lifecycle (migration `0027`) + reserve-at-draft
+  and paid-invoice lock (migration `0030`), full UI (draft/review/confirm/pay/void,
+  print, mailto) — **both prepaid and postpaid modes**, customer/company email
+  templates (migrations `0028`/`0029`), and bilingual (EN/AR) PDF export (`lib/pdf.ts`,
+  `lib/invoicePdfTemplate.ts`, migration `0031` — `invoice-pdfs` bucket). All
+  money-logic harnesses green.
+  - **Remaining setup (not code — runtime config):** PDF export code is done but
+    needs a **PDFShift account + `PDF_API_KEY`** in `.env.local` (Turki's action)
+    before real PDF output can be verified. Until then, Download PDF shows a graceful
+    "PDF service not configured" message.
   - **Deferred — Finance:**
-    1. Customer email + company/user email fields. No customer has an email yet and no
-       field exists to set one, so the invoice Email/mailto button stays disabled. Customer
-       email likely belongs in the Customer section of the 4-section project popup; company
-       email in `company_settings`.
-    2. Postpaid invoicing — own commit. The covered/unpaid engine is prepaid-only.
-    3. PDF generation — print is browser-print for now. Proof-of-payment storage upload
-       already works.
-    4. Effective-dated commission config — still deferred (commission, not invoicing).
+    1. Send-from-domain email (real outbound sending, e.g. via a transactional email
+       provider) — current email is mailto-only (opens the user's own mail client).
+       Separate project, not blocking.
+    2. Full Settings screen — `company_settings.email` today only has the minimal
+       get/set pair built for the invoice email templates (0029), not a real settings UI.
+    3. Effective-dated commission config — still deferred (commission, not invoicing).
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
   touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`

@@ -57,7 +57,7 @@
 // balance when it was walked by splitCoveredUnpaid — this filter only hides
 // it from THIS invoice's line items, it doesn't un-consume it).
 
-import { consumingTrips, splitCoveredUnpaid, type ConsumingTrip, type TopupLite } from "./prepaid";
+import { consumingTrips, splitCoveredUnpaid, type ConsumingTrip, type ConsumptionEntry, type TopupLite } from "./prepaid";
 import { calculateVat, type VatLineItem, type VatLinePreview } from "./vat";
 import type { InvoiceStatus } from "./db-types";
 
@@ -90,6 +90,11 @@ export type InvoiceLine = {
   description: string;
   amount_sar: number; // pre-VAT
   vat_sar: number; // display-only
+  // Additive, display-only (Finance polish batch A). null for charge lines.
+  // Never read by any total/VAT math above — passenger data for the
+  // grouped-row/clickable-ref UI only.
+  ref?: string | null;
+  water_type?: "potable" | "non_potable" | null;
 };
 
 export type InvoiceTableTotals = {
@@ -149,18 +154,23 @@ function chargesToVatItems(charges: SpecialChargeInput[]): VatLineItem[] {
   return charges.map((c) => ({ id: c.id, description: c.label, amount_sar: c.amount_sar }));
 }
 
+type TripPassenger = { trip_date: string; ref?: string | null; water_type?: "potable" | "non_potable" | null };
+
 function toLine(
   v: VatLinePreview,
   kind: "trip" | "charge",
-  tripDateById: Map<string, string>,
+  tripInfoById: Map<string, TripPassenger>,
 ): InvoiceLine {
+  const info = tripInfoById.get(v.id);
   return {
     id: v.id,
     kind,
-    trip_date: tripDateById.get(v.id) ?? null,
+    trip_date: info?.trip_date ?? null,
     description: v.description ?? "",
     amount_sar: v.amount_sar,
     vat_sar: v.lineVat,
+    ref: info?.ref ?? null,
+    water_type: info?.water_type ?? null,
   };
 }
 
@@ -189,8 +199,8 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   const reservedElsewhere = new Set(reservedElsewhereTripIds ?? []);
   const notReservedElsewhere = (e: { id: string }) => !reservedElsewhere.has(e.id);
 
-  let coveredEntries: { id: string; trip_date: string; amount: number }[] = [];
-  let unpaidTripEntries: { id: string; trip_date: string; amount: number }[] = [];
+  let coveredEntries: ConsumptionEntry[] = [];
+  let unpaidTripEntries: ConsumptionEntry[] = [];
 
   if (paymentMode === "prepaid") {
     const split = splitCoveredUnpaid(topups, trips, periodEnd);
@@ -200,8 +210,13 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     unpaidTripEntries = consumingTrips(trips, periodEnd).filter((e) => inPeriod(e.trip_date)).filter(notReservedElsewhere);
   }
 
-  const coveredTripDateById = new Map(coveredEntries.map((e) => [e.id, e.trip_date]));
-  const unpaidTripDateById = new Map(unpaidTripEntries.map((e) => [e.id, e.trip_date]));
+  const toPassenger = (e: ConsumptionEntry): TripPassenger => ({
+    trip_date: e.trip_date,
+    ref: e.ref,
+    water_type: e.water_type,
+  });
+  const coveredTripInfoById = new Map(coveredEntries.map((e) => [e.id, toPassenger(e)]));
+  const unpaidTripInfoById = new Map(unpaidTripEntries.map((e) => [e.id, toPassenger(e)]));
 
   const coveredItems = toVatItems(coveredEntries);
   const chargeItems = chargesToVatItems(specialCharges);
@@ -211,9 +226,9 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   const amountDueVat = calculateVat(unpaidItems); // = the Unpaid table's own totals
   const grandVat = calculateVat([...coveredItems, ...unpaidItems]);
 
-  const coveredLines = coveredVat.lines.map((l) => toLine(l, "trip", coveredTripDateById));
+  const coveredLines = coveredVat.lines.map((l) => toLine(l, "trip", coveredTripInfoById));
   const unpaidLines = amountDueVat.lines.map((l) =>
-    toLine(l, unpaidTripDateById.has(l.id) ? "trip" : "charge", unpaidTripDateById),
+    toLine(l, unpaidTripInfoById.has(l.id) ? "trip" : "charge", unpaidTripInfoById),
   );
 
   return {

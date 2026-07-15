@@ -372,6 +372,11 @@ export type InvoiceLineSnapshot = {
   description: string;
   amount_sar: number; // pre-VAT
   vat_sar: number; // display-only per-line VAT (see lib/vat.ts)
+  // Additive, display-only (Finance polish batch A) — null for charge lines
+  // and for lines snapshotted before this field existed (older confirmed
+  // invoices simply show "No ref" — acceptable degradation, no backfill).
+  ref?: string | null;
+  water_type?: "potable" | "non_potable" | null;
 };
 
 // invoices row (0025, widened 0027). Line items are NEVER stored pre-confirm

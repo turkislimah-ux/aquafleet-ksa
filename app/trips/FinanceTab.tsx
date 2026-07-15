@@ -20,6 +20,7 @@ import { formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { PAYMENT_MODE_LABELS, type PaymentMode } from "@/lib/db-types";
 import { derivedBalance, type ConsumingTrip, type TopupStatementInput } from "@/lib/prepaid";
+import type { WaterType } from "@/lib/db-types";
 import TopupModal, { type TopupCustomerOption } from "./TopupModal";
 import StatementModal from "./StatementModal";
 import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
@@ -32,8 +33,20 @@ type ProjectLite = {
   name: string;
   rate_per_trip_sar: number;
   payment_mode: PaymentMode | null;
+  // Display-only fallback source (Finance polish batch C) — the project's
+  // CURRENT water type, used when a trip/line's own water_type is null.
+  water_type: WaterType | null;
 };
-type TripLite = { id: string; project_id: string | null; trip_date: string; delivered_at: string | null };
+type TripLite = {
+  id: string;
+  project_id: string | null;
+  trip_date: string;
+  delivered_at: string | null;
+  // Additive (Finance polish batch A) — display-only, threaded into
+  // ConsumingTrip for the statement's ref link + water-type column.
+  ref?: string | null;
+  water_type?: WaterType | null;
+};
 type TopupRow = {
   id: string;
   customer_id: string;
@@ -90,14 +103,21 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
       let balance: number | null = null;
       let consuming: ConsumingTrip[] = [];
       let customerTopups: TopupStatementInput[] = [];
-      if (project && mode === "prepaid") {
+      // consuming is built for BOTH prepaid and postpaid — prepaid needs it
+      // for derivedBalance/buildStatement; postpaid needs it for the new
+      // itemized-trips statement view (no balance, no top-ups involved).
+      if (project && (mode === "prepaid" || mode === "postpaid")) {
         const projTrips = tripsByProject.get(project.id) ?? [];
         consuming = projTrips.map((t) => ({
           id: t.id,
           trip_date: t.trip_date,
           delivered_at: t.delivered_at,
           rate_sar: project.rate_per_trip_sar,
+          ref: t.ref,
+          water_type: t.water_type,
         }));
+      }
+      if (project && mode === "prepaid") {
         customerTopups = (topupsByCustomer.get(c.id) ?? []).map((t) => ({
           id: t.id,
           amount_sar: t.amount_sar,
@@ -261,20 +281,20 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
                   <TD>
                     <div className="inline-flex gap-2">
                       {r.mode === "prepaid" && (
-                        <>
-                          <Btn
-                            variant="outline"
-                            onClick={() => setTopupTarget({ id: r.customer.id, name: r.customer.name })}
-                          >
-                            Record top-up
-                          </Btn>
-                          <Btn
-                            variant="outline"
-                            onClick={() => setStatementFor({ customerId: r.customer.id, customerName: r.customer.name })}
-                          >
-                            View statement
-                          </Btn>
-                        </>
+                        <Btn
+                          variant="outline"
+                          onClick={() => setTopupTarget({ id: r.customer.id, name: r.customer.name })}
+                        >
+                          Record top-up
+                        </Btn>
+                      )}
+                      {(r.mode === "prepaid" || r.mode === "postpaid") && (
+                        <Btn
+                          variant="outline"
+                          onClick={() => setStatementFor({ customerId: r.customer.id, customerName: r.customer.name })}
+                        >
+                          View statement
+                        </Btn>
                       )}
                       {r.mode === "prepaid" || r.mode === "postpaid" ? (
                         <Btn
@@ -310,8 +330,10 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
         open={statementFor !== null}
         onClose={() => setStatementFor(null)}
         customerName={statementFor?.customerName ?? ""}
+        mode={activeStatementRow?.mode === "postpaid" ? "postpaid" : "prepaid"}
         topups={activeStatementRow?.customerTopups ?? []}
         trips={activeStatementRow?.consuming ?? []}
+        projectWaterType={activeStatementRow?.project?.water_type ?? null}
       />
 
       <InvoicesModal open={invoicesFor !== null} onClose={() => setInvoicesFor(null)} customer={invoicesFor} />

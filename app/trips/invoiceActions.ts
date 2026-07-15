@@ -14,7 +14,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type SpecialChargeInput } from "@/lib/invoice";
 import type { ConsumingTrip, TopupLite } from "@/lib/prepaid";
-import type { Invoice, CompanySettings, Customer } from "@/lib/db-types";
+import type { Invoice, CompanySettings, Customer, WaterType } from "@/lib/db-types";
 import { generateInvoicePdf, PdfServiceNotConfiguredError } from "@/lib/pdf";
 import { buildInvoicePdfHtml, type PdfInvoiceData, type PdfIdentity } from "@/lib/invoicePdfTemplate";
 
@@ -81,7 +81,10 @@ async function assembleForCustomerPeriod(params: {
   // than the one we're assembling for is excluded.
   const { data: tripRows, error: tripErr } = await supabase
     .from("trips")
-    .select("id, trip_date, delivered_at, invoice_id")
+    // ref/water_type added (Finance polish batch A) — display-only passenger
+    // data, threaded through ConsumingTrip -> InvoiceLine. Never used in any
+    // rate/VAT/total math.
+    .select("id, trip_date, delivered_at, invoice_id, ref, water_type")
     .eq("project_id", project.id);
   if (tripErr) return { error: tripErr.message };
   const trips: ConsumingTrip[] = (tripRows ?? []).map((t) => ({
@@ -89,6 +92,8 @@ async function assembleForCustomerPeriod(params: {
     trip_date: t.trip_date,
     delivered_at: t.delivered_at,
     rate_sar: project.rate_per_trip_sar,
+    ref: t.ref,
+    water_type: t.water_type,
   }));
   const reservedElsewhereTripIds = (tripRows ?? [])
     .filter((t) => t.invoice_id != null && t.invoice_id !== invoiceId)
@@ -248,11 +253,22 @@ export async function previewInvoice(invoiceId: string): Promise<ActionResult<In
 // only), this reads the frozen snapshot columns exactly as confirm_invoice()
 // wrote them, so a Confirmed invoice's displayed numbers never drift from
 // what was actually confirmed even if underlying trips change afterward.
-export async function getInvoice(invoiceId: string): Promise<ActionResult<Invoice>> {
+export async function getInvoice(invoiceId: string): Promise<ActionResult<Invoice & { projectWaterType: WaterType | null }>> {
   const supabase = createClient();
   const { data, error } = await supabase.from("invoices").select("*").eq("id", invoiceId).single();
   if (error || !data) return { error: error?.message ?? "Invoice not found." };
-  return { error: null, data: data as Invoice };
+  // Display-only fallback (Finance polish batch C): old/frozen invoice line
+  // snapshots predate the water_type field and store null for it. We resolve
+  // the project's CURRENT water_type here so the UI can show a real label
+  // instead of "—" — this never touches the frozen snapshot itself (covered_
+  // lines/unpaid_lines stay exactly as confirm_invoice() wrote them).
+  const invoice = data as Invoice;
+  const { data: project } = await supabase
+    .from("projects")
+    .select("water_type")
+    .eq("customer_id", invoice.customer_id)
+    .maybeSingle();
+  return { error: null, data: { ...invoice, projectWaterType: (project?.water_type as WaterType | null) ?? null } };
 }
 
 // Invoice history for one customer — newest period first. Powers the

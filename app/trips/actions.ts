@@ -44,7 +44,12 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
   const water_station = str(formData.get("water_station"));
   if (!water_station) return { error: "Water station is required." };
 
-  const water_type = str(formData.get("water_type")) || "potable";
+  // No hardcoded fallback here — water type must come from the project
+  // (client pre-fills it from the project's own water_type) or an explicit
+  // pick for direct-customer trips. Silently defaulting to "potable" would
+  // mask a missing/broken inheritance instead of surfacing it.
+  const water_type = str(formData.get("water_type"));
+  if (!water_type) return { error: "Water type is required." };
   if (!validWaterType(water_type)) return { error: "Invalid water type." };
 
   let count = num(formData.get("count")) || 1;
@@ -84,7 +89,8 @@ export async function updateTrip(id: string, formData: FormData): Promise<Action
   const water_station = str(formData.get("water_station"));
   if (!water_station) return { error: "Water station is required." };
 
-  const water_type = str(formData.get("water_type")) || "potable";
+  const water_type = str(formData.get("water_type"));
+  if (!water_type) return { error: "Water type is required." };
   if (!validWaterType(water_type)) return { error: "Invalid water type." };
 
   const supabase = createClient();
