@@ -333,13 +333,22 @@ export type CompanySettings = {
   updated_at: string;
 };
 
-// invoice_special_charges row (0025) — mutable while the parent invoice is
-// draft/review; frozen into invoices.special_charges_snapshot at confirm.
+// invoice_special_charges row (0025, widened 0032) — mutable while the
+// parent invoice is draft/review; frozen into invoices.special_charges_
+// snapshot at confirm. charge_date/quantity/price_sar/image_path (0032) are
+// all optional — pre-batch-B rows have none of them on file, app code falls
+// back to amount_sar/quantity=1 for display (see lib/invoice.ts). image_path
+// is an internal-only reference (a receipt photo, etc.) — never surfaced on
+// the customer-facing invoice/print/PDF.
 export type InvoiceSpecialCharge = {
   id: string;
   invoice_id: string;
   label: string;
-  amount_sar: number; // pre-VAT
+  amount_sar: number; // pre-VAT, = price_sar * quantity when both are set
+  charge_date: string | null;
+  quantity: number;
+  price_sar: number | null;
+  image_path: string | null;
   created_at: string;
 };
 
@@ -377,6 +386,12 @@ export type InvoiceLineSnapshot = {
   // invoices simply show "No ref" — acceptable degradation, no backfill).
   ref?: string | null;
   water_type?: "potable" | "non_potable" | null;
+  // Additive, display-only (Finance polish batch B) — charge lines only,
+  // undefined for older frozen snapshots predating this field. image_path
+  // is internal-only, never read by the print/PDF/mailto render paths.
+  quantity?: number | null;
+  price_sar?: number | null;
+  image_path?: string | null;
 };
 
 // invoices row (0025, widened 0027). Line items are NEVER stored pre-confirm

@@ -74,10 +74,23 @@ export function canEditSpecialCharges(status: InvoiceStatus): boolean {
   return status === "draft" || status === "review";
 }
 
+// Finance polish batch B: special charges now carry the invoice table's own
+// shape (date/description/quantity/price/amount) instead of a bare
+// label+amount. `label` stays the underlying field name (matches the DB
+// column — no rename) but is presented as "description" in the UI, per the
+// item 3 spec. `amount_sar` remains the ONE figure the VAT engine reads
+// (chargesToVatItems below) — quantity/price_sar are display/input fields
+// only, computed into amount_sar (= price * qty) by the caller BEFORE this
+// engine ever sees it. This file's math boundary is unchanged: it still
+// only ever sums amount_sar, never quantity * price itself.
 export type SpecialChargeInput = {
   id: string;
   label: string;
-  amount_sar: number; // pre-VAT
+  amount_sar: number; // pre-VAT, = price_sar * quantity (computed by caller)
+  charge_date?: string | null;
+  quantity?: number | null; // defaults to 1 for pre-batch-B rows (see migration 0032)
+  price_sar?: number | null; // defaults to amount_sar for pre-batch-B rows (no price on file)
+  image_path?: string | null; // internal-only — never surfaced on customer-facing output
 };
 
 // A single displayable line — trip or special charge — with its own
@@ -95,6 +108,15 @@ export type InvoiceLine = {
   // grouped-row/clickable-ref UI only.
   ref?: string | null;
   water_type?: "potable" | "non_potable" | null;
+  // Additive, display-only (Finance polish batch B) — charge lines only.
+  // quantity/price_sar are the INPUT fields the charge was entered with;
+  // amount_sar above stays the one figure the VAT engine sums (= price_sar *
+  // quantity, computed by the caller before this file ever sees it — see
+  // SpecialChargeInput). image_path is an internal-only reference, never
+  // read by any customer-facing render path (print/PDF/mailto).
+  quantity?: number | null;
+  price_sar?: number | null;
+  image_path?: string | null;
 };
 
 export type InvoiceTableTotals = {
@@ -156,12 +178,22 @@ function chargesToVatItems(charges: SpecialChargeInput[]): VatLineItem[] {
 
 type TripPassenger = { trip_date: string; ref?: string | null; water_type?: "potable" | "non_potable" | null };
 
-function toLine(
-  v: VatLinePreview,
-  kind: "trip" | "charge",
-  tripInfoById: Map<string, TripPassenger>,
-): InvoiceLine {
-  const info = tripInfoById.get(v.id);
+// Unified per-line extra-info shape (Finance polish batch B) — trip lines
+// populate trip_date/ref/water_type, charge lines populate trip_date (from
+// charge_date — reuses the same display field, see below)/quantity/
+// price_sar/image_path. One map covers both since trip ids and charge ids
+// never collide (distinct id spaces).
+type LineExtra = {
+  trip_date?: string | null;
+  ref?: string | null;
+  water_type?: "potable" | "non_potable" | null;
+  quantity?: number | null;
+  price_sar?: number | null;
+  image_path?: string | null;
+};
+
+function toLine(v: VatLinePreview, kind: "trip" | "charge", infoById: Map<string, LineExtra>): InvoiceLine {
+  const info = infoById.get(v.id);
   return {
     id: v.id,
     kind,
@@ -171,6 +203,12 @@ function toLine(
     vat_sar: v.lineVat,
     ref: info?.ref ?? null,
     water_type: info?.water_type ?? null,
+    // Charges: quantity/price_sar default to 1/amount_sar for a pre-batch-B
+    // row that has neither on file (see migration 0032 header). Trips never
+    // carry these — left undefined, same as before.
+    quantity: kind === "charge" ? info?.quantity ?? 1 : undefined,
+    price_sar: kind === "charge" ? info?.price_sar ?? v.amount_sar : undefined,
+    image_path: kind === "charge" ? info?.image_path ?? null : undefined,
   };
 }
 
@@ -215,8 +253,22 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     ref: e.ref,
     water_type: e.water_type,
   });
-  const coveredTripInfoById = new Map(coveredEntries.map((e) => [e.id, toPassenger(e)]));
-  const unpaidTripInfoById = new Map(unpaidTripEntries.map((e) => [e.id, toPassenger(e)]));
+  const coveredTripInfoById = new Map<string, LineExtra>(coveredEntries.map((e) => [e.id, toPassenger(e)]));
+  const unpaidTripInfoById = new Map<string, LineExtra>(unpaidTripEntries.map((e) => [e.id, toPassenger(e)]));
+  // Charges never appear in the Covered table (they aren't trips) — only
+  // merged into the Unpaid/Amount Due info map.
+  const chargeInfoById = new Map<string, LineExtra>(
+    specialCharges.map((c) => [
+      c.id,
+      {
+        trip_date: c.charge_date ?? null,
+        quantity: c.quantity ?? 1,
+        price_sar: c.price_sar ?? c.amount_sar,
+        image_path: c.image_path ?? null,
+      },
+    ]),
+  );
+  const unpaidInfoById = new Map<string, LineExtra>([...unpaidTripInfoById, ...chargeInfoById]);
 
   const coveredItems = toVatItems(coveredEntries);
   const chargeItems = chargesToVatItems(specialCharges);
@@ -228,7 +280,7 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
 
   const coveredLines = coveredVat.lines.map((l) => toLine(l, "trip", coveredTripInfoById));
   const unpaidLines = amountDueVat.lines.map((l) =>
-    toLine(l, unpaidTripInfoById.has(l.id) ? "trip" : "charge", unpaidTripInfoById),
+    toLine(l, unpaidTripInfoById.has(l.id) ? "trip" : "charge", unpaidInfoById),
   );
 
   return {

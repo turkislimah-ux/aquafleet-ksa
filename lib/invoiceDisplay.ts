@@ -1,4 +1,4 @@
-// PRESENTATION-ONLY grouping for the invoice line tables (Finance polish
+// PRESENTATION-ONLY grouping for the invoice trip-line table (Finance polish
 // batch A). Takes the already-computed InvoiceLine[]/InvoiceLineSnapshot[]
 // (money math already final — lib/invoice.ts) and groups trip lines into as
 // few summary rows as correctness allows, for display. Never recomputes any
@@ -13,7 +13,9 @@
 // DISTINCT rates would need separate rows (not built yet — deferred to a
 // later batch since today every trip line in a table shares one rate; see
 // finance-invoice-spec.md-referenced note in ProjectsBoard/invoiceActions).
-// Charge lines are never grouped — one row each, unchanged.
+//
+// Trip-only (Finance polish batch B) — special charges now render in their
+// own SpecialChargesSection (InvoiceDetailModal.tsx), never through here.
 
 import { WATER_TYPE_LABELS, type WaterType } from "./db-types";
 import { tripRefRangeLabel } from "./trip-ref";
@@ -28,26 +30,17 @@ export type DisplayLine = {
   water_type?: WaterType | null;
 };
 
-export type GroupedRow =
-  | {
-      type: "trip-group";
-      key: string;
-      periodLabel: string; // e.g. "12 Jun – 30 Jun 2026" or a single date
-      refRangeLabel: string;
-      firstTripId: string; // for the clickable range -> jumps to the first trip
-      typeLabel: string; // water type label, or "—" for a pre-water_type frozen snapshot
-      quantity: number;
-      price: number; // per-trip rate
-      amount: number; // price * quantity (== sum of the group's amount_sar, exact)
-    }
-  | {
-      type: "charge";
-      key: string;
-      id: string;
-      dateLabel: string;
-      description: string;
-      amount: number;
-    };
+export type GroupedRow = {
+  type: "trip-group";
+  key: string;
+  periodLabel: string; // e.g. "12 Jun – 30 Jun 2026" or a single date
+  refRangeLabel: string;
+  firstTripId: string; // for the clickable range -> jumps to the first trip
+  typeLabel: string; // water type label, or "—" for a pre-water_type frozen snapshot
+  quantity: number;
+  price: number; // per-trip rate
+  amount: number; // price * quantity (== sum of the group's amount_sar, exact)
+};
 
 function formatDateLabel(d: string | null): string {
   if (!d) return "—";
@@ -63,7 +56,6 @@ function formatDateLabel(d: string | null): string {
  */
 export function groupInvoiceLines(lines: DisplayLine[], fallbackWaterType?: WaterType | null): GroupedRow[] {
   const tripLines = lines.filter((l) => l.kind === "trip");
-  const chargeLines = lines.filter((l) => l.kind === "charge");
 
   // Group trip lines by their per-trip rate (amount_sar) — see header.
   const byRate = new Map<number, DisplayLine[]>();
@@ -107,14 +99,5 @@ export function groupInvoiceLines(lines: DisplayLine[], fallbackWaterType?: Wate
     });
   }
 
-  const charges: GroupedRow[] = chargeLines.map((l) => ({
-    type: "charge",
-    key: `charge-${l.id}`,
-    id: l.id,
-    dateLabel: formatDateLabel(l.trip_date),
-    description: l.description,
-    amount: l.amount_sar,
-  }));
-
-  return [...groups, ...charges];
+  return groups;
 }

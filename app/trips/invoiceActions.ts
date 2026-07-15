@@ -17,11 +17,13 @@ import type { ConsumingTrip, TopupLite } from "@/lib/prepaid";
 import type { Invoice, CompanySettings, Customer, WaterType } from "@/lib/db-types";
 import { generateInvoicePdf, PdfServiceNotConfiguredError } from "@/lib/pdf";
 import { buildInvoicePdfHtml, type PdfInvoiceData, type PdfIdentity } from "@/lib/invoicePdfTemplate";
+import { round2 } from "@/lib/vat";
 
 export type ActionResult<T = undefined> = { error: string | null; data?: T };
 
 const PROOF_BUCKET = "invoice-proofs";
 const PDF_BUCKET = "invoice-pdfs";
+const SPECIAL_CHARGE_IMAGE_BUCKET = "special-charge-images";
 
 // Note on runtime: this file has no `export const runtime` of its own —
 // Server Actions inherit the runtime of the Server Component page that
@@ -110,7 +112,7 @@ async function assembleForCustomerPeriod(params: {
   if (invoiceId) {
     const { data: chargeRows, error: chargeErr } = await supabase
       .from("invoice_special_charges")
-      .select("id, label, amount_sar")
+      .select("id, label, amount_sar, charge_date, quantity, price_sar, image_path")
       .eq("invoice_id", invoiceId);
     if (chargeErr) return { error: chargeErr.message };
     specialCharges = chargeRows ?? [];
@@ -214,18 +216,93 @@ export async function deleteDraftInvoice(invoiceId: string): Promise<ActionResul
   return { error: null };
 }
 
-export async function addSpecialCharge(invoiceId: string, label: string, amountSar: number): Promise<ActionResult> {
+// Inputs now match the invoice table's shape (Finance polish batch B, item
+// 3): date/quantity/price replace the old label+amount-only form. amount_sar
+// (the figure the VAT engine actually sums — lib/invoice.ts's
+// chargesToVatItems) is computed HERE, once, at write time — round2(price *
+// qty) — never re-derived inside the money-math read path. See migration
+// 0032's header.
+// ---------------------------------------------------------------------------
+// Draft-only period edit (Finance polish batch B, item 1) — same
+// date-range picker InvoicesModal uses to CREATE an invoice, reused here to
+// CHANGE a draft's period. Re-assembles for the new range (self-excluded,
+// same convention as createDraftInvoice/setInvoiceReview) and syncs
+// reservation BEFORE writing the new period: a trip that dropped out of the
+// new range is released, a trip newly in-range is claimed, and a genuine
+// double-claim (sync_draft_reservation's conflict raise, migration 0030)
+// aborts here with the period left untouched.
+// ---------------------------------------------------------------------------
+export async function updateDraftInvoicePeriod(
+  invoiceId: string,
+  periodStart: string,
+  periodEnd: string,
+): Promise<ActionResult> {
+  const supabase = createClient();
+
+  const { data: invoice, error: invErr } = await supabase
+    .from("invoices")
+    .select("id, customer_id, status")
+    .eq("id", invoiceId)
+    .single();
+  if (invErr || !invoice) return { error: invErr?.message ?? "Invoice not found." };
+  if (invoice.status !== "draft") return { error: "Only a Draft invoice's period can be changed." };
+  if (periodEnd < periodStart) return { error: "Period end must be on or after period start." };
+
+  const { error: assembleErr, assembly } = await assembleForCustomerPeriod({
+    customerId: invoice.customer_id,
+    periodStart,
+    periodEnd,
+    invoiceId,
+  });
+  if (assembleErr || !assembly) return { error: assembleErr ?? "Could not assemble invoice for the new period." };
+
+  const { error: syncErr } = await supabase.rpc("sync_draft_reservation", {
+    p_invoice_id: invoiceId,
+    p_trip_ids: desiredReservationTripIds(assembly),
+  });
+  if (syncErr) return { error: syncErr.message };
+
+  const { error } = await supabase
+    .from("invoices")
+    .update({ period_start: periodStart, period_end: periodEnd })
+    .eq("id", invoiceId)
+    .eq("status", "draft");
+  if (error) return { error: error.message };
+  revalidatePath("/trips");
+  return { error: null };
+}
+
+// Returns the new row's id (Finance polish batch D) — lets the caller chain
+// an immediate uploadSpecialChargeImage() when the add-charge form has a
+// staged file, all within one form submit ("attach while adding").
+export async function addSpecialCharge(
+  invoiceId: string,
+  label: string,
+  chargeDate: string | null,
+  quantity: number,
+  priceSar: number,
+): Promise<ActionResult<{ id: string }>> {
   const supabase = createClient();
   const { data: invoice } = await supabase.from("invoices").select("status").eq("id", invoiceId).single();
   if (!invoice || !canEditSpecialCharges(invoice.status)) {
     return { error: "Special charges can only be edited while the invoice is Draft or Review." };
   }
-  const { error } = await supabase
+  const amountSar = round2(priceSar * quantity);
+  const { data, error } = await supabase
     .from("invoice_special_charges")
-    .insert({ invoice_id: invoiceId, label, amount_sar: amountSar });
-  if (error) return { error: error.message };
+    .insert({
+      invoice_id: invoiceId,
+      label,
+      amount_sar: amountSar,
+      charge_date: chargeDate,
+      quantity,
+      price_sar: priceSar,
+    })
+    .select("id")
+    .single();
+  if (error || !data) return { error: error?.message ?? "Could not add the charge." };
   revalidatePath("/trips");
-  return { error: null };
+  return { error: null, data: { id: data.id } };
 }
 
 export async function removeSpecialCharge(invoiceId: string, chargeId: string): Promise<ActionResult> {
@@ -234,10 +311,74 @@ export async function removeSpecialCharge(invoiceId: string, chargeId: string): 
   if (!invoice || !canEditSpecialCharges(invoice.status)) {
     return { error: "Special charges can only be edited while the invoice is Draft or Review." };
   }
+  // Best-effort image cleanup — read the path first so a storage failure
+  // never blocks the row delete itself (an orphaned Storage object is a
+  // harmless leak; a charge stuck because Storage hiccuped is not).
+  const { data: charge } = await supabase
+    .from("invoice_special_charges")
+    .select("image_path")
+    .eq("id", chargeId)
+    .maybeSingle();
   const { error } = await supabase.from("invoice_special_charges").delete().eq("id", chargeId);
+  if (error) return { error: error.message };
+  if (charge?.image_path) {
+    await supabase.storage.from(SPECIAL_CHARGE_IMAGE_BUCKET).remove([charge.image_path]);
+  }
+  revalidatePath("/trips");
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Special charge image — optional, internal-only attachment (e.g. a receipt
+// photo). Never surfaced on the customer-facing invoice/print/PDF (migration
+// 0032 header) — this pair is only ever called from an internal control next
+// to the charge row. Private bucket + short-lived signed URL, same pattern
+// as getProofSignedUrl()/markInvoicePaid() above. Storage key is app-
+// generated (`${invoiceId}/${chargeId}-${timestamp}.${ext}`), never the raw
+// uploaded filename — the exact thing that broke before (0032 header).
+// ---------------------------------------------------------------------------
+export async function uploadSpecialChargeImage(invoiceId: string, chargeId: string, formData: FormData): Promise<ActionResult> {
+  const supabase = createClient();
+  const { data: invoice } = await supabase.from("invoices").select("status").eq("id", invoiceId).single();
+  if (!invoice || !canEditSpecialCharges(invoice.status)) {
+    return { error: "Special charges can only be edited while the invoice is Draft or Review." };
+  }
+  const file = formData.get("imageFile");
+  if (!(file instanceof File) || file.size === 0) return { error: "No image file provided." };
+
+  const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
+  const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
+  const imagePath = `${invoiceId}/${chargeId}-${Date.now()}.${ext}`;
+
+  const { error: uploadErr } = await supabase.storage.from(SPECIAL_CHARGE_IMAGE_BUCKET).upload(imagePath, file, {
+    contentType: file.type || "application/octet-stream",
+  });
+  if (uploadErr) return { error: `Image upload failed: ${uploadErr.message}` };
+
+  const { error } = await supabase
+    .from("invoice_special_charges")
+    .update({ image_path: imagePath })
+    .eq("id", chargeId);
   if (error) return { error: error.message };
   revalidatePath("/trips");
   return { error: null };
+}
+
+export async function getSpecialChargeImageSignedUrl(chargeId: string): Promise<ActionResult<{ url: string }>> {
+  const supabase = createClient();
+  const { data: charge, error: chargeErr } = await supabase
+    .from("invoice_special_charges")
+    .select("image_path")
+    .eq("id", chargeId)
+    .single();
+  if (chargeErr || !charge) return { error: chargeErr?.message ?? "Special charge not found." };
+  if (!charge.image_path) return { error: "No image on file for this charge." };
+
+  const { data, error } = await supabase.storage
+    .from(SPECIAL_CHARGE_IMAGE_BUCKET)
+    .createSignedUrl(charge.image_path, 300);
+  if (error || !data) return { error: error?.message ?? "Could not generate a link to the image." };
+  return { error: null, data: { url: data.signedUrl } };
 }
 
 // Live preview for the UI (5c) — draft AND review both stay live-recomputed,
@@ -352,6 +493,45 @@ export async function revertInvoiceToDraft(invoiceId: string): Promise<ActionRes
   if (!data) return { error: "Invoice is not in review status — cannot revert to draft." };
   revalidatePath("/trips");
   return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Undelivered-trip blockers (Finance polish batch B, item 2) — mirrors the
+// SERVER-SIDE guard added to confirm_invoice() (migration 0032) predicate
+// for predicate: same project (via customer_id), same period bounds, same
+// delivered_at is null filter — so the UI's block reason and the DB's hard
+// block can never disagree. Note consumingTrips()/splitCoveredUnpaid()
+// (lib/prepaid.ts) filter OUT undelivered trips entirely, so this can't be
+// derived from the assembly — it's a separate raw query.
+// ---------------------------------------------------------------------------
+export type UndeliveredTripBlocker = { id: string; trip_date: string; ref: string | null };
+
+export async function getUndeliveredTripsForInvoice(invoiceId: string): Promise<ActionResult<UndeliveredTripBlocker[]>> {
+  const supabase = createClient();
+  const { data: invoice, error: invErr } = await supabase
+    .from("invoices")
+    .select("customer_id, period_start, period_end")
+    .eq("id", invoiceId)
+    .single();
+  if (invErr || !invoice) return { error: invErr?.message ?? "Invoice not found." };
+
+  const { data: project, error: projErr } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("customer_id", invoice.customer_id)
+    .single();
+  if (projErr || !project) return { error: projErr?.message ?? "No project found for this customer." };
+
+  const { data: tripRows, error: tripErr } = await supabase
+    .from("trips")
+    .select("id, trip_date, ref")
+    .eq("project_id", project.id)
+    .gte("trip_date", invoice.period_start)
+    .lte("trip_date", invoice.period_end)
+    .is("delivered_at", null)
+    .order("trip_date", { ascending: true });
+  if (tripErr) return { error: tripErr.message };
+  return { error: null, data: (tripRows ?? []) as UndeliveredTripBlocker[] };
 }
 
 // ---------------------------------------------------------------------------

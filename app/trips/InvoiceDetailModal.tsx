@@ -16,10 +16,11 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { X, Printer, Mail, Plus, Trash2, AlertTriangle, Download } from "lucide-react";
+import { X, Printer, Mail, Plus, Trash2, AlertTriangle, Download, Image as ImageIcon, Paperclip } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
-import { formatSar } from "@/lib/utils";
+import { formatSar, todayKey } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
+import { round2 } from "@/lib/vat";
 import { groupInvoiceLines } from "@/lib/invoiceDisplay";
 import TripRefLink from "@/components/TripRefLink";
 import {
@@ -44,6 +45,11 @@ import {
   getProofSignedUrl,
   getCompanyEmail,
   getInvoicePdf,
+  updateDraftInvoicePeriod,
+  getUndeliveredTripsForInvoice,
+  uploadSpecialChargeImage,
+  getSpecialChargeImageSignedUrl,
+  type UndeliveredTripBlocker,
 } from "./invoiceActions";
 
 // Fallback company email — used in template bodies/signatures whenever
@@ -107,9 +113,34 @@ export default function InvoiceDetailModal({
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // Add-charge form (draft/review only).
+  // Add-charge form (draft/review only) — shape matches the invoice table
+  // (Finance polish batch B, item 3): date/description/quantity/price, with
+  // amount = price * qty computed server-side (addSpecialCharge).
   const [chargeLabel, setChargeLabel] = useState("");
-  const [chargeAmount, setChargeAmount] = useState("");
+  const [chargeDate, setChargeDate] = useState(todayKey());
+  const [chargeQty, setChargeQty] = useState("1");
+  const [chargePrice, setChargePrice] = useState("");
+  // Staged image file for the NEW charge (Finance polish batch D — "attach
+  // while adding"). Uploaded right after addSpecialCharge() resolves, inside
+  // the same onAddCharge submit. chargeImageInputKey forces the (uncontrolled)
+  // file input to remount/clear after a successful add.
+  const [chargeImageFile, setChargeImageFile] = useState<File | null>(null);
+  const [chargeImageInputKey, setChargeImageInputKey] = useState(0);
+  const [addingCharge, setAddingCharge] = useState(false);
+
+  // Draft-only period edit (item 1) — same date-range shape as
+  // InvoicesModal's "create draft" form, reused here to CHANGE a draft's
+  // period. updateDraftInvoicePeriod re-syncs reservation server-side.
+  const [editingPeriod, setEditingPeriod] = useState(false);
+  const [periodStartInput, setPeriodStartInput] = useState("");
+  const [periodEndInput, setPeriodEndInput] = useState("");
+  const [periodError, setPeriodError] = useState<string | null>(null);
+  const [savingPeriod, setSavingPeriod] = useState(false);
+
+  // Undelivered-trip blockers (item 2) — fetched only at Review, mirrors the
+  // SERVER-SIDE guard in confirm_invoice() (migration 0032) so the UI and DB
+  // can never disagree about what blocks Confirm.
+  const [blockers, setBlockers] = useState<UndeliveredTripBlocker[]>([]);
 
   // Two-step guards + inline forms for the irreversible/gated actions.
   const [confirmingConfirm, setConfirmingConfirm] = useState(false);
@@ -143,6 +174,15 @@ export default function InvoiceDetailModal({
       return;
     }
     setRaw(r.data);
+
+    // Blockers only matter at Review (what gates Confirm) — mirrors the SQL
+    // guard's exact predicate, see getUndeliveredTripsForInvoice() header.
+    if (r.data.status === "review") {
+      const b = await getUndeliveredTripsForInvoice(invoiceId);
+      setBlockers(b.data ?? []);
+    } else {
+      setBlockers([]);
+    }
 
     if (r.data.status === "draft" || r.data.status === "review") {
       const p = await previewInvoice(invoiceId);
@@ -188,7 +228,16 @@ export default function InvoiceDetailModal({
     setUnpayReason("");
     setDeletingDraft(false);
     setChargeLabel("");
-    setChargeAmount("");
+    setChargeDate(todayKey());
+    setChargeQty("1");
+    setChargePrice("");
+    setChargeImageFile(null);
+    setChargeImageInputKey((k) => k + 1);
+    setAddingCharge(false);
+    setEditingPeriod(false);
+    setPeriodError(null);
+    setSavingPeriod(false);
+    setBlockers([]);
     setEmailPickerOpen(false);
     setPdfError(null);
     load();
@@ -250,12 +299,76 @@ export default function InvoiceDetailModal({
     return true;
   }
 
+  // Two-step when an image is staged (create the charge, then upload against
+  // its new id) but still ONE form submit / one busy state from the user's
+  // point of view — "attach while adding" (Finance polish batch D). Falls
+  // back to the plain single-step add when no file was chosen.
   async function onAddCharge(e: React.FormEvent) {
     e.preventDefault();
-    if (!invoiceId || !chargeLabel.trim() || Number(chargeAmount) <= 0) return;
-    await runAction(() => addSpecialCharge(invoiceId, chargeLabel.trim(), Number(chargeAmount)));
+    const qty = Number(chargeQty);
+    const price = Number(chargePrice);
+    if (!invoiceId || !chargeLabel.trim() || qty <= 0 || price < 0) return;
+    setAddingCharge(true);
+    setActionError(null);
+    const res = await addSpecialCharge(invoiceId, chargeLabel.trim(), chargeDate || null, qty, price);
+    if (res.error || !res.data) {
+      setAddingCharge(false);
+      setActionError(res.error ?? "Could not add the charge.");
+      return;
+    }
+    if (chargeImageFile) {
+      const form = new FormData();
+      form.set("imageFile", chargeImageFile);
+      const imgRes = await uploadSpecialChargeImage(invoiceId, res.data.id, form);
+      if (imgRes.error) {
+        // Charge itself was added fine — surface the image failure but don't
+        // discard the successful add; the row can still get an image later.
+        setActionError(`Charge added, but the image failed to attach: ${imgRes.error}`);
+      }
+    }
+    setAddingCharge(false);
     setChargeLabel("");
-    setChargeAmount("");
+    setChargeDate(todayKey());
+    setChargeQty("1");
+    setChargePrice("");
+    setChargeImageFile(null);
+    setChargeImageInputKey((k) => k + 1);
+    await refresh();
+  }
+
+  async function onUploadChargeImage(chargeId: string, file: File) {
+    if (!invoiceId) return;
+    const form = new FormData();
+    form.set("imageFile", file);
+    await runAction(() => uploadSpecialChargeImage(invoiceId, chargeId, form));
+  }
+
+  async function onViewChargeImage(chargeId: string) {
+    const r = await getSpecialChargeImageSignedUrl(chargeId);
+    if (r.error || !r.data) {
+      setActionError(r.error ?? "Could not open the attached image.");
+      return;
+    }
+    window.open(r.data.url, "_blank", "noopener,noreferrer");
+  }
+
+  async function onSavePeriod(e: React.FormEvent) {
+    e.preventDefault();
+    if (!invoiceId) return;
+    if (periodStartInput > periodEndInput) {
+      setPeriodError("Pick a valid period (start must be on or before end).");
+      return;
+    }
+    setSavingPeriod(true);
+    setPeriodError(null);
+    const res = await updateDraftInvoicePeriod(invoiceId, periodStartInput, periodEndInput);
+    setSavingPeriod(false);
+    if (res.error) {
+      setPeriodError(res.error);
+      return;
+    }
+    setEditingPeriod(false);
+    await refresh();
   }
 
   async function onViewProof() {
@@ -308,6 +421,26 @@ export default function InvoiceDetailModal({
   const status = raw?.status;
   const editable = raw ? canEditSpecialCharges(raw.status) : false;
   const canEmail = !!(raw && view && customerEmail);
+
+  // Special-charges-only subtotal (item 3) — computed for DISPLAY only, same
+  // round-once methodology as calculateVat() (lib/vat.ts), applied to the
+  // charges subset. Never fed back into the document-level totals, which
+  // stay exactly as lib/invoice.ts computed them.
+  const chargeLines = view?.unpaidLines.filter((l) => l.kind === "charge") ?? [];
+  const chargesSubtotal = round2(chargeLines.reduce((s, l) => s + l.amount_sar, 0));
+  const chargesVat = round2(chargeLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0));
+  const chargesTotal = round2(chargesSubtotal + chargesVat);
+  const chargeAmountPreview = round2((Number(chargeQty) || 0) * (Number(chargePrice) || 0));
+
+  // Unpaid table is now trip-only (special charges moved to their own
+  // section below) — totals recomputed for the trip subset the same
+  // round-once way as chargesSubtotal/Vat/Total above. view.amountDue stays
+  // untouched (it's still the real, includes-charges document total used for
+  // Amount Due / Grand Total further down).
+  const unpaidTripLines = view?.unpaidLines.filter((l) => l.kind === "trip") ?? [];
+  const unpaidTripSubtotal = round2(unpaidTripLines.reduce((s, l) => s + l.amount_sar, 0));
+  const unpaidTripVat = round2(unpaidTripLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0));
+  const unpaidTripTotal = round2(unpaidTripSubtotal + unpaidTripVat);
 
   function sendTemplate(type: EmailType) {
     if (!raw || !view || !customerEmail) return;
@@ -370,9 +503,50 @@ export default function InvoiceDetailModal({
                 <h2 className="text-xl font-semibold">
                   {raw.invoice_number ? `Invoice #${raw.invoice_number}` : "Invoice (draft — not yet numbered)"}
                 </h2>
-                <p className="text-sm muted mt-0.5">
-                  {raw.period_start} → {raw.period_end}
-                </p>
+                {status === "draft" && editingPeriod ? (
+                  <form onSubmit={onSavePeriod} className="no-print flex items-end gap-2 flex-wrap mt-1">
+                    <label className="flex flex-col gap-1 text-xs">
+                      <span className="font-medium">Period start</span>
+                      <input value={periodStartInput} onChange={(e) => setPeriodStartInput(e.target.value)} type="date" required className={INPUT} style={INPUT_STYLE} />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs">
+                      <span className="font-medium">Period end</span>
+                      <input value={periodEndInput} onChange={(e) => setPeriodEndInput(e.target.value)} type="date" required className={INPUT} style={INPUT_STYLE} />
+                    </label>
+                    <Btn type="submit" variant="outline" className={savingPeriod ? "opacity-50 pointer-events-none" : ""}>
+                      {savingPeriod ? "Saving…" : "Save"}
+                    </Btn>
+                    <Btn
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        setEditingPeriod(false);
+                        setPeriodError(null);
+                      }}
+                    >
+                      Cancel
+                    </Btn>
+                    {periodError && <p className="w-full text-sm text-rose-600 dark:text-rose-400">{periodError}</p>}
+                  </form>
+                ) : status === "draft" ? (
+                  <button
+                    type="button"
+                    className="text-sm muted mt-0.5 underline decoration-dotted underline-offset-2 hover:text-[rgb(var(--fg))]"
+                    onClick={() => {
+                      setPeriodStartInput(raw.period_start);
+                      setPeriodEndInput(raw.period_end);
+                      setPeriodError(null);
+                      setEditingPeriod(true);
+                    }}
+                    title="Click to change this draft's period"
+                  >
+                    {raw.period_start} → {raw.period_end}
+                  </button>
+                ) : (
+                  <p className="text-sm muted mt-0.5">
+                    {raw.period_start} → {raw.period_end}
+                  </p>
+                )}
                 {raw.vat_ref && <p className="text-sm muted">VAT ref: {raw.vat_ref}</p>}
               </div>
               <div className="grid grid-cols-2 gap-4 text-sm">
@@ -398,40 +572,78 @@ export default function InvoiceDetailModal({
               />
             )}
 
-            {/* Unpaid / Amount Due table — always shown, this IS the
-                collectible amount. */}
+            {/* Unpaid / Amount Due table — trips only now (special charges
+                have their own section below). Totals recomputed for the
+                trip-only subset — view.amountDue (the real document total,
+                includes charges) is still what feeds Amount Due/Grand Total
+                further down, untouched. */}
             <LineTable
-              title="Unpaid — Amount Due"
-              lines={view.unpaidLines}
-              totals={view.amountDue}
-              editable={editable}
-              onRemoveCharge={(id) =>
-                runAction(() => removeSpecialCharge(invoiceId, id))
-              }
+              title="Unpaid — Amount Due (trips)"
+              lines={unpaidTripLines}
+              totals={{ subtotal: unpaidTripSubtotal, vat: unpaidTripVat, total: unpaidTripTotal }}
               fallbackWaterType={view.projectWaterType}
             />
 
-            {editable && (
-              <form onSubmit={onAddCharge} className="flex items-end gap-2 flex-wrap break-inside-avoid no-print">
-                <label className="flex flex-col gap-1 text-sm flex-1 min-w-[10rem]">
-                  <span className="font-medium">Special charge label</span>
-                  <input value={chargeLabel} onChange={(e) => setChargeLabel(e.target.value)} className={INPUT} style={INPUT_STYLE} placeholder="e.g. Callout fee" />
-                </label>
-                <label className="flex flex-col gap-1 text-sm w-40">
-                  <span className="font-medium">Amount (pre-VAT)</span>
-                  <input value={chargeAmount} onChange={(e) => setChargeAmount(e.target.value)} type="number" min="0" step="any" className={INPUT} style={INPUT_STYLE} placeholder="0" />
-                </label>
-                <Btn type="submit" variant="outline" className={!chargeLabel.trim() || Number(chargeAmount) <= 0 ? "opacity-50 pointer-events-none" : ""}>
-                  <Plus className="h-4 w-4" /> Add charge
-                </Btn>
-              </form>
+            {/* Special charges — own self-contained section (Finance polish
+                batch D). Rows + subtotal + add-form (incl. image-attach-on-
+                add) all live together in one bounded box, clearly separate
+                from the trip tables above and Grand Total/Amount Due below. */}
+            {(chargeLines.length > 0 || editable) && (
+              <SpecialChargesSection
+                chargeLines={chargeLines}
+                subtotal={chargesSubtotal}
+                vat={chargesVat}
+                total={chargesTotal}
+                editable={editable}
+                onRemoveCharge={(id) => runAction(() => removeSpecialCharge(invoiceId, id))}
+                onUploadChargeImage={onUploadChargeImage}
+                onViewChargeImage={onViewChargeImage}
+                onAddCharge={onAddCharge}
+                addingCharge={addingCharge}
+                chargeLabel={chargeLabel}
+                setChargeLabel={setChargeLabel}
+                chargeDate={chargeDate}
+                setChargeDate={setChargeDate}
+                chargeQty={chargeQty}
+                setChargeQty={setChargeQty}
+                chargePrice={chargePrice}
+                setChargePrice={setChargePrice}
+                chargeAmountPreview={chargeAmountPreview}
+                chargeImageFile={chargeImageFile}
+                setChargeImageFile={setChargeImageFile}
+                chargeImageInputKey={chargeImageInputKey}
+              />
             )}
 
-            {/* Grand Total + Amount Due — both required, shown side by side. */}
+            {/* Grand Total + Amount Due — both required, shown side by side,
+                clearly separated (own grid, own spacing) from the special
+                charges section above. */}
             <div className="grid grid-cols-2 gap-4 break-inside-avoid">
               <TotalCard label="Grand Total (full period value)" totals={view.grand} tone="info" />
               <TotalCard label="Amount Due (collectible)" totals={view.amountDue} tone={view.amountDue.total > 0 ? "bad" : "ok"} />
             </div>
+
+            {/* Undelivered-trip blockers (item 2) — only at Review, mirrors
+                confirm_invoice()'s SQL guard exactly (migration 0032).
+                Highlight-on-click/clear-on-hover comes free from
+                TripRefLink -> useIncomingTripHighlight (Batch A). */}
+            {status === "review" && blockers.length > 0 && (
+              <div className="no-print rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2 break-inside-avoid">
+                <p className="text-sm text-amber-800 dark:text-amber-300 flex gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  {blockers.length} trip{blockers.length > 1 ? "s" : ""} in this invoice&apos;s period{" "}
+                  {blockers.length > 1 ? "are" : "is"} not yet delivered — Confirm is blocked until every trip is
+                  delivered.
+                </p>
+                <ul className="text-sm space-y-1 ps-6 list-disc">
+                  {blockers.map((b) => (
+                    <li key={b.id}>
+                      {b.trip_date} — <TripRefLink tripId={b.id} label={b.ref ?? "View trip"} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {raw.status === "paid" && (
               <div className="rounded-lg border border-app p-3 text-sm break-inside-avoid">
@@ -475,9 +687,21 @@ export default function InvoiceDetailModal({
                   <Btn variant="outline" onClick={() => runAction(() => revertInvoiceToDraft(invoiceId))} className={busy ? "opacity-50 pointer-events-none" : ""}>
                     Back to Draft
                   </Btn>
-                  <Btn variant="primary" onClick={() => setConfirmingConfirm(true)}>
-                    Confirm Invoice
-                  </Btn>
+                  <span
+                    title={
+                      blockers.length > 0
+                        ? "Cannot confirm — undelivered trips in this invoice's period (see list above)."
+                        : undefined
+                    }
+                  >
+                    <Btn
+                      variant="primary"
+                      onClick={() => blockers.length === 0 && setConfirmingConfirm(true)}
+                      className={blockers.length > 0 ? "opacity-50 pointer-events-none" : ""}
+                    >
+                      Confirm Invoice
+                    </Btn>
+                  </span>
                 </div>
               )}
               {status === "review" && confirmingConfirm && (
@@ -641,24 +865,21 @@ function LineTable({
   title,
   lines,
   totals,
-  editable,
-  onRemoveCharge,
   fallbackWaterType,
 }: {
   title: string;
   lines: InvoiceLineSnapshot[];
   totals: Totals;
-  editable?: boolean;
-  onRemoveCharge?: (id: string) => void;
   // Display-only fallback (Finance polish batch C) — project's CURRENT
   // water_type, used when a line's own snapshot water_type is null (pre-
   // water_type-field invoice). Never mutates the frozen snapshot.
   fallbackWaterType?: WaterType | null;
 }) {
-  // Presentation-only: collapse per-trip lines into grouped summary rows
-  // (one row per project rate — see lib/invoiceDisplay.ts). VAT is NOT shown
-  // per row — it appears only in the document-level totals passed in via
-  // `totals` (untouched money logic). Charge lines still render one row each.
+  // Trip lines only (special charges get their own section — see
+  // SpecialChargesSection below). Presentation-only: collapse per-trip lines
+  // into grouped summary rows (one row per project rate — see
+  // lib/invoiceDisplay.ts). VAT is NOT shown per row — it appears only in the
+  // document-level totals passed in via `totals` (untouched money logic).
   const rows = groupInvoiceLines(lines, fallbackWaterType);
 
   return (
@@ -674,7 +895,6 @@ function LineTable({
               <TH>Quantity</TH>
               <TH>Price</TH>
               <TH>Amount</TH>
-              {editable && <TH></TH>}
             </tr>
           </thead>
           <tbody>
@@ -686,46 +906,24 @@ function LineTable({
                 <TD>{""}</TD>
                 <TD>{""}</TD>
                 <TD>{""}</TD>
-                {editable && <TD>{""}</TD>}
               </tr>
             ) : (
-              rows.map((r) =>
-                r.type === "trip-group" ? (
-                  <tr key={r.key}>
-                    <TD>{r.periodLabel}</TD>
-                    <TD>
-                      {r.firstTripId ? (
-                        <TripRefLink tripId={r.firstTripId} label={r.refRangeLabel} />
-                      ) : (
-                        <span className="muted">{r.refRangeLabel}</span>
-                      )}
-                    </TD>
-                    <TD>{r.typeLabel}</TD>
-                    <TD className="tabular-nums">{r.quantity}</TD>
-                    <TD className="tabular-nums">{formatSar(r.price)}</TD>
-                    <TD className="tabular-nums">{formatSar(r.amount)}</TD>
-                    {editable && <TD>{""}</TD>}
-                  </tr>
-                ) : (
-                  <tr key={r.key}>
-                    <TD>{r.dateLabel === "—" ? <span className="muted">—</span> : r.dateLabel}</TD>
-                    <TD>{r.description}</TD>
-                    <TD className="muted">—</TD>
-                    <TD className="muted">—</TD>
-                    <TD className="muted">—</TD>
-                    <TD className="tabular-nums">{formatSar(r.amount)}</TD>
-                    {editable && (
-                      <TD>
-                        {onRemoveCharge && (
-                          <button type="button" onClick={() => onRemoveCharge(r.id)} className="muted hover:text-rose-600 dark:hover:text-rose-400 no-print">
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </TD>
+              rows.map((r) => (
+                <tr key={r.key}>
+                  <TD>{r.periodLabel}</TD>
+                  <TD>
+                    {r.firstTripId ? (
+                      <TripRefLink tripId={r.firstTripId} label={r.refRangeLabel} />
+                    ) : (
+                      <span className="muted">{r.refRangeLabel}</span>
                     )}
-                  </tr>
-                ),
-              )
+                  </TD>
+                  <TD>{r.typeLabel}</TD>
+                  <TD className="tabular-nums">{r.quantity}</TD>
+                  <TD className="tabular-nums">{formatSar(r.price)}</TD>
+                  <TD className="tabular-nums">{formatSar(r.amount)}</TD>
+                </tr>
+              ))
             )}
             <tr>
               <TD className="font-medium">{""}</TD>
@@ -736,10 +934,194 @@ function LineTable({
               <TD className="tabular-nums font-medium">
                 {formatSar(totals.total)} <span className="muted font-normal">(VAT {formatSar(totals.vat)})</span>
               </TD>
-              {editable && <TD>{""}</TD>}
             </tr>
           </tbody>
         </Table>
+      </div>
+    </section>
+  );
+}
+
+// Special charges — own self-contained section (Finance polish batch D).
+// Everything lives together in ONE bounded box: existing charge rows, the
+// subtotal/VAT/total strip, and the add-charge form (now including the
+// image-attach control, staged and uploaded right after the row is created).
+// Deliberately roomier than the trip tables above (p-6, generous field gaps)
+// per the "too condensed" complaint — this is a distinct, secondary
+// bookkeeping surface, not a dense ledger.
+function SpecialChargesSection({
+  chargeLines,
+  subtotal,
+  vat,
+  total,
+  editable,
+  onRemoveCharge,
+  onUploadChargeImage,
+  onViewChargeImage,
+  onAddCharge,
+  addingCharge,
+  chargeLabel,
+  setChargeLabel,
+  chargeDate,
+  setChargeDate,
+  chargeQty,
+  setChargeQty,
+  chargePrice,
+  setChargePrice,
+  chargeAmountPreview,
+  chargeImageFile,
+  setChargeImageFile,
+  chargeImageInputKey,
+}: {
+  chargeLines: InvoiceLineSnapshot[];
+  subtotal: number;
+  vat: number;
+  total: number;
+  editable: boolean;
+  onRemoveCharge: (id: string) => void;
+  onUploadChargeImage: (id: string, file: File) => void;
+  onViewChargeImage: (id: string) => void;
+  onAddCharge: (e: React.FormEvent) => void;
+  addingCharge: boolean;
+  chargeLabel: string;
+  setChargeLabel: (v: string) => void;
+  chargeDate: string;
+  setChargeDate: (v: string) => void;
+  chargeQty: string;
+  setChargeQty: (v: string) => void;
+  chargePrice: string;
+  setChargePrice: (v: string) => void;
+  chargeAmountPreview: number;
+  chargeImageFile: File | null;
+  setChargeImageFile: (f: File | null) => void;
+  chargeImageInputKey: number;
+}) {
+  const canSubmit = !!chargeLabel.trim() && Number(chargeQty) > 0 && Number(chargePrice) >= 0;
+
+  return (
+    <section className="space-y-2 break-inside-avoid">
+      <h3 className="text-xs font-semibold uppercase tracking-wide muted">Special charges</h3>
+      {/* Borderless tinted panel (Turki: "remove the border, refit the table
+          and box") — the section reads as its own bounded surface via the
+          background tint + generous radius/padding rather than a hard edge.
+          The rows-table and add-form sit inside as their own raised (card-
+          background + shadow, still no border) surfaces, so the grouping is
+          legible without ever stacking borders. */}
+      <div className="rounded-2xl bg-black/[0.025] dark:bg-white/[0.035] p-6 space-y-5">
+        {chargeLines.length > 0 ? (
+          <div className="rounded-xl bg-[rgb(var(--card))] shadow-sm overflow-hidden">
+            <Table>
+              <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+                <tr>
+                  <TH>Date</TH>
+                  <TH>Description</TH>
+                  <TH>Quantity</TH>
+                  <TH>Price</TH>
+                  <TH>Amount</TH>
+                  <TH></TH>
+                </tr>
+              </thead>
+              <tbody>
+                {chargeLines.map((l) => (
+                  <tr key={l.id}>
+                    <TD>{l.trip_date ?? <span className="muted">—</span>}</TD>
+                    <TD>{l.description}</TD>
+                    <TD className="tabular-nums">{l.quantity ?? 1}</TD>
+                    <TD className="tabular-nums">{formatSar(l.price_sar ?? l.amount_sar)}</TD>
+                    <TD className="tabular-nums">{formatSar(l.amount_sar)}</TD>
+                    <TD>
+                      <div className="flex items-center gap-2.5 no-print">
+                        {l.image_path ? (
+                          <button
+                            type="button"
+                            onClick={() => onViewChargeImage(l.id)}
+                            className="muted hover:text-[rgb(var(--fg))]"
+                            title="View attached image (internal only)"
+                          >
+                            <ImageIcon className="h-4 w-4" />
+                          </button>
+                        ) : (
+                          editable && (
+                            <label className="muted hover:text-[rgb(var(--fg))] cursor-pointer" title="Attach an image (internal only)">
+                              <Paperclip className="h-4 w-4" />
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) onUploadChargeImage(l.id, f);
+                                  e.target.value = "";
+                                }}
+                              />
+                            </label>
+                          )
+                        )}
+                        {editable && (
+                          <button type="button" onClick={() => onRemoveCharge(l.id)} className="muted hover:text-rose-600 dark:hover:text-rose-400">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </TD>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            <div className="flex items-center justify-end gap-2 border-t border-app px-4 py-3 text-sm">
+              <span className="muted">Subtotal {formatSar(subtotal)} + VAT {formatSar(vat)} =</span>
+              <span className="font-semibold tabular-nums">{formatSar(total)}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm muted">No special charges on this invoice yet.</p>
+        )}
+
+        {editable && (
+          <form onSubmit={onAddCharge} className="no-print space-y-4 rounded-xl bg-[rgb(var(--card))] shadow-sm p-5">
+            <p className="text-xs font-semibold uppercase tracking-wide muted">Add a charge</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <label className="flex flex-col gap-1.5 text-sm col-span-2">
+                <span className="font-medium">Description</span>
+                <input value={chargeLabel} onChange={(e) => setChargeLabel(e.target.value)} className={INPUT} style={INPUT_STYLE} placeholder="e.g. Callout fee" />
+              </label>
+              <label className="flex flex-col gap-1.5 text-sm">
+                <span className="font-medium">Date</span>
+                <input value={chargeDate} onChange={(e) => setChargeDate(e.target.value)} type="date" className={INPUT} style={INPUT_STYLE} />
+              </label>
+              <label className="flex flex-col gap-1.5 text-sm">
+                <span className="font-medium">Quantity</span>
+                <input value={chargeQty} onChange={(e) => setChargeQty(e.target.value)} type="number" min="0" step="any" className={INPUT} style={INPUT_STYLE} />
+              </label>
+              <label className="flex flex-col gap-1.5 text-sm">
+                <span className="font-medium">Price (pre-VAT)</span>
+                <input value={chargePrice} onChange={(e) => setChargePrice(e.target.value)} type="number" min="0" step="any" className={INPUT} style={INPUT_STYLE} placeholder="0" />
+              </label>
+              <label className="flex flex-col gap-1.5 text-sm">
+                <span className="font-medium">Amount</span>
+                <div className={INPUT + " muted tabular-nums"} style={INPUT_STYLE}>
+                  {formatSar(chargeAmountPreview)}
+                </div>
+              </label>
+              <label className="flex flex-col gap-1.5 text-sm col-span-2">
+                <span className="font-medium">Attach image (optional, internal only)</span>
+                <input
+                  key={chargeImageInputKey}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setChargeImageFile(e.target.files?.[0] ?? null)}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                />
+              </label>
+            </div>
+            <div className="flex items-center justify-end">
+              <Btn type="submit" variant="outline" className={!canSubmit || addingCharge ? "opacity-50 pointer-events-none" : ""}>
+                <Plus className="h-4 w-4" /> {addingCharge ? "Adding…" : "Add charge"}
+              </Btn>
+            </div>
+          </form>
+        )}
       </div>
     </section>
   );
