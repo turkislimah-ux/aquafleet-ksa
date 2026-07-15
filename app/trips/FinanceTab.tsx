@@ -36,6 +36,9 @@ type ProjectLite = {
   // Display-only fallback source (Finance polish batch C) — the project's
   // CURRENT water type, used when a trip/line's own water_type is null.
   water_type: WaterType | null;
+  // Stable trip-ref prefix (projects.initials, 0033) — display-only here,
+  // used for the statement's sample-ref demo.
+  initials: string;
 };
 type TripLite = {
   id: string;
@@ -334,6 +337,7 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
         topups={activeStatementRow?.customerTopups ?? []}
         trips={activeStatementRow?.consuming ?? []}
         projectWaterType={activeStatementRow?.project?.water_type ?? null}
+        projectInitials={activeStatementRow?.project?.initials ?? null}
       />
 
       <InvoicesModal open={invoicesFor !== null} onClose={() => setInvoicesFor(null)} customer={invoicesFor} />

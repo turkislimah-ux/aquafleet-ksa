@@ -27,6 +27,9 @@ type ProjectHeader = {
   water_type: WaterType | null;
   // Finance (0025). NULL = unset.
   payment_mode: PaymentMode | null;
+  // Stable trip-ref prefix (projects.initials, 0033) — carried through for
+  // FinanceTab's statement sample-ref demo.
+  initials: string;
   default_station: string | null;
   default_water_station: string;
   location: string | null;
@@ -65,7 +68,7 @@ export default async function TripsPage() {
       supabase
         .from("projects")
         .select(
-          "id, name, customer_id, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, status, water_type, payment_mode, default_station, default_water_station, location, location_lat, location_lng, description"
+          "id, name, customer_id, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, status, water_type, payment_mode, initials, default_station, default_water_station, location, location_lat, location_lng, description"
         )
         .is("archived_at", null)
         .order("name", { ascending: true }),

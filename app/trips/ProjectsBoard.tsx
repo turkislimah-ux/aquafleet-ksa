@@ -72,6 +72,11 @@ type ProjectHeader = {
   // Finance (0025). Not used on this board — carried through so the prop
   // chain into CustomersTab (which does use it) type-checks.
   payment_mode: "postpaid" | "prepaid" | null;
+  // Stable trip-ref prefix (projects.initials, 0033). Not used on this
+  // board — carried through so the prop chain into FinanceTab/
+  // StatementModal (which uses it for the statement's sample-ref demo)
+  // type-checks.
+  initials: string;
   default_station: string | null;
   default_water_station: string;
   location: string | null;

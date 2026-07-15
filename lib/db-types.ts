@@ -45,6 +45,9 @@ export type Project = {
   id: string;
   customer_id: string;
   name: string;
+  // Stable 2-letter trip-ref prefix (e.g. "TR"). Claimed once at insert by a
+  // DB trigger (0033) — never written by the app, never changes on rename.
+  initials: string;
   // Customer billing rate per trip — kept SEPARATE from driver commission.
   rate_per_trip_sar: number;
   commission_mode: CommissionMode;
@@ -265,7 +268,10 @@ export type TripStage = "scheduled" | "loading" | "in_transit" | "delivered";
 
 export type Trip = {
   id: string;
-  // Human reference code, DB-generated (e.g. WT-2026-0042). Backfilled in 0004.
+  // Human reference code, DB-generated (BEFORE INSERT trigger, 0033). Legacy
+  // rows: WT-2026-0042 (global counter). New project-linked trips:
+  // <initials>-<yy y>-NNNN, e.g. TR-026-0001 (per-project, per-year counter).
+  // Bare-customer trips (no project) still fall back to the WT- scheme.
   ref: string | null;
   project_id: string | null;
   customer_id: string | null;

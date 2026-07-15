@@ -22,3 +22,21 @@ export function tripRefRangeLabel(refs: (string | null | undefined)[]): string {
   if (first === last) return first;
   return `${first} – ${last}`;
 }
+
+/**
+ * Illustrative sample of a project's trip-ref FORMAT, e.g. "K1-026-0001" —
+ * NOT a real trip's ref (no counter lookup, no DB round-trip). Demonstrates
+ * the scheme new trips for this project will follow (0033):
+ * <initials>-<yyy>-NNNN, where initials = projects.initials, yyy = last 3
+ * digits of the year, NNNN = a per-project/per-year counter (always shown
+ * as 0001 here — this is a demonstration, not a count). Returns null when
+ * the project has no initials yet (e.g. legacy/pre-0033 data).
+ */
+export function sampleTripRef(
+  initials: string | null | undefined,
+  year: number = new Date().getFullYear()
+): string | null {
+  if (!initials) return null;
+  const yyy = String(year % 1000).padStart(3, "0");
+  return `${initials}-${yyy}-0001`;
+}

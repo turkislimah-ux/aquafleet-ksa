@@ -23,7 +23,7 @@ import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { buildStatement, consumingTrips, type ConsumingTrip, type TopupStatementInput } from "@/lib/prepaid";
 import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
-import { formatTripRef } from "@/lib/trip-ref";
+import { formatTripRef, sampleTripRef } from "@/lib/trip-ref";
 import TripRefLink from "@/components/TripRefLink";
 
 export default function StatementModal({
@@ -34,6 +34,7 @@ export default function StatementModal({
   topups,
   trips,
   projectWaterType,
+  projectInitials,
 }: {
   open: boolean;
   onClose: () => void;
@@ -45,6 +46,9 @@ export default function StatementModal({
   // water_type, used when an entry/trip's own water_type is null (pre-
   // water_type-field data). Never mutates any stored record.
   projectWaterType?: WaterType | null;
+  // Project's stable trip-ref prefix (projects.initials, 0033) — used only
+  // to render a sample/demo ref under the customer name, never a real trip.
+  projectInitials?: string | null;
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -61,6 +65,7 @@ export default function StatementModal({
     window.print();
   }
 
+  const sampleRef = sampleTripRef(projectInitials);
   const entries = mode === "prepaid" ? buildStatement(topups, trips) : [];
   const balance = entries.length > 0 ? entries[entries.length - 1].runningBalance : 0;
   const postpaidTrips = mode === "postpaid" ? consumingTrips(trips) : [];
@@ -83,6 +88,7 @@ export default function StatementModal({
             </button>
           </div>
         </div>
+        {sampleRef && <p className="text-sm muted mb-1">Ref. {sampleRef}</p>}
         <p className="text-sm muted mb-4">
           {mode === "prepaid"
             ? "Pre-VAT ledger — top-up credits and delivered-trip debits, oldest first."
