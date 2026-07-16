@@ -18,7 +18,7 @@ import { X } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { CUSTOMER_TYPE_LABELS, WATER_TYPE_LABELS, type WaterType, type PaymentMode } from "@/lib/db-types";
 import { formatSar } from "@/lib/utils";
-import { archiveProject, createProjectWithCustomer, updateProjectWithCustomer } from "./actions";
+import { archiveProject, createProjectWithCustomer, updateProjectWithCustomer, checkPaymentModeSwitch } from "./actions";
 import { type DriverState } from "@/lib/driver-state";
 import DriverRosterTable from "./DriverRosterTable";
 
@@ -112,6 +112,15 @@ export default function ProjectModal({
   // modes (never defaulted), even in edit mode for a pre-Finance project
   // whose payment_mode is still NULL/"" in the DB.
   const [paymentMode, setPaymentMode] = useState<PaymentMode | "">("");
+  // Finance C3 (0035) — settlement guard on a real payment-mode CHANGE
+  // (edit mode only). Proactive/advisory: mirrors the server's own guard
+  // exactly (same RPC), but the DB call inside updateProjectWithCustomer is
+  // the real, unbypassable gate.
+  const [modeCheck, setModeCheck] = useState<{ checking: boolean; blocked: boolean; reason: string | null }>({
+    checking: false,
+    blocked: false,
+    reason: null,
+  });
 
   // Project. `commMode` is the COMMISSION mode — distinct from the `mode` prop.
   const [projName, setProjName] = useState("");
@@ -140,6 +149,7 @@ export default function ProjectModal({
     setConfirmingArchive(false);
     setConfirmText("");
     setArchiving(false);
+    setModeCheck({ checking: false, blocked: false, reason: null });
     if (mode === "edit" && initial) {
       setCustName(initial.cust_name);
       setCustType(initial.cust_type);
@@ -195,6 +205,27 @@ export default function ProjectModal({
     setSelected((prev) => (prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]));
   }
 
+  // Finance C3 (0035): picking a mode always sets it immediately (form stays
+  // responsive) and clears any stale check. Only fires the settlement check
+  // when actually CHANGING an already-set mode in edit mode — never the
+  // first-time forced choice on a legacy null-mode project, never a no-op
+  // reselect of the current mode. Matches the DB's own "is this a real
+  // switch" rule exactly.
+  async function selectPaymentMode(next: PaymentMode) {
+    setPaymentMode(next);
+    setModeCheck({ checking: false, blocked: false, reason: null });
+    if (mode !== "edit" || !initial || initial.payment_mode === "" || next === initial.payment_mode) return;
+    setModeCheck({ checking: true, blocked: false, reason: null });
+    const res = await checkPaymentModeSwitch(initial.project_id, next);
+    if (res.error || !res.result) {
+      // Advisory check failed to run — don't block the form on it; the
+      // server-side guard inside updateProjectWithCustomer still applies.
+      setModeCheck({ checking: false, blocked: false, reason: null });
+      return;
+    }
+    setModeCheck({ checking: false, blocked: res.result.blocked, reason: res.result.reason });
+  }
+
   // Live commission preview — driven by the DRIVER commission base + bump.
   const base = Number(commissionValue) || 0;
   const pct = Number(bump) || 0;
@@ -212,7 +243,9 @@ export default function ProjectModal({
     projName.trim() !== "" &&
     station !== "" &&
     waterType !== "" &&
-    paymentMode !== "";
+    paymentMode !== "" &&
+    !modeCheck.checking &&
+    !modeCheck.blocked;
 
   const isEdit = mode === "edit";
 
@@ -363,7 +396,7 @@ export default function ProjectModal({
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setPaymentMode("postpaid")}
+                  onClick={() => selectPaymentMode("postpaid")}
                   className={`rounded-lg border px-3 py-2 text-left text-sm ${paymentMode === "postpaid" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
                 >
                   <div className="font-medium">Postpaid</div>
@@ -371,7 +404,7 @@ export default function ProjectModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPaymentMode("prepaid")}
+                  onClick={() => selectPaymentMode("prepaid")}
                   className={`rounded-lg border px-3 py-2 text-left text-sm ${paymentMode === "prepaid" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
                 >
                   <div className="font-medium">Prepaid</div>
@@ -380,6 +413,12 @@ export default function ProjectModal({
               </div>
               {paymentMode === "" && (
                 <p className="muted text-[11px]">Required — pick how this customer pays.</p>
+              )}
+              {modeCheck.checking && (
+                <p className="muted text-[11px]">Checking settlement…</p>
+              )}
+              {modeCheck.blocked && modeCheck.reason && (
+                <p className="text-rose-600 dark:text-rose-400 text-[11px]">{modeCheck.reason}</p>
               )}
             </div>
 

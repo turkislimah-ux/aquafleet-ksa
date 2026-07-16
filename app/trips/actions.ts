@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 import { STAGE_ORDER, STAGE_TIMESTAMP, MAX_BATCH_TRIPS, type TripStage, type WaterType } from "@/lib/db-types";
 import { commissionForDelivery, commissionForNthTrip } from "@/lib/commission";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
+import { derivedBalance, type ConsumingTrip, type TopupLite } from "@/lib/prepaid";
 
 export type ActionResult = { error: string | null };
 
@@ -528,6 +529,70 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
   return { error: null };
 }
 
+// Finance C3 (0035) — the project's derived prepaid balance, computed the
+// SAME way FinanceTab.tsx does (project's CURRENT stored rate_per_trip_sar
+// applied to every trip, not a historical per-trip rate — that simplification
+// already exists app-wide, not new here). Feeds can_switch_payment_mode()'s
+// rule 3 (switching away from prepaid requires an exactly-zero balance) —
+// used by BOTH checkPaymentModeSwitch (client-proactive) and
+// updateProjectWithCustomer (server-authoritative) below, so the two never
+// compute it differently.
+async function fetchProjectBalance(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+  customerId: string,
+  ratePerTrip: number,
+): Promise<number> {
+  const [{ data: tripRows }, { data: topupRows }] = await Promise.all([
+    supabase.from("trips").select("id, trip_date, delivered_at").eq("project_id", projectId),
+    supabase.from("customer_topups").select("id, amount_sar, topup_date").eq("customer_id", customerId),
+  ]);
+  const trips: ConsumingTrip[] = (tripRows ?? []).map((t) => ({
+    id: t.id,
+    trip_date: t.trip_date,
+    delivered_at: t.delivered_at,
+    rate_sar: ratePerTrip,
+  }));
+  const topups: TopupLite[] = (topupRows ?? []) as TopupLite[];
+  return derivedBalance(topups, trips);
+}
+
+// Finance C3 (0035) — proactive client-side check, called from ProjectModal
+// when the user picks a DIFFERENT payment mode than the project's current
+// one (edit mode only). Calls the exact same SQL function
+// (can_switch_payment_mode) that update_project_with_customer enforces
+// server-side below — no duplicated predicate logic, so the UI's blocked
+// reason and the DB's hard block can never disagree. Purely advisory: the
+// DB call inside updateProjectWithCustomer is the real, unbypassable gate.
+export type PaymentModeSwitchCheck = { blocked: boolean; reason: string | null };
+
+export async function checkPaymentModeSwitch(
+  projectId: string,
+  newMode: string,
+): Promise<{ error: string | null; result?: PaymentModeSwitchCheck }> {
+  const id = projectId?.trim() ?? "";
+  if (!id) return { error: "Missing project id." };
+
+  const supabase = createClient();
+  const { data: project, error: projErr } = await supabase
+    .from("projects")
+    .select("customer_id, rate_per_trip_sar")
+    .eq("id", id)
+    .single();
+  if (projErr || !project) return { error: projErr?.message ?? "Project not found." };
+
+  const balance = await fetchProjectBalance(supabase, id, project.customer_id, project.rate_per_trip_sar ?? 0);
+
+  const { data, error } = await supabase.rpc("can_switch_payment_mode", {
+    p_project_id: id,
+    p_new_mode: newMode,
+    p_current_balance: balance,
+  });
+  if (error) return { error: error.message };
+  const row = Array.isArray(data) ? data[0] : data;
+  return { error: null, result: { blocked: !!row?.blocked, reason: row?.reason ?? null } };
+}
+
 // Edit half (Manage project). Atomic update via the update_project_with_customer
 // RPC (migration 0017): customer + project + driver-diff in ONE transaction.
 // Same validation/normalization as create; only adds the project id. Deliberately
@@ -543,6 +608,22 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
   const { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue, paymentMode } = norm.value;
 
   const supabase = createClient();
+
+  // Finance C3 (0035): compute the settlement balance here (server-side,
+  // authoritative) so update_project_with_customer's guard is accurate
+  // regardless of whether ProjectModal's proactive check ran or was
+  // bypassed. Looked up by the project's CURRENT customer_id/rate — cheap,
+  // and the RPC itself ignores this value unless it's actually needed
+  // (switching away from prepaid).
+  const { data: currentProject } = await supabase
+    .from("projects")
+    .select("customer_id, rate_per_trip_sar")
+    .eq("id", projectId)
+    .single();
+  const currentBalance = currentProject
+    ? await fetchProjectBalance(supabase, projectId, currentProject.customer_id, currentProject.rate_per_trip_sar ?? 0)
+    : 0;
+
   const { error } = await supabase.rpc("update_project_with_customer", {
     p_project_id: projectId,
     p_cust_name: custName,
@@ -563,6 +644,7 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
     p_driver_ids: driverIds,
     p_payment_mode: paymentMode,
     p_cust_email: input.cust_email?.trim() || null,
+    p_current_balance: currentBalance,
   });
   if (error) return { error: error.message };
 
