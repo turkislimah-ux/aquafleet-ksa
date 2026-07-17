@@ -165,6 +165,40 @@ relevant skill(s) **when the task calls for it**:
     2. Full Settings screen — `company_settings.email` today only has the minimal
        get/set pair built for the invoice email templates (0029), not a real settings UI.
     3. Effective-dated commission config — still deferred (commission, not invoicing).
+       Likely one feature with item 4 below (both need the same effective-dated-rate
+       history mechanism, one for driver pay, one for customer billing).
+    4. Mixed-rate invoice row splitting — requires effective-dated RATE history on
+       projects (today `rate_per_trip_sar` is a single current value, no history). A
+       rate change mid-period should split that period's invoice into two rows (old
+       rate up to the change, new rate after) instead of applying the current rate
+       retroactively to the whole period. Prepaid balance deduction would need to walk
+       old-then-new by date too (mirrors `consumingTrips()`'s ordering, just rate-aware).
+    5. Multi-project customers with separate finance — currently impossible
+       (`projects_customer_id_unique`, migration 0015 enforces 1 customer = 1 project),
+       and invoices key off `customer_id` only, never `project_id` (0025). The C3
+       payment-mode-switch guard (0035) explicitly notes this same limitation in its
+       header. Supporting it would need invoices to become project-scoped.
+
+- **Finance tab polish (Batches A/B/C, migrations `0032`–`0035`) is COMPLETE, through
+  commit `1431453`.** Built on top of the Finance/Invoice PRD above:
+  - Grouped invoice tables, print statement, clickable trip-ref → jumps to and
+    highlights the trip on the Kanban board, water-type inheritance (trip inherits its
+    project's default unless overridden), draft-period editing, undelivered-trip
+    confirm block (`confirm_invoice()` refuses to confirm while any trip in the
+    invoice's period is undelivered — migration `0032`).
+  - Special-charges section gained a detail view with internal reference images.
+  - Per-project trip refs: `XX-YYY-NNNN` (project initials + trip_date year + per-
+    project counter) — migration `0033`.
+  - Invoice numbers moved to yearly reset: `YYY-NNNNNN` (confirm-year + per-year
+    counter, replacing the old global counter) — migration `0034`. `vat_ref` removed
+    entirely in the same migration (column, index, counter, function, all app-code
+    references) — redundant once `invoice_number` itself carries a year.
+  - Payment-mode switch now requires settlement first: `can_switch_payment_mode()`
+    blocks a real mode change (never the first-time forced choice) unless every
+    invoice for the customer is paid/void, no delivered trip sits un-invoiced, and (if
+    leaving prepaid) the balance is exactly zero — enforced server-side inside
+    `update_project_with_customer`, checked proactively client-side in `ProjectModal`
+    — migration `0035`.
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
   touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`
