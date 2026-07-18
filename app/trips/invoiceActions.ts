@@ -672,12 +672,25 @@ export async function voidInvoice(invoiceId: string, reason: string): Promise<Ac
 // uploaded to Storage before the RPC call (the RPC only persists a path,
 // upload is plain I/O). cash needs no file. Locks both covered AND unpaid
 // trips (migration 0027's pay_invoice()).
+//
+// v3 Batch 2 (migration 0039, NOT YET RUN) — three new postpaid-only fields:
+// reference/date/note. Prepaid's "Pay with Balance" (Batch 1) calls this
+// same action but always with paymentMethod "cash" and no reference/date/
+// note fields in its FormData — trimmed-to-null here same as any other
+// caller, so that path is unaffected. bank_transfer requires reference AND
+// date (a real bank transaction exists to point to — same reasoning as the
+// existing proof-file requirement); cash leaves both optional. note is
+// always optional. Trimmed to null here (not in the RPC), same convention
+// as recordTopup (lib/actions/finance.ts).
 // ---------------------------------------------------------------------------
 export async function markInvoicePaid(formData: FormData): Promise<ActionResult> {
   const supabase = createClient();
   const invoiceId = String(formData.get("invoiceId") ?? "");
   const paymentMethod = String(formData.get("paymentMethod") ?? "");
   const file = formData.get("proofFile");
+  const reference = String(formData.get("paymentReference") ?? "").trim() || null;
+  const paymentDate = String(formData.get("paymentDate") ?? "").trim() || null;
+  const note = String(formData.get("paymentNote") ?? "").trim() || null;
 
   if (!invoiceId) return { error: "Missing invoice id." };
   if (paymentMethod !== "cash" && paymentMethod !== "bank_transfer") {
@@ -689,6 +702,8 @@ export async function markInvoicePaid(formData: FormData): Promise<ActionResult>
     if (!(file instanceof File) || file.size === 0) {
       return { error: "bank_transfer requires a proof-of-payment file." };
     }
+    if (!reference) return { error: "bank_transfer requires a payment reference." };
+    if (!paymentDate) return { error: "bank_transfer requires a payment date." };
     const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
     const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
     proofPath = `${invoiceId}/proof-${Date.now()}.${ext}`;
@@ -702,6 +717,9 @@ export async function markInvoicePaid(formData: FormData): Promise<ActionResult>
     p_invoice_id: invoiceId,
     p_payment_method: paymentMethod,
     p_proof_path: proofPath,
+    p_payment_reference: reference,
+    p_payment_date: paymentDate,
+    p_payment_note: note,
   });
   if (error) return { error: error.message };
   revalidatePath("/trips");

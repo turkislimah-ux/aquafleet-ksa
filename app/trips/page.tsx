@@ -69,6 +69,24 @@ export type SpecialChargeRow = {
   paid: boolean;
 };
 
+// Statement rebuild (Batch 3) — every PAID invoice, customer-tagged, feeding
+// the postpaid statement's Payment rows (payment_reference/payment_date +
+// grand_total_sar as the row's amount). Same paid-only query the board
+// already ran for invoiceLocked (below) — just widened columns, no new
+// fetch. payment_date can be null (cash payments — Batch 2's pay_invoice()
+// makes reference/date optional for cash); paid_at is the fallback, same
+// "recorded vs actual" convention as SpecialChargeRow.charge_date falling
+// back to created_at.
+export type PaidInvoiceRow = {
+  id: string;
+  customer_id: string;
+  payment_method: "cash" | "bank_transfer" | null;
+  payment_reference: string | null;
+  payment_date: string | null;
+  paid_at: string | null;
+  grand_total_sar: number;
+};
+
 export default async function TripsPage() {
   const supabase = createClient();
 
@@ -150,11 +168,15 @@ export default async function TripsPage() {
         .select("id, customer_id, amount_sar, topup_date, note, reference")
         .order("topup_date", { ascending: false }),
       // Finance bug fix — invoice-lock (§3, two independent locks: payout_id
-      // commission-lock OR paid-invoice lock). ids-only, status='paid' scoped
-      // in SQL — the board only needs to know WHICH invoices are paid, not
-      // their full rows. RESERVED (draft/confirmed, not yet paid) invoices are
-      // deliberately excluded — reserved trips stay editable, only paid locks.
-      supabase.from("invoices").select("id").eq("status", "paid"),
+      // commission-lock OR paid-invoice lock). status='paid' scoped in SQL —
+      // RESERVED (draft/confirmed, not yet paid) invoices are deliberately
+      // excluded — reserved trips stay editable, only paid locks. Widened
+      // (Batch 3) past ids-only: also feeds the postpaid statement's Payment
+      // rows (PaidInvoiceRow, above) — same paid-only set, no second query.
+      supabase
+        .from("invoices")
+        .select("id, customer_id, payment_method, payment_reference, payment_date, paid_at, grand_total_sar")
+        .eq("status", "paid"),
       // v3 Finance ledger source (2 of 2, with customer_topups above) — every
       // special charge on a non-void invoice, customer-tagged via its parent
       // invoice. Void-invoice charges are filtered out below (never consumed
@@ -169,7 +191,8 @@ export default async function TripsPage() {
   // set (that's RESERVED, still editable; see lib/db-types.ts's Trip.invoice_id
   // comment / migration 0030). Computed here, once, from the paid-only id set
   // fetched above, so ProjectsBoard never has to re-derive it per trip.
-  const paidInvoiceIds = new Set((paidInvoicesRes.data ?? []).map((i) => (i as { id: string }).id));
+  const paidInvoices = (paidInvoicesRes.data ?? []) as PaidInvoiceRow[];
+  const paidInvoiceIds = new Set(paidInvoices.map((i) => i.id));
 
   const trips = ((tripsRes.data ?? []) as JoinedTrip[]).map((t) => ({
     ...t,
@@ -330,6 +353,7 @@ export default async function TripsPage() {
       leaveLoadFailed={leaveLoadFailed}
       topups={topups}
       specialCharges={specialCharges}
+      paidInvoices={paidInvoices}
     />
   );
 }

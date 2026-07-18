@@ -27,9 +27,9 @@ import { monthKeyOf } from "@/lib/commission";
 import { PAYMENT_MODE_LABELS, type PaymentMode } from "@/lib/db-types";
 import { derivedBalanceItems, type ConsumingTrip, type ConsumingCharge, type TopupStatementInput } from "@/lib/prepaid";
 import type { WaterType } from "@/lib/db-types";
-import type { SpecialChargeRow } from "./page";
+import type { SpecialChargeRow, PaidInvoiceRow } from "./page";
 import TopupModal, { type TopupCustomerOption } from "./TopupModal";
-import StatementModal from "./StatementModal";
+import StatementModal, { type TripMeta } from "./StatementModal";
 import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
 import CompanySettingsModal from "./CompanySettingsModal";
 
@@ -62,6 +62,13 @@ type TripLite = {
   // wasn't declared on this narrower type until now. This is the "does this
   // trip belong to a PAID invoice" signal settled balance filters on.
   invoiceLocked?: boolean;
+  // Statement rebuild (Batch 3) — already computed in app/trips/page.tsx
+  // (trips.truck_id -> trucks.plate/capacity_m3 join) and flows straight
+  // through boardProps.trips, same as invoiceLocked above. Display-only,
+  // threaded into the statement's Truck/Capacity columns via tripMetaById
+  // below — never touches lib/prepaid.ts's ConsumingTrip.
+  truckPlate?: string | null;
+  truckCapacityM3?: number | null;
 };
 type TopupRow = {
   id: string;
@@ -78,11 +85,14 @@ export type FinanceTabProps = {
   trips: TripLite[];
   topups: TopupRow[];
   specialCharges: SpecialChargeRow[];
+  // Statement rebuild (Batch 3) — paid invoices, customer-tagged, feeding the
+  // postpaid statement's Payment rows. See page.tsx's PaidInvoiceRow comment.
+  paidInvoices: PaidInvoiceRow[];
 };
 
 type ModeFilter = "all" | "prepaid" | "postpaid";
 
-export default function FinanceTab({ customers, projects, trips, topups, specialCharges }: FinanceTabProps) {
+export default function FinanceTab({ customers, projects, trips, topups, specialCharges, paidInvoices }: FinanceTabProps) {
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
   const [topupTarget, setTopupTarget] = useState<TopupCustomerOption | null | "global">(null);
   const [statementFor, setStatementFor] = useState<{ customerId: string; customerName: string } | null>(null);
@@ -119,6 +129,31 @@ export default function FinanceTab({ customers, projects, trips, topups, special
     }
     return m;
   }, [specialCharges]);
+
+  // Statement rebuild (Batch 3) — trip id -> truck/paid-lock, built from the
+  // FULL trips list (every customer/project) so any consuming trip's id
+  // resolves regardless of which customer's statement is open.
+  const tripMetaById = useMemo(() => {
+    const m = new Map<string, TripMeta>();
+    for (const t of trips) {
+      m.set(t.id, {
+        truckPlate: t.truckPlate ?? null,
+        truckCapacityM3: t.truckCapacityM3 ?? null,
+        invoiceLocked: t.invoiceLocked ?? false,
+      });
+    }
+    return m;
+  }, [trips]);
+
+  // Statement rebuild (Batch 3) — paid invoices grouped by customer, feeding
+  // the postpaid statement's Payment rows.
+  const paidInvoicesByCustomer = useMemo(() => {
+    const m = new Map<string, PaidInvoiceRow[]>();
+    for (const inv of paidInvoices) {
+      (m.get(inv.customer_id) ?? m.set(inv.customer_id, []).get(inv.customer_id)!).push(inv);
+    }
+    return m;
+  }, [paidInvoices]);
 
   // Per-customer row: resolved project, mode, consuming-trips + balance (prepaid only).
   //
@@ -197,9 +232,15 @@ export default function FinanceTab({ customers, projects, trips, topups, special
           }));
         settledBalance = derivedBalanceItems(customerTopups, consumingPaidOnly, customerChargesPaidOnly);
       }
-      return { customer: c, project, mode, balance, settledBalance, consuming, customerTopups, customerCharges };
+      // Statement rebuild (Batch 3) — postpaid Payment rows source. Only
+      // meaningful for postpaid (prepaid never mixes cash/bank_transfer Mark-
+      // Paid — Batch 1's "Pay with Balance" sets none of these fields), but
+      // harmless to attach either way; StatementModal only reads it in
+      // postpaid mode.
+      const customerPaidInvoices = paidInvoicesByCustomer.get(c.id) ?? [];
+      return { customer: c, project, mode, balance, settledBalance, consuming, customerTopups, customerCharges, customerPaidInvoices };
     });
-  }, [customers, projectByCustomer, tripsByProject, topupsByCustomer, chargesByCustomer]);
+  }, [customers, projectByCustomer, tripsByProject, topupsByCustomer, chargesByCustomer, paidInvoicesByCustomer]);
 
   const filteredRows = useMemo(() => {
     if (modeFilter === "all") return rows;
@@ -406,6 +447,9 @@ export default function FinanceTab({ customers, projects, trips, topups, special
         charges={activeStatementRow?.customerCharges ?? []}
         projectWaterType={activeStatementRow?.project?.water_type ?? null}
         projectInitials={activeStatementRow?.project?.initials ?? null}
+        projectName={activeStatementRow?.project?.name ?? null}
+        tripMetaById={tripMetaById}
+        payments={activeStatementRow?.customerPaidInvoices ?? []}
       />
 
       <InvoicesModal open={invoicesFor !== null} onClose={() => setInvoicesFor(null)} customer={invoicesFor} />

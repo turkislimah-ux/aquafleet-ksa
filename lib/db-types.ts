@@ -432,6 +432,13 @@ export type Invoice = {
 
   payment_method: InvoicePaymentMethod | null;
   proof_of_payment_path: string | null;
+  // v3 Batch 2 (migration 0039) — postpaid Mark-Paid only (prepaid's "Pay
+  // with Balance" never sets these). payment_date is USER-ENTERED (when the
+  // payment actually happened), distinct from paid_at (server-set, when the
+  // row was recorded). Nullable, no backfill for pre-0039 paid invoices.
+  payment_reference: string | null;
+  payment_date: string | null;
+  payment_note: string | null;
 
   covered_subtotal_sar: number;
   covered_vat_sar: number;

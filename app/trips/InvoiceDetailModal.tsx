@@ -1000,6 +1000,39 @@ export default function InvoiceDetailModal({
                       Bank transfer
                     </label>
                   </div>
+                  {/* Batch 2 (migration 0039) — reference + date required for
+                      bank_transfer (a real bank transaction to point to,
+                      same reasoning as the proof file below); optional for
+                      cash. Note always optional. Uncontrolled — read via
+                      FormData in onMarkPaid, same as proofFile. */}
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium">
+                      Payment reference{payMethod === "bank_transfer" ? " (required) *" : " (optional)"}
+                    </span>
+                    <input
+                      type="text"
+                      name="paymentReference"
+                      required={payMethod === "bank_transfer"}
+                      className={INPUT}
+                      style={INPUT_STYLE}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium">
+                      Payment date{payMethod === "bank_transfer" ? " (required) *" : " (optional)"}
+                    </span>
+                    <input
+                      type="date"
+                      name="paymentDate"
+                      required={payMethod === "bank_transfer"}
+                      className={INPUT}
+                      style={INPUT_STYLE}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium">Note (optional)</span>
+                    <textarea name="paymentNote" rows={2} className={INPUT} style={INPUT_STYLE} />
+                  </label>
                   {payMethod === "bank_transfer" && (
                     <label className="flex flex-col gap-1 text-sm">
                       <span className="font-medium">Proof of payment (required) *</span>
