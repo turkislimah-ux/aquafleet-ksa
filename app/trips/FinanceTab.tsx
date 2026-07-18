@@ -369,7 +369,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
                       {r.mode === "prepaid" || r.mode === "postpaid" ? (
                         <Btn
                           variant="outline"
-                          onClick={() => setInvoicesFor({ id: r.customer.id, name: r.customer.name, email: r.customer.email })}
+                          onClick={() => setInvoicesFor({ id: r.customer.id, name: r.customer.name, email: r.customer.email, settledBalance: r.settledBalance })}
                         >
                           Invoices
                         </Btn>

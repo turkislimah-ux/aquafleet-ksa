@@ -118,6 +118,7 @@ export default function InvoiceDetailModal({
   open,
   invoiceId,
   customerEmail,
+  settledBalance,
   onClose,
   onBack,
   onMutated,
@@ -125,6 +126,10 @@ export default function InvoiceDetailModal({
   open: boolean;
   invoiceId: string | null;
   customerEmail: string | null;
+  // Prepaid customers only (Finance tab's per-row figure, §Batch-1 "Pay with
+  // Balance" confirmation) — display-only, never recomputed here. null for
+  // postpaid / not-yet-loaded.
+  settledBalance?: number | null;
   onClose: () => void;
   onBack: () => void;
   onMutated: () => void;
@@ -469,6 +474,34 @@ export default function InvoiceDetailModal({
     if (!invoiceId) return;
     const form = new FormData(e.currentTarget);
     form.set("invoiceId", invoiceId);
+    setBusy(true);
+    setActionError(null);
+    const res = await markInvoicePaid(form);
+    setBusy(false);
+    if (res.error) {
+      setActionError(res.error);
+      return;
+    }
+    setPayingOpen(false);
+    await refresh();
+  }
+
+  // Prepaid "Pay with Balance" (Batch 1) — no cash/bank choice (prepaid never
+  // pays that way, spec v3 §7): the engine already deducted the balance at
+  // delivery (trips) / add-to-draft (charges), so this step only RECORDS
+  // settlement and LOCKS the covered items — same pay_invoice() RPC the old
+  // cash/bank form called, just with no user-facing method choice. The RPC's
+  // payment_method column only accepts 'cash'/'bank_transfer' (0025's check
+  // constraint) — there's no 'balance' value without a migration, out of
+  // scope for this batch — so this records 'cash' under the hood (no file
+  // needed, least-wrong of the two existing options). Purely a bookkeeping
+  // label on a column the customer never sees; the invoice UI never shows
+  // "Cash" for a prepaid invoice anywhere.
+  async function onMarkPaidBalance() {
+    if (!invoiceId) return;
+    const form = new FormData();
+    form.set("invoiceId", invoiceId);
+    form.set("paymentMethod", "cash");
     setBusy(true);
     setActionError(null);
     const res = await markInvoicePaid(form);
@@ -912,14 +945,50 @@ export default function InvoiceDetailModal({
               {status === "confirmed" && !voiding && !payingOpen && (
                 <div className="flex items-center gap-2">
                   <Btn variant="primary" onClick={() => setPayingOpen(true)}>
-                    Mark Paid
+                    {isPrepaid ? "Pay with Balance" : "Mark Paid"}
                   </Btn>
                   <Btn variant="outline" onClick={() => setVoiding(true)}>
                     Void
                   </Btn>
                 </div>
               )}
-              {status === "confirmed" && payingOpen && (
+              {/* Prepaid — Batch 1: no cash/bank choice, just a confirmation
+                  showing settled balance draw-down. Numbers are display-only
+                  (settledBalance from the Finance tab row, view.grand.total
+                  already computed) — nothing recomputed here. */}
+              {status === "confirmed" && payingOpen && isPrepaid && (
+                <div className="space-y-3 max-w-sm">
+                  <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
+                    <div className="flex justify-between">
+                      <span className="muted">Settled balance</span>
+                      <span className="tabular-nums">{formatSar(settledBalance ?? 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="muted">This invoice (Grand Total)</span>
+                      <span className="tabular-nums">− {formatSar(view.grand.total)}</span>
+                    </div>
+                    <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                      <span>Remaining settled balance</span>
+                      <span className={"tabular-nums " + (((settledBalance ?? 0) - view.grand.total) < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
+                        {formatSar((settledBalance ?? 0) - view.grand.total)}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-xs muted">
+                    The balance already covered these trips/charges at delivery — this just records the settlement and locks them. No new money changes hands.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Btn type="button" variant="ghost" onClick={() => setPayingOpen(false)}>
+                      Cancel
+                    </Btn>
+                    <Btn type="button" variant="primary" onClick={onMarkPaidBalance} className={busy ? "opacity-50 pointer-events-none" : ""}>
+                      {busy ? "Recording…" : "Confirm payment"}
+                    </Btn>
+                  </div>
+                </div>
+              )}
+              {/* Postpaid — unchanged (v2 shape). */}
+              {status === "confirmed" && payingOpen && !isPrepaid && (
                 <form onSubmit={onMarkPaid} className="space-y-3 max-w-sm">
                   <div className="flex items-center gap-4 text-sm">
                     <label className="flex items-center gap-1.5">

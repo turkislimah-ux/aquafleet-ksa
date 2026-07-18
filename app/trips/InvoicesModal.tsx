@@ -20,7 +20,11 @@ import InvoiceDetailModal from "./InvoiceDetailModal";
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-export type InvoiceCustomer = { id: string; name: string; email: string | null };
+// settledBalance: prepaid customers only (Finance tab's per-row figure,
+// already computed there — passed through unchanged so InvoiceDetailModal's
+// "Pay with Balance" confirmation can display it without recomputing.
+// undefined/null for postpaid (no balance concept).
+export type InvoiceCustomer = { id: string; name: string; email: string | null; settledBalance?: number | null };
 
 export default function InvoicesModal({
   open,
@@ -187,6 +191,7 @@ export default function InvoicesModal({
         open={selectedInvoiceId !== null}
         invoiceId={selectedInvoiceId}
         customerEmail={customer.email}
+        settledBalance={customer.settledBalance ?? null}
         onClose={() => {
           setSelectedInvoiceId(null);
           onClose();

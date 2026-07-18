@@ -99,6 +99,11 @@ relevant skill(s) **when the task calls for it**:
 - **Turki verifies in-browser before every commit.** Nothing commits unverified.
 - Migrations numbered sequentially (`00NN_name.sql`). Highest so far: check
   `ls supabase/migrations/`.
+- **Migrations are DRAFTED to disk for Turki to run in the Supabase SQL Editor — never
+  self-applied by Claude Code through the Supabase MCP** (reaffirming §1). Incident: the
+  v3 prepaid rebuild self-applied `0036`/`0037` directly via MCP instead of drafting them
+  for Turki, which is how they ended up as stray `confirm_invoice` overloads instead of
+  clean replacements (fixed in `0038` — see §7). Draft the file, stop, let Turki run it.
 
 ---
 
@@ -199,6 +204,41 @@ relevant skill(s) **when the task calls for it**:
     leaving prepaid) the balance is exactly zero — enforced server-side inside
     `update_project_with_customer`, checked proactively client-side in `ProjectModal`
     — migration `0035`.
+
+- **Prepaid VAT-inclusive rebuild (v3) is COMPLETE, through commit `f365830`**
+  (finance-invoice-spec.md v3). Reworks the prepaid model end-to-end:
+  - **Model:** top-ups stay plain money. Trips consume `rate_per_trip_sar * 1.15` from
+    balance at delivery; special charges consume `amount_sar * 1.15` the instant they're
+    added to a draft invoice (not at confirm). ONE FIFO queue drains trips AND charges
+    together, oldest-first by date — no separate trip-only/charge-only queues.
+    Covered/unpaid is a presentation-only split of that single derived-balance walk, not
+    a second consumption pass.
+  - **Engine (`lib/prepaid.ts`):** the old v2 quartet (`consumingTrips`/`derivedBalance`/
+    `buildStatement`/`splitCoveredUnpaid`) is DELETED — replaced by `consumingItems`/
+    `derivedBalanceItems`/`buildStatementItems`/`splitCoveredUnpaidItems` (same shapes,
+    trips+charges combined). `VAT_RATE`'s canonical home moved here too (`lib/vat.ts`
+    now just re-exports it) — the v3 consumption math needs it directly, one direction
+    of flow, no circular import.
+  - **Invoice UI:** each trips table (Covered/Unpaid) shows its own stacked Subtotal/
+    Balance/Remaining ledger figures below the table (not an in-table row); a faded
+    pre-VAT+VAT breakdown sits beside the bold total everywhere (numbers only, no "SAR"
+    on the faded half — bold total keeps it); Special Charges gets its own table
+    (covered + uncovered, each tagged); Grand Total is one titleless stacked block
+    (covered trips + covered charges only) with Amount Due beside it in prepaid, removed
+    entirely in postpaid (same figure twice otherwise, no second card); a hide-toggle on
+    the Unpaid table header governs print/PDF/email only — always visible on-screen.
+  - **Finance tab:** the per-customer table shows SETTLED balance (consumption from
+    PAID invoices only — moves only on Mark Paid); the KPI row + over-balance alerts +
+    invoice-table ledgers use RUNNING (derived, all consumption) balance — two different
+    numbers by design, not a bug.
+  - **Migrations:** `0036` (ledger-total columns + `hide_amount_due`), `0037`
+    (`payment_mode` snapshot frozen at confirm), `0038` (dropped two stale
+    `confirm_invoice` overloads `0036`/`0037` left behind — exactly one 24-arg signature
+    live now; see §5's process-lesson note on how those overloads happened).
+  - **Legacy invoices** confirmed before `0036`: Balance/Remaining render as "—" (never
+    a fabricated 0), and their charges are treated as covered (best-available
+    approximation, no backfill — same precedent as every other frozen-snapshot gap).
+
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
   touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`
