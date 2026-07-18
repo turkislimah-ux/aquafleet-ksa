@@ -63,9 +63,14 @@ export type PdfLine = {
   description: string;
   amount_sar: number;
   vat_sar: number;
+  // v3, prepaid charge lines only — undefined for trip lines / postpaid.
+  covered?: boolean;
 };
 
 export type PdfTotals = { subtotal: number; vat: number; total: number };
+
+// v3 §9 — same shape as lib/invoice.ts's InvoiceLedgerTotals.
+export type PdfLedgerTotals = { subtotal: number; balance: number; remaining: number };
 
 export type PdfIdentity = {
   name: string | null; // legal_name (seller) or name (buyer)
@@ -80,17 +85,28 @@ export type PdfIdentity = {
 // the snapshot-vs-live branch and produces this; this file only renders it.
 export type PdfInvoiceData = {
   status: InvoiceStatus;
+  paymentMode: "prepaid" | "postpaid";
   invoiceNumber: string | null;
   periodStart: string;
   periodEnd: string;
   seller: PdfIdentity;
   buyer: PdfIdentity;
   buyerEmail: string | null;
-  coveredLines: PdfLine[];
-  unpaidLines: PdfLine[];
-  covered: PdfTotals;
-  amountDue: PdfTotals;
-  grand: PdfTotals;
+  coveredLines: PdfLine[]; // trips only
+  unpaidLines: PdfLine[]; // prepaid: trips only. postpaid: trips + charges (unchanged v2 shape)
+  // v3, prepaid only: ALL of this invoice's special charges (covered + uncovered).
+  // Always [] for postpaid.
+  chargeLines: PdfLine[];
+  covered: PdfTotals; // trips only
+  amountDue: PdfTotals; // v3 prepaid: unpaid trips only. postpaid: unchanged
+  grand: PdfTotals; // v3 prepaid: covered trips + covered charges only. postpaid: unchanged (= amountDue)
+  // v3, prepaid only — undefined for postpaid.
+  ledger?: { covered: PdfLedgerTotals; unpaid: PdfLedgerTotals };
+  // v3 §9 hide toggle — when true, the Amount Due table/figure is omitted
+  // from this customer-facing render entirely (on-screen it's always shown
+  // to staff; this template IS the customer-facing surface, so it's the one
+  // place this toggle takes effect).
+  hideAmountDue: boolean;
   paymentMethod: InvoicePaymentMethod | null;
   paidAt: string | null;
   voidReason: string | null;
@@ -197,6 +213,81 @@ function lineTable(title: string, titleAr: string, lines: PdfLine[], totals: Pdf
   `;
 }
 
+// v3 §9 — prepaid Covered/Unpaid TRIPS table. Rows stay pre-VAT (no per-row
+// VAT column, unlike the postpaid lineTable above). Footer is the stacked
+// Subtotal/Balance/Remaining ledger figures (VAT-inclusive) — ALWAYS shown,
+// even when the table has zero rows (per spec) and even when `remaining`
+// goes negative (Unpaid table, pool fell short).
+function prepaidTripTable(title: string, titleAr: string, lines: PdfLine[], ledger: PdfLedgerTotals): string {
+  const rows =
+    lines.length > 0
+      ? lines
+          .map(
+            (l) => `
+      <tr>
+        <td dir="ltr">${esc(l.trip_date) || "—"}</td>
+        <td>${esc(l.description)}</td>
+        <td class="num" dir="ltr">${fmtSar(l.amount_sar)}</td>
+      </tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="3" class="muted">${label("No trips", "لا توجد رحلات")}</td></tr>`;
+  return `
+    <section class="table-block">
+      <h3>${label(title, titleAr)}</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>${label("Date", "التاريخ")}</th>
+            <th>${label("Description", "البيان")}</th>
+            <th class="num">${label("Amount", "المبلغ")}</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="ledger-foot">
+        <div class="ledger-row"><span>${label("Subtotal", "المجموع الفرعي")}</span><span dir="ltr">${fmtSar(ledger.subtotal)}</span></div>
+        <div class="ledger-row"><span>${label("Balance", "الرصيد")}</span><span dir="ltr">${fmtSar(ledger.balance)}</span></div>
+        <div class="ledger-row ledger-remaining"><span>${label("Remaining", "المتبقي")}</span><span dir="ltr">${fmtSar(ledger.remaining)}</span></div>
+      </div>
+    </section>
+  `;
+}
+
+// v3 §9 — the ONE Special Charges table (covered + uncovered charges
+// together, each row tagged). Positioned below the Unpaid trips table.
+// Omitted entirely when there are no charges in this invoice's period.
+function chargesTable(lines: PdfLine[]): string {
+  if (lines.length === 0) return "";
+  const rows = lines
+    .map(
+      (l) => `
+      <tr>
+        <td dir="ltr">${esc(l.trip_date) || "—"}</td>
+        <td>${esc(l.description)}</td>
+        <td class="num" dir="ltr">${fmtSar(l.amount_sar)}</td>
+        <td>${l.covered ? `<span class="badge covered">${label("Covered", "مغطى")}</span>` : `<span class="badge uncovered">${label("Rolls forward", "يُرحّل")}</span>`}</td>
+      </tr>`,
+    )
+    .join("");
+  return `
+    <section class="table-block">
+      <h3>${label("Special Charges", "رسوم إضافية")}</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>${label("Date", "التاريخ")}</th>
+            <th>${label("Description", "البيان")}</th>
+            <th class="num">${label("Amount", "المبلغ")}</th>
+            <th>${label("Status", "الحالة")}</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </section>
+  `;
+}
+
 export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
   const ref = data.invoiceNumber ? `#${data.invoiceNumber}` : `(${data.periodStart} — ${data.periodEnd})`;
 
@@ -251,6 +342,19 @@ export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
   .notice { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
   .notice.ok { background: #eefaf0; color: #1a6b34; }
   .notice.bad { background: #fdeeee; color: #a12a2a; }
+  .ledger-foot { border-top: 2px solid #111; padding-top: 4px; }
+  .ledger-row { display: flex; justify-content: flex-end; gap: 10px; padding: 2px 6px; }
+  .ledger-row span:first-child { color: #555; }
+  .ledger-remaining { font-weight: 700; border-top: 1px solid #ddd; margin-top: 2px; padding-top: 4px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 9.5px; font-weight: 600; }
+  .badge.covered { background: #eefaf0; color: #1a6b34; }
+  .badge.uncovered { background: #fdf3f2; color: #a12a2a; }
+  .grand-stack { border: 1px solid #ddd; border-radius: 6px; padding: 10px 14px; margin: 14px 0; background: #f4f6fb; }
+  .grand-stack .grand-row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .grand-stack .grand-row.grand-final { font-size: 15px; font-weight: 700; border-top: 1px solid #111; margin-top: 4px; padding-top: 6px; }
+  .due-card { border-radius: 6px; padding: 10px 14px; border: 1px solid #ddd; background: #fdf3f2; margin: 14px 0; }
+  .due-card .amount { font-size: 16px; font-weight: 700; margin-top: 2px; }
+  .due-card .note { color: #888; font-size: 9.5px; }
 </style>
 </head>
 <body>
@@ -273,19 +377,51 @@ export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
 
   ${statusNote}
 
-  ${lineTable("Covered (paid from prepaid balance)", "مغطى (من الرصيد المسبق)", data.coveredLines, data.covered)}
-  ${lineTable("Amount Due (collectible)", "المبلغ المستحق (قابل للتحصيل)", data.unpaidLines, data.amountDue)}
+  ${
+    data.paymentMode === "postpaid"
+      ? `
+    ${lineTable("Covered (paid from prepaid balance)", "مغطى (من الرصيد المسبق)", data.coveredLines, data.covered)}
+    ${lineTable("Amount Due (collectible)", "المبلغ المستحق (قابل للتحصيل)", data.unpaidLines, data.amountDue)}
 
-  <div class="totals-cards">
-    <div class="total-card info">
-      <div>${label("Grand Total (full period value)", "الإجمالي الكلي (لكامل الفترة)")}</div>
-      <div class="amount" dir="ltr">${fmtSar(data.grand.total)}</div>
+    <div class="totals-cards">
+      <div class="total-card info">
+        <div>${label("Grand Total (full period value)", "الإجمالي الكلي (لكامل الفترة)")}</div>
+        <div class="amount" dir="ltr">${fmtSar(data.grand.total)}</div>
+      </div>
+      <div class="total-card due">
+        <div>${label("Amount Due", "المبلغ المستحق")}</div>
+        <div class="amount" dir="ltr">${fmtSar(data.amountDue.total)}</div>
+      </div>
     </div>
-    <div class="total-card due">
+  `
+      : `
+    ${prepaidTripTable("Covered Trips", "الرحلات المغطاة", data.coveredLines, data.ledger?.covered ?? { subtotal: 0, balance: 0, remaining: 0 })}
+    ${prepaidTripTable("Unpaid Trips", "الرحلات غير المدفوعة", data.unpaidLines, data.ledger?.unpaid ?? { subtotal: 0, balance: 0, remaining: 0 })}
+    ${chargesTable(data.chargeLines)}
+
+    <div class="grand-stack">
+      <h3>${label("Grand Total", "الإجمالي الكلي")}</h3>
+      <div class="grand-row"><span>${label("Subtotal (Covered trips)", "المجموع الفرعي (الرحلات المغطاة)")}</span><span dir="ltr">${fmtSar(data.covered.subtotal)}</span></div>
+      <div class="grand-row"><span>${label("Special Charges (covered)", "رسوم إضافية (مغطاة)")}</span><span dir="ltr">${fmtSar(
+          data.chargeLines.filter((l) => l.covered).reduce((sum, l) => sum + l.amount_sar, 0),
+        )}</span></div>
+      <div class="grand-row"><span>${label("Total VAT", "إجمالي ضريبة القيمة المضافة")}</span><span dir="ltr">${fmtSar(data.grand.vat)}</span></div>
+      <div class="grand-row grand-final"><span>${label("TOTAL", "الإجمالي")}</span><span dir="ltr">${fmtSar(data.grand.total)}</span></div>
+    </div>
+
+    ${
+      data.hideAmountDue
+        ? ""
+        : `
+    <div class="due-card">
       <div>${label("Amount Due", "المبلغ المستحق")}</div>
       <div class="amount" dir="ltr">${fmtSar(data.amountDue.total)}</div>
+      <div class="note">${label("Unpaid trips, informational only", "الرحلات غير المدفوعة، للعلم فقط")}</div>
     </div>
-  </div>
+    `
+    }
+  `
+  }
 </body>
 </html>`;
 }

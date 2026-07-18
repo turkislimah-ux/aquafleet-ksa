@@ -623,7 +623,7 @@ function PhasePickerModal({
   // ever stamped on delivered (setTripStage), and pay_commission only tags
   // rows where delivered_at is not null — so a commission-paid trip is
   // always delivered. An invoice-locked trip is ALSO always delivered (only
-  // delivered trips are ever billed — see lib/prepaid.ts's consumingTrips /
+  // delivered trips are ever billed — see lib/prepaid.ts's consumingItems /
   // lib/invoice.ts). So this single check already excludes BOTH locks too —
   // no separate payout_id/invoiceLocked check needed here.
   const deletable = trip.stage !== "delivered";

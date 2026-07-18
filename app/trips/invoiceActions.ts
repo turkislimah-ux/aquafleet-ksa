@@ -14,7 +14,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type SpecialChargeInput } from "@/lib/invoice";
 import type { ConsumingTrip, TopupLite } from "@/lib/prepaid";
-import type { Invoice, CompanySettings, Customer, WaterType } from "@/lib/db-types";
+import type { Invoice, CompanySettings, Customer, WaterType, PaymentMode } from "@/lib/db-types";
 import { generateInvoicePdf, PdfServiceNotConfiguredError } from "@/lib/pdf";
 import { buildInvoicePdfHtml, type PdfInvoiceData, type PdfIdentity } from "@/lib/invoicePdfTemplate";
 import { round2 } from "@/lib/vat";
@@ -37,11 +37,22 @@ const SPECIAL_CHARGE_IMAGE_BUCKET = "special-charge-images";
 // ---------------------------------------------------------------------------
 // Shared: fetch everything assembleInvoice() needs for a customer/period and
 // run it, applying the reserve-at-draft exclusion (migration 0030 — see
-// lib/invoice.ts's RESERVE-AT-DRAFT EXCLUSION note). `excludeInvoiceId` is
-// the invoice we're assembling FOR — trips it already reserves are treated
-// as "ours", not "reserved elsewhere"; pass null when no invoice exists yet
-// (createDraftInvoice's pre-create assembly). `invoiceId` (when given) also
-// scopes the special-charges fetch — a not-yet-created draft has none.
+// lib/invoice.ts's RESERVE-AT-DRAFT EXCLUSION note, GENERALIZED in v3 to
+// cover special charges too). `invoiceId` is the invoice we're assembling
+// FOR — trips/charges it already claims are treated as "ours", not
+// "reserved elsewhere"; pass null when no invoice exists yet
+// (createDraftInvoice's pre-create assembly).
+//
+// v3: the special-charges fetch is now CUSTOMER-WIDE (every charge on every
+// NON-VOID invoice for this customer, not just this invoiceId's own) — the
+// FIFO pool must see every charge that ever consumed it (see lib/invoice.ts's
+// PERIOD-MEMBERSHIP RULE + lib/prepaid.ts's "which invoices' charges
+// consume" note: void-invoice charges are excluded here, at the fetch, by
+// filtering out void invoice ids before the charges query even runs — this
+// IS the caller-side exclusion lib/prepaid.ts's header defers to). Charges
+// belonging to another (non-void) invoice than the one being assembled are
+// still included in the FIFO input but excluded from the DISPLAYED
+// chargeLines via reservedElsewhereIds, exactly like trips.
 //
 // Used by: previewInvoice() (read-only display, draft/review), confirmInvoice()
 // (right before it snapshots the result), createDraftInvoice() (pre-create,
@@ -97,9 +108,6 @@ async function assembleForCustomerPeriod(params: {
     ref: t.ref,
     water_type: t.water_type,
   }));
-  const reservedElsewhereTripIds = (tripRows ?? [])
-    .filter((t) => t.invoice_id != null && t.invoice_id !== invoiceId)
-    .map((t) => t.id);
 
   const { data: topupRows, error: topupErr } = await supabase
     .from("customer_topups")
@@ -108,15 +116,56 @@ async function assembleForCustomerPeriod(params: {
   if (topupErr) return { error: topupErr.message };
   const topups: TopupLite[] = topupRows ?? [];
 
-  let specialCharges: SpecialChargeInput[] = [];
-  if (invoiceId) {
-    const { data: chargeRows, error: chargeErr } = await supabase
+  // v3: customer-wide, non-void-invoice charges only — see header note.
+  // Two-step (no nested-join precedent elsewhere in this codebase, kept
+  // consistent): fetch this customer's non-void invoice ids, then every
+  // charge on those invoices.
+  const { data: customerInvoiceRows, error: custInvErr } = await supabase
+    .from("invoices")
+    .select("id, status")
+    .eq("customer_id", customerId);
+  if (custInvErr) return { error: custInvErr.message };
+  const nonVoidInvoiceIds = (customerInvoiceRows ?? []).filter((i) => i.status !== "void").map((i) => i.id);
+
+  let chargeRows: {
+    id: string;
+    invoice_id: string;
+    label: string;
+    amount_sar: number;
+    charge_date: string | null;
+    quantity: number;
+    price_sar: number | null;
+    image_path: string | null;
+    created_at: string;
+  }[] = [];
+  if (nonVoidInvoiceIds.length > 0) {
+    const { data, error: chargeErr } = await supabase
       .from("invoice_special_charges")
-      .select("id, label, amount_sar, charge_date, quantity, price_sar, image_path")
-      .eq("invoice_id", invoiceId);
+      .select("id, invoice_id, label, amount_sar, charge_date, quantity, price_sar, image_path, created_at")
+      .in("invoice_id", nonVoidInvoiceIds);
     if (chargeErr) return { error: chargeErr.message };
-    specialCharges = chargeRows ?? [];
+    chargeRows = data ?? [];
   }
+  const specialCharges: SpecialChargeInput[] = chargeRows.map((c) => ({
+    id: c.id,
+    label: c.label,
+    amount_sar: c.amount_sar,
+    charge_date: c.charge_date,
+    created_at: c.created_at,
+    quantity: c.quantity,
+    price_sar: c.price_sar,
+    image_path: c.image_path,
+  }));
+
+  // Reserved-elsewhere set (v3, generalized — see header note): a trip whose
+  // invoice_id is set to something other than this invoice, UNION a charge
+  // whose invoice_id is something other than this invoice (every charge
+  // always belongs to exactly one invoice from creation — see
+  // addSpecialCharge below — so "elsewhere" simply means "not this one").
+  const reservedElsewhereIds = [
+    ...(tripRows ?? []).filter((t) => t.invoice_id != null && t.invoice_id !== invoiceId).map((t) => t.id),
+    ...chargeRows.filter((c) => c.invoice_id !== invoiceId).map((c) => c.id),
+  ];
 
   const { data: seller } = await supabase.from("company_settings").select("*").eq("id", true).single();
 
@@ -136,7 +185,7 @@ async function assembleForCustomerPeriod(params: {
       billing_address: customer.billing_address,
     },
     customerEmail: customer.email,
-    reservedElsewhereTripIds,
+    reservedElsewhereIds,
   });
 
   return { error: null, assembly, sellerRow: seller, buyerRow: customer };
@@ -394,7 +443,9 @@ export async function previewInvoice(invoiceId: string): Promise<ActionResult<In
 // only), this reads the frozen snapshot columns exactly as confirm_invoice()
 // wrote them, so a Confirmed invoice's displayed numbers never drift from
 // what was actually confirmed even if underlying trips change afterward.
-export async function getInvoice(invoiceId: string): Promise<ActionResult<Invoice & { projectWaterType: WaterType | null }>> {
+export async function getInvoice(
+  invoiceId: string,
+): Promise<ActionResult<Invoice & { projectWaterType: WaterType | null; projectPaymentMode: PaymentMode }>> {
   const supabase = createClient();
   const { data, error } = await supabase.from("invoices").select("*").eq("id", invoiceId).single();
   if (error || !data) return { error: error?.message ?? "Invoice not found." };
@@ -403,13 +454,25 @@ export async function getInvoice(invoiceId: string): Promise<ActionResult<Invoic
   // the project's CURRENT water_type here so the UI can show a real label
   // instead of "—" — this never touches the frozen snapshot itself (covered_
   // lines/unpaid_lines stay exactly as confirm_invoice() wrote them).
+  //
+  // projectPaymentMode: the customer's CURRENT project.payment_mode — used by
+  // the caller ONLY as a fallback for frozen invoices predating migration
+  // 0037's payment_mode snapshot (raw.payment_mode == null). See
+  // getInvoicePdf()'s identical fallback for the rationale.
   const invoice = data as Invoice;
   const { data: project } = await supabase
     .from("projects")
-    .select("water_type")
+    .select("water_type, payment_mode")
     .eq("customer_id", invoice.customer_id)
     .maybeSingle();
-  return { error: null, data: { ...invoice, projectWaterType: (project?.water_type as WaterType | null) ?? null } };
+  return {
+    error: null,
+    data: {
+      ...invoice,
+      projectWaterType: (project?.water_type as WaterType | null) ?? null,
+      projectPaymentMode: (project?.payment_mode as PaymentMode | null) ?? "postpaid",
+    },
+  };
 }
 
 // Invoice history for one customer — newest period first. Powers the
@@ -500,7 +563,7 @@ export async function revertInvoiceToDraft(invoiceId: string): Promise<ActionRes
 // SERVER-SIDE guard added to confirm_invoice() (migration 0032) predicate
 // for predicate: same project (via customer_id), same period bounds, same
 // delivered_at is null filter — so the UI's block reason and the DB's hard
-// block can never disagree. Note consumingTrips()/splitCoveredUnpaid()
+// block can never disagree. Note consumingItems()/splitCoveredUnpaidItems()
 // (lib/prepaid.ts) filter OUT undelivered trips entirely, so this can't be
 // derived from the assembly — it's a separate raw query.
 // ---------------------------------------------------------------------------
@@ -552,9 +615,14 @@ export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ 
 
   const coveredTripIds = assembly.coveredLines.filter((l) => l.kind === "trip").map((l) => l.id);
   const unpaidTripIds = assembly.unpaidLines.filter((l) => l.kind === "trip").map((l) => l.id);
-  const specialChargesSnapshot = assembly.unpaidLines
-    .filter((l) => l.kind === "charge")
-    .map((l) => ({ id: l.id, label: l.description, amount_sar: l.amount_sar, vat_sar: l.vat_sar }));
+  // v3: prepaid keeps ALL its charges (covered + uncovered) in the dedicated
+  // chargeLines table; postpaid keeps the old v2 shape (charges merged into
+  // unpaidLines). Either way this is a full InvoiceLine snapshot now, not the
+  // old ad-hoc {id,label,amount_sar,vat_sar} shape — matches InvoiceLineSnapshot.
+  const specialChargesSnapshot =
+    assembly.paymentMode === "postpaid"
+      ? assembly.unpaidLines.filter((l) => l.kind === "charge")
+      : assembly.chargeLines;
 
   const { data, error } = await supabase.rpc("confirm_invoice", {
     p_invoice_id: invoiceId,
@@ -574,6 +642,13 @@ export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ 
     p_grand_subtotal: assembly.grand.subtotal,
     p_grand_vat: assembly.grand.vat,
     p_grand_total: assembly.grand.total,
+    p_covered_ledger_subtotal: assembly.ledger?.covered.subtotal ?? null,
+    p_covered_ledger_balance: assembly.ledger?.covered.balance ?? null,
+    p_covered_ledger_remaining: assembly.ledger?.covered.remaining ?? null,
+    p_unpaid_ledger_subtotal: assembly.ledger?.unpaid.subtotal ?? null,
+    p_unpaid_ledger_balance: assembly.ledger?.unpaid.balance ?? null,
+    p_unpaid_ledger_remaining: assembly.ledger?.unpaid.remaining ?? null,
+    p_payment_mode: assembly.paymentMode,
   });
   if (error) return { error: error.message };
   revalidatePath("/trips");
@@ -646,6 +721,21 @@ export async function unpayInvoice(invoiceId: string, reason: string): Promise<A
   const { data: auth } = await supabase.auth.getUser();
   const by = auth?.user?.email ?? "unknown";
   const { error } = await supabase.rpc("unpay_invoice", { p_invoice_id: invoiceId, p_reason: reason, p_by: by });
+  if (error) return { error: error.message };
+  revalidatePath("/trips");
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// v3 §9 — Amount Due hide toggle (migration 0036). A display preference, not
+// frozen financial data: a plain `.update()`, editable regardless of invoice
+// status (unlike every *_sar column, which is only ever written by
+// confirm_invoice()). Governs print/PDF/email only — always visible on-screen
+// to staff, per spec.
+// ---------------------------------------------------------------------------
+export async function setHideAmountDue(invoiceId: string, hide: boolean): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("invoices").update({ hide_amount_due: hide }).eq("id", invoiceId);
   if (error) return { error: error.message };
   revalidatePath("/trips");
   return { error: null };
@@ -737,6 +827,7 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
     const buyer = assembly.buyerSnapshot as BuyerSnap;
     pdfData = {
       status: inv.status,
+      paymentMode: assembly.paymentMode,
       invoiceNumber: inv.invoice_number,
       periodStart: inv.period_start,
       periodEnd: inv.period_end,
@@ -745,9 +836,12 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
       buyerEmail: assembly.customerEmail,
       coveredLines: assembly.coveredLines,
       unpaidLines: assembly.unpaidLines,
+      chargeLines: assembly.chargeLines,
       covered: assembly.covered,
       amountDue: assembly.amountDue,
       grand: assembly.grand,
+      ledger: assembly.ledger,
+      hideAmountDue: inv.hide_amount_due,
       paymentMethod: null,
       paidAt: null,
       voidReason: null,
@@ -756,8 +850,25 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
   } else {
     const seller = inv.seller_snapshot;
     const buyer = inv.buyer_snapshot;
+    // Frozen invoices predating migration 0037 have no `payment_mode`
+    // snapshot — fall back to the customer's CURRENT project.payment_mode.
+    // Correct for every invoice confirmed before any mode switch (the
+    // overwhelming majority); see migration 0037's header for the tradeoff.
+    let paymentMode: PaymentMode;
+    if (inv.payment_mode == null) {
+      const { data: proj } = await supabase
+        .from("projects")
+        .select("payment_mode")
+        .eq("customer_id", inv.customer_id)
+        .maybeSingle();
+      paymentMode = (proj?.payment_mode as PaymentMode | null | undefined) ?? "postpaid";
+    } else {
+      paymentMode = inv.payment_mode;
+    }
+    const isPrepaid = paymentMode === "prepaid";
     pdfData = {
       status: inv.status,
+      paymentMode,
       invoiceNumber: inv.invoice_number,
       periodStart: inv.period_start,
       periodEnd: inv.period_end,
@@ -768,10 +879,29 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
       // with "frozen means frozen".
       buyerEmail: null,
       coveredLines: inv.covered_lines ?? [],
+      // Prepaid (v3): unpaid_lines is trips-only already. Postpaid: unchanged
+      // (trips + charges merged, exactly as frozen).
       unpaidLines: inv.unpaid_lines ?? [],
+      chargeLines: isPrepaid ? (inv.special_charges_snapshot ?? []) : [],
       covered: { subtotal: inv.covered_subtotal_sar, vat: inv.covered_vat_sar, total: inv.covered_total_sar },
       amountDue: { subtotal: inv.amount_due_subtotal_sar, vat: inv.amount_due_vat_sar, total: inv.amount_due_sar },
       grand: { subtotal: inv.grand_subtotal_sar, vat: inv.grand_vat_sar, total: inv.grand_total_sar },
+      ledger:
+        isPrepaid && inv.covered_ledger_subtotal_sar != null && inv.unpaid_ledger_subtotal_sar != null
+          ? {
+              covered: {
+                subtotal: inv.covered_ledger_subtotal_sar,
+                balance: inv.covered_ledger_balance_sar ?? 0,
+                remaining: inv.covered_ledger_remaining_sar ?? 0,
+              },
+              unpaid: {
+                subtotal: inv.unpaid_ledger_subtotal_sar,
+                balance: inv.unpaid_ledger_balance_sar ?? 0,
+                remaining: inv.unpaid_ledger_remaining_sar ?? 0,
+              },
+            }
+          : undefined,
+      hideAmountDue: inv.hide_amount_due,
       paymentMethod: inv.payment_method,
       paidAt: inv.paid_at,
       voidReason: inv.void_reason,

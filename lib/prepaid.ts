@@ -1,35 +1,18 @@
 // Prepaid balance ledger — PURE math, no Supabase/Next/I-O. Mirrors
 // lib/commission.ts's discipline (see scripts/prepaid-check.ts).
 //
-// Model (finance-invoice-spec.md v2, §2 / §4.2 / §5):
-//   balance = sum(top-ups) - sum(consumed billable trip rates), BOTH PRE-VAT.
-//   Never stored — always recomputed from current rows. A trip consumes
-//   balance when it's DELIVERED (billable); reversing a delivery
-//   (delivered_at -> null) automatically stops it consuming, since these
-//   functions only ever see whatever delivered_at the caller's CURRENT trip
-//   rows carry. Nothing is manually undone.
-//
-//   A trip locked into a PAID invoice still counts as consumed — it was
-//   delivered and drew down balance; invoicing doesn't reverse that. The
-//   functions below take no invoice/lock field at all, by design:
-//   consumption depends ONLY on (trip_date, delivered_at, rate_sar), never
-//   on invoice_id/payout_id.
-//
-//   Trip rate = its PROJECT's rate_per_trip_sar (spec §2: "already exists on
-//   the project"; payment_mode also lives on the project, 1:1 with customer).
-//   `trips.rate_sar` is a separate, manually-entered legacy override column
-//   used only by the dashboard revenue KPI — NOT used here. Callers resolve
-//   each trip's rate before building a ConsumingTrip (its `rate_sar` field is
-//   the RESOLVED project rate, not that raw trips column).
-//
-//   Ordering/period key = trip_date (scheduled day), tiebreak delivered_at,
-//   tiebreak id — same convention as the commission engine.
-//
-// consumingTrips() is the SINGLE SHARED "what consumes balance" function
-// (spec §5 lock). derivedBalance() and buildStatement() (both below) call
-// it, and Commit 3's covered/unpaid engine will too — so the displayed
-// balance and the covered/unpaid split can never disagree on which trips
-// count, their amounts, or their order.
+// ---------------------------------------------------------------------------
+// v3 CUTOVER (Finance Step 3): the v2 model (pre-VAT consumption; exported
+// consumingTrips/derivedBalance/buildStatement/splitCoveredUnpaid) is RETIRED.
+// Every caller (lib/invoice.ts, app/trips/actions.ts, FinanceTab.tsx,
+// StatementModal.tsx) now uses the v3 functions below (consumingItems /
+// derivedBalanceItems / buildStatementItems / splitCoveredUnpaidItems) — the
+// ONE live consumption model, VAT-inclusive, trips+charges combined FIFO.
+// scripts/invoice-check.ts and scripts/prepaid-check.ts /
+// scripts/covered-unpaid-check.ts were rewritten alongside this cutover to
+// assert only v3 behavior. No parallel/legacy consumption implementation
+// remains in this file.
+// ---------------------------------------------------------------------------
 
 // Exported — lib/vat.ts (Finance Commit 4) reuses this exact rounding
 // definition rather than redefining its own, so every money value in the
@@ -37,6 +20,15 @@
 export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
+
+// Canonically defined HERE (not lib/vat.ts) so lib/prepaid.ts's v3
+// consumption math (below) can use it without a circular import — round2
+// already flowed prepaid.ts -> vat.ts; VAT_RATE now flows the same
+// direction. lib/vat.ts imports and re-exports both from here; nothing
+// outside this file hand-rolls 0.15 or 1.15 a second time (grep-verified:
+// only scripts/vat-check.ts imports VAT_RATE, via lib/vat.ts's re-export,
+// unaffected by this move).
+export const VAT_RATE = 0.15;
 
 export type ConsumingTrip = {
   id: string;
@@ -52,31 +44,28 @@ export type ConsumingTrip = {
   water_type?: "potable" | "non_potable" | null;
 };
 
-export type ConsumptionEntry = {
-  id: string;
-  trip_date: string;
-  delivered_at: string;
-  amount: number;
-  // Additive passenger fields — see ConsumingTrip.
-  ref?: string | null;
-  water_type?: "potable" | "non_potable" | null;
-};
-
 export type TopupLite = {
   id: string;
   amount_sar: number;
   topup_date: string;
 };
 
-/**
- * THE shared "what consumes balance" function (spec §5). Filters to billable
- * (delivered) trips, optionally capped to `asOfDate` (inclusive, by
- * trip_date), and returns them FIFO-ordered (trip_date asc, delivered_at
- * asc, id asc — deterministic tiebreak, matches lib/commission.ts). Commit
- * 3's covered/unpaid engine walks this exact list; derivedBalance() below
- * just sums it.
- */
-export function consumingTrips(trips: ConsumingTrip[], asOfDate?: string): ConsumptionEntry[] {
+export type TopupStatementInput = TopupLite & { note?: string | null; reference?: string | null };
+
+// Internal only — trip-side half of consumingItems()'s combined queue.
+// NOT exported: v2's standalone consumingTrips() export was retired in the
+// v3 cutover (see file header). This helper survives only as a private
+// building block so the trip-filter/sort logic isn't duplicated.
+type DeliveredTripEntry = {
+  id: string;
+  trip_date: string;
+  delivered_at: string;
+  amount: number; // pre-VAT
+  ref?: string | null;
+  water_type?: "potable" | "non_potable" | null;
+};
+
+function deliveredTripsSorted(trips: ConsumingTrip[], asOfDate?: string): DeliveredTripEntry[] {
   return trips
     .filter((t): t is ConsumingTrip & { delivered_at: string } => t.delivered_at != null)
     .filter((t) => asOfDate == null || t.trip_date <= asOfDate)
@@ -97,46 +86,204 @@ export function consumingTrips(trips: ConsumingTrip[], asOfDate?: string): Consu
     );
 }
 
+// ============================================================================
+// v3 MODEL (finance-invoice-spec.md v3, §2 / §4.2 / §5) — LIVE rule, wired
+// into every caller as of the Step 3 cutover (see file header).
+//
+//   Top-ups = plain money credits (unchanged from v2 — no VAT concept on the
+//   credit side, ever).
+//
+//   Consumption is VAT-INCLUSIVE: a delivered trip consumes
+//   `round2(rate_sar * (1 + VAT_RATE))`; a special charge consumes
+//   `round2(amount_sar * (1 + VAT_RATE))`. This is the ONE reversal from v2
+//   (which consumed pre-VAT rate_sar/amount_sar directly) — under v2, Bin
+//   Slimah absorbed VAT whenever balance couldn't stretch; under v3, the
+//   customer's balance bears the VAT, matching what the invoice will
+//   eventually bill for that item.
+//
+//   balance = sum(top-ups) - sum(VAT-inclusive consumption). Can go negative
+//   (over-balance), same as v2.
+//
+//   IMPORTANT — this VAT-inclusive multiplier is a CONSUMPTION/bookkeeping
+//   concern only, computed per item. It is NOT the same computation as
+//   lib/vat.ts's calculateVat(), which rounds VAT ONCE on a document-level
+//   SUMMED subtotal for invoice display. The two must never be conflated:
+//   a `ConsumedItem`'s `amount` field stays PRE-VAT (so a future invoice-
+//   assembly caller can still feed it through calculateVat() for correct
+//   document-level display); `consumedAmount` is the separate, per-item,
+//   VAT-inclusive figure that drives balance/coverage math. VAT_RATE is
+//   imported from nowhere else — it's the same constant defined just above,
+//   shared with lib/vat.ts's document-level math, never hand-rolled twice.
+//
+//   Timing: a trip consumes at delivery (delivered_at set) — same gate as
+//   v2. A special charge consumes once it's added to a NON-VOID invoice
+//   (draft/review/confirmed/paid) — no "delivered"-equivalent gate of its
+//   own. WHICH INVOICES' CHARGES CONSUME (the rule, and why): every charge
+//   belonging to a draft/review/confirmed/paid invoice; a charge on a VOID
+//   invoice does not. This mirrors ConsumingTrip.rate_sar's caller-resolved
+//   convention exactly — this file has NO invoice-status awareness at all.
+//   The caller (a future step, once lib/invoice.ts/actions.ts are migrated)
+//   is responsible for excluding a void invoice's charges before building
+//   the ConsumingCharge[] array passed in here; "void releases" a charge's
+//   consumption simply by the caller no longer including it, the exact same
+//   mechanism a reversed trip (delivered_at -> null) already uses today to
+//   stop consuming. No separate "released" flag or special-case code needed.
+//
+//   ONE FIFO queue by date, trips + special charges together (charge_date,
+//   migration 0032). Whole-item coverage — no splitting, same rule as v2's
+//   whole-trip coverage, just extended to a mixed queue. Uncovered items
+//   roll forward exactly as v2's uncovered trips did.
+//
+//   Still the TOTAL-BALANCE model (locked, same as v2): covered/unpaid is a
+//   PRESENTATION SPLIT of the single derived balance, never a per-top-up or
+//   per-item allocation.
+//
+// SINGLE-SOURCE-OF-TRUTH: consumingItems() is the ONE v3 "what consumes
+// balance" function. derivedBalanceItems() and buildStatementItems() (below)
+// both call it for their debit side, and splitCoveredUnpaidItems() walks its
+// exact output list — so the v3 balance, statement, and covered/unpaid split
+// can never disagree on which items count, their consumedAmount, or their
+// order. Never re-implement item selection/ordering/VAT-inclusive math
+// anywhere else.
+// ============================================================================
+
+export type ConsumingCharge = {
+  id: string;
+  // Caller-resolved, required. migration 0032's charge_date column is
+  // nullable at the DB level (pre-batch-B rows predate it) — a charge with
+  // no date can't take part in a date-ordered queue, so the caller must
+  // resolve one (e.g. fall back to the invoice's period_end) before
+  // constructing this type, exactly like ConsumingTrip.rate_sar being
+  // resolved before construction. Never re-derived in here.
+  charge_date: string;
+  // Pre-VAT, = price_sar * quantity, already computed by the caller — same
+  // source-of-truth field lib/invoice.ts's chargesToVatItems already reads
+  // (amount_sar). This file never does quantity * price itself.
+  amount_sar: number;
+  label?: string | null;
+};
+
+// A single v3 queue entry — trip OR special charge, discriminated by `kind`.
+// `amount` stays PRE-VAT (see model note above — feeds a future document-
+// level VAT display call unchanged); `consumedAmount` is the VAT-inclusive
+// figure that actually draws down balance. `trip_date` carries the item's
+// date regardless of origin (charge_date for charges) — same field-reuse
+// convention lib/invoice.ts's LineExtra type already established.
+export type ConsumedItem = {
+  id: string;
+  kind: "trip" | "charge";
+  trip_date: string;
+  delivered_at: string | null; // charges: always null, not applicable
+  amount: number; // pre-VAT
+  consumedAmount: number; // VAT-inclusive — round2(amount * (1 + VAT_RATE))
+  ref?: string | null; // trips only
+  water_type?: "potable" | "non_potable" | null; // trips only
+  label?: string | null; // charges only
+};
+
+function compareConsumedItems(a: ConsumedItem, b: ConsumedItem): number {
+  if (a.trip_date !== b.trip_date) return a.trip_date < b.trip_date ? -1 : 1;
+  // Same-date tiebreak: trips before charges — arbitrary but deterministic
+  // and documented (charges have no natural intra-day ordering signal the
+  // way delivered_at gives trips one).
+  if (a.kind !== b.kind) return a.kind === "trip" ? -1 : 1;
+  if (a.kind === "trip") {
+    const da = a.delivered_at ?? "";
+    const db = b.delivered_at ?? "";
+    if (da !== db) return da < db ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
 /**
- * Derived pre-VAT balance = sum(top-ups up to asOfDate) - sum(consumed trip
- * rates up to asOfDate, via consumingTrips). Pure; recomputed fresh every
- * call, so a reversed trip restores balance automatically next call.
+ * THE v3 shared "what consumes balance" function. Combines
+ * deliveredTripsSorted()'s delivered/asOfDate-filtered trip list with the
+ * given charges (asOfDate-filtered by charge_date; no other filtering — see
+ * the "which invoices' charges consume" note above), maps both to
+ * ConsumedItem (adding the VAT-inclusive consumedAmount), and returns ONE
+ * date-ordered queue. derivedBalanceItems/buildStatementItems/
+ * splitCoveredUnpaidItems all walk
+ * this exact list.
  */
-export function derivedBalance(topups: TopupLite[], trips: ConsumingTrip[], asOfDate?: string): number {
+export function consumingItems(
+  trips: ConsumingTrip[],
+  charges: ConsumingCharge[] = [],
+  asOfDate?: string,
+): ConsumedItem[] {
+  const tripItems: ConsumedItem[] = deliveredTripsSorted(trips, asOfDate).map((e) => ({
+    id: e.id,
+    kind: "trip",
+    trip_date: e.trip_date,
+    delivered_at: e.delivered_at,
+    amount: e.amount,
+    consumedAmount: round2(e.amount * (1 + VAT_RATE)),
+    ref: e.ref ?? null,
+    water_type: e.water_type ?? null,
+  }));
+
+  const chargeItems: ConsumedItem[] = charges
+    .filter((c) => asOfDate == null || c.charge_date <= asOfDate)
+    .map((c) => ({
+      id: c.id,
+      kind: "charge",
+      trip_date: c.charge_date,
+      delivered_at: null,
+      amount: round2(c.amount_sar),
+      consumedAmount: round2(c.amount_sar * (1 + VAT_RATE)),
+      label: c.label ?? null,
+    }));
+
+  return [...tripItems, ...chargeItems].sort(compareConsumedItems);
+}
+
+/**
+ * v3 derived balance = sum(top-ups up to asOfDate) - sum(VAT-inclusive
+ * consumption up to asOfDate, via consumingItems). Pure; recomputed fresh
+ * every call. `charges` defaults to `[]` so a trips-only caller still gets
+ * correct VAT-inclusive trip consumption without needing to pass charges.
+ */
+export function derivedBalanceItems(
+  topups: TopupLite[],
+  trips: ConsumingTrip[],
+  charges: ConsumingCharge[] = [],
+  asOfDate?: string,
+): number {
   const credits = round2(
     topups.filter((t) => asOfDate == null || t.topup_date <= asOfDate).reduce((s, t) => s + t.amount_sar, 0),
   );
-  const debits = round2(consumingTrips(trips, asOfDate).reduce((s, e) => s + e.amount, 0));
+  const debits = round2(consumingItems(trips, charges, asOfDate).reduce((s, e) => s + e.consumedAmount, 0));
   return round2(credits - debits);
 }
 
-export type StatementEntry = {
-  kind: "topup" | "trip";
+export type StatementItemEntry = {
+  kind: "topup" | "trip" | "charge";
   id: string;
-  date: string; // topup_date (credit) or trip_date (debit)
-  amount: number; // positive for a top-up credit, negative for a trip debit
+  date: string;
+  // Positive for a top-up credit, NEGATIVE VAT-INCLUSIVE consumedAmount for
+  // a trip/charge debit — the statement shows the true draw on balance, not
+  // the pre-VAT item amount.
+  amount: number;
   runningBalance: number;
   note?: string | null;
   reference?: string | null;
-  // Additive passenger fields (trip debits only) — see ConsumingTrip.
-  ref?: string | null;
-  water_type?: "potable" | "non_potable" | null;
+  ref?: string | null; // trip debits only
+  water_type?: "potable" | "non_potable" | null; // trip debits only
 };
 
-export type TopupStatementInput = TopupLite & { note?: string | null; reference?: string | null };
-
 /**
- * Bank-statement-style ledger (spec §10 drill-in): every top-up credit + every
- * trip debit, chronological (date asc; same-day tie: credit before debit,
- * then id asc), with a running balance. Pure/testable. The final entry's
- * runningBalance always equals derivedBalance(...) for the same asOfDate —
- * both derive from the same consumingTrips() core, so they can't disagree.
+ * v3 bank-statement-style ledger: every top-up credit + every trip/charge
+ * VAT-inclusive debit, chronological (date asc; same-day tie: credit before
+ * debit, then consumingItems'/compareConsumedItems' own tiebreak, then id),
+ * with a running balance. The final entry's runningBalance always equals
+ * derivedBalanceItems(...) for the same inputs — both derive from the same
+ * consumingItems() core.
  */
-export function buildStatement(
+export function buildStatementItems(
   topups: TopupStatementInput[],
   trips: ConsumingTrip[],
+  charges: ConsumingCharge[] = [],
   asOfDate?: string,
-): StatementEntry[] {
+): StatementItemEntry[] {
   const credits = topups
     .filter((t) => asOfDate == null || t.topup_date <= asOfDate)
     .map((t) => ({
@@ -147,15 +294,15 @@ export function buildStatement(
       note: t.note ?? null,
       reference: t.reference ?? null,
     }));
-  const debits = consumingTrips(trips, asOfDate).map((e) => ({
-    kind: "trip" as const,
+  const debits = consumingItems(trips, charges, asOfDate).map((e) => ({
+    kind: e.kind,
     id: e.id,
     date: e.trip_date,
-    amount: round2(-e.amount),
-    note: null as string | null,
+    amount: round2(-e.consumedAmount),
+    note: e.kind === "charge" ? e.label ?? null : null,
     reference: null as string | null,
-    ref: e.ref ?? null,
-    water_type: e.water_type ?? null,
+    ref: e.kind === "trip" ? e.ref ?? null : null,
+    water_type: e.kind === "trip" ? e.water_type ?? null : null,
   }));
 
   const merged = [...credits, ...debits].sort((a, b) => {
@@ -171,66 +318,57 @@ export function buildStatement(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Covered / unpaid engine (spec §5, prepaid-only, HIGHEST-RISK LOGIC).
-//
-// TOTAL-BALANCE MODEL (locked): this is a PRESENTATION SPLIT of the single
-// derived balance — sum(top-ups) − sum(consumed trip rates) — not a per-top-up
-// allocation. It never tracks which top-up "pays" which trip. Top-ups form one
-// pool (summed, order among themselves doesn't matter — same as derivedBalance's
-// credit side); trips drain the pool FIFO via consumingTrips (THE shared
-// "what consumes balance" function — split here, never recomputed).
-//
-// Whole-trip coverage: a trip is Covered only if its full rate fits in the
-// remaining pool. The FIRST trip that doesn't fit, and every trip after it
-// (in FIFO order), goes Unpaid — no trip splitting, no skip-and-try-next.
-// Leftover that couldn't cover the next whole trip freezes in remainingBalance
-// (never partially spent) and rolls forward to the next call automatically,
-// since this is a pure function recomputed fresh from current rows every time
-// — a later top-up (any topup_date) just enlarges the pool next call, which
-// can flip a previously-unpaid trip back to covered with no special-case code.
-//
-// Invariant (enforced by the harness on every case): coveredTotal + unpaidTotal
-// === sum of every consumingTrips() amount, and remainingBalance − unpaidTotal
-// === derivedBalance(topups, trips, asOfDate) for the same inputs — proving
-// this can never disagree with the displayed balance.
-export type CoveredUnpaidResult = {
-  covered: ConsumptionEntry[];
-  unpaid: ConsumptionEntry[];
-  coveredTotal: number;
-  unpaidTotal: number;
-  // Leftover pool after only-covered trips subtracted. Always >= 0 — never
-  // driven negative (unlike derivedBalance, which subtracts every consumed
-  // trip unconditionally and can go negative to show total over-balance).
+export type CoveredUnpaidItemsResult = {
+  covered: ConsumedItem[];
+  unpaid: ConsumedItem[];
+  coveredTotal: number; // VAT-inclusive sum (consumedAmount)
+  unpaidTotal: number; // VAT-inclusive sum (consumedAmount)
+  // Leftover pool after only-covered items subtracted. Always >= 0 — never
+  // driven negative (unlike derivedBalanceItems, which subtracts every
+  // consumed item unconditionally and can go negative to show over-balance).
   remainingBalance: number;
 };
 
-export function splitCoveredUnpaid(
+/**
+ * v3 covered/unpaid split — splits consumingItems()'s combined trips+charges
+ * queue against the top-up pool, FIFO, whole-item coverage (no splitting):
+ * an item is Covered only if its full consumedAmount (VAT-inclusive) fits in
+ * the remaining pool. The first item that doesn't fit, and every item after
+ * it in queue order, goes Unpaid and rolls forward — identical rule to v2's
+ * whole-trip coverage, just walking the mixed queue instead of trips only.
+ *
+ * Invariant (enforced by the harness on every case): coveredTotal +
+ * unpaidTotal === sum of every consumingItems() consumedAmount, and
+ * remainingBalance − unpaidTotal === derivedBalanceItems(topups, trips,
+ * charges, asOfDate) for the same inputs.
+ */
+export function splitCoveredUnpaidItems(
   topups: TopupLite[],
   trips: ConsumingTrip[],
+  charges: ConsumingCharge[] = [],
   asOfDate?: string,
-): CoveredUnpaidResult {
+): CoveredUnpaidItemsResult {
   let pool = round2(
     topups.filter((t) => asOfDate == null || t.topup_date <= asOfDate).reduce((s, t) => s + t.amount_sar, 0),
   );
 
-  const entries = consumingTrips(trips, asOfDate);
-  const covered: ConsumptionEntry[] = [];
-  const unpaid: ConsumptionEntry[] = [];
+  const items = consumingItems(trips, charges, asOfDate);
+  const covered: ConsumedItem[] = [];
+  const unpaid: ConsumedItem[] = [];
   let hitWall = false;
 
-  for (const e of entries) {
-    if (!hitWall && pool >= e.amount) {
+  for (const e of items) {
+    if (!hitWall && pool >= e.consumedAmount) {
       covered.push(e);
-      pool = round2(pool - e.amount);
+      pool = round2(pool - e.consumedAmount);
     } else {
       hitWall = true;
       unpaid.push(e);
     }
   }
 
-  const coveredTotal = round2(covered.reduce((s, e) => s + e.amount, 0));
-  const unpaidTotal = round2(unpaid.reduce((s, e) => s + e.amount, 0));
+  const coveredTotal = round2(covered.reduce((s, e) => s + e.consumedAmount, 0));
+  const unpaidTotal = round2(unpaid.reduce((s, e) => s + e.consumedAmount, 0));
 
   return { covered, unpaid, coveredTotal, unpaidTotal, remainingBalance: pool };
 }

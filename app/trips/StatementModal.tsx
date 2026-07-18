@@ -4,12 +4,16 @@
 // every trip, distinct from the invoice's grouped summary ranges (see
 // lib/invoiceDisplay.ts). Two modes:
 //   - prepaid: bank-statement-style chronological ledger — top-up credits +
-//     delivered-trip debits, running balance. Built from lib/prepaid.ts's
-//     buildStatement() (pure, tested by scripts/prepaid-check.ts).
+//     delivered-trip/special-charge VAT-inclusive debits, running balance.
+//     Built from lib/prepaid.ts's v3 buildStatementItems() (pure, tested by
+//     scripts/prepaid-check.ts), trips + charges combined FIFO.
 //   - postpaid: itemized delivered trips only — no balance/ledger concept
 //     (spec §8/§10: postpaid has no prepaid balance). Built from
-//     consumingTrips() directly, the same pure/shared "what counts" function.
-// Pre-VAT throughout (VAT is invoice-level, not shown here).
+//     consumingItems() directly (trip entries only — postpaid passes no
+//     charges), the same pure/shared "what counts" function.
+// Pre-VAT throughout (VAT is invoice-level, not shown here) — except the
+// prepaid ledger's own debit amounts, which are VAT-inclusive by design (see
+// StatementItemEntry's comment in lib/prepaid.ts).
 //
 // Print reuses the existing portal pattern (InvoiceDetailModal/BreakdownReport):
 // createPortal + mounted guard + a `printing-statement` body class toggled
@@ -21,7 +25,7 @@ import { createPortal } from "react-dom";
 import { X, Printer } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
-import { buildStatement, consumingTrips, type ConsumingTrip, type TopupStatementInput } from "@/lib/prepaid";
+import { buildStatementItems, consumingItems, type ConsumingTrip, type ConsumingCharge, type TopupStatementInput } from "@/lib/prepaid";
 import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
 import { formatTripRef, sampleTripRef } from "@/lib/trip-ref";
 import TripRefLink from "@/components/TripRefLink";
@@ -33,6 +37,7 @@ export default function StatementModal({
   mode,
   topups,
   trips,
+  charges,
   projectWaterType,
   projectInitials,
 }: {
@@ -42,6 +47,8 @@ export default function StatementModal({
   mode: "prepaid" | "postpaid";
   topups: TopupStatementInput[];
   trips: ConsumingTrip[];
+  // v3 — prepaid only. Always [] for postpaid (no coverage/balance concept).
+  charges: ConsumingCharge[];
   // Display-only fallback (Finance polish batch C) — project's CURRENT
   // water_type, used when an entry/trip's own water_type is null (pre-
   // water_type-field data). Never mutates any stored record.
@@ -66,9 +73,9 @@ export default function StatementModal({
   }
 
   const sampleRef = sampleTripRef(projectInitials);
-  const entries = mode === "prepaid" ? buildStatement(topups, trips) : [];
+  const entries = mode === "prepaid" ? buildStatementItems(topups, trips, charges) : [];
   const balance = entries.length > 0 ? entries[entries.length - 1].runningBalance : 0;
-  const postpaidTrips = mode === "postpaid" ? consumingTrips(trips) : [];
+  const postpaidTrips = mode === "postpaid" ? consumingItems(trips).filter((e) => e.kind === "trip") : [];
 
   return createPortal(
     <div className="statement-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
@@ -108,7 +115,7 @@ export default function StatementModal({
                     <TH>Ref</TH>
                     <TH>Note</TH>
                     <TH>Amount</TH>
-                    <TH>Balance</TH>
+                    <TH>Running Balance</TH>
                   </tr>
                 </thead>
                 <tbody>
@@ -118,6 +125,8 @@ export default function StatementModal({
                       <TD>
                         {e.kind === "topup" ? (
                           <span className="text-emerald-600 dark:text-emerald-400 font-medium">Top-up</span>
+                        ) : e.kind === "charge" ? (
+                          <span className="muted">Charge</span>
                         ) : (
                           <span className="muted">
                             Trip{(e.water_type ?? projectWaterType) ? ` · ${WATER_TYPE_LABELS[(e.water_type ?? projectWaterType) as WaterType]}` : ""}
@@ -185,7 +194,7 @@ export default function StatementModal({
         <div className="flex items-center justify-between pt-4 mt-4 border-t border-app">
           {mode === "prepaid" ? (
             <div className="text-sm">
-              <span className="muted">Current balance: </span>
+              <span className="muted">Running balance: </span>
               <span className={"font-semibold tabular-nums " + (balance < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
                 {formatSar(balance)}
               </span>

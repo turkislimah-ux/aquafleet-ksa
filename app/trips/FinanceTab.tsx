@@ -2,9 +2,9 @@
 
 // Finance tab (Trips page) — Commit 1: the prepaid-ledger surface + a
 // productivity shell around it. Home for ALL Finance/Invoice UI going
-// forward (grows commit by commit). Reuses lib/prepaid.ts (derivedBalance +
-// buildStatement) and lib/actions/finance.ts (recordTopup) UNCHANGED — this
-// file is the first UI to actually surface that math.
+// forward (grows commit by commit). Reuses lib/prepaid.ts's v3 engine
+// (derivedBalanceItems + buildStatementItems, trips+charges combined FIFO)
+// and lib/actions/finance.ts (recordTopup) UNCHANGED.
 //
 // Scope lock (finance-invoice-spec.md v2): PRE-VAT only. No invoices, no PDF,
 // no VAT here — those are later commits. Customers tab is untouched; this is
@@ -13,14 +13,21 @@
 // Balance model: payment_mode lives on the PROJECT (1:1 with its customer).
 // Only PREPAID projects run a ledger — postpaid and unset (legacy, pre-0025
 // rows) projects have no top-up/statement actions, just a mode badge.
+//
+// v3: the balance/statement math also draws on every non-void special charge
+// across the customer's invoices (a charge consumes balance the instant it's
+// added — lib/prepaid.ts header) — `specialCharges` prop, fetched
+// customer-wide in app/trips/page.tsx (same void-exclusion rule
+// assembleForCustomerPeriod applies).
 
 import { useMemo, useState } from "react";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { PAYMENT_MODE_LABELS, type PaymentMode } from "@/lib/db-types";
-import { derivedBalance, type ConsumingTrip, type TopupStatementInput } from "@/lib/prepaid";
+import { derivedBalanceItems, type ConsumingTrip, type ConsumingCharge, type TopupStatementInput } from "@/lib/prepaid";
 import type { WaterType } from "@/lib/db-types";
+import type { SpecialChargeRow } from "./page";
 import TopupModal, { type TopupCustomerOption } from "./TopupModal";
 import StatementModal from "./StatementModal";
 import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
@@ -49,6 +56,12 @@ type TripLite = {
   // ConsumingTrip for the statement's ref link + water-type column.
   ref?: string | null;
   water_type?: WaterType | null;
+  // v3.1 — settled-balance follow-up. Already computed in app/trips/page.tsx
+  // (paid-invoice lock, `invoiceLocked = invoice_id set AND that invoice's
+  // status = 'paid'`) and flows straight through boardProps.trips — just
+  // wasn't declared on this narrower type until now. This is the "does this
+  // trip belong to a PAID invoice" signal settled balance filters on.
+  invoiceLocked?: boolean;
 };
 type TopupRow = {
   id: string;
@@ -64,11 +77,12 @@ export type FinanceTabProps = {
   projects: ProjectLite[];
   trips: TripLite[];
   topups: TopupRow[];
+  specialCharges: SpecialChargeRow[];
 };
 
 type ModeFilter = "all" | "prepaid" | "postpaid";
 
-export default function FinanceTab({ customers, projects, trips, topups }: FinanceTabProps) {
+export default function FinanceTab({ customers, projects, trips, topups, specialCharges }: FinanceTabProps) {
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
   const [topupTarget, setTopupTarget] = useState<TopupCustomerOption | null | "global">(null);
   const [statementFor, setStatementFor] = useState<{ customerId: string; customerName: string } | null>(null);
@@ -98,17 +112,38 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
     return m;
   }, [topups]);
 
+  const chargesByCustomer = useMemo(() => {
+    const m = new Map<string, SpecialChargeRow[]>();
+    for (const c of specialCharges) {
+      (m.get(c.customer_id) ?? m.set(c.customer_id, []).get(c.customer_id)!).push(c);
+    }
+    return m;
+  }, [specialCharges]);
+
   // Per-customer row: resolved project, mode, consuming-trips + balance (prepaid only).
+  //
+  // v3.1 — two balances now coexist here, deliberately:
+  //   - `balance` ("Running Balance", Model A) — top-ups minus ALL consumption
+  //     (every delivered/consuming trip + every non-void charge), regardless
+  //     of whether it's been invoiced/paid yet. This is the engine number —
+  //     drives over-balance alerts, the invoice tables' own ledger, etc.
+  //     UNCHANGED by this batch.
+  //   - `settledBalance` ("Settled Balance", NEW) — top-ups minus consumption
+  //     of ONLY the items sitting on a PAID invoice. Moves exclusively on
+  //     Mark Paid. Same derivedBalanceItems() call, just fed a pre-filtered
+  //     (paid-only) trips/charges slice — no second consumption formula.
   const rows = useMemo(() => {
     return customers.map((c) => {
       const project = projectByCustomer.get(c.id) ?? null;
       const mode = project?.payment_mode ?? null;
       let balance: number | null = null;
+      let settledBalance: number | null = null;
       let consuming: ConsumingTrip[] = [];
       let customerTopups: TopupStatementInput[] = [];
+      let customerCharges: ConsumingCharge[] = [];
       // consuming is built for BOTH prepaid and postpaid — prepaid needs it
-      // for derivedBalance/buildStatement; postpaid needs it for the new
-      // itemized-trips statement view (no balance, no top-ups involved).
+      // for derivedBalanceItems/buildStatementItems; postpaid needs it for
+      // the itemized-trips statement view (no balance, no top-ups involved).
       if (project && (mode === "prepaid" || mode === "postpaid")) {
         const projTrips = tripsByProject.get(project.id) ?? [];
         consuming = projTrips.map((t) => ({
@@ -128,11 +163,43 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
           note: t.note,
           reference: t.reference,
         }));
-        balance = derivedBalance(customerTopups, consuming);
+        // v3: every non-void charge consumes balance too — resolve a date
+        // the same way lib/invoice.ts's resolveChargeDate does (charge_date,
+        // falling back to created_at's date) before handing off to the
+        // shared engine.
+        customerCharges = (chargesByCustomer.get(c.id) ?? []).map((ch) => ({
+          id: ch.id,
+          charge_date: ch.charge_date ?? ch.created_at.slice(0, 10),
+          amount_sar: ch.amount_sar,
+          label: ch.label,
+        }));
+        balance = derivedBalanceItems(customerTopups, consuming, customerCharges);
+
+        // Settled balance: same engine call, paid-only slice. `invoiceLocked`
+        // (page.tsx) already means "this trip's invoice is status='paid'";
+        // `paid` (SpecialChargeRow, page.tsx) is the charge-side equivalent.
+        const projTripsPaidOnly = (tripsByProject.get(project.id) ?? []).filter((t) => t.invoiceLocked);
+        const consumingPaidOnly: ConsumingTrip[] = projTripsPaidOnly.map((t) => ({
+          id: t.id,
+          trip_date: t.trip_date,
+          delivered_at: t.delivered_at,
+          rate_sar: project.rate_per_trip_sar,
+          ref: t.ref,
+          water_type: t.water_type,
+        }));
+        const customerChargesPaidOnly: ConsumingCharge[] = (chargesByCustomer.get(c.id) ?? [])
+          .filter((ch) => ch.paid)
+          .map((ch) => ({
+            id: ch.id,
+            charge_date: ch.charge_date ?? ch.created_at.slice(0, 10),
+            amount_sar: ch.amount_sar,
+            label: ch.label,
+          }));
+        settledBalance = derivedBalanceItems(customerTopups, consumingPaidOnly, customerChargesPaidOnly);
       }
-      return { customer: c, project, mode, balance, consuming, customerTopups };
+      return { customer: c, project, mode, balance, settledBalance, consuming, customerTopups, customerCharges };
     });
-  }, [customers, projectByCustomer, tripsByProject, topupsByCustomer]);
+  }, [customers, projectByCustomer, tripsByProject, topupsByCustomer, chargesByCustomer]);
 
   const filteredRows = useMemo(() => {
     if (modeFilter === "all") return rows;
@@ -175,7 +242,7 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <Stat
-          label="Total prepaid balance"
+          label="Total running balance"
           value={formatSar(totalPrepaidBalance)}
           tone={totalPrepaidBalance < 0 ? "bad" : "ok"}
           sub={`${prepaidCount} prepaid customer${prepaidCount === 1 ? "" : "s"}`}
@@ -260,7 +327,7 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
                 <TH>Customer</TH>
                 <TH>Project</TH>
                 <TH>Mode</TH>
-                <TH>Balance</TH>
+                <TH>Settled Balance</TH>
                 <TH></TH>
               </tr>
             </thead>
@@ -274,8 +341,8 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
                   </TD>
                   <TD className="tabular-nums">
                     {r.mode === "prepaid" ? (
-                      <span className={(r.balance ?? 0) < 0 ? "text-rose-600 dark:text-rose-400 font-medium" : ""}>
-                        {formatSar(r.balance ?? 0)}
+                      <span className={(r.settledBalance ?? 0) < 0 ? "text-rose-600 dark:text-rose-400 font-medium" : ""}>
+                        {formatSar(r.settledBalance ?? 0)}
                       </span>
                     ) : (
                       <span className="muted">—</span>
@@ -336,6 +403,7 @@ export default function FinanceTab({ customers, projects, trips, topups }: Finan
         mode={activeStatementRow?.mode === "postpaid" ? "postpaid" : "prepaid"}
         topups={activeStatementRow?.customerTopups ?? []}
         trips={activeStatementRow?.consuming ?? []}
+        charges={activeStatementRow?.customerCharges ?? []}
         projectWaterType={activeStatementRow?.project?.water_type ?? null}
         projectInitials={activeStatementRow?.project?.initials ?? null}
       />

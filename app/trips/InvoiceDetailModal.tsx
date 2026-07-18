@@ -18,7 +18,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { X, Printer, Mail, Plus, Trash2, AlertTriangle, Download, Image as ImageIcon, Paperclip } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
-import { formatSar, todayKey } from "@/lib/utils";
+import { formatSar, formatNum, todayKey } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
 import { round2 } from "@/lib/vat";
 import { groupInvoiceLines } from "@/lib/invoiceDisplay";
@@ -29,6 +29,7 @@ import {
   type Invoice,
   type InvoiceLineSnapshot,
   type WaterType,
+  type PaymentMode,
 } from "@/lib/db-types";
 import {
   getInvoice,
@@ -49,6 +50,7 @@ import {
   getUndeliveredTripsForInvoice,
   uploadSpecialChargeImage,
   getSpecialChargeImageSignedUrl,
+  setHideAmountDue,
   type UndeliveredTripBlocker,
 } from "./invoiceActions";
 
@@ -72,12 +74,38 @@ const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 foc
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
 type Totals = { subtotal: number; vat: number; total: number };
+// Display-layer ledger shape (money-bug fix, v3.1) — widens InvoiceLedgerTotals'
+// balance/remaining to `| null` for the ONE case the pure engine never has to
+// handle: a CONFIRMED invoice frozen before migration 0036 added the ledger
+// snapshot columns (covered_ledger_subtotal_sar etc, all null on that row
+// forever — frozen columns are never backfilled, see lib/db-types.ts). For
+// those legacy rows, `subtotal` is still derivable (view.covered.total /
+// view.amountDue.total already exist as real VAT-inclusive frozen figures —
+// see lib/invoice.ts's file header: amountDue.total IS ledger.unpaid.subtotal
+// by construction, and covered.total is its own calculateVat() pass that
+// reconciles to within a halala), but `balance`/`remaining` genuinely no
+// longer exist on disk — showing them as "0" is what caused the original
+// bug (a fabricated "-2,940 VAT" and a false "Running Balance: 0" next to 7
+// real covered trips). Rendered as "—" instead of a fabricated number.
+type DisplayLedgerTotals = { subtotal: number; balance: number | null; remaining: number | null };
 type View = {
-  coveredLines: InvoiceLineSnapshot[];
+  paymentMode: PaymentMode;
+  coveredLines: InvoiceLineSnapshot[]; // trips only. Always [] for postpaid.
+  // prepaid: trips only. postpaid: trips + charges (unchanged v2 shape).
   unpaidLines: InvoiceLineSnapshot[];
+  // v3, prepaid only — ALL of this invoice's special charges (covered +
+  // uncovered), each tagged `covered`. Always [] for postpaid (postpaid's
+  // charges stay merged into unpaidLines, read out separately below).
+  chargeLines: InvoiceLineSnapshot[];
   covered: Totals;
   amountDue: Totals;
   grand: Totals;
+  // v3, prepaid only — the Covered/Unpaid trips tables' stacked
+  // Subtotal/Balance/Remaining figures. undefined for postpaid. Always
+  // populated for prepaid (draft/review from the live engine, confirmed/paid
+  // either from the frozen snapshot columns or, for pre-0036 legacy rows,
+  // the derived DisplayLedgerTotals fallback built in refresh() below).
+  ledger?: { covered: DisplayLedgerTotals; unpaid: DisplayLedgerTotals };
   sellerSnapshot: { legal_name: string; vat_number: string | null; cr_number: string | null; address: string | null } | null;
   buyerSnapshot: { name: string; vat_number: string | null; cr_number: string | null; billing_address: string | null } | null;
   // Display-only fallback (Finance polish batch C) — the project's CURRENT
@@ -107,7 +135,7 @@ export default function InvoiceDetailModal({
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [raw, setRaw] = useState<(Invoice & { projectWaterType: WaterType | null }) | null>(null);
+  const [raw, setRaw] = useState<(Invoice & { projectWaterType: WaterType | null; projectPaymentMode: PaymentMode }) | null>(null);
   const [view, setView] = useState<View | null>(null);
 
   const [busy, setBusy] = useState(false);
@@ -192,22 +220,59 @@ export default function InvoiceDetailModal({
         return;
       }
       setView({
+        paymentMode: p.data.paymentMode,
         coveredLines: p.data.coveredLines,
         unpaidLines: p.data.unpaidLines,
+        chargeLines: p.data.chargeLines,
         covered: p.data.covered,
         amountDue: p.data.amountDue,
         grand: p.data.grand,
+        ledger: p.data.ledger,
         sellerSnapshot: (p.data.sellerSnapshot as View["sellerSnapshot"]) ?? null,
         buyerSnapshot: (p.data.buyerSnapshot as View["buyerSnapshot"]) ?? null,
         projectWaterType: r.data.projectWaterType,
       });
     } else {
+      // Frozen invoices predating migration 0037 have no `payment_mode`
+      // snapshot — fall back to the customer's CURRENT project.payment_mode
+      // (correct for every invoice confirmed before any mode switch; see
+      // migration 0037's header and getInvoicePdf()'s identical fallback).
+      const paymentMode = r.data.payment_mode ?? r.data.projectPaymentMode;
+      const hasLedgerSnapshot =
+        r.data.covered_ledger_subtotal_sar != null && r.data.unpaid_ledger_subtotal_sar != null;
       setView({
+        paymentMode,
         coveredLines: r.data.covered_lines ?? [],
         unpaidLines: r.data.unpaid_lines ?? [],
+        chargeLines: paymentMode === "prepaid" ? (r.data.special_charges_snapshot ?? []) : [],
         covered: { subtotal: r.data.covered_subtotal_sar, vat: r.data.covered_vat_sar, total: r.data.covered_total_sar },
         amountDue: { subtotal: r.data.amount_due_subtotal_sar, vat: r.data.amount_due_vat_sar, total: r.data.amount_due_sar },
         grand: { subtotal: r.data.grand_subtotal_sar, vat: r.data.grand_vat_sar, total: r.data.grand_total_sar },
+        ledger:
+          paymentMode === "prepaid"
+            ? hasLedgerSnapshot
+              ? {
+                  covered: {
+                    subtotal: r.data.covered_ledger_subtotal_sar!,
+                    balance: r.data.covered_ledger_balance_sar ?? 0,
+                    remaining: r.data.covered_ledger_remaining_sar ?? 0,
+                  },
+                  unpaid: {
+                    subtotal: r.data.unpaid_ledger_subtotal_sar!,
+                    balance: r.data.unpaid_ledger_balance_sar ?? 0,
+                    remaining: r.data.unpaid_ledger_remaining_sar ?? 0,
+                  },
+                }
+              : // Pre-migration-0036 legacy invoice — no ledger snapshot was
+                // ever written. Subtotal is still real (derived from the
+                // frozen document totals that DO exist — see DisplayLedgerTotals
+                // comment above); balance/remaining genuinely don't exist for
+                // this row, so "—" instead of a fabricated 0.
+                {
+                  covered: { subtotal: r.data.covered_total_sar, balance: null, remaining: null },
+                  unpaid: { subtotal: r.data.amount_due_sar, balance: null, remaining: null },
+                }
+            : undefined,
         sellerSnapshot: r.data.seller_snapshot,
         buyerSnapshot: r.data.buyer_snapshot,
         projectWaterType: r.data.projectWaterType,
@@ -422,25 +487,48 @@ export default function InvoiceDetailModal({
   const editable = raw ? canEditSpecialCharges(raw.status) : false;
   const canEmail = !!(raw && view && customerEmail);
 
+  const isPrepaid = view?.paymentMode === "prepaid";
+
+  // --- POSTPAID (unchanged v2 shape — do not touch) ------------------------
   // Special-charges-only subtotal (item 3) — computed for DISPLAY only, same
   // round-once methodology as calculateVat() (lib/vat.ts), applied to the
   // charges subset. Never fed back into the document-level totals, which
   // stay exactly as lib/invoice.ts computed them.
-  const chargeLines = view?.unpaidLines.filter((l) => l.kind === "charge") ?? [];
-  const chargesSubtotal = round2(chargeLines.reduce((s, l) => s + l.amount_sar, 0));
-  const chargesVat = round2(chargeLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0));
-  const chargesTotal = round2(chargesSubtotal + chargesVat);
+  const postpaidChargeLines = view?.unpaidLines.filter((l) => l.kind === "charge") ?? [];
+  const postpaidChargesSubtotal = round2(postpaidChargeLines.reduce((s, l) => s + l.amount_sar, 0));
+  const postpaidChargesVat = round2(postpaidChargeLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0));
+  const postpaidChargesTotal = round2(postpaidChargesSubtotal + postpaidChargesVat);
   const chargeAmountPreview = round2((Number(chargeQty) || 0) * (Number(chargePrice) || 0));
 
-  // Unpaid table is now trip-only (special charges moved to their own
-  // section below) — totals recomputed for the trip subset the same
-  // round-once way as chargesSubtotal/Vat/Total above. view.amountDue stays
-  // untouched (it's still the real, includes-charges document total used for
-  // Amount Due / Grand Total further down).
-  const unpaidTripLines = view?.unpaidLines.filter((l) => l.kind === "trip") ?? [];
-  const unpaidTripSubtotal = round2(unpaidTripLines.reduce((s, l) => s + l.amount_sar, 0));
-  const unpaidTripVat = round2(unpaidTripLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0));
-  const unpaidTripTotal = round2(unpaidTripSubtotal + unpaidTripVat);
+  // Unpaid table is trip-only (special charges have their own section below)
+  // — totals recomputed for the trip subset the same round-once way as
+  // postpaidCharges*/Vat/Total above. view.amountDue stays untouched (it's
+  // still the real, includes-charges document total used for Amount Due /
+  // Grand Total further down).
+  const postpaidUnpaidTripLines = view?.unpaidLines.filter((l) => l.kind === "trip") ?? [];
+  const postpaidUnpaidTripSubtotal = round2(postpaidUnpaidTripLines.reduce((s, l) => s + l.amount_sar, 0));
+  const postpaidUnpaidTripVat = round2(postpaidUnpaidTripLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0));
+  const postpaidUnpaidTripTotal = round2(postpaidUnpaidTripSubtotal + postpaidUnpaidTripVat);
+
+  // --- PREPAID (v3 §9) ------------------------------------------------------
+  // Special Charges table source: view.chargeLines already carries ALL of
+  // this invoice's own charges (covered + uncovered), each tagged — not a
+  // filter over unpaidLines (prepaid's unpaidLines is trips-only, see
+  // lib/invoice.ts's POSTPAID note). Grand Total's "Special Charges (covered)"
+  // row sums only the covered subset — same round-once convention as above.
+  const prepaidChargeLines = view?.chargeLines ?? [];
+  // l.covered undefined = a pre-migration-0036 legacy charge snapshot (no
+  // per-charge coverage concept existed before v3 — every special charge was
+  // simply billed unconditionally on whatever invoice it was added to, see
+  // finance-invoice-spec.md §4/§7's "rolls forward... (v3)" framing). Treat
+  // undefined as covered (`!== false`), not as excluded — excluding it here
+  // while the frozen grand_total_sar/grand_vat_sar snapshot already counted
+  // it (computed by the old engine, at confirm time) is what produced the
+  // "Special Charges (covered) = 0 SAR but Total VAT/TOTAL include it anyway"
+  // inconsistency.
+  const prepaidCoveredChargesSubtotal = round2(
+    prepaidChargeLines.filter((l) => l.covered !== false).reduce((s, l) => s + l.amount_sar, 0),
+  );
 
   function sendTemplate(type: EmailType) {
     if (!raw || !view || !customerEmail) return;
@@ -560,67 +648,175 @@ export default function InvoiceDetailModal({
               </div>
             )}
 
-            {/* Covered table — omitted entirely when empty (postpaid, or a
-                prepaid customer with nothing yet covered this period). */}
-            {view.coveredLines.length > 0 && (
-              <LineTable
-                title="Covered (paid from prepaid balance)"
-                lines={view.coveredLines}
-                totals={view.covered}
-                fallbackWaterType={view.projectWaterType}
-              />
+            {isPrepaid ? (
+              <>
+                {/* v3 §9 — Covered/Unpaid TRIPS tables, ALWAYS shown (even at
+                    zero rows), each with its own stacked
+                    Subtotal/Balance/Remaining ledger footer. Pre-VAT rows —
+                    no per-row VAT column (VAT only ever appears in the
+                    Grand Total stack below). */}
+                <PrepaidTripTable
+                  title="Covered Trips"
+                  lines={view.coveredLines}
+                  ledger={view.ledger?.covered ?? { subtotal: view.covered.total, balance: null, remaining: null }}
+                  fallbackWaterType={view.projectWaterType}
+                />
+                <PrepaidTripTable
+                  title="Unpaid Trips"
+                  lines={view.unpaidLines}
+                  ledger={view.ledger?.unpaid ?? { subtotal: view.amountDue.total, balance: null, remaining: null }}
+                  fallbackWaterType={view.projectWaterType}
+                  headerRight={
+                    <HideAmountDueToggle
+                      hidden={raw.hide_amount_due}
+                      busy={busy}
+                      onToggle={() => runAction(() => setHideAmountDue(invoiceId, !raw.hide_amount_due))}
+                    />
+                  }
+                />
+
+                {/* Special charges — ALL of this invoice's charges (covered +
+                    uncovered), each tagged, positioned below the Unpaid
+                    trips table per §9. Same editable add/remove/attach
+                    surface as before. */}
+                {(prepaidChargeLines.length > 0 || editable) && (
+                  <SpecialChargesSection
+                    chargeLines={prepaidChargeLines}
+                    subtotal={round2(prepaidChargeLines.reduce((s, l) => s + l.amount_sar, 0))}
+                    vat={round2(prepaidChargeLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0))}
+                    total={round2(
+                      prepaidChargeLines.reduce((s, l) => s + l.amount_sar, 0) +
+                        prepaidChargeLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0),
+                    )}
+                    editable={editable}
+                    onRemoveCharge={(id) => runAction(() => removeSpecialCharge(invoiceId, id))}
+                    onUploadChargeImage={onUploadChargeImage}
+                    onViewChargeImage={onViewChargeImage}
+                    onAddCharge={onAddCharge}
+                    addingCharge={addingCharge}
+                    chargeLabel={chargeLabel}
+                    setChargeLabel={setChargeLabel}
+                    chargeDate={chargeDate}
+                    setChargeDate={setChargeDate}
+                    chargeQty={chargeQty}
+                    setChargeQty={setChargeQty}
+                    chargePrice={chargePrice}
+                    setChargePrice={setChargePrice}
+                    chargeAmountPreview={chargeAmountPreview}
+                    chargeImageFile={chargeImageFile}
+                    setChargeImageFile={setChargeImageFile}
+                    chargeImageInputKey={chargeImageInputKey}
+                  />
+                )}
+
+                {/* Amount Due + Grand Total — side by side (layout fix), not
+                    stacked. Amount Due (item 5) is the smaller, single-figure
+                    card; Grand Total is the wider stacked block — both
+                    right-aligned as one visual pair. Hide toggle lives on the
+                    Unpaid Trips table above (item 6) — the Amount Due card
+                    itself is just the figure, no sentence, no toggle. */}
+                <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:justify-end break-inside-avoid">
+                  <div className="sm:w-64 sm:flex-shrink-0">
+                    <TotalCard label="Amount Due" totals={view.amountDue} tone={view.amountDue.total > 0 ? "bad" : "ok"} />
+                  </div>
+                  {/* Grand Total — v3 §9, one stacked block: covered trips +
+                      covered charges only (unpaid trips excluded). No title
+                      (item 4). */}
+                  <GrandTotalStack
+                    subtotalLabel="Subtotal (Covered trips)"
+                    subtotal={view.covered.subtotal}
+                    chargesLabel="Special Charges (covered)"
+                    chargesSubtotal={prepaidCoveredChargesSubtotal}
+                    vat={view.grand.vat}
+                    total={view.grand.total}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Covered table — omitted entirely when empty (postpaid
+                    customer with nothing yet covered this period). */}
+                {view.coveredLines.length > 0 && (
+                  <LineTable
+                    title="Covered (paid from prepaid balance)"
+                    lines={view.coveredLines}
+                    totals={view.covered}
+                    fallbackWaterType={view.projectWaterType}
+                  />
+                )}
+
+                {/* Unpaid / Amount Due table — trips only (special charges
+                    have their own section below). Totals recomputed for the
+                    trip-only subset — view.amountDue (the real document
+                    total, includes charges) is still what feeds Amount
+                    Due/Grand Total further down, untouched. */}
+                <LineTable
+                  title="Unpaid — Amount Due (trips)"
+                  lines={postpaidUnpaidTripLines}
+                  totals={{ subtotal: postpaidUnpaidTripSubtotal, vat: postpaidUnpaidTripVat, total: postpaidUnpaidTripTotal }}
+                  fallbackWaterType={view.projectWaterType}
+                  headerRight={
+                    <HideAmountDueToggle
+                      hidden={raw.hide_amount_due}
+                      busy={busy}
+                      onToggle={() => runAction(() => setHideAmountDue(invoiceId, !raw.hide_amount_due))}
+                    />
+                  }
+                />
+
+                {/* Special charges — own self-contained section (Finance
+                    polish batch D). Rows + subtotal + add-form (incl.
+                    image-attach-on-add) all live together in one bounded
+                    box, clearly separate from the trip tables above and
+                    Grand Total/Amount Due below. */}
+                {(postpaidChargeLines.length > 0 || editable) && (
+                  <SpecialChargesSection
+                    chargeLines={postpaidChargeLines}
+                    subtotal={postpaidChargesSubtotal}
+                    vat={postpaidChargesVat}
+                    total={postpaidChargesTotal}
+                    editable={editable}
+                    onRemoveCharge={(id) => runAction(() => removeSpecialCharge(invoiceId, id))}
+                    onUploadChargeImage={onUploadChargeImage}
+                    onViewChargeImage={onViewChargeImage}
+                    onAddCharge={onAddCharge}
+                    addingCharge={addingCharge}
+                    chargeLabel={chargeLabel}
+                    setChargeLabel={setChargeLabel}
+                    chargeDate={chargeDate}
+                    setChargeDate={setChargeDate}
+                    chargeQty={chargeQty}
+                    setChargeQty={setChargeQty}
+                    chargePrice={chargePrice}
+                    setChargePrice={setChargePrice}
+                    chargeAmountPreview={chargeAmountPreview}
+                    chargeImageFile={chargeImageFile}
+                    setChargeImageFile={setChargeImageFile}
+                    chargeImageInputKey={chargeImageInputKey}
+                  />
+                )}
+
+                {/* No Amount Due box for postpaid (layout fix) — postpaid has
+                    no prepaid balance, so Amount Due is always numerically
+                    identical to Grand Total below it (same figure twice,
+                    meaningless second card). The hide-amount-due toggle stays
+                    on the Unpaid trips table above (item 6) — it still
+                    governs whether the figure appears in print/PDF/email,
+                    independent of this on-screen removal. */}
+
+                {/* Grand Total (item 2) — same stacked structure as prepaid:
+                    Subtotal → Special Charges → VAT → Total, no Balance/
+                    Remaining (postpaid has no balance). No title (item 4). */}
+                <GrandTotalStack
+                  subtotalLabel="Subtotal (Unpaid trips)"
+                  subtotal={postpaidUnpaidTripSubtotal}
+                  chargesLabel="Special Charges"
+                  chargesSubtotal={postpaidChargesSubtotal}
+                  vat={view.grand.vat}
+                  total={view.grand.total}
+                />
+              </>
             )}
-
-            {/* Unpaid / Amount Due table — trips only now (special charges
-                have their own section below). Totals recomputed for the
-                trip-only subset — view.amountDue (the real document total,
-                includes charges) is still what feeds Amount Due/Grand Total
-                further down, untouched. */}
-            <LineTable
-              title="Unpaid — Amount Due (trips)"
-              lines={unpaidTripLines}
-              totals={{ subtotal: unpaidTripSubtotal, vat: unpaidTripVat, total: unpaidTripTotal }}
-              fallbackWaterType={view.projectWaterType}
-            />
-
-            {/* Special charges — own self-contained section (Finance polish
-                batch D). Rows + subtotal + add-form (incl. image-attach-on-
-                add) all live together in one bounded box, clearly separate
-                from the trip tables above and Grand Total/Amount Due below. */}
-            {(chargeLines.length > 0 || editable) && (
-              <SpecialChargesSection
-                chargeLines={chargeLines}
-                subtotal={chargesSubtotal}
-                vat={chargesVat}
-                total={chargesTotal}
-                editable={editable}
-                onRemoveCharge={(id) => runAction(() => removeSpecialCharge(invoiceId, id))}
-                onUploadChargeImage={onUploadChargeImage}
-                onViewChargeImage={onViewChargeImage}
-                onAddCharge={onAddCharge}
-                addingCharge={addingCharge}
-                chargeLabel={chargeLabel}
-                setChargeLabel={setChargeLabel}
-                chargeDate={chargeDate}
-                setChargeDate={setChargeDate}
-                chargeQty={chargeQty}
-                setChargeQty={setChargeQty}
-                chargePrice={chargePrice}
-                setChargePrice={setChargePrice}
-                chargeAmountPreview={chargeAmountPreview}
-                chargeImageFile={chargeImageFile}
-                setChargeImageFile={setChargeImageFile}
-                chargeImageInputKey={chargeImageInputKey}
-              />
-            )}
-
-            {/* Grand Total + Amount Due — both required, shown side by side,
-                clearly separated (own grid, own spacing) from the special
-                charges section above. */}
-            <div className="grid grid-cols-2 gap-4 break-inside-avoid">
-              <TotalCard label="Grand Total (full period value)" totals={view.grand} tone="info" />
-              <TotalCard label="Amount Due (collectible)" totals={view.amountDue} tone={view.amountDue.total > 0 ? "bad" : "ok"} />
-            </div>
 
             {/* Undelivered-trip blockers (item 2) — only at Review, mirrors
                 confirm_invoice()'s SQL guard exactly (migration 0032).
@@ -865,6 +1061,7 @@ function LineTable({
   lines,
   totals,
   fallbackWaterType,
+  headerRight,
 }: {
   title: string;
   lines: InvoiceLineSnapshot[];
@@ -873,6 +1070,9 @@ function LineTable({
   // water_type, used when a line's own snapshot water_type is null (pre-
   // water_type-field invoice). Never mutates the frozen snapshot.
   fallbackWaterType?: WaterType | null;
+  // v3.1 (item 6) — lets the postpaid Unpaid table host the hide-amount-due
+  // toggle at its header, same row as the title. Undefined for Covered.
+  headerRight?: React.ReactNode;
 }) {
   // Trip lines only (special charges get their own section — see
   // SpecialChargesSection below). Presentation-only: collapse per-trip lines
@@ -883,7 +1083,10 @@ function LineTable({
 
   return (
     <section className="space-y-2 break-inside-avoid">
-      <h3 className="text-xs font-semibold uppercase tracking-wide muted">{title}</h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wide muted">{title}</h3>
+        {headerRight}
+      </div>
       <div className="card p-0 overflow-hidden">
         <Table>
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
@@ -924,18 +1127,137 @@ function LineTable({
                 </tr>
               ))
             )}
-            <tr>
-              <TD className="font-medium">{""}</TD>
-              <TD className="font-medium">Subtotal / VAT / Total</TD>
-              <TD className="muted">{""}</TD>
-              <TD className="muted">{""}</TD>
-              <TD className="tabular-nums font-medium">{formatSar(totals.subtotal)}</TD>
-              <TD className="tabular-nums font-medium">
-                {formatSar(totals.total)} <span className="muted font-normal">(VAT {formatSar(totals.vat)})</span>
-              </TD>
-            </tr>
           </tbody>
         </Table>
+        {/* Footer lives OUTSIDE the table (matches PrepaidTripTable's
+            footer treatment, item 1 v3.2 fix) — a per-column <td> here
+            auto-sizes to each column's DATA-row content (Price/Amount are
+            narrow, just numbers), which split the faded pre-VAT figure and
+            the bold total across two far-apart, independently-sized
+            columns instead of reading as one grouped subtotal breakdown.
+            A flex row below the table sizes on its own content instead. */}
+        <div className="border-t border-app px-4 py-3 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="muted">Subtotal</span>
+            <span className="flex items-baseline gap-2">
+              {/* v3.1 (item 3) — faded pre-VAT + VAT breakdown alongside the
+                  figure. totals.subtotal is already pre-VAT here (Totals =
+                  InvoiceTableTotals, lib/invoice.ts) — no re-derivation. */}
+              <span className="tabular-nums text-xs text-black/35 dark:text-white/35">
+                {formatNum(totals.subtotal)} + VAT {formatNum(totals.vat)}
+              </span>
+              <span className="tabular-nums font-medium">{formatSar(totals.total)}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// v3 §9 — prepaid Covered/Unpaid TRIPS table. ALWAYS rendered (even with zero
+// rows — "always shown, even at zero" per spec), pre-VAT rows (no per-row
+// VAT column — VAT only ever shows in the Grand Total stack). Footer is the
+// stacked Subtotal/Balance/Remaining ledger figures (VAT-inclusive),
+// replacing LineTable's inline "Subtotal / VAT / Total" row — mirrors
+// lib/invoicePdfTemplate.ts's prepaidTripTable exactly (same three figures,
+// same source: view.ledger, never re-derived here).
+function PrepaidTripTable({
+  title,
+  lines,
+  ledger,
+  fallbackWaterType,
+  headerRight,
+}: {
+  title: string;
+  lines: InvoiceLineSnapshot[];
+  ledger: DisplayLedgerTotals;
+  fallbackWaterType?: WaterType | null;
+  // v3.1 (item 6) — lets the Unpaid Trips table host the hide-amount-due
+  // toggle at its header, same row as the title. Undefined for Covered.
+  headerRight?: React.ReactNode;
+}) {
+  const rows = groupInvoiceLines(lines, fallbackWaterType);
+  // v3.1 (item 3) — faded pre-VAT + VAT breakdown alongside the Subtotal
+  // figure. ledger.subtotal is VAT-inclusive (file header) so it can't be
+  // decomposed on its own; derive pre-VAT from the SAME raw lines already
+  // passed in (sum of amount_sar, the one figure the VAT engine reads —
+  // lib/invoice.ts), then back into VAT so the two halves always foot
+  // exactly to ledger.subtotal. Display-only — no new consumption math.
+  const preVat = round2(lines.reduce((s, l) => s + l.amount_sar, 0));
+  const vatAmt = round2(ledger.subtotal - preVat);
+
+  return (
+    <section className="space-y-2 break-inside-avoid">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wide muted">{title}</h3>
+        {headerRight}
+      </div>
+      <div className="card p-0 overflow-hidden">
+        <Table>
+          <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+            <tr>
+              <TH>Date</TH>
+              <TH>Description</TH>
+              <TH>Type</TH>
+              <TH>Quantity</TH>
+              <TH>Price</TH>
+              <TH>Amount</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <TD className="muted">No trips.</TD>
+                <TD>{""}</TD>
+                <TD>{""}</TD>
+                <TD>{""}</TD>
+                <TD>{""}</TD>
+                <TD>{""}</TD>
+              </tr>
+            ) : (
+              rows.map((r) => (
+                <tr key={r.key}>
+                  <TD>{r.periodLabel}</TD>
+                  <TD>
+                    {r.firstTripId ? (
+                      <TripRefLink tripId={r.firstTripId} label={r.refRangeLabel} />
+                    ) : (
+                      <span className="muted">{r.refRangeLabel}</span>
+                    )}
+                  </TD>
+                  <TD>{r.typeLabel}</TD>
+                  <TD className="tabular-nums">{r.quantity}</TD>
+                  <TD className="tabular-nums">{formatSar(r.price)}</TD>
+                  <TD className="tabular-nums">{formatSar(r.amount)}</TD>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </Table>
+        <div className="border-t border-app px-4 py-3 space-y-1 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="muted">Subtotal</span>
+            <span className="flex items-baseline gap-2">
+              <span className="tabular-nums text-xs text-black/35 dark:text-white/35">
+                {formatNum(preVat)} + VAT {formatNum(vatAmt)}
+              </span>
+              <span className="tabular-nums font-medium">{formatSar(ledger.subtotal)}</span>
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="muted">Running Balance</span>
+            {/* null = pre-migration-0036 legacy invoice, no frozen balance on
+                disk (see DisplayLedgerTotals) — "—", never a fabricated 0. */}
+            <span className="tabular-nums">{ledger.balance == null ? <span className="muted">—</span> : formatSar(ledger.balance)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="font-medium">Remaining</span>
+            <span className={"tabular-nums font-semibold " + (ledger.remaining != null && ledger.remaining < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
+              {ledger.remaining == null ? <span className="muted font-normal">—</span> : formatSar(ledger.remaining)}
+            </span>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -998,86 +1320,116 @@ function SpecialChargesSection({
   const canSubmit = !!chargeLabel.trim() && Number(chargeQty) > 0 && Number(chargePrice) >= 0;
 
   return (
-    <section className="space-y-2 break-inside-avoid">
-      <h3 className="text-xs font-semibold uppercase tracking-wide muted">Special charges</h3>
-      {/* Borderless tinted panel (Turki: "remove the border, refit the table
-          and box") — the section reads as its own bounded surface via the
-          background tint + generous radius/padding rather than a hard edge.
-          The rows-table and add-form sit inside as their own raised (card-
-          background + shadow, still no border) surfaces, so the grouping is
-          legible without ever stacking borders. */}
-      <div className="rounded-2xl bg-black/[0.025] dark:bg-white/[0.035] p-6 space-y-5">
-        {chargeLines.length > 0 ? (
-          <div className="rounded-xl bg-[rgb(var(--card))] shadow-sm overflow-hidden">
-            <Table>
-              <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-                <tr>
-                  <TH>Date</TH>
-                  <TH>Description</TH>
-                  <TH>Quantity</TH>
-                  <TH>Price</TH>
-                  <TH>Amount</TH>
-                  <TH></TH>
-                </tr>
-              </thead>
-              <tbody>
-                {chargeLines.map((l) => (
-                  <tr key={l.id}>
-                    <TD>{l.trip_date ?? <span className="muted">—</span>}</TD>
-                    <TD>{l.description}</TD>
-                    <TD className="tabular-nums">{l.quantity ?? 1}</TD>
-                    <TD className="tabular-nums">{formatSar(l.price_sar ?? l.amount_sar)}</TD>
-                    <TD className="tabular-nums">{formatSar(l.amount_sar)}</TD>
-                    <TD>
-                      <div className="flex items-center gap-2.5 no-print">
-                        {l.image_path ? (
-                          <button
-                            type="button"
-                            onClick={() => onViewChargeImage(l.id)}
-                            className="muted hover:text-[rgb(var(--fg))]"
-                            title="View attached image (internal only)"
-                          >
-                            <ImageIcon className="h-4 w-4" />
-                          </button>
-                        ) : (
-                          editable && (
-                            <label className="muted hover:text-[rgb(var(--fg))] cursor-pointer" title="Attach an image (internal only)">
-                              <Paperclip className="h-4 w-4" />
-                              <input
-                                type="file"
-                                accept="image/*"
-                                className="hidden"
-                                onChange={(e) => {
-                                  const f = e.target.files?.[0];
-                                  if (f) onUploadChargeImage(l.id, f);
-                                  e.target.value = "";
-                                }}
-                              />
-                            </label>
-                          )
-                        )}
-                        {editable && (
-                          <button type="button" onClick={() => onRemoveCharge(l.id)} className="muted hover:text-rose-600 dark:hover:text-rose-400">
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    </TD>
+    <>
+      {/* v3.1 (item 7) — the charges TABLE is now its own section, styled
+          like its sister tables (Covered/Unpaid: title + `card p-0
+          overflow-hidden` + a border-top footer strip), not bundled inside
+          the tinted add-charge panel anymore. Always shown when there's
+          anything to show or the invoice is editable (same gating the
+          caller already applies), matching Covered/Unpaid's "always shown"
+          convention. */}
+      <section className="space-y-2 break-inside-avoid">
+        <h3 className="text-xs font-semibold uppercase tracking-wide muted">Special Charges</h3>
+        <div className="card p-0 overflow-hidden">
+          {chargeLines.length > 0 ? (
+            <>
+              <Table>
+                <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+                  <tr>
+                    <TH>Date</TH>
+                    <TH>Description</TH>
+                    <TH>Quantity</TH>
+                    <TH>Price</TH>
+                    <TH>Amount</TH>
+                    <TH>Status</TH>
+                    <TH></TH>
                   </tr>
-                ))}
-              </tbody>
-            </Table>
-            <div className="flex items-center justify-end gap-2 border-t border-app px-4 py-3 text-sm">
-              <span className="muted">Subtotal {formatSar(subtotal)} + VAT {formatSar(vat)} =</span>
-              <span className="font-semibold tabular-nums">{formatSar(total)}</span>
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm muted">No special charges on this invoice yet.</p>
-        )}
+                </thead>
+                <tbody>
+                  {chargeLines.map((l) => (
+                    <tr key={l.id}>
+                      <TD>{l.trip_date ?? <span className="muted">—</span>}</TD>
+                      <TD>{l.description}</TD>
+                      <TD className="tabular-nums">{l.quantity ?? 1}</TD>
+                      <TD className="tabular-nums">{formatSar(l.price_sar ?? l.amount_sar)}</TD>
+                      <TD className="tabular-nums">{formatSar(l.amount_sar)}</TD>
+                      <TD>
+                        {/* v3 §9 — this table is prepaid-only (postpaid never
+                            renders SpecialChargesSection here), so `covered`
+                            undefined means one thing: a pre-migration-0036
+                            legacy snapshot with no per-charge coverage field
+                            at all. Pre-v3, a special charge had no rollover
+                            concept — it was always billed on the invoice it
+                            was added to (spec §4/§7) — so undefined reads as
+                            Covered, same as explicit `true`. Only an explicit
+                            `false` (the v3 engine's real "rolled forward,
+                            excluded from this invoice's Grand Total" tag)
+                            shows "Rolls forward". */}
+                        {l.covered === false ? (
+                          <span className="inline-block rounded-full px-2 py-0.5 text-[11px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                            Rolls forward
+                          </span>
+                        ) : (
+                          <span className="inline-block rounded-full px-2 py-0.5 text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                            Covered
+                          </span>
+                        )}
+                      </TD>
+                      <TD>
+                        <div className="flex items-center gap-2.5 no-print">
+                          {l.image_path ? (
+                            <button
+                              type="button"
+                              onClick={() => onViewChargeImage(l.id)}
+                              className="muted hover:text-[rgb(var(--fg))]"
+                              title="View attached image (internal only)"
+                            >
+                              <ImageIcon className="h-4 w-4" />
+                            </button>
+                          ) : (
+                            editable && (
+                              <label className="muted hover:text-[rgb(var(--fg))] cursor-pointer" title="Attach an image (internal only)">
+                                <Paperclip className="h-4 w-4" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    const f = e.target.files?.[0];
+                                    if (f) onUploadChargeImage(l.id, f);
+                                    e.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            )
+                          )}
+                          {editable && (
+                            <button type="button" onClick={() => onRemoveCharge(l.id)} className="muted hover:text-rose-600 dark:hover:text-rose-400">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </TD>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+              <div className="flex items-center justify-end gap-2 border-t border-app px-4 py-3 text-sm">
+                <span className="muted">Subtotal {formatNum(subtotal)} + VAT {formatNum(vat)} =</span>
+                <span className="font-semibold tabular-nums">{formatSar(total)}</span>
+              </div>
+            </>
+          ) : (
+            <p className="p-4 text-sm muted">No special charges on this invoice yet.</p>
+          )}
+        </div>
+      </section>
 
-        {editable && (
-          <form onSubmit={onAddCharge} className="no-print space-y-4 rounded-xl bg-[rgb(var(--card))] shadow-sm p-5">
+      {/* Add-charge form — untouched, still its own separate, roomier
+          tinted-panel surface (item 7: "stays exactly as-is, separate"). */}
+      {editable && (
+        <section className="break-inside-avoid">
+          <form onSubmit={onAddCharge} className="no-print space-y-4 rounded-2xl bg-black/[0.025] dark:bg-white/[0.035] p-6">
             <p className="text-xs font-semibold uppercase tracking-wide muted">Add a charge</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <label className="flex flex-col gap-1.5 text-sm col-span-2">
@@ -1120,9 +1472,9 @@ function SpecialChargesSection({
               </Btn>
             </div>
           </form>
-        )}
-      </div>
-    </section>
+        </section>
+      )}
+    </>
   );
 }
 
@@ -1137,6 +1489,91 @@ function TotalCard({ label, totals, tone }: { label: string; totals: Totals; ton
         {formatSar(totals.subtotal)} + {formatSar(totals.vat)} VAT
       </div>
     </div>
+  );
+}
+
+// v3 §9, generalized in v3.1 (items 2 & 4) — the stacked Grand Total block,
+// now shared by BOTH modes: Subtotal → Special Charges → VAT → Total. No
+// title (the block is self-evident — item 4); no Balance/Remaining rows ever
+// (postpaid has no balance concept — item 2). Prepaid feeds it covered
+// trips + covered charges only (unpaid trips excluded, unchanged v3 §9
+// behavior); postpaid feeds it the full unpaid-trips + charges period value
+// (its existing view.grand, untouched — see lib/invoice.ts's POSTPAID note).
+function GrandTotalStack({
+  subtotalLabel,
+  subtotal,
+  chargesLabel,
+  chargesSubtotal,
+  vat,
+  total,
+}: {
+  subtotalLabel: string;
+  subtotal: number;
+  chargesLabel: string;
+  chargesSubtotal: number;
+  vat: number;
+  total: number;
+}) {
+  return (
+    <section className="space-y-2 break-inside-avoid">
+      <div className="card p-4 space-y-1.5 text-sm max-w-md sm:min-w-[26rem] ms-auto">
+        <div className="flex items-center justify-between">
+          <span className="muted">{subtotalLabel}</span>
+          <span className="tabular-nums">{formatSar(subtotal)}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="muted">{chargesLabel}</span>
+          <span className="tabular-nums">{formatSar(chargesSubtotal)}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="muted">Total VAT</span>
+          <span className="tabular-nums">{formatSar(vat)}</span>
+        </div>
+        <div className="flex items-center justify-between pt-2 mt-1 border-t border-app">
+          <span className="font-semibold">TOTAL</span>
+          <span className="text-xl font-semibold tabular-nums text-brand-600 dark:text-brand-300">{formatSar(total)}</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// v3.1 (item 6) — the Amount-Due hide toggle, moved out of the old Amount Due
+// section header and into the top of the Unpaid Trips table (same control,
+// same `invoices.hide_amount_due` column, same setHideAmountDue() action —
+// just relocated). Shared by both modes (item 5: Amount Due applies to both).
+function HideAmountDueToggle({
+  hidden,
+  busy,
+  onToggle,
+}: {
+  hidden: boolean;
+  busy: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={busy}
+      className={"no-print inline-flex items-center gap-2 text-xs " + (busy ? "opacity-50 pointer-events-none" : "")}
+      title="Controls whether Amount Due appears in print / PDF / email — always visible here on-screen."
+    >
+      <span
+        className={
+          "relative inline-block h-4 w-7 rounded-full transition-colors " +
+          (hidden ? "bg-[rgb(var(--border))]" : "bg-brand-600")
+        }
+      >
+        <span
+          className={
+            "absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform " +
+            (hidden ? "translate-x-0.5" : "translate-x-3.5")
+          }
+        />
+      </span>
+      <span className="muted">{hidden ? "Hidden from customer" : "Visible to customer"}</span>
+    </button>
   );
 }
 

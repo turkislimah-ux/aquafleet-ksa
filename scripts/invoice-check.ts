@@ -132,17 +132,25 @@ function checkTrue(name: string, cond: boolean) {
   checkTrue("reconciliation: no id duplicated across the two tables", new Set(ids).size === ids.length);
 }
 
-// --- THE two-table rounding-divergence proof: three independent document- ---
-// --- level VAT roundings do NOT have to sum to each other. -------------------
-// Covered = two lines of 0.05 (pool covers exactly these two, FIFO).
-// Unpaid  = one line of 0.05 (third trip, pool exhausted).
-//   covered:   subtotal 0.10 -> vat round(0.015)  = 0.02 -> total 0.12
-//   amountDue: subtotal 0.05 -> vat round(0.0075) = 0.01 -> total 0.06
-//   naive sum of the two tables' totals: 0.12 + 0.06 = 0.18
-//   grand (own independent rounding over all three 0.05 lines):
-//     subtotal 0.15 -> vat round(0.0225) = 0.02 -> total 0.17
-// 0.17 != 0.18 — exactly the same document-level-vs-summed divergence
-// Commit 4 already proved for a single table, now shown across two tables.
+// --- THE covered/unpaid boundary-flip + two-table rounding-divergence proof -
+// --- (v3 CUTOVER — the boundary itself moved, not just the rounding). --------
+// Pool = 0.10. Three trips of 0.05 each now consume round2(0.05*1.15) = 0.06
+// apiece (VAT-INCLUSIVE consumption, PRD v3 §2/§5), not 0.05 as under the old
+// pre-VAT engine. Old v2 math: 0.10 exactly covered t1+t2 (2 covered/1
+// unpaid). New v3 math: 0.10 covers only t1 (0.10-0.06=0.04 left, t2 needs
+// 0.06 -> doesn't fit -> hitWall -> t2 AND t3 both unpaid) — the boundary
+// flips to 1 covered/2 unpaid. This is the exact divergence the user flagged
+// when specifying the v3 cutover.
+//   covered:   subtotal 0.05 (t1 only)  -> vat round(0.0075) = 0.01 -> total 0.06
+//   amountDue: subtotal 0.10 (t2+t3)    -> = ledger.unpaid.subtotal (0.12,
+//              VAT-inclusive consumedAmount sum) -> vat = 0.12-0.10 = 0.02
+//   grand: covered trips + covered charges (none) — same single line as
+//     covered table (no covered charges here) -> identical to covered: 0.06
+// naive sum of the two shown tables' totals: 0.06 + 0.12 = 0.18, vs
+// grand.total = 0.06 — v3's grand deliberately EXCLUDES unpaid trips (spec
+// §9, reversed from v2), so this is now a structural divergence (different
+// line sets), not merely a rounding one — still proves "don't sum the
+// tables to get the grand total."
 {
   const trips: ConsumingTrip[] = [
     { id: "t1", trip_date: "2026-06-01", delivered_at: "2026-06-01T10:00:00Z", rate_sar: 0.05 },
@@ -159,11 +167,13 @@ function checkTrue(name: string, cond: boolean) {
     topups,
     specialCharges: [],
   });
-  check("divergence proof: covered table = 0.10/0.02/0.12", r.covered, { subtotal: 0.1, vat: 0.02, total: 0.12 });
-  check("divergence proof: amountDue table = 0.05/0.01/0.06", r.amountDue, { subtotal: 0.05, vat: 0.01, total: 0.06 });
-  check("divergence proof: grand = 0.15/0.02/0.17 (own independent rounding)", r.grand, { subtotal: 0.15, vat: 0.02, total: 0.17 });
+  check("boundary flip: only t1 covered (was t1+t2 under old pre-VAT math)", r.coveredLines.map((l) => l.id), ["t1"]);
+  check("boundary flip: t2+t3 unpaid (was just t3 under old pre-VAT math)", r.unpaidLines.map((l) => l.id), ["t2", "t3"]);
+  check("divergence proof: covered table = 0.05/0.01/0.06", r.covered, { subtotal: 0.05, vat: 0.01, total: 0.06 });
+  check("divergence proof: amountDue table = 0.10/0.02/0.12", r.amountDue, { subtotal: 0.1, vat: 0.02, total: 0.12 });
+  check("divergence proof: grand = 0.05/0.01/0.06 (covered-only, unpaid trips excluded per v3 §9)", r.grand, { subtotal: 0.05, vat: 0.01, total: 0.06 });
   const naiveSum = Math.round((r.covered.total + r.amountDue.total) * 100) / 100;
-  checkTrue("divergence proof: naive sum of table totals (0.18) != grand.total (0.17)", naiveSum !== r.grand.total);
+  checkTrue("divergence proof: naive sum of table totals (0.18) != grand.total (0.06)", naiveSum !== r.grand.total);
   check("divergence proof: naive sum actually is 0.18", naiveSum, 0.18);
 }
 
@@ -227,20 +237,22 @@ function checkTrue(name: string, cond: boolean) {
 // --- Reserve-at-draft exclusion (0030): a trip reserved by ANOTHER invoice --
 // --- is excluded from THIS invoice's output — proof that exclusion is a ----
 // --- POST-split display filter, not a pool-math re-drain. ------------------
-// Pool = 200. FIFO t1(100)/t2(100)/t3(100): t1 covered (pool->100), t2
-// covered (pool->0), t3 doesn't fit -> unpaid. t2 is reserved by another
-// invoice. If exclusion were (wrongly) applied BEFORE the FIFO walk, t3
-// would flip to covered once t2 "disappears" (100 fits in the freed pool).
-// The correct behavior: t3 stays unpaid — the pool was already spent on t2
-// when it was walked, exclusion only hides t2 from this invoice's tables
-// afterward, it doesn't un-spend the pool.
+// Pool = 230 (was 200 pre-VAT) — 2 x 115 (100 * 1.15, VAT-inclusive
+// consumedAmount), so it still covers t1+t2 exactly with 0 leftover under
+// v3's VAT-inclusive consumption. FIFO t1(115)/t2(115)/t3(115): t1 covered
+// (pool->115), t2 covered (pool->0), t3 doesn't fit -> unpaid. t2 is
+// reserved by another invoice. If exclusion were (wrongly) applied BEFORE
+// the FIFO walk, t3 would flip to covered once t2 "disappears" (115 fits in
+// the freed pool). The correct behavior: t3 stays unpaid — the pool was
+// already spent on t2 when it was walked, exclusion only hides t2 from this
+// invoice's tables afterward, it doesn't un-spend the pool.
 {
   const trips: ConsumingTrip[] = [
     { id: "t1", trip_date: "2026-06-01", delivered_at: "2026-06-01T10:00:00Z", rate_sar: 100 },
     { id: "t2", trip_date: "2026-06-02", delivered_at: "2026-06-02T10:00:00Z", rate_sar: 100 },
     { id: "t3", trip_date: "2026-06-03", delivered_at: "2026-06-03T10:00:00Z", rate_sar: 100 },
   ];
-  const topups: TopupLite[] = [{ id: "top1", amount_sar: 200, topup_date: "2026-06-01" }];
+  const topups: TopupLite[] = [{ id: "top1", amount_sar: 230, topup_date: "2026-06-01" }];
   const r = assembleInvoice({
     customerId: "c1",
     paymentMode: "prepaid",
@@ -249,7 +261,7 @@ function checkTrue(name: string, cond: boolean) {
     trips,
     topups,
     specialCharges: [],
-    reservedElsewhereTripIds: ["t2"],
+    reservedElsewhereIds: ["t2"],
   });
   check("reserve-exclusion: t2 (reserved elsewhere) absent from coveredLines", r.coveredLines.map((l) => l.id), ["t1"]);
   checkTrue("reserve-exclusion: t3 stays Unpaid (pool already spent on t2, not un-drained by exclusion)", r.unpaidLines.some((l) => l.id === "t3"));
@@ -272,7 +284,7 @@ function checkTrue(name: string, cond: boolean) {
     trips,
     topups: [],
     specialCharges: [],
-    reservedElsewhereTripIds: ["t2"],
+    reservedElsewhereIds: ["t2"],
   });
   check("postpaid reserve-exclusion: only t1 billable", r.unpaidLines.map((l) => l.id), ["t1"]);
   check("postpaid reserve-exclusion: amountDue = just t1", r.amountDue, { subtotal: 300, vat: 45, total: 345 });

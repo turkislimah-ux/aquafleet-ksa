@@ -398,12 +398,16 @@ export type InvoiceLineSnapshot = {
   quantity?: number | null;
   price_sar?: number | null;
   image_path?: string | null;
+  // v3 (migration 0036) — prepaid only, undefined for postpaid/older
+  // snapshots. See lib/invoice.ts's InvoiceLine.covered.
+  covered?: boolean;
 };
 
-// invoices row (0025, widened 0027). Line items are NEVER stored pre-confirm
-// (draft/review stay live-recomputed from lib/invoice.ts); covered_lines/
-// unpaid_lines/special_charges_snapshot/*_trip_ids are null until confirmed,
-// then frozen forever (see 0027 migration header for why).
+// invoices row (0025, widened 0027, ledger totals + hide_amount_due added
+// 0036). Line items are NEVER stored pre-confirm (draft/review stay
+// live-recomputed from lib/invoice.ts); covered_lines/unpaid_lines/
+// special_charges_snapshot/*_trip_ids/ledger columns are null until
+// confirmed, then frozen forever (see 0027 migration header for why).
 export type Invoice = {
   id: string;
   // No project_id column — project is 1:1 with customer (lib/prepaid.ts
@@ -422,7 +426,7 @@ export type Invoice = {
 
   covered_lines: InvoiceLineSnapshot[] | null;
   unpaid_lines: InvoiceLineSnapshot[] | null;
-  special_charges_snapshot: { id: string; label: string; amount_sar: number; vat_sar: number }[] | null;
+  special_charges_snapshot: InvoiceLineSnapshot[] | null;
   covered_trip_ids: string[] | null;
   unpaid_trip_ids: string[] | null;
 
@@ -438,6 +442,27 @@ export type Invoice = {
   grand_subtotal_sar: number;
   grand_vat_sar: number;
   grand_total_sar: number;
+  // v3 (migration 0036) — prepaid only. Null for postpaid invoices (no
+  // balance/ledger concept — see lib/invoice.ts's POSTPAID note) and for
+  // any invoice confirmed before this column existed (no backfill, same
+  // precedent as invoice_number's format coexistence, 0034).
+  covered_ledger_subtotal_sar: number | null;
+  covered_ledger_balance_sar: number | null;
+  covered_ledger_remaining_sar: number | null;
+  unpaid_ledger_subtotal_sar: number | null;
+  unpaid_ledger_balance_sar: number | null;
+  unpaid_ledger_remaining_sar: number | null;
+  // v3 (migration 0036) — customer-facing hide toggle for Amount Due
+  // (print/PDF/email only; always visible on-screen to staff). Editable any
+  // time regardless of status — a display preference, not frozen financial
+  // data.
+  hide_amount_due: boolean;
+  // v3 (migration 0037) — frozen at confirm time, which mode this invoice
+  // was actually confirmed under (prepaid = three-table/ledger layout,
+  // postpaid = old v2 single-table layout — see lib/invoice.ts). Null for
+  // invoices confirmed before this column existed (no backfill) — callers
+  // fall back to the customer's current project.payment_mode for those.
+  payment_mode: PaymentMode | null;
 
   created_at: string;
   reviewed_at: string | null;

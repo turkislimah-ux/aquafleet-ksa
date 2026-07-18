@@ -1,11 +1,19 @@
 // VAT calculation layer (spec §9, KSA 15%). Pure math, no I/O — mirrors
 // lib/prepaid.ts's discipline (pure functions, own test harness before UI).
 //
-// OUTPUT-ONLY (locked decision, spec §2/§4.2/§5): the prepaid balance/ledger
-// stays pre-VAT forever. This module never touches lib/prepaid.ts's math or
-// stored rows — it only computes VAT for DISPLAY at the invoice/statement
-// layer, from pre-VAT inputs (covered/billed trip rates + special charges)
-// that the invoice layer (Commit 5) will assemble and pass in here.
+// STALE (pre-v3) claim corrected: the prepaid balance is NO LONGER pre-VAT
+// only (PRD v3 §2 — balance consumption reversed to VAT-INCLUSIVE: a trip/
+// charge draws `amount * (1 + VAT_RATE)` from balance, not `amount`). This
+// file's OWN math stays a genuinely separate concern though — DOCUMENT-LEVEL
+// invoice-display VAT (subtotal summed first, VAT rounded ONCE against that
+// subtotal), never per-item. lib/prepaid.ts's v3 consumption math needs the
+// same VAT_RATE constant, so VAT_RATE is now canonically DEFINED in
+// lib/prepaid.ts (alongside round2, which already flowed that direction) and
+// re-exported from here — one constant, one direction of flow, no circular
+// import. This file still never touches lib/prepaid.ts's per-item
+// consumption math or stored rows — it only computes VAT for DISPLAY at the
+// invoice/statement layer, from pre-VAT inputs (covered/billed trip rates +
+// special charges) that the invoice layer (Commit 5) assembles and passes in.
 //
 // ROUNDING CONVENTION — DOCUMENT-LEVEL, not per-line-summed (ZATCA-correct):
 // ZATCA's Electronic Invoice XML Implementation Standard states the VAT
@@ -28,10 +36,8 @@
 // (Math.round-based, already half-up) rather than redefining it, so every
 // money value across the Finance feature rounds identically.
 
-import { round2 } from "./prepaid";
-export { round2 };
-
-export const VAT_RATE = 0.15;
+import { round2, VAT_RATE } from "./prepaid";
+export { round2, VAT_RATE };
 
 export type VatLineItem = {
   id: string;

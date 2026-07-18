@@ -1,64 +1,103 @@
-// Invoice assembly engine (Finance Commit 5a, spec §6/§7/§8/§10/§11). Pure
-// math, no I/O — mirrors lib/prepaid.ts / lib/vat.ts's discipline (pure
-// functions, own test harness before the lifecycle actions / UI touch it).
+// Invoice assembly engine (Finance Commit 5a, spec §6/§7/§8/§10/§11 — v3
+// cutover per finance-invoice-spec.md v3 §5/§9). Pure math, no I/O — mirrors
+// lib/prepaid.ts / lib/vat.ts's discipline (pure functions, own test harness
+// before the lifecycle actions / UI touch it).
 //
-// Builds the Covered table + Unpaid table + Grand Total + Amount Due for a
-// customer/project over a billing period, reusing the two already-built
-// engines rather than re-deriving anything:
-//   - splitCoveredUnpaid (lib/prepaid.ts) for the prepaid covered/unpaid split
-//   - calculateVat (lib/vat.ts) for every VAT figure, document-level
+// v3 CUTOVER: reuses the v3 engines exclusively —
+//   - splitCoveredUnpaidItems (lib/prepaid.ts) for the prepaid covered/unpaid
+//     split (ONE combined trips+charges FIFO queue, VAT-inclusive consumption)
+//   - consumingItems (lib/prepaid.ts) for postpaid's plain delivered-trip list
+//   - calculateVat (lib/vat.ts) for every document-level VAT figure
+// No legacy (v2) consumption function is imported or called anywhere in this
+// file — see lib/prepaid.ts's header for the retired-functions note.
 //
 // PERIOD-MEMBERSHIP RULE (the one subtle correctness point in this file):
-// splitCoveredUnpaid/consumingTrips are called over the customer's FULL
-// trip/topup history up to periodEnd, THEN the result is filtered down to
-// trip_date within [periodStart, periodEnd] — never the other way around.
-// The FIFO pool-drain order depends on every trip ever consumed, not just
-// this period's; pre-filtering to the period first would let a trip "skip
-// the queue" and appear falsely Covered by ignoring balance an earlier
-// period's trips already spent. lib/prepaid.ts's own header already
-// established consumption depends only on trip_date/delivered_at/rate,
-// never on invoice linkage — this reuses that guarantee correctly. Callers
-// MUST pass the customer's full trip/topup history, not a period-prefiltered
-// slice.
+// splitCoveredUnpaidItems/consumingItems are called over the customer's FULL
+// trip/topup/charge history up to periodEnd, THEN the result is filtered
+// down to items whose date falls within [periodStart, periodEnd] — never the
+// other way around. The FIFO pool-drain order depends on every item ever
+// consumed, not just this period's; pre-filtering to the period first would
+// let an item "skip the queue" and appear falsely Covered by ignoring
+// balance an earlier period's items already spent. lib/prepaid.ts's own
+// header already established consumption depends only on
+// trip_date/delivered_at/rate (or charge_date/amount), never on invoice
+// linkage — this reuses that guarantee correctly. Callers MUST pass the
+// customer's full trip/topup/charge history, not a period-prefiltered slice.
 //
-// TWO-TABLE / THREE-TOTALS MODEL (locked decision):
-//   Covered table  = already-paid-from-balance trips (prepaid only), shown
-//                     WITH their own VAT for record/ZATCA completeness.
-//   Unpaid table   = collectible trips (prepaid: over-balance trips;
-//                     postpaid: every trip) + special charges — this table
-//                     IS "Amount Due": what the customer still owes.
-//   Grand Total    = full period value = Covered + Unpaid combined.
-// Each of the three totals (covered / amountDue / grand) is its OWN
-// independent calculateVat() call — its own document-level subtotal-then-
-// round-once pass over its own line set. They are NOT required to
-// reconcile to each other (covered.total + amountDue.total can legitimately
-// differ from grand.total by a halala) — this is the exact same
-// "document-level, not summed" principle Commit 4 already locked in and
-// proved with a harness; three independent document-level roundings don't
-// magically become additive just because they're presented side by side.
-// The harness proves this divergence is expected, not a bug.
+// THREE-TABLE / LEDGER MODEL (v3 §9, prepaid only — replaces the old
+// two-table model):
+//   Covered TRIPS table — trips only (never charges), already paid from
+//     balance.
+//   Unpaid TRIPS table  — trips only (never charges), over-balance trips
+//     that rolled forward. NOT "Amount Due" anymore (v3 reverses that): this
+//     table's own VAT-inclusive subtotal informs Amount Due (unpaid trips
+//     only, see below) but Amount Due is no longer "whatever this table
+//     contains" in the loose v2 sense — it's a dedicated, narrower figure.
+//   Special Charges table — ALL of THIS invoice's charges (covered AND
+//     uncovered), each tagged `covered: boolean`. Positioned below the
+//     Unpaid trips table per §9. A covered charge counts toward Grand Total;
+//     an uncovered one rolls forward (same "unpaid rolls forward" mechanism
+//     as trips, since it's simply excluded from the next covered walk by
+//     still being in the un-consumed-by-topups portion of the shared pool).
+//   Each of Covered/Unpaid TRIPS tables ALSO gets a `ledger` entry — three
+//   stacked figures (subtotal/balance/remaining), always present even at
+//   zero, computed from the SAME splitCoveredUnpaidItems() walk (never
+//   re-derived) so they can't disagree with coveredLines/unpaidLines.
 //
-// Postpaid projects never call splitCoveredUnpaid at all: coveredLines is
-// always [], every delivered trip in the period is an Unpaid/collectible
-// line, and amountDue/grand end up numerically identical (same input line
-// set) — not "close", exactly equal, since they're the same calculateVat
-// call in that case.
+// GRAND TOTAL (v3 §9, REVERSED from v2): built ONLY from what's actually
+// settled on this invoice — covered trips (pre-VAT) + covered special
+// charges (pre-VAT), ONE combined VAT pass. Unpaid trips are explicitly
+// EXCLUDED (the opposite of v2, where grand = covered + unpaid combined).
+//
+// AMOUNT DUE (v3 §9, NARROWED from v2): = the Unpaid TRIPS table's own
+// VAT-inclusive subtotal only (never special charges) — informational-only,
+// not collectible on this invoice. Deliberately computed from the exact same
+// number as `ledger.unpaid.subtotal` (see below) so the two on-screen
+// figures can never diverge by a halala.
+//
+// Each independently-rounded total (covered / amountDue / grand) is its own
+// document-level calculateVat() pass (or, for amountDue, derived directly
+// from the ledger's per-item VAT-inclusive sum — see below). They are NOT
+// required to reconcile to each other to the halala — same "document-level,
+// not summed" principle Commit 4 already locked in. The harness proves this
+// divergence is expected, not a bug.
+//
+// POSTPAID — completely unchanged (per Step 3 instruction, do not touch):
+// no balance/FIFO/coverage concept applies. coveredLines is always [],
+// chargeLines is always [] (charges stay merged into unpaidLines, exactly as
+// before — v3's separate Special Charges table is a prepaid-only concept),
+// ledger is undefined, and amountDue/grand are numerically identical (same
+// input line set: every delivered trip in the period + every special
+// charge), exactly as before.
 //
 // RESERVE-AT-DRAFT EXCLUSION (Finance Commit 6, reserved != locked — see
-// lib/db-types.ts Trip.invoice_id comment and migration 0030 header):
-// `reservedElsewhereTripIds` removes trips already reserved by ANOTHER
-// non-void invoice from the billable output, so the same trip can never
-// appear on two invoices at once. This filter is applied AFTER
-// splitCoveredUnpaid/consumingTrips run on the FULL trip history (see
-// PERIOD-MEMBERSHIP RULE above) — it is a display/billing filter on the
-// already-computed split, never a pre-filter on the input trips array.
-// Excluding a trip here does NOT change the FIFO pool math for every OTHER
-// trip in the split (a reserved-elsewhere trip still consumed its share of
-// balance when it was walked by splitCoveredUnpaid — this filter only hides
-// it from THIS invoice's line items, it doesn't un-consume it).
+// lib/db-types.ts Trip.invoice_id comment and migration 0030 header),
+// GENERALIZED in v3 to cover special charges too (every special charge
+// already belongs to exactly one invoice at creation — see
+// app/trips/invoiceActions.ts's addSpecialCharge — so "reserved elsewhere"
+// for a charge simply means "belongs to a different invoice than the one
+// being assembled"): `reservedElsewhereIds` removes trips/charges already
+// claimed by ANOTHER non-void invoice from THIS invoice's line-item output,
+// so the same trip/charge can never appear on two invoices at once. Applied
+// AFTER splitCoveredUnpaidItems/consumingItems run on the FULL history (see
+// PERIOD-MEMBERSHIP RULE above) — a display/billing filter on the
+// already-computed split, never a pre-filter on the input arrays. Excluding
+// an item here does NOT change the FIFO pool math for every OTHER item in
+// the split (a reserved-elsewhere item still consumed its share of balance
+// when it was walked — this filter only hides it from THIS invoice's line
+// items, it doesn't un-consume it).
 
-import { consumingTrips, splitCoveredUnpaid, type ConsumingTrip, type ConsumptionEntry, type TopupLite } from "./prepaid";
-import { calculateVat, type VatLineItem, type VatLinePreview } from "./vat";
+import {
+  splitCoveredUnpaidItems,
+  consumingItems,
+  VAT_RATE,
+  round2,
+  type ConsumingTrip,
+  type ConsumingCharge,
+  type ConsumedItem,
+  type TopupLite,
+} from "./prepaid";
+import { calculateVat, type VatLineItem } from "./vat";
 import type { InvoiceStatus } from "./db-types";
 
 export type PaymentMode = "postpaid" | "prepaid";
@@ -88,6 +127,12 @@ export type SpecialChargeInput = {
   label: string;
   amount_sar: number; // pre-VAT, = price_sar * quantity (computed by caller)
   charge_date?: string | null;
+  // v3: fallback source for charge_date when it's null (pre-batch-B rows
+  // predate the column). Resolved here as charge_date ?? created_at's date
+  // part — never re-derived anywhere else (mirrors ConsumingTrip.rate_sar's
+  // "caller resolves, this file never re-derives" convention, just applied
+  // to the one field that still needs a fallback).
+  created_at?: string | null;
   quantity?: number | null; // defaults to 1 for pre-batch-B rows (see migration 0032)
   price_sar?: number | null; // defaults to amount_sar for pre-batch-B rows (no price on file)
   image_path?: string | null; // internal-only — never surfaced on customer-facing output
@@ -99,7 +144,7 @@ export type SpecialChargeInput = {
 export type InvoiceLine = {
   id: string; // trip id, or special-charge id
   kind: "trip" | "charge";
-  trip_date: string | null; // null for charge lines
+  trip_date: string | null; // charge_date for charge lines (resolved, see SpecialChargeInput)
   description: string;
   amount_sar: number; // pre-VAT
   vat_sar: number; // display-only
@@ -117,6 +162,11 @@ export type InvoiceLine = {
   quantity?: number | null;
   price_sar?: number | null;
   image_path?: string | null;
+  // v3, prepaid charge lines only: whether this charge's full VAT-inclusive
+  // amount fit in the FIFO pool. undefined for trip lines (coveredLines vs
+  // unpaidLines already encodes coverage for trips) and for postpaid charge
+  // lines (no coverage concept applies — see POSTPAID note above).
+  covered?: boolean;
 };
 
 export type InvoiceTableTotals = {
@@ -125,18 +175,42 @@ export type InvoiceTableTotals = {
   total: number; // subtotal + vat
 };
 
+// v3 §9 — the stacked Subtotal/Balance/Remaining figures shown beneath a
+// Covered or Unpaid TRIPS table. ALL THREE are VAT-inclusive (this is the
+// one place in the invoice that shows a VAT-inclusive running figure outside
+// document-level totals — it mirrors the balance ledger's own units, not the
+// invoice's per-row pre-VAT convention). subtotal = the table's own items,
+// summed VAT-inclusive (Σ consumedAmount, NOT calculateVat's document-level
+// round-once pass — see file header, "Amount Due" note). balance = the pool
+// available going into this table's items (the v3 FIFO walk, up to but not
+// including this table's own items). remaining = balance − subtotal
+// (negative on the Unpaid table when the pool falls short — expected).
+export type InvoiceLedgerTotals = {
+  subtotal: number;
+  balance: number;
+  remaining: number;
+};
+
 export type InvoiceAssembly = {
   customerId: string;
   periodStart: string;
   periodEnd: string;
   paymentMode: PaymentMode;
 
-  coveredLines: InvoiceLine[]; // always [] for postpaid
-  unpaidLines: InvoiceLine[]; // trips + special charges — this IS the Amount Due table
+  coveredLines: InvoiceLine[]; // trips only, always [] for postpaid
+  unpaidLines: InvoiceLine[]; // prepaid: trips only. postpaid: trips + charges (unchanged v2 shape — see POSTPAID note)
+  // v3, prepaid only: ALL of this invoice's special charges (covered +
+  // uncovered), each tagged `covered`. Always [] for postpaid — postpaid's
+  // charges stay merged into unpaidLines exactly as before.
+  chargeLines: InvoiceLine[];
 
-  covered: InvoiceTableTotals;
-  amountDue: InvoiceTableTotals; // = unpaidLines' totals
-  grand: InvoiceTableTotals; // covered + unpaid combined, independently rounded
+  covered: InvoiceTableTotals; // trips only (pre-VAT covered-trips document total — feeds Grand Total)
+  amountDue: InvoiceTableTotals; // v3 prepaid: unpaid TRIPS only. postpaid: unchanged (trips + charges)
+  grand: InvoiceTableTotals; // v3 prepaid: covered trips + covered charges only. postpaid: unchanged (= amountDue)
+  // v3, prepaid only: the stacked ledger figures for the Covered/Unpaid
+  // trips tables. undefined for postpaid (no balance concept — see POSTPAID
+  // note above).
+  ledger?: { covered: InvoiceLedgerTotals; unpaid: InvoiceLedgerTotals };
 
   // Passthrough identity, not computed — caller resolves these; kept here so
   // 5b's confirm step and 5c's display/mailto have one assembled object to
@@ -158,58 +232,34 @@ export type AssembleInvoiceInput = {
   trips: ConsumingTrip[];
   // ALL topups for this customer, any date. Ignored entirely for postpaid.
   topups: TopupLite[];
+  // v3: for prepaid this must be the customer's FULL non-void-invoice charge
+  // history (every charge on a draft/review/confirmed/paid invoice, any
+  // invoice) — NOT just this invoice's own charges — so the FIFO walk sees
+  // every consumer of the pool. See PERIOD-MEMBERSHIP RULE + lib/prepaid.ts's
+  // "which invoices' charges consume" note. reservedElsewhereIds (below)
+  // then narrows the DISPLAYED chargeLines down to this invoice's own.
+  // For postpaid this can just be this invoice's own charges (no FIFO runs).
   specialCharges: SpecialChargeInput[];
   sellerSnapshot?: unknown;
   buyerSnapshot?: unknown;
   customerEmail?: string | null;
-  // Trip ids reserved by ANOTHER non-void invoice — excluded from this
-  // invoice's output. See the RESERVE-AT-DRAFT EXCLUSION note above. Default
-  // empty (no exclusion) so existing callers/harness cases are unaffected.
-  reservedElsewhereTripIds?: Iterable<string>;
+  // Trip AND charge ids claimed by ANOTHER non-void invoice — excluded from
+  // this invoice's displayed line items. See the RESERVE-AT-DRAFT EXCLUSION
+  // note above. Default empty (no exclusion) so existing callers/harness
+  // cases are unaffected.
+  reservedElsewhereIds?: Iterable<string>;
 };
 
 function toVatItems(entries: { id: string; trip_date: string; amount: number }[]): VatLineItem[] {
   return entries.map((e) => ({ id: e.id, description: `Trip ${e.trip_date}`, amount_sar: e.amount }));
 }
 
-function chargesToVatItems(charges: SpecialChargeInput[]): VatLineItem[] {
+function chargesToVatItems(charges: { id: string; label: string; amount_sar: number }[]): VatLineItem[] {
   return charges.map((c) => ({ id: c.id, description: c.label, amount_sar: c.amount_sar }));
 }
 
-type TripPassenger = { trip_date: string; ref?: string | null; water_type?: "potable" | "non_potable" | null };
-
-// Unified per-line extra-info shape (Finance polish batch B) — trip lines
-// populate trip_date/ref/water_type, charge lines populate trip_date (from
-// charge_date — reuses the same display field, see below)/quantity/
-// price_sar/image_path. One map covers both since trip ids and charge ids
-// never collide (distinct id spaces).
-type LineExtra = {
-  trip_date?: string | null;
-  ref?: string | null;
-  water_type?: "potable" | "non_potable" | null;
-  quantity?: number | null;
-  price_sar?: number | null;
-  image_path?: string | null;
-};
-
-function toLine(v: VatLinePreview, kind: "trip" | "charge", infoById: Map<string, LineExtra>): InvoiceLine {
-  const info = infoById.get(v.id);
-  return {
-    id: v.id,
-    kind,
-    trip_date: info?.trip_date ?? null,
-    description: v.description ?? "",
-    amount_sar: v.amount_sar,
-    vat_sar: v.lineVat,
-    ref: info?.ref ?? null,
-    water_type: info?.water_type ?? null,
-    // Charges: quantity/price_sar default to 1/amount_sar for a pre-batch-B
-    // row that has neither on file (see migration 0032 header). Trips never
-    // carry these — left undefined, same as before.
-    quantity: kind === "charge" ? info?.quantity ?? 1 : undefined,
-    price_sar: kind === "charge" ? info?.price_sar ?? v.amount_sar : undefined,
-    image_path: kind === "charge" ? info?.image_path ?? null : undefined,
-  };
+function resolveChargeDate(c: SpecialChargeInput, fallback: string): string {
+  return c.charge_date ?? (c.created_at ? c.created_at.slice(0, 10) : fallback);
 }
 
 export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
@@ -224,7 +274,7 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     sellerSnapshot = null,
     buyerSnapshot = null,
     customerEmail = null,
-    reservedElsewhereTripIds,
+    reservedElsewhereIds,
   } = input;
 
   if (paymentMode == null) {
@@ -234,54 +284,162 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   }
 
   const inPeriod = (d: string) => d >= periodStart && d <= periodEnd;
-  const reservedElsewhere = new Set(reservedElsewhereTripIds ?? []);
+  const reservedElsewhere = new Set(reservedElsewhereIds ?? []);
   const notReservedElsewhere = (e: { id: string }) => !reservedElsewhere.has(e.id);
 
-  let coveredEntries: ConsumptionEntry[] = [];
-  let unpaidTripEntries: ConsumptionEntry[] = [];
+  const toTripLine = (e: ConsumedItem): InvoiceLine => ({
+    id: e.id,
+    kind: "trip",
+    trip_date: e.trip_date,
+    description: `Trip ${e.trip_date}`,
+    amount_sar: e.amount,
+    vat_sar: round2(e.amount * VAT_RATE),
+    ref: e.ref ?? null,
+    water_type: e.water_type ?? null,
+  });
 
-  if (paymentMode === "prepaid") {
-    const split = splitCoveredUnpaid(topups, trips, periodEnd);
-    coveredEntries = split.covered.filter((e) => inPeriod(e.trip_date)).filter(notReservedElsewhere);
-    unpaidTripEntries = split.unpaid.filter((e) => inPeriod(e.trip_date)).filter(notReservedElsewhere);
-  } else {
-    unpaidTripEntries = consumingTrips(trips, periodEnd).filter((e) => inPeriod(e.trip_date)).filter(notReservedElsewhere);
+  if (paymentMode === "postpaid") {
+    // --- UNCHANGED v2 shape (see POSTPAID note above) --------------------
+    const unpaidTripEntries = consumingItems(trips, [], periodEnd)
+      .filter((e): e is ConsumedItem & { kind: "trip" } => e.kind === "trip")
+      .filter((e) => inPeriod(e.trip_date))
+      .filter(notReservedElsewhere);
+    const periodCharges = specialCharges
+      .filter((c) => inPeriod(resolveChargeDate(c, periodEnd)))
+      .filter(notReservedElsewhere);
+
+    const unpaidTripLines = unpaidTripEntries.map(toTripLine);
+    const chargeLinesForUnpaid: InvoiceLine[] = periodCharges.map((c) => ({
+      id: c.id,
+      kind: "charge",
+      trip_date: resolveChargeDate(c, periodEnd),
+      description: c.label,
+      amount_sar: round2(c.amount_sar),
+      vat_sar: round2(c.amount_sar * VAT_RATE),
+      quantity: c.quantity ?? 1,
+      price_sar: c.price_sar ?? c.amount_sar,
+      image_path: c.image_path ?? null,
+    }));
+    const unpaidLines = [...unpaidTripLines, ...chargeLinesForUnpaid];
+
+    const unpaidItems = [...toVatItems(unpaidTripEntries), ...chargesToVatItems(periodCharges)];
+    const amountDueVat = calculateVat(unpaidItems);
+    const grandVat = calculateVat(unpaidItems); // covered is always [] for postpaid — same input set
+
+    return {
+      customerId,
+      periodStart,
+      periodEnd,
+      paymentMode,
+      coveredLines: [],
+      unpaidLines,
+      chargeLines: [],
+      covered: { subtotal: 0, vat: 0, total: 0 },
+      amountDue: { subtotal: amountDueVat.subtotal, vat: amountDueVat.vatAmount, total: amountDueVat.grandTotal },
+      grand: { subtotal: grandVat.subtotal, vat: grandVat.vatAmount, total: grandVat.grandTotal },
+      sellerSnapshot,
+      buyerSnapshot,
+      customerEmail,
+    };
   }
 
-  const toPassenger = (e: ConsumptionEntry): TripPassenger => ({
-    trip_date: e.trip_date,
-    ref: e.ref,
-    water_type: e.water_type,
-  });
-  const coveredTripInfoById = new Map<string, LineExtra>(coveredEntries.map((e) => [e.id, toPassenger(e)]));
-  const unpaidTripInfoById = new Map<string, LineExtra>(unpaidTripEntries.map((e) => [e.id, toPassenger(e)]));
-  // Charges never appear in the Covered table (they aren't trips) — only
-  // merged into the Unpaid/Amount Due info map.
-  const chargeInfoById = new Map<string, LineExtra>(
-    specialCharges.map((c) => [
-      c.id,
-      {
-        trip_date: c.charge_date ?? null,
-        quantity: c.quantity ?? 1,
-        price_sar: c.price_sar ?? c.amount_sar,
-        image_path: c.image_path ?? null,
-      },
-    ]),
-  );
-  const unpaidInfoById = new Map<string, LineExtra>([...unpaidTripInfoById, ...chargeInfoById]);
+  // --- Prepaid: v3 three-table model -------------------------------------
+  const chargesForEngine: ConsumingCharge[] = specialCharges.map((c) => ({
+    id: c.id,
+    charge_date: resolveChargeDate(c, periodEnd),
+    amount_sar: round2(c.amount_sar),
+    label: c.label,
+  }));
 
-  const coveredItems = toVatItems(coveredEntries);
-  const chargeItems = chargesToVatItems(specialCharges);
-  const unpaidItems = [...toVatItems(unpaidTripEntries), ...chargeItems];
+  const split = splitCoveredUnpaidItems(topups, trips, chargesForEngine, periodEnd);
 
-  const coveredVat = calculateVat(coveredItems);
-  const amountDueVat = calculateVat(unpaidItems); // = the Unpaid table's own totals
-  const grandVat = calculateVat([...coveredItems, ...unpaidItems]);
+  const coveredTripEntries = split.covered
+    .filter((e): e is ConsumedItem & { kind: "trip" } => e.kind === "trip")
+    .filter((e) => inPeriod(e.trip_date))
+    .filter(notReservedElsewhere);
+  const unpaidTripEntries = split.unpaid
+    .filter((e): e is ConsumedItem & { kind: "trip" } => e.kind === "trip")
+    .filter((e) => inPeriod(e.trip_date))
+    .filter(notReservedElsewhere);
+  const coveredChargeIds = new Set(split.covered.filter((e) => e.kind === "charge").map((e) => e.id));
 
-  const coveredLines = coveredVat.lines.map((l) => toLine(l, "trip", coveredTripInfoById));
-  const unpaidLines = amountDueVat.lines.map((l) =>
-    toLine(l, unpaidTripInfoById.has(l.id) ? "trip" : "charge", unpaidInfoById),
-  );
+  const coveredLines = coveredTripEntries.map(toTripLine);
+  const unpaidLines = unpaidTripEntries.map(toTripLine);
+
+  // Special Charges table: ALL of THIS invoice's charges (period + not
+  // reserved elsewhere), covered+uncovered together, each tagged.
+  const chargeLines: InvoiceLine[] = specialCharges
+    .filter((c) => inPeriod(resolveChargeDate(c, periodEnd)))
+    .filter(notReservedElsewhere)
+    .map((c) => ({
+      id: c.id,
+      kind: "charge",
+      trip_date: resolveChargeDate(c, periodEnd),
+      description: c.label,
+      amount_sar: round2(c.amount_sar),
+      vat_sar: round2(c.amount_sar * VAT_RATE),
+      quantity: c.quantity ?? 1,
+      price_sar: c.price_sar ?? c.amount_sar,
+      image_path: c.image_path ?? null,
+      covered: coveredChargeIds.has(c.id),
+    }));
+
+  // ---- Ledger (v3 §9): Subtotal/Balance/Remaining, both trips tables ----
+  // Balance entering the Covered table = pool value immediately before the
+  // first line THIS invoice actually shows, walked through the GLOBAL
+  // covered order (full customer history, not just this period — see
+  // PERIOD-MEMBERSHIP RULE). Balance entering the Unpaid table is simply the
+  // split's frozen remainingBalance: once the FIFO wall is hit the pool
+  // never moves again, so every unpaid item (this invoice's or another's)
+  // shares that same entering value.
+  const startingPool = round2(topups.filter((t) => t.topup_date <= periodEnd).reduce((s, t) => s + t.amount_sar, 0));
+  const coveredLineIds = new Set(coveredTripEntries.map((e) => e.id));
+  let poolWalk = startingPool;
+  let coveredBalance = poolWalk;
+  let foundFirstCoveredLine = false;
+  for (const item of split.covered) {
+    if (!foundFirstCoveredLine && coveredLineIds.has(item.id)) {
+      coveredBalance = poolWalk;
+      foundFirstCoveredLine = true;
+    }
+    poolWalk = round2(poolWalk - item.consumedAmount);
+  }
+  if (!foundFirstCoveredLine) coveredBalance = poolWalk; // no covered lines this invoice — always-shown-at-zero case
+
+  const coveredLedgerSubtotal = round2(coveredTripEntries.reduce((s, e) => s + e.consumedAmount, 0));
+  const unpaidLedgerSubtotal = round2(unpaidTripEntries.reduce((s, e) => s + e.consumedAmount, 0));
+  const unpaidBalance = split.remainingBalance;
+
+  const ledger = {
+    covered: {
+      subtotal: coveredLedgerSubtotal,
+      balance: coveredBalance,
+      remaining: round2(coveredBalance - coveredLedgerSubtotal),
+    },
+    unpaid: {
+      subtotal: unpaidLedgerSubtotal,
+      balance: unpaidBalance,
+      remaining: round2(unpaidBalance - unpaidLedgerSubtotal),
+    },
+  };
+
+  // ---- covered / amountDue / grand (InvoiceTableTotals) ----
+  const coveredTripVatItems = toVatItems(coveredTripEntries);
+  const coveredVat = calculateVat(coveredTripVatItems);
+
+  // Amount Due = unpaid TRIPS only, VAT-inclusive, deliberately set equal to
+  // ledger.unpaid.subtotal (never independently rounded — see file header).
+  const unpaidTripPreVat = round2(unpaidTripEntries.reduce((s, e) => s + e.amount, 0));
+  const amountDue: InvoiceTableTotals = {
+    subtotal: unpaidTripPreVat,
+    vat: round2(unpaidLedgerSubtotal - unpaidTripPreVat),
+    total: unpaidLedgerSubtotal,
+  };
+
+  // Grand Total (v3, reversed from v2): covered trips + covered charges
+  // only, ONE combined VAT pass. Unpaid trips excluded entirely.
+  const coveredChargeLines = chargeLines.filter((l) => l.covered === true);
+  const grandVat = calculateVat([...coveredTripVatItems, ...chargesToVatItems(coveredChargeLines.map((l) => ({ id: l.id, label: l.description, amount_sar: l.amount_sar })))]);
 
   return {
     customerId,
@@ -290,9 +448,11 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     paymentMode,
     coveredLines,
     unpaidLines,
+    chargeLines,
     covered: { subtotal: coveredVat.subtotal, vat: coveredVat.vatAmount, total: coveredVat.grandTotal },
-    amountDue: { subtotal: amountDueVat.subtotal, vat: amountDueVat.vatAmount, total: amountDueVat.grandTotal },
+    amountDue,
     grand: { subtotal: grandVat.subtotal, vat: grandVat.vatAmount, total: grandVat.grandTotal },
+    ledger,
     sellerSnapshot,
     buyerSnapshot,
     customerEmail,

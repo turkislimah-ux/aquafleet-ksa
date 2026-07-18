@@ -13,7 +13,7 @@ import { PageHeader } from "@/components/ui";
 import ProjectsBoard, { type ProjectsBoardProps } from "./ProjectsBoard";
 import CustomersTab from "./CustomersTab";
 import FinanceTab from "./FinanceTab";
-import type { TopupRow } from "./page";
+import type { TopupRow, SpecialChargeRow } from "./page";
 
 type Tab = "projects" | "customers" | "finance";
 
@@ -35,8 +35,9 @@ const HEADER: Record<Tab, { title: string; subtitle: string }> = {
 export default function TripsTabs({
   error,
   topups,
+  specialCharges,
   ...boardProps
-}: ProjectsBoardProps & { error: string | null; topups: TopupRow[] }) {
+}: ProjectsBoardProps & { error: string | null; topups: TopupRow[]; specialCharges: SpecialChargeRow[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -93,6 +94,7 @@ export default function TripsTabs({
           projects={boardProps.projects}
           trips={boardProps.trips}
           topups={topups}
+          specialCharges={specialCharges}
         />
       )}
     </div>

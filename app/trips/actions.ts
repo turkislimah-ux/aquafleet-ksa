@@ -11,7 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 import { STAGE_ORDER, STAGE_TIMESTAMP, MAX_BATCH_TRIPS, type TripStage, type WaterType } from "@/lib/db-types";
 import { commissionForDelivery, commissionForNthTrip } from "@/lib/commission";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
-import { derivedBalance, type ConsumingTrip, type TopupLite } from "@/lib/prepaid";
+import { derivedBalanceItems, type ConsumingTrip, type ConsumingCharge, type TopupLite } from "@/lib/prepaid";
 
 export type ActionResult = { error: string | null };
 
@@ -261,7 +261,7 @@ export async function setTripStation(id: string, waterStation: string): Promise<
 // stamped on delivered (setTripStage), and pay_commission only tags rows where
 // delivered_at is not null — so a commission-paid trip is always delivered.
 // An invoice-locked trip is ALSO always delivered — only delivered trips are
-// ever billed (see isTripLocked's comment / lib/prepaid.ts's consumingTrips)
+// ever billed (see isTripLocked's comment / lib/prepaid.ts's consumingItems)
 // — so this one check already excludes BOTH locks too; no separate
 // payout_id/invoice check needed here. No table has a FK on trips.id
 // (checked: no `references public.trips` in any migration), so a
@@ -537,15 +537,25 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
 // used by BOTH checkPaymentModeSwitch (client-proactive) and
 // updateProjectWithCustomer (server-authoritative) below, so the two never
 // compute it differently.
+//
+// v3 cutover: balance is trips AND special charges combined (every charge
+// consumes balance the instant it's added — lib/prepaid.ts header). Charges
+// are fetched customer-wide across every non-void invoice, same rule as
+// assembleForCustomerPeriod (app/trips/invoiceActions.ts) — a void invoice's
+// charges never consumed balance, so they're excluded here too. Without this,
+// a customer with outstanding un-invoiced special charges could pass the
+// "balance is exactly zero" switch-guard while charges silently still owed
+// against the pool.
 async function fetchProjectBalance(
   supabase: ReturnType<typeof createClient>,
   projectId: string,
   customerId: string,
   ratePerTrip: number,
 ): Promise<number> {
-  const [{ data: tripRows }, { data: topupRows }] = await Promise.all([
+  const [{ data: tripRows }, { data: topupRows }, { data: invoiceRows }] = await Promise.all([
     supabase.from("trips").select("id, trip_date, delivered_at").eq("project_id", projectId),
     supabase.from("customer_topups").select("id, amount_sar, topup_date").eq("customer_id", customerId),
+    supabase.from("invoices").select("id, status").eq("customer_id", customerId),
   ]);
   const trips: ConsumingTrip[] = (tripRows ?? []).map((t) => ({
     id: t.id,
@@ -554,7 +564,22 @@ async function fetchProjectBalance(
     rate_sar: ratePerTrip,
   }));
   const topups: TopupLite[] = (topupRows ?? []) as TopupLite[];
-  return derivedBalance(topups, trips);
+
+  const nonVoidInvoiceIds = (invoiceRows ?? []).filter((i) => i.status !== "void").map((i) => i.id);
+  let charges: ConsumingCharge[] = [];
+  if (nonVoidInvoiceIds.length > 0) {
+    const { data: chargeRows } = await supabase
+      .from("invoice_special_charges")
+      .select("id, amount_sar, charge_date, created_at")
+      .in("invoice_id", nonVoidInvoiceIds);
+    charges = (chargeRows ?? []).map((c) => ({
+      id: c.id,
+      charge_date: c.charge_date ?? c.created_at.slice(0, 10),
+      amount_sar: c.amount_sar,
+    }));
+  }
+
+  return derivedBalanceItems(topups, trips, charges);
 }
 
 // Finance C3 (0035) — proactive client-side check, called from ProjectModal

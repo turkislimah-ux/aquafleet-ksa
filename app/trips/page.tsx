@@ -49,6 +49,26 @@ export type TopupRow = {
   reference: string | null;
 };
 
+// v3 cutover — every special charge belonging to a NON-VOID invoice, across
+// the whole app (not just one invoice's own charges): every charge from a
+// draft/review/confirmed/paid invoice consumes prepaid balance the instant
+// it's added (lib/prepaid.ts header), so FinanceTab's balance/statement math
+// needs this customer-wide, void-excluded set — same rule
+// assembleForCustomerPeriod (app/trips/invoiceActions.ts) already applies.
+export type SpecialChargeRow = {
+  id: string;
+  customer_id: string;
+  label: string | null;
+  amount_sar: number;
+  charge_date: string | null;
+  created_at: string;
+  // v3.1 — settled-balance follow-up: whether this charge's parent invoice is
+  // status='paid'. Lets FinanceTab filter to paid-only consumption WITHOUT a
+  // second query — `invoice.status` is already joined below, just wasn't
+  // surfaced past the mapping until now.
+  paid: boolean;
+};
+
 export default async function TripsPage() {
   const supabase = createClient();
 
@@ -56,7 +76,7 @@ export default async function TripsPage() {
   const [
     tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes,
     stationsRes, allStationsRes, leavePeriodsRes, terminatedDriversRes, topupsRes,
-    paidInvoicesRes,
+    paidInvoicesRes, specialChargesRes,
   ] =
     await Promise.all([
       supabase
@@ -135,6 +155,13 @@ export default async function TripsPage() {
       // their full rows. RESERVED (draft/confirmed, not yet paid) invoices are
       // deliberately excluded — reserved trips stay editable, only paid locks.
       supabase.from("invoices").select("id").eq("status", "paid"),
+      // v3 Finance ledger source (2 of 2, with customer_topups above) — every
+      // special charge on a non-void invoice, customer-tagged via its parent
+      // invoice. Void-invoice charges are filtered out below (never consumed
+      // balance) — same rule as assembleForCustomerPeriod.
+      supabase
+        .from("invoice_special_charges")
+        .select("id, label, amount_sar, charge_date, created_at, invoice:invoices(customer_id, status)"),
     ]);
 
   // Paid-invoice lock (Finance bug fix): a trip is LOCKED when its invoice_id
@@ -224,6 +251,30 @@ export default async function TripsPage() {
   const drivers = (driversRes.data ?? []) as { id: string; name: string; status: DriverStatus; active: boolean }[];
   const topups = (topupsRes.data ?? []) as TopupRow[];
 
+  // v3 — flatten the invoice-joined charge rows into customer-tagged,
+  // void-excluded entries. `invoice` comes back as a single joined object
+  // (many-to-one FK) or null if the parent invoice was somehow deleted.
+  type RawSpecialCharge = {
+    id: string;
+    label: string | null;
+    amount_sar: number;
+    charge_date: string | null;
+    created_at: string;
+    invoice: { customer_id: string; status: string } | { customer_id: string; status: string }[] | null;
+  };
+  const specialCharges: SpecialChargeRow[] = ((specialChargesRes.data ?? []) as RawSpecialCharge[])
+    .map((c) => ({ ...c, invoice: Array.isArray(c.invoice) ? c.invoice[0] ?? null : c.invoice }))
+    .filter((c) => c.invoice != null && c.invoice.status !== "void")
+    .map((c) => ({
+      id: c.id,
+      customer_id: c.invoice!.customer_id,
+      label: c.label,
+      amount_sar: c.amount_sar,
+      charge_date: c.charge_date,
+      created_at: c.created_at,
+      paid: c.invoice!.status === "paid",
+    }));
+
   // Map project_id -> [driver_id, …] for the Manage-drivers modal + driver count.
   const assignmentsByProject: Record<string, string[]> = {};
   for (const a of (assignmentsRes.data ?? []) as Pick<ProjectDriver, "project_id" | "driver_id">[]) {
@@ -259,7 +310,8 @@ export default async function TripsPage() {
     allStationsRes.error ||
     leavePeriodsRes.error ||
     terminatedDriversRes.error ||
-    topupsRes.error;
+    topupsRes.error ||
+    specialChargesRes.error;
 
   return (
     <TripsTabs
@@ -277,6 +329,7 @@ export default async function TripsPage() {
       leavePeriods={leavePeriods}
       leaveLoadFailed={leaveLoadFailed}
       topups={topups}
+      specialCharges={specialCharges}
     />
   );
 }
