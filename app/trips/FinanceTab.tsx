@@ -25,10 +25,10 @@ import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { PAYMENT_MODE_LABELS, type PaymentMode } from "@/lib/db-types";
-import { derivedBalanceItems, type ConsumingTrip, type ConsumingCharge, type TopupStatementInput } from "@/lib/prepaid";
+import { derivedBalanceItems, round2, VAT_RATE, type ConsumingTrip, type ConsumingCharge, type TopupStatementInput } from "@/lib/prepaid";
 import type { WaterType } from "@/lib/db-types";
 import type { SpecialChargeRow, PaidInvoiceRow } from "./page";
-import TopupModal, { type TopupCustomerOption } from "./TopupModal";
+import AddBalanceModal, { type AddBalanceCustomerOption } from "./AddBalanceModal";
 import StatementModal, { type TripMeta } from "./StatementModal";
 import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
 import CompanySettingsModal from "./CompanySettingsModal";
@@ -77,6 +77,12 @@ type TopupRow = {
   topup_date: string;
   note: string | null;
   reference: string | null;
+  // Add Balance restructure (Batch B, migration 0040) — feeds the new
+  // history popup's Method/Ref columns. Not threaded into
+  // TopupStatementInput below — the statement itself only shows date/ref/
+  // amount (Batch 3), unchanged by this batch.
+  method: "cash" | "bank_transfer" | null;
+  photo_path: string | null;
 };
 
 export type FinanceTabProps = {
@@ -94,7 +100,7 @@ type ModeFilter = "all" | "prepaid" | "postpaid";
 
 export default function FinanceTab({ customers, projects, trips, topups, specialCharges, paidInvoices }: FinanceTabProps) {
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
-  const [topupTarget, setTopupTarget] = useState<TopupCustomerOption | null | "global">(null);
+  const [topupTarget, setTopupTarget] = useState<AddBalanceCustomerOption | null | "global">(null);
   const [statementFor, setStatementFor] = useState<{ customerId: string; customerName: string } | null>(null);
   const [invoicesFor, setInvoicesFor] = useState<InvoiceCustomer | null>(null);
   const [companySettingsOpen, setCompanySettingsOpen] = useState(false);
@@ -238,7 +244,34 @@ export default function FinanceTab({ customers, projects, trips, topups, special
       // harmless to attach either way; StatementModal only reads it in
       // postpaid mode.
       const customerPaidInvoices = paidInvoicesByCustomer.get(c.id) ?? [];
-      return { customer: c, project, mode, balance, settledBalance, consuming, customerTopups, customerCharges, customerPaidInvoices };
+
+      // Batch A — "Unsettled Trips": delivered trips not yet on a PAID
+      // invoice. Same notion as the statement's "Total payable" (postpaid)
+      // and Settled Balance's paid-filter above (invoiceLocked = invoice_id
+      // set AND that invoice's status='paid') — reused here, no new flag.
+      const unsettledTripsCount = project
+        ? (tripsByProject.get(project.id) ?? []).filter((t) => t.delivered_at != null && !t.invoiceLocked).length
+        : 0;
+
+      // Batch A — "Rate": per-trip price, VAT-inclusive. Same formula the
+      // engine already uses for a consumed trip (lib/prepaid.ts:
+      // round2(rate_sar * (1 + VAT_RATE))) — no new math, just displaying it
+      // ahead of consumption.
+      const rateVatInclusive = project ? round2(project.rate_per_trip_sar * (1 + VAT_RATE)) : null;
+
+      return {
+        customer: c,
+        project,
+        mode,
+        balance,
+        settledBalance,
+        consuming,
+        customerTopups,
+        customerCharges,
+        customerPaidInvoices,
+        unsettledTripsCount,
+        rateVatInclusive,
+      };
     });
   }, [customers, projectByCustomer, tripsByProject, topupsByCustomer, chargesByCustomer, paidInvoicesByCustomer]);
 
@@ -268,12 +301,12 @@ export default function FinanceTab({ customers, projects, trips, topups, special
   );
 
   // Prepaid-only customer options for the global top-up picker.
-  const prepaidCustomerOptions: TopupCustomerOption[] = useMemo(
+  const prepaidCustomerOptions: AddBalanceCustomerOption[] = useMemo(
     () => prepaidRows.map((r) => ({ id: r.customer.id, name: r.customer.name })),
     [prepaidRows],
   );
 
-  const activeTopupCustomer: TopupCustomerOption | null =
+  const activeTopupCustomer: AddBalanceCustomerOption | null =
     topupTarget && topupTarget !== "global" ? topupTarget : null;
 
   const activeStatementRow = statementFor ? rows.find((r) => r.customer.id === statementFor.customerId) : null;
@@ -292,7 +325,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
           label="Over-balance"
           value={overBalanceRows.length}
           tone={overBalanceRows.length > 0 ? "bad" : "ok"}
-          sub={overBalanceRows.length > 0 ? "needs a top-up" : "all covered"}
+          sub={overBalanceRows.length > 0 ? "needs balance added" : "all covered"}
         />
         <Stat
           label="Customers by mode"
@@ -300,7 +333,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
           tone="info"
           sub={`prepaid / postpaid${unsetCount > 0 ? ` · ${unsetCount} unset` : ""}`}
         />
-        <Stat label="Top-ups · month" value={formatSar(topupsThisMonth)} tone="ok" />
+        <Stat label="Add Balance · month" value={formatSar(topupsThisMonth)} tone="ok" />
       </div>
 
       {/* Over-balance quick access — only when relevant. */}
@@ -319,7 +352,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
               variant="outline"
               onClick={() => setTopupTarget({ id: overBalanceRows[0].customer.id, name: overBalanceRows[0].customer.name })}
             >
-              Record top-up
+              Add Balance
             </Btn>
           </div>
         </div>
@@ -353,7 +386,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
             onClick={() => setTopupTarget("global")}
             className={prepaidCustomerOptions.length === 0 ? "opacity-50 pointer-events-none" : ""}
           >
-            Record top-up
+            Add Balance
           </Btn>
         </div>
       </div>
@@ -367,7 +400,9 @@ export default function FinanceTab({ customers, projects, trips, topups, special
               <tr>
                 <TH>Customer</TH>
                 <TH>Project</TH>
-                <TH>Mode</TH>
+                <TH>Method</TH>
+                <TH>Rate</TH>
+                <TH>Unsettled Trips</TH>
                 <TH>Settled Balance</TH>
                 <TH></TH>
               </tr>
@@ -379,6 +414,18 @@ export default function FinanceTab({ customers, projects, trips, topups, special
                   <TD>{r.project?.name ?? <span className="muted">—</span>}</TD>
                   <TD>
                     <ModeBadge mode={r.mode} />
+                  </TD>
+                  <TD className="tabular-nums">
+                    {r.rateVatInclusive != null ? formatSar(r.rateVatInclusive) : <span className="muted">—</span>}
+                  </TD>
+                  <TD className="tabular-nums">
+                    {r.project ? (
+                      <span className={r.unsettledTripsCount > 0 ? "text-amber-700 dark:text-amber-300 font-medium" : "muted"}>
+                        {r.unsettledTripsCount}
+                      </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
                   </TD>
                   <TD className="tabular-nums">
                     {r.mode === "prepaid" ? (
@@ -396,7 +443,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
                           variant="outline"
                           onClick={() => setTopupTarget({ id: r.customer.id, name: r.customer.name })}
                         >
-                          Record top-up
+                          Add Balance
                         </Btn>
                       )}
                       {(r.mode === "prepaid" || r.mode === "postpaid") && (
@@ -430,11 +477,12 @@ export default function FinanceTab({ customers, projects, trips, topups, special
         </div>
       )}
 
-      <TopupModal
+      <AddBalanceModal
         open={topupTarget !== null}
         onClose={() => setTopupTarget(null)}
         customers={prepaidCustomerOptions}
         fixedCustomer={activeTopupCustomer}
+        history={activeTopupCustomer ? (topupsByCustomer.get(activeTopupCustomer.id) ?? []) : []}
       />
 
       <StatementModal

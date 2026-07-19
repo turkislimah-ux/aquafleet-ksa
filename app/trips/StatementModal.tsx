@@ -238,7 +238,7 @@ export default function StatementModal({
         {sampleRef && <p className="text-sm muted mb-1">Ref. {sampleRef}</p>}
         <p className="text-sm muted mb-4">
           {mode === "prepaid"
-            ? "Top-up credits and delivered-trip/charge debits (VAT-inclusive), oldest first."
+            ? "Add Balance credits and delivered-trip/charge debits (VAT-inclusive), oldest first."
             : "Delivered trips and recorded payments, oldest first."}
         </p>
 
@@ -268,7 +268,7 @@ export default function StatementModal({
         {mode === "prepaid" ? (
           entries.length === 0 ? (
             <div className="card p-10 text-center muted text-sm">
-              {hasPeriodFilter ? "No activity in this period." : "No top-ups or delivered trips yet."}
+              {hasPeriodFilter ? "No activity in this period." : "No balance added or delivered trips yet."}
             </div>
           ) : (
             <div className="card p-0 overflow-hidden">
@@ -294,7 +294,7 @@ export default function StatementModal({
                         <TD className="tabular-nums">{e.date}</TD>
                         <TD>
                           {e.kind === "topup" ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">Top-up</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">Add Balance</span>
                           ) : e.kind === "charge" ? (
                             <span className="muted">Special charge</span>
                           ) : (

@@ -71,7 +71,7 @@ export default function TripsTabs({
       >
         <TabBtn active={tab === "projects"} onClick={() => setTab("projects")} label="Projects" />
         <TabBtn active={tab === "customers"} onClick={() => setTab("customers")} label="Customers" />
-        <TabBtn active={tab === "finance"} onClick={() => setTab("finance")} label="Finance" />
+        <TabBtn active={tab === "finance"} onClick={() => setTab("finance")} label="Finance/Invoice" />
       </div>
 
       {error && (

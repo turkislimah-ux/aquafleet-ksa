@@ -323,7 +323,12 @@ export type CustomerTopup = {
   amount_sar: number; // pre-VAT
   topup_date: string;
   note: string | null;
-  reference: string | null;
+  reference: string | null; // surfaced in the UI as "ETF Ref. number"
+  // Add Balance restructure (Batch B, migration 0040) — cash/bank_transfer
+  // choice + proof photo, same shape as invoices' payment_method/proof.
+  // Nullable: legacy rows predate this batch, no backfill.
+  method: "cash" | "bank_transfer" | null;
+  photo_path: string | null;
   entered_by: string | null;
   created_at: string;
 };

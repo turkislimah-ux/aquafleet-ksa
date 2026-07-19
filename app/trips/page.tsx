@@ -46,7 +46,11 @@ export type TopupRow = {
   amount_sar: number;
   topup_date: string;
   note: string | null;
-  reference: string | null;
+  reference: string | null; // surfaced in the UI as "ETF Ref. number"
+  // Add Balance restructure (Batch B, migration 0040) — cash/bank_transfer +
+  // proof photo. Nullable: legacy rows predate this batch.
+  method: "cash" | "bank_transfer" | null;
+  photo_path: string | null;
 };
 
 // v3 cutover — every special charge belonging to a NON-VOID invoice, across
@@ -165,7 +169,7 @@ export default async function TripsPage() {
       // statement math built on top of this + trips.
       supabase
         .from("customer_topups")
-        .select("id, customer_id, amount_sar, topup_date, note, reference")
+        .select("id, customer_id, amount_sar, topup_date, note, reference, method, photo_path")
         .order("topup_date", { ascending: false }),
       // Finance bug fix — invoice-lock (§3, two independent locks: payout_id
       // commission-lock OR paid-invoice lock). status='paid' scoped in SQL —

@@ -239,6 +239,28 @@ relevant skill(s) **when the task calls for it**:
     a fabricated 0), and their charges are treated as covered (best-available
     approximation, no backfill — same precedent as every other frozen-snapshot gap).
 
+- **Statement rebuild is COMPLETE, through commit `5889092`.**
+  - **Batch 1 (`39ed7f8`):** prepaid pay action is "Pay with Balance" — confirmation
+    shows settled balance − Grand Total, records/locks via the existing pay path (no
+    double-deduct). Postpaid keeps cash/bank+proof. Known limitation: stored
+    `payment_method` is `'cash'` under the hood — no `'balance'` enum value without a
+    migration.
+  - **Batch 2 (migration `0039`):** `invoices` gains `payment_reference`/
+    `payment_date` (user-entered, distinct from `paid_at`)/`payment_note`, all
+    nullable. `pay_invoice` dropped+recreated 6-arg (bank_transfer requires
+    reference+date, cash optional); `unpay_invoice` clears them on revert. Exactly
+    one signature each.
+  - **Batch 3:** statement rebuilt both modes — truck plate+capacity columns
+    (`trips.truck_id`→`trucks`, snapshotted at trip creation, not delivery — accepted
+    since statements only show delivered trips), period picker (filters rows, footer
+    stays all-time), PREPAID/POSTPAID STATEMENT titles with method shown by project.
+    Prepaid: VAT-inclusive AMOUNT with stacked faded pre-VAT+VAT, TYPE=water-type-only,
+    top-up rows (date/ref/'Top-up'/amount, no note). Postpaid: VAT + TOTAL columns,
+    payment rows (`payment_date` date-only, ref or 'Cash', 'Payment', amount under
+    TOTAL), 'Total payable' footer.
+  - **Deferred related:** real `payment_method='balance'` enum for prepaid reporting;
+    required top-up photo (spec §4.2 — `customer_topups` has no `photo_path` yet).
+
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
   touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`
