@@ -333,14 +333,25 @@ export type CustomerTopup = {
   created_at: string;
 };
 
-// company_settings row (0025) — singleton seller identity, appears on every
-// invoice's seller_snapshot at confirm time.
+// company_settings row (0025, email added 0029, description/telephone/phone
+// added 0041, legal_name_ar added 0042) — singleton seller identity, appears
+// on every invoice's seller_snapshot at confirm time (captured via
+// `select("*")` — see invoiceActions.ts's assembleForCustomerPeriod, no RPC
+// change needed when this type grows). legal_name is displayed as "CR
+// Company Name" and vat_number as "VAT Registration Number" in the UI (Batch
+// D relabeling — same "value stays, label changes" pattern as
+// INVOICE_STATUS_LABELS above).
 export type CompanySettings = {
   id: true;
   legal_name: string;
+  legal_name_ar: string | null; // company name (Arabic) — Batch D follow-up
   vat_number: string | null;
   cr_number: string | null;
   address: string | null;
+  email: string | null;
+  description: string | null;
+  telephone: string | null; // landline
+  phone: string | null; // mobile
   updated_at: string;
 };
 
@@ -370,12 +381,15 @@ export type InvoiceStatus = "draft" | "review" | "confirmed" | "paid" | "void";
 export type InvoicePaymentMethod = "cash" | "bank_transfer";
 
 // 5c: shared display labels, same convention as PAYMENT_MODE_LABELS above.
+// Batch C — status VALUE stays 'void' in the DB (avoids a data migration on
+// every already-voided invoice); only the display label changes to "Sales
+// Return". Every UI surface reads the label from here, not the literal.
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   draft: "Draft",
   review: "Review",
   confirmed: "Confirmed",
   paid: "Paid",
-  void: "Void",
+  void: "Sales Return",
 };
 export const PAYMENT_METHOD_LABELS: Record<InvoicePaymentMethod, string> = {
   cash: "Cash",
@@ -427,7 +441,9 @@ export type Invoice = {
   invoice_number: string | null;
 
   seller_snapshot: CompanySettings | null;
-  buyer_snapshot: Pick<Customer, "name" | "vat_number" | "cr_number" | "billing_address"> | null;
+  // name_ar added Batch D (invoice header restructure) — buyer snapshot is
+  // hand-built (not select *), see invoiceActions.ts's assembleForCustomerPeriod.
+  buyer_snapshot: Pick<Customer, "name" | "name_ar" | "vat_number" | "cr_number" | "billing_address"> | null;
 
   covered_lines: InvoiceLineSnapshot[] | null;
   unpaid_lines: InvoiceLineSnapshot[] | null;

@@ -118,9 +118,9 @@ export default async function TripsPage() {
         .from("customers")
         .select(
           // Finance 5c: vat_number/cr_number/billing_address/email added —
-          // buyer identity + mailto target for the invoice UI. Additive only;
-          // Projects/Customers tabs simply don't read the extra fields.
-          "id, name, default_station, delivery_site_address, customer_type, contact_name, phone, delivery_lat, delivery_lng, vat_number, cr_number, billing_address, email"
+          // buyer identity + mailto target for the invoice UI. Batch D: name_ar
+          // added — now wired into ProjectModal's Customer section (edit prefill).
+          "id, name, name_ar, default_station, delivery_site_address, customer_type, contact_name, phone, delivery_lat, delivery_lng, vat_number, cr_number, billing_address, email"
         )
         .is("archived_at", null)
         .order("name", { ascending: true }),
@@ -256,6 +256,7 @@ export default async function TripsPage() {
   const customers = (customersRes.data ?? []) as {
     id: string;
     name: string;
+    name_ar: string | null;
     default_station: string | null;
     delivery_site_address: string | null;
     customer_type: string;

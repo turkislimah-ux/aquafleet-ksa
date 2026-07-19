@@ -72,7 +72,7 @@ async function assembleForCustomerPeriod(params: {
 
   const { data: customer, error: custErr } = await supabase
     .from("customers")
-    .select("id, name, vat_number, cr_number, billing_address, email")
+    .select("id, name, name_ar, vat_number, cr_number, billing_address, email")
     .eq("id", customerId)
     .single();
   if (custErr || !customer) return { error: custErr?.message ?? "Customer not found." };
@@ -180,6 +180,7 @@ async function assembleForCustomerPeriod(params: {
     sellerSnapshot: seller ?? null,
     buyerSnapshot: {
       name: customer.name,
+      name_ar: customer.name_ar,
       vat_number: customer.vat_number,
       cr_number: customer.cr_number,
       billing_address: customer.billing_address,
@@ -760,9 +761,10 @@ export async function setHideAmountDue(invoiceId: string, hide: boolean): Promis
 }
 
 // ---------------------------------------------------------------------------
-// Company settings — email only (0029). Minimal get/set pair for the small
-// Finance-tab form; NOT a full settings screen (deferred). Table is a
-// singleton (id = true) — no id param needed.
+// Company settings — email only (0029). Read-only convenience kept for
+// InvoiceDetailModal's mailto signature (the only other caller); the
+// CompanySettingsModal form itself now uses the fuller pair below (Batch D).
+// Table is a singleton (id = true) — no id param needed.
 // ---------------------------------------------------------------------------
 export async function getCompanyEmail(): Promise<ActionResult<{ email: string | null }>> {
   const supabase = createClient();
@@ -775,12 +777,55 @@ export async function getCompanyEmail(): Promise<ActionResult<{ email: string | 
   return { error: null, data: { email: data?.email ?? null } };
 }
 
-export async function updateCompanyEmail(email: string): Promise<ActionResult> {
+// Batch D (invoice header restructure) — full company_settings get/set pair.
+// legal_name is labeled "CR Company Name" and vat_number "VAT Registration
+// Number" in the UI; the DB columns keep their original names (same "value
+// stays, label changes" pattern as INVOICE_STATUS_LABELS in lib/db-types.ts).
+// description/telephone/phone are new (migration 0041). All fields here are
+// nullable/optional — required going forward is a form-layer nicety, not
+// enforced by a NOT NULL (no backfill for existing rows).
+export async function getCompanySettings(): Promise<ActionResult<CompanySettings>> {
   const supabase = createClient();
-  const trimmed = email.trim();
+  const { data, error } = await supabase
+    .from("company_settings")
+    .select("*")
+    .eq("id", true)
+    .single();
+  if (error) return { error: error.message };
+  return { error: null, data: data as CompanySettings };
+}
+
+export type CompanySettingsInput = {
+  legal_name: string;
+  legal_name_ar: string | null;
+  vat_number: string | null;
+  cr_number: string | null;
+  address: string | null;
+  email: string | null;
+  description: string | null;
+  telephone: string | null;
+  phone: string | null;
+};
+
+export async function updateCompanySettings(input: CompanySettingsInput): Promise<ActionResult> {
+  const legalName = input.legal_name.trim();
+  if (!legalName) return { error: "CR Company Name is required." };
+
+  const supabase = createClient();
   const { error } = await supabase
     .from("company_settings")
-    .update({ email: trimmed || null, updated_at: new Date().toISOString() })
+    .update({
+      legal_name: legalName,
+      legal_name_ar: input.legal_name_ar?.trim() || null,
+      vat_number: input.vat_number?.trim() || null,
+      cr_number: input.cr_number?.trim() || null,
+      address: input.address?.trim() || null,
+      email: input.email?.trim() || null,
+      description: input.description?.trim() || null,
+      telephone: input.telephone?.trim() || null,
+      phone: input.phone?.trim() || null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", true);
   if (error) return { error: error.message };
   revalidatePath("/trips");
@@ -805,12 +850,28 @@ export async function updateCompanyEmail(email: string): Promise<ActionResult> {
 // ---------------------------------------------------------------------------
 export type InvoicePdfResult = { base64: string; filename: string };
 
-type SellerSnap = Pick<CompanySettings, "legal_name" | "vat_number" | "cr_number" | "address"> | null;
-type BuyerSnap = Pick<Customer, "name" | "vat_number" | "cr_number" | "billing_address"> | null;
+type SellerSnap = Pick<
+  CompanySettings,
+  "legal_name" | "legal_name_ar" | "vat_number" | "cr_number" | "address" | "description" | "telephone" | "phone"
+> | null;
+type BuyerSnap = Pick<Customer, "name" | "name_ar" | "vat_number" | "cr_number" | "billing_address"> | null;
 
-function toIdentity(name: string | null | undefined, vat: string | null, cr: string | null, address: string | null): PdfIdentity {
-  if (!name && !vat && !cr && !address) return null;
-  return { name: name ?? null, vat_number: vat, cr_number: cr, address };
+// Batch D — widened for the 3-section header (name_ar buyer-only,
+// description/telephone/phone seller-only; toIdentity is shared by both, the
+// unused side of each field simply stays undefined/null).
+function toIdentity(opts: {
+  name?: string | null;
+  name_ar?: string | null;
+  vat?: string | null;
+  cr?: string | null;
+  address?: string | null;
+  description?: string | null;
+  telephone?: string | null;
+  phone?: string | null;
+}): PdfIdentity {
+  const { name = null, name_ar = null, vat = null, cr = null, address = null, description = null, telephone = null, phone = null } = opts;
+  if (!name && !name_ar && !vat && !cr && !address && !description && !telephone && !phone) return null;
+  return { name, name_ar, vat_number: vat, cr_number: cr, address, description, telephone, phone };
 }
 
 export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<InvoicePdfResult>> {
@@ -849,8 +910,25 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
       invoiceNumber: inv.invoice_number,
       periodStart: inv.period_start,
       periodEnd: inv.period_end,
-      seller: toIdentity(seller?.legal_name, seller?.vat_number ?? null, seller?.cr_number ?? null, seller?.address ?? null),
-      buyer: toIdentity(buyer?.name, buyer?.vat_number ?? null, buyer?.cr_number ?? null, buyer?.billing_address ?? null),
+      // Draft/review is unconfirmed — no issue date exists yet.
+      issueDate: null,
+      seller: toIdentity({
+        name: seller?.legal_name,
+        name_ar: seller?.legal_name_ar ?? null,
+        vat: seller?.vat_number ?? null,
+        cr: seller?.cr_number ?? null,
+        address: seller?.address ?? null,
+        description: seller?.description ?? null,
+        telephone: seller?.telephone ?? null,
+        phone: seller?.phone ?? null,
+      }),
+      buyer: toIdentity({
+        name: buyer?.name,
+        name_ar: buyer?.name_ar ?? null,
+        vat: buyer?.vat_number ?? null,
+        cr: buyer?.cr_number ?? null,
+        address: buyer?.billing_address ?? null,
+      }),
       buyerEmail: assembly.customerEmail,
       coveredLines: assembly.coveredLines,
       unpaidLines: assembly.unpaidLines,
@@ -890,8 +968,26 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
       invoiceNumber: inv.invoice_number,
       periodStart: inv.period_start,
       periodEnd: inv.period_end,
-      seller: toIdentity(seller?.legal_name, seller?.vat_number ?? null, seller?.cr_number ?? null, seller?.address ?? null),
-      buyer: toIdentity(buyer?.name, buyer?.vat_number ?? null, buyer?.cr_number ?? null, buyer?.billing_address ?? null),
+      // Confirmed/paid/void — issue date is confirmed_at (frozen the instant
+      // this invoice left draft/review).
+      issueDate: inv.confirmed_at,
+      seller: toIdentity({
+        name: seller?.legal_name,
+        name_ar: seller?.legal_name_ar ?? null,
+        vat: seller?.vat_number ?? null,
+        cr: seller?.cr_number ?? null,
+        address: seller?.address ?? null,
+        description: seller?.description ?? null,
+        telephone: seller?.telephone ?? null,
+        phone: seller?.phone ?? null,
+      }),
+      buyer: toIdentity({
+        name: buyer?.name,
+        name_ar: buyer?.name_ar ?? null,
+        vat: buyer?.vat_number ?? null,
+        cr: buyer?.cr_number ?? null,
+        address: buyer?.billing_address ?? null,
+      }),
       // Snapshot never retained an email (buyer_snapshot's Pick<Customer,...>
       // has no email field) — omitted rather than re-fetched live, consistent
       // with "frozen means frozen".

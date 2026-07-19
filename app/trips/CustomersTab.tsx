@@ -27,6 +27,13 @@ type CustomerLite = {
   delivery_site_address: string | null;
   delivery_lat: number | null;
   delivery_lng: number | null;
+  // Batch D (invoice header restructure) — buyer header fields, wired into
+  // ProjectModal's Customer section. All pre-existing columns, just newly
+  // surfaced in the edit-form prefill.
+  name_ar: string | null;
+  vat_number: string | null;
+  cr_number: string | null;
+  billing_address: string | null;
 };
 type ProjectLite = {
   id: string;
@@ -86,6 +93,10 @@ function toInitial(c: CustomerLite, p: ProjectLite, driverIds: string[]): Projec
     contact_name: c.contact_name ?? "",
     phone: c.phone ?? "",
     cust_email: c.email ?? "",
+    cust_name_ar: c.name_ar ?? "",
+    cust_vat_number: c.vat_number ?? "",
+    cust_cr_number: c.cr_number ?? "",
+    cust_billing_address: c.billing_address ?? "",
     delivery_address: c.delivery_site_address ?? "",
     delivery_lat: c.delivery_lat == null ? "" : String(c.delivery_lat),
     delivery_lng: c.delivery_lng == null ? "" : String(c.delivery_lng),

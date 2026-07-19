@@ -106,6 +106,9 @@ type DriverRow = {
 type CustomerOption = {
   id: string;
   name: string;
+  // Batch D: buyer header field, unused by the board itself — flows through
+  // to CustomersTab's edit-form prefill.
+  name_ar: string | null;
   default_station: string | null;
   delivery_site_address: string | null;
   customer_type: string;

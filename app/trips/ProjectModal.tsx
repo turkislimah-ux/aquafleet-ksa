@@ -44,6 +44,13 @@ export type ProjectInitial = {
   phone: string;
   // Finance email (0028). "" = unset — optional, mirrors contact_name/phone.
   cust_email: string;
+  // Batch D (invoice header restructure) — buyer header fields. Pre-existing
+  // DB columns (name_ar/vat_number/cr_number/billing_address), first wired
+  // into this form here. "" = unset, same convention as cust_email.
+  cust_name_ar: string;
+  cust_vat_number: string;
+  cust_cr_number: string;
+  cust_billing_address: string;
   delivery_address: string;
   delivery_lat: string;
   delivery_lng: string;
@@ -104,6 +111,11 @@ export default function ProjectModal({
   const [contactName, setContactName] = useState("");
   const [phone, setPhone] = useState("");
   const [custEmail, setCustEmail] = useState("");
+  // Batch D — buyer header fields (see ProjectInitial comment above).
+  const [custNameAr, setCustNameAr] = useState("");
+  const [custVatNumber, setCustVatNumber] = useState("");
+  const [custCrNumber, setCustCrNumber] = useState("");
+  const [custBillingAddress, setCustBillingAddress] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryLat, setDeliveryLat] = useState("");
   const [deliveryLng, setDeliveryLng] = useState("");
@@ -156,6 +168,10 @@ export default function ProjectModal({
       setContactName(initial.contact_name);
       setPhone(initial.phone);
       setCustEmail(initial.cust_email);
+      setCustNameAr(initial.cust_name_ar);
+      setCustVatNumber(initial.cust_vat_number);
+      setCustCrNumber(initial.cust_cr_number);
+      setCustBillingAddress(initial.cust_billing_address);
       setDeliveryAddress(initial.delivery_address);
       setDeliveryLat(initial.delivery_lat);
       setDeliveryLng(initial.delivery_lng);
@@ -179,6 +195,10 @@ export default function ProjectModal({
       setContactName("");
       setPhone("");
       setCustEmail("");
+      setCustNameAr("");
+      setCustVatNumber("");
+      setCustCrNumber("");
+      setCustBillingAddress("");
       setDeliveryAddress("");
       setDeliveryLat("");
       setDeliveryLng("");
@@ -273,6 +293,10 @@ export default function ProjectModal({
       contact_name: contactName || null,
       phone: phone || null,
       cust_email: custEmail || null,
+      cust_name_ar: custNameAr || null,
+      cust_vat_number: custVatNumber || null,
+      cust_cr_number: custCrNumber || null,
+      cust_billing_address: custBillingAddress || null,
       delivery_address: deliveryAddress || null,
       delivery_lat: deliveryLat === "" ? null : Number(deliveryLat),
       delivery_lng: deliveryLng === "" ? null : Number(deliveryLng),
@@ -344,9 +368,24 @@ export default function ProjectModal({
           <section className="space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">Customer</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Batch D follow-up #2 — company name EN/AR share a row, VAT
+                  Registration Number + CR number sit right below it (layout
+                  ordering only, same fields/state, no data change). */}
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">Customer name *</span>
                 <input value={custName} onChange={(e) => setCustName(e.target.value)} required className={INPUT} style={INPUT_STYLE} placeholder="e.g. Bin Slimah Construction" />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">Company name (Arabic)</span>
+                <input value={custNameAr} onChange={(e) => setCustNameAr(e.target.value)} dir="rtl" className={INPUT} style={INPUT_STYLE} placeholder="اسم الشركة" />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">VAT Registration Number</span>
+                <input value={custVatNumber} onChange={(e) => setCustVatNumber(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">CR number</span>
+                <input value={custCrNumber} onChange={(e) => setCustCrNumber(e.target.value)} className={INPUT} style={INPUT_STYLE} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">Customer type *</span>
@@ -368,6 +407,10 @@ export default function ProjectModal({
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">Email</span>
                 <input value={custEmail} onChange={(e) => setCustEmail(e.target.value)} type="email" className={INPUT} style={INPUT_STYLE} placeholder="e.g. billing@customer.com" />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">Invoice address</span>
+                <input value={custBillingAddress} onChange={(e) => setCustBillingAddress(e.target.value)} className={INPUT} style={INPUT_STYLE} placeholder="for the invoice header — may differ from delivery site" />
               </label>
               <label className="flex flex-col gap-1 text-sm sm:col-span-2">
                 <span className="muted">Delivery site address</span>

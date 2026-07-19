@@ -433,6 +433,13 @@ export type NewProjectInput = {
   phone: string | null;
   // Finance email (0028). Optional, mirrors contact_name/phone.
   cust_email: string | null;
+  // Batch D (invoice header restructure) — buyer header fields. Pre-existing
+  // customers columns (name_ar/vat_number/cr_number/billing_address), newly
+  // threaded through the RPC. Optional, same convention as cust_email.
+  cust_name_ar: string | null;
+  cust_vat_number: string | null;
+  cust_cr_number: string | null;
+  cust_billing_address: string | null;
   delivery_address: string | null;
   delivery_lat: number | null;
   delivery_lng: number | null;
@@ -521,6 +528,10 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
     p_driver_ids: driverIds,
     p_payment_mode: paymentMode,
     p_cust_email: input.cust_email?.trim() || null,
+    p_cust_name_ar: input.cust_name_ar?.trim() || null,
+    p_cust_vat_number: input.cust_vat_number?.trim() || null,
+    p_cust_cr_number: input.cust_cr_number?.trim() || null,
+    p_cust_billing_address: input.cust_billing_address?.trim() || null,
   });
   if (error) return { error: error.message };
 
@@ -670,6 +681,10 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
     p_payment_mode: paymentMode,
     p_cust_email: input.cust_email?.trim() || null,
     p_current_balance: currentBalance,
+    p_cust_name_ar: input.cust_name_ar?.trim() || null,
+    p_cust_vat_number: input.cust_vat_number?.trim() || null,
+    p_cust_cr_number: input.cust_cr_number?.trim() || null,
+    p_cust_billing_address: input.cust_billing_address?.trim() || null,
   });
   if (error) return { error: error.message };
 

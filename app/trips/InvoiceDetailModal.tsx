@@ -60,14 +60,17 @@ import {
 // only, never the "to" or a forced sender.
 const FALLBACK_COMPANY_EMAIL = "info@binslimah.com";
 
-// Four purpose-specific mailto templates (Finance email templates, 0028/0029).
+// Purpose-specific mailto templates (Finance email templates, 0028/0029).
 // Each maps to a distinct tone/purpose picked by the user before mailto opens.
-type EmailType = "statement" | "payment_due" | "reminder" | "generic";
+// Batch C adds "sales_return" — a Sales Return (cancellation) notice, only
+// meaningful once the invoice has actually been returned/voided.
+type EmailType = "statement" | "payment_due" | "reminder" | "generic" | "sales_return";
 const EMAIL_TYPE_META: Record<EmailType, { label: string; hint: string }> = {
   statement: { label: "Monthly report / statement", hint: "Activity summary for the period." },
   payment_due: { label: "Payment due", hint: "This invoice is now due — request payment." },
   reminder: { label: "Payment reminder", hint: "Follow-up nudge for an outstanding balance." },
   generic: { label: "Plain / generic", hint: "Minimal — just the invoice reference." },
+  sales_return: { label: "Sales Return notice", hint: "Explains this invoice was cancelled." },
 };
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -106,8 +109,28 @@ type View = {
   // either from the frozen snapshot columns or, for pre-0036 legacy rows,
   // the derived DisplayLedgerTotals fallback built in refresh() below).
   ledger?: { covered: DisplayLedgerTotals; unpaid: DisplayLedgerTotals };
-  sellerSnapshot: { legal_name: string; vat_number: string | null; cr_number: string | null; address: string | null } | null;
-  buyerSnapshot: { name: string; vat_number: string | null; cr_number: string | null; billing_address: string | null } | null;
+  // description/telephone/phone added Batch D (invoice header restructure),
+  // legal_name_ar added Batch D follow-up #1 — all captured automatically via
+  // company_settings' `select("*")` (see invoiceActions.ts's
+  // assembleForCustomerPeriod), no assembly code change.
+  sellerSnapshot: {
+    legal_name: string;
+    legal_name_ar: string | null;
+    vat_number: string | null;
+    cr_number: string | null;
+    address: string | null;
+    description: string | null;
+    telephone: string | null;
+    phone: string | null;
+  } | null;
+  // name_ar added Batch D — hand-built buyer snapshot, see invoiceActions.ts.
+  buyerSnapshot: {
+    name: string;
+    name_ar: string | null;
+    vat_number: string | null;
+    cr_number: string | null;
+    billing_address: string | null;
+  } | null;
   // Display-only fallback (Finance polish batch C) — the project's CURRENT
   // water_type, used when a frozen/old line's own water_type is null. Never
   // written back to a stored snapshot.
@@ -669,15 +692,65 @@ export default function InvoiceDetailModal({
                   </p>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <IdentityBlock title="Seller" name={view.sellerSnapshot?.legal_name ?? null} vat={view.sellerSnapshot?.vat_number ?? null} cr={view.sellerSnapshot?.cr_number ?? null} address={view.sellerSnapshot?.address ?? null} />
-                <IdentityBlock title="Buyer" name={view.buyerSnapshot?.name ?? null} vat={view.buyerSnapshot?.vat_number ?? null} cr={view.buyerSnapshot?.cr_number ?? null} address={view.buyerSnapshot?.billing_address ?? null} extra={customerEmail} />
-              </div>
             </div>
 
-            {raw.status === "void" && raw.void_reason && (
-              <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-700 dark:text-rose-300 break-inside-avoid">
-                <span className="font-medium">Voided</span> {raw.voided_at ? `on ${raw.voided_at.slice(0, 10)}` : ""} — {raw.void_reason}
+            {/* Batch D — three-section header (Buyer / Seller / Invoice info),
+                mirrors the PDF's identityBlock()/invoiceInfoBlock() layout so
+                on-screen, print, and PDF all agree. Buyer/Seller pull from the
+                frozen (or live-preview) snapshots; Invoice info is derived
+                straight off `raw` — never itself snapshotted. */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm break-inside-avoid">
+              <IdentityBlock
+                title="Buyer"
+                name={view.buyerSnapshot?.name ?? null}
+                nameAr={view.buyerSnapshot?.name_ar ?? null}
+                lines={[
+                  { label: "", value: view.buyerSnapshot?.billing_address ?? null },
+                  { label: "VAT Registration No.", value: view.buyerSnapshot?.vat_number ?? null },
+                  { label: "CR No.", value: view.buyerSnapshot?.cr_number ?? null },
+                  { label: "", value: customerEmail },
+                ]}
+              />
+              <IdentityBlock
+                title="Seller"
+                name={view.sellerSnapshot?.legal_name ?? null}
+                nameAr={view.sellerSnapshot?.legal_name_ar ?? null}
+                lines={[
+                  { label: "", value: view.sellerSnapshot?.description ?? null },
+                  { label: "CR No.", value: view.sellerSnapshot?.cr_number ?? null },
+                  { label: "", value: view.sellerSnapshot?.address ?? null },
+                  { label: "Tel", value: view.sellerSnapshot?.telephone ?? null },
+                  { label: "Mobile", value: view.sellerSnapshot?.phone ?? null },
+                  { label: "VAT Registration No.", value: view.sellerSnapshot?.vat_number ?? null },
+                ]}
+              />
+              <IdentityBlock
+                title="Invoice info"
+                lines={[
+                  { label: "Invoice No.", value: raw.invoice_number ?? "Draft — not yet numbered" },
+                  { label: "Issue date", value: raw.confirmed_at ? raw.confirmed_at.slice(0, 10) : "—" },
+                  { label: "Period", value: `${raw.period_start} → ${raw.period_end}` },
+                  { label: "Status", value: status ? INVOICE_STATUS_LABELS[status] : null },
+                ]}
+              />
+            </div>
+
+            {/* Batch C — "Void" relabeled "Sales Return" in the UI; stored
+                status/columns stay 'void'/void_reason/voided_at (no data
+                migration). Second line is the new unpaid note the spec
+                asks for, always shown once returned (not gated on
+                void_reason — legacy rows may predate the required-reason
+                rule but are still unpaid). */}
+            {raw.status === "void" && (
+              <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-700 dark:text-rose-300 break-inside-avoid space-y-1">
+                <div>
+                  <span className="font-medium">Sales Return</span>
+                  {raw.voided_at ? ` on ${raw.voided_at.slice(0, 10)}` : ""}
+                  {raw.void_reason ? ` — ${raw.void_reason}` : ""}
+                </div>
+                <div className="text-xs">
+                  This invoice{raw.invoice_number ? ` (${raw.invoice_number})` : ""} is unpaid — marked Sales Return.
+                </div>
               </div>
             )}
 
@@ -948,7 +1021,7 @@ export default function InvoiceDetailModal({
                     {isPrepaid ? "Pay with Balance" : "Mark Paid"}
                   </Btn>
                   <Btn variant="outline" onClick={() => setVoiding(true)}>
-                    Void
+                    Sales Return
                   </Btn>
                 </div>
               )}
@@ -1052,13 +1125,13 @@ export default function InvoiceDetailModal({
               {status === "confirmed" && voiding && (
                 <div className="space-y-2 max-w-sm">
                   <label className="flex flex-col gap-1 text-sm">
-                    <span className="font-medium">Void reason *</span>
+                    <span className="font-medium">Sales Return reason *</span>
                     <textarea value={voidReason} onChange={(e) => setVoidReason(e.target.value)} rows={2} className={INPUT} style={INPUT_STYLE} />
                   </label>
                   <GuardBox
-                    warning="Voiding is the only undo for a confirmed invoice. The invoice number and VAT ref are retained forever, but this invoice will no longer be collectible."
+                    warning="Marking this a Sales Return is the only undo for a confirmed invoice, and it's terminal — there is no path back to Confirmed/Paid. The invoice number and VAT ref are retained forever, but this invoice will no longer be collectible."
                     busy={busy}
-                    confirmLabel="Yes, void invoice"
+                    confirmLabel="Yes, mark as Sales Return"
                     confirmDisabled={!voidReason.trim()}
                     onCancel={() => setVoiding(false)}
                     onConfirm={() => runAction(() => voidInvoice(invoiceId, voidReason.trim()))}
@@ -1111,7 +1184,13 @@ export default function InvoiceDetailModal({
             </button>
           </div>
           <div className="space-y-2">
-            {(Object.keys(EMAIL_TYPE_META) as EmailType[]).map((type) => (
+            {/* Sales Return notice only offered once actually returned;
+                the other four don't make sense to send on a cancelled
+                invoice (payment due/reminder chase money that's no longer
+                owed), so they're hidden rather than left to misfire. */}
+            {(Object.keys(EMAIL_TYPE_META) as EmailType[])
+              .filter((type) => (status === "void" ? type === "sales_return" : type !== "sales_return"))
+              .map((type) => (
               <button
                 key={type}
                 type="button"
@@ -1131,29 +1210,41 @@ export default function InvoiceDetailModal({
   );
 }
 
+// Batch D — generalized to render any of the three header sections (Buyer /
+// Seller / Invoice info). `name` is the bold headline (omitted entirely for
+// Invoice info, which has no single "name"); `nameAr` is an optional second
+// bold line (buyer's Arabic company name only — seller has no name_ar,
+// invoice info has none). `lines` is an ordered list of label/value pairs;
+// entries with a null value are dropped, and an empty label renders the
+// value alone (used for address/description/email — text that reads fine
+// unlabeled).
 function IdentityBlock({
   title,
   name,
-  vat,
-  cr,
-  address,
-  extra,
+  nameAr,
+  lines,
 }: {
   title: string;
-  name: string | null;
-  vat: string | null;
-  cr: string | null;
-  address: string | null;
-  extra?: string | null;
+  name?: string | null;
+  nameAr?: string | null;
+  lines: { label: string; value: string | null }[];
 }) {
   return (
     <div>
       <div className="text-[11px] uppercase tracking-wide muted mb-0.5">{title}</div>
-      <div className="font-medium">{name ?? <span className="muted">Not on file</span>}</div>
-      {vat && <div className="muted text-xs">VAT {vat}</div>}
-      {cr && <div className="muted text-xs">CR {cr}</div>}
-      {address && <div className="muted text-xs">{address}</div>}
-      {extra && <div className="muted text-xs">{extra}</div>}
+      {name !== undefined && <div className="font-medium">{name ?? <span className="muted">Not on file</span>}</div>}
+      {nameAr && (
+        <div className="font-medium" dir="rtl">
+          {nameAr}
+        </div>
+      )}
+      {lines
+        .filter((l) => l.value)
+        .map((l, i) => (
+          <div key={i} className="muted text-xs">
+            {l.label ? `${l.label} ${l.value}` : l.value}
+          </div>
+        ))}
     </div>
   );
 }
@@ -1781,6 +1872,25 @@ function buildMailtoFor(
         ...signature,
       ];
       break;
+    case "sales_return": {
+      const returnDate = raw.voided_at
+        ? new Date(raw.voided_at).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
+        : "recently";
+      subject = `Sales Return — Invoice ${ref} — ${buyerName}`;
+      bodyLines = [
+        `Dear ${buyerName},`,
+        "",
+        `This is to notify you that invoice ${ref} was cancelled (Sales Return) on ${returnDate}.`,
+        "",
+        "This invoice is no longer valid and no payment is owed against it. Please disregard it for any accounting or payment purposes.",
+        raw.void_reason ? `Reason: ${raw.void_reason}` : null,
+        "",
+        "If you have any questions, please don't hesitate to reach out.",
+        "",
+        ...signature,
+      ];
+      break;
+    }
     case "generic":
     default:
       subject = `Invoice ${ref}`;

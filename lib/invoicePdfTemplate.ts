@@ -72,11 +72,20 @@ export type PdfTotals = { subtotal: number; vat: number; total: number };
 // v3 §9 — same shape as lib/invoice.ts's InvoiceLedgerTotals.
 export type PdfLedgerTotals = { subtotal: number; balance: number; remaining: number };
 
+// Batch D (invoice header restructure) — widened to carry the full 3-section
+// header's fields. name_ar/description/telephone/phone are one-sided
+// (buyer-only / seller-only respectively) — the other side simply never sets
+// them, and identityBlock() below only renders a line when the field is
+// present.
 export type PdfIdentity = {
   name: string | null; // legal_name (seller) or name (buyer)
-  vat_number: string | null;
+  name_ar?: string | null; // buyer only — company name (Arabic)
+  vat_number: string | null; // "VAT Registration Number" — both sides
   cr_number: string | null;
   address: string | null; // address (seller) or billing_address (buyer)
+  description?: string | null; // seller only
+  telephone?: string | null; // seller only — landline
+  phone?: string | null; // seller only — mobile
 } | null;
 
 // Normalized invoice data — the SAME shape whether it came from a live
@@ -89,6 +98,10 @@ export type PdfInvoiceData = {
   invoiceNumber: string | null;
   periodStart: string;
   periodEnd: string;
+  // Batch D — Invoice info section's "issue date". Confirmed/paid/void:
+  // inv.confirmed_at. Draft/review (live, unconfirmed): null — no issue date
+  // exists yet.
+  issueDate: string | null;
   seller: PdfIdentity;
   buyer: PdfIdentity;
   buyerEmail: string | null;
@@ -113,19 +126,21 @@ export type PdfInvoiceData = {
   voidedAt: string | null;
 };
 
+// Batch C — "Void" relabeled "Sales Return" (label only; stored status
+// stays 'void', same as lib/db-types.ts's INVOICE_STATUS_LABELS).
 const STATUS_LABEL_AR: Record<InvoiceStatus, string> = {
   draft: "مسودة",
   review: "قيد المراجعة",
   confirmed: "مؤكدة",
   paid: "مدفوعة",
-  void: "ملغاة",
+  void: "مرتجع مبيعات",
 };
 const STATUS_LABEL_EN: Record<InvoiceStatus, string> = {
   draft: "Draft",
   review: "Review",
   confirmed: "Confirmed",
   paid: "Paid",
-  void: "Void",
+  void: "Sales Return",
 };
 const PAYMENT_METHOD_AR: Record<InvoicePaymentMethod, string> = {
   cash: "نقدًا",
@@ -157,10 +172,29 @@ function identityBlock(title: string, titleAr: string, id: PdfIdentity, extra?: 
     <div class="identity">
       <h3>${label(title, titleAr)}</h3>
       <p class="identity-name">${esc(id.name) || "—"}</p>
-      ${id.vat_number ? `<p>${label("VAT No.", "الرقم الضريبي")}: <span dir="ltr">${esc(id.vat_number)}</span></p>` : ""}
+      ${id.name_ar ? `<p class="identity-name" dir="rtl">${esc(id.name_ar)}</p>` : ""}
+      ${id.description ? `<p class="muted">${esc(id.description)}</p>` : ""}
+      ${id.vat_number ? `<p>${label("VAT Reg. No.", "الرقم الضريبي")}: <span dir="ltr">${esc(id.vat_number)}</span></p>` : ""}
       ${id.cr_number ? `<p>${label("CR No.", "رقم السجل التجاري")}: <span dir="ltr">${esc(id.cr_number)}</span></p>` : ""}
       ${id.address ? `<p>${label("Address", "العنوان")}: ${esc(id.address)}</p>` : ""}
+      ${id.telephone ? `<p>${label("Tel", "هاتف")}: <span dir="ltr">${esc(id.telephone)}</span></p>` : ""}
+      ${id.phone ? `<p>${label("Mobile", "جوال")}: <span dir="ltr">${esc(id.phone)}</span></p>` : ""}
       ${extra ? `<p>${label("Email", "البريد الإلكتروني")}: <span dir="ltr">${esc(extra)}</span></p>` : ""}
+    </div>
+  `;
+}
+
+// Batch D — third header section (Invoice info), same "identity" card style
+// as Buyer/Seller so all three sit in one row.
+function invoiceInfoBlock(data: PdfInvoiceData): string {
+  const ref = data.invoiceNumber ? `#${data.invoiceNumber}` : `(${data.periodStart} — ${data.periodEnd})`;
+  return `
+    <div class="identity">
+      <h3>${label("Invoice Info", "بيانات الفاتورة")}</h3>
+      <p>${label("Invoice No.", "رقم الفاتورة")}: <strong dir="ltr">${esc(ref)}</strong></p>
+      <p>${label("Issue Date", "تاريخ الإصدار")}: <span dir="ltr">${esc(data.issueDate?.slice(0, 10)) || "—"}</span></p>
+      <p>${label("Period", "الفترة")}: <span dir="ltr">${esc(data.periodStart)} → ${esc(data.periodEnd)}</span></p>
+      <p>${label("Status", "الحالة")}: <strong>${esc(STATUS_LABEL_EN[data.status])} / ${esc(STATUS_LABEL_AR[data.status])}</strong></p>
     </div>
   `;
 }
@@ -289,11 +323,10 @@ function chargesTable(lines: PdfLine[]): string {
 }
 
 export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
-  const ref = data.invoiceNumber ? `#${data.invoiceNumber}` : `(${data.periodStart} — ${data.periodEnd})`;
-
   const statusNote =
     data.status === "void"
-      ? `<p class="notice bad">${label("Voided", "ملغاة")}${data.voidedAt ? ` on ${esc(data.voidedAt.slice(0, 10))}` : ""}${data.voidReason ? ` — ${esc(data.voidReason)}` : ""}</p>`
+      ? `<p class="notice bad">${label("Sales Return", "مرتجع مبيعات")}${data.voidedAt ? ` on ${esc(data.voidedAt.slice(0, 10))}` : ""}${data.voidReason ? ` — ${esc(data.voidReason)}` : ""}` +
+        `<br/>${label(`This invoice${data.invoiceNumber ? ` (${data.invoiceNumber})` : ""} is unpaid — marked Sales Return.`, `هذه الفاتورة${data.invoiceNumber ? ` (${data.invoiceNumber})` : ""} غير مدفوعة — تم تحويلها إلى مرتجع مبيعات.`)}</p>`
       : data.status === "paid"
         ? `<p class="notice ok">${label("Paid", "مدفوعة")}${data.paidAt ? ` on ${esc(data.paidAt.slice(0, 10))}` : ""}${data.paymentMethod ? ` via ${esc(PAYMENT_METHOD_EN[data.paymentMethod])} / ${esc(PAYMENT_METHOD_AR[data.paymentMethod])}` : ""}</p>`
         : "";
@@ -320,9 +353,7 @@ export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
   h2 { font-size: 13px; margin: 0; color: #555; font-weight: 600; }
   h3 { font-size: 11px; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.02em; color: #444; }
   .muted { color: #888; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 14px; }
-  .header-meta { text-align: right; }
-  .header-meta p { margin: 2px 0; }
+  .header { border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 14px; }
   .identities { display: flex; gap: 24px; margin-bottom: 16px; }
   .identity { flex: 1; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; }
   .identity p { margin: 2px 0; }
@@ -359,20 +390,14 @@ export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
 </head>
 <body>
   <div class="header">
-    <div>
-      <h1>${label("Tax Invoice", "فاتورة ضريبية")}</h1>
-      <h2>${esc(data.seller?.name) || ""}</h2>
-    </div>
-    <div class="header-meta">
-      <p>${label("Invoice No.", "رقم الفاتورة")}: <strong dir="ltr">${esc(ref)}</strong></p>
-      <p>${label("Period", "الفترة")}: <span dir="ltr">${esc(data.periodStart)} → ${esc(data.periodEnd)}</span></p>
-      <p>${label("Status", "الحالة")}: <strong>${esc(STATUS_LABEL_EN[data.status])} / ${esc(STATUS_LABEL_AR[data.status])}</strong></p>
-    </div>
+    <h1>${label("Tax Invoice", "فاتورة ضريبية")}</h1>
   </div>
 
+  <!-- Batch D — three-section header: Buyer / Seller / Invoice info, one row. -->
   <div class="identities">
-    ${identityBlock("Seller", "البائع", data.seller)}
     ${identityBlock("Buyer", "المشتري", data.buyer, data.buyerEmail)}
+    ${identityBlock("Seller", "البائع", data.seller)}
+    ${invoiceInfoBlock(data)}
   </div>
 
   ${statusNote}
