@@ -582,3 +582,39 @@ export const STAGE_STYLES: Record<
 
 // Guard rail for batch trip creation.
 export const MAX_BATCH_TRIPS = 50;
+
+// ---------------------------------------------------------------------------
+// Inventory (migration 0043) — Slice 1 schema foundation. warehouses = a
+// THIRD, distinct location concept from water_stations/operation_stations
+// (see 0043's header) — physical parts storage, never FK'd to either. English
+// only (no name_ar — internal-only, never customer-facing).
+// ---------------------------------------------------------------------------
+export type Warehouse = {
+  id: string;
+  name: string;
+  location: string | null;
+  type: string | null; // free text, not an enum — addable without a migration
+  note: string | null;
+  active: boolean;
+  created_at: string;
+};
+
+// parts row (0043) — part definition + stock in ONE row (v1: no FIFO cost
+// lots, no PO/supplier entity — see 0043's header for full deferral list).
+export type Part = {
+  id: string;
+  sku: string;
+  name: string;
+  name_ar: string | null;
+  category: string | null; // free text, not an enum
+  unit: string | null;
+  unit_cost_sar: number | null;
+  qty_on_hand: number;
+  reorder_level: number | null;
+  reorder_qty: number | null;
+  lead_time_days: number | null;
+  supplier: string | null; // text for v1 — first-class entity in PO phase
+  warehouse_id: string;
+  active: boolean;
+  created_at: string;
+};
