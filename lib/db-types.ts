@@ -618,3 +618,32 @@ export type Part = {
   active: boolean;
   created_at: string;
 };
+
+// stock_movements row (migration 0044, DRAFTED — not yet applied; the
+// receive_stock/adjust_stock RPCs this type backs will 404 until Turki runs
+// it). Append-only audit ledger — never inserted/updated directly, only via
+// those two RPCs.
+export type StockMovement = {
+  id: string;
+  part_id: string;
+  movement_type: "receive" | "adjust";
+  qty_delta: number;
+  qty_after: number;
+  note: string | null;
+  created_by: string | null; // authenticated user's email — see 0044 header
+  created_at: string;
+};
+
+// suppliers row (migration 0045, LIVE) — structured vendor entity, Phase 1
+// of the full-demo Inventory build-out. parts.supplier (above) stays free
+// text — a snapshot copied from here at receipt time, not an FK to this
+// table (see 0045's header).
+export type Supplier = {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  contact_person: string | null;
+  active: boolean;
+  created_at: string;
+};

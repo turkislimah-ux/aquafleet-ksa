@@ -1,13 +1,18 @@
 "use server";
 
-// Inventory page — Slice 2 (warehouses layer) + Slice 3 (parts layer). Same
-// server-action pattern as app/trips/actions.ts's createWaterStation:
-// validate -> insert/update -> revalidate. Single-table writes, no RPC
-// (migration 0043's header: "NO RPCs in this migration"). Nothing
-// hard-deletes — deactivate is a later slice.
+// Inventory page — Slice 2 (warehouses layer) + Slice 3 (parts layer) + Slice
+// 4 (stock movements) + full-demo Phase 1 (suppliers entity, migration 0045,
+// LIVE). Warehouse/part/supplier creation follow the plain-table
+// server-action pattern from app/trips/actions.ts's createWaterStation:
+// validate -> insert -> revalidate (0043/0045 have no RPCs). No
+// updatePart — preview/ has no part-edit UI, so this file doesn't invent one;
+// parts change only via receiveStock/adjustStock below. Those two DO call
+// RPCs (migration 0044's receive_stock/adjust_stock, LIVE and applied).
+// Nothing hard-deletes — deactivate is a later slice.
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import type { StockMovement, Supplier } from "@/lib/db-types";
 
 export type WarehouseInput = {
   name: string;
@@ -37,6 +42,59 @@ export async function createWarehouse(
 
   revalidatePath("/inventory");
   return { error: null, id: data?.id };
+}
+
+// ---------------------------------------------------------------------------
+// Suppliers (full-demo build-out, Phase 1 — migration 0045, LIVE)
+//
+// No standalone suppliers page/list at this phase — mirrors preview/, which
+// never has one either. This is reusable infrastructure: an inline "New
+// supplier" modal + this action, both consumed later by Phase 3 (Add Parts/
+// receive) and Phase 4 (Purchase Orders) supplier pickers. Not independently
+// user-testable end-to-end until one of those wires a trigger to it.
+// ---------------------------------------------------------------------------
+
+export type SupplierInput = {
+  name: string;
+  phone: string | null;
+  email: string | null;
+  contact_person: string | null;
+};
+
+// Case-insensitive dedupe — mirrors preview/'s addSupplier(), which returns
+// the existing record instead of creating a duplicate when the trimmed name
+// already matches (case-insensitively) an existing supplier.
+export async function createSupplier(
+  input: SupplierInput,
+): Promise<{ error: string | null; supplier?: Supplier }> {
+  const name = input.name?.trim() ?? "";
+  if (!name) return { error: "Supplier name is required." };
+
+  const supabase = createClient();
+
+  const { data: existing, error: lookupError } = await supabase
+    .from("suppliers")
+    .select("id, name, phone, email, contact_person, active, created_at")
+    .ilike("name", name)
+    .limit(1)
+    .maybeSingle();
+  if (lookupError) return { error: lookupError.message };
+  if (existing) return { error: null, supplier: existing as Supplier };
+
+  const { data, error } = await supabase
+    .from("suppliers")
+    .insert({
+      name,
+      phone: input.phone?.trim() || null,
+      email: input.email?.trim() || null,
+      contact_person: input.contact_person?.trim() || null,
+    })
+    .select("id, name, phone, email, contact_person, active, created_at")
+    .single();
+  if (error) return { error: error.message };
+
+  revalidatePath("/inventory");
+  return { error: null, supplier: data as Supplier };
 }
 
 // ---------------------------------------------------------------------------
@@ -119,18 +177,79 @@ export async function createPart(
   return { error: null, id: data?.id };
 }
 
-export async function updatePart(
-  id: string,
-  input: PartInput,
+// ---------------------------------------------------------------------------
+// Stock movements (Slice 4 — migration 0044, LIVE). These two wrap
+// receive_stock()/adjust_stock() — qty_on_hand is never edited directly once
+// a part exists (see AddPartModal — qty starts at 0, create-only); every
+// post-creation change goes through one of these two RPCs so stock_movements
+// stays a complete, gap-free audit ledger.
+//
+// "Who acted" — same convention as unpay_invoice (app/trips/invoiceActions.ts)
+// and customer_topups.entered_by (lib/actions/finance.ts): the authenticated
+// user's email, read server-side, never a UI text field.
+// ---------------------------------------------------------------------------
+
+async function actorEmail(supabase: ReturnType<typeof createClient>): Promise<string | null> {
+  const { data } = await supabase.auth.getUser();
+  return data?.user?.email ?? null;
+}
+
+export async function receiveStock(
+  partId: string,
+  qty: number,
+  note: string | null,
 ): Promise<{ error: string | null }> {
-  if (!id) return { error: "Missing part." };
-  const validationError = validatePart(input);
-  if (validationError) return { error: validationError };
+  if (!partId) return { error: "Missing part." };
+  if (!(qty > 0)) return { error: "Received quantity must be positive." };
 
   const supabase = createClient();
-  const { error } = await supabase.from("parts").update(partFields(input)).eq("id", id);
-  if (error) return { error: friendlyError(error) };
+  const { error } = await supabase.rpc("receive_stock", {
+    p_part_id: partId,
+    p_qty: qty,
+    p_note: note?.trim() || null,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: error.message };
 
   revalidatePath("/inventory");
   return { error: null };
+}
+
+export async function adjustStock(
+  partId: string,
+  newQty: number,
+  note: string,
+): Promise<{ error: string | null }> {
+  if (!partId) return { error: "Missing part." };
+  if (newQty == null || newQty < 0) return { error: "New quantity cannot be negative." };
+  if (!note?.trim()) return { error: "Adjustment requires a note explaining the reason." };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("adjust_stock", {
+    p_part_id: partId,
+    p_new_qty: newQty,
+    p_note: note.trim(),
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/inventory");
+  return { error: null };
+}
+
+export async function getPartMovements(
+  partId: string,
+): Promise<{ error: string | null; movements: StockMovement[] }> {
+  if (!partId) return { error: "Missing part.", movements: [] };
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("stock_movements")
+    .select("id, part_id, movement_type, qty_delta, qty_after, note, created_by, created_at")
+    .eq("part_id", partId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) return { error: error.message, movements: [] };
+
+  return { error: null, movements: (data ?? []) as StockMovement[] };
 }
