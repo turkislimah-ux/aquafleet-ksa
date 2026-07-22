@@ -619,14 +619,15 @@ export type Part = {
   created_at: string;
 };
 
-// stock_movements row (migration 0044, DRAFTED — not yet applied; the
-// receive_stock/adjust_stock RPCs this type backs will 404 until Turki runs
-// it). Append-only audit ledger — never inserted/updated directly, only via
-// those two RPCs.
+// stock_movements row (migration 0044, LIVE; movement_type CHECK extended by
+// 0046 — LIVE — to add 'receive_lot'/'consume' alongside the original
+// 'receive'/'adjust'). Append-only audit ledger — never inserted/updated
+// directly, only via receive_stock/adjust_stock/add_price_lot/
+// consume_from_lots.
 export type StockMovement = {
   id: string;
   part_id: string;
-  movement_type: "receive" | "adjust";
+  movement_type: "receive" | "adjust" | "receive_lot" | "consume";
   qty_delta: number;
   qty_after: number;
   note: string | null;
@@ -645,5 +646,21 @@ export type Supplier = {
   email: string | null;
   contact_person: string | null;
   active: boolean;
+  created_at: string;
+};
+
+// price_lots row (migration 0046, LIVE) — one row per received batch, FIFO
+// cost ledger (preview/'s priceTiers). qty_purchased never changes after
+// insert; qty_remaining drains toward 0 as consume_from_lots (no caller yet
+// — lights up in a later phase) eats it oldest-first. The ONLY writer is
+// add_price_lot() (see actions.ts) — app code never inserts here directly.
+export type PriceLot = {
+  id: string;
+  part_id: string;
+  price_sar: number;
+  qty_purchased: number;
+  qty_remaining: number;
+  received_on: string; // date, "YYYY-MM-DD"
+  note: string | null;
   created_at: string;
 };

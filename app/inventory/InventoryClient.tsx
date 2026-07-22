@@ -60,18 +60,28 @@
 //     against). Wraps 0044's already-committed, already-live adjust_stock
 //     RPC. Exactly one entry point: the drawer footer. Turki: say the word
 //     and this comes out too — it's the one deliberate exception here.
-//   - Movement-history table (drawer) — stands in for preview's FIFO price-
-//     lot batches table AND its work_orders-linked usage log, neither of
-//     which exist in this schema. Shows the stock_movements ledger instead
-//     (the audit trail our receive/adjust RPCs already write either way).
+//   - Movement-history table (drawer) — stands in for preview's work_orders-
+//     linked maintenance usage log, which doesn't exist in this schema yet
+//     (needs a Maintenance phase). Shows the stock_movements ledger instead
+//     (the audit trail our receive/adjust/price-lot RPCs already write
+//     either way).
+//
+// Phase 2 (FIFO price lots, migration 0046 — LIVE) added: the batches table
+// (qty purchased/remaining + current/old/depleted status badge, exactly
+// preview's batchesHTML), the "Add new price" button (INV.openPriceLot),
+// and a current/previous-price + trend + weighted-avg-cost strip above it
+// (preview's pricing-snapshot card) — all wired to add_price_lot(). Every
+// write goes through that RPC; nothing here inserts into price_lots or
+// touches parts.qty_on_hand/unit_cost_sar directly. consume_from_lots
+// (also in 0046) has NO caller anywhere in this app yet — there's no
+// consumption event to drive it until a PO-receiving or work-order-parts-
+// usage phase exists. It's live in the DB, just unused until then.
 //
 // NOT built (flagged, needs new tables/functions — confirm before drafting a
 // migration, not created here): Purchase Orders, Approvals tab, Financial
-// Analysis tab, AI-suggest-PO, suppliers-as-entity (+ supplier picker/inline-
-// create), receipt invoice-photo upload, FIFO price-lots (+ "Add new price" +
-// price-trend arrows), per-part Financial Report + AI insight, row's
-// "Financial report"/"Create PO" buttons, drawer's conditional "Create PO"
-// footer button.
+// Analysis tab, AI-suggest-PO, receipt invoice-photo upload, per-part
+// Financial Report + AI insight, row's "Financial report"/"Create PO"
+// buttons, drawer's conditional "Create PO" footer button.
 //
 // Stock-tier coloring mirrors preview/'s INV.stockCell exactly: critical
 // (qty <= reorder) / low (qty <= 1.5x reorder) / ok. Parts with no
@@ -89,11 +99,15 @@ import {
   PackagePlus,
   SlidersHorizontal,
   History,
+  Boxes,
+  TrendingUp,
+  TrendingDown,
+  Banknote,
 } from "lucide-react";
 import { useApp } from "@/components/AppShell";
 import { PageHeader, Btn, Stat, Table, TH, TD, Card } from "@/components/ui";
-import { cn, formatSar } from "@/lib/utils";
-import type { Warehouse, Part, StockMovement, Supplier } from "@/lib/db-types";
+import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
+import type { Warehouse, Part, StockMovement, Supplier, PriceLot } from "@/lib/db-types";
 import {
   createWarehouse,
   createSupplier,
@@ -101,6 +115,8 @@ import {
   receiveStock,
   adjustStock,
   getPartMovements,
+  getPriceLots,
+  addPriceLot,
   type WarehouseInput,
   type SupplierInput,
   type PartInput,
@@ -138,6 +154,8 @@ const TIER_LABEL: Record<Exclude<StockTier, null>, { en: string; ar: string }> =
 const MOVEMENT_LABEL: Record<StockMovement["movement_type"], { en: string; ar: string }> = {
   receive: { en: "Received", ar: "استلام" },
   adjust: { en: "Adjusted", ar: "تعديل" },
+  receive_lot: { en: "Price lot", ar: "دفعة سعر" },
+  consume: { en: "Consumed", ar: "استهلاك" },
 };
 
 // preview/'s invInventoryView's own hardcoded CATS list, verbatim (its exact
@@ -196,10 +214,12 @@ function autoSku(name: string): string {
 export default function InventoryClient({
   warehouses,
   parts,
+  priceLots,
   error,
 }: {
   warehouses: Warehouse[];
   parts: Part[];
+  priceLots: PriceLot[];
   error: string | null;
 }) {
   const { lang } = useApp();
@@ -211,12 +231,30 @@ export default function InventoryClient({
   const [viewPart, setViewPart] = useState<Part | null>(null);
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
   const [adjustModal, setAdjustModal] = useState<{ part: Part } | null>(null);
+  const [priceLotModal, setPriceLotModal] = useState<{ part: Part } | null>(null);
 
   const warehousesById = useMemo(() => {
     const m = new Map<string, Warehouse>();
     for (const w of warehouses) m.set(w.id, w);
     return m;
   }, [warehouses]);
+
+  // Current/previous price per part, derived from priceLots (already sorted
+  // received_on/created_at ascending by the page query) — same "last two
+  // lots chronologically" rule ViewPartModal uses for currentLot/previousLot,
+  // just precomputed once for every row instead of per-drawer-open.
+  const pricesByPart = useMemo(() => {
+    const m = new Map<string, { current: PriceLot; previous: PriceLot | null }>();
+    for (const lot of priceLots) {
+      const existing = m.get(lot.part_id);
+      if (!existing) {
+        m.set(lot.part_id, { current: lot, previous: null });
+      } else {
+        m.set(lot.part_id, { current: lot, previous: existing.current });
+      }
+    }
+    return m;
+  }, [priceLots]);
 
   const visibleParts = useMemo(() => {
     return parts.filter((p) => {
@@ -350,6 +388,7 @@ export default function InventoryClient({
           <PartsTable
             parts={visibleParts}
             warehousesById={warehousesById}
+            pricesByPart={pricesByPart}
             lang={lang}
             onView={(p) => setViewPart(p)}
           />
@@ -370,6 +409,10 @@ export default function InventoryClient({
             setViewPart(null);
             setAdjustModal({ part: p });
           }}
+          onAddPrice={(p) => {
+            setViewPart(null);
+            setPriceLotModal({ part: p });
+          }}
         />
       )}
 
@@ -379,6 +422,10 @@ export default function InventoryClient({
 
       {adjustModal && (
         <AdjustStockModal lang={lang} part={adjustModal.part} onClose={() => setAdjustModal(null)} />
+      )}
+
+      {priceLotModal && (
+        <AddPriceLotModal lang={lang} part={priceLotModal.part} onClose={() => setPriceLotModal(null)} />
       )}
 
       {addPartModalOpen && (
@@ -444,11 +491,13 @@ function StockCell({ part, lang }: { part: Part; lang: "en" | "ar" }) {
 function PartsTable({
   parts,
   warehousesById,
+  pricesByPart,
   lang,
   onView,
 }: {
   parts: Part[];
   warehousesById: Map<string, Warehouse>;
+  pricesByPart: Map<string, { current: PriceLot; previous: PriceLot | null }>;
   lang: "en" | "ar";
   onView: (p: Part) => void;
 }) {
@@ -480,6 +529,17 @@ function PartsTable({
             const stockValue = p.unit_cost_sar != null ? p.unit_cost_sar * p.qty_on_hand : null;
             const warehouseName = warehousesById.get(p.warehouse_id)?.name ?? "—";
             const secondaryName = lang === "ar" ? p.name : p.name_ar;
+            // Unit-cost trend arrow — mirrors preview's Inventory table row
+            // exactly (pages-2.js: currentPriceSar vs previousPriceSar,
+            // ↑ delta-up / ↓ delta-down, inline % next to the price).
+            const prices = pricesByPart.get(p.id);
+            const currentPrice = prices?.current.price_sar ?? p.unit_cost_sar;
+            const previousPrice = prices?.previous?.price_sar ?? null;
+            const priceUp = previousPrice != null && currentPrice != null && currentPrice > previousPrice;
+            const priceDeltaPct =
+              previousPrice != null && currentPrice != null && previousPrice > 0
+                ? Math.abs(Math.round(((currentPrice - previousPrice) / previousPrice) * 100))
+                : null;
             return (
               <tr
                 key={p.id}
@@ -504,7 +564,20 @@ function PartsTable({
                 <TD>
                   <StockCell part={p} lang={lang} />
                 </TD>
-                <TD className="tabular-nums">{p.unit_cost_sar != null ? formatSar(p.unit_cost_sar) : "—"}</TD>
+                <TD className="tabular-nums">
+                  {p.unit_cost_sar != null ? formatSar(p.unit_cost_sar) : "—"}
+                  {priceDeltaPct != null && (
+                    <span
+                      className={cn(
+                        "text-[10px] font-semibold ms-1",
+                        priceUp ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400"
+                      )}
+                    >
+                      {priceUp ? "↑" : "↓"}
+                      {priceDeltaPct}%
+                    </span>
+                  )}
+                </TD>
                 <TD className="tabular-nums font-medium">{stockValue != null ? formatSar(stockValue) : "—"}</TD>
                 <TD className="text-right">
                   <button
@@ -833,16 +906,22 @@ function ViewPartModal({
   warehousesById,
   onClose,
   onAdjust,
+  onAddPrice,
 }: {
   lang: "en" | "ar";
   part: Part;
   warehousesById: Map<string, Warehouse>;
   onClose: () => void;
   onAdjust: (p: Part) => void;
+  onAddPrice: (p: Part) => void;
 }) {
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loadingMovements, setLoadingMovements] = useState(true);
   const [movementsError, setMovementsError] = useState<string | null>(null);
+
+  const [lots, setLots] = useState<PriceLot[]>([]);
+  const [loadingLots, setLoadingLots] = useState(true);
+  const [lotsError, setLotsError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -862,8 +941,52 @@ function ViewPartModal({
     };
   }, [part.id]);
 
-  const tier = stockTier(part);
-  const stockValue = part.unit_cost_sar != null ? part.unit_cost_sar * part.qty_on_hand : null;
+  // price_lots, oldest-first — matches getPriceLots' own ordering (received_on
+  // then created_at ascending), which is exactly the FIFO order preview's
+  // batchesHTML iterates p.priceTiers in (last element = current batch).
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingLots(true);
+    setLotsError(null);
+    getPriceLots(part.id).then((res) => {
+      if (cancelled) return;
+      setLoadingLots(false);
+      if (res.error) {
+        setLotsError(res.error);
+        return;
+      }
+      setLots(res.lots);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [part.id]);
+
+  // Current price = most recent lot's price_sar; previous = the lot received
+  // just before that — mirrors preview's currentPriceSar/previousPriceSar
+  // (set the moment savePriceLot pushes a new tier). A part with 0 or 1 lot
+  // has no "previous" (preview: "Single tier").
+  const currentLot = lots.length > 0 ? lots[lots.length - 1] : null;
+  const previousLot = lots.length > 1 ? lots[lots.length - 2] : null;
+  const priceDeltaPct =
+    currentLot != null && previousLot != null && previousLot.price_sar > 0
+      ? +(((currentLot.price_sar - previousLot.price_sar) / previousLot.price_sar) * 100).toFixed(1)
+      : null;
+  // Weighted average cost over lots still holding stock — mirrors preview's
+  // partAvgCost() exactly (qty_remaining > 0 lots only).
+  const activeLots = lots.filter((l) => l.qty_remaining > 0);
+  const activeQty = activeLots.reduce((s, l) => s + l.qty_remaining, 0);
+  const avgCost =
+    activeQty > 0
+      ? activeLots.reduce((s, l) => s + l.qty_remaining * l.price_sar, 0) / activeQty
+      : currentLot?.price_sar ?? part.unit_cost_sar ?? null;
+
+  // Stock value — sum(qty_remaining * price_sar) over ALL lots, matching
+  // preview's totalValue exactly (p.priceTiers.reduce(t.qty*t.priceSar)).
+  // Lots-derived, not unit_cost_sar*qty_on_hand — same invariant, more
+  // direct source once lots exist.
+  const totalValue = lots.reduce((s, l) => s + l.qty_remaining * l.price_sar, 0);
+  const low = part.reorder_level != null && part.qty_on_hand <= part.reorder_level; // preview's `low`
   const warehouseName = warehousesById.get(part.warehouse_id)?.name ?? "—";
   const reorderValue =
     part.reorder_qty != null && part.unit_cost_sar != null ? part.reorder_qty * part.unit_cost_sar : null;
@@ -903,36 +1026,159 @@ function ViewPartModal({
           </div>
         </div>
 
+        {/* Pricing snapshot — ONE card, preview's exact structure (pages-2.js
+            openPart, "Pricing snapshot + Stock health" comment): current
+            price / previous price+trend / avg cost+stock value / stock
+            qty+reorder status, plus the FIFO footer note. Not split boxes. */}
         <Card className="!p-4 mb-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Banknote className="h-4 w-4 muted" />
+            <h4 className="font-semibold text-sm">{lang === "en" ? "Pricing snapshot" : "ملخص السعر"}</h4>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "In stock" : "المخزون"}</div>
-              <div className={cn("flex items-baseline gap-1.5", tier ? TIER_TEXT[tier] : "")}>
-                {tier && <span className={cn("h-1.5 w-1.5 rounded-full self-center", TIER_DOT[tier])} />}
-                <span className="text-lg font-bold tabular-nums">{part.qty_on_hand}</span>
-                <span className="text-[10px] uppercase font-medium muted">{part.unit ?? ""}</span>
+              <div className="text-[11px] muted uppercase">{lang === "en" ? "Current price" : "السعر الحالي"}</div>
+              <div className="text-lg font-semibold tabular-nums text-brand-600">
+                {currentLot != null ? formatSar(currentLot.price_sar) : "—"}
               </div>
-              {tier && (
-                <div className={cn("text-[11px] mt-0.5", TIER_TEXT[tier])}>
-                  {lang === "en" ? TIER_LABEL[tier].en : TIER_LABEL[tier].ar}
+              <div className="text-[11px] muted">
+                {lang === "en" ? "per" : "لكل"} {part.unit ?? ""}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] muted uppercase">{lang === "en" ? "Previous price" : "السعر السابق"}</div>
+              <div className="text-lg font-semibold tabular-nums">
+                {previousLot != null ? (
+                  <span className="line-through muted">{formatSar(previousLot.price_sar)}</span>
+                ) : (
+                  <span className="muted">—</span>
+                )}
+              </div>
+              {priceDeltaPct != null ? (
+                <div
+                  className={cn(
+                    "text-[11px] font-semibold flex items-center gap-1",
+                    priceDeltaPct > 0
+                      ? "text-rose-600 dark:text-rose-400"
+                      : "text-emerald-700 dark:text-emerald-400"
+                  )}
+                >
+                  {priceDeltaPct > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                  {Math.abs(priceDeltaPct)}%
                 </div>
+              ) : (
+                <div className="text-[11px] muted">{lang === "en" ? "Single tier" : "دفعة وحيدة"}</div>
               )}
             </div>
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Reorder at" : "إعادة الطلب عند"}</div>
-              <div className="font-medium tabular-nums">{part.reorder_level ?? "—"}</div>
-            </div>
-            <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</div>
-              <div className="font-medium tabular-nums">
-                {part.unit_cost_sar != null ? formatSar(part.unit_cost_sar) : "—"}
+              <div className="text-[11px] muted uppercase">{lang === "en" ? "Avg Cost" : "متوسط التكلفة"}</div>
+              <div className="text-lg font-semibold tabular-nums">
+                {/* Deliberate deviation from preview's 0-decimal fmtSar — Turki
+                    wants weighted-avg cost specifically shown to 2 decimals
+                    (e.g. 26.56). Every other SAR figure stays whole-number. */}
+                {avgCost != null ? `${formatNum(avgCost, 2)} SAR` : "—"}
+              </div>
+              <div className="text-[11px] muted">
+                {lang === "en" ? "Stock value" : "قيمة المخزون"}: {formatSar(totalValue)}
               </div>
             </div>
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Stock value" : "قيمة المخزون"}</div>
-              <div className="font-medium tabular-nums">{stockValue != null ? formatSar(stockValue) : "—"}</div>
+              <div className="text-[11px] muted uppercase">{lang === "en" ? "Stock" : "المخزون"}</div>
+              <div className={cn("text-lg font-semibold tabular-nums", low ? "text-rose-600" : "")}>
+                {part.qty_on_hand} {part.unit ?? ""}
+              </div>
+              <div className={cn("text-[11px]", low ? "text-rose-600" : "muted")}>
+                {low ? (lang === "en" ? "Below reorder level" : "تحت حد إعادة الطلب") : lang === "en" ? "In stock" : "متوفّر"}
+                {" · "}
+                {lang === "en" ? "Reorder at" : "إعادة الطلب عند"} {part.reorder_level ?? "—"}
+              </div>
             </div>
           </div>
+          <p className="text-[11px] muted mt-3">
+            {lang === "en"
+              ? "Older stock at the previous price stays consumable until depleted."
+              : "المخزون القديم بالسعر السابق يبقى قابلاً للاستهلاك حتى ينفد."}
+          </p>
+        </Card>
+
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Boxes className="h-4 w-4 muted" />
+            <h3 className="text-sm font-semibold">{lang === "en" ? "Stock batches" : "دفعات المخزون"}</h3>
+          </div>
+          <Btn variant="outline" onClick={() => onAddPrice(part)}>
+            <Plus className="h-4 w-4" />
+            {lang === "en" ? "Add new price" : "إضافة سعر جديد"}
+          </Btn>
+        </div>
+        <Card className="!p-0 overflow-hidden mb-4">
+          <Table>
+            <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+              <tr>
+                <TH>{lang === "en" ? "Received on" : "تاريخ الاستلام"}</TH>
+                <TH>{lang === "en" ? "Qty purchased" : "الكمية المشتراة"}</TH>
+                <TH>{lang === "en" ? "Qty remaining" : "الكمية المتبقية"}</TH>
+                <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
+                <TH>{lang === "en" ? "Subtotal" : "الإجمالي الفرعي"}</TH>
+                <TH>{lang === "en" ? "Status" : "الحالة"}</TH>
+              </tr>
+            </thead>
+            <tbody>
+              {loadingLots && (
+                <tr>
+                  <td colSpan={6} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                    {lang === "en" ? "Loading…" : "جارٍ التحميل…"}
+                  </td>
+                </tr>
+              )}
+              {!loadingLots && lotsError && (
+                <tr>
+                  <td colSpan={6} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                    {lang === "en"
+                      ? "Price batches aren't available yet (pending setup)."
+                      : "دفعات الأسعار غير متاحة بعد (بانتظار الإعداد)."}
+                  </td>
+                </tr>
+              )}
+              {!loadingLots && !lotsError && lots.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                    {lang === "en" ? "No price batches yet." : "لا توجد دفعات أسعار بعد."}
+                  </td>
+                </tr>
+              )}
+              {!loadingLots &&
+                !lotsError &&
+                lots.map((lot, i) => {
+                  const isCurrent = i === lots.length - 1;
+                  const depleted = lot.qty_remaining <= 0;
+                  const subtotal = lot.qty_remaining * lot.price_sar;
+                  const badge = depleted
+                    ? { en: "Depleted", ar: "منتهية", cls: "muted" }
+                    : isCurrent
+                    ? { en: "Current batch", ar: "الدفعة الحالية", cls: "text-brand-600" }
+                    : { en: "Old batch", ar: "دفعة قديمة", cls: "muted" };
+                  return (
+                    <tr key={lot.id} className={depleted ? "opacity-60" : ""}>
+                      <TD className="text-xs">{lot.received_on}</TD>
+                      <TD className="tabular-nums">
+                        {lot.qty_purchased} {part.unit ?? ""}
+                      </TD>
+                      <TD className={cn("tabular-nums", !depleted && "font-semibold")}>
+                        {lot.qty_remaining} {part.unit ?? ""}
+                      </TD>
+                      <TD className="tabular-nums">{formatSar(lot.price_sar)}</TD>
+                      <TD className="tabular-nums">{formatSar(subtotal)}</TD>
+                      <TD>
+                        <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border", badge.cls)} style={{ borderColor: "rgb(var(--border))" }}>
+                          {lang === "en" ? badge.en : badge.ar}
+                        </span>
+                      </TD>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </Table>
         </Card>
 
         <div className="mb-2 flex items-center gap-2">
@@ -1289,6 +1535,144 @@ function AdjustStockModal({
               className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
             >
               {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Adjust stock" : "تعديل المخزون"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Wraps add_price_lot() (migration 0046 — live). Preview's INV.openPriceLot/
+// savePriceLot — records a new costed batch (price + incoming qty), FIFO:
+// older stock keeps its own price until fully consumed. ONE entry point: the
+// View drawer's "Add new price" button (mirrors preview exactly — that's its
+// only entry point too). Price defaults to the part's current unit cost,
+// qty defaults to its reorder qty, date defaults to today — same defaults
+// preview's own form pre-fills (p.currentPriceSar / p.reorderQty / TODAY).
+function AddPriceLotModal({
+  lang,
+  part,
+  onClose,
+}: {
+  lang: "en" | "ar";
+  part: Part;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [price, setPrice] = useNumField(part.unit_cost_sar ?? undefined);
+  const [qty, setQty] = useNumField(part.reorder_qty ?? undefined);
+  const [receivedOn, setReceivedOn] = useState(todayKey());
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const priceNum = parseNumField(price);
+  const qtyNum = parseNumField(qty);
+  const canSubmit = priceNum != null && priceNum > 0 && qtyNum != null && qtyNum > 0;
+
+  function close() {
+    if (saving) return;
+    onClose();
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) {
+      setError(lang === "en" ? "Enter a valid price and quantity." : "أدخل سعرًا وكمية صالحين.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const res = await addPriceLot(part.id, priceNum!, qtyNum!, receivedOn || null, note.trim() || null);
+    setSaving(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    onClose();
+    router.refresh();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+      <div className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
+        <form onSubmit={submit}>
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <h2 className="text-lg font-semibold">
+              {lang === "en" ? "Update market price" : "تحديث سعر السوق"} —{" "}
+              {lang === "ar" ? part.name_ar ?? part.name : part.name}
+            </h2>
+            <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <p className="text-xs muted mb-3">
+            {lang === "en"
+              ? "Add a new price batch. Older stock is consumed first (FIFO), so the previous price stays active until it runs out."
+              : "أضف دفعة سعر جديدة. يُستهلك المخزون الأقدم أولاً (FIFO)، فيظل السعر السابق فعّالًا حتى نفاد كميته."}
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="muted">{lang === "en" ? "New price (SAR) *" : "السعر الجديد (ر.س) *"}</span>
+              <input
+                value={price}
+                onChange={(e) => setPrice(e.target.value.replace(/-/g, ""))}
+                className={INPUT}
+                style={INPUT_STYLE}
+                inputMode="decimal"
+                required
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="muted">
+                {lang === "en" ? "Incoming qty" : "الكمية الواردة"} {part.unit ? `(${part.unit})` : ""} *
+              </span>
+              <input
+                value={qty}
+                onChange={(e) => setQty(e.target.value.replace(/-/g, ""))}
+                className={INPUT}
+                style={INPUT_STYLE}
+                inputMode="decimal"
+                required
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="muted">{lang === "en" ? "Received on" : "تاريخ الاستلام"}</span>
+              <input
+                type="date"
+                value={receivedOn}
+                onChange={(e) => setReceivedOn(e.target.value)}
+                className={INPUT}
+                style={INPUT_STYLE}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="muted">{lang === "en" ? "Note" : "ملاحظة"}</span>
+              <input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                className={INPUT}
+                style={INPUT_STYLE}
+                placeholder={lang === "en" ? "e.g. Market increase" : "مثال: ارتفاع السوق"}
+              />
+            </label>
+          </div>
+
+          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
+
+          <div className="mt-5 flex justify-end gap-2">
+            <Btn variant="outline" onClick={close}>
+              {lang === "en" ? "Cancel" : "إلغاء"}
+            </Btn>
+            <button
+              type="submit"
+              disabled={!canSubmit || saving}
+              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
+            >
+              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Save batch" : "حفظ الدفعة"}
             </button>
           </div>
         </form>

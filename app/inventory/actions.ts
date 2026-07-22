@@ -2,17 +2,18 @@
 
 // Inventory page — Slice 2 (warehouses layer) + Slice 3 (parts layer) + Slice
 // 4 (stock movements) + full-demo Phase 1 (suppliers entity, migration 0045,
-// LIVE). Warehouse/part/supplier creation follow the plain-table
-// server-action pattern from app/trips/actions.ts's createWaterStation:
-// validate -> insert -> revalidate (0043/0045 have no RPCs). No
-// updatePart — preview/ has no part-edit UI, so this file doesn't invent one;
-// parts change only via receiveStock/adjustStock below. Those two DO call
-// RPCs (migration 0044's receive_stock/adjust_stock, LIVE and applied).
+// LIVE) + Phase 2 (FIFO price lots, migration 0046, LIVE). Warehouse/part/
+// supplier creation follow the plain-table server-action pattern from
+// app/trips/actions.ts's createWaterStation: validate -> insert -> revalidate
+// (0043/0045 have no RPCs). No updatePart — preview/ has no part-edit UI, so
+// this file doesn't invent one; parts change only via receiveStock/
+// adjustStock/addPriceLot below. Those three DO call RPCs (migration 0044's
+// receive_stock/adjust_stock + 0046's add_price_lot, all LIVE and applied).
 // Nothing hard-deletes — deactivate is a later slice.
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import type { StockMovement, Supplier } from "@/lib/db-types";
+import type { PriceLot, StockMovement, Supplier } from "@/lib/db-types";
 
 export type WarehouseInput = {
   name: string;
@@ -252,4 +253,57 @@ export async function getPartMovements(
   if (error) return { error: error.message, movements: [] };
 
   return { error: null, movements: (data ?? []) as StockMovement[] };
+}
+
+// ---------------------------------------------------------------------------
+// Price lots (Phase 2 — migration 0046, LIVE). FIFO cost ledger, preview/'s
+// priceTiers/openPriceLot. add_price_lot is the ONLY writer — mirrors
+// receiveStock/adjustStock above, never a plain insert into price_lots or a
+// direct update of parts.qty_on_hand/unit_cost_sar. consume_from_lots (also
+// in 0046) has no caller here — nothing in this app consumes parts yet
+// (that's PO-receiving/work-order phases); it lights up when one of those
+// lands.
+// ---------------------------------------------------------------------------
+
+export async function getPriceLots(
+  partId: string,
+): Promise<{ error: string | null; lots: PriceLot[] }> {
+  if (!partId) return { error: "Missing part.", lots: [] };
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("price_lots")
+    .select("id, part_id, price_sar, qty_purchased, qty_remaining, received_on, note, created_at")
+    .eq("part_id", partId)
+    .order("received_on", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) return { error: error.message, lots: [] };
+
+  return { error: null, lots: (data ?? []) as PriceLot[] };
+}
+
+export async function addPriceLot(
+  partId: string,
+  price: number,
+  qty: number,
+  receivedOn: string | null,
+  note: string | null,
+): Promise<{ error: string | null }> {
+  if (!partId) return { error: "Missing part." };
+  if (!(qty > 0)) return { error: "Incoming quantity must be positive." };
+  if (price == null || price <= 0) return { error: "Price must be positive." };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("add_price_lot", {
+    p_part_id: partId,
+    p_price: price,
+    p_qty: qty,
+    p_received_on: receivedOn || undefined,
+    p_note: note?.trim() || null,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/inventory");
+  return { error: null };
 }
