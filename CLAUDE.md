@@ -298,12 +298,13 @@ relevant skill(s) **when the task calls for it**:
 
 - **Inventory is being built as the FULL demo (preview/'s Inventory page: parts +
   warehouses + suppliers + FIFO cost lots + Purchase Orders + Approvals + Financial
-  Analysis), in 7 phases. Phases 1–4 of 7 are COMPLETE.**
+  Analysis), in 7 phases. Phases 1–5 of 7 are COMPLETE.**
   - **Phases 1–3:** commits `580e135` (migrations) + `11d9239` (app code).
   - **Phase 4 (Purchase Orders core, draft->issued):** commits `dd67682`
-    (migration `0050`) + `ab3008d` (app code) — committed as two units this
-    time, right away, per the lesson below.
-  - **Migrations `0043`–`0050`, all applied and verified:** `warehouses`/`parts`
+    (migration `0050`) + `ab3008d` (app code).
+  - **Phase 5 (PO receiving):** commits `3d55392` (migration `0051`) +
+    `fc8005c` (app code).
+  - **Migrations `0043`–`0051`, all applied and verified:** `warehouses`/`parts`
     (0043), `stock_movements` audit ledger + `receive_stock`/`adjust_stock` RPCs
     (0044), `suppliers` entity (0045), FIFO `price_lots` + `add_price_lot`/
     `consume_from_lots` (0046), `stock_receipts`/`stock_receipt_lines`/
@@ -311,7 +312,9 @@ relevant skill(s) **when the task calls for it**:
     `receive_loose_parts` RPC (0047), `suppliers.name_ar` (0048), `units` lookup
     table, seeded (0049), `purchase_orders`/`purchase_order_lines` + gap-free
     `po_number` counter + `create_purchase_order`/`issue_purchase_order` RPCs
-    (0050).
+    (0050), `purchase_order_lines.received_qty`/`received_unit_price_sar`,
+    `purchase_orders.received_by`/`received_date`, `stock_receipts.po_id`, +
+    `receive_purchase_order` RPC (0051).
   - **Built and working (Phases 1–3):** warehouse tabs; parts table with KPIs
     (inventory value/SKUs/low stock) and stock-tier coloring; part drawer
     (pricing snapshot with current/previous price + trend, FIFO batches table,
@@ -330,16 +333,32 @@ relevant skill(s) **when the task calls for it**:
     Issue action on a draft); the "Active procurement" proc-strip's Open POs
     chip (header, warehouses.length>0). PO total is NEVER stored — always
     derived from `purchase_order_lines` at render, everywhere it's shown.
-  - **Remaining phases:** 5 PO receiving -> 6 Approvals (min 2 approvers,
-    reuses existing staff roles, no new role table) -> 7 Financial Analysis +
-    per-part finance + AI-suggest-PO.
+  - **Built and working (Phase 5):** Receive Purchase Order modal (per-line
+    ordered vs actual qty/price, mandatory invoice upload — same
+    `InvoiceFileTile` component the loose-receive flow uses); Awaiting Receipt
+    list (issued POs, card grid, matches preview's `openReceiveList` layout);
+    "Receive Stock" action on an issued PO's detail view; proc-strip's
+    Awaiting Receipt chip. `receive_purchase_order` (0051) composes on
+    `receive_loose_parts` (0047) rather than reimplementing receiving — a PO
+    receipt gets the exact same mandatory-invoice gate and `stock_receipts`
+    write as a loose receipt (see the Phase 5 lesson below for why this
+    wasn't the first draft's design). `pending_approval` is now a reachable
+    status — no approve/reject UI yet (Phase 6), so no "Pending review" chip
+    until that exists (a count with no action behind it is a dead end).
+  - **Remaining phases:** 6 Approvals (min 2 approvers, reuses existing staff
+    roles, no new role table) -> 7 Financial Analysis + per-part finance +
+    AI-suggest-PO.
   - **Dormant by design (RPC exists, no app-code caller yet — do not remove, do
-    not treat as dead code):** `consume_from_lots` (0046, lights up at PO
-    receiving/work-order-parts-usage); `receive_stock` (0044, superseded by the
-    lot-based `receive_loose_parts` — its APP-CODE WRAPPER was deleted as genuine
-    dead code in the cleanup pass, but the RPC itself stays live in the DB).
-    Movement-history/maintenance-usage log is blocked on `work_orders` existing
-    (Maintenance phase, not built yet) — stock_movements stands in for it today.
+    not treat as dead code):** `consume_from_lots` (0046, lights up at
+    work-order-parts-usage — PO receiving now has a caller via
+    `receive_purchase_order`->`receive_loose_parts`->`add_price_lot`, so this
+    is narrower than before: only the *Maintenance* consumption path is still
+    unwired); `receive_stock` (0044, superseded by the lot-based
+    `receive_loose_parts` — its APP-CODE WRAPPER was deleted as genuine dead
+    code in the cleanup pass, but the RPC itself stays live in the DB).
+    Movement-history/maintenance-usage log is blocked on `work_orders`
+    existing (Maintenance phase, not built yet) — stock_movements stands in
+    for it today.
   - **Deliberate deviations from `preview/` — do NOT let a future "match the demo"
     pass revert these, they were each a specific Turki call, not an oversight:**
     Adjust Stock (manual stock-correction path; preview has no such UI — no FIFO
@@ -349,7 +368,7 @@ relevant skill(s) **when the task calls for it**:
     Arabic name (preview's supplier form has no name_ar); category stays a
     free-text combo (Turki's explicit instruction, not moved to a lookup table
     like units were).
-  - **Working rules that held, keep applying through Phases 5–7:** every migration
+  - **Working rules that held, keep applying through Phases 6–7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);
     the FIFO invariant (`sum(price_lots.qty_remaining) == parts.qty_on_hand` per
@@ -360,10 +379,26 @@ relevant skill(s) **when the task calls for it**:
   - **Lesson from Phase 3 (applied, worked):** commit each phase immediately
     once it verifies, instead of letting it sit uncommitted through a follow-up
     pass (that's exactly how Phase 3 + its cleanup pass got too interleaved to
-    split, forcing the one-off combined commit `11d9239`). Phase 4 followed
-    this: migration committed the moment it was confirmed applied (`dd67682`),
-    app code committed the moment it was confirmed working (`ab3008d`) — two
-    clean, separable commits, nothing left to entangle.
+    split, forcing the one-off combined commit `11d9239`). Phases 4 and 5 both
+    followed this: migration committed the moment it was confirmed applied,
+    app code committed the moment it was confirmed working — clean, separable
+    commits every time, nothing left to entangle.
+  - **Lesson from Phase 5: check preview's ACTUAL code, not its own comments,
+    and reuse the existing mechanism instead of building a parallel one.**
+    The first draft of migration 0051 invented a PO-receiving path with no
+    mandatory invoice and no `stock_receipts` row — reviewed and rejected
+    before running. Preview's own lifecycle comment ("draft -> issued ->
+    received -> pending_approval...") doesn't match what its code actually
+    does (there's no `received` status assignment anywhere in
+    `receivePO()`), and its receive flow was assumed to be a separate,
+    lighter-weight path without re-reading `confirmReceipt()`, which applies
+    the SAME mandatory-invoice gate to loose and PO receipts alike, no
+    exception. Fixed by having `receive_purchase_order` call
+    `receive_loose_parts` directly instead of reimplementing any of its
+    validation/writes — composing on an existing, already-correct RPC beat
+    a parallel one that quietly dropped a requirement. Re-read the actual
+    demo code path end-to-end before designing a schema/RPC for it, not just
+    the nearest comment describing it.
   - **New lesson from Phase 4: watch for import cycles across sibling files.**
     Splitting a page's modals across multiple files (this app's own established
     pattern — see app/trips/*.tsx) is fine, but if file A exports something file
