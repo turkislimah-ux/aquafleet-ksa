@@ -258,8 +258,97 @@ relevant skill(s) **when the task calls for it**:
     top-up rows (date/ref/'Top-up'/amount, no note). Postpaid: VAT + TOTAL columns,
     payment rows (`payment_date` date-only, ref or 'Cash', 'Payment', amount under
     TOTAL), 'Total payable' footer.
-  - **Deferred related:** real `payment_method='balance'` enum for prepaid reporting;
-    required top-up photo (spec §4.2 — `customer_topups` has no `photo_path` yet).
+  - **Deferred related:** real `payment_method='balance'` enum for prepaid reporting.
+
+- **Finance/Invoice page polish (Batches A–D, migrations `0040`–`0042`) is DONE,
+  through commit `6601e50`.**
+  - **(A) Finance tab relabel + columns:** tab renamed Finance/Invoice; Top-up →
+    "Add Balance" labels; Mode → Method; new Unsettled Trips and Rate (incl. VAT)
+    columns.
+  - **(B) Add Balance popup rebuilt (migration `0040`):** history list + top-corner
+    "Add Balance" button; method is cash or bank_transfer — bank_transfer requires
+    photo + ETF reference, cash's are optional-but-kept-if-provided; photo viewable
+    from the history list. `customer_topups` gains `method`/`photo_path`; new
+    `topup-proofs` bucket. (Resolves the "required top-up photo" item that was
+    deferred at the Statement rebuild above.)
+  - **(C) Sales Return:** `'void'` relabeled "Sales Return" in the UI only — stored
+    status/columns unchanged (`void`/`void_reason`/`voided_at`); reuses those
+    columns, adds an unpaid-note line naming the invoice number; new "Sales Return"
+    notice email template. Already a terminal state, so this was a view-only
+    relabel, no lifecycle change.
+  - **(D) Three-section legal invoice header** (on-screen, print, and PDF, migrations
+    `0041`/`0042`):
+    - Buyer: company name EN + AR, address, VAT Registration Number, CR number.
+    - Seller: CR Company Name, company name (Arabic), description, CR number,
+      address, telephone, phone, VAT Registration Number.
+    - Invoice info: invoice number, issue date (`confirmed_at`), period.
+    - Most buyer fields pre-existed on `customers` (`name_ar`, `billing_address`,
+      `vat_number`, `cr_number`) — Batch D just wired them into
+      `create_project_with_customer`/`update_project_with_customer` (migration
+      `0041`, drop+recreate with 4 new trailing customer params) and into the
+      buyer snapshot (now captures `name_ar` too). "VAT Registration Number"
+      reuses the existing `vat_number` column (both `customers` and
+      `company_settings` — no new reg-number column); "CR Company Name" reuses
+      `company_settings.legal_name`. Genuinely new columns: `company_settings`
+      gains `description`/`telephone`/`phone` (0041) and `legal_name_ar` (0042,
+      follow-up — seller-side Arabic name, `customers.name_ar`'s counterpart).
+    - **Company Settings form now edits every company field** (was email-only) —
+      legal_name, legal_name_ar, description, cr_number, vat_number, address,
+      telephone, phone, email.
+
+- **Inventory is being built as the FULL demo (preview/'s Inventory page: parts +
+  warehouses + suppliers + FIFO cost lots + Purchase Orders + Approvals + Financial
+  Analysis), in 7 phases. Phases 1–3 of 7 are COMPLETE, through commits `580e135`
+  (migrations) + `11d9239` (app code).**
+  - **Migrations `0043`–`0049`, all applied and verified:** `warehouses`/`parts`
+    (0043), `stock_movements` audit ledger + `receive_stock`/`adjust_stock` RPCs
+    (0044), `suppliers` entity (0045), FIFO `price_lots` + `add_price_lot`/
+    `consume_from_lots` (0046), `stock_receipts`/`stock_receipt_lines`/
+    `stock_receipt_files` + private `stock-receipt-invoices` bucket +
+    `receive_loose_parts` RPC (0047), `suppliers.name_ar` (0048), `units` lookup
+    table, seeded (0049).
+  - **Built and working:** warehouse tabs; parts table with KPIs (inventory value/
+    SKUs/low stock) and stock-tier coloring; part drawer (pricing snapshot with
+    current/previous price + trend, FIFO batches table, stock_movements history,
+    reorder info); Add Parts/receive flow (supplier + warehouse pickers, multi-line
+    part/qty/price builder, mandatory multi-file invoice upload) with inline
+    New Item / New Supplier / New Warehouse / New Unit creates, each merging
+    in-flight and auto-selecting; Category is a free-text combo (existing values +
+    free typing, mirrors preview); Unit is a lookup-table picker (code + meaning
+    both shown, code is the stored value) with its own inline "+ Unit" create.
+  - **Remaining phases:** 4 Purchase Orders core (draft/issue) -> 5 PO receiving ->
+    6 Approvals (min 2 approvers, reuses existing staff roles, no new role table) ->
+    7 Financial Analysis + per-part finance + AI-suggest-PO.
+  - **Dormant by design (RPC exists, no app-code caller yet — do not remove, do
+    not treat as dead code):** `consume_from_lots` (0046, lights up at PO
+    receiving/work-order-parts-usage); `receive_stock` (0044, superseded by the
+    lot-based `receive_loose_parts` — its APP-CODE WRAPPER was deleted as genuine
+    dead code in the cleanup pass, but the RPC itself stays live in the DB).
+    Movement-history/maintenance-usage log is blocked on `work_orders` existing
+    (Maintenance phase, not built yet) — stock_movements stands in for it today.
+  - **Deliberate deviations from `preview/` — do NOT let a future "match the demo"
+    pass revert these, they were each a specific Turki call, not an oversight:**
+    Adjust Stock (manual stock-correction path; preview has no such UI — no FIFO
+    tiers to "recount" against); weighted-average cost shown to 2 decimals (every
+    other SAR figure in this app is whole-number); units as a first-class lookup
+    table with inline add (preview hardcodes a hardcoded unit list); supplier
+    Arabic name (preview's supplier form has no name_ar); category stays a
+    free-text combo (Turki's explicit instruction, not moved to a lookup table
+    like units were).
+  - **Working rules that held, keep applying through Phases 4–7:** every migration
+    drafted to disk and reviewed/run by Turki before any app code assumes it
+    exists; exactly one signature per RPC (see `0038`'s incident above for why);
+    the FIFO invariant (`sum(price_lots.qty_remaining) == parts.qty_on_hand` per
+    part) verified after every phase that touches lots; inventory/parts cost is
+    internal-only money (`unit_cost_sar`, `price_lots.price_sar`) and must never
+    flow into `lib/prepaid.ts`/`vat.ts`/`invoice.ts` — those stay customer-facing
+    money only.
+  - **Lesson from Phase 3:** commit each phase immediately once it verifies in-
+    browser. Phase 3 wasn't committed right away, so the follow-up cleanup +
+    demo-fidelity pass edited its still-uncommitted code in place — by the time
+    everything landed, Phase 3 and that cleanup pass were too interleaved to
+    split into separate commits, forcing one combined commit (`11d9239`) instead
+    of the usual one-logical-unit-per-commit discipline (§5).
 
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
