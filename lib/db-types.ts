@@ -642,9 +642,24 @@ export type StockMovement = {
 export type Supplier = {
   id: string;
   name: string;
+  name_ar: string | null; // migration 0048, LIVE — nullable, same convention as parts.name_ar (0043)
   phone: string | null;
   email: string | null;
   contact_person: string | null;
+  active: boolean;
+  created_at: string;
+};
+
+// units row (migration 0049, LIVE) — units-of-measure lookup table (a unit
+// has a CODE and a MEANING, which parts.unit's plain free text can't hold
+// alone). parts.unit stays free text — stores the unit's `code` as a soft,
+// denormalized snapshot, same convention as parts.supplier -> suppliers
+// (0045), NOT an FK.
+export type Unit = {
+  id: string;
+  code: string;
+  label_en: string;
+  label_ar: string | null;
   active: boolean;
   created_at: string;
 };

@@ -13,7 +13,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import type { PriceLot, StockMovement, Supplier } from "@/lib/db-types";
+import type { Part, PriceLot, StockMovement, Supplier, Unit, Warehouse } from "@/lib/db-types";
 
 export type WarehouseInput = {
   name: string;
@@ -22,9 +22,13 @@ export type WarehouseInput = {
   note: string | null;
 };
 
+// Returns the full inserted row (not just id) — the inline "+ Warehouse"
+// trigger inside ReceivePartsModal (Add Parts) needs it immediately, to
+// merge into the draft's local warehouse list and auto-select it, same
+// reasoning as createSupplier/createPart above.
 export async function createWarehouse(
   input: WarehouseInput,
-): Promise<{ error: string | null; id?: string }> {
+): Promise<{ error: string | null; warehouse?: Warehouse }> {
   const name = input.name?.trim() ?? "";
   if (!name) return { error: "Warehouse name is required." };
 
@@ -37,12 +41,12 @@ export async function createWarehouse(
       type: input.type?.trim() || null,
       note: input.note?.trim() || null,
     })
-    .select("id")
+    .select("id, name, location, type, note, active, created_at")
     .single();
   if (error) return { error: error.message };
 
   revalidatePath("/inventory");
-  return { error: null, id: data?.id };
+  return { error: null, warehouse: data as Warehouse };
 }
 
 // ---------------------------------------------------------------------------
@@ -57,6 +61,7 @@ export async function createWarehouse(
 
 export type SupplierInput = {
   name: string;
+  name_ar: string | null; // migration 0048, LIVE
   phone: string | null;
   email: string | null;
   contact_person: string | null;
@@ -75,7 +80,7 @@ export async function createSupplier(
 
   const { data: existing, error: lookupError } = await supabase
     .from("suppliers")
-    .select("id, name, phone, email, contact_person, active, created_at")
+    .select("id, name, name_ar, phone, email, contact_person, active, created_at")
     .ilike("name", name)
     .limit(1)
     .maybeSingle();
@@ -86,16 +91,59 @@ export async function createSupplier(
     .from("suppliers")
     .insert({
       name,
+      name_ar: input.name_ar?.trim() || null,
       phone: input.phone?.trim() || null,
       email: input.email?.trim() || null,
       contact_person: input.contact_person?.trim() || null,
     })
-    .select("id, name, phone, email, contact_person, active, created_at")
+    .select("id, name, name_ar, phone, email, contact_person, active, created_at")
     .single();
   if (error) return { error: error.message };
 
   revalidatePath("/inventory");
   return { error: null, supplier: data as Supplier };
+}
+
+// ---------------------------------------------------------------------------
+// Units of measure (migration 0049, LIVE) — lookup table, mirrors suppliers'
+// role for parts.unit: `code` is what parts.unit stores (soft reference,
+// no FK — see 0049's header). The New Item unit picker inline "add unit"
+// affordance is the only writer here for now.
+// ---------------------------------------------------------------------------
+
+export type UnitInput = {
+  code: string;
+  label_en: string;
+  label_ar: string | null;
+};
+
+export async function createUnit(
+  input: UnitInput,
+): Promise<{ error: string | null; unit?: Unit }> {
+  const code = input.code?.trim() ?? "";
+  const labelEn = input.label_en?.trim() ?? "";
+  if (!code) return { error: "Unit code is required." };
+  if (!labelEn) return { error: "English label is required." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("units")
+    .insert({
+      code,
+      label_en: labelEn,
+      label_ar: input.label_ar?.trim() || null,
+    })
+    .select("id, code, label_en, label_ar, active, created_at")
+    .single();
+  if (error) {
+    // units.code has a unique constraint (0049) — surfaced as a clean
+    // message instead of the raw constraint-name error.
+    if (error.code === "23505") return { error: "Unit code already exists." };
+    return { error: error.message };
+  }
+
+  revalidatePath("/inventory");
+  return { error: null, unit: data as Unit };
 }
 
 // ---------------------------------------------------------------------------
@@ -160,9 +208,13 @@ function friendlyError(error: { code?: string; message: string }): string {
   return error.message;
 }
 
+// Returns the full inserted row (not just id) — the "New Item" flow inside
+// ReceivePartsModal (Add Parts) needs the fresh part's fields immediately, to
+// merge it into the in-progress receive draft as a line, without waiting on
+// a server round-trip/page refresh. Same reasoning as createSupplier above.
 export async function createPart(
   input: PartInput,
-): Promise<{ error: string | null; id?: string }> {
+): Promise<{ error: string | null; part?: Part }> {
   const validationError = validatePart(input);
   if (validationError) return { error: validationError };
 
@@ -170,20 +222,30 @@ export async function createPart(
   const { data, error } = await supabase
     .from("parts")
     .insert(partFields(input))
-    .select("id")
+    .select(
+      "id, sku, name, name_ar, category, unit, unit_cost_sar, qty_on_hand, reorder_level, reorder_qty, lead_time_days, supplier, warehouse_id, active, created_at"
+    )
     .single();
   if (error) return { error: friendlyError(error) };
 
   revalidatePath("/inventory");
-  return { error: null, id: data?.id };
+  return { error: null, part: data as Part };
 }
 
 // ---------------------------------------------------------------------------
-// Stock movements (Slice 4 — migration 0044, LIVE). These two wrap
-// receive_stock()/adjust_stock() — qty_on_hand is never edited directly once
-// a part exists (see AddPartModal — qty starts at 0, create-only); every
-// post-creation change goes through one of these two RPCs so stock_movements
-// stays a complete, gap-free audit ledger.
+// Stock movements (Slice 4 — migration 0044, LIVE). qty_on_hand is never
+// edited directly once a part exists (see AddPartModal — qty starts at 0,
+// create-only); every post-creation change goes through adjust_stock() or
+// receive_loose_parts() (below) so stock_movements stays a complete,
+// gap-free audit ledger.
+//
+// Note: the single-part receive_stock() RPC (0044, LIVE) has no app-code
+// caller anymore — the app-code wrapper that called it (receiveStock()) was
+// dead code left behind when ReceiveStockModal was replaced end-to-end by
+// the loose "Add Parts" flow (receiveLooseParts()/receive_loose_parts(),
+// below); removed here. The RPC itself is untouched in the DB — same
+// "flagged, not dropped" treatment as consume_from_lots (0046) — only the
+// unreferenced app-code wrapper is gone.
 //
 // "Who acted" — same convention as unpay_invoice (app/trips/invoiceActions.ts)
 // and customer_topups.entered_by (lib/actions/finance.ts): the authenticated
@@ -193,27 +255,6 @@ export async function createPart(
 async function actorEmail(supabase: ReturnType<typeof createClient>): Promise<string | null> {
   const { data } = await supabase.auth.getUser();
   return data?.user?.email ?? null;
-}
-
-export async function receiveStock(
-  partId: string,
-  qty: number,
-  note: string | null,
-): Promise<{ error: string | null }> {
-  if (!partId) return { error: "Missing part." };
-  if (!(qty > 0)) return { error: "Received quantity must be positive." };
-
-  const supabase = createClient();
-  const { error } = await supabase.rpc("receive_stock", {
-    p_part_id: partId,
-    p_qty: qty,
-    p_note: note?.trim() || null,
-    p_actor: await actorEmail(supabase),
-  });
-  if (error) return { error: error.message };
-
-  revalidatePath("/inventory");
-  return { error: null };
 }
 
 export async function adjustStock(
@@ -306,4 +347,96 @@ export async function addPriceLot(
 
   revalidatePath("/inventory");
   return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Loose "Add Parts" receive (full-demo Phase 3 — migration 0047, LIVE).
+// Wraps receive_loose_parts(), preview/'s INV.confirmReceipt manual-mode
+// path (no PO — Purchase Orders are a separate, later phase). Invoice
+// file(s) are uploaded to the private stock-receipt-invoices bucket FIRST,
+// using an app-generated key (never the raw filename — same convention as
+// topup-proofs, lib/actions/finance.ts's recordTopup), because the RPC's
+// p_files contract expects already-uploaded {storage_path, file_name,
+// mime_type} pointers, not raw files. Grouped by warehouseId (an
+// already-known real entity id at upload time) rather than a receipt id,
+// since the receipt row doesn't exist until the RPC call returns.
+//
+// This is the ONLY app-code path that reaches receive_loose_parts — nothing
+// here inserts into price_lots/parts/stock_receipts* directly; the RPC
+// calls add_price_lot() (0046) once per line, same as Phase 2's own "Add new
+// price" action.
+// ---------------------------------------------------------------------------
+
+const INVOICE_BUCKET = "stock-receipt-invoices";
+
+export type ReceiveLine = { part_id: string; qty: number; unit_price_sar: number };
+
+export async function receiveLooseParts(
+  formData: FormData,
+): Promise<{ error: string | null; id?: string }> {
+  const supplierId = String(formData.get("supplierId") ?? "").trim();
+  const warehouseId = String(formData.get("warehouseId") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim() || null;
+  const linesRaw = String(formData.get("linesJson") ?? "");
+  const files = formData.getAll("invoiceFiles").filter((f): f is File => f instanceof File && f.size > 0);
+
+  if (!supplierId) return { error: "Supplier is required." };
+  if (!warehouseId) return { error: "Warehouse is required." };
+
+  let lines: ReceiveLine[];
+  try {
+    lines = JSON.parse(linesRaw);
+  } catch {
+    return { error: "Invalid line items." };
+  }
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return { error: "At least one line item is required." };
+  }
+  for (const l of lines) {
+    if (!l?.part_id) return { error: "Line item is missing a part." };
+    if (!(l.qty > 0)) return { error: "Line item quantity must be positive." };
+    if (l.unit_price_sar == null || l.unit_price_sar < 0) {
+      return { error: "Line item price cannot be negative." };
+    }
+  }
+  if (files.length === 0) return { error: "At least one invoice file is required." };
+
+  const supabase = createClient();
+
+  const uploaded: { storage_path: string; file_name: string; mime_type: string | null }[] = [];
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
+    const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
+    const path = `${warehouseId}/receipt-${Date.now()}-${i}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from(INVOICE_BUCKET).upload(path, file, {
+      contentType: file.type || "application/octet-stream",
+    });
+    if (uploadErr) {
+      if (uploaded.length > 0) {
+        await supabase.storage.from(INVOICE_BUCKET).remove(uploaded.map((u) => u.storage_path));
+      }
+      return { error: `Invoice upload failed: ${uploadErr.message}` };
+    }
+    uploaded.push({ storage_path: path, file_name: file.name, mime_type: file.type || null });
+  }
+
+  const { data, error } = await supabase.rpc("receive_loose_parts", {
+    p_supplier_id: supplierId,
+    p_warehouse_id: warehouseId,
+    p_lines: lines,
+    p_files: uploaded,
+    p_note: note,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) {
+    // Best-effort cleanup — avoid orphaned storage objects for a receipt
+    // that never landed. Ignore cleanup failures; the upload error below is
+    // the one the user needs to see.
+    await supabase.storage.from(INVOICE_BUCKET).remove(uploaded.map((u) => u.storage_path));
+    return { error: error.message };
+  }
+
+  revalidatePath("/inventory");
+  return { error: null, id: (data as { id?: string } | null)?.id };
 }
