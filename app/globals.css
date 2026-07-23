@@ -175,4 +175,33 @@ body {
     print-color-adjust: exact !important;
   }
   #statement-print table tr { break-inside: avoid; }
+
+  /* Purchase Order detail (Inventory Phase 4) — same portal/paginate
+     pattern as invoice/breakdown/statement above, fourth independent
+     id/class/marker set. */
+  #po-print, #po-print * { visibility: visible !important; }
+  body.printing-po > *:not(.po-print-portal) { display: none !important; }
+
+  .po-print-portal,
+  .po-print-portal > * {
+    position: static !important;
+    inset: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  #po-print {
+    position: static !important;
+    margin: 0;
+    padding: 1rem;
+    max-height: none !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  #po-print table tr { break-inside: avoid; }
 }

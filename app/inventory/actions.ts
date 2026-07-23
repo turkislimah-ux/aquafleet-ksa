@@ -13,7 +13,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import type { Part, PriceLot, StockMovement, Supplier, Unit, Warehouse } from "@/lib/db-types";
+import type { Part, PriceLot, PurchaseOrder, StockMovement, Supplier, Unit, Warehouse } from "@/lib/db-types";
 
 export type WarehouseInput = {
   name: string;
@@ -439,4 +439,86 @@ export async function receiveLooseParts(
 
   revalidatePath("/inventory");
   return { error: null, id: (data as { id?: string } | null)?.id };
+}
+
+// ---------------------------------------------------------------------------
+// Purchase Orders (full-demo Phase 4 — migration 0050, LIVE). Wraps
+// create_purchase_order()/issue_purchase_order() — draft->issued ONLY
+// (receiving is Phase 5, approvals Phase 6, neither built here). Both RPCs
+// are the ONLY writers to purchase_orders/purchase_order_lines; this file
+// never inserts into either table directly. Neither RPC touches
+// price_lots/parts.qty_on_hand/stock_movements — issuing a PO is a paper
+// commitment, not a receiving event. No total is stored anywhere — the UI
+// derives it from summing lines' qty*unit_price_sar at render.
+// ---------------------------------------------------------------------------
+
+export type PurchaseOrderLineInput = { part_id: string; qty: number; unit_price_sar: number };
+
+export type CreatePurchaseOrderInput = {
+  supplier_id: string;
+  warehouse_id: string;
+  lines: PurchaseOrderLineInput[];
+  expected_delivery: string | null;
+  note: string | null;
+};
+
+// The RPC's own warehouse/part consistency guard (0050) raises with the
+// mismatched part's raw uuid in the message — fine for a Postgres log, not
+// something to show a non-technical user. The UI is expected to prevent
+// this proactively (the "pick a part" dropdown is filtered to the PO's own
+// warehouse — see NewPOModal), so this is a defense-in-depth fallback for
+// the rare case a line goes stale (e.g. warehouse switched after adding
+// lines) and slips through to the RPC anyway.
+function friendlyPoError(message: string): string {
+  if (message.includes("belongs to a different warehouse")) {
+    return "One or more parts don't belong to the selected warehouse. Remove and re-add those lines.";
+  }
+  return message;
+}
+
+export async function createPurchaseOrder(
+  input: CreatePurchaseOrderInput,
+): Promise<{ error: string | null; po?: PurchaseOrder }> {
+  if (!input.supplier_id) return { error: "Supplier is required." };
+  if (!input.warehouse_id) return { error: "Warehouse is required." };
+  if (!Array.isArray(input.lines) || input.lines.length === 0) {
+    return { error: "At least one line item is required." };
+  }
+  for (const l of input.lines) {
+    if (!l?.part_id) return { error: "Line item is missing a part." };
+    if (!(l.qty > 0)) return { error: "Line item quantity must be positive." };
+    if (l.unit_price_sar == null || l.unit_price_sar < 0) {
+      return { error: "Line item price cannot be negative." };
+    }
+  }
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("create_purchase_order", {
+    p_supplier_id: input.supplier_id,
+    p_warehouse_id: input.warehouse_id,
+    p_lines: input.lines,
+    p_expected_delivery: input.expected_delivery,
+    p_note: input.note,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: friendlyPoError(error.message) };
+
+  revalidatePath("/inventory");
+  return { error: null, po: data as PurchaseOrder };
+}
+
+export async function issuePurchaseOrder(
+  poId: string,
+): Promise<{ error: string | null; po?: PurchaseOrder }> {
+  if (!poId) return { error: "Missing purchase order." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("issue_purchase_order", {
+    p_po_id: poId,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/inventory");
+  return { error: null, po: data as PurchaseOrder };
 }

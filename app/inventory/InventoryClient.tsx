@@ -199,26 +199,36 @@ import {
   Upload,
   Save,
   Check,
-  ChevronDown,
+  ShoppingCart,
 } from "lucide-react";
 import { useApp } from "@/components/AppShell";
 import { PageHeader, Btn, Stat, Table, TH, TD, Card } from "@/components/ui";
 import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
-import type { Warehouse, Part, StockMovement, Supplier, PriceLot, Unit } from "@/lib/db-types";
+import type {
+  Warehouse,
+  Part,
+  StockMovement,
+  Supplier,
+  PriceLot,
+  Unit,
+  PurchaseOrder,
+  PurchaseOrderLine,
+} from "@/lib/db-types";
+import { ProcStrip, NewPOModal, POListModal, PODetailModal } from "./PurchaseOrders";
 import {
-  createWarehouse,
-  createSupplier,
-  createPart,
-  createUnit,
+  CreateWarehouseModal,
+  NewSupplierModal,
+  AddPartModal,
+  categoryLabel,
+  useNumField,
+  parseNumField,
+} from "./SharedCreateModals";
+import {
   adjustStock,
   getPartMovements,
   getPriceLots,
   addPriceLot,
   receiveLooseParts,
-  type WarehouseInput,
-  type SupplierInput,
-  type PartInput,
-  type UnitInput,
   type ReceiveLine,
 } from "./actions";
 
@@ -262,49 +272,12 @@ const MOVEMENT_LABEL: Record<StockMovement["movement_type"], { en: string; ar: s
 // order, "all" excluded here since the "All" chip is rendered separately).
 const FILTER_CATS = ["engine", "brake", "tire", "fluid", "electrical", "tank", "filter", "consumable"];
 
-// preview/'s openNewPart's own hardcoded cats list, verbatim (includes
-// "equipment", which invInventoryView's filter list does not — that
-// inconsistency is preview's own, not something introduced here).
-const CREATE_CATS = ["fluid", "filter", "brake", "tire", "electrical", "tank", "engine", "consumable", "equipment"];
-
-const CATEGORY_LABEL: Record<string, { en: string; ar: string }> = {
-  fluid: { en: "Fluid", ar: "سوائل" },
-  filter: { en: "Filter", ar: "فلتر" },
-  brake: { en: "Brake", ar: "فرامل" },
-  tire: { en: "Tire", ar: "إطارات" },
-  electrical: { en: "Electrical", ar: "كهرباء" },
-  tank: { en: "Tank", ar: "خزان" },
-  engine: { en: "Engine", ar: "محرك" },
-  consumable: { en: "Consumable", ar: "مستهلكات" },
-  equipment: { en: "Equipment", ar: "معدات" },
-};
-
-function categoryLabel(cat: string | null, lang: "en" | "ar"): string {
-  if (!cat) return "—";
-  const found = CATEGORY_LABEL[cat];
-  if (!found) return cat;
-  return lang === "en" ? found.en : found.ar;
-}
-
-// Units used to be a hardcoded list here (preview's openNewPart units,
-// verbatim) — now a lookup table (migration 0049, LIVE). See AddPartModal's
-// `units` prop / Unit picker below; CREATE_UNITS/UNIT_LABEL are gone, not
-// just hidden (dead once the picker reads from the DB instead).
-
-// Lightweight client-side stand-in for preview's server-side "auto if blank"
-// SKU generator — deterministic-ish, collision handled by the existing
-// unique-constraint error message (friendlyError() in actions.ts).
-function autoSku(name: string): string {
-  const base =
-    name
-      .trim()
-      .toUpperCase()
-      .replace(/[^A-Z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 16) || "PART";
-  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `${base}-${suffix}`;
-}
+// CREATE_CATS/CATEGORY_LABEL/categoryLabel/autoSku/useNumField/parseNumField
+// /ComboInput/CreateWarehouseModal/NewSupplierModal/AddPartModal all moved to
+// ./SharedCreateModals.tsx (imported below) to break a circular import —
+// PurchaseOrders.tsx needs the three modals, and this file needs
+// ProcStrip/NewPOModal/POListModal/PODetailModal from PurchaseOrders.tsx.
+// See that file's own header comment for the full postmortem.
 
 export default function InventoryClient({
   warehouses,
@@ -312,6 +285,8 @@ export default function InventoryClient({
   priceLots,
   suppliers,
   units,
+  purchaseOrders,
+  purchaseOrderLines,
   error,
 }: {
   warehouses: Warehouse[];
@@ -319,6 +294,8 @@ export default function InventoryClient({
   priceLots: PriceLot[];
   suppliers: Supplier[];
   units: Unit[];
+  purchaseOrders: PurchaseOrder[];
+  purchaseOrderLines: PurchaseOrderLine[];
   error: string | null;
 }) {
   const { lang } = useApp();
@@ -330,6 +307,10 @@ export default function InventoryClient({
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
   const [adjustModal, setAdjustModal] = useState<{ part: Part } | null>(null);
   const [priceLotModal, setPriceLotModal] = useState<{ part: Part } | null>(null);
+  // Phase 4 — Purchase Orders (migration 0050).
+  const [newPOOpen, setNewPOOpen] = useState(false);
+  const [poListOpen, setPoListOpen] = useState(false);
+  const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
 
   const warehousesById = useMemo(() => {
     const m = new Map<string, Warehouse>();
@@ -378,6 +359,10 @@ export default function InventoryClient({
   const lowStockCount = parts.filter(
     (p) => p.reorder_level != null && p.qty_on_hand <= p.reorder_level
   ).length;
+  // Proc-strip's "Open POs" chip (preview: pages-2.js ~3007) — draft+issued
+  // only. "Awaiting receipt"/"Pending review" chips need Phase 5/6 data,
+  // not built here.
+  const openPOsCount = purchaseOrders.filter((o) => o.status === "draft" || o.status === "issued").length;
 
   return (
     <div className="space-y-5">
@@ -394,6 +379,18 @@ export default function InventoryClient({
               <Plus className="h-4 w-4" />
               {lang === "en" ? "Create Warehouse" : "إنشاء مستودع"}
             </Btn>
+            {/* Phase 4 — preview's header order is New PO (primary) / Add
+                Parts (outline) / AI-suggest-PO (outline, Phase 7, not built
+                yet). Same warehouse-required gate as Add Parts — a PO always
+                needs a warehouse picked; New Item/New Supplier are still
+                available inline inside the New PO modal for the
+                chicken-and-egg case. */}
+            {warehouses.length > 0 && (
+              <Btn variant="primary" onClick={() => setNewPOOpen(true)}>
+                <ShoppingCart className="h-4 w-4" />
+                {lang === "en" ? "New PO" : "أمر شراء جديد"}
+              </Btn>
+            )}
             {/* preview/'s header has no standalone "new part" button — new-
                 item creation lives ONLY inside the Add Parts draft (INV.
                 openNewPart, bound next to "Add line"). Matches exactly: Add
@@ -431,6 +428,8 @@ export default function InventoryClient({
               tone={lowStockCount > 0 ? "bad" : "ok"}
             />
           </div>
+
+          <ProcStrip lang={lang} openCount={openPOsCount} onOpenList={() => setPoListOpen(true)} />
 
           <Card className="!p-3">
             <div className="flex items-center gap-2 flex-wrap">
@@ -533,6 +532,49 @@ export default function InventoryClient({
 
       {priceLotModal && (
         <AddPriceLotModal lang={lang} part={priceLotModal.part} onClose={() => setPriceLotModal(null)} />
+      )}
+
+      {newPOOpen && (
+        <NewPOModal
+          lang={lang}
+          suppliers={suppliers}
+          warehouses={warehouses}
+          parts={parts}
+          units={units}
+          onClose={() => setNewPOOpen(false)}
+          onSaved={() => setPoListOpen(false)}
+        />
+      )}
+
+      {poListOpen && (
+        <POListModal
+          lang={lang}
+          purchaseOrders={purchaseOrders}
+          purchaseOrderLines={purchaseOrderLines}
+          suppliers={suppliers}
+          onClose={() => setPoListOpen(false)}
+          onView={(po) => {
+            setPoListOpen(false);
+            setViewPO(po);
+          }}
+          onNewPO={() => {
+            setPoListOpen(false);
+            setNewPOOpen(true);
+          }}
+        />
+      )}
+
+      {viewPO && (
+        <PODetailModal
+          lang={lang}
+          po={viewPO}
+          lines={purchaseOrderLines}
+          suppliers={suppliers}
+          warehouses={warehouses}
+          parts={parts}
+          onClose={() => setViewPO(null)}
+          onIssued={() => setViewPO(null)}
+        />
       )}
     </div>
   );
@@ -699,438 +741,6 @@ function PartsTable({
   );
 }
 
-function CreateWarehouseModal({
-  lang,
-  onClose,
-  onCreated,
-}: {
-  lang: "en" | "ar";
-  onClose: () => void;
-  // Optional — set only when opened inline from ReceivePartsModal's "+
-  // Warehouse" trigger (mirrors preview's openNewWarehouse, bound next to
-  // the Add Parts warehouse picker), so the fresh row can be merged into
-  // that draft's local warehouse list and auto-selected, same pattern as
-  // onCreated on NewSupplierModal/AddPartModal. The standalone header
-  // "Create Warehouse" button (a flagged, preview-less deviation) doesn't
-  // pass this — it just closes and lets the next server refresh pick it up.
-  onCreated?: (warehouse: Warehouse) => void;
-}) {
-  const router = useRouter();
-  const [name, setName] = useState("");
-  const [location, setLocation] = useState("");
-  const [type, setType] = useState("");
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const canSubmit = name.trim() !== "";
-
-  function close() {
-    if (saving) return;
-    onClose();
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmit) {
-      setError(lang === "en" ? "Warehouse name is required." : "اسم المستودع مطلوب.");
-      return;
-    }
-    const input: WarehouseInput = {
-      name: name.trim(),
-      location: location.trim() || null,
-      type: type.trim() || null,
-      note: note.trim() || null,
-    };
-    setSaving(true);
-    setError(null);
-    const res = await createWarehouse(input);
-    setSaving(false);
-    if (res.error || !res.warehouse) {
-      setError(res.error ?? (lang === "en" ? "Could not create warehouse." : "تعذّر إنشاء المستودع."));
-      return;
-    }
-    onCreated?.(res.warehouse);
-    onClose();
-    router.refresh();
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
-      <div
-        className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <form onSubmit={submit}>
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <h2 className="text-lg font-semibold">
-              {lang === "en" ? "Create warehouse" : "إنشاء مستودع"}
-            </h2>
-            <button
-              type="button"
-              onClick={close}
-              className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Name *" : "الاسم *"}</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                required
-                placeholder={lang === "en" ? "e.g. Riyadh Depot" : "مثال: مستودع الرياض"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Location" : "الموقع"}</span>
-              <input
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                placeholder={lang === "en" ? "e.g. Riyadh" : "مثال: الرياض"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Type" : "النوع"}</span>
-              <input
-                value={type}
-                onChange={(e) => setType(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                placeholder={lang === "en" ? "e.g. Main depot" : "مثال: مستودع رئيسي"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Note" : "ملاحظة"}</span>
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                rows={2}
-              />
-            </label>
-          </div>
-
-          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
-
-          <div className="mt-5 flex justify-end gap-2">
-            <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
-            </Btn>
-            <button
-              type="submit"
-              disabled={!canSubmit || saving}
-              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
-            >
-              {saving
-                ? lang === "en" ? "Saving…" : "جارٍ الحفظ…"
-                : lang === "en" ? "Create warehouse" : "إنشاء المستودع"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// Reusable "New supplier" modal — Phase 1 of the full-demo build-out
-// (migration 0045, LIVE). Mirrors preview/'s openNewSupplier()/
-// saveNewSupplier() exactly: name/phone/email/contact person, dedupes
-// case-insensitively server-side (createSupplier), and hands the resulting
-// record back via onCreated so the caller can auto-select it — same as
-// preview auto-selecting a freshly-created supplier in whatever draft is
-// Mirrors preview's openNewSupplier() exactly: title/button label both read
-// "Add a new supplier" (preview reuses inv.newSupplierTitle for both — not a
-// typo, matched verbatim), intro paragraph, 2-col field grid, field labels
-// (Supplier name/Phone/Email/Contact person).
-//
-// FLAGGED, NOT BUILT: Turki asked for an Arabic name field here as a
-// deliberate extension beyond preview (which has none). `suppliers` (0045)
-// has no `name_ar` column today — adding this field needs a new column,
-// which is a migration-review decision, not something to add unilaterally
-// here. Stopped short of this one piece; everything else in this modal is
-// preview-matched below.
-function NewSupplierModal({
-  lang,
-  onClose,
-  onCreated,
-}: {
-  lang: "en" | "ar";
-  onClose: () => void;
-  onCreated: (supplier: Supplier) => void;
-}) {
-  const [name, setName] = useState("");
-  const [nameAr, setNameAr] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [contactPerson, setContactPerson] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const canSubmit = name.trim() !== "";
-
-  function close() {
-    if (saving) return;
-    onClose();
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmit) {
-      setError(lang === "en" ? "Supplier name is required." : "اسم المورّد مطلوب.");
-      return;
-    }
-    const input: SupplierInput = {
-      name: name.trim(),
-      name_ar: nameAr.trim() || null,
-      phone: phone.trim() || null,
-      email: email.trim() || null,
-      contact_person: contactPerson.trim() || null,
-    };
-    setSaving(true);
-    setError(null);
-    const res = await createSupplier(input);
-    setSaving(false);
-    if (res.error) {
-      setError(res.error);
-      return;
-    }
-    if (res.supplier) onCreated(res.supplier);
-    onClose();
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
-      <div
-        className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <form onSubmit={submit}>
-          <div className="flex items-start justify-between gap-4 mb-1">
-            <h2 className="text-lg font-semibold">
-              {lang === "en" ? "Add a new supplier" : "إضافة مورّد جديد"}
-            </h2>
-            <button
-              type="button"
-              onClick={close}
-              className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <p className="text-sm muted mb-4">
-            {lang === "en"
-              ? "Quickly add a supplier. They'll be available in every Add Parts dropdown."
-              : "إضافة مورّد بسرعة. سيظهر فوراً في جميع القوائم."}
-          </p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Supplier name *" : "اسم المورّد *"}</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                required
-                placeholder={lang === "en" ? "e.g. Al-Khaleej Heavy Trucks" : "مثال: الخليج للشاحنات الثقيلة"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Name (Arabic)" : "الاسم (عربي)"}</span>
-              <input
-                value={nameAr}
-                onChange={(e) => setNameAr(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                dir="rtl"
-                placeholder={lang === "en" ? "optional" : "اختياري"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Phone" : "الهاتف"}</span>
-              <input
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                placeholder="+966 11 ..."
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Email" : "البريد الإلكتروني"}</span>
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                placeholder="orders@..."
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Contact person" : "جهة الاتصال"}</span>
-              <input
-                value={contactPerson}
-                onChange={(e) => setContactPerson(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                placeholder={lang === "en" ? "Contact person" : "جهة الاتصال"}
-              />
-            </label>
-          </div>
-
-          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
-
-          <div className="mt-5 flex justify-end gap-2">
-            <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
-            </Btn>
-            <button
-              type="submit"
-              disabled={!canSubmit || saving}
-              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
-            >
-              {saving ? null : <Save className="h-4 w-4" />}
-              {saving
-                ? lang === "en" ? "Saving…" : "جارٍ الحفظ…"
-                : lang === "en" ? "Add a new supplier" : "إضافة مورّد جديد"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// Numeric field helper — text input backed by a string (so an empty field is
-// distinguishable from 0), parsed to number|null on submit. Blocks minus-sign
-// entry so negatives can never even be typed.
-function useNumField(initial: number | null | undefined) {
-  return useState(initial != null ? String(initial) : "");
-}
-
-function parseNumField(raw: string): number | null {
-  const t = raw.trim();
-  if (t === "") return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-}
-
-// Proper combo control (Turki's extension, not from preview) — a VISIBLE
-// dropdown list of existing options, plus free typing in the same field. A
-// native <input list>+<datalist> reads as plain free-text in practice (no
-// visible affordance that options exist, browser-inconsistent) — this is a
-// real listbox: a chevron toggles a panel of options; clicking one selects
-// it; typing at any time still works and is saved as-is (the option isn't
-// enforced — matches the free-text columns underneath). Options filter live
-// against whatever's typed so far; the raw typed value is always what gets
-// saved, whether or not it matches a suggestion.
-function ComboInput({
-  value,
-  onChange,
-  options,
-  placeholder,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  placeholder?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  // BUG FIX: filtering used to run against `value` directly — the
-  // committed field value (e.g. the "fluid" default) — so opening the
-  // list with a value already in it filtered EVERYTHING down to just that
-  // one exact match ("only shows fluid"). `query` is a separate, typing-only
-  // signal: cleared whenever the list is opened via focus/chevron (so the
-  // FULL option set shows), and only starts narrowing once the user
-  // actually types a character.
-  const [query, setQuery] = useState("");
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
-
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? options.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
-    : options;
-
-  return (
-    <div className="relative" ref={containerRef}>
-      <div className="relative">
-        <input
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            setQuery(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => {
-            setQuery("");
-            setOpen(true);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setOpen(false);
-          }}
-          className={cn(INPUT, "pe-8")}
-          style={INPUT_STYLE}
-          placeholder={placeholder}
-          autoComplete="off"
-        />
-        <button
-          type="button"
-          tabIndex={-1}
-          onClick={() => {
-            setQuery("");
-            setOpen((o) => !o);
-          }}
-          className="absolute inset-y-0 end-0 px-2 flex items-center muted"
-        >
-          <ChevronDown className="h-4 w-4" />
-        </button>
-      </div>
-      {open && filtered.length > 0 && (
-        <div
-          className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border shadow-lg"
-          style={INPUT_STYLE}
-        >
-          {filtered.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              onClick={() => {
-                onChange(o.value);
-                setOpen(false);
-              }}
-              className={cn(
-                "w-full text-start px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5",
-                o.value === value ? "text-brand-600 font-medium" : ""
-              )}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // preview's openPart drawer, minus the FIFO price-lot batches table and the
 // work_orders-linked maintenance usage log (neither exists in this app's
@@ -2394,422 +2004,3 @@ function AddPriceLotModal({
   );
 }
 
-// "New Item" — mirrors preview's INV.openNewPart()/saveNewPart() exactly:
-// create-only (no edit mode, preview has none), same field set (name,
-// name_ar, sku, category, unit, unit price, reorder level, reorder qty), and
-// the SAME single entry point — bound next to "Add line" inside the Add
-// Parts draft (ReceivePartsModal), never a standalone page-header action
-// (preview's header has no such button either — see that header's own
-// comment). Two fields preview's form has that don't apply are still absent
-// by design: supplier (assigned at receipt time) and qty on hand (starts at
-// 0 — physical qty only arrives via the receipt this item's being added to).
-// Warehouse is fixed to the CALLING draft's own warehouse (read-only, not a
-// picker) rather than a free choice — preview's draft-based creation never
-// shows a warehouse field at all because the draft already carries one;
-// letting it be freely re-picked here would risk creating a part in a
-// different warehouse than the receipt it's about to be received into.
-// onCreated hands the fresh row back so the caller can merge it into the
-// draft's part list AND drop it in as a line — same as onCreated on
-// NewSupplierModal above.
-function AddPartModal({
-  lang,
-  warehouses,
-  parts,
-  units,
-  defaultWarehouseId,
-  onClose,
-  onCreated,
-}: {
-  lang: "en" | "ar";
-  warehouses: Warehouse[];
-  // Turki's own addition, not from preview — powers the Category combo
-  // input's "existing options" list (CREATE_CATS unioned with whatever's
-  // already in live use on real parts, so a typed-in new value shows up as
-  // selectable for the next item too, no migration needed: parts.category
-  // is free text, 0043). Units used to work the same way — now a lookup
-  // table (0049) instead; see the Unit picker below.
-  parts: Part[];
-  // Units-of-measure lookup (migration 0049, LIVE) — the Unit picker below
-  // reads from this instead of a hardcoded/free-text list. parts.unit still
-  // stores the selected unit's CODE (soft reference, no FK — see 0049).
-  units: Unit[];
-  defaultWarehouseId: string;
-  onClose: () => void;
-  onCreated: (part: Part) => void;
-}) {
-  const router = useRouter();
-  const [sku, setSku] = useState("");
-  const [name, setName] = useState("");
-  const [nameAr, setNameAr] = useState("");
-  const [category, setCategory] = useState(CREATE_CATS[0]);
-  const [unitCost, setUnitCost] = useNumField(undefined);
-  const [reorderLevel, setReorderLevel] = useNumField(undefined);
-  const [reorderQty, setReorderQty] = useNumField(undefined);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Unit is no longer free text — picked from the units table (+ an inline
-  // "add unit" affordance, same pattern as +Supplier/+Warehouse). Freshly
-  // added units (via that affordance) merge in locally, same "merge in,
-  // auto-select" pattern used throughout this file.
-  const [localUnits, setLocalUnits] = useState<Unit[]>([]);
-  const [newUnitOpen, setNewUnitOpen] = useState(false);
-  const allUnits = useMemo(() => {
-    const ids = new Set(units.map((u) => u.id));
-    return [...units, ...localUnits.filter((u) => !ids.has(u.id))];
-  }, [units, localUnits]);
-  const [unitCode, setUnitCode] = useState(allUnits[0]?.code ?? "");
-
-  // Combo-input option list (extension #1) — hardcoded CREATE_CATS ∪
-  // distinct values already used by real parts, so a typed-in free value
-  // reappears as selectable next time. Category-only now — units moved to
-  // the lookup table above.
-  const categoryOptions = useMemo(() => {
-    const extra = parts.map((p) => p.category).filter((c): c is string => !!c);
-    return Array.from(new Set([...CREATE_CATS, ...extra]));
-  }, [parts]);
-
-  const warehouseName = warehouses.find((w) => w.id === defaultWarehouseId)?.name ?? "—";
-  const canSubmit = name.trim() !== "" && defaultWarehouseId !== "";
-
-  function close() {
-    if (saving) return;
-    onClose();
-  }
-
-  function blockNegative(raw: string) {
-    return raw.replace(/-/g, "");
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmit) {
-      setError(lang === "en" ? "Name is required." : "الاسم مطلوب.");
-      return;
-    }
-    const input: PartInput = {
-      sku: sku.trim() || autoSku(name),
-      name: name.trim(),
-      name_ar: nameAr.trim() || null,
-      category,
-      unit: unitCode || null,
-      unit_cost_sar: parseNumField(unitCost),
-      qty_on_hand: 0,
-      reorder_level: parseNumField(reorderLevel),
-      reorder_qty: parseNumField(reorderQty),
-      lead_time_days: null,
-      supplier: null,
-      warehouse_id: defaultWarehouseId,
-    };
-    setSaving(true);
-    setError(null);
-    const res = await createPart(input);
-    setSaving(false);
-    if (res.error || !res.part) {
-      setError(res.error ?? (lang === "en" ? "Could not create item." : "تعذّر إنشاء الصنف."));
-      return;
-    }
-    onCreated(res.part);
-    onClose();
-    router.refresh();
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
-      <div
-        className="card p-6 w-full max-w-[880px] max-h-[85vh] overflow-y-auto scrollbar-thin"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <form onSubmit={submit}>
-          <div className="flex items-start justify-between gap-4 mb-1">
-            <h2 className="text-lg font-semibold">
-              {lang === "en" ? "New item / equipment" : "صنف / معدة جديدة"}
-            </h2>
-            <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <p className="text-sm muted mb-4">
-            {lang === "en"
-              ? "Create a brand-new item or equipment type. It's added to the catalog and dropped straight into your current list."
-              : "أنشئ صنفًا أو معدة جديدة. تُضاف للكتالوج وتُدرج مباشرة في قائمتك الحالية."}
-          </p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Item / Equipment name *" : "اسم الصنف / المعدة *"}</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} className={INPUT} style={INPUT_STYLE} required />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Name (Arabic)" : "الاسم (عربي)"}</span>
-              <input
-                value={nameAr}
-                onChange={(e) => setNameAr(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                dir="rtl"
-                placeholder={lang === "en" ? "optional" : "اختياري"}
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "SKU" : "رمز الصنف"}</span>
-              <input
-                value={sku}
-                onChange={(e) => setSku(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                placeholder={lang === "en" ? "auto if blank" : "تلقائي إن تُرك فارغًا"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Warehouse" : "المستودع"}</span>
-              <div className="px-3 py-2 rounded-lg border text-sm" style={INPUT_STYLE}>
-                {warehouseName}
-              </div>
-            </label>
-
-            {/* Category combo (Turki's extension #1, not from preview) — a
-                VISIBLE dropdown list of existing options AND free typing in
-                the same control (ComboInput, above). Pick a suggestion or
-                type a brand-new value, which is saved as-is (category is
-                free text on parts, 0043 — no migration needed) and becomes
-                a selectable suggestion here again next time. */}
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Category" : "الفئة"}</span>
-              <ComboInput
-                value={category}
-                onChange={setCategory}
-                options={categoryOptions.map((c) => ({ value: c, label: categoryLabel(c, lang) }))}
-                placeholder={lang === "en" ? "Pick or type a category…" : "اختر أو اكتب فئة…"}
-              />
-            </label>
-            {/* Unit picker — units table (migration 0049), NOT free text
-                anymore. Same inline-create pattern as +Supplier/+Warehouse
-                inside Add Parts: a select of existing units (code + its
-                meaning, both visible) plus a "+ Unit" trigger to define a
-                new one. The stored value is the CODE. */}
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Unit" : "الوحدة"}</span>
-              <div className="flex gap-2">
-                <select
-                  value={unitCode}
-                  onChange={(e) => setUnitCode(e.target.value)}
-                  className={cn(INPUT, "flex-1")}
-                  style={INPUT_STYLE}
-                >
-                  <option value="" disabled>
-                    {lang === "en" ? "Pick a unit…" : "اختر وحدة…"}
-                  </option>
-                  {allUnits.map((u) => (
-                    <option key={u.id} value={u.code}>
-                      {u.code} — {lang === "ar" && u.label_ar ? u.label_ar : u.label_en}
-                    </option>
-                  ))}
-                </select>
-                <Btn type="button" variant="outline" onClick={() => setNewUnitOpen(true)}>
-                  {lang === "en" ? "+ Unit" : "+ وحدة"}
-                </Btn>
-              </div>
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Unit price (SAR)" : "سعر الوحدة (ر.س)"}</span>
-              <input
-                value={unitCost}
-                onChange={(e) => setUnitCost(blockNegative(e.target.value))}
-                className={INPUT}
-                style={INPUT_STYLE}
-                inputMode="decimal"
-                placeholder="0.00"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Reorder level" : "حد إعادة الطلب"}</span>
-              <input
-                value={reorderLevel}
-                onChange={(e) => setReorderLevel(blockNegative(e.target.value))}
-                className={INPUT}
-                style={INPUT_STYLE}
-                inputMode="decimal"
-                placeholder="0"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Reorder qty" : "كمية إعادة الطلب"}</span>
-              <input
-                value={reorderQty}
-                onChange={(e) => setReorderQty(blockNegative(e.target.value))}
-                className={INPUT}
-                style={INPUT_STYLE}
-                inputMode="decimal"
-                placeholder="1"
-              />
-            </label>
-          </div>
-
-          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
-
-          <div className="mt-5 flex justify-end gap-2">
-            <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
-            </Btn>
-            <button
-              type="submit"
-              disabled={!canSubmit || saving}
-              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
-            >
-              {saving ? null : <Save className="h-4 w-4" />}
-              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Create item" : "إنشاء الصنف"}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {newUnitOpen && (
-        <NewUnitModal
-          lang={lang}
-          onClose={() => setNewUnitOpen(false)}
-          onCreated={(u) => {
-            setLocalUnits((prev) => [...prev, u]);
-            setUnitCode(u.code);
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-// "+ Unit" inline-create modal — units table (migration 0049, LIVE). Same
-// shape/role as NewSupplierModal/CreateWarehouseModal's onCreated pattern:
-// captures code + English label + Arabic label, inserts via createUnit(),
-// hands the fresh row back so AddPartModal can merge it into the picker and
-// auto-select it. Duplicate codes are rejected cleanly server-side (units
-// .code unique constraint, 0049) — createUnit() already turns that into a
-// plain message, surfaced here like any other validation error.
-function NewUnitModal({
-  lang,
-  onClose,
-  onCreated,
-}: {
-  lang: "en" | "ar";
-  onClose: () => void;
-  onCreated: (unit: Unit) => void;
-}) {
-  const [code, setCode] = useState("");
-  const [labelEn, setLabelEn] = useState("");
-  const [labelAr, setLabelAr] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const canSubmit = code.trim() !== "" && labelEn.trim() !== "";
-
-  function close() {
-    if (saving) return;
-    onClose();
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmit) {
-      setError(
-        lang === "en" ? "Code and English label are required." : "الرمز والاسم بالإنجليزية مطلوبان."
-      );
-      return;
-    }
-    const input: UnitInput = {
-      code: code.trim(),
-      label_en: labelEn.trim(),
-      label_ar: labelAr.trim() || null,
-    };
-    setSaving(true);
-    setError(null);
-    const res = await createUnit(input);
-    setSaving(false);
-    if (res.error || !res.unit) {
-      setError(res.error ?? (lang === "en" ? "Could not create unit." : "تعذّر إنشاء الوحدة."));
-      return;
-    }
-    onCreated(res.unit);
-    onClose();
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
-      <div
-        className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <form onSubmit={submit}>
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <h2 className="text-lg font-semibold">
-              {lang === "en" ? "Add a new unit" : "إضافة وحدة جديدة"}
-            </h2>
-            <button
-              type="button"
-              onClick={close}
-              className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Code *" : "الرمز *"}</span>
-              <input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                required
-                placeholder={lang === "en" ? "e.g. box" : "مثال: box"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "English label *" : "التسمية بالإنجليزية *"}</span>
-              <input
-                value={labelEn}
-                onChange={(e) => setLabelEn(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                required
-                placeholder={lang === "en" ? "e.g. Box" : "مثال: Box"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Arabic label" : "التسمية بالعربية"}</span>
-              <input
-                value={labelAr}
-                onChange={(e) => setLabelAr(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                dir="rtl"
-                placeholder={lang === "en" ? "optional" : "اختياري"}
-              />
-            </label>
-          </div>
-
-          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
-
-          <div className="mt-5 flex justify-end gap-2">
-            <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
-            </Btn>
-            <button
-              type="submit"
-              disabled={!canSubmit || saving}
-              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
-            >
-              {saving ? null : <Save className="h-4 w-4" />}
-              {saving
-                ? lang === "en" ? "Saving…" : "جارٍ الحفظ…"
-                : lang === "en" ? "Add a new unit" : "إضافة وحدة جديدة"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}

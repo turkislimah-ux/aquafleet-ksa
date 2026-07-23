@@ -679,3 +679,38 @@ export type PriceLot = {
   note: string | null;
   created_at: string;
 };
+
+// purchase_orders / purchase_order_lines rows (migration 0050, LIVE) —
+// Inventory Phase 4 (Purchase Orders core, draft->issued only). The ONLY
+// writers are create_purchase_order()/issue_purchase_order() (see
+// actions.ts) — app code never inserts/updates these tables directly. The
+// PO total is intentionally NOT a stored column here — always derive it
+// from summing lines' qty*unit_price_sar at render time (same reasoning
+// stock_receipts' own total_cost_sar avoided drift risk the other way
+// round: here there's no writer that would keep a stored total in sync, so
+// no stored total exists to go stale).
+export type PurchaseOrder = {
+  id: string;
+  po_number: string;
+  supplier_id: string;
+  warehouse_id: string;
+  // Full lifecycle the 0050 CHECK constraint allows — only 'draft'/'issued'
+  // are reachable through this phase's RPCs; 'received'/'pending_approval'/
+  // 'approved'/'rejected' light up in Phases 5/6.
+  status: "draft" | "issued" | "received" | "pending_approval" | "approved" | "rejected";
+  request_date: string; // date, "YYYY-MM-DD"
+  expected_delivery: string | null; // date
+  note: string | null;
+  requested_by: string | null;
+  issued_at: string | null;
+  created_at: string;
+};
+
+export type PurchaseOrderLine = {
+  id: string;
+  purchase_order_id: string;
+  part_id: string;
+  qty: number;
+  unit_price_sar: number;
+  created_at: string;
+};
