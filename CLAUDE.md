@@ -298,13 +298,15 @@ relevant skill(s) **when the task calls for it**:
 
 - **Inventory is being built as the FULL demo (preview/'s Inventory page: parts +
   warehouses + suppliers + FIFO cost lots + Purchase Orders + Approvals + Financial
-  Analysis), in 7 phases. Phases 1–5 of 7 are COMPLETE.**
+  Analysis), in 7 phases. Phases 1–6 of 7 are COMPLETE — only Phase 7 left.**
   - **Phases 1–3:** commits `580e135` (migrations) + `11d9239` (app code).
   - **Phase 4 (Purchase Orders core, draft->issued):** commits `dd67682`
     (migration `0050`) + `ab3008d` (app code).
   - **Phase 5 (PO receiving):** commits `3d55392` (migration `0051`) +
     `fc8005c` (app code).
-  - **Migrations `0043`–`0051`, all applied and verified:** `warehouses`/`parts`
+  - **Phase 6 (PO Approvals):** commits `ab3a414` (migration `0052`) +
+    `07c7729` (app code).
+  - **Migrations `0043`–`0052`, all applied and verified:** `warehouses`/`parts`
     (0043), `stock_movements` audit ledger + `receive_stock`/`adjust_stock` RPCs
     (0044), `suppliers` entity (0045), FIFO `price_lots` + `add_price_lot`/
     `consume_from_lots` (0046), `stock_receipts`/`stock_receipt_lines`/
@@ -314,7 +316,10 @@ relevant skill(s) **when the task calls for it**:
     `po_number` counter + `create_purchase_order`/`issue_purchase_order` RPCs
     (0050), `purchase_order_lines.received_qty`/`received_unit_price_sar`,
     `purchase_orders.received_by`/`received_date`, `stock_receipts.po_id`, +
-    `receive_purchase_order` RPC (0051).
+    `receive_purchase_order` RPC (0051), `purchase_order_approvals`
+    (UNIQUE per po+approver) + `purchase_orders.rejected_by`/`rejected_at`/
+    `rejection_reason` + `approve_purchase_order`/`reject_purchase_order`
+    RPCs (0052).
   - **Built and working (Phases 1–3):** warehouse tabs; parts table with KPIs
     (inventory value/SKUs/low stock) and stock-tier coloring; part drawer
     (pricing snapshot with current/previous price + trend, FIFO batches table,
@@ -342,11 +347,21 @@ relevant skill(s) **when the task calls for it**:
     `receive_loose_parts` (0047) rather than reimplementing receiving — a PO
     receipt gets the exact same mandatory-invoice gate and `stock_receipts`
     write as a loose receipt (see the Phase 5 lesson below for why this
-    wasn't the first draft's design). `pending_approval` is now a reachable
-    status — no approve/reject UI yet (Phase 6), so no "Pending review" chip
-    until that exists (a count with no action behind it is a dead end).
-  - **Remaining phases:** 6 Approvals (min 2 approvers, reuses existing staff
-    roles, no new role table) -> 7 Financial Analysis + per-part finance +
+    wasn't the first draft's design).
+  - **Built and working (Phase 6):** Approve/Reject actions on a
+    `pending_approval` PO (approver identity = the authenticated session,
+    same convention as every other actor field in this feature — no persona
+    picker like preview's, since this app has real auth; eligibility —
+    `staff.role` in the approver set — is enforced by the RPC, not
+    duplicated client-side); approvals section on PO detail (who signed off,
+    count X/2, rejection block when rejected); Pending Review list; proc-
+    strip's third chip (now meaningful, since there's an approve/reject UI to
+    click through to). Also closed a Phase 5 gap while wiring this:
+    `page.tsx`'s selects were missing `received_by`/`received_date`/
+    `received_qty`/`received_unit_price_sar` (columns existed, just never
+    selected) — PO detail now shows actual-vs-ordered qty/price per line and
+    an "Actual total" once anything's been received.
+  - **Remaining phase:** 7 Financial Analysis + per-part finance +
     AI-suggest-PO.
   - **Dormant by design (RPC exists, no app-code caller yet — do not remove, do
     not treat as dead code):** `consume_from_lots` (0046, lights up at
@@ -367,8 +382,10 @@ relevant skill(s) **when the task calls for it**:
     table with inline add (preview hardcodes a hardcoded unit list); supplier
     Arabic name (preview's supplier form has no name_ar); category stays a
     free-text combo (Turki's explicit instruction, not moved to a lookup table
-    like units were).
-  - **Working rules that held, keep applying through Phases 6–7:** every migration
+    like units were); PO receiving requires `status='issued'` (0051), not
+    draft-or-issued like preview; approver identity is the real session email
+    (0052), not preview's persona picker.
+  - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);
     the FIFO invariant (`sum(price_lots.qty_remaining) == parts.qty_on_hand` per
@@ -379,10 +396,10 @@ relevant skill(s) **when the task calls for it**:
   - **Lesson from Phase 3 (applied, worked):** commit each phase immediately
     once it verifies, instead of letting it sit uncommitted through a follow-up
     pass (that's exactly how Phase 3 + its cleanup pass got too interleaved to
-    split, forcing the one-off combined commit `11d9239`). Phases 4 and 5 both
-    followed this: migration committed the moment it was confirmed applied,
-    app code committed the moment it was confirmed working — clean, separable
-    commits every time, nothing left to entangle.
+    split, forcing the one-off combined commit `11d9239`). Phases 4, 5, and 6
+    all followed this: migration committed the moment it was confirmed
+    applied, app code committed the moment it was confirmed working — clean,
+    separable commits every time, nothing left to entangle.
   - **Lesson from Phase 5: check preview's ACTUAL code, not its own comments,
     and reuse the existing mechanism instead of building a parallel one.**
     The first draft of migration 0051 invented a PO-receiving path with no
