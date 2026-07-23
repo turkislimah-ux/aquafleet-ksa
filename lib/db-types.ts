@@ -716,6 +716,14 @@ export type PurchaseOrder = {
   rejected_by: string | null;
   rejected_at: string | null; // timestamptz
   rejection_reason: string | null;
+  // migration 0053, LIVE — set at creation by create_purchase_order when
+  // opened via "AI-Suggest". Bilingual pair (not a single lang-baked
+  // snapshot), same convention as name/name_ar throughout this schema, so
+  // the rationale reads correctly in either language regardless of which
+  // was active when the suggestion was generated.
+  ai_generated: boolean;
+  ai_rationale: string | null;
+  ai_rationale_ar: string | null;
   created_at: string;
 };
 

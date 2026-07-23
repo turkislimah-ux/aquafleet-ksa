@@ -77,7 +77,7 @@ export default async function InventoryPage() {
     supabase
       .from("purchase_orders")
       .select(
-        "id, po_number, supplier_id, warehouse_id, status, request_date, expected_delivery, note, requested_by, issued_at, received_by, received_date, rejected_by, rejected_at, rejection_reason, created_at"
+        "id, po_number, supplier_id, warehouse_id, status, request_date, expected_delivery, note, requested_by, issued_at, received_by, received_date, rejected_by, rejected_at, rejection_reason, ai_generated, ai_rationale, ai_rationale_ar, created_at"
       )
       .order("created_at", { ascending: false }),
     supabase

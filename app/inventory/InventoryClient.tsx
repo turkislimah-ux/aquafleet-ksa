@@ -200,6 +200,8 @@ import {
   Save,
   Check,
   ShoppingCart,
+  Zap,
+  BarChart3,
 } from "lucide-react";
 import { useApp } from "@/components/AppShell";
 import { PageHeader, Btn, Stat, Table, TH, TD, Card } from "@/components/ui";
@@ -227,6 +229,9 @@ import {
   RejectPOModal,
   ApprovalsTab,
   FinancialAnalysisTab,
+  PartFinanceModal,
+  suggestAIPurchaseLines,
+  type NewPOAISuggestion,
 } from "./PurchaseOrders";
 import {
   CreateWarehouseModal,
@@ -325,6 +330,7 @@ export default function InventoryClient({
   const [cat, setCat] = useState<string>("all");
   const [warehouseModalOpen, setWarehouseModalOpen] = useState(false);
   const [viewPart, setViewPart] = useState<Part | null>(null);
+  const [financePart, setFinancePart] = useState<Part | null>(null);
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
   const [adjustModal, setAdjustModal] = useState<{ part: Part } | null>(null);
   const [priceLotModal, setPriceLotModal] = useState<{ part: Part } | null>(null);
@@ -339,6 +345,10 @@ export default function InventoryClient({
   const [approvalsListOpen, setApprovalsListOpen] = useState(false);
   const [approvePO, setApprovePO] = useState<PurchaseOrder | null>(null);
   const [rejectPO, setRejectPO] = useState<PurchaseOrder | null>(null);
+  // Phase 7 — AI-Suggest-PO (migration 0053). Set right before opening
+  // NewPOModal so it renders with the .ai-banner + prefilled lines; cleared
+  // on close so a plain "New PO" click afterwards opens blank again.
+  const [aiSuggestion, setAiSuggestion] = useState<NewPOAISuggestion | null>(null);
 
   const warehousesById = useMemo(() => {
     const m = new Map<string, Warehouse>();
@@ -392,6 +402,20 @@ export default function InventoryClient({
   const awaitingReceiptCount = purchaseOrders.filter((o) => o.status === "issued").length;
   const pendingReviewCount = purchaseOrders.filter((o) => o.status === "pending_approval").length;
 
+  // AI-Suggest-PO (Phase 7, migration 0053, LIVE) — preview's INV.openAIPO()
+  // (pages-2.js ~2115-2133). No toast utility exists anywhere in this app
+  // (grepped — zero hits), so the "nothing to reorder" case disables the
+  // button instead of toasting (see the button's disabled attr below); the
+  // header button always renders (so the user can see it's there and why
+  // it's disabled), but the Financial Analysis tab's CTA only renders at
+  // all when lowParts.length > 0, so it never needs the disabled state.
+  const aiPurchaseSuggestion = suggestAIPurchaseLines(parts, purchaseOrders, purchaseOrderLines, suppliers);
+  function openAISuggest() {
+    if (!aiPurchaseSuggestion) return;
+    setAiSuggestion(aiPurchaseSuggestion);
+    setNewPOOpen(true);
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -408,18 +432,21 @@ export default function InventoryClient({
               {lang === "en" ? "Create Warehouse" : "إنشاء مستودع"}
             </Btn>
             {/* Phase 4 — preview's header order is New PO (primary) / Add
-                Parts (outline) / AI-suggest-PO (outline, Phase 7 — drafted
-                a migration for the persisted ai_generated/ai_rationale
-                columns, not yet applied, so this button isn't built yet
-                either; wiring it before the columns exist would mean
-                reworking it right after). Same warehouse-required gate as
-                Add Parts — a PO always needs a warehouse picked; New Item/
-                New Supplier are still available inline inside the New PO
-                modal for the chicken-and-egg case. preview gates its ENTIRE
-                header action row to the Inventory Levels sub-tab
-                (headerActions, pages-2.js ~3022) — matched here too. */}
+                Parts (outline) / AI-suggest-PO (outline). Same warehouse-
+                required gate as Add Parts — a PO always needs a warehouse
+                picked; New Item/New Supplier are still available inline
+                inside the New PO modal for the chicken-and-egg case.
+                preview gates its ENTIRE header action row to the Inventory
+                Levels sub-tab (headerActions, pages-2.js ~3022) — matched
+                here too. */}
             {invTab === "inventory" && warehouses.length > 0 && (
-              <Btn variant="primary" onClick={() => setNewPOOpen(true)}>
+              <Btn
+                variant="primary"
+                onClick={() => {
+                  setAiSuggestion(null);
+                  setNewPOOpen(true);
+                }}
+              >
                 <ShoppingCart className="h-4 w-4" />
                 {lang === "en" ? "New PO" : "أمر شراء جديد"}
               </Btn>
@@ -436,6 +463,18 @@ export default function InventoryClient({
               <Btn variant="outline" onClick={() => setReceiveModalOpen(true)}>
                 <PackagePlus className="h-4 w-4" />
                 {lang === "en" ? "Add Parts" : "إضافة قطع"}
+              </Btn>
+            )}
+            {/* AI-Suggest-PO (Phase 7, migration 0053) — preview's own
+                header AI-suggest button, always visible on this sub-tab
+                (not gated on lowParts.length, matching preview) but
+                disabled when there's genuinely nothing to reorder — no
+                toast utility exists in this app (grepped, zero hits), so
+                disable-in-place stands in for preview's toast here. */}
+            {invTab === "inventory" && warehouses.length > 0 && (
+              <Btn variant="outline" onClick={openAISuggest} disabled={!aiPurchaseSuggestion}>
+                <Zap className="h-4 w-4" />
+                {lang === "en" ? "AI-Suggest" : "اقتراح ذكي"}
               </Btn>
             )}
           </>
@@ -580,6 +619,7 @@ export default function InventoryClient({
                 pricesByPart={pricesByPart}
                 lang={lang}
                 onView={(p) => setViewPart(p)}
+                onFinance={(p) => setFinancePart(p)}
               />
             </>
           )}
@@ -605,6 +645,7 @@ export default function InventoryClient({
               suppliers={suppliers}
               inventoryValue={inventoryValue}
               openPOsCount={openPOsCount}
+              onOpenAISuggest={openAISuggest}
             />
           )}
         </>
@@ -628,6 +669,19 @@ export default function InventoryClient({
             setViewPart(null);
             setPriceLotModal({ part: p });
           }}
+        />
+      )}
+
+      {financePart && (
+        <PartFinanceModal
+          lang={lang}
+          part={financePart}
+          warehouses={warehouses}
+          priceLots={priceLots}
+          purchaseOrders={purchaseOrders}
+          purchaseOrderLines={purchaseOrderLines}
+          onClose={() => setFinancePart(null)}
+          onViewPO={(po) => setViewPO(po)}
         />
       )}
 
@@ -657,7 +711,11 @@ export default function InventoryClient({
           warehouses={warehouses}
           parts={parts}
           units={units}
-          onClose={() => setNewPOOpen(false)}
+          aiSuggestion={aiSuggestion ?? undefined}
+          onClose={() => {
+            setNewPOOpen(false);
+            setAiSuggestion(null);
+          }}
           onSaved={() => setPoListOpen(false)}
         />
       )}
@@ -820,12 +878,14 @@ function PartsTable({
   pricesByPart,
   lang,
   onView,
+  onFinance,
 }: {
   parts: Part[];
   warehousesById: Map<string, Warehouse>;
   pricesByPart: Map<string, { current: PriceLot; previous: PriceLot | null }>;
   lang: "en" | "ar";
   onView: (p: Part) => void;
+  onFinance: (p: Part) => void;
 }) {
   return (
     <Card className="!p-0 overflow-hidden">
@@ -905,7 +965,18 @@ function PartsTable({
                   )}
                 </TD>
                 <TD className="tabular-nums font-medium">{stockValue != null ? formatSar(stockValue) : "—"}</TD>
-                <TD className="text-right">
+                <TD className="text-right whitespace-nowrap">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onFinance(p);
+                    }}
+                    title={lang === "en" ? "Financial report" : "التقرير المالي"}
+                    className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    <BarChart3 className="h-4 w-4" />
+                  </button>
                   <button
                     type="button"
                     onClick={(e) => {

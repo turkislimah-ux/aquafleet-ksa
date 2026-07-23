@@ -296,10 +296,9 @@ relevant skill(s) **when the task calls for it**:
       legal_name, legal_name_ar, description, cr_number, vat_number, address,
       telephone, phone, email.
 
-- **Inventory is being built as the FULL demo (preview/'s Inventory page: parts +
+- **Inventory was built as the FULL demo (preview/'s Inventory page: parts +
   warehouses + suppliers + FIFO cost lots + Purchase Orders + Approvals + Financial
-  Analysis), in 7 phases. Phases 1–6 of 7 are COMPLETE. Phase 7 is IN PROGRESS
-  (tabs shipped, AI-Suggest-PO not wired yet — migration drafted, not applied).**
+  Analysis), in 7 phases. Phases 1–7 of 7 are COMPLETE.**
   - **Phases 1–3:** commits `580e135` (migrations) + `11d9239` (app code).
   - **Phase 4 (Purchase Orders core, draft->issued):** commits `dd67682`
     (migration `0050`) + `ab3008d` (app code).
@@ -311,7 +310,10 @@ relevant skill(s) **when the task calls for it**:
     `9c3e08a`. Turki flagged these two tabs as entirely MISSING from the app
     (preview has had them since the PO phases began) — this app was a single
     flat page with no tab structure at all until this commit.
-  - **Migrations `0043`–`0052`, all applied and verified:** `warehouses`/`parts`
+  - **Phase 7, final (AI-Suggest-PO + per-part finance report):** migration
+    `9e3f2fe` (`0053`), app code committed separately (see below). Closes out
+    the 7-phase Inventory build.
+  - **Migrations `0043`–`0053`, all applied and verified:** `warehouses`/`parts`
     (0043), `stock_movements` audit ledger + `receive_stock`/`adjust_stock` RPCs
     (0044), `suppliers` entity (0045), FIFO `price_lots` + `add_price_lot`/
     `consume_from_lots` (0046), `stock_receipts`/`stock_receipt_lines`/
@@ -324,7 +326,9 @@ relevant skill(s) **when the task calls for it**:
     `receive_purchase_order` RPC (0051), `purchase_order_approvals`
     (UNIQUE per po+approver) + `purchase_orders.rejected_by`/`rejected_at`/
     `rejection_reason` + `approve_purchase_order`/`reject_purchase_order`
-    RPCs (0052).
+    RPCs (0052), `purchase_orders.ai_generated`/`ai_rationale`/
+    `ai_rationale_ar` + `create_purchase_order` extended to 9 args (0053 —
+    old 6-arg signature dropped, exactly one version in the DB, confirmed).
   - **Built and working (Phases 1–3):** warehouse tabs; parts table with KPIs
     (inventory value/SKUs/low stock) and stock-tier coloring; part drawer
     (pricing snapshot with current/previous price + trend, FIFO batches table,
@@ -377,16 +381,28 @@ relevant skill(s) **when the task calls for it**:
     value, open PO count, top-spend-category + spend-by-supplier bar
     charts, AI Insights card (low-stock/price-up/consolidate
     recommendations, read-only for now).
-  - **Remaining in Phase 7:** AI-Suggest-PO itself. Migration `0053`
-    (`purchase_orders.ai_generated`/`ai_rationale`/`ai_rationale_ar`,
-    extends `create_purchase_order`'s signature to 9 args) is DRAFTED to
-    disk, flagged, NOT yet applied. Until it's run: no "AI-Suggest" header
-    button, no "AI-Suggest ->" action on the Financial Analysis tab's
-    low-stock insight, no "★ AI" badge anywhere — wiring any of that before
-    the columns exist would mean reworking it right after. Also still
-    pending: per-part finance report (preview's `openPartFinance` — 90-day
-    spend/usage + AI tip per part, opened from the parts table's chart-icon
-    button).
+  - **Built and working (Phase 7, final):** "AI-Suggest" header button
+    (Inventory-Levels-tab-scoped, disabled — not toasted, no toast utility
+    exists anywhere in this app — when there's nothing to reorder) and the
+    Financial Analysis tab's low-stock insight "AI-Suggest ->" CTA, both
+    calling `suggestAIPurchaseLines()` (a client-side heuristic — parts
+    at/below reorder level, excluding parts already on an open draft/issued
+    PO — paired with one of 4 canned `{en,ar}` rationale strings, same as
+    preview; NOT a real model call, same as preview) and opening `NewPOModal`
+    prefilled via its `aiSuggestion` prop (supplier/warehouse/lines seeded,
+    `.ai-banner`-style callout shown, `ai_generated`/`ai_rationale`/
+    `ai_rationale_ar` persisted through `createPurchaseOrder()` at submit).
+    "★ AI" badge next to the PO number everywhere a PO row/header appears
+    (POListModal, PODetailModal, ReceiveListModal, ApprovalsListModal,
+    ApprovalsTab, PartFinanceModal's purchase-history rows) when
+    `ai_generated` is true; PODetailModal also shows the full rationale
+    banner. Per-part finance report (`PartFinanceModal`, preview's
+    `openPartFinance`/`partFinance()`) opened from a new chart-icon button on
+    the parts table (next to "View"): purchases/stock-value/price-trend
+    stat row (real, from `purchase_order_lines` + `price_lots`), an AI tip
+    card (critical-stock / price-up / overstocked / healthy, same tiering as
+    preview), and a purchase-history table linking back to each PO's detail
+    view.
   - **Dormant by design (RPC exists, no app-code caller yet — do not remove, do
     not treat as dead code):** `consume_from_lots` (0046, lights up at
     work-order-parts-usage — PO receiving now has a caller via
@@ -408,7 +424,20 @@ relevant skill(s) **when the task calls for it**:
     free-text combo (Turki's explicit instruction, not moved to a lookup table
     like units were); PO receiving requires `status='issued'` (0051), not
     draft-or-issued like preview; approver identity is the real session email
-    (0052), not preview's persona picker.
+    (0052), not preview's persona picker; AI-Suggest groups candidate parts by
+    `warehouse_id` (the largest group, capped at 5 lines like preview), not
+    preview's supplier-based grouping — this app's `create_purchase_order`
+    enforces one supplier + one warehouse per PO (0050's guard), so warehouse
+    is the hard constraint here; supplier is only prefilled best-effort when
+    every part in the group shares the same `parts.supplier` value matching a
+    real `suppliers.name`, otherwise left for the user to pick. Per-part
+    finance report drops preview's consumption/usage stats
+    (`spentByConsumption`/`totalConsumed`) and the "purchased but not
+    consumed" AI-tip branch — this app has no consumption/usage workflow yet
+    (`stock_movements`' `'consume'` movement_type exists in the 0046 CHECK
+    constraint but nothing writes it), so that section was dropped rather
+    than faked; everything else in the report (purchases, stock value, price
+    trend) is real data.
   - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);

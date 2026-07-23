@@ -85,9 +85,9 @@ export function Section({ title, action, children }: { title: string; action?: R
   );
 }
 
-export function Btn({ children, variant = "default", className, onClick, type = "button" }: {
+export function Btn({ children, variant = "default", className, onClick, type = "button", disabled }: {
   children: ReactNode; variant?: "default" | "ghost" | "primary" | "outline"; className?: string;
-  onClick?: () => void; type?: "button" | "submit";
+  onClick?: () => void; type?: "button" | "submit"; disabled?: boolean;
 }) {
   const v =
     variant === "primary" ? "bg-brand-600 hover:bg-brand-700 text-white" :
@@ -95,8 +95,8 @@ export function Btn({ children, variant = "default", className, onClick, type = 
     variant === "outline" ? "border hover:bg-black/5 dark:hover:bg-white/5" :
     "bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10";
   return (
-    <button type={type} onClick={onClick}
-      className={cn("h-9 px-3 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition", v, className)}
+    <button type={type} onClick={onClick} disabled={disabled}
+      className={cn("h-9 px-3 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition disabled:opacity-50 disabled:pointer-events-none", v, className)}
       style={variant === "outline" ? { borderColor: "rgb(var(--border))" } : undefined}>
       {children}
     </button>

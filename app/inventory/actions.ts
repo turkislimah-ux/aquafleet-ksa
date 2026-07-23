@@ -469,6 +469,11 @@ export type CreatePurchaseOrderInput = {
   lines: PurchaseOrderLineInput[];
   expected_delivery: string | null;
   note: string | null;
+  // migration 0053 — set only when this draft came from "AI-Suggest"
+  // (NewPOModal's aiSuggestion prop). Omitted/false on every ordinary draft.
+  ai_generated?: boolean;
+  ai_rationale?: string | null;
+  ai_rationale_ar?: string | null;
 };
 
 // The RPC's own warehouse/part consistency guard (0050) raises with the
@@ -509,6 +514,9 @@ export async function createPurchaseOrder(
     p_expected_delivery: input.expected_delivery,
     p_note: input.note,
     p_actor: await actorEmail(supabase),
+    p_ai_generated: input.ai_generated ?? false,
+    p_ai_rationale: input.ai_rationale ?? null,
+    p_ai_rationale_ar: input.ai_rationale_ar ?? null,
   });
   if (error) return { error: friendlyPoError(error.message) };
 
