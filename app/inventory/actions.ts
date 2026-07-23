@@ -619,3 +619,55 @@ export async function receivePurchaseOrder(
   revalidatePath("/inventory");
   return { error: null, receipt: data as StockReceipt };
 }
+
+// ---------------------------------------------------------------------------
+// PO Approvals (full-demo Phase 6 — migration 0052, LIVE). Wraps
+// approve_purchase_order()/reject_purchase_order(). Approver identity is
+// the authenticated user's email (same convention as every other actor
+// column in this app) — eligibility (staff.role in the approver-eligible
+// set, active, not terminated) is checked SERVER-SIDE inside the RPC, not
+// pre-filtered here. This app doesn't look up the current user's staff row
+// before showing the Approve/Reject buttons — anyone can attempt either
+// action, and a non-eligible attempt comes back as a clean RPC error
+// ("Not authorized..."). Same "attempt, surface the RPC's own error"
+// pattern this app already uses elsewhere (e.g. issue_purchase_order on a
+// non-draft PO) rather than duplicating the eligibility rule client-side.
+// Neither RPC touches price_lots/parts.qty_on_hand/stock_movements —
+// approval/rejection is paperwork on an already-received PO.
+// ---------------------------------------------------------------------------
+
+export async function approvePurchaseOrder(
+  poId: string,
+  comment: string | null,
+): Promise<{ error: string | null; po?: PurchaseOrder }> {
+  if (!poId) return { error: "Missing purchase order." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("approve_purchase_order", {
+    p_po_id: poId,
+    p_comment: comment?.trim() || null,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/inventory");
+  return { error: null, po: data as PurchaseOrder };
+}
+
+export async function rejectPurchaseOrder(
+  poId: string,
+  reason: string | null,
+): Promise<{ error: string | null; po?: PurchaseOrder }> {
+  if (!poId) return { error: "Missing purchase order." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("reject_purchase_order", {
+    p_po_id: poId,
+    p_reason: reason?.trim() || null,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/inventory");
+  return { error: null, po: data as PurchaseOrder };
+}

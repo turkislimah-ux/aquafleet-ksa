@@ -46,11 +46,21 @@ import { createPortal } from "react-dom";
 import { Plus, X, ShoppingCart, Save, Eye, Printer, Check, AlertTriangle, PackagePlus, Upload } from "lucide-react";
 import { Btn, Table, TH, TD, Card } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
-import type { Warehouse, Part, Supplier, Unit, PurchaseOrder, PurchaseOrderLine } from "@/lib/db-types";
+import type {
+  Warehouse,
+  Part,
+  Supplier,
+  Unit,
+  PurchaseOrder,
+  PurchaseOrderLine,
+  PurchaseOrderApproval,
+} from "@/lib/db-types";
 import {
   createPurchaseOrder,
   issuePurchaseOrder,
   receivePurchaseOrder,
+  approvePurchaseOrder,
+  rejectPurchaseOrder,
   type PurchaseOrderLineInput,
 } from "./actions";
 import { NewSupplierModal, CreateWarehouseModal, AddPartModal, InvoiceFileTile } from "./SharedCreateModals";
@@ -135,23 +145,25 @@ function ProcChip({
 }
 
 // "Active procurement" strip (preview: pages-2.js ~3083-3098, app.css
-// ~611-646) — Open POs (Phase 4) + Awaiting receipt (Phase 5, issued count).
-// "Pending review" (Phase 6 — approvals) is deliberately NOT shown yet:
-// pending_approval is now a reachable status (0051), but there's no
-// approve/reject UI to click through to — showing a count with no action
-// behind it would be a dead end. Add it once Phase 6 lands.
+// ~611-646) — Open POs (Phase 4) + Awaiting receipt (Phase 5) + Pending
+// review (Phase 6, pending_approval count — now meaningful since the
+// approve/reject UI exists to click through to, unlike before).
 export function ProcStrip({
   lang,
   openCount,
   awaitingReceiptCount,
+  pendingReviewCount,
   onOpenList,
   onOpenReceiveList,
+  onOpenApprovalsList,
 }: {
   lang: "en" | "ar";
   openCount: number;
   awaitingReceiptCount: number;
+  pendingReviewCount: number;
   onOpenList: () => void;
   onOpenReceiveList: () => void;
+  onOpenApprovalsList: () => void;
 }) {
   return (
     <div
@@ -170,6 +182,12 @@ export function ProcStrip({
         count={awaitingReceiptCount}
         label={lang === "en" ? "Awaiting receipt" : "بانتظار الاستلام"}
         onClick={onOpenReceiveList}
+      />
+      <ProcChip
+        count={pendingReviewCount}
+        label={lang === "en" ? "Pending review" : "بانتظار المراجعة"}
+        onClick={onOpenApprovalsList}
+        warn
       />
     </div>
   );
@@ -807,16 +825,21 @@ export function PODetailModal({
   lang,
   po,
   lines,
+  approvals,
   suppliers,
   warehouses,
   parts,
   onClose,
   onIssued,
   onReceive,
+  onApprove,
+  onReject,
 }: {
   lang: "en" | "ar";
   po: PurchaseOrder;
   lines: PurchaseOrderLine[];
+  // Phase 6 (migration 0052) — this PO's approvals only (caller filters).
+  approvals: PurchaseOrderApproval[];
   suppliers: Supplier[];
   warehouses: Warehouse[];
   parts: Part[];
@@ -827,6 +850,10 @@ export function PODetailModal({
   // action for issued/draft (this app: issued-only, see 0051's deliberate
   // deviation note).
   onReceive: (po: PurchaseOrder) => void;
+  // Phase 6 — Approve/Reject actions, pending_approval POs only. Mirrors
+  // preview's own openPO footer showing Approve for pending_approval.
+  onApprove: (po: PurchaseOrder) => void;
+  onReject: (po: PurchaseOrder) => void;
 }) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -842,7 +869,21 @@ export function PODetailModal({
     return m;
   }, [parts]);
   const poLines = lines.filter((l) => l.purchase_order_id === po.id);
-  const total = poLines.reduce((s, l) => s + l.qty * l.unit_price_sar, 0);
+  // Actual (received) figures take priority over ordered ones once a line
+  // has been received — mirrors preview's own openPO
+  // (`l.receivedQty || l.qty`, `l.receivedUnitPriceSar != null ? ... :
+  // l.unitPriceSar`). Total label follows suit: "Actual total" once
+  // anything's been received, "Estimated total" while still just ordered
+  // amounts (same condition preview's own footer label switches on).
+  const hasReceivedFigures = poLines.some((l) => l.received_qty != null);
+  const total = poLines.reduce((s, l) => {
+    const qty = l.received_qty ?? l.qty;
+    const price = l.received_unit_price_sar ?? l.unit_price_sar;
+    return s + qty * price;
+  }, 0);
+  // Visible on any PO that's reached pending_approval or beyond — mirrors
+  // preview's own approvalsHtml condition exactly.
+  const showApprovals = po.status === "pending_approval" || po.status === "approved" || po.status === "rejected";
 
   if (!mounted) return null;
 
@@ -911,6 +952,18 @@ export function PODetailModal({
             <div className="text-[11px] muted uppercase">{lang === "en" ? "Warehouse" : "المستودع"}</div>
             <div className="font-medium">{warehouse?.name ?? "—"}</div>
           </div>
+          {po.received_by && (
+            <>
+              <div>
+                <div className="text-[11px] muted uppercase">{lang === "en" ? "Received by" : "استُلم بواسطة"}</div>
+                <div className="font-medium">{po.received_by}</div>
+              </div>
+              <div>
+                <div className="text-[11px] muted uppercase">{lang === "en" ? "Received on" : "تاريخ الاستلام"}</div>
+                <div className="font-medium">{po.received_date ?? "—"}</div>
+              </div>
+            </>
+          )}
         </div>
 
         {supplier && (
@@ -949,6 +1002,8 @@ export function PODetailModal({
             <tbody>
               {poLines.map((l) => {
                 const part = partsById.get(l.part_id);
+                const qty = l.received_qty ?? l.qty;
+                const price = l.received_unit_price_sar ?? l.unit_price_sar;
                 return (
                 <tr key={l.id}>
                   <TD>
@@ -957,9 +1012,23 @@ export function PODetailModal({
                       {part ? (lang === "ar" && part.name_ar ? part.name_ar : part.name) : "—"}
                     </div>
                   </TD>
-                  <TD className="tabular">{l.qty}</TD>
-                  <TD className="tabular">{formatSar(l.unit_price_sar)}</TD>
-                  <TD className="tabular font-medium">{formatSar(l.qty * l.unit_price_sar)}</TD>
+                  <TD className="tabular">
+                    {qty}
+                    {l.received_qty != null && l.received_qty !== l.qty && (
+                      <span className="muted text-[11px] ms-1">
+                        ({lang === "en" ? "ordered" : "مطلوب"}: {l.qty})
+                      </span>
+                    )}
+                  </TD>
+                  <TD className="tabular">
+                    {formatSar(price)}
+                    {l.received_unit_price_sar != null && l.received_unit_price_sar !== l.unit_price_sar && (
+                      <span className="muted text-[11px] ms-1">
+                        ({lang === "en" ? "ordered" : "مطلوب"}: {formatSar(l.unit_price_sar)})
+                      </span>
+                    )}
+                  </TD>
+                  <TD className="tabular font-medium">{formatSar(qty * price)}</TD>
                 </tr>
                 );
               })}
@@ -971,7 +1040,9 @@ export function PODetailModal({
                   className="text-end font-semibold py-2.5 px-3 border-t text-sm"
                   style={{ borderColor: "rgb(var(--border))" }}
                 >
-                  {lang === "en" ? "Estimated total" : "الإجمالي التقديري"}
+                  {hasReceivedFigures
+                    ? lang === "en" ? "Actual total" : "الإجمالي الفعلي"
+                    : lang === "en" ? "Estimated total" : "الإجمالي التقديري"}
                 </td>
                 <td
                   className="tabular font-bold text-brand-600 py-2.5 px-3 border-t text-sm"
@@ -988,6 +1059,49 @@ export function PODetailModal({
           <Card className="!p-3 mb-4">
             <div className="text-[11px] muted uppercase mb-1">{lang === "en" ? "Note" : "ملاحظة"}</div>
             <p className="text-sm whitespace-pre-wrap">{po.note}</p>
+          </Card>
+        )}
+
+        {/* Approvals section — preview's approvalsHtml (pages-2.js
+            ~2357-2377), visible from pending_approval onward. Rejection is
+            a single terminal event (0052), not a list — shown as its own
+            block when present. */}
+        {showApprovals && (
+          <Card className="!p-3 mb-4">
+            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+              <Check className="h-4 w-4 text-emerald-600" />
+              {lang === "en" ? "Approved by" : "تم الاعتماد من"}{" "}
+              <span className="muted text-xs font-normal">({approvals.length}/2)</span>
+            </h4>
+            {approvals.length === 0 ? (
+              <p className="muted text-sm">{lang === "en" ? "Awaiting approval" : "بانتظار الاعتماد"}</p>
+            ) : (
+              <ul className="space-y-2">
+                {approvals.map((a) => (
+                  <li key={a.id} className="flex items-start gap-2 text-sm">
+                    <Check className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="font-medium">{a.approver_email}</div>
+                      <div className="text-[11px] muted">
+                        {new Date(a.approved_at).toLocaleString(lang === "ar" ? "ar-SA" : "en-US")}
+                        {a.comment ? ` · "${a.comment}"` : ""}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {po.status === "rejected" && (
+              <div className="mt-3 pt-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                <div className="font-semibold text-sm text-rose-600">
+                  {lang === "en" ? "Rejected by" : "رُفض من"}: {po.rejected_by ?? "—"}
+                </div>
+                <div className="text-xs muted mt-1">
+                  {po.rejected_at ? new Date(po.rejected_at).toLocaleString(lang === "ar" ? "ar-SA" : "en-US") : "—"}
+                </div>
+                {po.rejection_reason && <div className="text-sm mt-1">&quot;{po.rejection_reason}&quot;</div>}
+              </div>
+            )}
           </Card>
         )}
 
@@ -1017,6 +1131,27 @@ export function PODetailModal({
               <PackagePlus className="h-4 w-4" />
               {lang === "en" ? "Receive Stock" : "استلام المخزون"}
             </button>
+          )}
+          {po.status === "pending_approval" && (
+            <>
+              <button
+                type="button"
+                onClick={() => onReject(po)}
+                className="h-9 px-3 rounded-lg text-sm font-medium border inline-flex items-center gap-2"
+                style={{ ...INPUT_STYLE, color: "#be123c", borderColor: "rgba(190,18,60,.4)" }}
+              >
+                <X className="h-4 w-4" />
+                {lang === "en" ? "Reject" : "رفض"}
+              </button>
+              <button
+                type="button"
+                onClick={() => onApprove(po)}
+                className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white inline-flex items-center gap-2"
+              >
+                <Check className="h-4 w-4" />
+                {lang === "en" ? "Approve" : "اعتماد"}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -1429,6 +1564,315 @@ export function ReceivePOModal({
             >
               <PackagePlus className="h-4 w-4" />
               {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Confirm receipt" : "تأكيد الاستلام"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// "Pending review" list — POs awaiting approval (preview's own Approvals
+// tab list, trimmed to just this filter since this app has no separate
+// tab). Table, same shape as POListModal (Open POs) — click a row to open
+// the full PO detail, where Approve/Reject actually live.
+export function ApprovalsListModal({
+  lang,
+  purchaseOrders,
+  purchaseOrderApprovals,
+  suppliers,
+  onClose,
+  onView,
+}: {
+  lang: "en" | "ar";
+  purchaseOrders: PurchaseOrder[];
+  purchaseOrderApprovals: PurchaseOrderApproval[];
+  suppliers: Supplier[];
+  onClose: () => void;
+  onView: (po: PurchaseOrder) => void;
+}) {
+  const suppliersById = useMemo(() => {
+    const m = new Map<string, Supplier>();
+    for (const s of suppliers) m.set(s.id, s);
+    return m;
+  }, [suppliers]);
+
+  const pending = purchaseOrders
+    .filter((o) => o.status === "pending_approval")
+    .slice()
+    .sort((a, b) => (a.request_date < b.request_date ? 1 : a.request_date > b.request_date ? -1 : 0));
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <div
+        className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <h2 className="text-lg font-semibold">
+            {lang === "en" ? "Purchase Orders Pending Review" : "أوامر الشراء بانتظار المراجعة"}
+          </h2>
+          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {pending.length === 0 ? (
+          <p className="muted text-sm py-10 text-center">
+            {lang === "en" ? "Nothing pending review." : "لا يوجد ما ينتظر المراجعة."}
+          </p>
+        ) : (
+          <Card className="!p-0 overflow-hidden">
+            <Table>
+              <thead>
+                <tr>
+                  <TH>{lang === "en" ? "PO Number" : "رقم الأمر"}</TH>
+                  <TH>{lang === "en" ? "Supplier" : "المورد"}</TH>
+                  <TH>{lang === "en" ? "Received on" : "تاريخ الاستلام"}</TH>
+                  <TH>{lang === "en" ? "Approved by" : "تم الاعتماد من"}</TH>
+                  <TH></TH>
+                </tr>
+              </thead>
+              <tbody>
+                {pending.map((po) => {
+                  const supplier = suppliersById.get(po.supplier_id);
+                  const count = purchaseOrderApprovals.filter((a) => a.purchase_order_id === po.id).length;
+                  return (
+                    <tr
+                      key={po.id}
+                      className="cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+                      onClick={() => onView(po)}
+                    >
+                      <TD className="font-mono text-xs font-semibold">{po.po_number}</TD>
+                      <TD>
+                        <div className="text-sm font-medium">{supplier?.name ?? "—"}</div>
+                      </TD>
+                      <TD className="text-xs">{po.received_date ?? "—"}</TD>
+                      <TD>
+                        <span
+                          className="text-[11px] font-medium px-2 py-0.5 rounded-full"
+                          style={{
+                            background: count >= 2 ? "rgba(16,185,129,.14)" : "rgba(245,158,11,.14)",
+                            color: count >= 2 ? "#047857" : "#b45309",
+                          }}
+                        >
+                          {count}/2
+                        </span>
+                      </TD>
+                      <TD className="text-right">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onView(po);
+                          }}
+                          title={lang === "en" ? "View" : "عرض"}
+                          className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/5"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      </TD>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          </Card>
+        )}
+
+        <div className="mt-5 flex justify-end">
+          <Btn variant="outline" onClick={onClose}>
+            {lang === "en" ? "Close" : "إغلاق"}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Approve a PO — preview's openApprove (pages-2.js ~2928-2957), trimmed:
+// preview has a persona picker ("Approve as") because it has no real auth;
+// this app derives the approver from the authenticated session server-side
+// (same substitution every other actor field in this feature already
+// made), so there's nothing to pick here — just the running count and an
+// optional comment. Eligibility (staff.role in the approver set) is
+// checked by the RPC, not pre-filtered client-side (see actions.ts's own
+// comment on why).
+export function ApprovePOModal({
+  lang,
+  po,
+  approvalCount,
+  onClose,
+  onApproved,
+}: {
+  lang: "en" | "ar";
+  po: PurchaseOrder;
+  approvalCount: number;
+  onClose: () => void;
+  onApproved: () => void;
+}) {
+  const router = useRouter();
+  const [comment, setComment] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function close() {
+    if (saving) return;
+    onClose();
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    const res = await approvePurchaseOrder(po.id, comment.trim() || null);
+    setSaving(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    onApproved();
+    router.refresh();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+      <div
+        className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <form onSubmit={submit}>
+          <div className="flex items-start justify-between gap-4 mb-1">
+            <h2 className="text-lg font-semibold">
+              {lang === "en" ? "Approve" : "اعتماد"} — {po.po_number}
+            </h2>
+            <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <p className="text-sm muted mb-4">
+            {lang === "en" ? "Minimum approvals required" : "الحد الأدنى من الاعتمادات"}: <b>2</b> ·{" "}
+            {lang === "en" ? "Approved by" : "تم الاعتماد من"}: <b>{approvalCount}</b>
+          </p>
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted">{lang === "en" ? "Optional comment" : "تعليق اختياري"}</span>
+            <input
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              className={INPUT}
+              style={INPUT_STYLE}
+              placeholder={lang === "en" ? "Optional comment" : "تعليق اختياري"}
+            />
+          </label>
+
+          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
+
+          <div className="mt-5 flex justify-end gap-2">
+            <Btn variant="outline" onClick={close}>
+              {lang === "en" ? "Cancel" : "إلغاء"}
+            </Btn>
+            <button
+              type="submit"
+              disabled={saving}
+              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
+            >
+              <Check className="h-4 w-4" />
+              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Approve" : "اعتماد"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Reject a PO — preview's openReject (pages-2.js ~2968-2986). Terminal;
+// same warning copy preview uses about stock not auto-reversing (accurate
+// here too — receiving already moved stock via receive_purchase_order,
+// 0051, and rejecting doesn't undo it).
+export function RejectPOModal({
+  lang,
+  po,
+  onClose,
+  onRejected,
+}: {
+  lang: "en" | "ar";
+  po: PurchaseOrder;
+  onClose: () => void;
+  onRejected: () => void;
+}) {
+  const router = useRouter();
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function close() {
+    if (saving) return;
+    onClose();
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    const res = await rejectPurchaseOrder(po.id, reason.trim() || null);
+    setSaving(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    onRejected();
+    router.refresh();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+      <div
+        className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <form onSubmit={submit}>
+          <div className="flex items-start justify-between gap-4 mb-1">
+            <h2 className="text-lg font-semibold">
+              {lang === "en" ? "Reject" : "رفض"} — {po.po_number}
+            </h2>
+            <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <p className="text-sm muted mb-4">
+            {lang === "en"
+              ? "Rejection ends this PO. Stock changes from the receipt are not reversed automatically."
+              : "الرفض ينهي هذا الأمر. التغييرات في المخزون لا تُعكس تلقائيًا."}
+          </p>
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted">{lang === "en" ? "Rejection reason" : "سبب الرفض"}</span>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className={INPUT}
+              style={INPUT_STYLE}
+              rows={3}
+              placeholder={lang === "en" ? "optional" : "اختياري"}
+            />
+          </label>
+
+          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
+
+          <div className="mt-5 flex justify-end gap-2">
+            <Btn variant="outline" onClick={close}>
+              {lang === "en" ? "Cancel" : "إلغاء"}
+            </Btn>
+            <button
+              type="submit"
+              disabled={saving}
+              className="h-9 px-3 rounded-lg text-sm font-medium text-white disabled:opacity-50 inline-flex items-center gap-2"
+              style={{ background: "#be123c" }}
+            >
+              <X className="h-4 w-4" />
+              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Reject" : "رفض"}
             </button>
           </div>
         </form>

@@ -213,6 +213,7 @@ import type {
   Unit,
   PurchaseOrder,
   PurchaseOrderLine,
+  PurchaseOrderApproval,
 } from "@/lib/db-types";
 import {
   ProcStrip,
@@ -221,6 +222,9 @@ import {
   PODetailModal,
   ReceiveListModal,
   ReceivePOModal,
+  ApprovalsListModal,
+  ApprovePOModal,
+  RejectPOModal,
 } from "./PurchaseOrders";
 import {
   CreateWarehouseModal,
@@ -295,6 +299,7 @@ export default function InventoryClient({
   units,
   purchaseOrders,
   purchaseOrderLines,
+  purchaseOrderApprovals,
   error,
 }: {
   warehouses: Warehouse[];
@@ -304,6 +309,7 @@ export default function InventoryClient({
   units: Unit[];
   purchaseOrders: PurchaseOrder[];
   purchaseOrderLines: PurchaseOrderLine[];
+  purchaseOrderApprovals: PurchaseOrderApproval[];
   error: string | null;
 }) {
   const { lang } = useApp();
@@ -322,6 +328,10 @@ export default function InventoryClient({
   // Phase 5 — PO receiving (migration 0051).
   const [receiveListOpen, setReceiveListOpen] = useState(false);
   const [receivePO, setReceivePO] = useState<PurchaseOrder | null>(null);
+  // Phase 6 — PO Approvals (migration 0052).
+  const [approvalsListOpen, setApprovalsListOpen] = useState(false);
+  const [approvePO, setApprovePO] = useState<PurchaseOrder | null>(null);
+  const [rejectPO, setRejectPO] = useState<PurchaseOrder | null>(null);
 
   const warehousesById = useMemo(() => {
     const m = new Map<string, Warehouse>();
@@ -370,11 +380,10 @@ export default function InventoryClient({
   const lowStockCount = parts.filter(
     (p) => p.reorder_level != null && p.qty_on_hand <= p.reorder_level
   ).length;
-  // Proc-strip chips (preview: pages-2.js ~3007). "Pending review" needs
-  // Phase 6 (approve/reject UI) before it's worth showing — see
-  // ProcStrip's own comment.
+  // Proc-strip chips (preview: pages-2.js ~3007).
   const openPOsCount = purchaseOrders.filter((o) => o.status === "draft" || o.status === "issued").length;
   const awaitingReceiptCount = purchaseOrders.filter((o) => o.status === "issued").length;
+  const pendingReviewCount = purchaseOrders.filter((o) => o.status === "pending_approval").length;
 
   return (
     <div className="space-y-5">
@@ -445,8 +454,10 @@ export default function InventoryClient({
             lang={lang}
             openCount={openPOsCount}
             awaitingReceiptCount={awaitingReceiptCount}
+            pendingReviewCount={pendingReviewCount}
             onOpenList={() => setPoListOpen(true)}
             onOpenReceiveList={() => setReceiveListOpen(true)}
+            onOpenApprovalsList={() => setApprovalsListOpen(true)}
           />
 
           <Card className="!p-3">
@@ -587,6 +598,7 @@ export default function InventoryClient({
           lang={lang}
           po={viewPO}
           lines={purchaseOrderLines}
+          approvals={purchaseOrderApprovals.filter((a) => a.purchase_order_id === viewPO.id)}
           suppliers={suppliers}
           warehouses={warehouses}
           parts={parts}
@@ -595,6 +607,14 @@ export default function InventoryClient({
           onReceive={(po) => {
             setViewPO(null);
             setReceivePO(po);
+          }}
+          onApprove={(po) => {
+            setViewPO(null);
+            setApprovePO(po);
+          }}
+          onReject={(po) => {
+            setViewPO(null);
+            setRejectPO(po);
           }}
         />
       )}
@@ -620,6 +640,39 @@ export default function InventoryClient({
           parts={parts}
           onClose={() => setReceivePO(null)}
           onReceived={() => setReceivePO(null)}
+        />
+      )}
+
+      {approvalsListOpen && (
+        <ApprovalsListModal
+          lang={lang}
+          purchaseOrders={purchaseOrders}
+          purchaseOrderApprovals={purchaseOrderApprovals}
+          suppliers={suppliers}
+          onClose={() => setApprovalsListOpen(false)}
+          onView={(po) => {
+            setApprovalsListOpen(false);
+            setViewPO(po);
+          }}
+        />
+      )}
+
+      {approvePO && (
+        <ApprovePOModal
+          lang={lang}
+          po={approvePO}
+          approvalCount={purchaseOrderApprovals.filter((a) => a.purchase_order_id === approvePO.id).length}
+          onClose={() => setApprovePO(null)}
+          onApproved={() => setApprovePO(null)}
+        />
+      )}
+
+      {rejectPO && (
+        <RejectPOModal
+          lang={lang}
+          po={rejectPO}
+          onClose={() => setRejectPO(null)}
+          onRejected={() => setRejectPO(null)}
         />
       )}
     </div>

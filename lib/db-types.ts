@@ -695,11 +695,12 @@ export type PurchaseOrder = {
   supplier_id: string;
   warehouse_id: string;
   // Full lifecycle the 0050 CHECK constraint allows. Reachable in practice:
-  // 'draft'/'issued' (Phase 4) and now 'pending_approval' (Phase 5,
-  // migration 0051 — receive_purchase_order goes issued -> pending_approval
-  // directly, matching preview's ACTUAL receivePO() behavior; the
-  // 'received' value is never assigned by this app — see 0051's header).
-  // 'approved'/'rejected' light up in Phase 6.
+  // 'draft'/'issued' (Phase 4), 'pending_approval' (Phase 5, migration
+  // 0051 — receive_purchase_order goes issued -> pending_approval directly,
+  // matching preview's ACTUAL receivePO() behavior; the 'received' value is
+  // never assigned by this app — see 0051's header), and 'approved'/
+  // 'rejected' (Phase 6, migration 0052 — approve_purchase_order/
+  // reject_purchase_order).
   status: "draft" | "issued" | "received" | "pending_approval" | "approved" | "rejected";
   request_date: string; // date, "YYYY-MM-DD"
   expected_delivery: string | null; // date
@@ -709,7 +710,27 @@ export type PurchaseOrder = {
   // migration 0051, LIVE — set by receive_purchase_order.
   received_by: string | null;
   received_date: string | null; // date
+  // migration 0052, LIVE — set by reject_purchase_order. A rejection is a
+  // single terminal event (no history table), same as preview's own
+  // po.rejection single-object model.
+  rejected_by: string | null;
+  rejected_at: string | null; // timestamptz
+  rejection_reason: string | null;
   created_at: string;
+};
+
+// purchase_order_approvals row (migration 0052, LIVE) — one row per
+// distinct approver who has signed off on a PO (UNIQUE on
+// purchase_order_id+approver_email — can't approve the same PO twice). The
+// ONLY writer is approve_purchase_order() (see actions.ts). No stored
+// approval count anywhere — always derive from counting these rows,
+// same "derive, don't cache" principle as PO totals (0050's header).
+export type PurchaseOrderApproval = {
+  id: string;
+  purchase_order_id: string;
+  approver_email: string;
+  comment: string | null;
+  approved_at: string;
 };
 
 export type PurchaseOrderLine = {
