@@ -298,7 +298,8 @@ relevant skill(s) **when the task calls for it**:
 
 - **Inventory is being built as the FULL demo (preview/'s Inventory page: parts +
   warehouses + suppliers + FIFO cost lots + Purchase Orders + Approvals + Financial
-  Analysis), in 7 phases. Phases 1–6 of 7 are COMPLETE — only Phase 7 left.**
+  Analysis), in 7 phases. Phases 1–6 of 7 are COMPLETE. Phase 7 is IN PROGRESS
+  (tabs shipped, AI-Suggest-PO not wired yet — migration drafted, not applied).**
   - **Phases 1–3:** commits `580e135` (migrations) + `11d9239` (app code).
   - **Phase 4 (Purchase Orders core, draft->issued):** commits `dd67682`
     (migration `0050`) + `ab3008d` (app code).
@@ -306,6 +307,10 @@ relevant skill(s) **when the task calls for it**:
     `fc8005c` (app code).
   - **Phase 6 (PO Approvals):** commits `ab3a414` (migration `0052`) +
     `07c7729` (app code).
+  - **Phase 7, partial (Approvals + Financial Analysis tabs):** commit
+    `9c3e08a`. Turki flagged these two tabs as entirely MISSING from the app
+    (preview has had them since the PO phases began) — this app was a single
+    flat page with no tab structure at all until this commit.
   - **Migrations `0043`–`0052`, all applied and verified:** `warehouses`/`parts`
     (0043), `stock_movements` audit ledger + `receive_stock`/`adjust_stock` RPCs
     (0044), `suppliers` entity (0045), FIFO `price_lots` + `add_price_lot`/
@@ -361,8 +366,27 @@ relevant skill(s) **when the task calls for it**:
     `received_qty`/`received_unit_price_sar` (columns existed, just never
     selected) — PO detail now shows actual-vs-ordered qty/price per line and
     an "Actual total" once anything's been received.
-  - **Remaining phase:** 7 Financial Analysis + per-part finance +
-    AI-suggest-PO.
+  - **Built and working (Phase 7, partial):** top-level 3-tab nav (Inventory
+    Levels / Approvals / Financial Analysis, preview's own `inv-tabs`) —
+    header actions (New PO/Add Parts) and the ProcStrip/search/parts-table
+    are Inventory-Levels-tab-scoped now, matching preview; a 5-stat KPI row
+    (added Open POs + Pending Approval to the existing 3) sits above the
+    tabs, always visible, also matching preview. Approvals tab:
+    `pending_approval` queue, approval-dot progress, quick Approve action
+    per row. Financial Analysis tab: Spend 30d/90d (real dates), inventory
+    value, open PO count, top-spend-category + spend-by-supplier bar
+    charts, AI Insights card (low-stock/price-up/consolidate
+    recommendations, read-only for now).
+  - **Remaining in Phase 7:** AI-Suggest-PO itself. Migration `0053`
+    (`purchase_orders.ai_generated`/`ai_rationale`/`ai_rationale_ar`,
+    extends `create_purchase_order`'s signature to 9 args) is DRAFTED to
+    disk, flagged, NOT yet applied. Until it's run: no "AI-Suggest" header
+    button, no "AI-Suggest ->" action on the Financial Analysis tab's
+    low-stock insight, no "★ AI" badge anywhere — wiring any of that before
+    the columns exist would mean reworking it right after. Also still
+    pending: per-part finance report (preview's `openPartFinance` — 90-day
+    spend/usage + AI tip per part, opened from the parts table's chart-icon
+    button).
   - **Dormant by design (RPC exists, no app-code caller yet — do not remove, do
     not treat as dead code):** `consume_from_lots` (0046, lights up at
     work-order-parts-usage — PO receiving now has a caller via
