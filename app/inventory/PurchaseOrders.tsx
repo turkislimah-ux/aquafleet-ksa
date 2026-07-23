@@ -43,8 +43,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { Plus, X, ShoppingCart, Save, Eye, Printer, Check, AlertTriangle, PackagePlus, Upload } from "lucide-react";
-import { Btn, Table, TH, TD, Card } from "@/components/ui";
+import {
+  Plus,
+  X,
+  ShoppingCart,
+  Save,
+  Eye,
+  Printer,
+  Check,
+  AlertTriangle,
+  PackagePlus,
+  Upload,
+  Zap,
+} from "lucide-react";
+import { Btn, Table, TH, TD, Card, Stat } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import type {
   Warehouse,
@@ -63,7 +75,7 @@ import {
   rejectPurchaseOrder,
   type PurchaseOrderLineInput,
 } from "./actions";
-import { NewSupplierModal, CreateWarehouseModal, AddPartModal, InvoiceFileTile } from "./SharedCreateModals";
+import { NewSupplierModal, CreateWarehouseModal, AddPartModal, InvoiceFileTile, categoryLabel } from "./SharedCreateModals";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -1876,6 +1888,374 @@ export function RejectPOModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// Approvals TAB — preview's invApprovalsView (pages-2.js ~3277-3329),
+// inline on the Inventory page's own "Approvals" tab (was previously only
+// reachable via the ProcStrip's "Pending review" chip -> a modal; that
+// modal still exists for quick access, this is the full tab preview has
+// alongside it). Same queue (pending_approval POs, oldest received first),
+// approval-dot progress + approver names, quick "Approve" action per row.
+export function ApprovalsTab({
+  lang,
+  purchaseOrders,
+  purchaseOrderApprovals,
+  suppliers,
+  onView,
+  onApprove,
+}: {
+  lang: "en" | "ar";
+  purchaseOrders: PurchaseOrder[];
+  purchaseOrderApprovals: PurchaseOrderApproval[];
+  suppliers: Supplier[];
+  onView: (po: PurchaseOrder) => void;
+  onApprove: (po: PurchaseOrder) => void;
+}) {
+  const suppliersById = useMemo(() => {
+    const m = new Map<string, Supplier>();
+    for (const s of suppliers) m.set(s.id, s);
+    return m;
+  }, [suppliers]);
+
+  const queue = purchaseOrders
+    .filter((o) => o.status === "pending_approval")
+    .slice()
+    .sort((a, b) => {
+      const ad = a.received_date ?? "";
+      const bd = b.received_date ?? "";
+      return ad < bd ? -1 : ad > bd ? 1 : 0;
+    });
+
+  return (
+    <Card className="!p-0 overflow-hidden">
+      <div className="p-3 border-b" style={{ borderColor: "rgb(var(--border))" }}>
+        <h3 className="font-semibold">{lang === "en" ? "Approvals Queue" : "قائمة الاعتمادات"}</h3>
+        <p className="text-sm muted">
+          {lang === "en" ? "Minimum approvals required" : "الحد الأدنى من الاعتمادات"}: <b>2</b>
+        </p>
+      </div>
+      {queue.length === 0 ? (
+        <p className="muted text-sm py-6 text-center">
+          {lang === "en" ? "No POs awaiting approval." : "لا توجد أوامر بانتظار الاعتماد."}
+        </p>
+      ) : (
+        <Table>
+          <thead>
+            <tr>
+              <TH>{lang === "en" ? "PO Number" : "رقم الأمر"}</TH>
+              <TH>{lang === "en" ? "Supplier" : "المورد"}</TH>
+              <TH>{lang === "en" ? "Received on" : "تاريخ الاستلام"}</TH>
+              <TH>{lang === "en" ? "Approved by" : "تم الاعتماد من"}</TH>
+              <TH></TH>
+            </tr>
+          </thead>
+          <tbody>
+            {queue.map((po) => {
+              const supplier = suppliersById.get(po.supplier_id);
+              const approvals = purchaseOrderApprovals.filter((a) => a.purchase_order_id === po.id);
+              return (
+                <tr
+                  key={po.id}
+                  className="cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+                  onClick={() => onView(po)}
+                >
+                  <TD className="font-mono text-xs font-semibold">{po.po_number}</TD>
+                  <TD>
+                    <div className="text-sm">{supplier?.name ?? "—"}</div>
+                  </TD>
+                  <TD className="text-xs">{po.received_date ?? "—"}</TD>
+                  <TD className="text-xs">
+                    <div className="inline-flex items-center gap-1">
+                      {Array.from({ length: 2 }).map((_, i) => (
+                        <span
+                          key={i}
+                          className="h-2 w-2 rounded-full inline-block"
+                          style={{
+                            background: i < approvals.length ? "#10b981" : "rgb(var(--border))",
+                            boxShadow: i < approvals.length ? "0 0 0 1px rgba(16,185,129,.4)" : undefined,
+                          }}
+                        />
+                      ))}
+                      <span className="muted ms-1">{approvals.length}/2</span>
+                    </div>
+                    {approvals.length > 0 && (
+                      <div className="text-[11px] muted">{approvals.map((a) => a.approver_email).join(", ")}</div>
+                    )}
+                  </TD>
+                  <TD className="text-right">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onApprove(po);
+                      }}
+                      className="h-7 px-2.5 rounded-md text-xs font-medium bg-brand-600 hover:bg-brand-700 text-white inline-flex items-center gap-1.5"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      {lang === "en" ? "Approve" : "اعتماد"}
+                    </button>
+                  </TD>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      )}
+    </Card>
+  );
+}
+
+function SpendBar({ pct }: { pct: number }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const color = clamped >= 70 ? "#10b981" : clamped >= 40 ? "#f59e0b" : "#f43f5e";
+  return (
+    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(0,0,0,.06)" }}>
+      <div className="h-full rounded-full transition-all" style={{ width: `${clamped}%`, background: color }} />
+    </div>
+  );
+}
+
+// Financial Analysis TAB — preview's invReportsView (pages-2.js
+// ~3331-3439): spend KPIs, top spend categories + spend-by-supplier bar
+// charts (from real purchase_order_lines/purchase_orders, actual received
+// figures where available), and an AI Insights card (low-stock items,
+// price-up items, supplier-consolidation suggestion). Uses real dates
+// (todayKey-based cutoffs), not preview's hardcoded demo "today".
+//
+// The AI Insights card's low-stock recommendation intentionally has NO
+// "AI-Suggest ->" button yet (preview has one, opening a pre-filled PO
+// draft) — that needs purchase_orders.ai_generated/ai_rationale(_ar)
+// (migration 0053, drafted, NOT yet applied) to persist correctly. Shows
+// the recommendation text only until that migration lands and the
+// create-PO wiring can follow.
+export function FinancialAnalysisTab({
+  lang,
+  parts,
+  priceLots,
+  purchaseOrders,
+  purchaseOrderLines,
+  suppliers,
+  inventoryValue,
+  openPOsCount,
+}: {
+  lang: "en" | "ar";
+  parts: Part[];
+  priceLots: { part_id: string; price_sar: number; received_on: string; created_at: string }[];
+  purchaseOrders: PurchaseOrder[];
+  purchaseOrderLines: PurchaseOrderLine[];
+  suppliers: Supplier[];
+  inventoryValue: number;
+  openPOsCount: number;
+}) {
+  const suppliersById = useMemo(() => {
+    const m = new Map<string, Supplier>();
+    for (const s of suppliers) m.set(s.id, s);
+    return m;
+  }, [suppliers]);
+
+  function daysAgoKey(n: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function poActualOrEstimated(po: PurchaseOrder): number {
+    return purchaseOrderLines
+      .filter((l) => l.purchase_order_id === po.id)
+      .reduce((s, l) => s + (l.received_qty ?? l.qty) * (l.received_unit_price_sar ?? l.unit_price_sar), 0);
+  }
+
+  const cutoff30 = daysAgoKey(30);
+  const cutoff90 = daysAgoKey(90);
+  const spend30 = purchaseOrders
+    .filter((po) => po.received_date && po.received_date >= cutoff30 && po.status === "approved")
+    .reduce((s, po) => s + poActualOrEstimated(po), 0);
+  const spend90 = purchaseOrders
+    .filter(
+      (po) =>
+        po.received_date && po.received_date >= cutoff90 && (po.status === "approved" || po.status === "pending_approval")
+    )
+    .reduce((s, po) => s + poActualOrEstimated(po), 0);
+
+  const partsById = useMemo(() => {
+    const m = new Map<string, Part>();
+    for (const p of parts) m.set(p.id, p);
+    return m;
+  }, [parts]);
+
+  // Top spend categories — same PO filter as spend90 (approved + pending
+  // approval), grouped by part.category.
+  const spendByCat = new Map<string, number>();
+  for (const po of purchaseOrders) {
+    if (po.status !== "approved" && po.status !== "pending_approval") continue;
+    for (const l of purchaseOrderLines.filter((x) => x.purchase_order_id === po.id)) {
+      const part = partsById.get(l.part_id);
+      if (!part || !part.category) continue;
+      const cost = (l.received_qty ?? l.qty) * (l.received_unit_price_sar ?? l.unit_price_sar);
+      spendByCat.set(part.category, (spendByCat.get(part.category) ?? 0) + cost);
+    }
+  }
+  const catRows = Array.from(spendByCat.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+  const catMax = catRows[0]?.[1] ?? 1;
+
+  // Spend by supplier — same PO filter.
+  const spendBySup = new Map<string, number>();
+  for (const po of purchaseOrders) {
+    if (po.status !== "approved" && po.status !== "pending_approval") continue;
+    const name = suppliersById.get(po.supplier_id)?.name ?? "—";
+    spendBySup.set(name, (spendBySup.get(name) ?? 0) + poActualOrEstimated(po));
+  }
+  const supRows = Array.from(spendBySup.entries()).sort((a, b) => b[1] - a[1]);
+  const supMax = supRows[0]?.[1] ?? 1;
+
+  // AI insights — pure recommendations, no PO creation wired yet (see this
+  // component's own header comment).
+  const lowParts = parts.filter((p) => p.reorder_level != null && p.qty_on_hand <= p.reorder_level);
+  const pricesByPart = useMemo(() => {
+    const m = new Map<string, { current: number; previous: number | null }>();
+    for (const lot of priceLots) {
+      const existing = m.get(lot.part_id);
+      if (!existing) m.set(lot.part_id, { current: lot.price_sar, previous: null });
+      else m.set(lot.part_id, { current: lot.price_sar, previous: existing.current });
+    }
+    return m;
+  }, [priceLots]);
+  const pricedUp = parts.filter((p) => {
+    const prices = pricesByPart.get(p.id);
+    if (!prices || prices.previous == null || prices.previous <= 0) return false;
+    return (prices.current - prices.previous) / prices.previous > 0.1;
+  });
+  const supplierPOCount = new Map<string, number>();
+  for (const po of purchaseOrders) {
+    const name = suppliersById.get(po.supplier_id)?.name ?? "—";
+    supplierPOCount.set(name, (supplierPOCount.get(name) ?? 0) + 1);
+  }
+  const consolidate = Array.from(supplierPOCount.entries()).filter(([, n]) => n >= 3);
+  const noInsights = lowParts.length === 0 && pricedUp.length === 0 && consolidate.length === 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Stat label={lang === "en" ? "Spend (30d)" : "الإنفاق (30 يوم)"} value={formatSar(spend30)} tone="info" />
+        <Stat label={lang === "en" ? "Spend (90d)" : "الإنفاق (90 يوم)"} value={formatSar(spend90)} tone="info" />
+        <Stat label={lang === "en" ? "Inventory Value" : "قيمة المخزون"} value={formatSar(inventoryValue)} tone="ok" />
+        <Stat label={lang === "en" ? "Open POs" : "أوامر مفتوحة"} value={openPOsCount} tone="warn" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card className="!p-4">
+          <h3 className="font-semibold mb-3">{lang === "en" ? "Top spend categories (90d)" : "أعلى فئات الإنفاق (90 يوم)"}</h3>
+          {catRows.length === 0 ? (
+            <p className="muted text-sm">{lang === "en" ? "No approved spend yet" : "لا يوجد إنفاق معتمد بعد"}</p>
+          ) : (
+            <div className="space-y-2">
+              {catRows.map(([cat, val]) => (
+                <div key={cat}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span>{categoryLabel(cat, lang)}</span>
+                    <span className="font-medium tabular-nums">{formatSar(val)}</span>
+                  </div>
+                  <SpendBar pct={(val / catMax) * 100} />
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card className="!p-4">
+          <h3 className="font-semibold mb-3">{lang === "en" ? "Spend by supplier" : "الإنفاق حسب المورّد"}</h3>
+          {supRows.length === 0 ? (
+            <p className="muted text-sm">{lang === "en" ? "No approved spend yet" : "لا يوجد إنفاق معتمد بعد"}</p>
+          ) : (
+            <div className="space-y-2">
+              {supRows.map(([sup, val]) => (
+                <div key={sup}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span>{sup}</span>
+                    <span className="font-medium tabular-nums">{formatSar(val)}</span>
+                  </div>
+                  <SpendBar pct={(val / supMax) * 100} />
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div
+        className="card p-4"
+        style={{ background: "linear-gradient(180deg, rgba(139,92,246,.04) 0%, transparent 100%)" }}
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <span
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full text-white tracking-wide"
+            style={{ background: "linear-gradient(135deg,#8b5cf6,#0b7eea)" }}
+          >
+            <Zap className="h-3 w-3" />
+            {lang === "en" ? "AI Insights & Recommendations" : "رؤى وتوصيات الذكاء"}
+          </span>
+        </div>
+        <div className="space-y-3">
+          {lowParts.length > 0 && (
+            <div className="rounded-lg border p-3" style={{ background: "rgba(245,158,11,.06)", borderColor: "rgba(245,158,11,.3)" }}>
+              <div className="font-medium text-sm flex items-center">
+                {lang === "en" ? "Items below reorder level — consider issuing POs now" : "أصناف تحت حد إعادة الطلب — اعتبر إصدار أوامر شراء"}
+                <span className="inline-block min-w-[1.25rem] px-1.5 rounded-full bg-violet-500 text-white text-[11px] font-bold text-center ms-2">
+                  {lowParts.length}
+                </span>
+              </div>
+              <div className="text-xs muted mt-1">
+                {lowParts.slice(0, 4).map((p) => p.sku).join(", ")}
+                {lowParts.length > 4 ? "…" : ""}
+              </div>
+            </div>
+          )}
+          {pricedUp.length > 0 && (
+            <div className="rounded-lg border p-3" style={{ background: "rgba(11,126,234,.05)", borderColor: "rgba(11,126,234,.25)" }}>
+              <div className="font-medium text-sm flex items-center">
+                {lang === "en"
+                  ? "Parts whose latest price increased >10% — review supplier alternatives"
+                  : "قطع ارتفع آخر سعر لها أكثر من 10% — راجع البدائل"}
+                <span className="inline-block min-w-[1.25rem] px-1.5 rounded-full bg-violet-500 text-white text-[11px] font-bold text-center ms-2">
+                  {pricedUp.length}
+                </span>
+              </div>
+              <div className="text-xs muted mt-1">
+                {pricedUp
+                  .slice(0, 4)
+                  .map((p) => {
+                    const prices = pricesByPart.get(p.id)!;
+                    const pct = Math.round(((prices.current - (prices.previous ?? 0)) / (prices.previous ?? 1)) * 100);
+                    return `${p.sku} (${pct}%)`;
+                  })
+                  .join(", ")}
+              </div>
+            </div>
+          )}
+          {consolidate.length > 0 && (
+            <div className="rounded-lg border p-3" style={{ background: "rgba(11,126,234,.05)", borderColor: "rgba(11,126,234,.25)" }}>
+              <div className="font-medium text-sm">
+                {lang === "en"
+                  ? "Suppliers with multiple small POs — consolidating can unlock volume discounts"
+                  : "موردون بأوامر صغيرة متعددة — التوحيد قد يحقق خصومات الكمية"}
+              </div>
+              <div className="text-xs muted mt-1">{consolidate.map(([s, n]) => `${s} (${n})`).join(", ")}</div>
+            </div>
+          )}
+          {noInsights && (
+            <p className="muted text-sm">
+              {lang === "en" ? "No recommendations at this time — inventory looks healthy." : "لا توصيات حالياً — المخزون في حالة جيدة."}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

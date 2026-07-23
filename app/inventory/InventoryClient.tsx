@@ -225,6 +225,8 @@ import {
   ApprovalsListModal,
   ApprovePOModal,
   RejectPOModal,
+  ApprovalsTab,
+  FinancialAnalysisTab,
 } from "./PurchaseOrders";
 import {
   CreateWarehouseModal,
@@ -313,6 +315,11 @@ export default function InventoryClient({
   error: string | null;
 }) {
   const { lang } = useApp();
+  // Phase 7 — top-level sub-tabs (preview: inventory()'s 3-tab structure,
+  // pages-2.js ~3012-3016). Header action buttons (New PO/Add Parts) and
+  // the ProcStrip/search+filter/parts table only ever show on "inventory" —
+  // matches preview's own headerActions gate exactly.
+  const [invTab, setInvTab] = useState<"inventory" | "approvals" | "analysis">("inventory");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("all"); // "all" | warehouse.id
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
@@ -401,12 +408,17 @@ export default function InventoryClient({
               {lang === "en" ? "Create Warehouse" : "إنشاء مستودع"}
             </Btn>
             {/* Phase 4 — preview's header order is New PO (primary) / Add
-                Parts (outline) / AI-suggest-PO (outline, Phase 7, not built
-                yet). Same warehouse-required gate as Add Parts — a PO always
-                needs a warehouse picked; New Item/New Supplier are still
-                available inline inside the New PO modal for the
-                chicken-and-egg case. */}
-            {warehouses.length > 0 && (
+                Parts (outline) / AI-suggest-PO (outline, Phase 7 — drafted
+                a migration for the persisted ai_generated/ai_rationale
+                columns, not yet applied, so this button isn't built yet
+                either; wiring it before the columns exist would mean
+                reworking it right after). Same warehouse-required gate as
+                Add Parts — a PO always needs a warehouse picked; New Item/
+                New Supplier are still available inline inside the New PO
+                modal for the chicken-and-egg case. preview gates its ENTIRE
+                header action row to the Inventory Levels sub-tab
+                (headerActions, pages-2.js ~3022) — matched here too. */}
+            {invTab === "inventory" && warehouses.length > 0 && (
               <Btn variant="primary" onClick={() => setNewPOOpen(true)}>
                 <ShoppingCart className="h-4 w-4" />
                 {lang === "en" ? "New PO" : "أمر شراء جديد"}
@@ -420,7 +432,7 @@ export default function InventoryClient({
                 Item" inside this very modal — same chicken-and-egg fix
                 preview's own header already has, since it never gates on
                 parts.length either). */}
-            {warehouses.length > 0 && (
+            {invTab === "inventory" && warehouses.length > 0 && (
               <Btn variant="outline" onClick={() => setReceiveModalOpen(true)}>
                 <PackagePlus className="h-4 w-4" />
                 {lang === "en" ? "Add Parts" : "إضافة قطع"}
@@ -436,7 +448,11 @@ export default function InventoryClient({
         <EmptyWarehouseState lang={lang} onCreate={() => setWarehouseModalOpen(true)} />
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Top-level KPI row — preview's own inventory()'s 5-stat row
+              (pages-2.js ~3035-3041), ALWAYS visible above the tabs
+              regardless of which sub-tab is active (unlike the ProcStrip,
+              which is Inventory-Levels-tab-scoped, see below). */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <Stat
               label={lang === "en" ? "Inventory Value" : "قيمة المخزون"}
               value={formatSar(inventoryValue)}
@@ -448,78 +464,149 @@ export default function InventoryClient({
               value={lowStockCount}
               tone={lowStockCount > 0 ? "bad" : "ok"}
             />
+            <Stat
+              label={lang === "en" ? "Open POs" : "أوامر مفتوحة"}
+              value={openPOsCount}
+              tone={openPOsCount > 0 ? "info" : "ok"}
+            />
+            <Stat
+              label={lang === "en" ? "Pending Approval" : "بانتظار الاعتماد"}
+              value={pendingReviewCount}
+              tone={pendingReviewCount > 0 ? "warn" : "ok"}
+            />
           </div>
 
-          <ProcStrip
-            lang={lang}
-            openCount={openPOsCount}
-            awaitingReceiptCount={awaitingReceiptCount}
-            pendingReviewCount={pendingReviewCount}
-            onOpenList={() => setPoListOpen(true)}
-            onOpenReceiveList={() => setReceiveListOpen(true)}
-            onOpenApprovalsList={() => setApprovalsListOpen(true)}
-          />
-
-          <Card className="!p-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative flex-1 min-w-[200px]">
-                <Search className="h-4 w-4 muted absolute left-2.5 top-1/2 -translate-y-1/2" />
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder={lang === "en" ? "Search part name, SKU…" : "بحث بالاسم أو الرمز…"}
-                  className="h-9 pl-8 pr-3 rounded-lg border text-sm w-full"
-                  style={INPUT_STYLE}
-                />
-              </div>
-              <div className="flex items-center gap-1 flex-wrap">
-                <button
-                  onClick={() => setCat("all")}
-                  className={cn(
-                    "h-9 px-2.5 rounded-lg text-[11px] font-medium border",
-                    cat === "all" ? "bg-brand-600 text-white border-brand-600" : ""
-                  )}
-                  style={cat !== "all" ? { borderColor: "rgb(var(--border))" } : undefined}
-                >
-                  {lang === "en" ? "All" : "الكل"}
-                </button>
-                {FILTER_CATS.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setCat(c)}
-                    className={cn(
-                      "h-9 px-2.5 rounded-lg text-[11px] font-medium border",
-                      cat === c ? "bg-brand-600 text-white border-brand-600" : ""
-                    )}
-                    style={cat !== c ? { borderColor: "rgb(var(--border))" } : undefined}
-                  >
-                    {categoryLabel(c, lang)}
-                  </button>
-                ))}
-              </div>
-              <select
-                value={warehouseFilter}
-                onChange={(e) => setWarehouseFilter(e.target.value)}
-                className="h-9 px-2.5 rounded-lg border text-sm"
-                style={INPUT_STYLE}
+          {/* Sub-tab nav — preview's .inv-tabs (pages-2.js ~3012-3016,
+              app.css ~651-665): Inventory Levels / Approvals / Financial
+              Analysis. Turki: both Approvals and Financial Analysis were
+              missing from this app entirely before this pass — preview has
+              had them since the Purchase Orders phases began. */}
+          <div
+            className="inline-flex p-1 gap-1 rounded-xl border flex-wrap"
+            style={{ background: "rgb(var(--card))", borderColor: "rgb(var(--border))" }}
+          >
+            {(
+              [
+                ["inventory", lang === "en" ? "Inventory Levels" : "مستويات المخزون", null],
+                ["approvals", lang === "en" ? "Approvals" : "الموافقات", pendingReviewCount],
+                ["analysis", lang === "en" ? "Financial Analysis" : "التحليل المالي", null],
+              ] as const
+            ).map(([key, label, count]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setInvTab(key)}
+                className={cn(
+                  "px-3.5 py-2 rounded-lg text-[13px] font-medium transition-colors whitespace-nowrap",
+                  invTab === key ? "bg-brand-600 text-white shadow-sm" : "hover:bg-black/5 dark:hover:bg-white/5"
+                )}
               >
-                <option value="all">{lang === "en" ? "All warehouses" : "كل المستودعات"}</option>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </Card>
+                {label}
+                {count != null && (
+                  <span className={cn("ms-1", invTab === key ? "text-white/85" : "muted")}>({count})</span>
+                )}
+              </button>
+            ))}
+          </div>
 
-          <PartsTable
-            parts={visibleParts}
-            warehousesById={warehousesById}
-            pricesByPart={pricesByPart}
-            lang={lang}
-            onView={(p) => setViewPart(p)}
-          />
+          {invTab === "inventory" && (
+            <>
+              <ProcStrip
+                lang={lang}
+                openCount={openPOsCount}
+                awaitingReceiptCount={awaitingReceiptCount}
+                pendingReviewCount={pendingReviewCount}
+                onOpenList={() => setPoListOpen(true)}
+                onOpenReceiveList={() => setReceiveListOpen(true)}
+                onOpenApprovalsList={() => setApprovalsListOpen(true)}
+              />
+
+              <Card className="!p-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="h-4 w-4 muted absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      value={q}
+                      onChange={(e) => setQ(e.target.value)}
+                      placeholder={lang === "en" ? "Search part name, SKU…" : "بحث بالاسم أو الرمز…"}
+                      className="h-9 pl-8 pr-3 rounded-lg border text-sm w-full"
+                      style={INPUT_STYLE}
+                    />
+                  </div>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <button
+                      onClick={() => setCat("all")}
+                      className={cn(
+                        "h-9 px-2.5 rounded-lg text-[11px] font-medium border",
+                        cat === "all" ? "bg-brand-600 text-white border-brand-600" : ""
+                      )}
+                      style={cat !== "all" ? { borderColor: "rgb(var(--border))" } : undefined}
+                    >
+                      {lang === "en" ? "All" : "الكل"}
+                    </button>
+                    {FILTER_CATS.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setCat(c)}
+                        className={cn(
+                          "h-9 px-2.5 rounded-lg text-[11px] font-medium border",
+                          cat === c ? "bg-brand-600 text-white border-brand-600" : ""
+                        )}
+                        style={cat !== c ? { borderColor: "rgb(var(--border))" } : undefined}
+                      >
+                        {categoryLabel(c, lang)}
+                      </button>
+                    ))}
+                  </div>
+                  <select
+                    value={warehouseFilter}
+                    onChange={(e) => setWarehouseFilter(e.target.value)}
+                    className="h-9 px-2.5 rounded-lg border text-sm"
+                    style={INPUT_STYLE}
+                  >
+                    <option value="all">{lang === "en" ? "All warehouses" : "كل المستودعات"}</option>
+                    {warehouses.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </Card>
+
+              <PartsTable
+                parts={visibleParts}
+                warehousesById={warehousesById}
+                pricesByPart={pricesByPart}
+                lang={lang}
+                onView={(p) => setViewPart(p)}
+              />
+            </>
+          )}
+
+          {invTab === "approvals" && (
+            <ApprovalsTab
+              lang={lang}
+              purchaseOrders={purchaseOrders}
+              purchaseOrderApprovals={purchaseOrderApprovals}
+              suppliers={suppliers}
+              onView={(po) => setViewPO(po)}
+              onApprove={(po) => setApprovePO(po)}
+            />
+          )}
+
+          {invTab === "analysis" && (
+            <FinancialAnalysisTab
+              lang={lang}
+              parts={parts}
+              priceLots={priceLots}
+              purchaseOrders={purchaseOrders}
+              purchaseOrderLines={purchaseOrderLines}
+              suppliers={suppliers}
+              inventoryValue={inventoryValue}
+              openPOsCount={openPOsCount}
+            />
+          )}
         </>
       )}
 
