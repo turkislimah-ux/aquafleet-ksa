@@ -298,27 +298,41 @@ relevant skill(s) **when the task calls for it**:
 
 - **Inventory is being built as the FULL demo (preview/'s Inventory page: parts +
   warehouses + suppliers + FIFO cost lots + Purchase Orders + Approvals + Financial
-  Analysis), in 7 phases. Phases 1–3 of 7 are COMPLETE, through commits `580e135`
-  (migrations) + `11d9239` (app code).**
-  - **Migrations `0043`–`0049`, all applied and verified:** `warehouses`/`parts`
+  Analysis), in 7 phases. Phases 1–4 of 7 are COMPLETE.**
+  - **Phases 1–3:** commits `580e135` (migrations) + `11d9239` (app code).
+  - **Phase 4 (Purchase Orders core, draft->issued):** commits `dd67682`
+    (migration `0050`) + `ab3008d` (app code) — committed as two units this
+    time, right away, per the lesson below.
+  - **Migrations `0043`–`0050`, all applied and verified:** `warehouses`/`parts`
     (0043), `stock_movements` audit ledger + `receive_stock`/`adjust_stock` RPCs
     (0044), `suppliers` entity (0045), FIFO `price_lots` + `add_price_lot`/
     `consume_from_lots` (0046), `stock_receipts`/`stock_receipt_lines`/
     `stock_receipt_files` + private `stock-receipt-invoices` bucket +
     `receive_loose_parts` RPC (0047), `suppliers.name_ar` (0048), `units` lookup
-    table, seeded (0049).
-  - **Built and working:** warehouse tabs; parts table with KPIs (inventory value/
-    SKUs/low stock) and stock-tier coloring; part drawer (pricing snapshot with
-    current/previous price + trend, FIFO batches table, stock_movements history,
-    reorder info); Add Parts/receive flow (supplier + warehouse pickers, multi-line
-    part/qty/price builder, mandatory multi-file invoice upload) with inline
-    New Item / New Supplier / New Warehouse / New Unit creates, each merging
-    in-flight and auto-selecting; Category is a free-text combo (existing values +
-    free typing, mirrors preview); Unit is a lookup-table picker (code + meaning
-    both shown, code is the stored value) with its own inline "+ Unit" create.
-  - **Remaining phases:** 4 Purchase Orders core (draft/issue) -> 5 PO receiving ->
-    6 Approvals (min 2 approvers, reuses existing staff roles, no new role table) ->
-    7 Financial Analysis + per-part finance + AI-suggest-PO.
+    table, seeded (0049), `purchase_orders`/`purchase_order_lines` + gap-free
+    `po_number` counter + `create_purchase_order`/`issue_purchase_order` RPCs
+    (0050).
+  - **Built and working (Phases 1–3):** warehouse tabs; parts table with KPIs
+    (inventory value/SKUs/low stock) and stock-tier coloring; part drawer
+    (pricing snapshot with current/previous price + trend, FIFO batches table,
+    stock_movements history, reorder info); Add Parts/receive flow (supplier +
+    warehouse pickers, multi-line part/qty/price builder, mandatory multi-file
+    invoice upload) with inline New Item / New Supplier / New Warehouse / New
+    Unit creates, each merging in-flight and auto-selecting; Category is a
+    free-text combo (existing values + free typing, mirrors preview); Unit is
+    a lookup-table picker (code + meaning both shown, code is the stored
+    value) with its own inline "+ Unit" create.
+  - **Built and working (Phase 4):** New PO modal (supplier/warehouse pickers +
+    inline creates, "pick a part" filtered to the PO's own warehouse so the
+    RPC's consistency guard is never hit in normal use, Save draft / Issue
+    now); PO list modal (draft+issued, click-through to detail); read-only PO
+    detail (status pill, print via the existing portal+body-class pattern,
+    Issue action on a draft); the "Active procurement" proc-strip's Open POs
+    chip (header, warehouses.length>0). PO total is NEVER stored — always
+    derived from `purchase_order_lines` at render, everywhere it's shown.
+  - **Remaining phases:** 5 PO receiving -> 6 Approvals (min 2 approvers,
+    reuses existing staff roles, no new role table) -> 7 Financial Analysis +
+    per-part finance + AI-suggest-PO.
   - **Dormant by design (RPC exists, no app-code caller yet — do not remove, do
     not treat as dead code):** `consume_from_lots` (0046, lights up at PO
     receiving/work-order-parts-usage); `receive_stock` (0044, superseded by the
@@ -335,7 +349,7 @@ relevant skill(s) **when the task calls for it**:
     Arabic name (preview's supplier form has no name_ar); category stays a
     free-text combo (Turki's explicit instruction, not moved to a lookup table
     like units were).
-  - **Working rules that held, keep applying through Phases 4–7:** every migration
+  - **Working rules that held, keep applying through Phases 5–7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);
     the FIFO invariant (`sum(price_lots.qty_remaining) == parts.qty_on_hand` per
@@ -343,12 +357,27 @@ relevant skill(s) **when the task calls for it**:
     internal-only money (`unit_cost_sar`, `price_lots.price_sar`) and must never
     flow into `lib/prepaid.ts`/`vat.ts`/`invoice.ts` — those stay customer-facing
     money only.
-  - **Lesson from Phase 3:** commit each phase immediately once it verifies in-
-    browser. Phase 3 wasn't committed right away, so the follow-up cleanup +
-    demo-fidelity pass edited its still-uncommitted code in place — by the time
-    everything landed, Phase 3 and that cleanup pass were too interleaved to
-    split into separate commits, forcing one combined commit (`11d9239`) instead
-    of the usual one-logical-unit-per-commit discipline (§5).
+  - **Lesson from Phase 3 (applied, worked):** commit each phase immediately
+    once it verifies, instead of letting it sit uncommitted through a follow-up
+    pass (that's exactly how Phase 3 + its cleanup pass got too interleaved to
+    split, forcing the one-off combined commit `11d9239`). Phase 4 followed
+    this: migration committed the moment it was confirmed applied (`dd67682`),
+    app code committed the moment it was confirmed working (`ab3008d`) — two
+    clean, separable commits, nothing left to entangle.
+  - **New lesson from Phase 4: watch for import cycles across sibling files.**
+    Splitting a page's modals across multiple files (this app's own established
+    pattern — see app/trips/*.tsx) is fine, but if file A exports something file
+    B needs AND file B exports something file A needs, that's a real cycle —
+    `tsc`/`next build` do NOT catch it (nothing touches the cross-import at
+    module-top-level), but Next's dev module system can resolve it to
+    `undefined` at request time and crash the whole page blank. Fix: give the
+    genuinely-shared pieces their own leaf module (no imports back to either
+    caller) that both files import from one-way — same fix used here
+    (`app/inventory/SharedCreateModals.tsx`, holding `CreateWarehouseModal`/
+    `NewSupplierModal`/`AddPartModal`, now imported one-way by both
+    `InventoryClient.tsx` and `PurchaseOrders.tsx`). Sketch the import
+    direction before splitting a page across new files, not after hitting a
+    blank page.
 
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
