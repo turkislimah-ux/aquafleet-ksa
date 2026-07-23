@@ -944,3 +944,63 @@ function NewUnitModal({
     </div>
   );
 }
+
+// Local (not-yet-uploaded) invoice file preview — image thumbnail or a "PDF"
+// badge + filename, mirrors preview's invoice-tile gallery. Object URL is
+// created/revoked per file via effect cleanup, same lifecycle rule as any
+// other client-only blob preview in this app. Shared by ReceivePartsModal
+// (InventoryClient.tsx) and ReceivePOModal (PurchaseOrders.tsx, Phase 5) —
+// lives here, a leaf module, so neither of those two needs to import it
+// from the other (see this file's own header for the import-cycle it
+// avoids).
+export function InvoiceFileTile({
+  file,
+  lang,
+  onRemove,
+}: {
+  file: File;
+  lang: "en" | "ar";
+  onRemove: () => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const isImage = file.type.startsWith("image/");
+
+  useEffect(() => {
+    if (!isImage) return;
+    const objectUrl = URL.createObjectURL(file);
+    setUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file, isImage]);
+
+  // Structure mirrors preview's .invoice-tile exactly (app.css ~570-578):
+  // fixed-height image/PDF-badge block on top, filename row below it (not
+  // an overlay banner on the image), hover-reveal remove button (opacity 0
+  // -> 1 on hover, not always-visible), hover border turns brand-blue with
+  // a soft shadow.
+  return (
+    <div
+      className="group relative rounded-lg border overflow-hidden flex flex-col transition-all hover:border-brand-500 hover:shadow-md"
+      style={INPUT_STYLE}
+    >
+      {isImage && url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt={file.name} className="w-full h-[70px] object-cover block" />
+      ) : (
+        <div className="flex flex-col items-center justify-center h-[70px] gap-1 bg-rose-500/[0.06]">
+          <span className="bg-rose-700 text-white text-[10px] font-bold px-1.5 py-0.5 rounded tracking-wide">
+            PDF
+          </span>
+        </div>
+      )}
+      <span className="text-[11px] muted px-1.5 py-1 truncate">{file.name}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        title={lang === "en" ? "Remove" : "حذف"}
+        className="absolute top-1 right-1 w-5 h-5 grid place-items-center rounded-full bg-rose-700 text-white text-[11px] leading-none opacity-0 group-hover:opacity-100 transition-opacity"
+      >
+        ×
+      </button>
+    </div>
+  );
+}

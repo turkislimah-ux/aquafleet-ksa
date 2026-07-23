@@ -214,11 +214,19 @@ import type {
   PurchaseOrder,
   PurchaseOrderLine,
 } from "@/lib/db-types";
-import { ProcStrip, NewPOModal, POListModal, PODetailModal } from "./PurchaseOrders";
+import {
+  ProcStrip,
+  NewPOModal,
+  POListModal,
+  PODetailModal,
+  ReceiveListModal,
+  ReceivePOModal,
+} from "./PurchaseOrders";
 import {
   CreateWarehouseModal,
   NewSupplierModal,
   AddPartModal,
+  InvoiceFileTile,
   categoryLabel,
   useNumField,
   parseNumField,
@@ -311,6 +319,9 @@ export default function InventoryClient({
   const [newPOOpen, setNewPOOpen] = useState(false);
   const [poListOpen, setPoListOpen] = useState(false);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
+  // Phase 5 — PO receiving (migration 0051).
+  const [receiveListOpen, setReceiveListOpen] = useState(false);
+  const [receivePO, setReceivePO] = useState<PurchaseOrder | null>(null);
 
   const warehousesById = useMemo(() => {
     const m = new Map<string, Warehouse>();
@@ -359,10 +370,11 @@ export default function InventoryClient({
   const lowStockCount = parts.filter(
     (p) => p.reorder_level != null && p.qty_on_hand <= p.reorder_level
   ).length;
-  // Proc-strip's "Open POs" chip (preview: pages-2.js ~3007) — draft+issued
-  // only. "Awaiting receipt"/"Pending review" chips need Phase 5/6 data,
-  // not built here.
+  // Proc-strip chips (preview: pages-2.js ~3007). "Pending review" needs
+  // Phase 6 (approve/reject UI) before it's worth showing — see
+  // ProcStrip's own comment.
   const openPOsCount = purchaseOrders.filter((o) => o.status === "draft" || o.status === "issued").length;
+  const awaitingReceiptCount = purchaseOrders.filter((o) => o.status === "issued").length;
 
   return (
     <div className="space-y-5">
@@ -429,7 +441,13 @@ export default function InventoryClient({
             />
           </div>
 
-          <ProcStrip lang={lang} openCount={openPOsCount} onOpenList={() => setPoListOpen(true)} />
+          <ProcStrip
+            lang={lang}
+            openCount={openPOsCount}
+            awaitingReceiptCount={awaitingReceiptCount}
+            onOpenList={() => setPoListOpen(true)}
+            onOpenReceiveList={() => setReceiveListOpen(true)}
+          />
 
           <Card className="!p-3">
             <div className="flex items-center gap-2 flex-wrap">
@@ -574,6 +592,34 @@ export default function InventoryClient({
           parts={parts}
           onClose={() => setViewPO(null)}
           onIssued={() => setViewPO(null)}
+          onReceive={(po) => {
+            setViewPO(null);
+            setReceivePO(po);
+          }}
+        />
+      )}
+
+      {receiveListOpen && (
+        <ReceiveListModal
+          lang={lang}
+          purchaseOrders={purchaseOrders}
+          suppliers={suppliers}
+          onClose={() => setReceiveListOpen(false)}
+          onReceive={(po) => {
+            setReceiveListOpen(false);
+            setReceivePO(po);
+          }}
+        />
+      )}
+
+      {receivePO && (
+        <ReceivePOModal
+          lang={lang}
+          po={receivePO}
+          lines={purchaseOrderLines.filter((l) => l.purchase_order_id === receivePO.id)}
+          parts={parts}
+          onClose={() => setReceivePO(null)}
+          onReceived={() => setReceivePO(null)}
         />
       )}
     </div>
@@ -1689,61 +1735,10 @@ function ReceivePartsModal({
   );
 }
 
-// Local (not-yet-uploaded) invoice file preview — image thumbnail or a "PDF"
-// badge + filename, mirrors preview's invoice-tile gallery. Object URL is
-// created/revoked per file via effect cleanup, same lifecycle rule as any
-// other client-only blob preview in this app.
-function InvoiceFileTile({
-  file,
-  lang,
-  onRemove,
-}: {
-  file: File;
-  lang: "en" | "ar";
-  onRemove: () => void;
-}) {
-  const [url, setUrl] = useState<string | null>(null);
-  const isImage = file.type.startsWith("image/");
-
-  useEffect(() => {
-    if (!isImage) return;
-    const objectUrl = URL.createObjectURL(file);
-    setUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [file, isImage]);
-
-  // Structure mirrors preview's .invoice-tile exactly (app.css ~570-578):
-  // fixed-height image/PDF-badge block on top, filename row below it (not
-  // an overlay banner on the image), hover-reveal remove button (opacity 0
-  // -> 1 on hover, not always-visible), hover border turns brand-blue with
-  // a soft shadow.
-  return (
-    <div
-      className="group relative rounded-lg border overflow-hidden flex flex-col transition-all hover:border-brand-500 hover:shadow-md"
-      style={INPUT_STYLE}
-    >
-      {isImage && url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={url} alt={file.name} className="w-full h-[70px] object-cover block" />
-      ) : (
-        <div className="flex flex-col items-center justify-center h-[70px] gap-1 bg-rose-500/[0.06]">
-          <span className="bg-rose-700 text-white text-[10px] font-bold px-1.5 py-0.5 rounded tracking-wide">
-            PDF
-          </span>
-        </div>
-      )}
-      <span className="text-[11px] muted px-1.5 py-1 truncate">{file.name}</span>
-      <button
-        type="button"
-        onClick={onRemove}
-        title={lang === "en" ? "Remove" : "حذف"}
-        className="absolute top-1 right-1 w-5 h-5 grid place-items-center rounded-full bg-rose-700 text-white text-[11px] leading-none opacity-0 group-hover:opacity-100 transition-opacity"
-      >
-        ×
-      </button>
-    </div>
-  );
-}
+// InvoiceFileTile moved to ./SharedCreateModals.tsx (imported above) —
+// ReceivePOModal (PurchaseOrders.tsx, Phase 5) needs it too, and that file
+// cannot import from InventoryClient.tsx without recreating the same
+// import-cycle risk fixed in Phase 4 (see this file's own header note).
 
 // Wraps adjust_stock() (migration 0044 — live). Genuinely new vs preview (no
 // FIFO price-lots here, so a manual correction path is needed) — the ONE

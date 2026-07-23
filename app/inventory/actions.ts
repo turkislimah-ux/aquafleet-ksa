@@ -13,7 +13,16 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import type { Part, PriceLot, PurchaseOrder, StockMovement, Supplier, Unit, Warehouse } from "@/lib/db-types";
+import type {
+  Part,
+  PriceLot,
+  PurchaseOrder,
+  StockMovement,
+  StockReceipt,
+  Supplier,
+  Unit,
+  Warehouse,
+} from "@/lib/db-types";
 
 export type WarehouseInput = {
   name: string;
@@ -521,4 +530,92 @@ export async function issuePurchaseOrder(
 
   revalidatePath("/inventory");
   return { error: null, po: data as PurchaseOrder };
+}
+
+// ---------------------------------------------------------------------------
+// PO receiving (full-demo Phase 5 — migration 0051, LIVE). Wraps
+// receive_purchase_order(), which itself calls receive_loose_parts() (0047)
+// internally — so this action's job is identical to receiveLooseParts'
+// above (upload invoice files first, since the RPC's contract expects
+// already-uploaded {storage_path, file_name, mime_type} pointers, not raw
+// files), plus one extra field: which existing purchase_order_lines row
+// each received line corresponds to. The mandatory-invoice check and the
+// stock_receipts write happen inside receive_loose_parts, not here — this
+// action does not (and must not) duplicate that validation.
+// ---------------------------------------------------------------------------
+
+export type ReceivePoLineInput = {
+  line_id: string;
+  received_qty: number;
+  received_unit_price_sar: number;
+};
+
+export async function receivePurchaseOrder(
+  formData: FormData,
+): Promise<{ error: string | null; receipt?: StockReceipt }> {
+  const poId = String(formData.get("poId") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim() || null;
+  const linesRaw = String(formData.get("linesJson") ?? "");
+  const files = formData.getAll("invoiceFiles").filter((f): f is File => f instanceof File && f.size > 0);
+
+  if (!poId) return { error: "Missing purchase order." };
+
+  let lines: ReceivePoLineInput[];
+  try {
+    lines = JSON.parse(linesRaw);
+  } catch {
+    return { error: "Invalid line items." };
+  }
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return { error: "At least one line item is required." };
+  }
+  for (const l of lines) {
+    if (!l?.line_id) return { error: "Line item is missing line_id." };
+    if (!(l.received_qty > 0)) return { error: "Received quantity must be positive." };
+    if (l.received_unit_price_sar == null || l.received_unit_price_sar < 0) {
+      return { error: "Received unit price cannot be negative." };
+    }
+  }
+  // Not strictly required server-side (receive_loose_parts, called inside
+  // the RPC, is the actual enforcer) — checked here too so the upload loop
+  // below doesn't run for a request that's going to be rejected anyway.
+  if (files.length === 0) return { error: "At least one invoice file is required." };
+
+  const supabase = createClient();
+
+  const uploaded: { storage_path: string; file_name: string; mime_type: string | null }[] = [];
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
+    const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
+    const path = `${poId}/receipt-${Date.now()}-${i}.${ext}`;
+    const { error: uploadErr } = await supabase.storage.from(INVOICE_BUCKET).upload(path, file, {
+      contentType: file.type || "application/octet-stream",
+    });
+    if (uploadErr) {
+      if (uploaded.length > 0) {
+        await supabase.storage.from(INVOICE_BUCKET).remove(uploaded.map((u) => u.storage_path));
+      }
+      return { error: `Invoice upload failed: ${uploadErr.message}` };
+    }
+    uploaded.push({ storage_path: path, file_name: file.name, mime_type: file.type || null });
+  }
+
+  const { data, error } = await supabase.rpc("receive_purchase_order", {
+    p_po_id: poId,
+    p_lines: lines,
+    p_files: uploaded,
+    p_note: note,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) {
+    // Best-effort cleanup — avoid orphaned storage objects for a receipt
+    // that never landed. Ignore cleanup failures; the RPC error below is
+    // the one the user needs to see.
+    await supabase.storage.from(INVOICE_BUCKET).remove(uploaded.map((u) => u.storage_path));
+    return { error: error.message };
+  }
+
+  revalidatePath("/inventory");
+  return { error: null, receipt: data as StockReceipt };
 }

@@ -1,21 +1,24 @@
 "use client";
 
-// Inventory — Phase 4 of the full-demo build-out: Purchase Orders CORE UI
-// (migration 0050, LIVE — create_purchase_order/issue_purchase_order).
-// Mirrors preview/'s INV.openNewPO/_renderPOModal/savePO (new/draft/issue),
-// INV.openPOList (list modal), INV.openPO (read-only detail + print), and
-// the "Active procurement" proc-strip's Open POs chip (pages-2.js
-// ~3080-3098). Scope is draft->issued ONLY, same as the migration —
-// receiving (Phase 5) and approvals (Phase 6) are NOT built here, so this
-// file only ever shows the "Open POs" chip (not "Awaiting receipt"/
-// "Pending review" — those need data this phase doesn't have yet) and the
-// PO detail's only action beyond Print/Close is "Issue" on a draft.
+// Inventory — Phase 4 + Phase 5 of the full-demo build-out: Purchase
+// Orders core (migration 0050 — create_purchase_order/issue_purchase_order)
+// + PO receiving (migration 0051 — receive_purchase_order). Mirrors
+// preview/'s INV.openNewPO/_renderPOModal/savePO (new/draft/issue),
+// INV.openPOList (list modal), INV.openPO (read-only detail + print),
+// INV.openReceiveList (awaiting-receipt card grid), and the "Active
+// procurement" proc-strip's Open POs + Awaiting receipt chips (pages-2.js
+// ~3080-3098). Approvals (Phase 6) are NOT built here — pending_approval is
+// a real, reachable status now (0051), but there's no approve/reject UI to
+// act on it yet, so the "Pending review" chip stays out (see ProcStrip's
+// own comment) and PO detail's only actions beyond Print/Close are "Issue"
+// on a draft and "Receive Stock" on an issued PO.
 //
-// ALL writes go through create_purchase_order()/issue_purchase_order()
-// (app/inventory/actions.ts) — nothing here inserts into purchase_orders/
-// purchase_order_lines directly. The PO total is NEVER stored — every
-// total in this file (list rows, detail footer) is derived by summing
-// lines' qty*unit_price_sar at render, per the RPC's own contract.
+// ALL writes go through create_purchase_order()/issue_purchase_order()/
+// receive_purchase_order() (app/inventory/actions.ts) — nothing here
+// inserts into purchase_orders/purchase_order_lines/stock_receipts
+// directly. The PO total is NEVER stored — every total in this file (list
+// rows, detail footer, receive form) is derived from lines at render, per
+// the RPCs' own contract.
 //
 // WAREHOUSE/PART CONSISTENCY — the RPC rejects a line whose part doesn't
 // belong to the PO's warehouse (0050's guard). Surfaced cleanly, not as a
@@ -37,15 +40,20 @@
 // SharedCreateModals.tsx's header for the full postmortem (this was a
 // real bug, caught after the first version shipped a blank-page crash).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { Plus, X, ShoppingCart, Save, Eye, Printer, Check, AlertTriangle } from "lucide-react";
+import { Plus, X, ShoppingCart, Save, Eye, Printer, Check, AlertTriangle, PackagePlus, Upload } from "lucide-react";
 import { Btn, Table, TH, TD, Card } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import type { Warehouse, Part, Supplier, Unit, PurchaseOrder, PurchaseOrderLine } from "@/lib/db-types";
-import { createPurchaseOrder, issuePurchaseOrder, type PurchaseOrderLineInput } from "./actions";
-import { NewSupplierModal, CreateWarehouseModal, AddPartModal } from "./SharedCreateModals";
+import {
+  createPurchaseOrder,
+  issuePurchaseOrder,
+  receivePurchaseOrder,
+  type PurchaseOrderLineInput,
+} from "./actions";
+import { NewSupplierModal, CreateWarehouseModal, AddPartModal, InvoiceFileTile } from "./SharedCreateModals";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -93,14 +101,57 @@ export function PoStatusPill({ status, lang }: { status: PurchaseOrder["status"]
 // ~611-646) — ONLY the "Open POs" chip this phase (draft+issued count).
 // "Awaiting receipt"/"Pending review" chips need Phase 5/6 data and aren't
 // built here — not silently dropped, just not reachable yet.
+// Chip num background — brand blue by default, amber for "warn" (matches
+// preview's .proc-chip / .proc-chip-warn distinction, app.css ~623-640).
+// Not used yet (both chips built so far are the plain/blue kind) but kept
+// so the "Pending review" chip (Phase 6) can reuse this component as-is.
+function ProcChip({
+  count,
+  label,
+  onClick,
+  warn,
+}: {
+  count: number;
+  label: string;
+  onClick: () => void;
+  warn?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-[13px] hover:border-brand-500/50 hover:bg-brand-500/[0.05] transition-colors"
+      style={INPUT_STYLE}
+    >
+      <span
+        className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-md text-white font-bold text-[13px] tabular-nums"
+        style={{ background: warn ? "#f59e0b" : "#0b7eea" }}
+      >
+        {count}
+      </span>
+      <span className="muted">{label}</span>
+    </button>
+  );
+}
+
+// "Active procurement" strip (preview: pages-2.js ~3083-3098, app.css
+// ~611-646) — Open POs (Phase 4) + Awaiting receipt (Phase 5, issued count).
+// "Pending review" (Phase 6 — approvals) is deliberately NOT shown yet:
+// pending_approval is now a reachable status (0051), but there's no
+// approve/reject UI to click through to — showing a count with no action
+// behind it would be a dead end. Add it once Phase 6 lands.
 export function ProcStrip({
   lang,
   openCount,
+  awaitingReceiptCount,
   onOpenList,
+  onOpenReceiveList,
 }: {
   lang: "en" | "ar";
   openCount: number;
+  awaitingReceiptCount: number;
   onOpenList: () => void;
+  onOpenReceiveList: () => void;
 }) {
   return (
     <div
@@ -114,17 +165,12 @@ export function ProcStrip({
         <ShoppingCart className="h-3.5 w-3.5 text-brand-600" />
         {lang === "en" ? "Active procurement" : "العمليات النشطة"}
       </span>
-      <button
-        type="button"
-        onClick={onOpenList}
-        className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-[13px] hover:border-brand-500/50 hover:bg-brand-500/[0.05] transition-colors"
-        style={INPUT_STYLE}
-      >
-        <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-md bg-brand-600 text-white font-bold text-[13px] tabular-nums">
-          {openCount}
-        </span>
-        <span className="muted">{lang === "en" ? "Open POs" : "أوامر مفتوحة"}</span>
-      </button>
+      <ProcChip count={openCount} label={lang === "en" ? "Open POs" : "أوامر مفتوحة"} onClick={onOpenList} />
+      <ProcChip
+        count={awaitingReceiptCount}
+        label={lang === "en" ? "Awaiting receipt" : "بانتظار الاستلام"}
+        onClick={onOpenReceiveList}
+      />
     </div>
   );
 }
@@ -766,6 +812,7 @@ export function PODetailModal({
   parts,
   onClose,
   onIssued,
+  onReceive,
 }: {
   lang: "en" | "ar";
   po: PurchaseOrder;
@@ -775,6 +822,11 @@ export function PODetailModal({
   parts: Part[];
   onClose: () => void;
   onIssued: () => void;
+  // Phase 5 (migration 0051) — "Receive Stock" action, issued POs only.
+  // Mirrors preview's own openPO footer, which shows the SAME Receive
+  // action for issued/draft (this app: issued-only, see 0051's deliberate
+  // deviation note).
+  onReceive: (po: PurchaseOrder) => void;
 }) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -956,9 +1008,431 @@ export function PODetailModal({
               {issuing ? (lang === "en" ? "Issuing…" : "جارٍ الإصدار…") : lang === "en" ? "Issue" : "إصدار"}
             </button>
           )}
+          {po.status === "issued" && (
+            <button
+              type="button"
+              onClick={() => onReceive(po)}
+              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white inline-flex items-center gap-2"
+            >
+              <PackagePlus className="h-4 w-4" />
+              {lang === "en" ? "Receive Stock" : "استلام المخزون"}
+            </button>
+          )}
         </div>
       </div>
     </div>,
     document.body
+  );
+}
+
+// "Awaiting receipt" list — issued POs only, sorted by expected delivery
+// ascending (preview: openReceiveList, pages-2.js ~1939-1963). Card grid,
+// not a table — matches preview's own layout for this specific list
+// (unlike the Open POs list, which IS a table there). Click a card to jump
+// straight into receiving that PO (preview: `INV.openReceive('${o.id}')`).
+export function ReceiveListModal({
+  lang,
+  purchaseOrders,
+  suppliers,
+  onClose,
+  onReceive,
+}: {
+  lang: "en" | "ar";
+  purchaseOrders: PurchaseOrder[];
+  suppliers: Supplier[];
+  onClose: () => void;
+  onReceive: (po: PurchaseOrder) => void;
+}) {
+  const suppliersById = useMemo(() => {
+    const m = new Map<string, Supplier>();
+    for (const s of suppliers) m.set(s.id, s);
+    return m;
+  }, [suppliers]);
+
+  const issued = purchaseOrders
+    .filter((o) => o.status === "issued")
+    .slice()
+    .sort((a, b) => {
+      const ad = a.expected_delivery ?? "";
+      const bd = b.expected_delivery ?? "";
+      return ad < bd ? -1 : ad > bd ? 1 : 0;
+    });
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <div
+        className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <h2 className="text-lg font-semibold">
+            {lang === "en" ? "Purchase Orders Awaiting Receipt" : "أوامر الشراء بانتظار الاستلام"}
+          </h2>
+          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {issued.length === 0 ? (
+          <p className="muted text-sm py-10 text-center">
+            {lang === "en" ? "No POs awaiting receipt." : "لا أوامر بانتظار الاستلام."}
+          </p>
+        ) : (
+          <>
+            <p className="text-sm muted mb-3">
+              {lang === "en"
+                ? "Pick an issued PO to record what physically arrived. Step 2 of purchasing."
+                : "اختر أمرًا صادرًا لتسجيل ما وصل فعلاً. الخطوة الثانية من الشراء."}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {issued.map((po) => {
+                const supplier = suppliersById.get(po.supplier_id);
+                return (
+                  <button
+                    key={po.id}
+                    type="button"
+                    onClick={() => onReceive(po)}
+                    className="text-start rounded-lg border p-3 hover:shadow-md hover:border-brand-500/50 transition-all"
+                    style={INPUT_STYLE}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-mono text-xs font-semibold">{po.po_number}</span>
+                      <PoStatusPill status={po.status} lang={lang} />
+                    </div>
+                    <div className="font-medium text-sm">{supplier?.name ?? "—"}</div>
+                    <div className="text-[11px] muted mb-2">
+                      {lang === "en" ? "Expected delivery" : "تاريخ التسليم المتوقع"}: {po.expected_delivery ?? "—"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        <div className="mt-5 flex justify-end">
+          <Btn variant="outline" onClick={onClose}>
+            {lang === "en" ? "Close" : "إغلاق"}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type ReceiveLineState = {
+  line_id: string;
+  part_id: string;
+  ordered_qty: number;
+  ordered_unit_price_sar: number;
+  received_qty: string; // text-backed, same "empty distinguishable from 0" convention as useNumField
+  received_unit_price_sar: string;
+};
+
+// Receive a Purchase Order — preview's openReceive(prefillPOId), trimmed to
+// what this phase actually needs: NOT the full loose/PO-dual-mode receive
+// draft (supplier/warehouse are fixed, taken from the PO, not pickable),
+// just the two things receiving actually changes — actual qty/price per
+// existing line — plus the SAME mandatory invoice upload every receiving
+// path in this app requires (inherited from receive_loose_parts via
+// receive_purchase_order, 0051 — see actions.ts's own comment). Every line
+// on the PO must be included (the RPC rejects a partial/duplicate set),
+// so there's no "add/remove line" control here — only qty/price edits.
+export function ReceivePOModal({
+  lang,
+  po,
+  lines,
+  parts,
+  onClose,
+  onReceived,
+}: {
+  lang: "en" | "ar";
+  po: PurchaseOrder;
+  lines: PurchaseOrderLine[];
+  parts: Part[];
+  onClose: () => void;
+  onReceived: () => void;
+}) {
+  const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const partsById = useMemo(() => {
+    const m = new Map<string, Part>();
+    for (const p of parts) m.set(p.id, p);
+    return m;
+  }, [parts]);
+
+  const [receiveLines, setReceiveLines] = useState<ReceiveLineState[]>(() =>
+    lines.map((l) => ({
+      line_id: l.id,
+      part_id: l.part_id,
+      ordered_qty: l.qty,
+      ordered_unit_price_sar: l.unit_price_sar,
+      received_qty: String(l.qty),
+      received_unit_price_sar: String(l.unit_price_sar),
+    }))
+  );
+  const [files, setFiles] = useState<File[]>([]);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const linesValid = receiveLines.every((l) => {
+    const q = Number(l.received_qty);
+    const p = Number(l.received_unit_price_sar);
+    return l.received_qty.trim() !== "" && q > 0 && l.received_unit_price_sar.trim() !== "" && p >= 0;
+  });
+  const canSubmit = linesValid && files.length > 0;
+
+  const total = receiveLines.reduce(
+    (s, l) => s + (Number(l.received_qty) || 0) * (Number(l.received_unit_price_sar) || 0),
+    0
+  );
+
+  function updateLine(idx: number, patch: Partial<ReceiveLineState>) {
+    setReceiveLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  }
+
+  function close() {
+    if (saving) return;
+    onClose();
+  }
+
+  function addFiles(list: FileList | null) {
+    if (!list || list.length === 0) return;
+    setFiles((prev) => [...prev, ...Array.from(list)]);
+  }
+
+  function removeFile(idx: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!linesValid) {
+      setError(
+        lang === "en"
+          ? "Every line needs a positive received quantity and a non-negative price."
+          : "كل بند يحتاج كمية مستلمة موجبة وسعراً غير سالب."
+      );
+      return;
+    }
+    if (files.length === 0) {
+      setError(lang === "en" ? "An invoice must be uploaded before saving." : "يجب رفع فاتورة قبل الحفظ.");
+      return;
+    }
+
+    const payload = receiveLines.map((l) => ({
+      line_id: l.line_id,
+      received_qty: Number(l.received_qty),
+      received_unit_price_sar: Number(l.received_unit_price_sar),
+    }));
+
+    const formData = new FormData();
+    formData.set("poId", po.id);
+    formData.set("note", note.trim());
+    formData.set("linesJson", JSON.stringify(payload));
+    for (const file of files) formData.append("invoiceFiles", file);
+
+    setSaving(true);
+    setError(null);
+    const res = await receivePurchaseOrder(formData);
+    setSaving(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    onReceived();
+    router.refresh();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+      <div
+        className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <form onSubmit={submit} className="flex flex-col gap-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold">
+                {lang === "en" ? "Receive Purchase Order" : "استلام أمر الشراء"} — {po.po_number}
+              </h2>
+              <p className="text-xs muted mt-0.5">
+                {lang === "en"
+                  ? "Confirm what actually arrived. Invoice upload is required — this moves stock into inventory."
+                  : "أكّد ما وصل فعلاً. رفع الفاتورة إلزامي — هذا يُدخل المخزون فعليًا."}
+              </p>
+            </div>
+            <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <Card className="!p-0 overflow-hidden">
+            <Table>
+              <thead>
+                <tr>
+                  <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
+                  <TH>{lang === "en" ? "Ordered qty" : "الكمية المطلوبة"}</TH>
+                  <TH>{lang === "en" ? "Ordered unit price" : "سعر الوحدة المطلوب"}</TH>
+                  <TH>{lang === "en" ? "Actual qty received" : "الكمية الفعلية"}</TH>
+                  <TH>{lang === "en" ? "Actual unit price" : "سعر الوحدة الفعلي"}</TH>
+                  <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
+                </tr>
+              </thead>
+              <tbody>
+                {receiveLines.map((l, idx) => {
+                  const part = partsById.get(l.part_id);
+                  return (
+                    <tr key={l.line_id}>
+                      <TD>
+                        <div className="font-mono text-[11px] muted">{part?.sku ?? ""}</div>
+                        <div className="text-sm font-medium">
+                          {part ? (lang === "ar" && part.name_ar ? part.name_ar : part.name) : "—"}
+                        </div>
+                      </TD>
+                      <TD className="tabular muted">{l.ordered_qty}</TD>
+                      <TD className="tabular muted">{formatSar(l.ordered_unit_price_sar)}</TD>
+                      <TD>
+                        <input
+                          value={l.received_qty}
+                          onChange={(e) => updateLine(idx, { received_qty: e.target.value.replace(/-/g, "") })}
+                          type="number"
+                          min={0}
+                          className="h-8 w-20 px-2 rounded-lg border text-sm"
+                          style={INPUT_STYLE}
+                        />
+                      </TD>
+                      <TD>
+                        <input
+                          value={l.received_unit_price_sar}
+                          onChange={(e) =>
+                            updateLine(idx, { received_unit_price_sar: e.target.value.replace(/-/g, "") })
+                          }
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          className="h-8 w-24 px-2 rounded-lg border text-sm"
+                          style={INPUT_STYLE}
+                        />
+                      </TD>
+                      <TD className="tabular font-semibold">
+                        {formatSar((Number(l.received_qty) || 0) * (Number(l.received_unit_price_sar) || 0))}
+                      </TD>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="text-end font-semibold py-2.5 px-3 border-t text-sm"
+                    style={{ borderColor: "rgb(var(--border))" }}
+                  >
+                    {lang === "en" ? "Actual total" : "الإجمالي الفعلي"}
+                  </td>
+                  <td
+                    className="tabular font-bold text-brand-600 py-2.5 px-3 border-t text-sm"
+                    style={{ borderColor: "rgb(var(--border))" }}
+                  >
+                    {formatSar(total)}
+                  </td>
+                </tr>
+              </tfoot>
+            </Table>
+          </Card>
+
+          <div
+            className={cn(
+              "rounded-lg p-3 transition-colors",
+              files.length === 0
+                ? "border-[1.5px] border-dashed border-rose-300 dark:border-rose-900/50"
+                : "border border-emerald-300 dark:border-emerald-900/50"
+            )}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              addFiles(e.dataTransfer.files);
+            }}
+          >
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <span className="text-sm font-medium flex items-center gap-1.5">
+                {lang === "en" ? "Invoice (required)" : "الفاتورة (إلزامية)"}
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-full"
+                  style={{ background: files.length === 0 ? "#f43f5e" : "#10b981" }}
+                />
+              </span>
+              <Btn type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="h-4 w-4" />
+                {lang === "en" ? "Add invoice" : "إضافة فاتورة"}
+              </Btn>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+
+            {files.length === 0 ? (
+              <div className="flex items-center justify-center text-center h-14 rounded-md">
+                <p className="text-xs muted px-3">
+                  {lang === "en"
+                    ? "Upload at least one invoice image or PDF. Drag a file or click to browse."
+                    : "ارفع صورة فاتورة أو PDF واحداً على الأقل. اسحب ملفاً أو اضغط للاستعراض."}
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))" }}>
+                {files.map((file, idx) => (
+                  <InvoiceFileTile key={`${file.name}-${idx}`} file={file} lang={lang} onRemove={() => removeFile(idx)} />
+                ))}
+              </div>
+            )}
+            {files.length > 0 && (
+              <p className="text-[11px] muted mt-1.5">
+                {files.length} {lang === "en" ? "invoices attached" : "فاتورة مرفقة"}
+              </p>
+            )}
+          </div>
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted">{lang === "en" ? "Note" : "ملاحظة"}</span>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className={INPUT}
+              style={INPUT_STYLE}
+              rows={2}
+              placeholder={lang === "en" ? "optional" : "اختياري"}
+            />
+          </label>
+
+          {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+
+          <div className="flex justify-end gap-2">
+            <Btn type="button" variant="outline" onClick={close}>
+              {lang === "en" ? "Cancel" : "إلغاء"}
+            </Btn>
+            <button
+              type="submit"
+              disabled={!canSubmit || saving}
+              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
+            >
+              <PackagePlus className="h-4 w-4" />
+              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Confirm receipt" : "تأكيد الاستلام"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

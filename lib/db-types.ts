@@ -694,15 +694,21 @@ export type PurchaseOrder = {
   po_number: string;
   supplier_id: string;
   warehouse_id: string;
-  // Full lifecycle the 0050 CHECK constraint allows — only 'draft'/'issued'
-  // are reachable through this phase's RPCs; 'received'/'pending_approval'/
-  // 'approved'/'rejected' light up in Phases 5/6.
+  // Full lifecycle the 0050 CHECK constraint allows. Reachable in practice:
+  // 'draft'/'issued' (Phase 4) and now 'pending_approval' (Phase 5,
+  // migration 0051 — receive_purchase_order goes issued -> pending_approval
+  // directly, matching preview's ACTUAL receivePO() behavior; the
+  // 'received' value is never assigned by this app — see 0051's header).
+  // 'approved'/'rejected' light up in Phase 6.
   status: "draft" | "issued" | "received" | "pending_approval" | "approved" | "rejected";
   request_date: string; // date, "YYYY-MM-DD"
   expected_delivery: string | null; // date
   note: string | null;
   requested_by: string | null;
   issued_at: string | null;
+  // migration 0051, LIVE — set by receive_purchase_order.
+  received_by: string | null;
+  received_date: string | null; // date
   created_at: string;
 };
 
@@ -712,5 +718,28 @@ export type PurchaseOrderLine = {
   part_id: string;
   qty: number;
   unit_price_sar: number;
+  // migration 0051, LIVE — null until receive_purchase_order records what
+  // actually arrived for this line (may differ from the ordered qty/price
+  // above).
+  received_qty: number | null;
+  received_unit_price_sar: number | null;
+  created_at: string;
+};
+
+// stock_receipts row (migration 0047, LIVE; `po_id` added by migration 0051)
+// — one row per receiving event, loose OR PO-linked. `po_id` is null for a
+// loose receipt (Add Parts with no PO), set for one created by
+// receive_purchase_order(). The ONLY writer is receive_loose_parts() (see
+// actions.ts) — receive_purchase_order() calls that same RPC rather than
+// writing here itself (0051's header).
+export type StockReceipt = {
+  id: string;
+  supplier_id: string;
+  warehouse_id: string;
+  po_id: string | null;
+  received_on: string; // date
+  received_by: string | null;
+  note: string | null;
+  total_cost_sar: number;
   created_at: string;
 };
