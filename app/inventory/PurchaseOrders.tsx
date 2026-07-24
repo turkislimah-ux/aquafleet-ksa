@@ -68,6 +68,7 @@ import type {
   PurchaseOrderLine,
   PurchaseOrderApproval,
   PriceLot,
+  StockMovement,
 } from "@/lib/db-types";
 import {
   createPurchaseOrder,
@@ -75,6 +76,7 @@ import {
   receivePurchaseOrder,
   approvePurchaseOrder,
   rejectPurchaseOrder,
+  getPartMovements,
   type PurchaseOrderLineInput,
 } from "./actions";
 import { NewSupplierModal, CreateWarehouseModal, AddPartModal, InvoiceFileTile, categoryLabel } from "./SharedCreateModals";
@@ -1139,7 +1141,21 @@ export function PODetailModal({
           </div>
         )}
 
+        {/* preview's own grid (pages-2.js:2383-2391) — 8 fields, this exact
+            order, ALL unconditional with a muted "—" fallback for anything
+            not yet set (receivedBy/receivedDate especially — preview never
+            hides them, it always shows "—" until they're populated). PO
+            Number used to be shown only in the h2 title above; adding it
+            here too matches preview, which does the same (its modal's own
+            title bar duplicates the PO id, then the printable grid content
+            repeats it — the grid is what actually prints). Received
+            by/on used to be a conditional block (hidden entirely pre-
+            receipt) — now always rendered, matching preview. */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-4">
+          <div>
+            <div className="text-[11px] muted uppercase">{lang === "en" ? "PO Number" : "رقم الأمر"}</div>
+            <div className="font-mono font-medium">{po.po_number}</div>
+          </div>
           <div>
             <div className="text-[11px] muted uppercase">{lang === "en" ? "Status" : "الحالة"}</div>
             <div className="mt-0.5">
@@ -1155,28 +1171,21 @@ export function PODetailModal({
             <div className="font-medium">{po.expected_delivery ?? "—"}</div>
           </div>
           <div>
-            <div className="text-[11px] muted uppercase">{lang === "en" ? "Warehouse" : "المستودع"}</div>
-            <div className="font-medium">{warehouse?.name ?? "—"}</div>
-          </div>
-          {/* preview's inv.requestedBy ("Requested by", i18n.js:578,
-              pages-2.js:2388) — po.requested_by was already selected in
-              page.tsx but never rendered anywhere. */}
-          <div>
             <div className="text-[11px] muted uppercase">{lang === "en" ? "Requested by" : "طلب بواسطة"}</div>
             <div className="font-medium">{po.requested_by ?? "—"}</div>
           </div>
-          {po.received_by && (
-            <>
-              <div>
-                <div className="text-[11px] muted uppercase">{lang === "en" ? "Received by" : "استُلم بواسطة"}</div>
-                <div className="font-medium">{po.received_by}</div>
-              </div>
-              <div>
-                <div className="text-[11px] muted uppercase">{lang === "en" ? "Received on" : "تاريخ الاستلام"}</div>
-                <div className="font-medium">{po.received_date ?? "—"}</div>
-              </div>
-            </>
-          )}
+          <div>
+            <div className="text-[11px] muted uppercase">{lang === "en" ? "Received by" : "استُلم بواسطة"}</div>
+            <div className="font-medium">{po.received_by ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-[11px] muted uppercase">{lang === "en" ? "Received on" : "تاريخ الاستلام"}</div>
+            <div className="font-medium">{po.received_date ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-[11px] muted uppercase">{lang === "en" ? "Warehouse" : "المستودع"}</div>
+            <div className="font-medium">{warehouse?.name ?? "—"}</div>
+          </div>
         </div>
 
         {supplier && (
@@ -2392,14 +2401,205 @@ export function FinancialAnalysisTab({
 // convention PODetailModal already uses). Price trend compares the latest
 // price_lots entry against the average of every earlier one for this part.
 //
-// DELIBERATE DEVIATION FROM PREVIEW: preview's partFinance also reports
-// consumption (spentByConsumption/totalConsumed, from a partUsage log tied
-// to work orders) and an AI tip branch for "purchased but not consumed".
-// This app has no consumption/usage workflow yet — stock_movements' own
-// 'consume' movement_type exists in the CHECK constraint (0046) but nothing
-// in this app's UI writes it (see db-types.ts's StockMovement comment). That
-// stat and AI-tip branch are dropped rather than faked with data this app
-// doesn't actually have; everything else here is real.
+// CONSUMPTION IS REAL, JUST CURRENTLY ALWAYS ZERO: preview's partFinance
+// also reports consumption (spentByConsumption/totalConsumed) from a
+// partUsage log — in preview that's static seed data, not something any
+// button in preview's own UI actually writes either. This app derives the
+// same numbers from stock_movements where movement_type = 'consume' (CHECK
+// constraint added by migration 0046) — a real column, just nothing writes
+// to it yet (no Maintenance/work-order consumption flow exists). So
+// totalConsumed reads 0 for every part today, honestly, not faked — it
+// starts reflecting real numbers the moment that flow ships. spentByConsumption
+// stays 0 specifically because stock_movements has no per-movement cost
+// column to derive it from (qty_delta/qty_after only) — whichever feature
+// eventually writes 'consume' rows will need to decide how cost gets
+// attributed (most likely via consume_from_lots, which does know per-lot
+// cost) at that time.
+//
+// Pure calc, shared between PartFinanceModal and ViewPartModal's own
+// "Financial summary" card (InventoryClient.tsx) so both stay in sync on
+// exactly one definition of each number, instead of two hand-copied
+// implementations drifting apart later. PartFinanceModal additionally
+// needs the per-PO purchase rows for its own history table — that stays
+// caller-side (different shape), this only returns the 6 aggregate
+// primitives PartFinanceSummaryCard renders.
+export function computePartFinanceStats(
+  part: Part,
+  priceLots: PriceLot[],
+  purchaseOrders: PurchaseOrder[],
+  purchaseOrderLines: PurchaseOrderLine[],
+  movements: StockMovement[]
+): {
+  totalPurchased: number;
+  purchaseCount: number;
+  stockValue: number;
+  priceTrendPct: number;
+  totalConsumed: number;
+  spentByConsumption: number;
+} {
+  const lots = priceLots
+    .filter((l) => l.part_id === part.id)
+    .sort((a, b) => (a.received_on !== b.received_on ? (a.received_on < b.received_on ? -1 : 1) : a.created_at < b.created_at ? -1 : 1));
+  const currentPrice = lots.length > 0 ? lots[lots.length - 1].price_sar : part.unit_cost_sar;
+  let priceTrendPct = 0;
+  if (lots.length >= 2 && currentPrice != null) {
+    const hist = lots.slice(0, -1);
+    const avgOld = hist.reduce((s, l) => s + l.price_sar, 0) / hist.length;
+    if (avgOld > 0) priceTrendPct = Math.round(((currentPrice - avgOld) / avgOld) * 1000) / 10;
+  }
+  const stockValue = part.unit_cost_sar != null ? part.unit_cost_sar * part.qty_on_hand : 0;
+
+  let totalPurchased = 0;
+  let purchaseCount = 0;
+  for (const po of purchaseOrders) {
+    if (po.status !== "approved" && po.status !== "pending_approval") continue;
+    const line = purchaseOrderLines.find((l) => l.purchase_order_id === po.id && l.part_id === part.id);
+    if (!line) continue;
+    const qty = line.received_qty ?? line.qty;
+    const unit = line.received_unit_price_sar ?? line.unit_price_sar;
+    totalPurchased += qty * unit;
+    purchaseCount += 1;
+  }
+
+  // See this file's own header comment above (CONSUMPTION IS REAL...) —
+  // always 0 today, not faked, just nothing writes movement_type='consume'
+  // rows yet.
+  const totalConsumed = movements
+    .filter((m) => m.part_id === part.id && m.movement_type === "consume")
+    .reduce((s, m) => s + Math.abs(m.qty_delta), 0);
+  const spentByConsumption = 0;
+
+  return { totalPurchased, purchaseCount, stockValue, priceTrendPct, totalConsumed, spentByConsumption };
+}
+
+export function PartFinanceSummaryCard({
+  lang,
+  part,
+  totalPurchased,
+  purchaseCount,
+  stockValue,
+  priceTrendPct,
+  totalConsumed,
+  spentByConsumption,
+}: {
+  lang: "en" | "ar";
+  part: Part;
+  totalPurchased: number;
+  purchaseCount: number;
+  stockValue: number;
+  priceTrendPct: number;
+  totalConsumed: number;
+  spentByConsumption: number;
+}) {
+  const trendCls =
+    priceTrendPct > 0 ? "text-rose-600 dark:text-rose-400" : priceTrendPct < 0 ? "text-emerald-700 dark:text-emerald-400" : "muted";
+  const trendArrow = priceTrendPct > 0 ? "↑" : priceTrendPct < 0 ? "↓" : "→";
+
+  // Same 4 branches + healthy fallback preview's own per-part AI tip uses
+  // (pages-2.js:1772-1792) — "purchased but not consumed" is back now that
+  // consumption is real data (see header comment above); it'll fire for
+  // most parts with purchase history until a real consumption flow exists,
+  // which is an accurate reflection of today's app state, not a bug.
+  const aiTip: { tone: "warn" | "info" | "ok"; text: string } = (() => {
+    if (part.reorder_level != null && part.qty_on_hand <= part.reorder_level * 0.5) {
+      return {
+        tone: "warn",
+        text:
+          lang === "en"
+            ? `Stock critical — only ${part.qty_on_hand} ${part.unit ?? ""} left vs reorder level of ${part.reorder_level}. Recommend issuing a PO of ${part.reorder_qty ?? "?"} ${part.unit ?? ""} immediately.`
+            : `المخزون حرج — يتبقى ${part.qty_on_hand} ${part.unit ?? ""} مقابل حد إعادة طلب ${part.reorder_level}. يُوصى بإصدار أمر شراء بكمية ${part.reorder_qty ?? "?"} ${part.unit ?? ""} فورًا.`,
+      };
+    }
+    if (priceTrendPct >= 10) {
+      return {
+        tone: "warn",
+        text:
+          lang === "en"
+            ? `Price up ${priceTrendPct}% over historical batches. Compare quotes from alternative suppliers before the next PO.`
+            : `ارتفع السعر ${priceTrendPct}% مقارنة بالدفعات السابقة. قارن العروض من موردين بدلاء قبل أمر الشراء التالي.`,
+      };
+    }
+    if (totalConsumed === 0 && purchaseCount > 0) {
+      return {
+        tone: "warn",
+        text:
+          lang === "en"
+            ? "Purchased but not yet consumed — review storage and assignment."
+            : "تم الشراء ولم يُستهلك بعد — راجع التخزين والإسناد.",
+      };
+    }
+    if (part.reorder_level != null && part.reorder_level > 0 && part.qty_on_hand > part.reorder_level * 3) {
+      return {
+        tone: "info",
+        text:
+          lang === "en"
+            ? `Overstocked at ${part.qty_on_hand} ${part.unit ?? ""} (>3× reorder level). Consider postponing the next PO.`
+            : `مخزون زائد عند ${part.qty_on_hand} ${part.unit ?? ""} (>3× حد الطلب). فكّر في تأجيل أمر الشراء التالي.`,
+      };
+    }
+    return {
+      tone: "ok",
+      text: lang === "en" ? "Stock and pricing look healthy. No action recommended." : "المخزون والسعر في حالة جيدة. لا حاجة لإجراء.",
+    };
+  })();
+  const tipStyle =
+    aiTip.tone === "warn"
+      ? { background: "rgba(245,158,11,.06)", borderColor: "rgba(245,158,11,.3)" }
+      : aiTip.tone === "info"
+      ? { background: "rgba(11,126,234,.05)", borderColor: "rgba(11,126,234,.25)" }
+      : { background: "rgba(16,185,129,.05)", borderColor: "rgba(16,185,129,.25)" };
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+        <div className="rounded-lg border p-3" style={INPUT_STYLE}>
+          <div className="text-[11px] muted uppercase">{lang === "en" ? "Purchases" : "المشتريات"}</div>
+          <div className="text-lg font-semibold tabular-nums">{formatSar(totalPurchased)}</div>
+          <div className="text-[11px] muted">
+            {purchaseCount} {lang === "en" ? "PO lines" : "بنود أوامر"}
+          </div>
+        </div>
+        <div className="rounded-lg border p-3" style={INPUT_STYLE}>
+          <div className="text-[11px] muted uppercase">
+            {lang === "en" ? "Consumption" : "الاستهلاك"} ({lang === "en" ? "all time" : "الإجمالي"})
+          </div>
+          <div className="text-lg font-semibold tabular-nums">{formatSar(spentByConsumption)}</div>
+          <div className="text-[11px] muted">
+            {totalConsumed} {part.unit ?? ""}
+          </div>
+        </div>
+        <div className="rounded-lg border p-3" style={INPUT_STYLE}>
+          <div className="text-[11px] muted uppercase">{lang === "en" ? "Stock Value" : "قيمة المخزون"}</div>
+          <div className="text-lg font-semibold tabular-nums text-brand-600">{formatSar(stockValue)}</div>
+          <div className="text-[11px] muted">
+            {part.qty_on_hand} {part.unit ?? ""} {lang === "en" ? "in stock" : "في المخزون"}
+          </div>
+        </div>
+        <div className="rounded-lg border p-3" style={INPUT_STYLE}>
+          <div className="text-[11px] muted uppercase">{lang === "en" ? "Price Trend" : "اتجاه السعر"}</div>
+          <div className={cn("text-lg font-semibold tabular-nums", trendCls)}>
+            {trendArrow} {Math.abs(priceTrendPct)}%
+          </div>
+          <div className="text-[11px] muted">{lang === "en" ? "vs historical batches" : "مقابل الدفعات السابقة"}</div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border p-3" style={tipStyle}>
+        <div className="flex items-start gap-2">
+          <span
+            className="inline-flex items-center gap-1 shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full text-white tracking-wide"
+            style={{ background: "linear-gradient(135deg,#8b5cf6,#0b7eea)" }}
+          >
+            <Zap className="h-3 w-3" />
+            AI
+          </span>
+          <div className="text-sm">{aiTip.text}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PartFinanceModal({
   lang,
   part,
@@ -2426,23 +2626,30 @@ export function PartFinanceModal({
 }) {
   const warehouseName = warehouses.find((w) => w.id === part.warehouse_id)?.name ?? "—";
 
-  const lots = useMemo(
-    () =>
-      priceLots
-        .filter((l) => l.part_id === part.id)
-        .sort((a, b) => (a.received_on !== b.received_on ? (a.received_on < b.received_on ? -1 : 1) : a.created_at < b.created_at ? -1 : 1)),
-    [priceLots, part.id]
-  );
-  const currentPrice = lots.length > 0 ? lots[lots.length - 1].price_sar : part.unit_cost_sar;
-  const priceTrendPct = useMemo(() => {
-    if (lots.length < 2 || currentPrice == null) return 0;
-    const hist = lots.slice(0, -1);
-    const avgOld = hist.reduce((s, l) => s + l.price_sar, 0) / hist.length;
-    if (avgOld <= 0) return 0;
-    return Math.round(((currentPrice - avgOld) / avgOld) * 1000) / 10;
-  }, [lots, currentPrice]);
-  const stockValue = part.unit_cost_sar != null ? part.unit_cost_sar * part.qty_on_hand : 0;
+  // Consumption — fetched the same way ViewPartModal already fetches this
+  // part's full movement history (getPartMovements). Currently always
+  // empty (see computePartFinanceStats's own header comment) — fetched
+  // anyway so the numbers are honest and will start moving the moment a
+  // real consumption flow exists.
+  const [movements, setMovements] = useState<StockMovement[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getPartMovements(part.id).then((res) => {
+      if (!cancelled && !res.error) setMovements(res.movements);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [part.id]);
 
+  const stats = useMemo(
+    () => computePartFinanceStats(part, priceLots, purchaseOrders, purchaseOrderLines, movements),
+    [part, priceLots, purchaseOrders, purchaseOrderLines, movements]
+  );
+
+  // Per-PO breakdown for the table below — computePartFinanceStats only
+  // returns the aggregate totalPurchased/purchaseCount, this modal alone
+  // needs the row-level detail (date/PO/qty/price/cost).
   const allPurchases = useMemo(() => {
     return purchaseOrders
       .filter((po) => po.status === "approved" || po.status === "pending_approval")
@@ -2458,53 +2665,10 @@ export function PartFinanceModal({
   const totalPurchased = allPurchases.reduce((s, p) => s + p.cost, 0);
   const purchaseRows = allPurchases.slice(0, 8);
 
-  const trendCls = priceTrendPct > 0 ? "text-rose-600 dark:text-rose-400" : priceTrendPct < 0 ? "text-emerald-700 dark:text-emerald-400" : "muted";
-  const trendArrow = priceTrendPct > 0 ? "↑" : priceTrendPct < 0 ? "↓" : "→";
-
-  const aiTip: { tone: "warn" | "info" | "ok"; text: string } = (() => {
-    if (part.reorder_level != null && part.qty_on_hand <= part.reorder_level * 0.5) {
-      return {
-        tone: "warn",
-        text:
-          lang === "en"
-            ? `Stock critical — only ${part.qty_on_hand} ${part.unit ?? ""} left vs reorder level of ${part.reorder_level}. Recommend issuing a PO of ${part.reorder_qty ?? "?"} ${part.unit ?? ""} immediately.`
-            : `المخزون حرج — يتبقى ${part.qty_on_hand} ${part.unit ?? ""} مقابل حد إعادة طلب ${part.reorder_level}. يُوصى بإصدار أمر شراء بكمية ${part.reorder_qty ?? "?"} ${part.unit ?? ""} فورًا.`,
-      };
-    }
-    if (priceTrendPct >= 10) {
-      return {
-        tone: "warn",
-        text:
-          lang === "en"
-            ? `Price up ${priceTrendPct}% over historical batches. Compare quotes from alternative suppliers before the next PO.`
-            : `ارتفع السعر ${priceTrendPct}% مقارنة بالدفعات السابقة. قارن العروض من موردين بدلاء قبل أمر الشراء التالي.`,
-      };
-    }
-    if (part.reorder_level != null && part.reorder_level > 0 && part.qty_on_hand > part.reorder_level * 3) {
-      return {
-        tone: "info",
-        text:
-          lang === "en"
-            ? `Overstocked at ${part.qty_on_hand} ${part.unit ?? ""} (>3× reorder level). Consider postponing the next PO.`
-            : `مخزون زائد عند ${part.qty_on_hand} ${part.unit ?? ""} (>3× حد الطلب). فكّر في تأجيل أمر الشراء التالي.`,
-      };
-    }
-    return {
-      tone: "ok",
-      text: lang === "en" ? "Stock and pricing look healthy. No action recommended." : "المخزون والسعر في حالة جيدة. لا حاجة لإجراء.",
-    };
-  })();
-  const tipStyle =
-    aiTip.tone === "warn"
-      ? { background: "rgba(245,158,11,.06)", borderColor: "rgba(245,158,11,.3)" }
-      : aiTip.tone === "info"
-      ? { background: "rgba(11,126,234,.05)", borderColor: "rgba(11,126,234,.25)" }
-      : { background: "rgba(16,185,129,.05)", borderColor: "rgba(16,185,129,.25)" };
-
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <div
-        className="card p-6 w-full max-w-[720px] max-h-[85vh] overflow-y-auto scrollbar-thin"
+        className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 mb-1">
@@ -2519,41 +2683,17 @@ export function PartFinanceModal({
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 text-sm my-4">
-          <div className="rounded-lg border p-3" style={INPUT_STYLE}>
-            <div className="text-[11px] muted uppercase">{lang === "en" ? "Purchases" : "المشتريات"}</div>
-            <div className="text-lg font-semibold tabular-nums">{formatSar(totalPurchased)}</div>
-            <div className="text-[11px] muted">
-              {allPurchases.length} {lang === "en" ? "PO lines" : "بنود أوامر"}
-            </div>
-          </div>
-          <div className="rounded-lg border p-3" style={INPUT_STYLE}>
-            <div className="text-[11px] muted uppercase">{lang === "en" ? "Stock Value" : "قيمة المخزون"}</div>
-            <div className="text-lg font-semibold tabular-nums text-brand-600">{formatSar(stockValue)}</div>
-            <div className="text-[11px] muted">
-              {part.qty_on_hand} {part.unit ?? ""} {lang === "en" ? "in stock" : "في المخزون"}
-            </div>
-          </div>
-          <div className="rounded-lg border p-3" style={INPUT_STYLE}>
-            <div className="text-[11px] muted uppercase">{lang === "en" ? "Price Trend" : "اتجاه السعر"}</div>
-            <div className={cn("text-lg font-semibold tabular-nums", trendCls)}>
-              {trendArrow} {Math.abs(priceTrendPct)}%
-            </div>
-            <div className="text-[11px] muted">{lang === "en" ? "vs historical batches" : "مقابل الدفعات السابقة"}</div>
-          </div>
-        </div>
-
-        <div className="rounded-lg border p-3 mb-4" style={tipStyle}>
-          <div className="flex items-start gap-2">
-            <span
-              className="inline-flex items-center gap-1 shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full text-white tracking-wide"
-              style={{ background: "linear-gradient(135deg,#8b5cf6,#0b7eea)" }}
-            >
-              <Zap className="h-3 w-3" />
-              AI
-            </span>
-            <div className="text-sm">{aiTip.text}</div>
-          </div>
+        <div className="my-4">
+          <PartFinanceSummaryCard
+            lang={lang}
+            part={part}
+            totalPurchased={stats.totalPurchased}
+            purchaseCount={stats.purchaseCount}
+            stockValue={stats.stockValue}
+            priceTrendPct={stats.priceTrendPct}
+            totalConsumed={stats.totalConsumed}
+            spentByConsumption={stats.spentByConsumption}
+          />
         </div>
 
         <div>

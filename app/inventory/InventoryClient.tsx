@@ -229,6 +229,8 @@ import {
   ApprovalsTab,
   FinancialAnalysisTab,
   PartFinanceModal,
+  PartFinanceSummaryCard,
+  computePartFinanceStats,
   suggestAIPurchaseLines,
   type NewPOAISuggestion,
 } from "./PurchaseOrders";
@@ -477,14 +479,17 @@ export default function InventoryClient({
                 (not gated on lowParts.length, matching preview) but
                 disabled when there's genuinely nothing to reorder — no
                 toast utility exists in this app (grepped, zero hits), so
-                the disabled button's own `title` tooltip carries preview's
-                toast message ("Nothing to reorder — all parts above
-                threshold.", pages-2.js:2119-2122) instead of a popup. */}
+                preview's toast message ("Nothing to reorder — all parts
+                above threshold.", pages-2.js:2119-2122) is shown as a
+                tooltip instead of a popup. BUG FIX: a `title` attribute on
+                the <button> itself never fires on hover once `disabled` is
+                set (Chrome/most browsers suppress hover events on disabled
+                controls entirely — confirmed by Turki testing it) — the
+                title has to live on a wrapping element that ISN'T disabled;
+                the inner Btn's own `disabled:pointer-events-none` then lets
+                hover fall through to this wrapper. */}
             {invTab === "inventory" && warehouses.length > 0 && (
-              <Btn
-                variant="outline"
-                onClick={openAISuggest}
-                disabled={!aiPurchaseSuggestion}
+              <span
                 title={
                   aiPurchaseSuggestion
                     ? undefined
@@ -493,9 +498,11 @@ export default function InventoryClient({
                     : "لا شيء للطلب — كل القطع فوق الحد."
                 }
               >
-                <Zap className="h-4 w-4" />
-                {lang === "en" ? "AI-Suggest" : "اقتراح ذكي"}
-              </Btn>
+                <Btn variant="outline" onClick={openAISuggest} disabled={!aiPurchaseSuggestion}>
+                  <Zap className="h-4 w-4" />
+                  {lang === "en" ? "AI-Suggest" : "اقتراح ذكي"}
+                </Btn>
+              </span>
             )}
           </>
         }
@@ -681,6 +688,8 @@ export default function InventoryClient({
           lang={lang}
           part={viewPart}
           warehousesById={warehousesById}
+          purchaseOrders={purchaseOrders}
+          purchaseOrderLines={purchaseOrderLines}
           onClose={() => setViewPart(null)}
           onAdjust={(p) => {
             setViewPart(null);
@@ -1026,6 +1035,8 @@ function ViewPartModal({
   lang,
   part,
   warehousesById,
+  purchaseOrders,
+  purchaseOrderLines,
   onClose,
   onAdjust,
   onAddPrice,
@@ -1033,6 +1044,12 @@ function ViewPartModal({
   lang: "en" | "ar";
   part: Part;
   warehousesById: Map<string, Warehouse>;
+  // Financial summary card (preview's inv.perPartFinance, pages-2.js
+  // 1766-1809) needs this part's own purchase history — same data
+  // PartFinanceModal already computes from, just threaded one level
+  // deeper here since this drawer wasn't fetching it before.
+  purchaseOrders: PurchaseOrder[];
+  purchaseOrderLines: PurchaseOrderLine[];
   onClose: () => void;
   onAdjust: (p: Part) => void;
   onAddPrice: (p: Part) => void;
@@ -1112,6 +1129,12 @@ function ViewPartModal({
   const warehouseName = warehousesById.get(part.warehouse_id)?.name ?? "—";
   const reorderValue =
     part.reorder_qty != null && part.unit_cost_sar != null ? part.reorder_qty * part.unit_cost_sar : null;
+
+  // "Financial summary" card (preview's inv.perPartFinance, pages-2.js
+  // 1766-1809) — reuses this drawer's OWN already-fetched `lots`/`movements`
+  // (both scoped to this part.id already), same computePartFinanceStats
+  // PartFinanceModal uses, so the two never drift out of sync.
+  const financeStats = computePartFinanceStats(part, lots, purchaseOrders, purchaseOrderLines, movements);
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
@@ -1373,6 +1396,27 @@ function ViewPartModal({
                 ))}
             </tbody>
           </Table>
+        </Card>
+
+        {/* Financial summary — preview's inv.perPartFinance ("Financial
+            summary"/"الملخص المالي", i18n.js:621), inline in the drawer
+            itself, not just the standalone PartFinanceModal popup (both
+            exist in preview, pages-2.js:1766-1809). */}
+        <Card className="!p-4 mb-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Banknote className="h-4 w-4 muted" />
+            <h3 className="text-sm font-semibold">{lang === "en" ? "Financial summary" : "الملخص المالي"}</h3>
+          </div>
+          <PartFinanceSummaryCard
+            lang={lang}
+            part={part}
+            totalPurchased={financeStats.totalPurchased}
+            purchaseCount={financeStats.purchaseCount}
+            stockValue={financeStats.stockValue}
+            priceTrendPct={financeStats.priceTrendPct}
+            totalConsumed={financeStats.totalConsumed}
+            spentByConsumption={financeStats.spentByConsumption}
+          />
         </Card>
 
         <Card className="!p-4">

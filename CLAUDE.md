@@ -475,6 +475,53 @@ relevant skill(s) **when the task calls for it**:
     (`components/ui.tsx`, shared primitive) gained an optional `title` prop
     (`disabled` was already added in the Phase 7 AI-Suggest pass) to support
     the above — backward compatible, every other caller unaffected.
+  - **Turki tested `e9a03d5` and reported 4 real issues, fixed:** (1) the
+    AI-Suggest button's disabled-state tooltip never showed — a `title` on a
+    `disabled` `<button>` doesn't fire hover in Chrome/most browsers; fixed
+    by moving the `title` onto a wrapping `<span>` instead (the `Btn`'s own
+    `disabled:pointer-events-none` lets hover fall through to it). (2)
+    `PODetailModal`'s info grid was missing `PO Number` entirely and hid
+    `Received by`/`Received on` completely pre-receipt instead of showing
+    them with preview's own `—` fallback — rebuilt to match preview's exact
+    8-field grid/order (PO Number, Status, Issued on, Expected delivery,
+    Requested by, Received by, Received on, Warehouse), all unconditional.
+    (3) `PartFinanceModal` was missing the `Consumption (all time)` stat and
+    was sized at `max-w-[720px]` instead of the `max-w-[1080px]` every other
+    `size:lg` popup in this app uses (see `InventoryClient.tsx:130`) — fixed,
+    and see the next bullet for why consumption isn't a fabrication despite
+    the earlier "no consumption workflow" deviation note. (4) The part
+    drawer (`ViewPartModal`) was missing preview's own inline "Financial
+    summary" card (`inv.perPartFinance`, pages-2.js:1766-1809) entirely —
+    preview shows the exact same 4-stat-grid + AI-tip block in BOTH the
+    drawer AND the standalone finance popup; this app only had the popup.
+    Fixed by factoring `computePartFinanceStats()` (pure calc) +
+    `PartFinanceSummaryCard` (render) out of `PartFinanceModal` into shared
+    exports (`PurchaseOrders.tsx`) that `ViewPartModal` now also calls —
+    one definition of each number, not two hand-copied ones that could
+    drift. **Consumption stat, revisited:** the earlier "dropped rather than
+    faked" reasoning (see the deviation note above) was too conservative —
+    preview's OWN consumption numbers are static seed data too (`partUsage`
+    in `data.js`), not derived from any live workflow in preview's own UI
+    either. This app derives the same stat from real `stock_movements` rows
+    where `movement_type='consume'` (0046) — honestly always 0 today (still
+    nothing writes that type), not fake, and it'll start moving the moment a
+    real consumption flow (Maintenance/work-orders) ships. `spentByConsumption`
+    specifically stays 0 even then until `stock_movements` gains a per-
+    movement cost column (currently only `qty_delta`/`qty_after`) — flagged
+    in `computePartFinanceStats`'s own comment for whoever builds that flow.
+  - **Migration `0054` (drafted, flagged, NOT yet applied) — data-only, no
+    schema change:** grants Turki's own login (`turkislimah@gmail.com`)
+    approval access. Root cause of test 10's "Not authorized to approve
+    purchase orders": `approve_purchase_order` (0052) requires a
+    `public.staff` row for the actor's email with an eligible role
+    (`fleet_manager`/`ops_supervisor`/`inventory_clerk`), `active=true`,
+    `terminated_at is null` — checked live, no `staff` row existed for that
+    email at all. `0054` upserts one with `role='fleet_manager'`
+    (idempotent — updates if a row already exists, inserts if not). Turki's
+    own framing ("always give all access... full authority... for testing
+    and managing") is honored for THIS login specifically, not by loosening
+    the RPC's role check for everyone — that stays a real business rule,
+    matching preview's own `APPROVER_ROLES` model.
   - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);
