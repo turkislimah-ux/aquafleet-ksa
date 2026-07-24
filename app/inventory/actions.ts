@@ -6,10 +6,10 @@
 // supplier creation follow the plain-table server-action pattern from
 // app/trips/actions.ts's createWaterStation: validate -> insert -> revalidate
 // (0043/0045 have no RPCs). No updatePart — preview/ has no part-edit UI, so
-// this file doesn't invent one; parts change only via receiveStock/
-// adjustStock/addPriceLot below. Those three DO call RPCs (migration 0044's
-// receive_stock/adjust_stock + 0046's add_price_lot, all LIVE and applied).
-// Nothing hard-deletes — deactivate is a later slice.
+// this file doesn't invent one; parts change only via adjustStock (below,
+// migration 0044's adjust_stock RPC) or the receiving flows further down
+// (receiveLooseParts/receivePurchaseOrder), which call add_price_lot (0046)
+// internally. Nothing hard-deletes — deactivate is a later slice.
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -332,31 +332,19 @@ export async function getPriceLots(
   return { error: null, lots: (data ?? []) as PriceLot[] };
 }
 
-export async function addPriceLot(
-  partId: string,
-  price: number,
-  qty: number,
-  receivedOn: string | null,
-  note: string | null,
-): Promise<{ error: string | null }> {
-  if (!partId) return { error: "Missing part." };
-  if (!(qty > 0)) return { error: "Incoming quantity must be positive." };
-  if (price == null || price <= 0) return { error: "Price must be positive." };
-
-  const supabase = createClient();
-  const { error } = await supabase.rpc("add_price_lot", {
-    p_part_id: partId,
-    p_price: price,
-    p_qty: qty,
-    p_received_on: receivedOn || undefined,
-    p_note: note?.trim() || null,
-    p_actor: await actorEmail(supabase),
-  });
-  if (error) return { error: error.message };
-
-  revalidatePath("/inventory");
-  return { error: null };
-}
+// addPriceLot() — the standalone single-part "Add new price" quick-action
+// wrapper (called add_price_lot RPC directly) — was REMOVED here (Turki's
+// post-e9a03d5 test feedback, test 6): it let a user add stock to a part
+// with no invoice, no stock_receipts row, and no warehouse-consistency
+// check, running in parallel to the real receiving flow below that DOES
+// all three — two different ways to "add stock to a part" was the exact
+// contradiction Turki flagged. ViewPartModal's "Add new price" button (was
+// InventoryClient.tsx) now opens ReceivePartsModal prefilled with this part
+// as a line instead (qty defaulted to clear reorder_level, price defaulted
+// to the part's current price) — same RPC path as every other receipt,
+// just pre-seeded. The add_price_lot() RPC itself stays live in the DB —
+// receive_loose_parts/receive_purchase_order still call it once per line
+// server-side; only this app-code wrapper and its one caller are gone.
 
 // ---------------------------------------------------------------------------
 // Loose "Add Parts" receive (full-demo Phase 3 — migration 0047, LIVE).
@@ -372,8 +360,8 @@ export async function addPriceLot(
 //
 // This is the ONLY app-code path that reaches receive_loose_parts — nothing
 // here inserts into price_lots/parts/stock_receipts* directly; the RPC
-// calls add_price_lot() (0046) once per line, same as Phase 2's own "Add new
-// price" action.
+// calls add_price_lot() (0046) once per line — now the ONLY caller of that
+// RPC from this app's code (see the removed addPriceLot() note above).
 // ---------------------------------------------------------------------------
 
 const INVOICE_BUCKET = "stock-receipt-invoices";

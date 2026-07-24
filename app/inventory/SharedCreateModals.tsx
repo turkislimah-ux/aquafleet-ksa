@@ -34,8 +34,11 @@
 // (categoryLabel/CREATE_CATS/CATEGORY_LABEL, autoSku, useNumField/
 // parseNumField). categoryLabel/useNumField/parseNumField are ALSO used by
 // components still in InventoryClient.tsx (PartsTable, ViewPartModal,
-// AdjustStockModal, AddPriceLotModal) — exported here, imported back
-// there. That back-import is safe: it's a one-way edge, not a cycle.
+// AdjustStockModal) — exported here, imported back there. That back-import
+// is safe: it's a one-way edge, not a cycle. (AddPriceLotModal — the
+// drawer's old standalone "Add new price" quick-action — was removed
+// entirely post-launch, Turki's test-6 feedback on e9a03d5; see
+// InventoryClient.tsx's own header comment.)
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";

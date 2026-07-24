@@ -509,6 +509,29 @@ relevant skill(s) **when the task calls for it**:
     specifically stays 0 even then until `stock_movements` gains a per-
     movement cost column (currently only `qty_delta`/`qty_after`) — flagged
     in `computePartFinanceStats`'s own comment for whoever builds that flow.
+  - **Test 6 (asked, then fixed): "Add new price" removed, replaced with a
+    prefilled "Add Parts."** Turki's original ask read two ways — open the
+    real "New Item"/AddPartModal prefilled (would insert a SECOND part row,
+    same name, different SKU/id — duplicate-part risk) vs. prefill the
+    existing receiving flow with this part as a line (adds stock to the SAME
+    part, real invoice/`stock_receipts` record, no new row). Asked before
+    building (data-integrity stakes either way) — Turki confirmed the
+    receiving-flow route. `AddPriceLotModal` (the drawer's old standalone
+    quick-action, and its `addPriceLot()` client wrapper in `actions.ts`) is
+    DELETED — no other entry point, same "no dead code left unreachable"
+    call as `ApprovalsListModal` earlier in this pass. The `add_price_lot`
+    RPC itself stays live (still called by `receive_loose_parts`/
+    `receive_purchase_order` internally). The drawer's button is now "Add
+    Parts" (`PackagePlus`, same label/icon as the header button), opening
+    `ReceivePartsModal` via a new optional `prefill` prop (`{warehouseId,
+    lines}`) — seeds `warehouseId`/`lines` initial state exactly like
+    `NewPOModal`'s `aiSuggestion` prop already does. Default qty: enough to
+    clear `reorder_level` if set (`reorder_level - qty_on_hand + 1`,
+    minimum 1), else 1 always — Turki's exact spec. Default price: the
+    part's current price (`currentLot?.price_sar ?? unit_cost_sar`). Supplier
+    is left unset (same reasoning as AI-Suggest's best-effort-only supplier
+    prefill) — `parts.supplier` is free text, not guaranteed to match a real
+    `suppliers.name`.
   - **Migration `0054` (drafted, flagged, NOT yet applied) — data-only, no
     schema change:** grants Turki's own login (`turkislimah@gmail.com`)
     approval access. Root cause of test 10's "Not authorized to approve

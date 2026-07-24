@@ -68,14 +68,17 @@
 //
 // Phase 2 (FIFO price lots, migration 0046 — LIVE) added: the batches table
 // (qty purchased/remaining + current/old/depleted status badge, exactly
-// preview's batchesHTML), the "Add new price" button (INV.openPriceLot),
-// and a current/previous-price + trend + weighted-avg-cost strip above it
-// (preview's pricing-snapshot card) — all wired to add_price_lot(). Every
-// write goes through that RPC; nothing here inserts into price_lots or
-// touches parts.qty_on_hand/unit_cost_sar directly. consume_from_lots
-// (also in 0046) has NO caller anywhere in this app yet — there's no
-// consumption event to drive it until a PO-receiving or work-order-parts-
-// usage phase exists. It's live in the DB, just unused until then.
+// preview's batchesHTML) and a current/previous-price + trend + weighted-
+// avg-cost strip above it (preview's pricing-snapshot card). The drawer's
+// own "Add new price" button (preview's INV.openPriceLot) was REMOVED
+// post-launch (Turki's test-6 feedback on e9a03d5) — it added stock with
+// no invoice/receipt record, a second, weaker path alongside the real
+// receiving flow. It's now "Add Parts" instead, opening ReceivePartsModal
+// prefilled with this part (see ViewPartModal's onReceiveMore) — same RPC
+// path (receive_loose_parts -> add_price_lot per line) every other receipt
+// uses. consume_from_lots (also in 0046) has NO caller anywhere in this
+// app yet — there's no consumption event to drive it until a work-order-
+// parts-usage phase exists. It's live in the DB, just unused until then.
 //
 // NOT built (flagged, needs new tables/functions — confirm before drafting a
 // migration, not created here): Purchase Orders, Approvals tab, Financial
@@ -247,7 +250,6 @@ import {
   adjustStock,
   getPartMovements,
   getPriceLots,
-  addPriceLot,
   receiveLooseParts,
   type ReceiveLine,
 } from "./actions";
@@ -335,8 +337,12 @@ export default function InventoryClient({
   const [viewPart, setViewPart] = useState<Part | null>(null);
   const [financePart, setFinancePart] = useState<Part | null>(null);
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
+  // Prefill for ReceivePartsModal when opened from the part drawer's own
+  // "Add Parts" button (test 6 fix — see ReceivePartsModal's own header
+  // comment for the full rationale). null when opened from the header
+  // button instead (blank draft, as before).
+  const [receivePrefill, setReceivePrefill] = useState<{ warehouseId: string; lines: ReceiveLine[] } | null>(null);
   const [adjustModal, setAdjustModal] = useState<{ part: Part } | null>(null);
-  const [priceLotModal, setPriceLotModal] = useState<{ part: Part } | null>(null);
   // Phase 4 — Purchase Orders (migration 0050).
   const [newPOOpen, setNewPOOpen] = useState(false);
   const [poListOpen, setPoListOpen] = useState(false);
@@ -469,7 +475,13 @@ export default function InventoryClient({
                 preview's own header already has, since it never gates on
                 parts.length either). */}
             {invTab === "inventory" && warehouses.length > 0 && (
-              <Btn variant="outline" onClick={() => setReceiveModalOpen(true)}>
+              <Btn
+                variant="outline"
+                onClick={() => {
+                  setReceivePrefill(null);
+                  setReceiveModalOpen(true);
+                }}
+              >
                 <PackagePlus className="h-4 w-4" />
                 {lang === "en" ? "Add Parts" : "إضافة قطع"}
               </Btn>
@@ -695,9 +707,10 @@ export default function InventoryClient({
             setViewPart(null);
             setAdjustModal({ part: p });
           }}
-          onAddPrice={(p) => {
+          onReceiveMore={(prefill) => {
             setViewPart(null);
-            setPriceLotModal({ part: p });
+            setReceivePrefill(prefill);
+            setReceiveModalOpen(true);
           }}
         />
       )}
@@ -723,16 +736,16 @@ export default function InventoryClient({
           warehouses={warehouses}
           suppliers={suppliers}
           units={units}
-          onClose={() => setReceiveModalOpen(false)}
+          prefill={receivePrefill ?? undefined}
+          onClose={() => {
+            setReceiveModalOpen(false);
+            setReceivePrefill(null);
+          }}
         />
       )}
 
       {adjustModal && (
         <AdjustStockModal lang={lang} part={adjustModal.part} onClose={() => setAdjustModal(null)} />
-      )}
-
-      {priceLotModal && (
-        <AddPriceLotModal lang={lang} part={priceLotModal.part} onClose={() => setPriceLotModal(null)} />
       )}
 
       {newPOOpen && (
@@ -1039,7 +1052,7 @@ function ViewPartModal({
   purchaseOrderLines,
   onClose,
   onAdjust,
-  onAddPrice,
+  onReceiveMore,
 }: {
   lang: "en" | "ar";
   part: Part;
@@ -1052,7 +1065,14 @@ function ViewPartModal({
   purchaseOrderLines: PurchaseOrderLine[];
   onClose: () => void;
   onAdjust: (p: Part) => void;
-  onAddPrice: (p: Part) => void;
+  // Test 6 fix (Turki, post-e9a03d5 feedback): the old "Add new price"
+  // button opened a standalone AddPriceLotModal that added stock with no
+  // invoice/stock_receipts row/warehouse check — a second, weaker way to
+  // "add stock to a part" alongside the real receiving flow, which Turki
+  // flagged as a contradiction. Now opens ReceivePartsModal (the SAME
+  // "Add Parts" flow the header button uses) prefilled with this part as
+  // one line, so it goes through the real invoice/receipt-record path.
+  onReceiveMore: (prefill: { warehouseId: string; lines: ReceiveLine[] }) => void;
 }) {
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loadingMovements, setLoadingMovements] = useState(true);
@@ -1251,9 +1271,24 @@ function ViewPartModal({
             <Boxes className="h-4 w-4 muted" />
             <h3 className="text-sm font-semibold">{lang === "en" ? "Stock batches" : "دفعات المخزون"}</h3>
           </div>
-          <Btn variant="outline" onClick={() => onAddPrice(part)}>
-            <Plus className="h-4 w-4" />
-            {lang === "en" ? "Add new price" : "إضافة سعر جديد"}
+          <Btn
+            variant="outline"
+            onClick={() => {
+              // Default qty: just enough to clear reorder_level (if set),
+              // otherwise 1 — Turki's exact spec. Default price: this
+              // part's current price (same fallback chain the Pricing
+              // snapshot card above already uses).
+              const qty =
+                part.reorder_level != null ? Math.max(1, part.reorder_level - part.qty_on_hand + 1) : 1;
+              const price = currentLot?.price_sar ?? part.unit_cost_sar ?? 0;
+              onReceiveMore({
+                warehouseId: part.warehouse_id,
+                lines: [{ part_id: part.id, qty, unit_price_sar: price }],
+              });
+            }}
+          >
+            <PackagePlus className="h-4 w-4" />
+            {lang === "en" ? "Add Parts" : "إضافة قطع"}
           </Btn>
         </div>
         <Card className="!p-0 overflow-hidden mb-4">
@@ -1487,6 +1522,7 @@ function ReceivePartsModal({
   warehouses,
   suppliers,
   units,
+  prefill,
   onClose,
 }: {
   lang: "en" | "ar";
@@ -1494,6 +1530,10 @@ function ReceivePartsModal({
   warehouses: Warehouse[];
   suppliers: Supplier[];
   units: Unit[];
+  // Set when opened from a part drawer's "Add Parts" button (test 6 fix) —
+  // seeds warehouseId + one line for that part. undefined when opened from
+  // the header button instead (blank draft, unchanged from before).
+  prefill?: { warehouseId: string; lines: ReceiveLine[] };
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -1506,8 +1546,8 @@ function ReceivePartsModal({
   const [localWarehouses, setLocalWarehouses] = useState<Warehouse[]>([]);
   const [newWarehouseOpen, setNewWarehouseOpen] = useState(false);
   const [supplierId, setSupplierId] = useState("");
-  const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id ?? "");
-  const [lines, setLines] = useState<ReceiveLine[]>([]);
+  const [warehouseId, setWarehouseId] = useState(prefill?.warehouseId ?? warehouses[0]?.id ?? "");
+  const [lines, setLines] = useState<ReceiveLine[]>(prefill?.lines ?? []);
   const [addPartId, setAddPartId] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [note, setNote] = useState("");
@@ -2122,145 +2162,6 @@ function AdjustStockModal({
               className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
             >
               {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Adjust stock" : "تعديل المخزون"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// Wraps add_price_lot() (migration 0046 — live). Preview's INV.openPriceLot/
-// savePriceLot — records a new costed batch (price + incoming qty), FIFO:
-// older stock keeps its own price until fully consumed. ONE entry point: the
-// View drawer's "Add new price" button (mirrors preview exactly — that's its
-// only entry point too). Price defaults to the part's current unit cost,
-// qty defaults to its reorder qty, date defaults to today — same defaults
-// preview's own form pre-fills (p.currentPriceSar / p.reorderQty / TODAY).
-function AddPriceLotModal({
-  lang,
-  part,
-  onClose,
-}: {
-  lang: "en" | "ar";
-  part: Part;
-  onClose: () => void;
-}) {
-  const router = useRouter();
-  const [price, setPrice] = useNumField(part.unit_cost_sar ?? undefined);
-  const [qty, setQty] = useNumField(part.reorder_qty ?? undefined);
-  const [receivedOn, setReceivedOn] = useState(todayKey());
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const priceNum = parseNumField(price);
-  const qtyNum = parseNumField(qty);
-  const canSubmit = priceNum != null && priceNum > 0 && qtyNum != null && qtyNum > 0;
-
-  function close() {
-    if (saving) return;
-    onClose();
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmit) {
-      setError(lang === "en" ? "Enter a valid price and quantity." : "أدخل سعرًا وكمية صالحين.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    const res = await addPriceLot(part.id, priceNum!, qtyNum!, receivedOn || null, note.trim() || null);
-    setSaving(false);
-    if (res.error) {
-      setError(res.error);
-      return;
-    }
-    onClose();
-    router.refresh();
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
-      <div className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
-        <form onSubmit={submit}>
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <h2 className="text-lg font-semibold">
-              {lang === "en" ? "Update market price" : "تحديث سعر السوق"} —{" "}
-              {lang === "ar" ? part.name_ar ?? part.name : part.name}
-            </h2>
-            <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          <p className="text-xs muted mb-3">
-            {lang === "en"
-              ? "Add a new price batch. Older stock is consumed first (FIFO), so the previous price stays active until it runs out."
-              : "أضف دفعة سعر جديدة. يُستهلك المخزون الأقدم أولاً (FIFO)، فيظل السعر السابق فعّالًا حتى نفاد كميته."}
-          </p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "New price (SAR) *" : "السعر الجديد (ر.س) *"}</span>
-              <input
-                value={price}
-                onChange={(e) => setPrice(e.target.value.replace(/-/g, ""))}
-                className={INPUT}
-                style={INPUT_STYLE}
-                inputMode="decimal"
-                required
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">
-                {lang === "en" ? "Incoming qty" : "الكمية الواردة"} {part.unit ? `(${part.unit})` : ""} *
-              </span>
-              <input
-                value={qty}
-                onChange={(e) => setQty(e.target.value.replace(/-/g, ""))}
-                className={INPUT}
-                style={INPUT_STYLE}
-                inputMode="decimal"
-                required
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Received on" : "تاريخ الاستلام"}</span>
-              <input
-                type="date"
-                value={receivedOn}
-                onChange={(e) => setReceivedOn(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Note" : "ملاحظة"}</span>
-              <input
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                placeholder={lang === "en" ? "e.g. Market increase" : "مثال: ارتفاع السوق"}
-              />
-            </label>
-          </div>
-
-          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
-
-          <div className="mt-5 flex justify-end gap-2">
-            <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
-            </Btn>
-            <button
-              type="submit"
-              disabled={!canSubmit || saving}
-              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
-            >
-              {/* preview's inv.saveLot ("Save Lot", i18n.js:474) */}
-              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Save Lot" : "حفظ الدفعة"}
             </button>
           </div>
         </form>
