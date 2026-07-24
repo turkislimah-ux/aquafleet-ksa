@@ -183,7 +183,7 @@ export function ProcStrip({
   pendingReviewCount,
   onOpenList,
   onOpenReceiveList,
-  onOpenApprovalsList,
+  onGoToApprovals,
 }: {
   lang: "en" | "ar";
   openCount: number;
@@ -191,7 +191,11 @@ export function ProcStrip({
   pendingReviewCount: number;
   onOpenList: () => void;
   onOpenReceiveList: () => void;
-  onOpenApprovalsList: () => void;
+  // preview's third chip calls INV.setTab('approvals') — a tab switch, not
+  // a popup (pages-2.js:3094-3097). This used to open a standalone
+  // ApprovalsListModal (now removed — it had no other entry point and
+  // preview has no such popup at all).
+  onGoToApprovals: () => void;
 }) {
   return (
     <div
@@ -214,7 +218,7 @@ export function ProcStrip({
       <ProcChip
         count={pendingReviewCount}
         label={lang === "en" ? "Pending review" : "بانتظار المراجعة"}
-        onClick={onOpenApprovalsList}
+        onClick={onGoToApprovals}
         warn
       />
     </div>
@@ -370,7 +374,14 @@ export function NewPOModal({
 
   const [supplierId, setSupplierId] = useState(aiSuggestion?.supplierId ?? "");
   const [warehouseId, setWarehouseId] = useState(aiSuggestion?.warehouseId ?? warehouses[0]?.id ?? "");
-  const [expectedDelivery, setExpectedDelivery] = useState("");
+  // preview's openNewPO defaults expectedDelivery to today+7 (pages-2.js:2107)
+  // unless the caller overrides it — matched here as the initial value only
+  // (still freely editable, same as preview's own date input).
+  const [expectedDelivery, setExpectedDelivery] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().slice(0, 10);
+  });
   const [lines, setLines] = useState<NewPOLine[]>(aiSuggestion?.lines ?? []);
   const [addPartId, setAddPartId] = useState("");
   const [note, setNote] = useState(
@@ -1098,7 +1109,8 @@ export function PODetailModal({
           <div className="no-print flex items-center gap-2">
             <Btn variant="outline" onClick={handlePrint}>
               <Printer className="h-4 w-4" />
-              {lang === "en" ? "Print" : "طباعة"}
+              {/* preview's inv.printInvoice ("Print as Invoice", i18n.js:636) */}
+              {lang === "en" ? "Print as Invoice" : "طباعة كفاتورة"}
             </Btn>
             <button type="button" onClick={onClose} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
               <X className="h-4 w-4" />
@@ -1145,6 +1157,13 @@ export function PODetailModal({
           <div>
             <div className="text-[11px] muted uppercase">{lang === "en" ? "Warehouse" : "المستودع"}</div>
             <div className="font-medium">{warehouse?.name ?? "—"}</div>
+          </div>
+          {/* preview's inv.requestedBy ("Requested by", i18n.js:578,
+              pages-2.js:2388) — po.requested_by was already selected in
+              page.tsx but never rendered anywhere. */}
+          <div>
+            <div className="text-[11px] muted uppercase">{lang === "en" ? "Requested by" : "طلب بواسطة"}</div>
+            <div className="font-medium">{po.requested_by ?? "—"}</div>
           </div>
           {po.received_by && (
             <>
@@ -1769,147 +1788,32 @@ export function ReceivePOModal({
   );
 }
 
-// "Pending review" list — POs awaiting approval (preview's own Approvals
-// tab list, trimmed to just this filter since this app has no separate
-// tab). Table, same shape as POListModal (Open POs) — click a row to open
-// the full PO detail, where Approve/Reject actually live.
-export function ApprovalsListModal({
-  lang,
-  purchaseOrders,
-  purchaseOrderApprovals,
-  suppliers,
-  onClose,
-  onView,
-}: {
-  lang: "en" | "ar";
-  purchaseOrders: PurchaseOrder[];
-  purchaseOrderApprovals: PurchaseOrderApproval[];
-  suppliers: Supplier[];
-  onClose: () => void;
-  onView: (po: PurchaseOrder) => void;
-}) {
-  const suppliersById = useMemo(() => {
-    const m = new Map<string, Supplier>();
-    for (const s of suppliers) m.set(s.id, s);
-    return m;
-  }, [suppliers]);
-
-  const pending = purchaseOrders
-    .filter((o) => o.status === "pending_approval")
-    .slice()
-    .sort((a, b) => (a.request_date < b.request_date ? 1 : a.request_date > b.request_date ? -1 : 0));
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
-      <div
-        className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <h2 className="text-lg font-semibold">
-            {lang === "en" ? "Purchase Orders Pending Review" : "أوامر الشراء بانتظار المراجعة"}
-          </h2>
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {pending.length === 0 ? (
-          <p className="muted text-sm py-10 text-center">
-            {lang === "en" ? "Nothing pending review." : "لا يوجد ما ينتظر المراجعة."}
-          </p>
-        ) : (
-          <Card className="!p-0 overflow-hidden">
-            <Table>
-              <thead>
-                <tr>
-                  <TH>{lang === "en" ? "PO Number" : "رقم الأمر"}</TH>
-                  <TH>{lang === "en" ? "Supplier" : "المورد"}</TH>
-                  <TH>{lang === "en" ? "Received on" : "تاريخ الاستلام"}</TH>
-                  <TH>{lang === "en" ? "Approved by" : "تم الاعتماد من"}</TH>
-                  <TH></TH>
-                </tr>
-              </thead>
-              <tbody>
-                {pending.map((po) => {
-                  const supplier = suppliersById.get(po.supplier_id);
-                  const count = purchaseOrderApprovals.filter((a) => a.purchase_order_id === po.id).length;
-                  return (
-                    <tr
-                      key={po.id}
-                      className="cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
-                      onClick={() => onView(po)}
-                    >
-                      <TD className="font-mono text-xs font-semibold">
-                        <span className="inline-flex items-center gap-1.5">
-                          {po.po_number}
-                          {po.ai_generated && <AiPill lang={lang} />}
-                        </span>
-                      </TD>
-                      <TD>
-                        <div className="text-sm font-medium">{supplier?.name ?? "—"}</div>
-                      </TD>
-                      <TD className="text-xs">{po.received_date ?? "—"}</TD>
-                      <TD>
-                        <span
-                          className="text-[11px] font-medium px-2 py-0.5 rounded-full"
-                          style={{
-                            background: count >= 2 ? "rgba(16,185,129,.14)" : "rgba(245,158,11,.14)",
-                            color: count >= 2 ? "#047857" : "#b45309",
-                          }}
-                        >
-                          {count}/2
-                        </span>
-                      </TD>
-                      <TD className="text-right">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onView(po);
-                          }}
-                          title={lang === "en" ? "View" : "عرض"}
-                          className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/5"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
-                      </TD>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </Table>
-          </Card>
-        )}
-
-        <div className="mt-5 flex justify-end">
-          <Btn variant="outline" onClick={onClose}>
-            {lang === "en" ? "Close" : "إغلاق"}
-          </Btn>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // Approve a PO — preview's openApprove (pages-2.js ~2928-2957), trimmed:
 // preview has a persona picker ("Approve as") because it has no real auth;
 // this app derives the approver from the authenticated session server-side
 // (same substitution every other actor field in this feature already
 // made), so there's nothing to pick here — just the running count and an
-// optional comment. Eligibility (staff.role in the approver set) is
-// checked by the RPC, not pre-filtered client-side (see actions.ts's own
-// comment on why).
+// optional comment. Role eligibility (staff.role in the approver set) is
+// still enforced only by the RPC, not duplicated client-side (see actions.ts's
+// own comment on why) — but a duplicate-approval attempt (this session
+// already signed off on this exact PO) IS pre-checked client-side now
+// (`alreadyApproved`), swapping the form for preview's own message
+// (inv.youCannotApprove, i18n.js:604, pages-2.js:2953-2955) instead of only
+// surfacing the DB's UNIQUE(purchase_order_id, approver_email) constraint
+// (migration 0052) as a raw error after submit. The constraint stays the
+// real enforcement either way — this is a friendlier message in front of it.
 export function ApprovePOModal({
   lang,
   po,
   approvalCount,
+  alreadyApproved,
   onClose,
   onApproved,
 }: {
   lang: "en" | "ar";
   po: PurchaseOrder;
   approvalCount: number;
+  alreadyApproved: boolean;
   onClose: () => void;
   onApproved: () => void;
 }) {
@@ -1957,32 +1861,47 @@ export function ApprovePOModal({
             {lang === "en" ? "Approved by" : "تم الاعتماد من"}: <b>{approvalCount}</b>
           </p>
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">{lang === "en" ? "Optional comment" : "تعليق اختياري"}</span>
-            <input
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              className={INPUT}
-              style={INPUT_STYLE}
-              placeholder={lang === "en" ? "Optional comment" : "تعليق اختياري"}
-            />
-          </label>
+          {alreadyApproved ? (
+            <>
+              <p className="text-sm muted">
+                {lang === "en" ? "You've already signed off on this PO" : "لقد اعتمدتَ هذا الأمر مسبقًا"}
+              </p>
+              <div className="mt-5 flex justify-end">
+                <Btn variant="outline" onClick={close}>
+                  {lang === "en" ? "Close" : "إغلاق"}
+                </Btn>
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">{lang === "en" ? "Optional comment" : "تعليق اختياري"}</span>
+                <input
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                  placeholder={lang === "en" ? "Optional comment" : "تعليق اختياري"}
+                />
+              </label>
 
-          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
+              {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
 
-          <div className="mt-5 flex justify-end gap-2">
-            <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
-            </Btn>
-            <button
-              type="submit"
-              disabled={saving}
-              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
-            >
-              <Check className="h-4 w-4" />
-              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Approve" : "اعتماد"}
-            </button>
-          </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <Btn variant="outline" onClick={close}>
+                  {lang === "en" ? "Cancel" : "إلغاء"}
+                </Btn>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  <Check className="h-4 w-4" />
+                  {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Approve" : "اعتماد"}
+                </button>
+              </div>
+            </>
+          )}
         </form>
       </div>
     </div>
@@ -2490,6 +2409,7 @@ export function PartFinanceModal({
   purchaseOrderLines,
   onClose,
   onViewPO,
+  onViewPart,
 }: {
   lang: "en" | "ar";
   part: Part;
@@ -2499,6 +2419,10 @@ export function PartFinanceModal({
   purchaseOrderLines: PurchaseOrderLine[];
   onClose: () => void;
   onViewPO: (po: PurchaseOrder) => void;
+  // preview's openPartFinance footer has Close + "View Part" (jumps to the
+  // full drawer, pages-2.js:2067-2069) — this modal had no footer at all
+  // before, only the header's X-to-close.
+  onViewPart: (p: Part) => void;
 }) {
   const warehouseName = warehouses.find((w) => w.id === part.warehouse_id)?.name ?? "—";
 
@@ -2683,6 +2607,22 @@ export function PartFinanceModal({
               </tbody>
             </Table>
           </Card>
+        </div>
+
+        <div className="flex justify-end gap-2 mt-4">
+          <Btn variant="outline" onClick={onClose}>
+            {lang === "en" ? "Close" : "إغلاق"}
+          </Btn>
+          <Btn
+            variant="primary"
+            onClick={() => {
+              onClose();
+              onViewPart(part);
+            }}
+          >
+            <Eye className="h-4 w-4" />
+            {lang === "en" ? "View Part" : "عرض القطعة"}
+          </Btn>
         </div>
       </div>
     </div>

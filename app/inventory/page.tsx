@@ -19,6 +19,18 @@ export const dynamic = "force-dynamic";
 export default async function InventoryPage() {
   const supabase = createClient();
 
+  // Current session email — used client-side only for a UX pre-check on
+  // ApprovePOModal (preview's openApprove shows "You've already signed off
+  // on this PO" instead of the approve form when the active persona has no
+  // eligibility left, pages-2.js:2928-2955/i18n.js:604). The real
+  // enforcement stays the DB's UNIQUE(purchase_order_id, approver_email)
+  // constraint (migration 0052) — this is only a friendlier message before
+  // submit, not a security control.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const currentUserEmail = user?.email ?? null;
+
   const [
     warehousesRes,
     partsRes,
@@ -120,6 +132,7 @@ export default async function InventoryPage() {
       purchaseOrders={purchaseOrders}
       purchaseOrderLines={purchaseOrderLines}
       purchaseOrderApprovals={purchaseOrderApprovals}
+      currentUserEmail={currentUserEmail}
       error={error}
     />
   );

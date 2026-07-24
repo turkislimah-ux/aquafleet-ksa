@@ -224,7 +224,6 @@ import {
   PODetailModal,
   ReceiveListModal,
   ReceivePOModal,
-  ApprovalsListModal,
   ApprovePOModal,
   RejectPOModal,
   ApprovalsTab,
@@ -307,6 +306,7 @@ export default function InventoryClient({
   purchaseOrders,
   purchaseOrderLines,
   purchaseOrderApprovals,
+  currentUserEmail,
   error,
 }: {
   warehouses: Warehouse[];
@@ -317,6 +317,7 @@ export default function InventoryClient({
   purchaseOrders: PurchaseOrder[];
   purchaseOrderLines: PurchaseOrderLine[];
   purchaseOrderApprovals: PurchaseOrderApproval[];
+  currentUserEmail: string | null;
   error: string | null;
 }) {
   const { lang } = useApp();
@@ -341,8 +342,10 @@ export default function InventoryClient({
   // Phase 5 — PO receiving (migration 0051).
   const [receiveListOpen, setReceiveListOpen] = useState(false);
   const [receivePO, setReceivePO] = useState<PurchaseOrder | null>(null);
-  // Phase 6 — PO Approvals (migration 0052).
-  const [approvalsListOpen, setApprovalsListOpen] = useState(false);
+  // Phase 6 — PO Approvals (migration 0052). Pending-review now reaches the
+  // Approvals tab directly (ProcStrip's onGoToApprovals -> setInvTab), no
+  // standalone list-modal in between — matches preview's own setTab, which
+  // has no popup for this at all.
   const [approvePO, setApprovePO] = useState<PurchaseOrder | null>(null);
   const [rejectPO, setRejectPO] = useState<PurchaseOrder | null>(null);
   // Phase 7 — AI-Suggest-PO (migration 0053). Set right before opening
@@ -421,9 +424,13 @@ export default function InventoryClient({
       <PageHeader
         title={lang === "en" ? "Inventory" : "المخزون"}
         subtitle={
+          // preview's c.invSubtitle ("Parts, fluids, tires & equipment across
+          // 3 warehouses", i18n.js:321) hardcodes preview's own demo data —
+          // matched here on real warehouse count instead of copying "3"
+          // verbatim, so the message stays correct as warehouses are added.
           lang === "en"
-            ? "Warehouses, parts & stock levels"
-            : "المستودعات وقطع الغيار ومستويات المخزون"
+            ? `Parts, fluids, tires & equipment across ${warehouses.length} warehouse${warehouses.length === 1 ? "" : "s"}`
+            : `قطع وسوائل وإطارات ومعدات في ${warehouses.length} ${warehouses.length === 1 ? "مستودع" : "مستودعات"}`
         }
         actions={
           <>
@@ -470,9 +477,22 @@ export default function InventoryClient({
                 (not gated on lowParts.length, matching preview) but
                 disabled when there's genuinely nothing to reorder — no
                 toast utility exists in this app (grepped, zero hits), so
-                disable-in-place stands in for preview's toast here. */}
+                the disabled button's own `title` tooltip carries preview's
+                toast message ("Nothing to reorder — all parts above
+                threshold.", pages-2.js:2119-2122) instead of a popup. */}
             {invTab === "inventory" && warehouses.length > 0 && (
-              <Btn variant="outline" onClick={openAISuggest} disabled={!aiPurchaseSuggestion}>
+              <Btn
+                variant="outline"
+                onClick={openAISuggest}
+                disabled={!aiPurchaseSuggestion}
+                title={
+                  aiPurchaseSuggestion
+                    ? undefined
+                    : lang === "en"
+                    ? "Nothing to reorder — all parts above threshold."
+                    : "لا شيء للطلب — كل القطع فوق الحد."
+                }
+              >
                 <Zap className="h-4 w-4" />
                 {lang === "en" ? "AI-Suggest" : "اقتراح ذكي"}
               </Btn>
@@ -498,8 +518,9 @@ export default function InventoryClient({
               tone="info"
             />
             <Stat label={lang === "en" ? "SKUs" : "أصناف"} value={skuCount} />
+            {/* preview's c.lowStock ("Low Stock Items"/"أصناف منخفضة", i18n.js:234) */}
             <Stat
-              label={lang === "en" ? "Low Stock" : "مخزون منخفض"}
+              label={lang === "en" ? "Low Stock Items" : "أصناف منخفضة"}
               value={lowStockCount}
               tone={lowStockCount > 0 ? "bad" : "ok"}
             />
@@ -557,7 +578,7 @@ export default function InventoryClient({
                 pendingReviewCount={pendingReviewCount}
                 onOpenList={() => setPoListOpen(true)}
                 onOpenReceiveList={() => setReceiveListOpen(true)}
-                onOpenApprovalsList={() => setApprovalsListOpen(true)}
+                onGoToApprovals={() => setInvTab("approvals")}
               />
 
               <Card className="!p-3">
@@ -682,6 +703,7 @@ export default function InventoryClient({
           purchaseOrderLines={purchaseOrderLines}
           onClose={() => setFinancePart(null)}
           onViewPO={(po) => setViewPO(po)}
+          onViewPart={(p) => setViewPart(p)}
         />
       )}
 
@@ -788,25 +810,14 @@ export default function InventoryClient({
         />
       )}
 
-      {approvalsListOpen && (
-        <ApprovalsListModal
-          lang={lang}
-          purchaseOrders={purchaseOrders}
-          purchaseOrderApprovals={purchaseOrderApprovals}
-          suppliers={suppliers}
-          onClose={() => setApprovalsListOpen(false)}
-          onView={(po) => {
-            setApprovalsListOpen(false);
-            setViewPO(po);
-          }}
-        />
-      )}
-
       {approvePO && (
         <ApprovePOModal
           lang={lang}
           po={approvePO}
           approvalCount={purchaseOrderApprovals.filter((a) => a.purchase_order_id === approvePO.id).length}
+          alreadyApproved={purchaseOrderApprovals.some(
+            (a) => a.purchase_order_id === approvePO.id && a.approver_email === currentUserEmail
+          )}
           onClose={() => setApprovePO(null)}
           onApproved={() => setApprovePO(null)}
         />
@@ -852,7 +863,10 @@ function EmptyWarehouseState({ lang, onCreate }: { lang: "en" | "ar"; onCreate: 
 function StockCell({ part, lang }: { part: Part; lang: "en" | "ar" }) {
   const tier = stockTier(part);
   return (
-    <div className="flex flex-col gap-0.5 min-w-[6rem]">
+    <div
+      className="flex flex-col gap-0.5 min-w-[6rem]"
+      title={tier ? (lang === "en" ? TIER_LABEL[tier].en : TIER_LABEL[tier].ar) : undefined}
+    >
       <div className={cn("flex items-baseline gap-1.5", tier ? TIER_TEXT[tier] : "")}>
         {tier && <span className={cn("h-1.5 w-1.5 rounded-full self-center", TIER_DOT[tier])} />}
         <span className="text-[15px] font-bold tabular-nums">{part.qty_on_hand}</span>
@@ -2201,7 +2215,8 @@ function AddPriceLotModal({
               disabled={!canSubmit || saving}
               className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
             >
-              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Save batch" : "حفظ الدفعة"}
+              {/* preview's inv.saveLot ("Save Lot", i18n.js:474) */}
+              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Save Lot" : "حفظ الدفعة"}
             </button>
           </div>
         </form>

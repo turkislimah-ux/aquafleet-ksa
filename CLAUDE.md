@@ -438,6 +438,43 @@ relevant skill(s) **when the task calls for it**:
     constraint but nothing writes it), so that section was dropped rather
     than faked; everything else in the report (purchases, stock value, price
     trend) is real data.
+  - **Post-Phase-7 audit + gap-closing pass:** a full systematic comparison
+    against `preview/` (functional/wording + a separate git-history + visual/
+    CSS pass) turned up a list of real gaps; Turki approved all of them, then
+    excluded six as a separate, data-risk track — **NOT done in this pass,
+    still open:** unified receive with extra ad-hoc lines on a PO receipt
+    (preview's `_renderReceiveModal` PO-lookup field / `ReceivePOModal`'s
+    inability to add lines — same underlying gap described two ways);
+    sequential auto-SKU; single-part quick-reorder (`INV.openReorder`); the
+    Actual-Total column on the Approvals queue; New PO's default supplier;
+    and every visual/CSS/styling finding (colors, `.btn` hover/press
+    micro-interactions, `.card` radius/shadow, icon substitutions — none of
+    that is being done at all, not just deferred).
+    **Closed in this pass (no migration needed — real data already
+    selected):** wording (`inv.printInvoice`→"Print as Invoice",
+    `inv.saveLot`→"Save Lot", `c.lowStock`→"Low Stock Items", page subtitle
+    content-matched to preview's message shape but on the real warehouse
+    count, not preview's hardcoded "3"); stock-cell `title` tooltip wired to
+    the already-existing `TIER_LABEL` map; `NewPOModal`'s expected-delivery
+    now defaults to today+7 (preview's own default); AI-Suggest's disabled
+    header button now carries preview's "nothing to reorder" toast text as
+    its `title` attribute (no toast utility exists in this app); PO detail
+    now shows `Requested by` (`requested_by` was already selected in
+    `page.tsx`, just never rendered); `PartFinanceModal` gained a footer
+    (Close + "View Part", jumping to the full drawer); the ProcStrip's
+    "Pending review" chip now switches to the Approvals tab directly
+    (`onGoToApprovals`, matching preview's `INV.setTab('approvals')` exactly)
+    instead of opening a standalone popup — `ApprovalsListModal` had no other
+    entry point and preview has no such popup at all, so it was deleted
+    rather than left unreachable; `ApprovePOModal` now pre-checks whether the
+    current session already approved this exact PO and swaps the form for
+    preview's own message (`inv.youCannotApprove`) instead of only surfacing
+    a raw RPC error after submit — the real enforcement stays the DB's
+    `UNIQUE(purchase_order_id, approver_email)` constraint (0052), this is a
+    friendlier message in front of it, not a new security control. `Btn`
+    (`components/ui.tsx`, shared primitive) gained an optional `title` prop
+    (`disabled` was already added in the Phase 7 AI-Suggest pass) to support
+    the above — backward compatible, every other caller unaffected.
   - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);
