@@ -238,6 +238,7 @@ import {
   computePartFinanceStats,
   suggestAIPurchaseLines,
   type NewPOAISuggestion,
+  type NewPOQuickReorder,
   type EditingPO,
 } from "./PurchaseOrders";
 import {
@@ -378,6 +379,10 @@ export default function InventoryClient({
   // the SAME newPOOpen state) so it renders in edit mode instead of create
   // mode; mutually exclusive with aiSuggestion, cleared on close.
   const [editingPO, setEditingPO] = useState<EditingPO | null>(null);
+  // Follow-up batch, item 1 — single-part quick-reorder. Mutually exclusive
+  // with aiSuggestion/editingPO (all three share newPOOpen + NewPOModal's
+  // create-mode branch), cleared on close.
+  const [quickReorder, setQuickReorder] = useState<NewPOQuickReorder | null>(null);
 
   const warehousesById = useMemo(() => {
     const m = new Map<string, Warehouse>();
@@ -463,6 +468,37 @@ export default function InventoryClient({
     if (!aiPurchaseSuggestion) return;
     setAiSuggestion(aiPurchaseSuggestion);
     setEditingPO(null);
+    setQuickReorder(null);
+    setNewPOOpen(true);
+  }
+
+  // Single-part quick-reorder (item 1, follow-up batch) — preview's own
+  // INV.openReorder (pages-2.js:1877). "Last supplier" = the most recent PO
+  // (by request_date, any status) carrying a line for this part — richer
+  // than the static parts.supplier free-text field. Falls back to matching
+  // that free-text field against a real supplier's name (same heuristic
+  // suggestAIPurchaseLines already uses above), then finally null, leaving
+  // the field blank for the user to pick, same as any other blank New PO.
+  function findLastSupplierId(part: Part): string | null {
+    const posForPart = purchaseOrders
+      .filter((po) => purchaseOrderLines.some((l) => l.purchase_order_id === po.id && l.part_id === part.id))
+      .sort((a, b) => (a.request_date < b.request_date ? 1 : a.request_date > b.request_date ? -1 : 0));
+    if (posForPart.length > 0) return posForPart[0].supplier_id;
+    const match = part.supplier && suppliers.find((s) => s.name === part.supplier);
+    return match ? match.id : null;
+  }
+
+  function openQuickReorder(part: Part) {
+    // Same "enough to clear reorder level" formula already used for the
+    // "Add Parts" drawer-button prefill (Stage 1 of the risky batch).
+    const qty = part.reorder_level != null ? Math.max(1, part.reorder_level - part.qty_on_hand + 1) : 1;
+    setAiSuggestion(null);
+    setEditingPO(null);
+    setQuickReorder({
+      warehouseId: part.warehouse_id,
+      supplierId: findLastSupplierId(part),
+      line: { part_id: part.id, qty, unit_price_sar: part.unit_cost_sar ?? 0 },
+    });
     setNewPOOpen(true);
   }
 
@@ -499,6 +535,7 @@ export default function InventoryClient({
                 onClick={() => {
                   setAiSuggestion(null);
                   setEditingPO(null);
+                  setQuickReorder(null);
                   setNewPOOpen(true);
                 }}
               >
@@ -723,6 +760,7 @@ export default function InventoryClient({
                 lang={lang}
                 onView={(p) => setViewPart(p)}
                 onFinance={(p) => setFinancePart(p)}
+                onQuickReorder={openQuickReorder}
               />
             </>
           )}
@@ -731,6 +769,7 @@ export default function InventoryClient({
             <ApprovalsTab
               lang={lang}
               purchaseOrders={purchaseOrders}
+              purchaseOrderLines={purchaseOrderLines}
               purchaseOrderApprovals={purchaseOrderApprovals}
               suppliers={suppliers}
               onView={(po) => setViewPO(po)}
@@ -779,6 +818,10 @@ export default function InventoryClient({
             setReceivePrefill(prefill);
             setReceiveModalOpen(true);
           }}
+          onQuickReorder={(p) => {
+            setViewPart(null);
+            openQuickReorder(p);
+          }}
         />
       )}
 
@@ -825,11 +868,13 @@ export default function InventoryClient({
           units={units}
           aiSuggestion={aiSuggestion ?? undefined}
           editingPO={editingPO ?? undefined}
+          quickReorder={quickReorder ?? undefined}
           defaultWarehouseId={warehouseTab}
           onClose={() => {
             setNewPOOpen(false);
             setAiSuggestion(null);
             setEditingPO(null);
+            setQuickReorder(null);
           }}
           onSaved={() => setPoListOpen(false)}
         />
@@ -848,6 +893,7 @@ export default function InventoryClient({
           }}
           onNewPO={() => {
             setPoListOpen(false);
+            setQuickReorder(null);
             setNewPOOpen(true);
           }}
         />
@@ -883,6 +929,7 @@ export default function InventoryClient({
               lines: purchaseOrderLines.filter((l) => l.purchase_order_id === po.id),
             });
             setAiSuggestion(null);
+            setQuickReorder(null);
             setNewPOOpen(true);
           }}
         />
@@ -995,6 +1042,7 @@ function PartsTable({
   lang,
   onView,
   onFinance,
+  onQuickReorder,
 }: {
   parts: Part[];
   warehousesById: Map<string, Warehouse>;
@@ -1002,6 +1050,9 @@ function PartsTable({
   lang: "en" | "ar";
   onView: (p: Part) => void;
   onFinance: (p: Part) => void;
+  // Item 1, follow-up batch — preview's own INV.openReorder (pages-2.js:1877),
+  // gated on stockTier === "critical" (== preview's own qty <= reorderLevel).
+  onQuickReorder: (p: Part) => void;
 }) {
   return (
     <Card className="!p-0 overflow-hidden">
@@ -1082,6 +1133,19 @@ function PartsTable({
                 </TD>
                 <TD className="tabular-nums font-medium">{stockValue != null ? formatSar(stockValue) : "—"}</TD>
                 <TD className="text-right whitespace-nowrap">
+                  {tier === "critical" && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onQuickReorder(p);
+                      }}
+                      title={lang === "en" ? "Quick reorder" : "إعادة طلب سريعة"}
+                      className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <ShoppingCart className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={(e) => {
@@ -1133,6 +1197,7 @@ function ViewPartModal({
   onClose,
   onAdjust,
   onReceiveMore,
+  onQuickReorder,
 }: {
   lang: "en" | "ar";
   part: Part;
@@ -1153,6 +1218,8 @@ function ViewPartModal({
   // "Add Parts" flow the header button uses) prefilled with this part as
   // one line, so it goes through the real invoice/receipt-record path.
   onReceiveMore: (prefill: { warehouseId: string; lines: ReceiveLine[] }) => void;
+  // Item 1, follow-up batch — footer "Create PO" button, critical-tier only.
+  onQuickReorder: (p: Part) => void;
 }) {
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loadingMovements, setLoadingMovements] = useState(true);
@@ -1568,6 +1635,17 @@ function ViewPartModal({
             <SlidersHorizontal className="h-4 w-4" />
             {lang === "en" ? "Adjust Stock" : "تعديل المخزون"}
           </Btn>
+          {/* Item 1, follow-up batch — preview's own conditional Create-PO
+              footer button (see this file's header comment, line ~17-18),
+              never wired to a real handler before AI-Suggest/quick-reorder
+              existed. Same gate as PartsTable's row button: critical tier
+              only, i.e. preview's own qty <= reorderLevel. */}
+          {stockTier(part) === "critical" && (
+            <Btn variant="primary" onClick={() => onQuickReorder(part)}>
+              <ShoppingCart className="h-4 w-4" />
+              {lang === "en" ? "Create PO" : "إنشاء أمر شراء"}
+            </Btn>
+          )}
         </div>
       </div>
     </ModalOverlay>

@@ -133,6 +133,19 @@ export function categoryLabel(cat: string | null, lang: "en" | "ar"): string {
   return lang === "en" ? found.en : found.ar;
 }
 
+// Auto-SKU (item 4, follow-up batch) — NOT name-based (corrected per
+// Turki's own review; an earlier version derived the SKU from the typed
+// name, wrong). Default is "SKU-" + any number not already used by an
+// existing SKU in the parts table — doesn't have to follow the highest,
+// just unused. parts.sku is globally unique already (0043's own `unique`
+// constraint) — this only avoids suggesting a value that would fail that
+// constraint, it doesn't add a new one. Stays editable either way.
+export function computeAutoSku(existingSkus: Set<string>): string {
+  let n = Math.floor(Math.random() * 9000) + 1000;
+  while (existingSkus.has(`SKU-${n}`)) n = Math.floor(Math.random() * 9000) + 1000;
+  return `SKU-${n}`;
+}
+
 // Numeric field helper — text input backed by a string (so an empty field is
 // distinguishable from 0), parsed to number|null on submit. Blocks minus-sign
 // entry so negatives can never even be typed.
@@ -604,7 +617,11 @@ export function AddPartModal({
   onCreated: (part: Part) => void;
 }) {
   const router = useRouter();
-  const [sku, setSku] = useState("");
+  // Full parts list (not just this warehouse's) — parts.sku is globally
+  // unique (0043), so the suggestion has to check against everything, not
+  // just what's in view here. Computed once, at mount, to seed the default
+  // below — not name-based, so nothing needs to re-run this as the user types.
+  const [sku, setSku] = useState(() => computeAutoSku(new Set(parts.map((p) => p.sku.toUpperCase()))));
   const [name, setName] = useState("");
   const [nameAr, setNameAr] = useState("");
   const [category, setCategory] = useState(CREATE_CATS[0]);

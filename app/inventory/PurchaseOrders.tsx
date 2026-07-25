@@ -287,6 +287,17 @@ export type NewPOAISuggestion = {
   noteAr: string;
 };
 
+// Single-part quick-reorder (preview's INV.openReorder, pages-2.js:1877 —
+// previously excluded as a data-risk item, now built). Unlike aiSuggestion,
+// the warehouse here isn't just a default — it's LOCKED (see NewPOModal's
+// own lockWarehouseId prop): the part only exists in one warehouse, so
+// there is exactly one correct destination, not a suggestion to override.
+export type NewPOQuickReorder = {
+  warehouseId: string;
+  supplierId: string | null;
+  line: NewPOLine;
+};
+
 // preview groups AI candidates by supplier and opens one PO per group
 // (pages-2.js ~2118-2133). This app's create_purchase_order enforces ONE
 // supplier + ONE warehouse per PO (0050's guard), so warehouse is the hard
@@ -373,6 +384,7 @@ export function NewPOModal({
   units,
   aiSuggestion,
   editingPO,
+  quickReorder,
   defaultWarehouseId,
   onClose,
   onSaved,
@@ -384,13 +396,17 @@ export function NewPOModal({
   units: Unit[];
   aiSuggestion?: NewPOAISuggestion;
   editingPO?: EditingPO;
+  // Mutually exclusive with aiSuggestion/editingPO (a caller passes at most
+  // one). See NewPOQuickReorder's own comment for why the warehouse it
+  // carries is LOCKED, not just a default.
+  quickReorder?: NewPOQuickReorder;
   // The page's currently active warehouse tab — used as the initial
-  // warehouseId when there's no aiSuggestion/editingPO (both already pick
-  // their own warehouse), so a brand-new draft starts on whichever
-  // warehouse you're already looking at instead of always the first one.
-  // Warehouses can no longer be created inline here — the header's "Create
-  // Warehouse" button is the only entry point now (per-warehouse tabs on
-  // the Inventory page).
+  // warehouseId when there's no aiSuggestion/editingPO/quickReorder (all
+  // three already pick their own warehouse), so a brand-new draft starts on
+  // whichever warehouse you're already looking at instead of always the
+  // first one. Warehouses can no longer be created inline here — the
+  // header's "Create Warehouse" button is the only entry point now
+  // (per-warehouse tabs on the Inventory page).
   defaultWarehouseId?: string;
   onClose: () => void;
   onSaved: () => void;
@@ -402,10 +418,21 @@ export function NewPOModal({
   const [localParts, setLocalParts] = useState<Part[]>([]);
   const [newItemOpen, setNewItemOpen] = useState(false);
 
-  const [supplierId, setSupplierId] = useState(editingPO?.po.supplier_id ?? aiSuggestion?.supplierId ?? "");
-  const [warehouseId, setWarehouseId] = useState(
-    editingPO?.po.warehouse_id ?? aiSuggestion?.warehouseId ?? defaultWarehouseId ?? warehouses[0]?.id ?? ""
+  const [supplierId, setSupplierId] = useState(
+    editingPO?.po.supplier_id ?? aiSuggestion?.supplierId ?? quickReorder?.supplierId ?? ""
   );
+  const [warehouseId, setWarehouseId] = useState(
+    editingPO?.po.warehouse_id ??
+      aiSuggestion?.warehouseId ??
+      quickReorder?.warehouseId ??
+      defaultWarehouseId ??
+      warehouses[0]?.id ??
+      ""
+  );
+  // Single-part quick-reorder locks the warehouse — the part only exists
+  // in one, so the dropdown below disables every OTHER option rather than
+  // just defaulting to this one (still visible, not selectable).
+  const lockWarehouseId = quickReorder?.warehouseId;
   // preview's openNewPO defaults expectedDelivery to today+7 (pages-2.js:2107)
   // unless the caller overrides it — matched here as the initial value only
   // (still freely editable, same as preview's own date input). Editing an
@@ -420,6 +447,8 @@ export function NewPOModal({
   const [lines, setLines] = useState<NewPOLine[]>(
     editingPO
       ? editingPO.lines.map((l) => ({ part_id: l.part_id, qty: l.qty, unit_price_sar: l.unit_price_sar }))
+      : quickReorder
+      ? [quickReorder.line]
       : aiSuggestion?.lines ?? []
   );
   const [addPartId, setAddPartId] = useState("");
@@ -434,6 +463,13 @@ export function NewPOModal({
     const ids = new Set(suppliers.map((s) => s.id));
     return [...suppliers, ...localSuppliers.filter((s) => !ids.has(s.id))];
   }, [suppliers, localSuppliers]);
+
+  // Supplier info card (item 3) — preview's own _supplierCardHtml/
+  // #poSupplierCard (pages-2.js:2241-2255), never built here before. Blank
+  // "—" until a supplier is picked; once picked, name_ar shown beneath the
+  // English name — this app's own bilingual-pair convention (preview has
+  // no supplier name_ar at all, migration 0048's own addition).
+  const selectedSupplier = allSuppliers.find((s) => s.id === supplierId) ?? null;
 
   const allParts = useMemo(() => {
     const ids = new Set(parts.map((p) => p.id));
@@ -675,7 +711,12 @@ export function NewPOModal({
             <label className="flex flex-col gap-1 text-sm">
               <span className="muted">{lang === "en" ? "Warehouse *" : "المستودع *"}</span>
               {/* No inline "+ Warehouse" here anymore — Create Warehouse is
-                  the page header's job only (per-warehouse tabs). */}
+                  the page header's job only (per-warehouse tabs). Quick-
+                  reorder LOCKS this to the part's own warehouse — every
+                  option still renders (so it's visible this isn't a
+                  short list, just a restriction) but every OTHER one is
+                  disabled; a part only lives in one warehouse, so there is
+                  exactly one correct destination for this PO. */}
               <select
                 value={warehouseId}
                 onChange={(e) => {
@@ -687,11 +728,18 @@ export function NewPOModal({
                 required
               >
                 {warehouses.map((w) => (
-                  <option key={w.id} value={w.id}>
+                  <option key={w.id} value={w.id} disabled={lockWarehouseId != null && w.id !== lockWarehouseId}>
                     {w.name}
                   </option>
                 ))}
               </select>
+              {lockWarehouseId && (
+                <p className="text-[11px] muted mt-0.5">
+                  {lang === "en"
+                    ? "Locked — this part only exists in this warehouse."
+                    : "مقفل — هذه القطعة موجودة في هذا المستودع فقط."}
+                </p>
+              )}
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
@@ -705,6 +753,36 @@ export function NewPOModal({
               />
             </label>
           </div>
+
+          <Card className="!p-3">
+            <div className="text-[11px] muted uppercase tracking-wide mb-1">
+              {lang === "en" ? "Supplier contact" : "بيانات المورّد"}
+            </div>
+            {!selectedSupplier ? (
+              <div className="text-sm muted">—</div>
+            ) : (
+              <>
+                <div className="font-semibold text-sm">{selectedSupplier.name}</div>
+                {selectedSupplier.name_ar && (
+                  <div className="text-xs muted mb-1">{selectedSupplier.name_ar}</div>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs mt-1">
+                  <div>
+                    <span className="muted">{lang === "en" ? "Contact person" : "الشخص المسؤول"}:</span>{" "}
+                    {selectedSupplier.contact_person ?? "—"}
+                  </div>
+                  <div>
+                    <span className="muted">{lang === "en" ? "Phone" : "الهاتف"}:</span>{" "}
+                    <span className="font-mono">{selectedSupplier.phone ?? "—"}</span>
+                  </div>
+                  <div>
+                    <span className="muted">{lang === "en" ? "Email" : "البريد الإلكتروني"}:</span>{" "}
+                    <span className="font-mono">{selectedSupplier.email ?? "—"}</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </Card>
 
           {droppedNotice && (
             <p className="text-xs flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
@@ -2294,6 +2372,7 @@ export function RejectPOModal({
 export function ApprovalsTab({
   lang,
   purchaseOrders,
+  purchaseOrderLines,
   purchaseOrderApprovals,
   suppliers,
   onView,
@@ -2301,6 +2380,13 @@ export function ApprovalsTab({
 }: {
   lang: "en" | "ar";
   purchaseOrders: PurchaseOrder[];
+  // Item 2 ("risky batch" follow-up) — Actual Total column. Every PO in
+  // this queue is pending_approval or later, meaning receive_purchase_order
+  // has already stamped received_qty/received_unit_price_sar on EVERY line
+  // (its own contract, 0051/0055) — no ordered-value fallback needed here,
+  // unlike PODetailModal's line table, which also has to handle a PO that
+  // hasn't been received yet.
+  purchaseOrderLines: PurchaseOrderLine[];
   purchaseOrderApprovals: PurchaseOrderApproval[];
   suppliers: Supplier[];
   onView: (po: PurchaseOrder) => void;
@@ -2340,6 +2426,7 @@ export function ApprovalsTab({
               <TH>{lang === "en" ? "PO Number" : "رقم الأمر"}</TH>
               <TH>{lang === "en" ? "Supplier" : "المورد"}</TH>
               <TH>{lang === "en" ? "Received on" : "تاريخ الاستلام"}</TH>
+              <TH>{lang === "en" ? "Actual Total" : "الإجمالي الفعلي"}</TH>
               <TH>{lang === "en" ? "Approved by" : "تم الاعتماد من"}</TH>
               <TH></TH>
             </tr>
@@ -2348,6 +2435,9 @@ export function ApprovalsTab({
             {queue.map((po) => {
               const supplier = suppliersById.get(po.supplier_id);
               const approvals = purchaseOrderApprovals.filter((a) => a.purchase_order_id === po.id);
+              const actualTotal = purchaseOrderLines
+                .filter((l) => l.purchase_order_id === po.id)
+                .reduce((s, l) => s + (l.received_qty ?? 0) * (l.received_unit_price_sar ?? 0), 0);
               return (
                 <tr
                   key={po.id}
@@ -2364,6 +2454,7 @@ export function ApprovalsTab({
                     <div className="text-sm">{supplier?.name ?? "—"}</div>
                   </TD>
                   <TD className="text-xs">{po.received_date ?? "—"}</TD>
+                  <TD className="tabular-nums font-medium text-xs">{formatSar(actualTotal)}</TD>
                   <TD className="text-xs">
                     <div className="inline-flex items-center gap-1">
                       {Array.from({ length: 2 }).map((_, i) => (

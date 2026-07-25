@@ -688,6 +688,81 @@ relevant skill(s) **when the task calls for it**:
       everything after that (Issue now, error handling) unchanged. New
       "Edit" button on `PODetailModal`'s footer, draft POs only — no
       preview equivalent (preview never lets you edit a saved PO either).
+  - **Stage 4 of the "risky batch" — 4 app-only items, no migration/RPC
+    touched.** (Migration `0054` — grants Turki's real login `fleet_manager`
+    access for PO approval — was drafted/applied/verified earlier but stays
+    intentionally uncommitted; not in scope for this stage's commit either.)
+    - **Item 1 — single-part quick-reorder.** Preview's own `INV.openReorder`
+      (pages-2.js:1877), previously excluded as a data-risk item, now built.
+      New cart-icon button on a `PartsTable` row (gated on
+      `stockTier(p) === "critical"`) and a "Create PO" footer button on
+      `ViewPartModal` (same gate) both call a new `openQuickReorder(part)`
+      handler in `InventoryClient.tsx`, which builds a `NewPOQuickReorder`
+      (`PurchaseOrders.tsx`) — `{ warehouseId, supplierId, line }` — and
+      opens `NewPOModal` with it. Qty prefills to
+      `max(1, reorder_level - qty_on_hand + 1)` (same formula already used
+      for the "Add Parts" drawer-button prefill). Supplier prefills from
+      `findLastSupplierId()`: the most recent PO (by `request_date`, any
+      status) with a line for this part, falling back to matching the
+      static `parts.supplier` free-text field against a real supplier's
+      name (same heuristic `suggestAIPurchaseLines` already uses), then
+      `null`. The warehouse is **locked**, not just defaulted:
+      `NewPOModal`'s new `lockWarehouseId` derived value disables every
+      `<option>` except the part's own warehouse in the warehouse
+      `<select>` — the select itself stays interactive/openable (per
+      Turki's explicit wording), only the non-matching options are
+      individually disabled. Mutually exclusive with `aiSuggestion`/
+      `editingPO` (all three share `newPOOpen` + `NewPOModal`'s create-mode
+      branch); every existing opener of `NewPOModal` now also clears
+      `quickReorder` so a plain "New PO" click afterwards opens blank.
+    - **Item 2 — Approvals queue gained an "Actual Total" column.**
+      `ApprovalsTab` (`PurchaseOrders.tsx`) takes a new `purchaseOrderLines`
+      prop; each row sums `received_qty * received_unit_price_sar` across
+      that PO's lines. No ordered-value fallback needed (unlike
+      `PODetailModal`'s line table) — every PO reaching this queue is
+      `pending_approval` or later, meaning `receive_purchase_order` has
+      already stamped both received fields on every line (0051/0055's own
+      contract).
+    - **Item 3 — `NewPOModal` gained a "Supplier contact" info card**
+      (preview's own `_supplierCardHtml`/`#poSupplierCard`,
+      pages-2.js:2241-2255 — never built here before; only `PODetailModal`
+      had the equivalent). Blank `—` until `supplierId` is set (no default
+      supplier was ever picked automatically — confirmed the field's
+      `useState` initializer has no such fallback); once picked, shows
+      `name`, then `name_ar` beneath it if set (a field preview's own
+      suppliers don't have at all — migration `0048`'s addition), plus
+      contact person/phone/email, same fields `PODetailModal`'s card
+      already shows.
+    - **Item 4 — auto-SKU in `AddPartModal`.** New
+      `computeAutoSku(existingSkus)` (`SharedCreateModals.tsx`) — NOT
+      name-based (first draft derived the SKU from the typed name; Turki
+      caught this as wrong before commit). Default is `"SKU-"` + any
+      random number not already used by an existing SKU in the parts
+      table — doesn't have to follow the highest, any unused number is
+      fine, just re-rolled until it misses the full parts-list collision
+      set. Seeded once via `useState`'s lazy initializer at mount (not
+      re-derived from the name field — there's nothing name-related to
+      react to anymore), replacing the random-suffix `autoSku()` deleted
+      as dead code in Stage 3. SKU stays `required` (already true since
+      Stage 3) and stays fully editable — this is a convenience default
+      only, `parts.sku`'s `unique not null` constraint (migration `0043`)
+      was already the real enforcement, unchanged.
+    - **Verification:** built a throwaway `/inv-batch-test` diagnostic
+      route (mock data, no Supabase/auth — same technique as every prior
+      stage's render-verification) mounting `InventoryClient` +
+      `AddPartModal` directly, plus a temporary `lib/supabase/
+      middleware.ts` auth-gate bypass to reach it unauthenticated. Wrote
+      a Playwright test (`tests/inventory-batch.spec.ts`,
+      `playwright.config.ts`, new `@playwright/test` devDependency —
+      first browser-test infra in this repo) covering all 4 items against
+      that route; all 4 passed. Diagnostic route deleted and the
+      middleware bypass reverted (confirmed `git diff` empty) before
+      finishing; dev server restarted clean, `/login` 200 and
+      `/inventory` 307 reconfirmed. The Playwright test file depends on
+      the now-deleted `/inv-batch-test` route to actually run — it's
+      documentation of what was verified, not a standing regression
+      suite, unless Turki wants the diagnostic route kept permanently for
+      that purpose (his call, flagged, not decided here).
   - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);
