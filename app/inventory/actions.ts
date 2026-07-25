@@ -512,6 +512,136 @@ export async function createPurchaseOrder(
   return { error: null, po: data as PurchaseOrder };
 }
 
+// ---------------------------------------------------------------------------
+// Edit a draft PO — "risky batch" Stage 3, item 6. App-only, NO RPC (Turki's
+// explicit instruction for this whole stage). This is the ONE deliberate
+// exception to every other PO mutation in this file going through a
+// security-definer RPC in one transaction — flagged here, not slipped in
+// quietly.
+//
+// WHY THIS IS ACCEPTABLE WITHOUT ONE: a draft PO carries zero real-world
+// commitment yet — nothing issued, no stock moved, no approval chain
+// started (that's the whole point of the draft/issued split, 0050). Worst
+// case if this partially fails mid-way (see below) is a draft temporarily
+// missing some lines — recoverable by editing again, not a data-integrity
+// incident. This reasoning does NOT extend to issued/pending_approval/
+// approved/rejected POs — this action refuses all of those, server-side,
+// not just client-side.
+//
+// NOT ATOMIC — three separate Supabase calls, not one transaction (that's
+// what an RPC would normally buy):
+//   1. UPDATE purchase_orders header fields, gated on status='draft' (both
+//      a fresh server-side read AND a WHERE clause on the update itself —
+//      belt-and-suspenders against a race where the PO stopped being a
+//      draft between the read and the write).
+//   2. DELETE all existing purchase_order_lines for this PO.
+//   3. INSERT the new line set.
+// If (2) succeeds but (3) fails, the PO is left with zero lines until the
+// user edits again — ugly, not dangerous, given point above. Every
+// validation create_purchase_order's own RPC would normally enforce
+// (supplier/warehouse exist+active, every line's part belongs to the
+// chosen warehouse) is re-implemented here in TypeScript instead, since
+// there's no RPC backing this to do it server-side otherwise.
+export type UpdatePurchaseOrderInput = {
+  supplier_id: string;
+  warehouse_id: string;
+  lines: PurchaseOrderLineInput[];
+  expected_delivery: string | null;
+  note: string | null;
+};
+
+export async function updatePurchaseOrder(
+  poId: string,
+  input: UpdatePurchaseOrderInput,
+): Promise<{ error: string | null; po?: PurchaseOrder }> {
+  if (!poId) return { error: "Missing purchase order." };
+  if (!input.supplier_id) return { error: "Supplier is required." };
+  if (!input.warehouse_id) return { error: "Warehouse is required." };
+  if (!Array.isArray(input.lines) || input.lines.length === 0) {
+    return { error: "At least one line item is required." };
+  }
+  for (const l of input.lines) {
+    if (!l?.part_id) return { error: "Line item is missing a part." };
+    if (!(l.qty > 0)) return { error: "Line item quantity must be positive." };
+    if (l.unit_price_sar == null || l.unit_price_sar < 0) {
+      return { error: "Line item price cannot be negative." };
+    }
+  }
+
+  const supabase = createClient();
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from("purchase_orders")
+    .select("status")
+    .eq("id", poId)
+    .single();
+  if (fetchErr || !existing) return { error: "Purchase order not found." };
+  if (existing.status !== "draft") {
+    return { error: `Only a draft purchase order can be edited (current status: ${existing.status}).` };
+  }
+
+  const { data: supplierRow } = await supabase
+    .from("suppliers")
+    .select("id")
+    .eq("id", input.supplier_id)
+    .eq("active", true)
+    .maybeSingle();
+  if (!supplierRow) return { error: "Supplier not found or inactive." };
+
+  const { data: warehouseRow } = await supabase
+    .from("warehouses")
+    .select("id")
+    .eq("id", input.warehouse_id)
+    .eq("active", true)
+    .maybeSingle();
+  if (!warehouseRow) return { error: "Warehouse not found or inactive." };
+
+  const partIds = Array.from(new Set(input.lines.map((l) => l.part_id)));
+  const { data: partsRows, error: partsErr } = await supabase
+    .from("parts")
+    .select("id, warehouse_id, active")
+    .in("id", partIds);
+  if (partsErr) return { error: partsErr.message };
+  const partsById = new Map((partsRows ?? []).map((p) => [p.id, p]));
+  for (const l of input.lines) {
+    const part = partsById.get(l.part_id);
+    if (!part || !part.active) return { error: "Part not found or inactive." };
+    if (part.warehouse_id !== input.warehouse_id) {
+      return { error: friendlyPoError(`Part belongs to a different warehouse than this purchase order.`) };
+    }
+  }
+
+  const { data: po, error: updateErr } = await supabase
+    .from("purchase_orders")
+    .update({
+      supplier_id: input.supplier_id,
+      warehouse_id: input.warehouse_id,
+      expected_delivery: input.expected_delivery,
+      note: input.note?.trim() || null,
+    })
+    .eq("id", poId)
+    .eq("status", "draft")
+    .select()
+    .single();
+  if (updateErr || !po) return { error: updateErr?.message ?? "Could not update purchase order." };
+
+  const { error: delErr } = await supabase.from("purchase_order_lines").delete().eq("purchase_order_id", poId);
+  if (delErr) return { error: delErr.message };
+
+  const { error: insErr } = await supabase.from("purchase_order_lines").insert(
+    input.lines.map((l) => ({
+      purchase_order_id: poId,
+      part_id: l.part_id,
+      qty: l.qty,
+      unit_price_sar: l.unit_price_sar,
+    })),
+  );
+  if (insErr) return { error: insErr.message };
+
+  revalidatePath("/inventory");
+  return { error: null, po: po as PurchaseOrder };
+}
+
 export async function issuePurchaseOrder(
   poId: string,
 ): Promise<{ error: string | null; po?: PurchaseOrder }> {

@@ -623,6 +623,71 @@ relevant skill(s) **when the task calls for it**:
       (already existed for `create_purchase_order`'s own warehouse-mismatch
       message — same substring, reused as-is) for the new extra-line
       warehouse-guard error.
+  - **Stage 3 of the "risky batch" — 7 app-only fixes/additions, no
+    migration/RPC touched.**
+    - **Items 1 + 7, one fix.** Every Inventory modal except `PODetailModal`
+      rendered its `fixed inset-0` backdrop inline in the component tree,
+      not portaled — `PODetailModal` was the one exception, already using
+      `createPortal(..., document.body)`. Traced two real bugs to that: (a)
+      the backdrop clipped at the top (an inline `fixed` element only
+      anchors to the true viewport when nothing in its ancestor chain
+      establishes a new containing block — portaling removes the
+      ambiguity), and (b) stacked popups (e.g. "+ New Item" over "Add
+      Part") — a child modal's backdrop div is a DOM CHILD of the parent's
+      own backdrop div when rendered inline, so clicking the child's dimmed
+      backdrop to dismiss it bubbles the click straight into the parent's
+      backdrop too, closing both and losing the parent's typed input.
+      Fixed with one shared `ModalOverlay` component
+      (`SharedCreateModals.tsx` — portal + `mounted` guard, same pattern
+      `PODetailModal` already used, plus `stopPropagation()` on its own
+      backdrop click as belt-and-suspenders) — all ~14 other inventory
+      modals across `InventoryClient.tsx`/`PurchaseOrders.tsx`/
+      `SharedCreateModals.tsx` now use it instead of a raw backdrop div.
+      Portaling makes stacked modals DOM siblings, not nested, so a child's
+      backdrop click has no parent-modal ancestor left to bubble into.
+    - **Items 2 + 3 — KPI row + "Active Procurement" (ProcStrip) now scope
+      to the active warehouse tab; Approvals-tab badge + Financial Analysis
+      stay global.** New `kpi*`-prefixed variables (`kpiInventoryValue`/
+      `kpiSkuCount`/`kpiLowStockCount`/`kpiOpenPOsCount`/
+      `kpiAwaitingReceiptCount`/`kpiPendingReviewCount`/`kpiPurchaseOrders`)
+      computed from `parts`/`purchaseOrders` filtered to `warehouseTab` —
+      NOT a rename/in-place filter of the existing global variables, since
+      those still feed the Approvals-tab's own badge count and
+      `FinancialAnalysisTab`'s props, both required to stay global. Also
+      scoped what `POListModal`/`ReceiveListModal` show (their
+      `purchaseOrders` prop is now `kpiPurchaseOrders`) so a ProcStrip
+      chip's count always matches what clicking it opens.
+    - **Item 4 — every `AddPartModal` field is now required.** Real
+      behavior change: the client-side `autoSku()` "generate if blank"
+      helper is gone entirely (removed as dead code, not left orphaned) —
+      "required" and "auto-fill if blank" are contradictory. Name (Arabic),
+      SKU, Category, Unit, Unit price, Reorder level, and Reorder qty are
+      all now hard-gated in `canSubmit`, matching the item/equipment name
+      field's existing requirement.
+    - **Item 5 — `ReceivePartsModal`'s "pick a part to add" dropdown is now
+      scoped to its own selected warehouse.** Was listing every part
+      system-wide; `NewPOModal`'s own `partsInWarehouse` pattern already did
+      this correctly — this was the one place it was missing. New
+      `partsInWarehouse` memo, same filter (`p.warehouse_id === warehouseId`).
+    - **Item 6 — a draft PO can now be edited.** The one deliberate
+      exception to "every PO mutation goes through an RPC" in this whole
+      feature — flagged, not slipped in. New `updatePurchaseOrder()` server
+      action (`actions.ts`) does 3 separate Supabase calls (update header
+      gated on `status='draft'`, delete old lines, insert new ones) instead
+      of one RPC transaction — accepted specifically because a draft
+      carries zero real-world commitment yet (nothing issued, no stock
+      moved, no approval started), so worst case on partial failure is a
+      draft temporarily missing lines, fixable by editing again — not a
+      data-integrity incident. Re-implements create_purchase_order's own
+      validation (supplier/warehouse exist+active, every line's part
+      belongs to the chosen warehouse) in TypeScript, since there's no RPC
+      backing this to do it server-side otherwise. `NewPOModal` gained an
+      `editingPO` prop (mutually exclusive with `aiSuggestion`) prefilling
+      every field from the existing draft; submit routes to
+      `updatePurchaseOrder()` instead of `createPurchaseOrder()` when set,
+      everything after that (Issue now, error handling) unchanged. New
+      "Edit" button on `PODetailModal`'s footer, draft POs only — no
+      preview equivalent (preview never lets you edit a saved PO either).
   - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);

@@ -61,6 +61,7 @@ import {
   Zap,
   Trash2,
   Unlink,
+  Pencil,
 } from "lucide-react";
 import { Btn, Table, TH, TD, Card, Stat } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
@@ -77,6 +78,7 @@ import type {
 } from "@/lib/db-types";
 import {
   createPurchaseOrder,
+  updatePurchaseOrder,
   issuePurchaseOrder,
   receivePurchaseOrder,
   receiveLooseParts,
@@ -87,7 +89,7 @@ import {
   type ReceivePoLineInput,
   type ReceiveLine,
 } from "./actions";
-import { NewSupplierModal, AddPartModal, InvoiceFileTile, categoryLabel } from "./SharedCreateModals";
+import { ModalOverlay, NewSupplierModal, AddPartModal, InvoiceFileTile, categoryLabel } from "./SharedCreateModals";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -355,6 +357,14 @@ export function suggestAIPurchaseLines(
   };
 }
 
+// "Risky batch" Stage 3, item 6 — editingPO's shape. Mutually exclusive
+// with aiSuggestion (a caller only ever passes one): editing an EXISTING
+// draft, prefilling every field from it, submitting through
+// updatePurchaseOrder() instead of createPurchaseOrder(). See
+// updatePurchaseOrder's own header comment (actions.ts) for why this is the
+// one PO mutation in the app not backed by an RPC.
+export type EditingPO = { po: PurchaseOrder; lines: PurchaseOrderLine[] };
+
 export function NewPOModal({
   lang,
   suppliers,
@@ -362,6 +372,7 @@ export function NewPOModal({
   parts,
   units,
   aiSuggestion,
+  editingPO,
   defaultWarehouseId,
   onClose,
   onSaved,
@@ -372,12 +383,14 @@ export function NewPOModal({
   parts: Part[];
   units: Unit[];
   aiSuggestion?: NewPOAISuggestion;
+  editingPO?: EditingPO;
   // The page's currently active warehouse tab — used as the initial
-  // warehouseId when there's no aiSuggestion (which already picks its own
-  // warehouse), so the draft starts on whichever warehouse you're already
-  // looking at instead of always the first one. Warehouses can no longer be
-  // created inline here — the header's "Create Warehouse" button is the
-  // only entry point now (per-warehouse tabs on the Inventory page).
+  // warehouseId when there's no aiSuggestion/editingPO (both already pick
+  // their own warehouse), so a brand-new draft starts on whichever
+  // warehouse you're already looking at instead of always the first one.
+  // Warehouses can no longer be created inline here — the header's "Create
+  // Warehouse" button is the only entry point now (per-warehouse tabs on
+  // the Inventory page).
   defaultWarehouseId?: string;
   onClose: () => void;
   onSaved: () => void;
@@ -389,22 +402,29 @@ export function NewPOModal({
   const [localParts, setLocalParts] = useState<Part[]>([]);
   const [newItemOpen, setNewItemOpen] = useState(false);
 
-  const [supplierId, setSupplierId] = useState(aiSuggestion?.supplierId ?? "");
+  const [supplierId, setSupplierId] = useState(editingPO?.po.supplier_id ?? aiSuggestion?.supplierId ?? "");
   const [warehouseId, setWarehouseId] = useState(
-    aiSuggestion?.warehouseId ?? defaultWarehouseId ?? warehouses[0]?.id ?? ""
+    editingPO?.po.warehouse_id ?? aiSuggestion?.warehouseId ?? defaultWarehouseId ?? warehouses[0]?.id ?? ""
   );
   // preview's openNewPO defaults expectedDelivery to today+7 (pages-2.js:2107)
   // unless the caller overrides it — matched here as the initial value only
-  // (still freely editable, same as preview's own date input).
+  // (still freely editable, same as preview's own date input). Editing an
+  // existing draft keeps its own expected_delivery instead (may be null —
+  // stays blank, not re-defaulted to today+7).
   const [expectedDelivery, setExpectedDelivery] = useState(() => {
+    if (editingPO) return editingPO.po.expected_delivery ?? "";
     const d = new Date();
     d.setDate(d.getDate() + 7);
     return d.toISOString().slice(0, 10);
   });
-  const [lines, setLines] = useState<NewPOLine[]>(aiSuggestion?.lines ?? []);
+  const [lines, setLines] = useState<NewPOLine[]>(
+    editingPO
+      ? editingPO.lines.map((l) => ({ part_id: l.part_id, qty: l.qty, unit_price_sar: l.unit_price_sar }))
+      : aiSuggestion?.lines ?? []
+  );
   const [addPartId, setAddPartId] = useState("");
   const [note, setNote] = useState(
-    aiSuggestion ? (lang === "en" ? aiSuggestion.noteEn : aiSuggestion.noteAr) : ""
+    editingPO ? editingPO.po.note ?? "" : aiSuggestion ? (lang === "en" ? aiSuggestion.noteEn : aiSuggestion.noteAr) : ""
   );
   const [droppedNotice, setDroppedNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState<"draft" | "issued" | null>(null);
@@ -523,19 +543,32 @@ export function NewPOModal({
     setSaving(status);
     setError(null);
 
-    const createRes = await createPurchaseOrder({
-      supplier_id: supplierId,
-      warehouse_id: warehouseId,
-      lines,
-      expected_delivery: expectedDelivery || null,
-      note: note.trim() || null,
-      ai_generated: !!aiSuggestion,
-      ai_rationale: aiSuggestion?.rationale.en ?? null,
-      ai_rationale_ar: aiSuggestion?.rationale.ar ?? null,
-    });
-    if (createRes.error || !createRes.po) {
+    // "Risky batch" Stage 3, item 6 — editing an existing draft goes
+    // through updatePurchaseOrder() (no RPC, see its own header comment)
+    // instead of createPurchaseOrder(). Everything after this point
+    // (Issue now, error handling) is identical either way — both return
+    // the same { error, po } shape.
+    const saveRes = editingPO
+      ? await updatePurchaseOrder(editingPO.po.id, {
+          supplier_id: supplierId,
+          warehouse_id: warehouseId,
+          lines,
+          expected_delivery: expectedDelivery || null,
+          note: note.trim() || null,
+        })
+      : await createPurchaseOrder({
+          supplier_id: supplierId,
+          warehouse_id: warehouseId,
+          lines,
+          expected_delivery: expectedDelivery || null,
+          note: note.trim() || null,
+          ai_generated: !!aiSuggestion,
+          ai_rationale: aiSuggestion?.rationale.en ?? null,
+          ai_rationale_ar: aiSuggestion?.rationale.ar ?? null,
+        });
+    if (saveRes.error || !saveRes.po) {
       setSaving(null);
-      setError(createRes.error ?? (lang === "en" ? "Could not create purchase order." : "تعذّر إنشاء أمر الشراء."));
+      setError(saveRes.error ?? (lang === "en" ? "Could not save purchase order." : "تعذّر حفظ أمر الشراء."));
       return;
     }
 
@@ -547,7 +580,7 @@ export function NewPOModal({
       return;
     }
 
-    const issueRes = await issuePurchaseOrder(createRes.po.id);
+    const issueRes = await issuePurchaseOrder(saveRes.po.id);
     setSaving(null);
     if (issueRes.error) {
       // The PO already exists as a draft at this point — don't lose it.
@@ -556,8 +589,8 @@ export function NewPOModal({
       router.refresh();
       setError(
         (lang === "en"
-          ? `Saved as draft (${createRes.po.po_number}), but issuing failed: `
-          : `حُفظ كمسوّدة (${createRes.po.po_number})، لكن تعذّر الإصدار: `) + issueRes.error
+          ? `Saved as draft (${saveRes.po.po_number}), but issuing failed: `
+          : `حُفظ كمسوّدة (${saveRes.po.po_number})، لكن تعذّر الإصدار: `) + issueRes.error
       );
       return;
     }
@@ -568,7 +601,7 @@ export function NewPOModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+    <ModalOverlay onClick={close}>
       <div
         className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -577,7 +610,9 @@ export function NewPOModal({
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold">
-                {lang === "en" ? "New Purchase Order" : "أمر شراء جديد"}
+                {editingPO
+                  ? `${lang === "en" ? "Edit Purchase Order" : "تعديل أمر الشراء"} — ${editingPO.po.po_number}`
+                  : lang === "en" ? "New Purchase Order" : "أمر شراء جديد"}
               </h2>
               <p className="text-xs muted mt-0.5">
                 {lang === "en"
@@ -836,6 +871,8 @@ export function NewPOModal({
               <Save className="h-4 w-4" />
               {saving === "draft"
                 ? lang === "en" ? "Saving…" : "جارٍ الحفظ…"
+                : editingPO
+                ? lang === "en" ? "Save changes" : "حفظ التغييرات"
                 : lang === "en" ? "Save draft" : "حفظ مسوّدة"}
             </button>
             <button
@@ -847,6 +884,8 @@ export function NewPOModal({
               <ShoppingCart className="h-4 w-4" />
               {saving === "issued"
                 ? lang === "en" ? "Issuing…" : "جارٍ الإصدار…"
+                : editingPO
+                ? lang === "en" ? "Save & Issue" : "حفظ وإصدار"
                 : lang === "en" ? "Issue now" : "إصدار الآن"}
             </button>
           </div>
@@ -875,7 +914,7 @@ export function NewPOModal({
           onCreated={(part) => addNewPartAsLine(part)}
         />
       )}
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -910,7 +949,7 @@ export function POListModal({
     .sort((a, b) => (a.request_date < b.request_date ? 1 : a.request_date > b.request_date ? -1 : 0));
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+    <ModalOverlay onClick={onClose}>
       <div
         className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -992,7 +1031,7 @@ export function POListModal({
           </Btn>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -1014,6 +1053,7 @@ export function PODetailModal({
   onReceive,
   onApprove,
   onReject,
+  onEdit,
 }: {
   lang: "en" | "ar";
   po: PurchaseOrder;
@@ -1034,6 +1074,9 @@ export function PODetailModal({
   // preview's own openPO footer showing Approve for pending_approval.
   onApprove: (po: PurchaseOrder) => void;
   onReject: (po: PurchaseOrder) => void;
+  // "Risky batch" Stage 3, item 6 — Edit action, draft POs only. No preview
+  // equivalent (preview never lets you edit an already-saved PO either).
+  onEdit: (po: PurchaseOrder) => void;
 }) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -1331,15 +1374,21 @@ export function PODetailModal({
             {lang === "en" ? "Close" : "إغلاق"}
           </Btn>
           {po.status === "draft" && (
-            <button
-              type="button"
-              disabled={issuing}
-              onClick={handleIssue}
-              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
-            >
-              <Check className="h-4 w-4" />
-              {issuing ? (lang === "en" ? "Issuing…" : "جارٍ الإصدار…") : lang === "en" ? "Issue" : "إصدار"}
-            </button>
+            <>
+              <Btn variant="outline" onClick={() => onEdit(po)}>
+                <Pencil className="h-4 w-4" />
+                {lang === "en" ? "Edit" : "تعديل"}
+              </Btn>
+              <button
+                type="button"
+                disabled={issuing}
+                onClick={handleIssue}
+                className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                <Check className="h-4 w-4" />
+                {issuing ? (lang === "en" ? "Issuing…" : "جارٍ الإصدار…") : lang === "en" ? "Issue" : "إصدار"}
+              </button>
+            </>
           )}
           {po.status === "issued" && (
             <button
@@ -1413,7 +1462,7 @@ export function ReceiveListModal({
     });
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+    <ModalOverlay onClick={onClose}>
       <div
         className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -1473,7 +1522,7 @@ export function ReceiveListModal({
           </Btn>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -1701,7 +1750,7 @@ export function ReceivePOModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+    <ModalOverlay onClick={close}>
       <div
         className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -2016,7 +2065,7 @@ export function ReceivePOModal({
           </div>
         </form>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -2074,7 +2123,7 @@ export function ApprovePOModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+    <ModalOverlay onClick={close}>
       <div
         className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -2136,7 +2185,7 @@ export function ApprovePOModal({
           )}
         </form>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -2180,7 +2229,7 @@ export function RejectPOModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+    <ModalOverlay onClick={close}>
       <div
         className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -2230,16 +2279,18 @@ export function RejectPOModal({
           </div>
         </form>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
 // Approvals TAB — preview's invApprovalsView (pages-2.js ~3277-3329),
-// inline on the Inventory page's own "Approvals" tab (was previously only
-// reachable via the ProcStrip's "Pending review" chip -> a modal; that
-// modal still exists for quick access, this is the full tab preview has
-// alongside it). Same queue (pending_approval POs, oldest received first),
-// approval-dot progress + approver names, quick "Approve" action per row.
+// inline on the Inventory page's own "Approvals" tab. Reached via the
+// invTab strip directly, or via the ProcStrip's "Pending review" chip
+// (onGoToApprovals -> setInvTab('approvals'), no popup — the standalone
+// ApprovalsListModal this used to open was deleted, no other entry point,
+// see the post-Phase-7 audit gap-closing pass). Same queue (pending_approval
+// POs, oldest received first), approval-dot progress + approver names,
+// quick "Approve" action per row.
 export function ApprovalsTab({
   lang,
   purchaseOrders,
@@ -2888,7 +2939,7 @@ export function PartFinanceModal({
   const purchaseRows = allPurchases.slice(0, 8);
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+    <ModalOverlay onClick={onClose}>
       <div
         className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -2987,6 +3038,6 @@ export function PartFinanceModal({
           </Btn>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

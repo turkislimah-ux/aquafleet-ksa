@@ -40,8 +40,9 @@
 // entirely post-launch, Turki's test-6 feedback on e9a03d5; see
 // InventoryClient.tsx's own header comment.)
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
 import { X, Save, ChevronDown } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -56,6 +57,53 @@ import {
   type PartInput,
   type UnitInput,
 } from "./actions";
+
+// Shared modal backdrop — "risky batch" Stage 3, items 1 + 7. Every
+// Inventory modal used to render its own `fixed inset-0` backdrop INLINE
+// in the component tree (a plain div, not portaled) — PODetailModal was
+// the one exception, already using createPortal(..., document.body). Two
+// real bugs traced to that inline pattern:
+//
+//   1. Backdrop clipped at the top — an inline `fixed` element is only
+//      guaranteed to anchor to the true viewport when NOTHING in its
+//      ancestor chain establishes a new containing block (transform,
+//      filter, perspective, contain, etc). Portaling straight to
+//      document.body removes that ambiguity entirely — same fix as
+//      PODetailModal already uses, just applied everywhere.
+//   2. Stacked popups (e.g. "+ New Item" opened from "Add Part") — a
+//      child modal's own backdrop div, rendered inline, is a DOM CHILD of
+//      the parent modal's backdrop div. Clicking the child's dimmed
+//      backdrop to dismiss it closes the child (correct) but the click
+//      then bubbles up through the DOM tree into the PARENT's backdrop
+//      onClick too (nothing stopped it), closing the parent and losing
+//      everything typed into it. Portaling each modal separately to
+//      document.body makes them DOM SIBLINGS, not nested — a child's
+//      backdrop click has no parent-modal ancestor left to bubble into.
+//      stopPropagation() on this component's own backdrop onClick is
+//      belt-and-suspenders on top of that, not the primary fix.
+//
+// mounted-guard: same pattern PODetailModal already established — a
+// portal can't render before the client has mounted (no `document` during
+// SSR), so this renders null on the first pass and the real content one
+// tick later. Expected, not a bug — every modal built after this point
+// behaves exactly like PODetailModal always has.
+export function ModalOverlay({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      {children}
+    </div>,
+    document.body
+  );
+}
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -83,21 +131,6 @@ export function categoryLabel(cat: string | null, lang: "en" | "ar"): string {
   const found = CATEGORY_LABEL[cat];
   if (!found) return cat;
   return lang === "en" ? found.en : found.ar;
-}
-
-// Lightweight client-side stand-in for preview's server-side "auto if blank"
-// SKU generator — deterministic-ish, collision handled by the existing
-// unique-constraint error message (friendlyError() in actions.ts).
-function autoSku(name: string): string {
-  const base =
-    name
-      .trim()
-      .toUpperCase()
-      .replace(/[^A-Z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 16) || "PART";
-  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `${base}-${suffix}`;
 }
 
 // Numeric field helper — text input backed by a string (so an empty field is
@@ -278,7 +311,7 @@ export function CreateWarehouseModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+    <ModalOverlay onClick={close}>
       <div
         className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -359,7 +392,7 @@ export function CreateWarehouseModal({
           </div>
         </form>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -426,7 +459,7 @@ export function NewSupplierModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+    <ModalOverlay onClick={close}>
       <div
         className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -524,7 +557,7 @@ export function NewSupplierModal({
           </div>
         </form>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -603,7 +636,22 @@ export function AddPartModal({
   }, [parts]);
 
   const warehouseName = warehouses.find((w) => w.id === defaultWarehouseId)?.name ?? "—";
-  const canSubmit = name.trim() !== "" && defaultWarehouseId !== "";
+  // Turki's explicit call ("risky batch" Stage 3, item 4): every field on
+  // this form is now required before it can be saved — a real behavior
+  // change from before, where SKU auto-generated on blank (via a client-
+  // side autoSku() helper, now removed entirely — dead code the moment
+  // "required" replaced "auto-fill if blank", the two are contradictory)
+  // and name_ar/unit price/reorder level/reorder qty were all optional.
+  const canSubmit =
+    name.trim() !== "" &&
+    nameAr.trim() !== "" &&
+    sku.trim() !== "" &&
+    category.trim() !== "" &&
+    unitCode !== "" &&
+    parseNumField(unitCost) !== null &&
+    parseNumField(reorderLevel) !== null &&
+    parseNumField(reorderQty) !== null &&
+    defaultWarehouseId !== "";
 
   function close() {
     if (saving) return;
@@ -617,15 +665,15 @@ export function AddPartModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) {
-      setError(lang === "en" ? "Name is required." : "الاسم مطلوب.");
+      setError(lang === "en" ? "Every field is required." : "جميع الحقول مطلوبة.");
       return;
     }
     const input: PartInput = {
-      sku: sku.trim() || autoSku(name),
+      sku: sku.trim(),
       name: name.trim(),
-      name_ar: nameAr.trim() || null,
+      name_ar: nameAr.trim(),
       category,
-      unit: unitCode || null,
+      unit: unitCode,
       unit_cost_sar: parseNumField(unitCost),
       qty_on_hand: 0,
       reorder_level: parseNumField(reorderLevel),
@@ -648,7 +696,7 @@ export function AddPartModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+    <ModalOverlay onClick={close}>
       <div
         className="card p-6 w-full max-w-[880px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -674,25 +722,25 @@ export function AddPartModal({
               <input value={name} onChange={(e) => setName(e.target.value)} className={INPUT} style={INPUT_STYLE} required />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Name (Arabic)" : "الاسم (عربي)"}</span>
+              <span className="muted">{lang === "en" ? "Name (Arabic) *" : "الاسم (عربي) *"}</span>
               <input
                 value={nameAr}
                 onChange={(e) => setNameAr(e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
                 dir="rtl"
-                placeholder={lang === "en" ? "optional" : "اختياري"}
+                required
               />
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "SKU" : "رمز الصنف"}</span>
+              <span className="muted">{lang === "en" ? "SKU *" : "رمز الصنف *"}</span>
               <input
                 value={sku}
                 onChange={(e) => setSku(e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
-                placeholder={lang === "en" ? "auto if blank" : "تلقائي إن تُرك فارغًا"}
+                required
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
@@ -709,7 +757,7 @@ export function AddPartModal({
                 free text on parts, 0043 — no migration needed) and becomes
                 a selectable suggestion here again next time. */}
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Category" : "الفئة"}</span>
+              <span className="muted">{lang === "en" ? "Category *" : "الفئة *"}</span>
               <ComboInput
                 value={category}
                 onChange={setCategory}
@@ -723,13 +771,14 @@ export function AddPartModal({
                 meaning, both visible) plus a "+ Unit" trigger to define a
                 new one. The stored value is the CODE. */}
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Unit" : "الوحدة"}</span>
+              <span className="muted">{lang === "en" ? "Unit *" : "الوحدة *"}</span>
               <div className="flex gap-2">
                 <select
                   value={unitCode}
                   onChange={(e) => setUnitCode(e.target.value)}
                   className={cn(INPUT, "flex-1")}
                   style={INPUT_STYLE}
+                  required
                 >
                   <option value="" disabled>
                     {lang === "en" ? "Pick a unit…" : "اختر وحدة…"}
@@ -747,37 +796,37 @@ export function AddPartModal({
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Unit price (SAR)" : "سعر الوحدة (ر.س)"}</span>
+              <span className="muted">{lang === "en" ? "Unit price (SAR) *" : "سعر الوحدة (ر.س) *"}</span>
               <input
                 value={unitCost}
                 onChange={(e) => setUnitCost(blockNegative(e.target.value))}
                 className={INPUT}
                 style={INPUT_STYLE}
                 inputMode="decimal"
-                placeholder="0.00"
+                required
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Reorder level" : "حد إعادة الطلب"}</span>
+              <span className="muted">{lang === "en" ? "Reorder level *" : "حد إعادة الطلب *"}</span>
               <input
                 value={reorderLevel}
                 onChange={(e) => setReorderLevel(blockNegative(e.target.value))}
                 className={INPUT}
                 style={INPUT_STYLE}
                 inputMode="decimal"
-                placeholder="0"
+                required
               />
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Reorder qty" : "كمية إعادة الطلب"}</span>
+              <span className="muted">{lang === "en" ? "Reorder qty *" : "كمية إعادة الطلب *"}</span>
               <input
                 value={reorderQty}
                 onChange={(e) => setReorderQty(blockNegative(e.target.value))}
                 className={INPUT}
                 style={INPUT_STYLE}
                 inputMode="decimal"
-                placeholder="1"
+                required
               />
             </label>
           </div>
@@ -810,7 +859,7 @@ export function AddPartModal({
           }}
         />
       )}
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -869,7 +918,7 @@ function NewUnitModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+    <ModalOverlay onClick={close}>
       <div
         className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -943,7 +992,7 @@ function NewUnitModal({
           </div>
         </form>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 

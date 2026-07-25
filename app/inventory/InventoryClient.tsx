@@ -238,8 +238,10 @@ import {
   computePartFinanceStats,
   suggestAIPurchaseLines,
   type NewPOAISuggestion,
+  type EditingPO,
 } from "./PurchaseOrders";
 import {
+  ModalOverlay,
   CreateWarehouseModal,
   NewSupplierModal,
   AddPartModal,
@@ -372,6 +374,10 @@ export default function InventoryClient({
   // NewPOModal so it renders with the .ai-banner + prefilled lines; cleared
   // on close so a plain "New PO" click afterwards opens blank again.
   const [aiSuggestion, setAiSuggestion] = useState<NewPOAISuggestion | null>(null);
+  // "Risky batch" Stage 3, item 6 — set right before opening NewPOModal (via
+  // the SAME newPOOpen state) so it renders in edit mode instead of create
+  // mode; mutually exclusive with aiSuggestion, cleared on close.
+  const [editingPO, setEditingPO] = useState<EditingPO | null>(null);
 
   const warehousesById = useMemo(() => {
     const m = new Map<string, Warehouse>();
@@ -409,21 +415,41 @@ export default function InventoryClient({
     });
   }, [parts, warehouseTab, cat, q]);
 
-  // KPIs — computed from ALL parts, not the filtered table below. Matches
-  // preview's inventoryPage(): totalValue/lowStock use D().parts directly;
-  // only invInventoryView's own table list is scoped by invFilters.
+  // GLOBAL versions — computed from ALL parts/POs regardless of warehouse
+  // tab. Matches preview's inventoryPage() (totalValue/lowStock use
+  // D().parts directly) and stays this way on purpose: these feed the
+  // Approvals-tab badge count (invTab strip, below) and FinancialAnalysisTab
+  // — both explicitly required to stay global ("risky batch" Stage 3,
+  // items 2/3's carve-out). Do NOT scope these to warehouseTab.
   const inventoryValue = parts.reduce(
     (s, p) => s + (p.unit_cost_sar != null ? p.unit_cost_sar * p.qty_on_hand : 0),
     0
   );
-  const skuCount = parts.length;
-  const lowStockCount = parts.filter(
+  const openPOsCount = purchaseOrders.filter((o) => o.status === "draft" || o.status === "issued").length;
+  const pendingReviewCount = purchaseOrders.filter((o) => o.status === "pending_approval").length;
+
+  // WAREHOUSE-SCOPED versions ("risky batch" Stage 3, items 2/3) — the KPI
+  // row and the "Active procurement" (ProcStrip) strip now reflect ONLY the
+  // active warehouse tab. Separate variables from the global ones above,
+  // not a rename/in-place filter — reusing the same variable for both KPI
+  // row and Financial Analysis would have silently scoped Financial
+  // Analysis too, which Turki explicitly said must stay global.
+  const kpiParts = useMemo(() => parts.filter((p) => p.warehouse_id === warehouseTab), [parts, warehouseTab]);
+  const kpiPurchaseOrders = useMemo(
+    () => purchaseOrders.filter((o) => o.warehouse_id === warehouseTab),
+    [purchaseOrders, warehouseTab]
+  );
+  const kpiInventoryValue = kpiParts.reduce(
+    (s, p) => s + (p.unit_cost_sar != null ? p.unit_cost_sar * p.qty_on_hand : 0),
+    0
+  );
+  const kpiSkuCount = kpiParts.length;
+  const kpiLowStockCount = kpiParts.filter(
     (p) => p.reorder_level != null && p.qty_on_hand <= p.reorder_level
   ).length;
-  // Proc-strip chips (preview: pages-2.js ~3007).
-  const openPOsCount = purchaseOrders.filter((o) => o.status === "draft" || o.status === "issued").length;
-  const awaitingReceiptCount = purchaseOrders.filter((o) => o.status === "issued").length;
-  const pendingReviewCount = purchaseOrders.filter((o) => o.status === "pending_approval").length;
+  const kpiOpenPOsCount = kpiPurchaseOrders.filter((o) => o.status === "draft" || o.status === "issued").length;
+  const kpiAwaitingReceiptCount = kpiPurchaseOrders.filter((o) => o.status === "issued").length;
+  const kpiPendingReviewCount = kpiPurchaseOrders.filter((o) => o.status === "pending_approval").length;
 
   // AI-Suggest-PO (Phase 7, migration 0053, LIVE) — preview's INV.openAIPO()
   // (pages-2.js ~2115-2133). No toast utility exists anywhere in this app
@@ -436,6 +462,7 @@ export default function InventoryClient({
   function openAISuggest() {
     if (!aiPurchaseSuggestion) return;
     setAiSuggestion(aiPurchaseSuggestion);
+    setEditingPO(null);
     setNewPOOpen(true);
   }
 
@@ -471,6 +498,7 @@ export default function InventoryClient({
                 variant="primary"
                 onClick={() => {
                   setAiSuggestion(null);
+                  setEditingPO(null);
                   setNewPOOpen(true);
                 }}
               >
@@ -568,29 +596,33 @@ export default function InventoryClient({
           {/* Top-level KPI row — preview's own inventory()'s 5-stat row
               (pages-2.js ~3035-3041), ALWAYS visible above the tabs
               regardless of which sub-tab is active (unlike the ProcStrip,
-              which is Inventory-Levels-tab-scoped, see below). */}
+              which is Inventory-Levels-tab-scoped, see below). "Risky
+              batch" Stage 3, item 2 — now reflects the ACTIVE WAREHOUSE
+              TAB only (kpi* variables above), not all warehouses combined —
+              a deliberate departure from preview's own always-global KPIs,
+              Turki's explicit call. */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <Stat
               label={lang === "en" ? "Inventory Value" : "قيمة المخزون"}
-              value={formatSar(inventoryValue)}
+              value={formatSar(kpiInventoryValue)}
               tone="info"
             />
-            <Stat label={lang === "en" ? "SKUs" : "أصناف"} value={skuCount} />
+            <Stat label={lang === "en" ? "SKUs" : "أصناف"} value={kpiSkuCount} />
             {/* preview's c.lowStock ("Low Stock Items"/"أصناف منخفضة", i18n.js:234) */}
             <Stat
               label={lang === "en" ? "Low Stock Items" : "أصناف منخفضة"}
-              value={lowStockCount}
-              tone={lowStockCount > 0 ? "bad" : "ok"}
+              value={kpiLowStockCount}
+              tone={kpiLowStockCount > 0 ? "bad" : "ok"}
             />
             <Stat
               label={lang === "en" ? "Open POs" : "أوامر مفتوحة"}
-              value={openPOsCount}
-              tone={openPOsCount > 0 ? "info" : "ok"}
+              value={kpiOpenPOsCount}
+              tone={kpiOpenPOsCount > 0 ? "info" : "ok"}
             />
             <Stat
               label={lang === "en" ? "Pending Approval" : "بانتظار الاعتماد"}
-              value={pendingReviewCount}
-              tone={pendingReviewCount > 0 ? "warn" : "ok"}
+              value={kpiPendingReviewCount}
+              tone={kpiPendingReviewCount > 0 ? "warn" : "ok"}
             />
           </div>
 
@@ -629,11 +661,16 @@ export default function InventoryClient({
 
           {invTab === "inventory" && (
             <>
+              {/* "Risky batch" Stage 3, item 3 — scoped to the active
+                  warehouse tab (kpi* variables), not global. Approvals/
+                  Financial Analysis stay unaffected — see this component's
+                  own onGoToApprovals, which switches to the (global)
+                  Approvals tab, not a warehouse-scoped view of it. */}
               <ProcStrip
                 lang={lang}
-                openCount={openPOsCount}
-                awaitingReceiptCount={awaitingReceiptCount}
-                pendingReviewCount={pendingReviewCount}
+                openCount={kpiOpenPOsCount}
+                awaitingReceiptCount={kpiAwaitingReceiptCount}
+                pendingReviewCount={kpiPendingReviewCount}
                 onOpenList={() => setPoListOpen(true)}
                 onOpenReceiveList={() => setReceiveListOpen(true)}
                 onGoToApprovals={() => setInvTab("approvals")}
@@ -787,10 +824,12 @@ export default function InventoryClient({
           parts={parts}
           units={units}
           aiSuggestion={aiSuggestion ?? undefined}
+          editingPO={editingPO ?? undefined}
           defaultWarehouseId={warehouseTab}
           onClose={() => {
             setNewPOOpen(false);
             setAiSuggestion(null);
+            setEditingPO(null);
           }}
           onSaved={() => setPoListOpen(false)}
         />
@@ -799,7 +838,7 @@ export default function InventoryClient({
       {poListOpen && (
         <POListModal
           lang={lang}
-          purchaseOrders={purchaseOrders}
+          purchaseOrders={kpiPurchaseOrders}
           purchaseOrderLines={purchaseOrderLines}
           suppliers={suppliers}
           onClose={() => setPoListOpen(false)}
@@ -837,13 +876,22 @@ export default function InventoryClient({
             setViewPO(null);
             setRejectPO(po);
           }}
+          onEdit={(po) => {
+            setViewPO(null);
+            setEditingPO({
+              po,
+              lines: purchaseOrderLines.filter((l) => l.purchase_order_id === po.id),
+            });
+            setAiSuggestion(null);
+            setNewPOOpen(true);
+          }}
         />
       )}
 
       {receiveListOpen && (
         <ReceiveListModal
           lang={lang}
-          purchaseOrders={purchaseOrders}
+          purchaseOrders={kpiPurchaseOrders}
           suppliers={suppliers}
           onClose={() => setReceiveListOpen(false)}
           onReceive={(po) => {
@@ -1189,7 +1237,7 @@ function ViewPartModal({
   const financeStats = computePartFinanceStats(part, lots, purchaseOrders, purchaseOrderLines, movements);
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+    <ModalOverlay onClick={onClose}>
       <div
         className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -1522,7 +1570,7 @@ function ViewPartModal({
           </Btn>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -1616,6 +1664,15 @@ function ReceivePartsModal({
     for (const p of allParts) m.set(p.id, p);
     return m;
   }, [allParts]);
+
+  // "Risky batch" Stage 3, item 5 — the "pick a part to add" dropdown used
+  // to list every part system-wide, regardless of which warehouse this
+  // draft is for. Same one-SKU-one-warehouse rule NewPOModal's own
+  // partsInWarehouse already enforces, just missing here until now.
+  const partsInWarehouse = useMemo(
+    () => allParts.filter((p) => p.warehouse_id === warehouseId),
+    [allParts, warehouseId]
+  );
 
   const total = lines.reduce((s, l) => s + l.qty * l.unit_price_sar, 0);
   const linesValid = lines.length > 0 && lines.every((l) => l.qty > 0 && l.unit_price_sar >= 0);
@@ -1719,7 +1776,7 @@ function ReceivePartsModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+    <ModalOverlay onClick={close}>
       <div
         className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
@@ -1802,7 +1859,7 @@ function ReceivePartsModal({
                   style={INPUT_STYLE}
                 >
                   <option value="">{lang === "en" ? "Pick a part to add…" : "اختر قطعة للإضافة…"}</option>
-                  {allParts.map((p) => (
+                  {partsInWarehouse.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.sku} · {lang === "ar" && p.name_ar ? p.name_ar : p.name}
                     </option>
@@ -2055,7 +2112,7 @@ function ReceivePartsModal({
           onCreated={(part) => addNewPartAsLine(part)}
         />
       )}
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -2117,7 +2174,7 @@ function AdjustStockModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+    <ModalOverlay onClick={close}>
       <div className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={submit}>
           <div className="flex items-start justify-between gap-4 mb-4">
@@ -2181,7 +2238,7 @@ function AdjustStockModal({
           </div>
         </form>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
