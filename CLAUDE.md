@@ -580,6 +580,49 @@ relevant skill(s) **when the task calls for it**:
     modals — removed alongside, along with `PurchaseOrders.tsx`'s now-
     orphaned `CreateWarehouseModal` import (its one caller was the trigger
     just removed).
+  - **Stage 2 of the "risky batch" — unified receive with extra ad-hoc
+    lines. Migration `0055`, applied and verified.** `receive_purchase_order`
+    (0051) reworked to accept two `p_lines` element shapes: existing PO
+    lines (`{line_id, received_qty, received_unit_price_sar}`, unchanged)
+    and extra parts the supplier delivered that were never on the PO
+    (`{part_id, received_qty, received_unit_price_sar}`, new) — both feed
+    the same `receive_loose_parts()` call unchanged, so the mandatory-
+    invoice gate, `add_price_lot`, and the FIFO invariant are identical for
+    both. On save, the PO's own `purchase_order_lines` gets a genuinely new
+    row per extra part (ordered = received, since there's no real "ordered"
+    figure for something never ordered) — checked preview's actual
+    `confirmReceipt()` first (not assumed): preview's own demo silently
+    drops this reconciliation for ad-hoc lines, so this app deliberately
+    goes beyond preview's own (incomplete) behavior here, per Turki's
+    explicit ask.
+    - **UI (`ReceivePOModal`, `PurchaseOrders.tsx`):** the line table now
+      distinguishes PO-derived lines (ordered qty/price shown, a Match/
+      Variance pill — preview's own `pill-ok`/`pill-warn`, exact hex) from
+      extra ones (an "Extra — not on PO" badge, no ordered figures to
+      compare). A "pick a part to add" control below the table is
+      restricted to the PO's own warehouse and excludes parts already on
+      the draft — the same guards the RPC itself enforces, surfaced
+      client-side so the picker never even offers something that would be
+      rejected. Extra lines always have a remove button; PO-derived lines
+      only get one once detached (see below) — every PO line must still be
+      included otherwise, same completeness rule as before.
+    - **Detach from PO — Turki's own requirement, zero preview equivalent.**
+      A checkbox-style toggle in the modal switches which server action
+      `submit()` calls: checked, it calls `receiveLooseParts()` (0047 — the
+      exact same action the header's "Add Parts" flow already uses) with
+      the draft's current lines/files/note and the PO's own supplier_id/
+      warehouse_id (still not editable — detaching changes whether the PO
+      gets reconciled, not what was received); unchecked (default), it
+      calls `receivePurchaseOrder()` as before. Detaching never touches the
+      PO at all — no `po_id` stamped, no status change, no PO line writes.
+      This needed no new server action — `receiveLooseParts()` already
+      existed for the loose-receive flow.
+    - `actions.ts`: `ReceivePoLineInput` is now a union type mirroring the
+      RPC's two shapes exactly; `receivePurchaseOrder()`'s validation
+      accepts either and its error path now runs through `friendlyPoError()`
+      (already existed for `create_purchase_order`'s own warehouse-mismatch
+      message — same substring, reused as-is) for the new extra-line
+      warehouse-guard error.
   - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);

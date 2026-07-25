@@ -529,22 +529,29 @@ export async function issuePurchaseOrder(
 }
 
 // ---------------------------------------------------------------------------
-// PO receiving (full-demo Phase 5 — migration 0051, LIVE). Wraps
-// receive_purchase_order(), which itself calls receive_loose_parts() (0047)
-// internally — so this action's job is identical to receiveLooseParts'
-// above (upload invoice files first, since the RPC's contract expects
-// already-uploaded {storage_path, file_name, mime_type} pointers, not raw
-// files), plus one extra field: which existing purchase_order_lines row
-// each received line corresponds to. The mandatory-invoice check and the
-// stock_receipts write happen inside receive_loose_parts, not here — this
-// action does not (and must not) duplicate that validation.
+// PO receiving (full-demo Phase 5 — migration 0051, LIVE; extra ad-hoc
+// lines — migration 0055, LIVE). Wraps receive_purchase_order(), which
+// itself calls receive_loose_parts() (0047) internally — so this action's
+// job is identical to receiveLooseParts' above (upload invoice files
+// first, since the RPC's contract expects already-uploaded {storage_path,
+// file_name, mime_type} pointers, not raw files), plus reconciling against
+// the PO's own lines. The mandatory-invoice check and the stock_receipts
+// write happen inside receive_loose_parts, not here — this action does
+// not (and must not) duplicate that validation.
+//
+// ReceivePoLineInput is now a union (0055) — each element is EITHER an
+// existing PO line being reconciled (line_id) OR an extra part the
+// supplier delivered that was never on the PO (part_id). Mirrors the RPC's
+// own p_lines contract exactly (see 0055's header) — this action validates
+// the SAME shape client-side first, then trusts the RPC's own validation
+// (warehouse-consistency, duplicate-part, "already a real line") as the
+// source of truth, same convention every other RPC wrapper in this file
+// uses.
 // ---------------------------------------------------------------------------
 
-export type ReceivePoLineInput = {
-  line_id: string;
-  received_qty: number;
-  received_unit_price_sar: number;
-};
+export type ReceivePoLineInput =
+  | { line_id: string; received_qty: number; received_unit_price_sar: number }
+  | { part_id: string; received_qty: number; received_unit_price_sar: number };
 
 export async function receivePurchaseOrder(
   formData: FormData,
@@ -566,7 +573,10 @@ export async function receivePurchaseOrder(
     return { error: "At least one line item is required." };
   }
   for (const l of lines) {
-    if (!l?.line_id) return { error: "Line item is missing line_id." };
+    const hasLineId = "line_id" in l && !!l.line_id;
+    const hasPartId = "part_id" in l && !!l.part_id;
+    if (hasLineId && hasPartId) return { error: "Line item cannot specify both line_id and part_id." };
+    if (!hasLineId && !hasPartId) return { error: "Line item must specify either line_id or part_id." };
     if (!(l.received_qty > 0)) return { error: "Received quantity must be positive." };
     if (l.received_unit_price_sar == null || l.received_unit_price_sar < 0) {
       return { error: "Received unit price cannot be negative." };
@@ -607,9 +617,12 @@ export async function receivePurchaseOrder(
   if (error) {
     // Best-effort cleanup — avoid orphaned storage objects for a receipt
     // that never landed. Ignore cleanup failures; the RPC error below is
-    // the one the user needs to see.
+    // the one the user needs to see. friendlyPoError() covers the
+    // extra-line warehouse-mismatch message (0055) — same substring
+    // ("belongs to a different warehouse") create_purchase_order's own
+    // guard raises, already handled by that helper.
     await supabase.storage.from(INVOICE_BUCKET).remove(uploaded.map((u) => u.storage_path));
-    return { error: error.message };
+    return { error: friendlyPoError(error.message) };
   }
 
   revalidatePath("/inventory");

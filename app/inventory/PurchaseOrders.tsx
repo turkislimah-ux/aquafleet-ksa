@@ -59,6 +59,8 @@ import {
   PackagePlus,
   Upload,
   Zap,
+  Trash2,
+  Unlink,
 } from "lucide-react";
 import { Btn, Table, TH, TD, Card, Stat } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
@@ -77,10 +79,13 @@ import {
   createPurchaseOrder,
   issuePurchaseOrder,
   receivePurchaseOrder,
+  receiveLooseParts,
   approvePurchaseOrder,
   rejectPurchaseOrder,
   getPartMovements,
   type PurchaseOrderLineInput,
+  type ReceivePoLineInput,
+  type ReceiveLine,
 } from "./actions";
 import { NewSupplierModal, AddPartModal, InvoiceFileTile, categoryLabel } from "./SharedCreateModals";
 
@@ -1472,24 +1477,54 @@ export function ReceiveListModal({
   );
 }
 
+// key is a stable client-side React key only — never sent to the RPC.
+// line_id null = an extra/ad-hoc line (0055), not on the original PO;
+// ordered_qty/ordered_unit_price_sar are null for the same reason (there is
+// no "ordered" figure for something that was never ordered).
 type ReceiveLineState = {
-  line_id: string;
+  key: string;
+  line_id: string | null;
   part_id: string;
-  ordered_qty: number;
-  ordered_unit_price_sar: number;
+  ordered_qty: number | null;
+  ordered_unit_price_sar: number | null;
   received_qty: string; // text-backed, same "empty distinguishable from 0" convention as useNumField
   received_unit_price_sar: string;
 };
 
-// Receive a Purchase Order — preview's openReceive(prefillPOId), trimmed to
-// what this phase actually needs: NOT the full loose/PO-dual-mode receive
-// draft (supplier/warehouse are fixed, taken from the PO, not pickable),
-// just the two things receiving actually changes — actual qty/price per
-// existing line — plus the SAME mandatory invoice upload every receiving
-// path in this app requires (inherited from receive_loose_parts via
-// receive_purchase_order, 0051 — see actions.ts's own comment). Every line
-// on the PO must be included (the RPC rejects a partial/duplicate set),
-// so there's no "add/remove line" control here — only qty/price edits.
+let extraLineSeq = 0;
+function nextExtraLineKey(): string {
+  extraLineSeq += 1;
+  return `extra-${Date.now()}-${extraLineSeq}`;
+}
+
+// Receive a Purchase Order — preview's openReceive(prefillPOId)/rcvAddLine,
+// reworked (migration 0055) to allow extra ad-hoc lines the supplier
+// delivered that weren't on the original PO, and a "detach from PO" escape
+// hatch preview has no equivalent of at all (Turki's own explicit ask,
+// worked out from the RPC's own design — see 0055's header comment).
+//
+// PO-derived lines (line_id set) show their ordered qty/price as a muted
+// sub-line plus a Match/Variance pill (preview's own pill-ok/pill-warn,
+// pages-2.js ~2586-2590, exact hex colors) — no remove button UNLESS the
+// receipt has been detached from the PO (every existing PO line must
+// still be included when NOT detached, same completeness rule 0051/0055
+// enforce; once detached there is no more PO to reconcile against, so
+// removing one is safe — this receipt becomes a plain loose receipt).
+// Extra lines (line_id null, added via the "pick a part to add" picker
+// below, restricted to the PO's own warehouse — same one-SKU-one-warehouse
+// rule the RPC itself enforces, surfaced here instead of relying only on
+// the RPC's own rejection) always have a remove button, no pill (there's
+// nothing to compare against).
+//
+// Detaching flips which action gets called on submit: receiveLooseParts()
+// (0047, the exact same RPC the "Add Parts" header flow already uses)
+// instead of receivePurchaseOrder() (0051/0055) — using this draft's own
+// supplier_id/warehouse_id (still the PO's, unchanged — detaching doesn't
+// make them editable, it only changes whether the PO gets reconciled) and
+// whatever lines/files/note are currently in the draft. The PO itself is
+// never touched: no po_id stamped on the resulting receipt, no status
+// change, no line updates — exactly as if this receiving event never
+// mentioned the PO at all.
 export function ReceivePOModal({
   lang,
   po,
@@ -1516,6 +1551,7 @@ export function ReceivePOModal({
 
   const [receiveLines, setReceiveLines] = useState<ReceiveLineState[]>(() =>
     lines.map((l) => ({
+      key: l.id,
       line_id: l.id,
       part_id: l.part_id,
       ordered_qty: l.qty,
@@ -1524,17 +1560,33 @@ export function ReceivePOModal({
       received_unit_price_sar: String(l.unit_price_sar),
     }))
   );
+  const [addPartId, setAddPartId] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [note, setNote] = useState("");
+  // Detach from PO (0055) — flips submit() to call receiveLooseParts()
+  // instead of receivePurchaseOrder(); see this component's own header
+  // comment for the full design.
+  const [detached, setDetached] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Extra lines can only add parts that (a) belong to the PO's own
+  // warehouse — same rule the RPC itself enforces, checked here too so the
+  // picker never even offers a part that would be rejected — and (b)
+  // aren't already a line on this draft (existing or extra), matching the
+  // RPC's own "already a line" / duplicate-extra-part rejections.
+  const usedPartIds = useMemo(() => new Set(receiveLines.map((l) => l.part_id)), [receiveLines]);
+  const availableExtraParts = useMemo(
+    () => parts.filter((p) => p.warehouse_id === po.warehouse_id && !usedPartIds.has(p.id)),
+    [parts, po.warehouse_id, usedPartIds]
+  );
 
   const linesValid = receiveLines.every((l) => {
     const q = Number(l.received_qty);
     const p = Number(l.received_unit_price_sar);
     return l.received_qty.trim() !== "" && q > 0 && l.received_unit_price_sar.trim() !== "" && p >= 0;
   });
-  const canSubmit = linesValid && files.length > 0;
+  const canSubmit = linesValid && receiveLines.length > 0 && files.length > 0;
 
   const total = receiveLines.reduce(
     (s, l) => s + (Number(l.received_qty) || 0) * (Number(l.received_unit_price_sar) || 0),
@@ -1543,6 +1595,36 @@ export function ReceivePOModal({
 
   function updateLine(idx: number, patch: Partial<ReceiveLineState>) {
     setReceiveLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  }
+
+  // A PO-derived line can only be removed once detached (every line still
+  // on the PO must be included otherwise — the completeness rule 0051/0055
+  // enforce). An extra line can always be removed — it was never required.
+  function canRemoveLine(l: ReceiveLineState): boolean {
+    return l.line_id === null || detached;
+  }
+
+  function removeLine(idx: number) {
+    setReceiveLines((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function addExtraLine() {
+    if (!addPartId) return;
+    const part = partsById.get(addPartId);
+    if (!part) return;
+    setReceiveLines((prev) => [
+      ...prev,
+      {
+        key: nextExtraLineKey(),
+        line_id: null,
+        part_id: part.id,
+        ordered_qty: null,
+        ordered_unit_price_sar: null,
+        received_qty: String(part.reorder_qty || 1),
+        received_unit_price_sar: String(part.unit_cost_sar ?? 0),
+      },
+    ]);
+    setAddPartId("");
   }
 
   function close() {
@@ -1561,7 +1643,7 @@ export function ReceivePOModal({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!linesValid) {
+    if (!linesValid || receiveLines.length === 0) {
       setError(
         lang === "en"
           ? "Every line needs a positive received quantity and a non-negative price."
@@ -1574,21 +1656,41 @@ export function ReceivePOModal({
       return;
     }
 
-    const payload = receiveLines.map((l) => ({
-      line_id: l.line_id,
-      received_qty: Number(l.received_qty),
-      received_unit_price_sar: Number(l.received_unit_price_sar),
-    }));
-
-    const formData = new FormData();
-    formData.set("poId", po.id);
-    formData.set("note", note.trim());
-    formData.set("linesJson", JSON.stringify(payload));
-    for (const file of files) formData.append("invoiceFiles", file);
-
     setSaving(true);
     setError(null);
-    const res = await receivePurchaseOrder(formData);
+
+    let res: { error: string | null };
+    if (detached) {
+      // Plain loose receipt (0047) — same RPC the header's "Add Parts" flow
+      // already uses. Uses the PO's own supplier_id/warehouse_id (not
+      // editable here — detaching doesn't change WHAT was received, only
+      // whether it gets reconciled against the PO). No po_id, no PO status
+      // change, no PO line writes — the PO stays exactly as it was.
+      const looseLines: ReceiveLine[] = receiveLines.map((l) => ({
+        part_id: l.part_id,
+        qty: Number(l.received_qty),
+        unit_price_sar: Number(l.received_unit_price_sar),
+      }));
+      const formData = new FormData();
+      formData.set("supplierId", po.supplier_id);
+      formData.set("warehouseId", po.warehouse_id);
+      formData.set("note", note.trim());
+      formData.set("linesJson", JSON.stringify(looseLines));
+      for (const file of files) formData.append("invoiceFiles", file);
+      res = await receiveLooseParts(formData);
+    } else {
+      const payload: ReceivePoLineInput[] = receiveLines.map((l) =>
+        l.line_id !== null
+          ? { line_id: l.line_id, received_qty: Number(l.received_qty), received_unit_price_sar: Number(l.received_unit_price_sar) }
+          : { part_id: l.part_id, received_qty: Number(l.received_qty), received_unit_price_sar: Number(l.received_unit_price_sar) }
+      );
+      const formData = new FormData();
+      formData.set("poId", po.id);
+      formData.set("note", note.trim());
+      formData.set("linesJson", JSON.stringify(payload));
+      for (const file of files) formData.append("invoiceFiles", file);
+      res = await receivePurchaseOrder(formData);
+    }
     setSaving(false);
     if (res.error) {
       setError(res.error);
@@ -1621,6 +1723,48 @@ export function ReceivePOModal({
             </button>
           </div>
 
+          {/* Detach from PO (0055) — no preview equivalent, Turki's own
+              requirement. A plain checkbox-style toggle rather than a
+              separate popup: flipping it changes what happens on submit
+              (which RPC, whether the PO gets touched) without changing the
+              form itself. */}
+          <div
+            className="rounded-lg border p-3 flex items-start gap-2.5"
+            style={detached ? { background: "rgba(244,63,94,.06)", borderColor: "rgba(244,63,94,.3)" } : INPUT_STYLE}
+          >
+            <button
+              type="button"
+              onClick={() => setDetached((v) => !v)}
+              className="mt-0.5 shrink-0 h-5 w-5 rounded border flex items-center justify-center"
+              style={{
+                borderColor: detached ? "#f43f5e" : "rgb(var(--border))",
+                background: detached ? "#f43f5e" : "transparent",
+              }}
+              aria-pressed={detached}
+            >
+              {detached && <Check className="h-3.5 w-3.5 text-white" />}
+            </button>
+            <div className="text-sm">
+              <button
+                type="button"
+                onClick={() => setDetached((v) => !v)}
+                className="font-medium inline-flex items-center gap-1.5"
+              >
+                <Unlink className="h-3.5 w-3.5" />
+                {lang === "en" ? "Detach from this purchase order" : "فصل عن أمر الشراء هذا"}
+              </button>
+              <p className="text-xs muted mt-0.5">
+                {detached
+                  ? lang === "en"
+                    ? `This will be saved as a plain loose receipt — ${po.po_number} stays issued, unreceived, and none of its lines change. Every line below can now be removed.`
+                    : `سيُحفظ هذا كاستلام مباشر عادي — يبقى ${po.po_number} صادراً وغير مستلم، ولن تتغيّر أي من بنوده. يمكن الآن إزالة أي بند أدناه.`
+                  : lang === "en"
+                  ? "Leave unchecked to receive against this PO — it will move to Pending Approval and include any extra parts you add below."
+                  : "اتركه دون تحديد للاستلام مقابل أمر الشراء هذا — سينتقل إلى بانتظار الاعتماد ويشمل أي قطع إضافية تضيفها أدناه."}
+              </p>
+            </div>
+          </div>
+
           <Card className="!p-0 overflow-hidden">
             <Table>
               <thead>
@@ -1631,21 +1775,37 @@ export function ReceivePOModal({
                   <TH>{lang === "en" ? "Actual qty received" : "الكمية الفعلية"}</TH>
                   <TH>{lang === "en" ? "Actual unit price" : "سعر الوحدة الفعلي"}</TH>
                   <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
+                  <TH></TH>
                 </tr>
               </thead>
               <tbody>
                 {receiveLines.map((l, idx) => {
                   const part = partsById.get(l.part_id);
+                  // preview's own Match/Variance pill (pages-2.js
+                  // ~2586-2590, pill-ok/pill-warn, exact hex from
+                  // app.css:148/150) — only meaningful for a PO-derived
+                  // line, which has an ordered figure to compare against.
+                  const variance =
+                    l.line_id !== null &&
+                    (Number(l.received_qty) !== l.ordered_qty || Number(l.received_unit_price_sar) !== l.ordered_unit_price_sar);
                   return (
-                    <tr key={l.line_id}>
+                    <tr key={l.key}>
                       <TD>
                         <div className="font-mono text-[11px] muted">{part?.sku ?? ""}</div>
                         <div className="text-sm font-medium">
                           {part ? (lang === "ar" && part.name_ar ? part.name_ar : part.name) : "—"}
                         </div>
+                        {l.line_id === null && (
+                          <span
+                            className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                            style={{ background: "rgba(100,116,139,.10)", color: "#475569" }}
+                          >
+                            {lang === "en" ? "Extra — not on PO" : "إضافي — ليس في الأمر"}
+                          </span>
+                        )}
                       </TD>
-                      <TD className="tabular muted">{l.ordered_qty}</TD>
-                      <TD className="tabular muted">{formatSar(l.ordered_unit_price_sar)}</TD>
+                      <TD className="tabular muted">{l.ordered_qty ?? "—"}</TD>
+                      <TD className="tabular muted">{l.ordered_unit_price_sar != null ? formatSar(l.ordered_unit_price_sar) : "—"}</TD>
                       <TD>
                         <input
                           value={l.received_qty}
@@ -1672,6 +1832,38 @@ export function ReceivePOModal({
                       <TD className="tabular font-semibold">
                         {formatSar((Number(l.received_qty) || 0) * (Number(l.received_unit_price_sar) || 0))}
                       </TD>
+                      <TD className="text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1.5">
+                          {l.line_id !== null && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                              style={
+                                variance
+                                  ? { background: "rgba(245,158,11,.12)", color: "#b45309" }
+                                  : { background: "rgba(16,185,129,.10)", color: "#047857" }
+                              }
+                            >
+                              <span
+                                className="h-1.5 w-1.5 rounded-full"
+                                style={{ background: variance ? "#f59e0b" : "#10b981" }}
+                              />
+                              {variance
+                                ? lang === "en" ? "Variance" : "فرق"
+                                : lang === "en" ? "Match" : "مطابق"}
+                            </span>
+                          )}
+                          {canRemoveLine(l) && (
+                            <button
+                              type="button"
+                              onClick={() => removeLine(idx)}
+                              className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 text-rose-600"
+                              title={lang === "en" ? "Remove" : "إزالة"}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </TD>
                     </tr>
                   );
                 })}
@@ -1691,10 +1883,45 @@ export function ReceivePOModal({
                   >
                     {formatSar(total)}
                   </td>
+                  <td className="border-t" style={{ borderColor: "rgb(var(--border))" }} />
                 </tr>
               </tfoot>
             </Table>
           </Card>
+
+          {/* Extra / ad-hoc lines (0055) — preview's own rcvAddLine, "and in
+              PO mode if extra parts are received alongside the PO"
+              (pages-2.js ~2500-2502). Restricted to this PO's own
+              warehouse, same one-SKU-one-warehouse rule the RPC enforces —
+              only ever offers a part that would actually be accepted. */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={addPartId}
+              onChange={(e) => setAddPartId(e.target.value)}
+              className="h-9 px-2.5 rounded-lg border text-sm max-w-[280px] flex-1"
+              style={INPUT_STYLE}
+              disabled={availableExtraParts.length === 0}
+            >
+              <option value="">
+                {availableExtraParts.length === 0
+                  ? lang === "en"
+                    ? "No other parts in this warehouse"
+                    : "لا توجد قطع أخرى في هذا المستودع"
+                  : lang === "en"
+                  ? "Pick a part to add…"
+                  : "اختر قطعة للإضافة…"}
+              </option>
+              {availableExtraParts.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.sku} · {lang === "ar" && p.name_ar ? p.name_ar : p.name}
+                </option>
+              ))}
+            </select>
+            <Btn type="button" variant="outline" onClick={addExtraLine} disabled={!addPartId}>
+              <Plus className="h-4 w-4" />
+              {lang === "en" ? "Add extra part" : "إضافة قطعة إضافية"}
+            </Btn>
+          </div>
 
           <div
             className={cn(
@@ -1779,8 +2006,12 @@ export function ReceivePOModal({
               disabled={!canSubmit || saving}
               className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
             >
-              <PackagePlus className="h-4 w-4" />
-              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Confirm receipt" : "تأكيد الاستلام"}
+              {detached ? <Unlink className="h-4 w-4" /> : <PackagePlus className="h-4 w-4" />}
+              {saving
+                ? lang === "en" ? "Saving…" : "جارٍ الحفظ…"
+                : detached
+                ? lang === "en" ? "Save as loose receipt" : "حفظ كاستلام مباشر"
+                : lang === "en" ? "Confirm receipt" : "تأكيد الاستلام"}
             </button>
           </div>
         </form>
