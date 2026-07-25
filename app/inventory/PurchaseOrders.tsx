@@ -2662,7 +2662,6 @@ export function PartFinanceModal({
       })
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   }, [purchaseOrders, purchaseOrderLines, part.id]);
-  const totalPurchased = allPurchases.reduce((s, p) => s + p.cost, 0);
   const purchaseRows = allPurchases.slice(0, 8);
 
   return (

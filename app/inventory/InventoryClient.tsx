@@ -200,7 +200,6 @@ import {
   Banknote,
   Trash2,
   Upload,
-  Save,
   Check,
   ShoppingCart,
   Zap,
