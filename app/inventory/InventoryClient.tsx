@@ -146,6 +146,9 @@
 //     inline "+ Warehouse" trigger next to the warehouse picker (preview's
 //     openNewWarehouse, pages-2.js ~2656) — this app had ONLY a page-header
 //     "Create Warehouse" button before, no inline one inside Add Parts.
+//     (REMOVED again later — per-warehouse tabs on the Inventory page,
+//     Turki's explicit call: the header button is the only entry point
+//     now, in NewPOModal or here. See ReceivePartsModal's own comment.)
 //   - Invoice box: border now dashed-while-missing / solid-once-met
 //     (preview's .invoice-required/.is-met, was solid both states); helper
 //     text restored to preview's full two-sentence copy (was truncated);
@@ -329,7 +332,17 @@ export default function InventoryClient({
   // the ProcStrip/search+filter/parts table only ever show on "inventory" —
   // matches preview's own headerActions gate exactly.
   const [invTab, setInvTab] = useState<"inventory" | "approvals" | "analysis">("inventory");
-  const [warehouseFilter, setWarehouseFilter] = useState<string>("all"); // "all" | warehouse.id
+  // Per-warehouse scoping (Turki's explicit call, deviates from preview —
+  // preview's own per-warehouse control is a dropdown with an "All
+  // warehouses" option; this app has no combined view at all, one tab per
+  // warehouse, always exactly one selected). Replaces the old warehouseFilter
+  // dropdown entirely — this is the ONLY thing that filters the parts/
+  // inventory view now. Everything else on the page (KPI row, ProcStrip,
+  // Approvals, Financial Analysis, AI-Suggest) stays fully global/unscoped,
+  // unchanged — matches preview's own KPI/AI-Suggest behavior (already
+  // computed from ALL parts, see below) and Turki's explicit requirement
+  // that Approvals/Financial Analysis never filter by warehouse.
+  const [warehouseTab, setWarehouseTab] = useState<string>(warehouses[0]?.id ?? "");
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
   const [warehouseModalOpen, setWarehouseModalOpen] = useState(false);
@@ -385,7 +398,7 @@ export default function InventoryClient({
 
   const visibleParts = useMemo(() => {
     return parts.filter((p) => {
-      if (warehouseFilter !== "all" && p.warehouse_id !== warehouseFilter) return false;
+      if (p.warehouse_id !== warehouseTab) return false;
       if (cat !== "all" && p.category !== cat) return false;
       if (q) {
         const s = q.toLowerCase();
@@ -394,7 +407,7 @@ export default function InventoryClient({
       }
       return true;
     });
-  }, [parts, warehouseFilter, cat, q]);
+  }, [parts, warehouseTab, cat, q]);
 
   // KPIs — computed from ALL parts, not the filtered table below. Matches
   // preview's inventoryPage(): totalValue/lowStock use D().parts directly;
@@ -525,6 +538,33 @@ export default function InventoryClient({
         <EmptyWarehouseState lang={lang} onCreate={() => setWarehouseModalOpen(true)} />
       ) : (
         <>
+          {/* Per-warehouse tabs — Turki's explicit call, no preview
+              equivalent (preview uses an "All warehouses" + per-warehouse
+              dropdown; this app has no combined view at all). Sits right
+              below the page title/header, above everything else. Filters
+              ONLY the parts/inventory view (visibleParts -> PartsTable,
+              below) — the KPI row, ProcStrip, Approvals, Financial
+              Analysis, and AI-Suggest are all unaffected, unchanged, still
+              fully global (see their own comments). */}
+          <div
+            className="inline-flex p-1 gap-1 rounded-xl border flex-wrap"
+            style={{ background: "rgb(var(--card))", borderColor: "rgb(var(--border))" }}
+          >
+            {warehouses.map((w) => (
+              <button
+                key={w.id}
+                type="button"
+                onClick={() => setWarehouseTab(w.id)}
+                className={cn(
+                  "px-3.5 py-2 rounded-lg text-[13px] font-medium transition-colors whitespace-nowrap",
+                  warehouseTab === w.id ? "bg-brand-600 text-white shadow-sm" : "hover:bg-black/5 dark:hover:bg-white/5"
+                )}
+              >
+                {w.name}
+              </button>
+            ))}
+          </div>
+
           {/* Top-level KPI row — preview's own inventory()'s 5-stat row
               (pages-2.js ~3035-3041), ALWAYS visible above the tabs
               regardless of which sub-tab is active (unlike the ProcStrip,
@@ -636,19 +676,6 @@ export default function InventoryClient({
                       </button>
                     ))}
                   </div>
-                  <select
-                    value={warehouseFilter}
-                    onChange={(e) => setWarehouseFilter(e.target.value)}
-                    className="h-9 px-2.5 rounded-lg border text-sm"
-                    style={INPUT_STYLE}
-                  >
-                    <option value="all">{lang === "en" ? "All warehouses" : "كل المستودعات"}</option>
-                    {warehouses.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.name}
-                      </option>
-                    ))}
-                  </select>
                 </div>
               </Card>
 
@@ -691,7 +718,11 @@ export default function InventoryClient({
       )}
 
       {warehouseModalOpen && (
-        <CreateWarehouseModal lang={lang} onClose={() => setWarehouseModalOpen(false)} />
+        <CreateWarehouseModal
+          lang={lang}
+          onClose={() => setWarehouseModalOpen(false)}
+          onCreated={(w) => setWarehouseTab(w.id)}
+        />
       )}
 
       {viewPart && (
@@ -736,6 +767,7 @@ export default function InventoryClient({
           suppliers={suppliers}
           units={units}
           prefill={receivePrefill ?? undefined}
+          defaultWarehouseId={warehouseTab}
           onClose={() => {
             setReceiveModalOpen(false);
             setReceivePrefill(null);
@@ -755,6 +787,7 @@ export default function InventoryClient({
           parts={parts}
           units={units}
           aiSuggestion={aiSuggestion ?? undefined}
+          defaultWarehouseId={warehouseTab}
           onClose={() => {
             setNewPOOpen(false);
             setAiSuggestion(null);
@@ -1522,6 +1555,7 @@ function ReceivePartsModal({
   suppliers,
   units,
   prefill,
+  defaultWarehouseId,
   onClose,
 }: {
   lang: "en" | "ar";
@@ -1533,6 +1567,13 @@ function ReceivePartsModal({
   // seeds warehouseId + one line for that part. undefined when opened from
   // the header button instead (blank draft, unchanged from before).
   prefill?: { warehouseId: string; lines: ReceiveLine[] };
+  // The page's currently active warehouse tab — used as the initial
+  // warehouseId when there's no prefill (i.e. opened from the header "Add
+  // Parts" button), so the draft starts on whichever warehouse you're
+  // already looking at instead of always the first one. Warehouses can no
+  // longer be created inline here — the header's "Create Warehouse" button
+  // is the only entry point now (per-warehouse tabs on the Inventory page).
+  defaultWarehouseId?: string;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -1542,10 +1583,10 @@ function ReceivePartsModal({
   const [newSupplierOpen, setNewSupplierOpen] = useState(false);
   const [localParts, setLocalParts] = useState<Part[]>([]);
   const [newItemOpen, setNewItemOpen] = useState(false);
-  const [localWarehouses, setLocalWarehouses] = useState<Warehouse[]>([]);
-  const [newWarehouseOpen, setNewWarehouseOpen] = useState(false);
   const [supplierId, setSupplierId] = useState("");
-  const [warehouseId, setWarehouseId] = useState(prefill?.warehouseId ?? warehouses[0]?.id ?? "");
+  const [warehouseId, setWarehouseId] = useState(
+    prefill?.warehouseId ?? defaultWarehouseId ?? warehouses[0]?.id ?? ""
+  );
   const [lines, setLines] = useState<ReceiveLine[]>(prefill?.lines ?? []);
   const [addPartId, setAddPartId] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -1569,14 +1610,6 @@ function ReceivePartsModal({
     const ids = new Set(parts.map((p) => p.id));
     return [...parts, ...localParts.filter((p) => !ids.has(p.id))];
   }, [parts, localParts]);
-
-  // Same merge-in pattern for warehouses freshly created via "+ Warehouse"
-  // (below, next to the warehouse picker) — mirrors preview's own
-  // openNewWarehouse/saveNewWarehouse, bound in exactly this spot.
-  const allWarehouses = useMemo(() => {
-    const ids = new Set(warehouses.map((w) => w.id));
-    return [...warehouses, ...localWarehouses.filter((w) => !ids.has(w.id))];
-  }, [warehouses, localWarehouses]);
 
   const partsById = useMemo(() => {
     const m = new Map<string, Part>();
@@ -1738,27 +1771,21 @@ function ReceivePartsModal({
 
             <label className="flex flex-col gap-1 text-sm">
               <span className="muted">{lang === "en" ? "Warehouse *" : "المستودع *"}</span>
-              <div className="flex gap-2">
-                <select
-                  value={warehouseId}
-                  onChange={(e) => setWarehouseId(e.target.value)}
-                  className={cn(INPUT, "flex-1")}
-                  style={INPUT_STYLE}
-                  required
-                >
-                  {allWarehouses.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.name}
-                    </option>
-                  ))}
-                </select>
-                {/* preview's openNewWarehouse trigger, same spot (pages-2.js
-                    ~2656) — was missing here entirely; Create Warehouse only
-                    existed as a page-header button before this pass. */}
-                <Btn type="button" variant="outline" onClick={() => setNewWarehouseOpen(true)}>
-                  {lang === "en" ? "+ Warehouse" : "+ مستودع"}
-                </Btn>
-              </div>
+              {/* No inline "+ Warehouse" here anymore — Create Warehouse is
+                  the page header's job only (per-warehouse tabs). */}
+              <select
+                value={warehouseId}
+                onChange={(e) => setWarehouseId(e.target.value)}
+                className={INPUT}
+                style={INPUT_STYLE}
+                required
+              >
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
 
@@ -2017,21 +2044,10 @@ function ReceivePartsModal({
         />
       )}
 
-      {newWarehouseOpen && (
-        <CreateWarehouseModal
-          lang={lang}
-          onClose={() => setNewWarehouseOpen(false)}
-          onCreated={(warehouse) => {
-            setLocalWarehouses((prev) => [...prev, warehouse]);
-            setWarehouseId(warehouse.id);
-          }}
-        />
-      )}
-
       {newItemOpen && (
         <AddPartModal
           lang={lang}
-          warehouses={allWarehouses}
+          warehouses={warehouses}
           parts={allParts}
           units={units}
           defaultWarehouseId={warehouseId}

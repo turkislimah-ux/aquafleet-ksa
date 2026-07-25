@@ -229,13 +229,12 @@ export function CreateWarehouseModal({
 }: {
   lang: "en" | "ar";
   onClose: () => void;
-  // Optional — set only when opened inline from ReceivePartsModal's "+
-  // Warehouse" trigger (mirrors preview's openNewWarehouse, bound next to
-  // the Add Parts warehouse picker), so the fresh row can be merged into
-  // that draft's local warehouse list and auto-selected, same pattern as
-  // onCreated on NewSupplierModal/AddPartModal. The standalone header
-  // "Create Warehouse" button (a flagged, preview-less deviation) doesn't
-  // pass this — it just closes and lets the next server refresh pick it up.
+  // Optional. The header's own "Create Warehouse" button (the ONLY place a
+  // warehouse can be created now — the inline "+ Warehouse" triggers inside
+  // NewPOModal/ReceivePartsModal were removed, per-warehouse tabs on the
+  // Inventory page) passes this to auto-switch the page's active warehouse
+  // tab to the freshly created one, same immediate-select-no-wait-for-
+  // refresh pattern onCreated on NewSupplierModal/AddPartModal already uses.
   onCreated?: (warehouse: Warehouse) => void;
 }) {
   const router = useRouter();

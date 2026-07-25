@@ -532,19 +532,54 @@ relevant skill(s) **when the task calls for it**:
     is left unset (same reasoning as AI-Suggest's best-effort-only supplier
     prefill) — `parts.supplier` is free text, not guaranteed to match a real
     `suppliers.name`.
-  - **Migration `0054` (drafted, flagged, NOT yet applied) — data-only, no
-    schema change:** grants Turki's own login (`turkislimah@gmail.com`)
-    approval access. Root cause of test 10's "Not authorized to approve
-    purchase orders": `approve_purchase_order` (0052) requires a
-    `public.staff` row for the actor's email with an eligible role
-    (`fleet_manager`/`ops_supervisor`/`inventory_clerk`), `active=true`,
-    `terminated_at is null` — checked live, no `staff` row existed for that
-    email at all. `0054` upserts one with `role='fleet_manager'`
-    (idempotent — updates if a row already exists, inserts if not). Turki's
-    own framing ("always give all access... full authority... for testing
-    and managing") is honored for THIS login specifically, not by loosening
-    the RPC's role check for everyone — that stays a real business rule,
-    matching preview's own `APPROVER_ROLES` model.
+  - **Migration `0054`, applied and verified — data-only, no schema
+    change:** grants Turki's own login (`turkias.co@hotmail.com` — the
+    original draft targeted `turkislimah@gmail.com`, corrected before
+    running once Turki confirmed his actual session email) approval access.
+    Root cause of test 10's "Not authorized to approve purchase orders":
+    `approve_purchase_order` (0052) requires a `public.staff` row for the
+    actor's email with an eligible role (`fleet_manager`/`ops_supervisor`/
+    `inventory_clerk`), `active=true`, `terminated_at is null` — checked
+    live, no `staff` row existed for that email at all. `0054` upserted one
+    with `role='fleet_manager'` (idempotent — updates if a row already
+    exists, inserts if not). Turki's own framing ("always give all
+    access... full authority... for testing and managing") is honored for
+    THIS login specifically, not by loosening the RPC's role check for
+    everyone — that stays a real business rule, matching preview's own
+    `APPROVER_ROLES` model.
+  - **Per-warehouse scoping (first of the "risky batch," app-only, no
+    migration/RPC touched) — a tab per warehouse, no combined/all view.**
+    Turki's explicit requirements, a deliberate departure from preview
+    (preview's own per-warehouse control is a dropdown with an "All
+    warehouses" option — this app has no combined view at all): a new tab
+    row (one button per warehouse, `warehouseTab` state, defaults to the
+    first warehouse) sits directly below the page title, above everything
+    else. It filters ONLY `visibleParts` (search/category/table) — the old
+    `warehouseFilter` dropdown inside the Inventory Levels filter bar is
+    gone, fully replaced. **Everything else on the page stays exactly as
+    global/unscoped as it already was** — a deliberate, narrower read of
+    "stays global" than scoping everything: the 5-stat KPI row, ProcStrip's
+    three chips, the Approvals tab, the Financial Analysis tab, and
+    AI-Suggest's own warehouse-grouping heuristic were ALL already computed
+    from every part/PO regardless of warehouse (matches preview's own
+    behavior — see the KPI row's own pre-existing comment), and none of
+    that changed. Only the two manual create-flows got a small, in-scope
+    ergonomic addition: `NewPOModal`/`ReceivePartsModal` gained an optional
+    `defaultWarehouseId` prop, defaulting their warehouse picker to the
+    page's active tab instead of always the first warehouse (still fully
+    editable, still overridden by `aiSuggestion`/`prefill` when either is
+    set). Suppliers/units confirmed already unscoped structurally (neither
+    table has a `warehouse_id` column) — nothing to change there.
+    **"+ Warehouse" removed from every popup** (`NewPOModal`,
+    `ReceivePartsModal`) — `CreateWarehouseModal`'s header instance is the
+    only entry point now, and now auto-switches the page's active
+    warehouse tab to whatever was just created (`onCreated` prop, wasn't
+    wired there before). Removing the inline triggers made the
+    "merge locally-created warehouse into the list" pattern
+    (`localWarehouses`/`newWarehouseOpen`/`allWarehouses`) dead in both
+    modals — removed alongside, along with `PurchaseOrders.tsx`'s now-
+    orphaned `CreateWarehouseModal` import (its one caller was the trigger
+    just removed).
   - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);

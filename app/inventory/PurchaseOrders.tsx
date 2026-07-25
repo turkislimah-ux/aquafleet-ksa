@@ -30,11 +30,14 @@
 // server-side friendlyPoError() fallback (actions.ts) is defense in depth
 // only, for the rare case a stale line still slips through.
 //
-// Reuses NewSupplierModal / CreateWarehouseModal / AddPartModal from
-// ./SharedCreateModals.tsx — same inline-create modals ReceivePartsModal
-// (InventoryClient.tsx) already uses, not reimplemented here. Deliberately
-// NOT imported from InventoryClient.tsx directly: this file needs those
-// three, while InventoryClient.tsx needs ProcStrip/NewPOModal/POListModal/
+// Reuses NewSupplierModal / AddPartModal from ./SharedCreateModals.tsx —
+// same inline-create modals ReceivePartsModal (InventoryClient.tsx) already
+// uses, not reimplemented here. (CreateWarehouseModal used to be reused here
+// too, for NewPOModal's inline "+ Warehouse" trigger — removed; the header's
+// own "Create Warehouse" button is the only entry point now, per-warehouse
+// tabs on the Inventory page.) Deliberately NOT imported from
+// InventoryClient.tsx directly: this file needs those two, while
+// InventoryClient.tsx needs ProcStrip/NewPOModal/POListModal/
 // PODetailModal from THIS file — importing the modals straight from
 // InventoryClient.tsx would make that a two-file cycle. Both sides import
 // the shared modals from the same third, leaf module instead. See
@@ -79,7 +82,7 @@ import {
   getPartMovements,
   type PurchaseOrderLineInput,
 } from "./actions";
-import { NewSupplierModal, CreateWarehouseModal, AddPartModal, InvoiceFileTile, categoryLabel } from "./SharedCreateModals";
+import { NewSupplierModal, AddPartModal, InvoiceFileTile, categoryLabel } from "./SharedCreateModals";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -230,10 +233,11 @@ export function ProcStrip({
 type NewPOLine = PurchaseOrderLineInput;
 
 // New Purchase Order — mirrors preview's openNewPO/_renderPOModal/savePO
-// exactly in shape: supplier + inline "+ Supplier", warehouse + inline
-// "+ Warehouse", expected delivery date, line-item builder + inline
-// "New Item", note. Two save actions (Save draft / Issue now) instead of
-// preview's single savePO(status) — this app's backend is two RPCs
+// in shape: supplier + inline "+ Supplier", warehouse picker (defaults to
+// the page's active warehouse tab — no inline "+ Warehouse" anymore, see
+// this file's own header comment on why), expected delivery date, line-item
+// builder + inline "New Item", note. Two save actions (Save draft / Issue
+// now) instead of preview's single savePO(status) — this app's backend is two RPCs
 // (create_purchase_order always drafts; issue_purchase_order is a separate
 // transition), so "Issue now" chains both calls instead of one insert with
 // a status argument.
@@ -353,6 +357,7 @@ export function NewPOModal({
   parts,
   units,
   aiSuggestion,
+  defaultWarehouseId,
   onClose,
   onSaved,
 }: {
@@ -362,6 +367,13 @@ export function NewPOModal({
   parts: Part[];
   units: Unit[];
   aiSuggestion?: NewPOAISuggestion;
+  // The page's currently active warehouse tab — used as the initial
+  // warehouseId when there's no aiSuggestion (which already picks its own
+  // warehouse), so the draft starts on whichever warehouse you're already
+  // looking at instead of always the first one. Warehouses can no longer be
+  // created inline here — the header's "Create Warehouse" button is the
+  // only entry point now (per-warehouse tabs on the Inventory page).
+  defaultWarehouseId?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -369,13 +381,13 @@ export function NewPOModal({
 
   const [localSuppliers, setLocalSuppliers] = useState<Supplier[]>([]);
   const [newSupplierOpen, setNewSupplierOpen] = useState(false);
-  const [localWarehouses, setLocalWarehouses] = useState<Warehouse[]>([]);
-  const [newWarehouseOpen, setNewWarehouseOpen] = useState(false);
   const [localParts, setLocalParts] = useState<Part[]>([]);
   const [newItemOpen, setNewItemOpen] = useState(false);
 
   const [supplierId, setSupplierId] = useState(aiSuggestion?.supplierId ?? "");
-  const [warehouseId, setWarehouseId] = useState(aiSuggestion?.warehouseId ?? warehouses[0]?.id ?? "");
+  const [warehouseId, setWarehouseId] = useState(
+    aiSuggestion?.warehouseId ?? defaultWarehouseId ?? warehouses[0]?.id ?? ""
+  );
   // preview's openNewPO defaults expectedDelivery to today+7 (pages-2.js:2107)
   // unless the caller overrides it — matched here as the initial value only
   // (still freely editable, same as preview's own date input).
@@ -397,11 +409,6 @@ export function NewPOModal({
     const ids = new Set(suppliers.map((s) => s.id));
     return [...suppliers, ...localSuppliers.filter((s) => !ids.has(s.id))];
   }, [suppliers, localSuppliers]);
-
-  const allWarehouses = useMemo(() => {
-    const ids = new Set(warehouses.map((w) => w.id));
-    return [...warehouses, ...localWarehouses.filter((w) => !ids.has(w.id))];
-  }, [warehouses, localWarehouses]);
 
   const allParts = useMemo(() => {
     const ids = new Set(parts.map((p) => p.id));
@@ -627,27 +634,24 @@ export function NewPOModal({
 
             <label className="flex flex-col gap-1 text-sm">
               <span className="muted">{lang === "en" ? "Warehouse *" : "المستودع *"}</span>
-              <div className="flex gap-2">
-                <select
-                  value={warehouseId}
-                  onChange={(e) => {
-                    setDroppedNotice(null);
-                    changeWarehouse(e.target.value);
-                  }}
-                  className={cn(INPUT, "flex-1")}
-                  style={INPUT_STYLE}
-                  required
-                >
-                  {allWarehouses.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.name}
-                    </option>
-                  ))}
-                </select>
-                <Btn type="button" variant="outline" onClick={() => setNewWarehouseOpen(true)}>
-                  {lang === "en" ? "+ Warehouse" : "+ مستودع"}
-                </Btn>
-              </div>
+              {/* No inline "+ Warehouse" here anymore — Create Warehouse is
+                  the page header's job only (per-warehouse tabs). */}
+              <select
+                value={warehouseId}
+                onChange={(e) => {
+                  setDroppedNotice(null);
+                  changeWarehouse(e.target.value);
+                }}
+                className={INPUT}
+                style={INPUT_STYLE}
+                required
+              >
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
@@ -855,22 +859,10 @@ export function NewPOModal({
         />
       )}
 
-      {newWarehouseOpen && (
-        <CreateWarehouseModal
-          lang={lang}
-          onClose={() => setNewWarehouseOpen(false)}
-          onCreated={(warehouse) => {
-            setLocalWarehouses((prev) => [...prev, warehouse]);
-            setDroppedNotice(null);
-            changeWarehouse(warehouse.id);
-          }}
-        />
-      )}
-
       {newItemOpen && (
         <AddPartModal
           lang={lang}
-          warehouses={allWarehouses}
+          warehouses={warehouses}
           parts={allParts}
           units={units}
           defaultWarehouseId={warehouseId}
