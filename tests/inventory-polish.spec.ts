@@ -161,53 +161,49 @@ test.describe("Inventory polish round (design-only)", () => {
     await expect(poModal.locator("button", { hasText: "FLT-001" })).toContainText(/FLT-001\s*·\s*Oil Filter/);
   });
 
-  // ADD 2 — Add Part popup shows supplier info the same way New PO does:
-  // blank "—" until picked, then the SupplierContactCard.
-  test("addition 2 — Add Part popup shows supplier info like New PO (both real entry points, right after picking it)", async ({
+  // ADD 2 — CORRECTED: supplier info belongs on "Add Part" (ReceivePartsModal,
+  // title "Add Parts to Inventory", header "Add Parts" button) — NOT on
+  // "+ New Item" (AddPartModal, title "New item / equipment"). An earlier
+  // pass put it on the wrong one; reverted there, added here instead.
+  test("addition 2 — Add Part (\"Add Parts to Inventory\") shows supplier info like New PO", async ({ page }) => {
+    await page.goto("/inv-polish-test");
+    await page.getByRole("button", { name: /^Add Parts/ }).click();
+
+    const addPartModal = page
+      .locator("div.card.p-6")
+      .filter({ has: page.getByRole("heading", { name: "Add Parts to Inventory" }) });
+    await expect(addPartModal).toBeVisible();
+
+    const card = addPartModal.getByText("Supplier contact", { exact: true }).locator("..");
+    await expect(card.getByText("—", { exact: true })).toBeVisible();
+
+    await addPartModal.locator("select", { hasText: "Pick a supplier" }).selectOption("sup1");
+    await expect(card.getByText("Acme Parts")).toBeVisible();
+    await expect(card.getByText("أكمي للقطع")).toBeVisible();
+  });
+
+  // "+ New Item" (AddPartModal) must NOT have any supplier field/card —
+  // reverted to its exact pre-supplier-work state. Checked via both real
+  // entry points (New PO's "+ New Item" and Add Parts' own "+ New Item").
+  test("addition 2 regression guard — \"+ New Item\" (AddPartModal) has NO supplier field, either entry point", async ({
     page,
   }) => {
     await page.goto("/inv-polish-test");
-
-    // FOLLOW-UP FIX: the card was already mounted and worked (proved via a
-    // direct DOM dump) but sat at the very BOTTOM of the form, after 6
-    // other fields — technically present, practically invisible without
-    // scrolling. Now it's a `col-span-2` grid item directly under the
-    // Supplier field, same prominence as New PO's own card. Checked via
-    // BOTH real entry points this time (New PO's "+ New Item" AND Add
-    // Parts' own "+ New Item") — the earlier pass only checked one.
-    async function checkAddPartModal(addPartModal: ReturnType<typeof page.locator>) {
-      await expect(addPartModal).toBeVisible();
-
-      const card = addPartModal.getByText("Supplier contact", { exact: true }).locator("../..");
-      await expect(card.getByText("—", { exact: true })).toBeVisible();
-
-      // Prominence — the card sits ABOVE Category, not below every other
-      // field. (Category is the field right after it now.)
-      const cardBox = await card.boundingBox();
-      const categoryBox = await addPartModal.getByText("Category *", { exact: true }).boundingBox();
-      expect(cardBox).not.toBeNull();
-      expect(categoryBox).not.toBeNull();
-      expect(cardBox!.y).toBeLessThan(categoryBox!.y);
-
-      await addPartModal.locator("select", { hasText: "None yet" }).selectOption("sup1");
-      await expect(card.getByText("Acme Parts")).toBeVisible();
-      await expect(card.getByText("أكمي للقطع")).toBeVisible();
-    }
-
     await page.getByRole("button", { name: /New Purchase Order/ }).click();
     await page.getByRole("button", { name: /New Item/ }).click();
-    await checkAddPartModal(
-      page.locator("div.card.p-6").filter({ has: page.getByRole("heading", { name: "New item / equipment" }) })
-    );
+    let newItemModal = page
+      .locator("div.card.p-6")
+      .filter({ has: page.getByRole("heading", { name: "New item / equipment" }) });
+    await expect(newItemModal).toBeVisible();
+    await expect(newItemModal).not.toContainText(/supplier/i);
 
-    // Fresh page for the second entry point instead of navigating back
-    // through nested "Cancel" buttons (AddPartModal is nested inside
-    // NewPOModal, so "Cancel" is ambiguous between the two).
     await page.goto("/inv-polish-test");
     await page.getByRole("button", { name: /^Add Parts/ }).click();
     await page.getByRole("button", { name: /New Item/ }).click();
-    await checkAddPartModal(
-      page.locator("div.card.p-6").filter({ has: page.getByRole("heading", { name: "New item / equipment" }) })
-    );
+    newItemModal = page
+      .locator("div.card.p-6")
+      .filter({ has: page.getByRole("heading", { name: "New item / equipment" }) });
+    await expect(newItemModal).toBeVisible();
+    await expect(newItemModal).not.toContainText(/supplier/i);
   });
 });

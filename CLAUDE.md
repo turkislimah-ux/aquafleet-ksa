@@ -1125,6 +1125,48 @@ relevant skill(s) **when the task calls for it**:
       presence) — `tests/inventory-polish.spec.ts`'s addition-2 test
       rewritten to check both entry points + the position, all 10 tests
       still pass.
+    - **Third follow-up — Turki: wrong popup entirely.** The whole
+      "supplier in Add Part" addition had landed on the WRONG component.
+      Two distinct, confirmed-different modals:
+      - **"+ New Item" = `AddPartModal`** (`SharedCreateModals.tsx`, title
+        "New item / equipment") — creates a brand-new catalog SKU. Should
+        have NO supplier field — preview's own create flow never had one
+        either (supplier is only ever assigned later, at receipt time).
+        This is where the previous two follow-ups had mistakenly built
+        the supplier picker/card.
+      - **"Add Part" = `ReceivePartsModal`** (`InventoryClient.tsx`, title
+        "Add Parts to Inventory", opened via the header "Add Parts"
+        button) — the actual receiving flow. This one already HAD its own
+        top-level `supplierId`/`allSuppliers` (a supplier is required to
+        receive stock) but never got the contact-info card.
+      **Reverted `AddPartModal` to its exact pre-supplier-work state** —
+      confirmed byte-for-byte identical to the version at commit `f800f93`
+      (diffed directly, zero differences beyond the file's own trailing
+      marker). Removed: the `suppliers` prop, the `supplierId`/
+      `localSuppliers`/`newSupplierOpen`/`allSuppliers`/`selectedSupplier`
+      state, the Supplier `<select>` field, the `SupplierContactCard`
+      mount, the `NewSupplierModal` mount, and `submit`'s `supplier:
+      selectedSupplier?.name ?? null` (back to plain `null`). Both
+      `AddPartModal` mount sites (NewPOModal's own "+ New Item",
+      ReceivePartsModal's own "+ New Item") stopped passing `suppliers`.
+      **Added supplier info to `ReceivePartsModal` instead** — a new
+      `selectedSupplier` derived from its OWN pre-existing `supplierId`/
+      `allSuppliers`, and `<SupplierContactCard lang={lang}
+      supplier={selectedSupplier} />` placed immediately after its own
+      Supplier/Warehouse row (same position/prominence as New PO's own
+      card) — no new state needed, this modal already tracked everything
+      required.
+    - **Verification:** rebuilt the diagnostic route, confirmed via BOTH
+      real entry points to "+ New Item" that it's back to its original
+      field set (name/name_ar/SKU/warehouse/category/unit/price/reorder —
+      no "supplier" text anywhere), and confirmed "Add Parts to Inventory"
+      shows the blank-"—"-then-populated-on-selection card, screenshots
+      included (blue-tinted "SUPPLIER CONTACT" box, "—" before picking,
+      full name/name_ar/contact/phone/email after). `tests/inventory-
+      polish.spec.ts`'s addition-2 test rewritten to target
+      `ReceivePartsModal` instead of `AddPartModal`, plus a new dedicated
+      regression-guard test asserting "+ New Item" has zero "supplier"
+      text through both entry points — 11 tests total, all pass.
   - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);

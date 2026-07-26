@@ -251,6 +251,7 @@ import {
   NewSupplierModal,
   AddPartModal,
   AdjustItemModal,
+  SupplierContactCard,
   InvoiceFileTile,
   categoryLabel,
   useNumField,
@@ -1809,6 +1810,13 @@ function ReceivePartsModal({
     const ids = new Set(suppliers.map((s) => s.id));
     return [...suppliers, ...localSuppliers.filter((s) => !ids.has(s.id))];
   }, [suppliers, localSuppliers]);
+  // Supplier info card — THIS is "Add Part" (header "Add Parts" button,
+  // title "Add Parts to Inventory"), the popup Turki actually wants
+  // supplier info on ("the same way New PO shows it") — not "+ New Item"
+  // (AddPartModal, SharedCreateModals.tsx), which got it by mistake and
+  // was reverted. This modal already HAD its own top-level supplierId/
+  // allSuppliers (needed for the receipt itself) — this just reads it.
+  const selectedSupplier = allSuppliers.find((s) => s.id === supplierId) ?? null;
 
   // Same merge-in pattern for parts freshly created via "New Item" (below) —
   // preview's own openNewPart/saveNewPart drops the new record straight into
@@ -2011,6 +2019,12 @@ function ReceivePartsModal({
               </select>
             </label>
           </div>
+
+          {/* Supplier contact — "the same way New PO shows it" (Turki's own
+              wording): blank until picked, then name/name_ar/contact/
+              phone/email, immediately below the Supplier/Warehouse row —
+              same position/prominence as New PO's own card. */}
+          <SupplierContactCard lang={lang} supplier={selectedSupplier} />
 
           <div>
             <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
@@ -2279,7 +2293,6 @@ function ReceivePartsModal({
           warehouses={warehouses}
           parts={allParts}
           units={units}
-          suppliers={allSuppliers}
           defaultWarehouseId={warehouseId}
           onClose={() => setNewItemOpen(false)}
           onCreated={(part) => addNewPartAsLine(part)}

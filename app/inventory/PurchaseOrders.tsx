@@ -1030,7 +1030,6 @@ export function NewPOModal({
           warehouses={warehouses}
           parts={allParts}
           units={units}
-          suppliers={allSuppliers}
           defaultWarehouseId={warehouseId}
           onClose={() => setNewItemOpen(false)}
           onCreated={(part) => addNewPartAsLine(part)}

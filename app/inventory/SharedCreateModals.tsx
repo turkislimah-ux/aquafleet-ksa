@@ -794,7 +794,6 @@ export function AddPartModal({
   warehouses,
   parts,
   units,
-  suppliers,
   defaultWarehouseId,
   onClose,
   onCreated,
@@ -812,15 +811,6 @@ export function AddPartModal({
   // reads from this instead of a hardcoded/free-text list. parts.unit still
   // stores the selected unit's CODE (soft reference, no FK — see 0049).
   units: Unit[];
-  // Item 3 (follow-up polish) — supplier picker + SupplierContactCard, "the
-  // same way New PO shows it" (Turki's own wording). parts.supplier stays
-  // free text (0043) — this stores the PICKED supplier's `name` as a
-  // snapshot, same "free-text snapshot of a real suppliers.name" convention
-  // AI-Suggest's own best-effort supplier match already relies on
-  // elsewhere. Preview's own create flow has no supplier field at all
-  // (supplier is only ever assigned later, at receipt time) — this is a
-  // deliberate addition beyond preview, per Turki's explicit ask now.
-  suppliers: Supplier[];
   defaultWarehouseId: string;
   onClose: () => void;
   onCreated: (part: Part) => void;
@@ -851,18 +841,6 @@ export function AddPartModal({
     return [...units, ...localUnits.filter((u) => !ids.has(u.id))];
   }, [units, localUnits]);
   const [unitCode, setUnitCode] = useState(allUnits[0]?.code ?? "");
-
-  // Item 3 (follow-up polish) — supplier picker, same "merge freshly
-  // created ones in locally" pattern as units/category above, same
-  // "+Supplier" inline-create pattern NewPOModal already uses.
-  const [supplierId, setSupplierId] = useState("");
-  const [localSuppliers, setLocalSuppliers] = useState<Supplier[]>([]);
-  const [newSupplierOpen, setNewSupplierOpen] = useState(false);
-  const allSuppliers = useMemo(() => {
-    const ids = new Set(suppliers.map((s) => s.id));
-    return [...suppliers, ...localSuppliers.filter((s) => !ids.has(s.id))];
-  }, [suppliers, localSuppliers]);
-  const selectedSupplier = allSuppliers.find((s) => s.id === supplierId) ?? null;
 
   // Combo-input option list (extension #1) — hardcoded CREATE_CATS ∪
   // distinct values already used by real parts, so a typed-in free value
@@ -917,10 +895,7 @@ export function AddPartModal({
       reorder_level: parseNumField(reorderLevel),
       reorder_qty: parseNumField(reorderQty),
       lead_time_days: null,
-      // Item 3 (follow-up polish) — snapshot the picked supplier's name as
-      // free text (parts.supplier, 0043); null if none was picked, same
-      // as before this item existed.
-      supplier: selectedSupplier?.name ?? null,
+      supplier: null,
       warehouse_id: defaultWarehouseId,
     };
     setSaving(true);
@@ -990,46 +965,6 @@ export function AddPartModal({
                 {warehouseName}
               </div>
             </label>
-
-            {/* Item 3 (follow-up polish) — supplier picker, same
-                select+"+Supplier" pattern NewPOModal already uses. No
-                default (blank until picked) — the SupplierContactCard
-                below reflects that, same as New PO. */}
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Supplier" : "المورّد"}</span>
-              <div className="flex gap-2">
-                <select
-                  value={supplierId}
-                  onChange={(e) => setSupplierId(e.target.value)}
-                  className={cn(INPUT, "flex-1")}
-                  style={INPUT_STYLE}
-                >
-                  <option value="">{lang === "en" ? "None yet" : "لا يوجد بعد"}</option>
-                  {allSuppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-                <Btn type="button" variant="outline" onClick={() => setNewSupplierOpen(true)}>
-                  {lang === "en" ? "+ Supplier" : "+ مورّد"}
-                </Btn>
-              </div>
-            </label>
-
-            {/* FOLLOW-UP FIX — the card rendered fine (proved via direct
-                DOM check), but sat at the very end of the form, after 6
-                more fields (Category/Unit/price/reorder x2) — nothing
-                like New PO, which shows it immediately after its own
-                Supplier/Warehouse row. That's the real "doesn't appear
-                the same way" gap Turki caught: technically present,
-                practically invisible without scrolling past everything
-                else first. `col-span-2` keeps this a grid ITEM (not a
-                second grid) so it can sit directly under the Supplier
-                field, immediately visible, same prominence as New PO. */}
-            <div className="col-span-2 -mt-1">
-              <SupplierContactCard lang={lang} supplier={selectedSupplier} />
-            </div>
 
             {/* Category combo (Turki's extension #1, not from preview) — a
                 VISIBLE dropdown list of existing options AND free typing in
@@ -1170,17 +1105,6 @@ export function AddPartModal({
           onCreated={(u) => {
             setLocalUnits((prev) => [...prev, u]);
             setUnitCode(u.code);
-          }}
-        />
-      )}
-
-      {newSupplierOpen && (
-        <NewSupplierModal
-          lang={lang}
-          onClose={() => setNewSupplierOpen(false)}
-          onCreated={(s) => {
-            setLocalSuppliers((prev) => [...prev, s]);
-            setSupplierId(s.id);
           }}
         />
       )}
