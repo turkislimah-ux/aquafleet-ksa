@@ -93,7 +93,14 @@ import {
   type ReceivePoLineInput,
   type ReceiveLine,
 } from "./actions";
-import { ModalOverlay, NewSupplierModal, AddPartModal, InvoiceFileTile, categoryLabel } from "./SharedCreateModals";
+import {
+  ModalOverlay,
+  NewSupplierModal,
+  AddPartModal,
+  InvoiceFileTile,
+  categoryLabel,
+  PartPicker,
+} from "./SharedCreateModals";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -765,7 +772,24 @@ export function NewPOModal({
             </label>
           </div>
 
-          <Card className="!p-3">
+          {/* Item 3 (polish round) — faded baby-blue tint on every
+              supplier-info box, Turki's own call (preview's own
+              .supplier-card is a neutral black/white .015-.025 tint, not
+              blue — this is a deliberate departure, not a preview match).
+              Same brand-blue rgba this app already uses at similar low
+              opacity elsewhere (e.g. the AI-Insights gradient card).
+              FOLLOW-UP FIX: the bg-[...] utility never rendered — Card's
+              own ".card" CSS class (globals.css) sets `background-color`
+              as PLAIN CSS declared AFTER `@tailwind utilities`, so Tailwind
+              never reorders it into the utilities layer; at equal
+              specificity the LATER rule in the compiled stylesheet wins,
+              and .card's own background always came after any Tailwind
+              bg-* utility in source order — same "same-specificity,
+              later-rule-wins" trap globals.css's own .trip-highlight
+              comment already documents for box-shadow/ring. `!bg-[...]`
+              (important) forces the override, same technique already used
+              for the AI-Suggest button's gradient just above. */}
+          <Card className="!p-3 !bg-[rgba(11,126,234,.06)] dark:!bg-[rgba(96,196,255,.06)]">
             <div className="text-[11px] muted uppercase tracking-wide mb-1">
               {lang === "en" ? "Supplier contact" : "بيانات المورّد"}
             </div>
@@ -808,19 +832,17 @@ export function NewPOModal({
                 {lang === "en" ? "Line items" : "بنود الأمر"}
               </span>
               <div className="flex items-center gap-2">
-                <select
-                  value={addPartId}
-                  onChange={(e) => setAddPartId(e.target.value)}
-                  className="h-9 px-2.5 rounded-lg border text-sm max-w-[280px]"
-                  style={INPUT_STYLE}
-                >
-                  <option value="">{lang === "en" ? "Pick a part to add…" : "اختر قطعة للإضافة…"}</option>
-                  {partsInWarehouse.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.sku} · {lang === "ar" && p.name_ar ? p.name_ar : p.name}
-                    </option>
-                  ))}
-                </select>
+                {/* Item 2 (follow-up polish) — widened (280px -> 380px),
+                    same reason as ReceivePartsModal's own picker. */}
+                <div className="w-[380px]">
+                  <PartPicker
+                    value={addPartId}
+                    onChange={setAddPartId}
+                    parts={partsInWarehouse}
+                    lang={lang}
+                    placeholder={lang === "en" ? "Pick a part to add…" : "اختر قطعة للإضافة…"}
+                  />
+                </div>
                 <Btn type="button" variant="outline" onClick={addLine}>
                   <Plus className="h-4 w-4" />
                   {lang === "en" ? "Add line" : "إضافة بند"}
@@ -1008,6 +1030,7 @@ export function NewPOModal({
           warehouses={warehouses}
           parts={allParts}
           units={units}
+          suppliers={allSuppliers}
           defaultWarehouseId={warehouseId}
           onClose={() => setNewItemOpen(false)}
           onCreated={(part) => addNewPartAsLine(part)}
@@ -1348,7 +1371,7 @@ export function PODetailModal({
         </div>
 
         {supplier && (
-          <Card className="!p-3 mb-4">
+          <Card className="!p-3 mb-4 !bg-[rgba(11,126,234,.06)] dark:!bg-[rgba(96,196,255,.06)]">
             <div className="text-[11px] muted uppercase mb-1">
               {lang === "en" ? "Supplier contact" : "بيانات المورّد"}
             </div>
@@ -2096,28 +2119,24 @@ export function ReceivePOModal({
               warehouse, same one-SKU-one-warehouse rule the RPC enforces —
               only ever offers a part that would actually be accepted. */}
           <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={addPartId}
-              onChange={(e) => setAddPartId(e.target.value)}
-              className="h-9 px-2.5 rounded-lg border text-sm max-w-[280px] flex-1"
-              style={INPUT_STYLE}
-              disabled={availableExtraParts.length === 0}
-            >
-              <option value="">
-                {availableExtraParts.length === 0
-                  ? lang === "en"
-                    ? "No other parts in this warehouse"
-                    : "لا توجد قطع أخرى في هذا المستودع"
-                  : lang === "en"
-                  ? "Pick a part to add…"
-                  : "اختر قطعة للإضافة…"}
-              </option>
-              {availableExtraParts.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.sku} · {lang === "ar" && p.name_ar ? p.name_ar : p.name}
-                </option>
-              ))}
-            </select>
+            <div className="max-w-[280px] flex-1">
+              <PartPicker
+                value={addPartId}
+                onChange={setAddPartId}
+                parts={availableExtraParts}
+                lang={lang}
+                disabled={availableExtraParts.length === 0}
+                placeholder={
+                  availableExtraParts.length === 0
+                    ? lang === "en"
+                      ? "No other parts in this warehouse"
+                      : "لا توجد قطع أخرى في هذا المستودع"
+                    : lang === "en"
+                    ? "Pick a part to add…"
+                    : "اختر قطعة للإضافة…"
+                }
+              />
+            </div>
             <Btn type="button" variant="outline" onClick={addExtraLine} disabled={!addPartId}>
               <Plus className="h-4 w-4" />
               {lang === "en" ? "Add extra part" : "إضافة قطعة إضافية"}
@@ -3178,7 +3197,11 @@ export function PartFinanceModal({
           </button>
         </div>
 
-        <div className="my-4">
+        {/* Item 3 (polish round) — same faded light-purple tint as
+            ViewPartModal's own inline "Financial summary" card, so this
+            standalone popup's version of the SAME card (see this
+            component's own header comment) reads consistently. */}
+        <div className="my-4 rounded-xl p-4 !bg-[rgba(139,92,246,.05)] dark:!bg-[rgba(139,92,246,.07)]">
           <PartFinanceSummaryCard
             lang={lang}
             part={part}

@@ -958,6 +958,173 @@ relevant skill(s) **when the task calls for it**:
       inclusive total). Diagnostic route deleted and the middleware bypass
       reverted (confirmed `git diff` empty) before finishing; dev server
       restarted clean, `/login` 200 and `/inventory` 307 reconfirmed.
+  - **Polish round — 7 design-only items, no migration/RPC/data changes.**
+    `lib/prepaid.ts`/`vat.ts`/`invoice.ts`/`inventory-vat.ts` untouched.
+    - **Item 1 — "pick a part to add" now a custom `PartPicker`, not a bare
+      `<select>`.** Native `<option>` can't reliably carry a per-row
+      colored dot cross-browser, so this is a genuinely new small
+      component (`SharedCreateModals.tsx`), not a `<select>` restyle —
+      button + popover listbox, each row showing qty+unit and a stock-
+      state dot/color (green/amber/rose), relabeled for this context
+      ("Current"/"Low stock"/"Depleted" — `PICKER_TIER_LABEL`, distinct
+      from the drawer's own "Healthy"/"Getting low"/"Critical — reorder"
+      wording) but the SAME thresholds as the parts table's own stock
+      cell. Used by all 3 "pick a part to add" sites (`ReceivePartsModal`,
+      `NewPOModal`, `ReceivePOModal`'s extra-line picker). Required moving
+      `stockTier`/`StockTier`/`TIER_TEXT`/`TIER_DOT`/`TIER_LABEL` from
+      `InventoryClient.tsx` into `SharedCreateModals.tsx` (exported there,
+      imported back) — same one-way-edge pattern `categoryLabel`/
+      `useNumField`/`parseNumField` already established, not a new risk.
+    - **Item 2 — row-action icons now match preview exactly**
+      (pages-2.js ~3155-3161, `.btn-outline`/`.btn-primary`/`.btn-icon`,
+      app.css ~244-292/643): View is a LABELED outline pill (was icon-only
+      before), chart-report is an outline icon-only square, quick-reorder
+      is a PRIMARY (filled brand) icon-only square shown only on critical
+      rows — and in preview's own ORDER (View, chart, cart), not the
+      reversed order this row used to render.
+    - **Item 3 — faded background tints: baby-blue (supplier-info),
+      light-purple (financial-summary), light-green (pricing-snapshot).**
+      Turki's own call, NOT a preview match — preview's own `.supplier-
+      card` is a neutral black/white .015-.025 tint, not blue (checked
+      before assuming); confirmed there's no equivalent tint on the other
+      two cards in preview either. Uses this app's own already-live AI-
+      insights-card rgba intensity (~.05-.06) for consistency, applied via
+      Tailwind arbitrary-value classes (`bg-[rgba(...)]`) directly on each
+      `Card`, not a change to the shared `Card` component (`components/
+      ui.tsx` untouched — scoped, not a global un-asked-for change).
+      Applied to both places "Financial summary" renders (`ViewPartModal`'s
+      inline card AND `PartFinanceModal`'s popup — same shared
+      `PartFinanceSummaryCard`, so both needed their own wrapper tinted).
+    - **Item 4 — warehouse tabs restyled from a filled-pill segmented
+      control to this app's own underline-tab convention** — matches
+      `TripsTabs.tsx`'s Projects/Customers/Finance tabs exactly (`flex
+      items-center gap-1 border-b` container, `border-b-2 -mb-px` active
+      indicator, `border-brand-600 text-brand-600` active / `border-
+      transparent muted` inactive). The container's own `border-b` IS the
+      divider line under the title Turki asked for — same as `TripsTabs`,
+      no separate element needed.
+    - **Item 5 — "New PO" -> "New Purchase Order"** (English only; preview's
+      own Arabic string, i18n.js:569, already matched — only the English
+      side had been shortened).
+    - **Item 6 — AI-Suggest header button recolored** with this app's own
+      established AI gradient (`linear-gradient(135deg,#8b5cf6,#0b7eea)` —
+      already used for the `AiPill`/`.ai-chip` badge on `ai_generated`
+      POs, sourced from preview's own `.ai-chip`/`.ai-pill`, app.css
+      ~731-739) — was plain outline, indistinguishable from New PO/Add
+      Parts.
+    - **Item 7 — new "Adjust Item" action (part drawer footer, `Pencil`
+      icon — this app's established Edit-icon convention, matches
+      `CustomerForm.tsx`/`DriversClient.tsx`).** No preview equivalent
+      (preview has NO edit-part UI at all, by original design — see
+      `InventoryClient.tsx`'s own header comment on why the edit flow was
+      deleted entirely in an earlier pass); this reverses that call, per
+      Turki's own explicit ask now. New `updatePart()` server action
+      (`actions.ts`) — plain single-table update, no RPC (same "not a
+      data-integrity risk" reasoning `updatePurchaseOrder` already
+      established for editing a draft PO, Stage 3 item 6). GUARDRAILS,
+      both enforced structurally, not just left out of the form: (1) new
+      `PartUpdateInput` type (`Omit<PartInput, "sku" | "qty_on_hand" |
+      "warehouse_id">`) makes it impossible even at the type level to pass
+      those 3 through this path, and the update payload itself never
+      includes those keys either; (2) SKU shown read-only (same disabled-
+      box pattern `AddPartModal`'s own Warehouse field already uses);
+      (3) warehouse ALSO shown read-only, on the same "already assumed
+      stable by every `purchase_order_lines`/`price_lots` row for this
+      part" reasoning as SKU — not explicitly asked, but the same
+      protective instinct as the explicit qty_on_hand guardrail. Adds two
+      fields `AddPartModal`'s own create form never had — Supplier (free
+      text) and Lead time (days) — because Turki's own field list for
+      THIS form explicitly names supplier, and lead time was the one
+      other descriptive field with no edit path anywhere.
+    - **Verification:** built a throwaway `/inv-polish-test` diagnostic
+      route + temporary middleware bypass (same technique as every prior
+      stage), 3 parts at 3 different stock tiers (Current/Low stock/
+      Depleted) to exercise item 1's color-coding and item 2's critical-
+      only cart button together. New `tests/inventory-polish.spec.ts`, 8
+      tests (item 3 split into 3a/3b — supplier-tint, pricing/financial
+      tints), all passed. Item 7's test verifies the form opens correctly
+      pre-filled with SKU locked and no qty field — it does NOT exercise
+      an actual save (`updatePart()` is a real, auth-gated server action;
+      this diagnostic route has no Supabase session, same limitation as
+      every prior stage's test suite) — Turki's own in-browser check
+      covers the real save. Diagnostic route deleted and the middleware
+      bypass reverted (confirmed `git diff` empty) before finishing; dev
+      server restarted clean, `/login` 200 and `/inventory` 307
+      reconfirmed.
+  - **Polish round follow-up — fix for item 3 (tints never rendered) + 2
+    new additions, still design-only.**
+    - **ROOT CAUSE of the missing tints, found:** `Card`'s own `.card` CSS
+      class (`app/globals.css`) sets `background-color`, declared as PLAIN
+      CSS positioned AFTER the `@tailwind utilities` directive in the same
+      file. Tailwind only reorders rules wrapped in `@layer` — plain CSS
+      after `@tailwind utilities` stays exactly where it is in the
+      compiled stylesheet, i.e. AFTER every Tailwind utility class. At
+      equal specificity (both single-class selectors), the LATER rule in
+      the stylesheet wins — so `.card`'s own background always silently
+      overrode the `bg-[rgba(...)]` tint utility, regardless of source
+      order in the JSX. `globals.css` already had a near-identical
+      documented precedent for this exact trap (`.trip-highlight`'s own
+      comment: "`.card`'s box-shadow below always overwrote a ring's
+      box-shadow — same specificity, later rule"). **Fix:** `!bg-[rgba(...)]`
+      (Tailwind's important-modifier) on all 5 tinted spots — same
+      technique already used for the AI-Suggest button's gradient in the
+      original polish-round pass, just not yet applied to the tints.
+      **Test gap closed too:** the original test suite only checked
+      className presence (`toHaveClass`), which was already true before
+      the fix — passing then despite the real bug. Rewritten to
+      `toHaveCSS("background-color", ...)`, which reads
+      `getComputedStyle` and would have caught this the first time.
+    - **Addition 1 — widened the part picker (260-280px -> 380px) in both
+      Add Parts and New PO**, plus a font cleanup shared by all 3 usages
+      (`PartPicker`, `SharedCreateModals.tsx`, ReceivePOModal's extra-line
+      picker included for free): sku/name now separated by a proper "·"
+      (was a bare space, reading cramped once widened) — same separator
+      convention this app already uses everywhere else a sku+name pair
+      sits on one line; name gets `font-medium`, qty/tier badge gets
+      `font-medium` too, for a clearer visual hierarchy.
+    - **Addition 2 — Add Part popup now shows supplier info "the same way
+      New PO shows it."** Preview's own create-flow has no supplier field
+      at all (supplier is only ever assigned later, at receipt time) — a
+      deliberate addition beyond preview, per Turki's explicit ask.
+      Extracted New PO's own inline "Supplier contact" card JSX into a new
+      shared `SupplierContactCard` (`SharedCreateModals.tsx`) — blank "—"
+      until picked, then name/name_ar/contact/phone/email, identical
+      behavior to New PO's own card. `PODetailModal`'s similar-looking
+      card was deliberately left alone (different behavior — read-only for
+      an already-committed PO, supplier always present, no blank state —
+      folding it in would have been a real behavior change nobody asked
+      for). `AddPartModal` gained a `suppliers` prop + its own supplier
+      picker (+ inline "+Supplier" create, same pattern New PO uses) —
+      `parts.supplier` stays free text (0043); the picked supplier's
+      `name` is stored as a snapshot at submit time, same "free-text
+      snapshot of a real `suppliers.name`" convention AI-Suggest's own
+      best-effort supplier match already relies on elsewhere. Both
+      `AddPartModal` mount sites (NewPOModal's own "+ New Item",
+      ReceivePartsModal's own "+ New Item") updated to pass `suppliers`.
+    - **Verification:** rebuilt the throwaway `/inv-polish-test` route +
+      temporary middleware bypass; `tests/inventory-polish.spec.ts` grew
+      from 8 to 10 tests (3a/3b rewritten to computed-style checks, 2 new
+      addition tests) — all 10 passed. Diagnostic route deleted and the
+      middleware bypass reverted (confirmed `git diff` empty); dev server
+      restarted clean, `/login` 200 and `/inventory` 307 reconfirmed.
+    - **Second follow-up — Turki: addition 2's supplier info "does NOT
+      appear at all" on Add Part.** Traced against New PO exactly as
+      asked. The card WAS mounted and DID render — proved with a raw
+      `innerText` dump of the actual popup through both real entry points
+      (New PO's "+ New Item" and Add Parts' own "+ New Item") — but it sat
+      at the very BOTTOM of the form, after 6 more fields (Category/Unit/
+      price/reorder x2), while New PO shows its own card immediately after
+      its Supplier/Warehouse row. Technically present, practically
+      invisible without scrolling past everything else first — that's the
+      real "same way New PO shows it" gap. Fixed by making the card a
+      `col-span-2` grid item positioned directly under the Supplier field
+      (the grid stays ONE `grid-cols-2`, not split into two) — same
+      prominence as New PO's own card now. Re-verified through both real
+      entry points again, this time also asserting the card's Y-position
+      sits ABOVE the Category field's (a real regression guard, not just
+      presence) — `tests/inventory-polish.spec.ts`'s addition-2 test
+      rewritten to check both entry points + the position, all 10 tests
+      still pass.
   - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);

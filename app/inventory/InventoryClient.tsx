@@ -207,6 +207,7 @@ import {
   ShoppingCart,
   Zap,
   BarChart3,
+  Pencil,
 } from "lucide-react";
 import { useApp } from "@/components/AppShell";
 import { PageHeader, Btn, Stat, Table, TH, TD, Card } from "@/components/ui";
@@ -249,10 +250,17 @@ import {
   CreateWarehouseModal,
   NewSupplierModal,
   AddPartModal,
+  AdjustItemModal,
   InvoiceFileTile,
   categoryLabel,
   useNumField,
   parseNumField,
+  PartPicker,
+  stockTier,
+  type StockTier,
+  TIER_TEXT,
+  TIER_DOT,
+  TIER_LABEL,
 } from "./SharedCreateModals";
 import {
   adjustStock,
@@ -265,31 +273,6 @@ import {
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
-
-type StockTier = "ok" | "low" | "critical" | null;
-
-function stockTier(part: Part): StockTier {
-  if (part.reorder_level == null) return null;
-  if (part.qty_on_hand <= part.reorder_level) return "critical";
-  if (part.qty_on_hand <= part.reorder_level * 1.5) return "low";
-  return "ok";
-}
-
-const TIER_TEXT: Record<Exclude<StockTier, null>, string> = {
-  ok: "text-emerald-700 dark:text-emerald-400",
-  low: "text-amber-700 dark:text-amber-400",
-  critical: "text-rose-700 dark:text-rose-400",
-};
-const TIER_DOT: Record<Exclude<StockTier, null>, string> = {
-  ok: "bg-emerald-500",
-  low: "bg-amber-500",
-  critical: "bg-rose-500",
-};
-const TIER_LABEL: Record<Exclude<StockTier, null>, { en: string; ar: string }> = {
-  ok: { en: "Healthy", ar: "جيد" },
-  low: { en: "Getting low", ar: "منخفض نسبيًا" },
-  critical: { en: "Critical — reorder", ar: "حرج — أعد الطلب" },
-};
 
 const MOVEMENT_LABEL: Record<StockMovement["movement_type"], { en: string; ar: string }> = {
   receive: { en: "Received", ar: "استلام" },
@@ -361,6 +344,9 @@ export default function InventoryClient({
   // button instead (blank draft, as before).
   const [receivePrefill, setReceivePrefill] = useState<{ warehouseId: string; lines: ReceiveLine[] } | null>(null);
   const [adjustModal, setAdjustModal] = useState<{ part: Part } | null>(null);
+  // Item 7 (polish round) — "Adjust Item" (descriptive-info edit, distinct
+  // from adjustModal/Adjust Stock above).
+  const [adjustItemPart, setAdjustItemPart] = useState<Part | null>(null);
   // Phase 4 — Purchase Orders (migration 0050).
   const [newPOOpen, setNewPOOpen] = useState(false);
   const [poListOpen, setPoListOpen] = useState(false);
@@ -543,7 +529,11 @@ export default function InventoryClient({
                 }}
               >
                 <ShoppingCart className="h-4 w-4" />
-                {lang === "en" ? "New PO" : "أمر شراء جديد"}
+                {/* Item 5 (polish round) — preview's own i18n.js:569
+                    ("newPO": "New Purchase Order" / "أمر شراء جديد" — only
+                    the English string was ever shortened here; Arabic
+                    already matched). */}
+                {lang === "en" ? "New Purchase Order" : "أمر شراء جديد"}
               </Btn>
             )}
             {/* preview/'s header has no standalone "new part" button — new-
@@ -590,7 +580,19 @@ export default function InventoryClient({
                     : "لا شيء للطلب — كل القطع فوق الحد."
                 }
               >
-                <Btn variant="outline" onClick={openAISuggest} disabled={!aiPurchaseSuggestion}>
+                {/* Item 6 (polish round) — purple/blue gradient, this app's
+                    own established "AI" visual language (the ★ AI / AiPill
+                    badge shown on ai_generated POs elsewhere already uses
+                    this exact gradient — same source as preview's own
+                    .ai-chip/.ai-pill, app.css ~731-739:
+                    linear-gradient(135deg,#8b5cf6,#0b7eea)). Was plain
+                    outline, indistinguishable from New PO/Add Parts. */}
+                <Btn
+                  variant="primary"
+                  className="!bg-gradient-to-br !from-[#8b5cf6] !to-[#0b7eea] hover:!opacity-90"
+                  onClick={openAISuggest}
+                  disabled={!aiPurchaseSuggestion}
+                >
                   <Zap className="h-4 w-4" />
                   {lang === "en" ? "AI-Suggest" : "اقتراح ذكي"}
                 </Btn>
@@ -613,10 +615,19 @@ export default function InventoryClient({
               ONLY the parts/inventory view (visibleParts -> PartsTable,
               below) — the KPI row, ProcStrip, Approvals, Financial
               Analysis, and AI-Suggest are all unaffected, unchanged, still
-              fully global (see their own comments). */}
+              fully global (see their own comments).
+              Item 4 (polish round) — restyled from a filled-pill segmented
+              control to this app's own underline-tab convention (matches
+              TripsTabs.tsx's Projects/Customers/Finance tabs and the
+              Drivers & People sub-tabs exactly: border-b container +
+              border-b-2 -mb-px active indicator), so the warehouse tabs
+              read as the SAME kind of tab bar as every sister page,
+              instead of a bespoke pill-segmented control unique to this
+              one. The border-b IS the divider line under the title, same
+              as TripsTabs — no separate <hr>/divider element needed. */}
           <div
-            className="inline-flex p-1 gap-1 rounded-xl border flex-wrap"
-            style={{ background: "rgb(var(--card))", borderColor: "rgb(var(--border))" }}
+            className="flex items-center gap-1 border-b flex-wrap"
+            style={{ borderColor: "rgb(var(--border))" }}
           >
             {warehouses.map((w) => (
               <button
@@ -624,8 +635,10 @@ export default function InventoryClient({
                 type="button"
                 onClick={() => setWarehouseTab(w.id)}
                 className={cn(
-                  "px-3.5 py-2 rounded-lg text-[13px] font-medium transition-colors whitespace-nowrap",
-                  warehouseTab === w.id ? "bg-brand-600 text-white shadow-sm" : "hover:bg-black/5 dark:hover:bg-white/5"
+                  "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px inline-flex items-center gap-2 transition whitespace-nowrap",
+                  warehouseTab === w.id
+                    ? "border-brand-600 text-brand-600 dark:text-brand-300"
+                    : "border-transparent muted hover:text-[rgb(var(--fg))]"
                 )}
               >
                 {w.name}
@@ -816,6 +829,10 @@ export default function InventoryClient({
             setViewPart(null);
             setAdjustModal({ part: p });
           }}
+          onAdjustItem={(p) => {
+            setViewPart(null);
+            setAdjustItemPart(p);
+          }}
           onReceiveMore={(prefill) => {
             setViewPart(null);
             setReceivePrefill(prefill);
@@ -860,6 +877,18 @@ export default function InventoryClient({
 
       {adjustModal && (
         <AdjustStockModal lang={lang} part={adjustModal.part} onClose={() => setAdjustModal(null)} />
+      )}
+
+      {adjustItemPart && (
+        <AdjustItemModal
+          lang={lang}
+          part={adjustItemPart}
+          warehouses={warehouses}
+          parts={parts}
+          units={units}
+          onClose={() => setAdjustItemPart(null)}
+          onUpdated={() => setAdjustItemPart(null)}
+        />
       )}
 
       {newPOOpen && (
@@ -1135,42 +1164,56 @@ function PartsTable({
                   )}
                 </TD>
                 <TD className="tabular-nums font-medium">{stockValue != null ? formatSar(stockValue) : "—"}</TD>
+                {/* Item 2 (polish round) — match preview's row-actions
+                    exactly (pages-2.js ~3155-3161, .btn-outline/.btn-primary/
+                    .btn-icon, app.css ~244-292/643): View is a LABELED
+                    outline pill (only one with text, matches preview's own
+                    btn({label, icon}) call), chart-report is an outline
+                    icon-only square, quick-reorder is a PRIMARY (filled
+                    brand) icon-only square, low-stock-only — same order
+                    preview uses (View, then chart, then cart), not the
+                    reverse this row used to render. */}
                 <TD className="text-right whitespace-nowrap">
-                  {tier === "critical" && (
+                  <div className="inline-flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onQuickReorder(p);
+                        onView(p);
                       }}
-                      title={lang === "en" ? "Quick reorder" : "إعادة طلب سريعة"}
-                      className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/5"
+                      title={lang === "en" ? "View" : "عرض"}
+                      className="h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 hover:border-brand-500/45"
+                      style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
                     >
-                      <ShoppingCart className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+                      <Eye className="h-3.5 w-3.5" />
+                      {lang === "en" ? "View" : "عرض"}
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onFinance(p);
-                    }}
-                    title={lang === "en" ? "Financial report" : "التقرير المالي"}
-                    className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    <BarChart3 className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onView(p);
-                    }}
-                    title={lang === "en" ? "View" : "عرض"}
-                    className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    <Eye className="h-4 w-4" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onFinance(p);
+                      }}
+                      title={lang === "en" ? "Financial report" : "التقرير المالي"}
+                      className="h-8 w-8 rounded-lg border inline-flex items-center justify-center hover:border-brand-500/45"
+                      style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
+                    >
+                      <BarChart3 className="h-3.5 w-3.5" />
+                    </button>
+                    {tier === "critical" && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onQuickReorder(p);
+                        }}
+                        title={lang === "en" ? "Quick reorder" : "إعادة طلب سريعة"}
+                        className="h-8 w-8 rounded-lg bg-brand-600 hover:bg-brand-700 text-white inline-flex items-center justify-center"
+                      >
+                        <ShoppingCart className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </TD>
               </tr>
             );
@@ -1199,6 +1242,7 @@ function ViewPartModal({
   purchaseOrderLines,
   onClose,
   onAdjust,
+  onAdjustItem,
   onReceiveMore,
   onQuickReorder,
 }: {
@@ -1213,6 +1257,10 @@ function ViewPartModal({
   purchaseOrderLines: PurchaseOrderLine[];
   onClose: () => void;
   onAdjust: (p: Part) => void;
+  // Item 7 (polish round) — "Adjust Item" footer button, opens
+  // AdjustItemModal (SharedCreateModals.tsx) — descriptive-info edit,
+  // distinct from onAdjust (Adjust Stock, quantity correction) above.
+  onAdjustItem: (p: Part) => void;
   // Test 6 fix (Turki, post-e9a03d5 feedback): the old "Add new price"
   // button opened a standalone AddPriceLotModal that added stock with no
   // invoice/stock_receipts row/warehouse check — a second, weaker way to
@@ -1344,8 +1392,10 @@ function ViewPartModal({
         {/* Pricing snapshot — ONE card, preview's exact structure (pages-2.js
             openPart, "Pricing snapshot + Stock health" comment): current
             price / previous price+trend / avg cost+stock value / stock
-            qty+reorder status, plus the FIFO footer note. Not split boxes. */}
-        <Card className="!p-4 mb-4">
+            qty+reorder status, plus the FIFO footer note. Not split boxes.
+            Item 3 (polish round) — faded light-green tint, Turki's own
+            call (own rgba, no preview equivalent to match). */}
+        <Card className="!p-4 mb-4 !bg-[rgba(16,185,129,.05)] dark:!bg-[rgba(16,185,129,.06)]">
           <div className="flex items-center gap-2 mb-3">
             <Banknote className="h-4 w-4 muted" />
             <h4 className="font-semibold text-sm">{lang === "en" ? "Pricing snapshot" : "ملخص السعر"}</h4>
@@ -1603,8 +1653,9 @@ function ViewPartModal({
         {/* Financial summary — preview's inv.perPartFinance ("Financial
             summary"/"الملخص المالي", i18n.js:621), inline in the drawer
             itself, not just the standalone PartFinanceModal popup (both
-            exist in preview, pages-2.js:1766-1809). */}
-        <Card className="!p-4 mb-4">
+            exist in preview, pages-2.js:1766-1809). Item 3 (polish round) —
+            faded light-purple tint, Turki's own call. */}
+        <Card className="!p-4 mb-4 !bg-[rgba(139,92,246,.05)] dark:!bg-[rgba(139,92,246,.07)]">
           <div className="flex items-center gap-2 mb-3">
             <Banknote className="h-4 w-4 muted" />
             <h3 className="text-sm font-semibold">{lang === "en" ? "Financial summary" : "الملخص المالي"}</h3>
@@ -1652,6 +1703,14 @@ function ViewPartModal({
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <Btn variant="outline" onClick={onClose}>
             {lang === "en" ? "Close" : "إغلاق"}
+          </Btn>
+          {/* Item 7 (polish round) — "Adjust Item": edit descriptive info,
+              distinct from "Adjust Stock" right after it (that one is the
+              existing quantity-correction path — this one never touches
+              qty_on_hand at all, see AdjustItemModal's own header). */}
+          <Btn variant="outline" onClick={() => onAdjustItem(part)}>
+            <Pencil className="h-4 w-4" />
+            {lang === "en" ? "Adjust Item" : "تعديل الصنف"}
           </Btn>
           <Btn variant="outline" onClick={() => onAdjust(part)}>
             <SlidersHorizontal className="h-4 w-4" />
@@ -1959,19 +2018,17 @@ function ReceivePartsModal({
                 {lang === "en" ? "Line items" : "بنود الأمر"}
               </span>
               <div className="flex items-center gap-2">
-                <select
-                  value={addPartId}
-                  onChange={(e) => setAddPartId(e.target.value)}
-                  className="h-9 px-2.5 rounded-lg border text-sm max-w-[240px]"
-                  style={INPUT_STYLE}
-                >
-                  <option value="">{lang === "en" ? "Pick a part to add…" : "اختر قطعة للإضافة…"}</option>
-                  {partsInWarehouse.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.sku} · {lang === "ar" && p.name_ar ? p.name_ar : p.name}
-                    </option>
-                  ))}
-                </select>
+                {/* Item 2 (follow-up polish) — widened (260px -> 380px);
+                    was cramped for a sku+name+qty+status row. */}
+                <div className="w-[380px]">
+                  <PartPicker
+                    value={addPartId}
+                    onChange={setAddPartId}
+                    parts={partsInWarehouse}
+                    lang={lang}
+                    placeholder={lang === "en" ? "Pick a part to add…" : "اختر قطعة للإضافة…"}
+                  />
+                </div>
                 <Btn type="button" variant="outline" onClick={addLine}>
                   <Plus className="h-4 w-4" />
                   {lang === "en" ? "Add line" : "إضافة بند"}
@@ -2222,6 +2279,7 @@ function ReceivePartsModal({
           warehouses={warehouses}
           parts={allParts}
           units={units}
+          suppliers={allSuppliers}
           defaultWarehouseId={warehouseId}
           onClose={() => setNewItemOpen(false)}
           onCreated={(part) => addNewPartAsLine(part)}

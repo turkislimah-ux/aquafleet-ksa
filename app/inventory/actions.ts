@@ -248,6 +248,70 @@ export async function createPart(
   return { error: null, part: data as Part };
 }
 
+// Item 7 (polish round) — "Adjust Item": edit an EXISTING part's
+// descriptive info. Deliberately NOT `PartInput` — a distinct type missing
+// sku/qty_on_hand/warehouse_id entirely, so it's impossible even at the
+// type level to pass them through this path, and the update payload below
+// never includes those 3 keys either (belt-and-suspenders, not just a type
+// guard). GUARDRAIL (Turki's explicit wording): qty_on_hand only ever
+// moves through adjust_stock()/receive_loose_parts()/receive_purchase_order,
+// never this form — sku is locked (identity, globally unique, 0043).
+// warehouse_id is excluded too, on the same reasoning as sku: every
+// purchase_order_lines/price_lots row already assumes a part's warehouse
+// is stable (0050's one-SKU-one-warehouse guard) — letting it move here
+// would retroactively invalidate that assumption for any PO/lot already
+// tied to this part. No RPC — a plain, single-table update, same "not a
+// data-integrity risk, no RPC needed" reasoning updatePurchaseOrder
+// already established for editing a draft PO (Stage 3, item 6).
+export type PartUpdateInput = Omit<PartInput, "sku" | "qty_on_hand" | "warehouse_id">;
+
+function validatePartUpdate(input: PartUpdateInput): string | null {
+  if (!input.name?.trim()) return "Part name is required.";
+  const numericFields: [string, number | null][] = [
+    ["Unit cost", input.unit_cost_sar],
+    ["Reorder level", input.reorder_level],
+    ["Reorder qty", input.reorder_qty],
+    ["Lead time (days)", input.lead_time_days],
+  ];
+  for (const [label, value] of numericFields) {
+    if (value != null && value < 0) return `${label} can't be negative.`;
+  }
+  return null;
+}
+
+export async function updatePart(
+  partId: string,
+  input: PartUpdateInput,
+): Promise<{ error: string | null; part?: Part }> {
+  if (!partId) return { error: "Missing part." };
+  const validationError = validatePartUpdate(input);
+  if (validationError) return { error: validationError };
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("parts")
+    .update({
+      name: input.name.trim(),
+      name_ar: input.name_ar?.trim() || null,
+      category: input.category?.trim() || null,
+      unit: input.unit?.trim() || null,
+      unit_cost_sar: input.unit_cost_sar,
+      reorder_level: input.reorder_level,
+      reorder_qty: input.reorder_qty,
+      lead_time_days: input.lead_time_days,
+      supplier: input.supplier?.trim() || null,
+    })
+    .eq("id", partId)
+    .select(
+      "id, sku, name, name_ar, category, unit, unit_cost_sar, qty_on_hand, reorder_level, reorder_qty, lead_time_days, supplier, warehouse_id, active, created_at"
+    )
+    .single();
+  if (error) return { error: friendlyError(error) };
+
+  revalidatePath("/inventory");
+  return { error: null, part: data as Part };
+}
+
 // ---------------------------------------------------------------------------
 // Stock movements (Slice 4 — migration 0044, LIVE). qty_on_hand is never
 // edited directly once a part exists (see AddPartModal — qty starts at 0,
