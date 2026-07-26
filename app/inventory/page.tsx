@@ -89,13 +89,13 @@ export default async function InventoryPage() {
     supabase
       .from("purchase_orders")
       .select(
-        "id, po_number, supplier_id, warehouse_id, status, request_date, expected_delivery, note, requested_by, issued_at, received_by, received_date, rejected_by, rejected_at, rejection_reason, ai_generated, ai_rationale, ai_rationale_ar, created_at"
+        "id, po_number, supplier_id, warehouse_id, status, request_date, expected_delivery, note, requested_by, issued_at, received_by, received_date, rejected_by, rejected_at, rejection_reason, ai_generated, ai_rationale, ai_rationale_ar, created_at, subtotal_sar, vat_sar, total_sar, received_subtotal_sar, received_vat_sar, received_total_sar"
       )
       .order("created_at", { ascending: false }),
     supabase
       .from("purchase_order_lines")
       .select(
-        "id, purchase_order_id, part_id, qty, unit_price_sar, received_qty, received_unit_price_sar, created_at"
+        "id, purchase_order_id, part_id, qty, unit_price_sar, received_qty, received_unit_price_sar, created_at, line_vat_sar, received_line_vat_sar"
       ),
     supabase
       .from("purchase_order_approvals")

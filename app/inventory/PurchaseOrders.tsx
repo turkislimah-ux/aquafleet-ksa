@@ -65,6 +65,10 @@ import {
 } from "lucide-react";
 import { Btn, Table, TH, TD, Card, Stat } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
+// VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
+// NOT lib/vat.ts (document-level rounding, a different convention for a
+// different document — see lib/inventory-vat.ts's own header).
+import { lineVat, calculateInventoryVatDocument, formatSarVat } from "@/lib/inventory-vat";
 import type {
   Warehouse,
   Part,
@@ -491,7 +495,14 @@ export function NewPOModal({
     [allParts, warehouseId]
   );
 
-  const total = lines.reduce((s, l) => s + l.qty * l.unit_price_sar, 0);
+  // VAT (0056) — client-side preview only, per-line-then-summed (never
+  // lib/vat.ts's document-level rounding — see lib/inventory-vat.ts's own
+  // header). create_purchase_order/updatePurchaseOrder recompute and store
+  // the real figures server-side at save time; this is what the user sees
+  // while still composing the draft.
+  const vatDoc = calculateInventoryVatDocument(
+    lines.map((l) => ({ qty: l.qty, unitPriceSar: l.unit_price_sar }))
+  );
   const linesValid = lines.length > 0 && lines.every((l) => l.qty > 0 && l.unit_price_sar >= 0);
   const canSubmit = supplierId !== "" && warehouseId !== "" && linesValid;
 
@@ -828,6 +839,7 @@ export function NewPOModal({
                     <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
                     <TH>{lang === "en" ? "Qty" : "الكمية"}</TH>
                     <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
+                    <TH>{lang === "en" ? "VAT (15%)" : "ضريبة القيمة المضافة (15%)"}</TH>
                     <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
                     <TH></TH>
                   </tr>
@@ -836,7 +848,7 @@ export function NewPOModal({
                   {lines.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         className="py-6 px-3 border-t text-center muted text-sm"
                         style={{ borderColor: "rgb(var(--border))" }}
                       >
@@ -881,6 +893,7 @@ export function NewPOModal({
                               style={INPUT_STYLE}
                             />
                           </TD>
+                          <TD className="tabular muted text-xs">{formatSarVat(lineVat(l.qty, l.unit_price_sar))}</TD>
                           <TD className="tabular font-semibold">{formatSar(l.qty * l.unit_price_sar)}</TD>
                           <TD>
                             <button
@@ -901,17 +914,25 @@ export function NewPOModal({
                   <tfoot>
                     <tr>
                       <td
-                        colSpan={3}
+                        colSpan={4}
                         className="text-end font-semibold py-2.5 px-3 border-t text-sm"
                         style={{ borderColor: "rgb(var(--border))" }}
                       >
                         {lang === "en" ? "Estimated total" : "الإجمالي التقديري"}
                       </td>
                       <td
-                        className="tabular font-bold text-brand-600 py-2.5 px-3 border-t text-sm"
+                        className="py-2.5 px-3 border-t text-sm"
                         style={{ borderColor: "rgb(var(--border))" }}
                       >
-                        {formatSar(total)}
+                        {/* Actual-total block convention (0056) — subtotal
+                            (pre-VAT), then VAT (sum of line VATs), then the
+                            bold grand total. Same 3-line stack everywhere a
+                            document total appears in this feature now. */}
+                        <div className="text-[11px] muted tabular-nums">{formatSarVat(vatDoc.subtotal)}</div>
+                        <div className="text-[11px] muted tabular-nums">
+                          + {formatSarVat(vatDoc.vat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                        </div>
+                        <div className="tabular font-bold text-brand-600">{formatSarVat(vatDoc.total)}</div>
                       </td>
                       <td className="border-t" style={{ borderColor: "rgb(var(--border))" }} />
                     </tr>
@@ -1053,7 +1074,7 @@ export function POListModal({
                   <TH>{lang === "en" ? "Supplier" : "المورد"}</TH>
                   <TH>{lang === "en" ? "Issued on" : "تاريخ الإصدار"}</TH>
                   <TH>{lang === "en" ? "Expected delivery" : "تاريخ التسليم المتوقع"}</TH>
-                  <TH>{lang === "en" ? "PO Total" : "إجمالي الأمر"}</TH>
+                  <TH>{lang === "en" ? "PO Total (incl. VAT)" : "إجمالي الأمر (شامل الضريبة)"}</TH>
                   <TH></TH>
                 </tr>
               </thead>
@@ -1077,7 +1098,18 @@ export function POListModal({
                       </TD>
                       <TD className="text-xs">{po.request_date}</TD>
                       <TD className="text-xs">{po.expected_delivery ?? "—"}</TD>
-                      <TD className="tabular font-medium">{formatSar(poTotal(po.id, purchaseOrderLines))}</TD>
+                      {/* Follow-up fix — was poTotal() (ordered qty x
+                          unit_price_sar, pre-VAT). These POs are always
+                          draft/issued (never received), so the stored
+                          ORDERED-side header total (po.total_sar, written
+                          by create_purchase_order/updatePurchaseOrder) is
+                          already VAT-inclusive — use it directly, no
+                          recompute. Falls back to the old derived total
+                          only for a pre-0056 PO (total_sar reads 0 there,
+                          honestly — not back-computed). */}
+                      <TD className="tabular font-medium">
+                        {formatSarVat(po.total_sar || poTotal(po.id, purchaseOrderLines))}
+                      </TD>
                       <TD className="text-right">
                         <button
                           type="button"
@@ -1182,6 +1214,15 @@ export function PODetailModal({
     const price = l.received_unit_price_sar ?? l.unit_price_sar;
     return s + qty * price;
   }, 0);
+  // VAT (0056) — prefer the STORED, booked header figures (set at write
+  // time by create_purchase_order/receive_purchase_order) over recomputing
+  // client-side; fall back to the derived `total` above only for a
+  // pre-0056 PO (subtotal_sar/received_subtotal_sar read 0/null there,
+  // honestly — not back-computed, see 0056's own header) so a real
+  // historical PO doesn't render a confusing "0" total.
+  const docSubtotal = hasReceivedFigures ? po.received_subtotal_sar ?? total : po.subtotal_sar || total;
+  const docVat = hasReceivedFigures ? po.received_vat_sar ?? 0 : po.vat_sar;
+  const docTotal = docSubtotal + docVat;
   // Visible on any PO that's reached pending_approval or beyond — mirrors
   // preview's own approvalsHtml condition exactly.
   const showApprovals = po.status === "pending_approval" || po.status === "approved" || po.status === "rejected";
@@ -1336,6 +1377,7 @@ export function PODetailModal({
                 <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
                 <TH>{lang === "en" ? "Qty" : "الكمية"}</TH>
                 <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
+                <TH>{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}</TH>
                 <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
               </tr>
             </thead>
@@ -1344,6 +1386,10 @@ export function PODetailModal({
                 const part = partsById.get(l.part_id);
                 const qty = l.received_qty ?? l.qty;
                 const price = l.received_unit_price_sar ?? l.unit_price_sar;
+                // VAT (0056) — the STORED per-line figure (received-side if
+                // received, else ordered-side), never recomputed. A
+                // pre-0056 line reads 0 here, honestly.
+                const vat = l.received_line_vat_sar ?? l.line_vat_sar;
                 return (
                 <tr key={l.id}>
                   <TD>
@@ -1368,6 +1414,7 @@ export function PODetailModal({
                       </span>
                     )}
                   </TD>
+                  <TD className="tabular muted text-xs">{formatSarVat(vat)}</TD>
                   <TD className="tabular font-medium">{formatSar(qty * price)}</TD>
                 </tr>
                 );
@@ -1376,7 +1423,7 @@ export function PODetailModal({
             <tfoot>
               <tr>
                 <td
-                  colSpan={3}
+                  colSpan={4}
                   className="text-end font-semibold py-2.5 px-3 border-t text-sm"
                   style={{ borderColor: "rgb(var(--border))" }}
                 >
@@ -1385,10 +1432,17 @@ export function PODetailModal({
                     : lang === "en" ? "Estimated total" : "الإجمالي التقديري"}
                 </td>
                 <td
-                  className="tabular font-bold text-brand-600 py-2.5 px-3 border-t text-sm"
+                  className="py-2.5 px-3 border-t text-sm"
                   style={{ borderColor: "rgb(var(--border))" }}
                 >
-                  {formatSar(total)}
+                  {/* Actual-total block convention (0056) — subtotal
+                      (pre-VAT), then VAT (sum of line VATs), then the bold
+                      total. */}
+                  <div className="text-[11px] muted tabular-nums">{formatSarVat(docSubtotal)}</div>
+                  <div className="text-[11px] muted tabular-nums">
+                    + {formatSarVat(docVat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                  </div>
+                  <div className="tabular font-bold text-brand-600">{formatSarVat(docTotal)}</div>
                 </td>
               </tr>
             </tfoot>
@@ -1719,6 +1773,15 @@ export function ReceivePOModal({
     (s, l) => s + (Number(l.received_qty) || 0) * (Number(l.received_unit_price_sar) || 0),
     0
   );
+  // VAT (0056) — client-side preview only (receive_purchase_order/
+  // receive_loose_parts recompute and store the real per-line/document
+  // figures server-side at submit time — same per-line-then-summed rule).
+  const vatDoc = calculateInventoryVatDocument(
+    receiveLines.map((l) => ({
+      qty: Number(l.received_qty) || 0,
+      unitPriceSar: Number(l.received_unit_price_sar) || 0,
+    }))
+  );
 
   function updateLine(idx: number, patch: Partial<ReceiveLineState>) {
     setReceiveLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
@@ -1901,6 +1964,7 @@ export function ReceivePOModal({
                   <TH>{lang === "en" ? "Ordered unit price" : "سعر الوحدة المطلوب"}</TH>
                   <TH>{lang === "en" ? "Actual qty received" : "الكمية الفعلية"}</TH>
                   <TH>{lang === "en" ? "Actual unit price" : "سعر الوحدة الفعلي"}</TH>
+                  <TH>{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}</TH>
                   <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
                   <TH></TH>
                 </tr>
@@ -1956,6 +2020,9 @@ export function ReceivePOModal({
                           style={INPUT_STYLE}
                         />
                       </TD>
+                      <TD className="tabular muted text-xs">
+                        {formatSarVat(lineVat(Number(l.received_qty) || 0, Number(l.received_unit_price_sar) || 0))}
+                      </TD>
                       <TD className="tabular font-semibold">
                         {formatSar((Number(l.received_qty) || 0) * (Number(l.received_unit_price_sar) || 0))}
                       </TD>
@@ -2005,10 +2072,17 @@ export function ReceivePOModal({
                     {lang === "en" ? "Actual total" : "الإجمالي الفعلي"}
                   </td>
                   <td
-                    className="tabular font-bold text-brand-600 py-2.5 px-3 border-t text-sm"
+                    className="py-2.5 px-3 border-t text-sm"
                     style={{ borderColor: "rgb(var(--border))" }}
                   >
-                    {formatSar(total)}
+                    {/* Actual-total block convention (0056) — subtotal
+                        (pre-VAT), then VAT (sum of line VATs), then bold
+                        total. */}
+                    <div className="text-[11px] muted tabular-nums">{formatSarVat(vatDoc.subtotal)}</div>
+                    <div className="text-[11px] muted tabular-nums">
+                      + {formatSarVat(vatDoc.vat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                    </div>
+                    <div className="tabular font-bold text-brand-600">{formatSarVat(vatDoc.total)}</div>
                   </td>
                   <td className="border-t" style={{ borderColor: "rgb(var(--border))" }} />
                 </tr>
@@ -2426,7 +2500,7 @@ export function ApprovalsTab({
               <TH>{lang === "en" ? "PO Number" : "رقم الأمر"}</TH>
               <TH>{lang === "en" ? "Supplier" : "المورد"}</TH>
               <TH>{lang === "en" ? "Received on" : "تاريخ الاستلام"}</TH>
-              <TH>{lang === "en" ? "Actual Total" : "الإجمالي الفعلي"}</TH>
+              <TH>{lang === "en" ? "Actual Total (incl. VAT)" : "الإجمالي الفعلي (شامل الضريبة)"}</TH>
               <TH>{lang === "en" ? "Approved by" : "تم الاعتماد من"}</TH>
               <TH></TH>
             </tr>
@@ -2435,9 +2509,18 @@ export function ApprovalsTab({
             {queue.map((po) => {
               const supplier = suppliersById.get(po.supplier_id);
               const approvals = purchaseOrderApprovals.filter((a) => a.purchase_order_id === po.id);
-              const actualTotal = purchaseOrderLines
-                .filter((l) => l.purchase_order_id === po.id)
-                .reduce((s, l) => s + (l.received_qty ?? 0) * (l.received_unit_price_sar ?? 0), 0);
+              // VAT (0056) — prefer the STORED received-side header figures
+              // (set at write time by receive_purchase_order) over
+              // recomputing client-side; fall back to summing lines only
+              // for a pre-0056 receipt (received_vat_sar reads 0 there,
+              // honestly — not back-computed).
+              const actualSubtotal =
+                po.received_subtotal_sar ??
+                purchaseOrderLines
+                  .filter((l) => l.purchase_order_id === po.id)
+                  .reduce((s, l) => s + (l.received_qty ?? 0) * (l.received_unit_price_sar ?? 0), 0);
+              const actualVat = po.received_vat_sar ?? 0;
+              const actualTotal = actualSubtotal + actualVat;
               return (
                 <tr
                   key={po.id}
@@ -2454,7 +2537,15 @@ export function ApprovalsTab({
                     <div className="text-sm">{supplier?.name ?? "—"}</div>
                   </TD>
                   <TD className="text-xs">{po.received_date ?? "—"}</TD>
-                  <TD className="tabular-nums font-medium text-xs">{formatSar(actualTotal)}</TD>
+                  <TD className="tabular-nums text-xs">
+                    {/* Actual-total block convention (0056) — subtotal
+                        (pre-VAT), then VAT, then bold Actual Total. */}
+                    <div className="muted">{formatSarVat(actualSubtotal)}</div>
+                    <div className="muted">
+                      + {formatSarVat(actualVat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                    </div>
+                    <div className="font-medium">{formatSarVat(actualTotal)}</div>
+                  </TD>
                   <TD className="text-xs">
                     <div className="inline-flex items-center gap-1">
                       {Array.from({ length: 2 }).map((_, i) => (
@@ -2796,6 +2887,16 @@ export function computePartFinanceStats(
   movements: StockMovement[]
 ): {
   totalPurchased: number;
+  // VAT (0056) — "Purchases" is the one stat in this card that's a real
+  // purchasing-money figure (a booked cost of parts bought), so it's the
+  // one place here VAT applies. stockValue/priceTrendPct/totalConsumed/
+  // spentByConsumption stay VAT-free (see this function's own callers'
+  // header comments + 0056's "must NOT appear" list) — untouched below.
+  // Sourced from each qualifying line's STORED line_vat_sar/
+  // received_line_vat_sar, never recomputed — a pre-0056 line honestly
+  // reads 0 here, not back-computed.
+  purchasesVat: number;
+  purchasesTotal: number; // totalPurchased + purchasesVat
   purchaseCount: number;
   stockValue: number;
   priceTrendPct: number;
@@ -2815,6 +2916,7 @@ export function computePartFinanceStats(
   const stockValue = part.unit_cost_sar != null ? part.unit_cost_sar * part.qty_on_hand : 0;
 
   let totalPurchased = 0;
+  let purchasesVat = 0;
   let purchaseCount = 0;
   for (const po of purchaseOrders) {
     if (po.status !== "approved" && po.status !== "pending_approval") continue;
@@ -2823,8 +2925,10 @@ export function computePartFinanceStats(
     const qty = line.received_qty ?? line.qty;
     const unit = line.received_unit_price_sar ?? line.unit_price_sar;
     totalPurchased += qty * unit;
+    purchasesVat += line.received_line_vat_sar ?? line.line_vat_sar;
     purchaseCount += 1;
   }
+  const purchasesTotal = totalPurchased + purchasesVat;
 
   // See this file's own header comment above (CONSUMPTION IS REAL...) —
   // always 0 today, not faked, just nothing writes movement_type='consume'
@@ -2834,13 +2938,24 @@ export function computePartFinanceStats(
     .reduce((s, m) => s + Math.abs(m.qty_delta), 0);
   const spentByConsumption = 0;
 
-  return { totalPurchased, purchaseCount, stockValue, priceTrendPct, totalConsumed, spentByConsumption };
+  return {
+    totalPurchased,
+    purchasesVat,
+    purchasesTotal,
+    purchaseCount,
+    stockValue,
+    priceTrendPct,
+    totalConsumed,
+    spentByConsumption,
+  };
 }
 
 export function PartFinanceSummaryCard({
   lang,
   part,
   totalPurchased,
+  purchasesVat,
+  purchasesTotal,
   purchaseCount,
   stockValue,
   priceTrendPct,
@@ -2850,6 +2965,8 @@ export function PartFinanceSummaryCard({
   lang: "en" | "ar";
   part: Part;
   totalPurchased: number;
+  purchasesVat: number;
+  purchasesTotal: number;
   purchaseCount: number;
   stockValue: number;
   priceTrendPct: number;
@@ -2919,7 +3036,17 @@ export function PartFinanceSummaryCard({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
         <div className="rounded-lg border p-3" style={INPUT_STYLE}>
           <div className="text-[11px] muted uppercase">{lang === "en" ? "Purchases" : "المشتريات"}</div>
-          <div className="text-lg font-semibold tabular-nums">{formatSar(totalPurchased)}</div>
+          {/* Follow-up fix — re-perspectived total-first (Turki: "same
+              figures, just re-perspectived"): the bold headline figure is
+              now the VAT-INCLUSIVE total, with the pre-VAT subtotal + VAT
+              breakdown faded below it — same two stored figures as before,
+              just swapped which one leads. The one stat on this card that's
+              a real purchasing figure; Stock Value/Consumption/Price Trend
+              stay VAT-free. */}
+          <div className="text-lg font-semibold tabular-nums">{formatSarVat(purchasesTotal)}</div>
+          <div className="text-[11px] muted tabular-nums">
+            {formatSarVat(totalPurchased)} + {formatSarVat(purchasesVat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+          </div>
           <div className="text-[11px] muted">
             {purchaseCount} {lang === "en" ? "PO lines" : "بنود أوامر"}
           </div>
@@ -3023,7 +3150,11 @@ export function PartFinanceModal({
         if (!line) return [];
         const qty = line.received_qty ?? line.qty;
         const unit = line.received_unit_price_sar ?? line.unit_price_sar;
-        return [{ po, date: po.received_date ?? po.request_date, qty, unit, cost: qty * unit }];
+        // VAT (0056) — the STORED figure (received-side if received, else
+        // ordered-side), never recomputed — a pre-0056 line legitimately
+        // reads 0 here (booked before VAT existed, not back-computed).
+        const vat = line.received_line_vat_sar ?? line.line_vat_sar;
+        return [{ po, date: po.received_date ?? po.request_date, qty, unit, vat, cost: qty * unit }];
       })
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   }, [purchaseOrders, purchaseOrderLines, part.id]);
@@ -3052,6 +3183,8 @@ export function PartFinanceModal({
             lang={lang}
             part={part}
             totalPurchased={stats.totalPurchased}
+            purchasesVat={stats.purchasesVat}
+            purchasesTotal={stats.purchasesTotal}
             purchaseCount={stats.purchaseCount}
             stockValue={stats.stockValue}
             priceTrendPct={stats.priceTrendPct}
@@ -3073,7 +3206,7 @@ export function PartFinanceModal({
                   <TH>{lang === "en" ? "PO #" : "رقم الأمر"}</TH>
                   <TH>{lang === "en" ? "Qty" : "الكمية"}</TH>
                   <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
-                  <TH>{lang === "en" ? "Cost" : "التكلفة"}</TH>
+                  <TH>{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل الضريبة)"}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -3084,7 +3217,7 @@ export function PartFinanceModal({
                     </td>
                   </tr>
                 ) : (
-                  purchaseRows.map(({ po, date, qty, unit, cost }) => (
+                  purchaseRows.map(({ po, date, qty, unit, vat, cost }) => (
                     <tr key={po.id}>
                       <TD className="text-xs">{date}</TD>
                       <TD className="font-mono text-xs">
@@ -3104,7 +3237,17 @@ export function PartFinanceModal({
                         {qty} {part.unit ?? ""}
                       </TD>
                       <TD className="tabular-nums">{formatSar(unit)}</TD>
-                      <TD className="tabular-nums font-medium">{formatSar(cost)}</TD>
+                      {/* Follow-up fix — was two separate columns (VAT, then
+                          pre-VAT Cost); "same issue as Financial summary
+                          Purchases" — now one column, total-first (bold),
+                          pre-VAT + VAT breakdown faded below it. Same two
+                          stored figures (cost/vat), just re-perspectived. */}
+                      <TD className="tabular-nums">
+                        <div className="font-medium">{formatSarVat(cost + vat)}</div>
+                        <div className="muted text-[11px]">
+                          {formatSarVat(cost)} + {formatSarVat(vat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                        </div>
+                      </TD>
                     </tr>
                   ))
                 )}

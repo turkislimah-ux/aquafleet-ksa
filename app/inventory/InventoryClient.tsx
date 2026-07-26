@@ -211,6 +211,9 @@ import {
 import { useApp } from "@/components/AppShell";
 import { PageHeader, Btn, Stat, Table, TH, TD, Card } from "@/components/ui";
 import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
+// VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
+// NOT lib/vat.ts (see lib/inventory-vat.ts's own header).
+import { lineVat, formatSarVat } from "@/lib/inventory-vat";
 import type {
   Warehouse,
   Part,
@@ -1446,21 +1449,22 @@ function ViewPartModal({
                 <TH>{lang === "en" ? "Qty purchased" : "الكمية المشتراة"}</TH>
                 <TH>{lang === "en" ? "Qty remaining" : "الكمية المتبقية"}</TH>
                 <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
-                <TH>{lang === "en" ? "Subtotal" : "الإجمالي الفرعي"}</TH>
+                <TH>{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}</TH>
+                <TH>{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل الضريبة)"}</TH>
                 <TH>{lang === "en" ? "Status" : "الحالة"}</TH>
               </tr>
             </thead>
             <tbody>
               {loadingLots && (
                 <tr>
-                  <td colSpan={6} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                  <td colSpan={7} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                     {lang === "en" ? "Loading…" : "جارٍ التحميل…"}
                   </td>
                 </tr>
               )}
               {!loadingLots && lotsError && (
                 <tr>
-                  <td colSpan={6} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                  <td colSpan={7} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                     {lang === "en"
                       ? "Price batches aren't available yet (pending setup)."
                       : "دفعات الأسعار غير متاحة بعد (بانتظار الإعداد)."}
@@ -1469,7 +1473,7 @@ function ViewPartModal({
               )}
               {!loadingLots && !lotsError && lots.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                  <td colSpan={7} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                     {lang === "en" ? "No price batches yet." : "لا توجد دفعات أسعار بعد."}
                   </td>
                 </tr>
@@ -1479,7 +1483,14 @@ function ViewPartModal({
                 lots.map((lot, i) => {
                   const isCurrent = i === lots.length - 1;
                   const depleted = lot.qty_remaining <= 0;
+                  // Follow-up fix — was pre-VAT (qty_remaining x price_sar);
+                  // Turki: "should be VAT-inclusive, renamed Total." VAT
+                  // column below now shares this SAME qty_remaining basis
+                  // (was qty_purchased) so the row foots correctly: VAT +
+                  // this = Total.
                   const subtotal = lot.qty_remaining * lot.price_sar;
+                  const vat = lineVat(lot.qty_remaining, lot.price_sar);
+                  const total = subtotal + vat;
                   const badge = depleted
                     ? { en: "Depleted", ar: "منتهية", cls: "muted" }
                     : isCurrent
@@ -1495,7 +1506,16 @@ function ViewPartModal({
                         {lot.qty_remaining} {part.unit ?? ""}
                       </TD>
                       <TD className="tabular-nums">{formatSar(lot.price_sar)}</TD>
-                      <TD className="tabular-nums">{formatSar(subtotal)}</TD>
+                      {/* VAT (0056, follow-up basis fix) — display-only,
+                          computed live from price_lots' own stored
+                          qty_remaining/price_sar (price_lots has no stored
+                          VAT column, see 0056's own header — nothing here
+                          can go stale, same two numbers already on this
+                          row). Basis is qty_remaining, matching "Total"
+                          right after it, so VAT + pre-VAT subtotal = Total
+                          on this row. */}
+                      <TD className="tabular-nums muted text-xs">{formatSarVat(vat)}</TD>
+                      <TD className="tabular-nums font-medium">{formatSarVat(total)}</TD>
                       <TD>
                         <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border", badge.cls)} style={{ borderColor: "rgb(var(--border))" }}>
                           {lang === "en" ? badge.en : badge.ar}
@@ -1593,6 +1613,8 @@ function ViewPartModal({
             lang={lang}
             part={part}
             totalPurchased={financeStats.totalPurchased}
+            purchasesVat={financeStats.purchasesVat}
+            purchasesTotal={financeStats.purchasesTotal}
             purchaseCount={financeStats.purchaseCount}
             stockValue={financeStats.stockValue}
             priceTrendPct={financeStats.priceTrendPct}

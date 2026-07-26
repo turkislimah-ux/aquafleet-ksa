@@ -45,8 +45,11 @@ import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { X, Save, ChevronDown } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import { cn, formatSar } from "@/lib/utils";
 import type { Warehouse, Part, Supplier, Unit } from "@/lib/db-types";
+// VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
+// NOT lib/vat.ts (see lib/inventory-vat.ts's own header).
+import { calculateInventoryVatDocument, formatSarVat } from "@/lib/inventory-vat";
 import {
   createWarehouse,
   createSupplier,
@@ -822,6 +825,39 @@ export function AddPartModal({
                 inputMode="decimal"
                 required
               />
+              {/* VAT — display-only readout, entered price is VAT-EXCLUSIVE.
+                  parts.unit_cost_sar itself stores this price UNCHANGED
+                  (it's the pricing snapshot — must stay VAT-free, see
+                  0056's own header). Shown the same way New PO shows a
+                  line's VAT/Total (calculateInventoryVatDocument, same
+                  helper, same rate/rounding). Parses unitCost ONCE into
+                  `price` instead of the previous version's two separate
+                  parseNumField() calls — cosmetic hardening, not a fix for
+                  a reproduced bug: the prior nested version was verified
+                  live to render correctly through BOTH real entry points
+                  (New PO's "+ New Item" and Add Parts' "+ New Item"),
+                  typing a price into this exact field. Kept nested inside
+                  this <label> (not hoisted into its own grid cell) — this
+                  form is `grid grid-cols-2`, and a standalone sibling node
+                  here would shift every field after it into the wrong
+                  column. */}
+              {(() => {
+                const price = parseNumField(unitCost);
+                if (price === null) return null;
+                const doc = calculateInventoryVatDocument([{ qty: 1, unitPriceSar: price }]);
+                return (
+                  <div className="flex items-center gap-3 text-xs mt-1">
+                    <span>
+                      <span className="muted">{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}:</span>{" "}
+                      <span className="font-medium tabular-nums">{formatSarVat(doc.vat)}</span>
+                    </span>
+                    <span>
+                      <span className="muted">{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل الضريبة)"}:</span>{" "}
+                      <span className="font-medium tabular-nums">{formatSarVat(doc.total)}</span>
+                    </span>
+                  </div>
+                );
+              })()}
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="muted">{lang === "en" ? "Reorder level *" : "حد إعادة الطلب *"}</span>

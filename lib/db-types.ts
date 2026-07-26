@@ -725,6 +725,22 @@ export type PurchaseOrder = {
   ai_rationale: string | null;
   ai_rationale_ar: string | null;
   created_at: string;
+  // migration 0056, LIVE — VAT (fixed 15%, ZATCA; per-line rounding summed,
+  // see lib/inventory-vat.ts's header). Ordered-side, booked by
+  // create_purchase_order at draft time, refreshed by receive_purchase_order
+  // when extra/ad-hoc lines are added (0055). Deliberate exception to "PO
+  // total never stored" (see 0056's own header) — every writer of
+  // purchase_order_lines for this PO also rewrites these three together, in
+  // the same transaction, so they can't drift stale. A pre-0056 PO reads
+  // 0 here (not back-computed) — honestly pre-VAT, not fabricated.
+  subtotal_sar: number;
+  vat_sar: number;
+  total_sar: number;
+  // migration 0056, LIVE — received-side, null until receive_purchase_order
+  // actually runs (mirrors received_by/received_date's own convention).
+  received_subtotal_sar: number | null;
+  received_vat_sar: number | null;
+  received_total_sar: number | null;
 };
 
 // purchase_order_approvals row (migration 0052, LIVE) — one row per
@@ -753,6 +769,11 @@ export type PurchaseOrderLine = {
   received_qty: number | null;
   received_unit_price_sar: number | null;
   created_at: string;
+  // migration 0056, LIVE — VAT, ordered-side (qty * unit_price_sar * 15%,
+  // rounded per line — lib/inventory-vat.ts) and received-side (null until
+  // received, same convention as received_qty/received_unit_price_sar).
+  line_vat_sar: number;
+  received_line_vat_sar: number | null;
 };
 
 // stock_receipts row (migration 0047, LIVE; `po_id` added by migration 0051)
@@ -769,6 +790,11 @@ export type StockReceipt = {
   received_on: string; // date
   received_by: string | null;
   note: string | null;
-  total_cost_sar: number;
+  total_cost_sar: number; // pre-VAT subtotal — name/meaning unchanged since 0047
   created_at: string;
+  // migration 0056, LIVE — VAT on top of total_cost_sar (fixed 15%,
+  // per-line rounding summed, lib/inventory-vat.ts). A pre-0056 receipt
+  // reads 0/grand_total_sar===total_cost_sar (not back-computed).
+  vat_sar: number;
+  grand_total_sar: number;
 };

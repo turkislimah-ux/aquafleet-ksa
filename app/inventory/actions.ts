@@ -23,6 +23,13 @@ import type {
   Unit,
   Warehouse,
 } from "@/lib/db-types";
+// VAT (migration 0056) — updatePurchaseOrder (below) is the one PO mutation
+// NOT backed by an RPC (flagged exception, see its own header), so it must
+// mirror create_purchase_order's VAT math here in TypeScript rather than
+// getting it "for free" server-side. Same per-line-then-summed rule, same
+// borrowed-rate-only file every other VAT display in this feature uses —
+// never lib/vat.ts (see lib/inventory-vat.ts's own header for why).
+import { lineVat, calculateInventoryVatDocument } from "@/lib/inventory-vat";
 
 export type WarehouseInput = {
   name: string;
@@ -634,12 +641,30 @@ export async function updatePurchaseOrder(
       part_id: l.part_id,
       qty: l.qty,
       unit_price_sar: l.unit_price_sar,
+      line_vat_sar: lineVat(l.qty, l.unit_price_sar),
     })),
   );
   if (insErr) return { error: insErr.message };
 
+  // VAT (0056) — recompute the header's ordered-side totals from the lines
+  // just written, same as create_purchase_order does server-side. This is
+  // the one PO-mutation path with no RPC behind it, so nothing else will
+  // ever do this for a draft edit.
+  const vatDoc = calculateInventoryVatDocument(
+    input.lines.map((l) => ({ qty: l.qty, unitPriceSar: l.unit_price_sar })),
+  );
+  const { data: poWithTotals, error: totalsErr } = await supabase
+    .from("purchase_orders")
+    .update({ subtotal_sar: vatDoc.subtotal, vat_sar: vatDoc.vat, total_sar: vatDoc.total })
+    .eq("id", poId)
+    .select()
+    .single();
+  if (totalsErr || !poWithTotals) {
+    return { error: totalsErr?.message ?? "Could not update purchase order totals." };
+  }
+
   revalidatePath("/inventory");
-  return { error: null, po: po as PurchaseOrder };
+  return { error: null, po: poWithTotals as PurchaseOrder };
 }
 
 export async function issuePurchaseOrder(

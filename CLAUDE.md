@@ -763,6 +763,181 @@ relevant skill(s) **when the task calls for it**:
       documentation of what was verified, not a standing regression
       suite, unless Turki wants the diagnostic route kept permanently for
       that purpose (his call, flagged, not decided here).
+  - **Stage 5 — VAT on parts invoices. Migration `0056` (applied/verified
+    earlier, invariant clean) + its app-code UI, both in scope now.**
+    Fixed 15% (ZATCA), entered unit prices VAT-EXCLUSIVE, PER-LINE
+    rounding summed for the document total (`round(qty * unit_price *
+    0.15, 2)` per line, then SUM the already-rounded lines) — the
+    opposite of `lib/vat.ts`'s own document-level-rounding rule for
+    customer invoices (that file's header quotes ZATCA's own invoice-XML
+    rule for why IT rounds once; parts VAT is a genuinely different,
+    separately-correct convention for a different document). New
+    `lib/inventory-vat.ts` — borrows ONLY `VAT_RATE` from `lib/prepaid.ts`
+    (a read, not a modification), never routes through `lib/vat.ts`'s
+    `calculateVat()`. `lib/vat.ts`/`prepaid.ts`/`invoice.ts` untouched, as
+    required.
+    - **Columns (0056):** `purchase_order_lines.line_vat_sar` (+
+      `received_line_vat_sar`, nullable), `purchase_orders.subtotal_sar`/
+      `vat_sar`/`total_sar` (+ `received_subtotal_sar`/`received_vat_sar`/
+      `received_total_sar`, nullable), `stock_receipts.vat_sar`/
+      `grand_total_sar` (`total_cost_sar` unchanged), `stock_receipt_lines
+      .line_vat_sar`. All additive, no backfill — a pre-0056 record (e.g.
+      `PO-2026-0003`) reads 0/null on every new column, confirmed via
+      Supabase MCP query before building any UI against it. `price_lots`/
+      `parts.unit_cost_sar` gained NO column — VAT for those is computed
+      live, display-only, never stored (see below).
+    - **Where VAT shows, exactly:** New PO (line table gets a "VAT (15%)"
+      column right after unit cost, before Subtotal; footer becomes a
+      3-line stack — subtotal, then `+ VAT`, then bold total — replacing
+      the old single-line "Estimated total"); Add Part (a live "+ VAT
+      (15%): X per unit" readout under the Unit price field — display
+      only, `parts.unit_cost_sar` itself is never touched, stays
+      VAT-exclusive); the part-row chart's Purchase history table
+      (`PartFinanceModal`) gets the same VAT column, sourced from each
+      line's STORED `received_line_vat_sar ?? line_vat_sar` (never
+      recomputed); the part drawer's Stock batches (FIFO `price_lots`)
+      table gets a VAT column too, but computed LIVE from that lot's own
+      `qty_purchased * price_sar * 15%` — `price_lots` has no stored VAT
+      column, nothing to go stale; and the "Financial summary" card's
+      Purchases stat (`computePartFinanceStats`/`PartFinanceSummaryCard`)
+      gained a `+ VAT = grand total` subline, summed from the same stored
+      per-line figures — the ONLY one of that card's 4 stats to change;
+      Stock Value/Consumption/Price Trend are byte-for-byte untouched.
+    - **Where VAT stays off, deliberately:** `FinancialAnalysisTab`
+      (Spend 30d/90d, top-spend-category/by-supplier bars, AI Insights) —
+      explicitly named "financial analysis" in Turki's own exclusion list,
+      distinct from the per-part "financial summary" card above, which DOES
+      get VAT — confirmed by exclusion once the tab's own content was read
+      end-to-end and none of it overlapped the inclusion list. Also
+      untouched: KPI row's Inventory Value, `PartsTable`'s Stock Value
+      column, the Pricing snapshot card (current/previous price + trend +
+      avg cost), and every consumption figure.
+    - **Consistency extensions beyond the 5 named spots (not asked for
+      verbatim, but the same PO/receipt data is already shown elsewhere in
+      this feature and leaving those screens VAT-blind would have been a
+      visible, confusing gap):** `PODetailModal`'s line table + footer
+      (same VAT column + 3-line stack, reading the STORED header/line
+      figures with a fallback to the pre-existing derived total only for a
+      pre-0056 PO, so a real historical PO doesn't render a false "0");
+      `ReceivePOModal`'s line table + footer (same, client-side preview via
+      `calculateInventoryVatDocument`, since the RPC recomputes and stores
+      the real figures at submit time); the Approvals queue's existing
+      "Actual Total" column (Stage 4, item 2) upgraded from a flat
+      qty×price sum into the same subtotal/VAT/total stack, reading
+      `purchase_orders.received_subtotal_sar/received_vat_sar` with the
+      same pre-0056 fallback.
+    - **`updatePurchaseOrder`** (`actions.ts`, the one PO-mutation path not
+      backed by an RPC, flagged since Stage 3) now also computes and
+      writes `line_vat_sar` per line and `subtotal_sar`/`vat_sar`/
+      `total_sar` on the header, via `lib/inventory-vat.ts` — otherwise
+      editing a draft PO would silently zero out its own VAT figures.
+    - **Verification:** DB state checked directly via the Supabase MCP
+      before writing any UI (confirmed `PO-2026-0003` reads 0/null on
+      every new column, confirmed the FIFO invariant query returns zero
+      rows). Built a throwaway `/inv-vat-test` diagnostic route + temporary
+      middleware bypass (same technique as every prior stage) using a
+      REAL existing part/price-lot pair (queried live via the Supabase
+      MCP) so the Stock batches table's own auth-gated server action
+      (`getPriceLots`) had real rows to return — this diagnostic route has
+      no real login session, so RLS quietly returns empty for anything
+      fetched that way; the one place this bit (Stock batches' exact VAT
+      *value*) the test verifies the column header only and notes why —
+      Turki's own in-browser check covers the populated case, same as
+      every stage. New `tests/inventory-vat.spec.ts`, 7 tests, all passed
+      (New PO, Approvals real+legacy, Add Part, Stock batches header +
+      Pricing-snapshot absence, Financial summary Purchases + 3-stat
+      absence, Purchase history real+legacy, Financial Analysis tab
+      whole-page absence). Diagnostic route deleted and the middleware
+      bypass reverted (confirmed `git diff` empty) before finishing; dev
+      server restarted clean, `/login` 200 and `/inventory` 307
+      reconfirmed. (Running the OLDER `tests/inventory-batch.spec.ts`
+      afterward now fails all 4 of its own tests — expected, not a
+      regression: it depends on `/inv-batch-test`, deleted at the end of
+      Stage 4 per this same convention, documented there already.)
+  - **Stage 5 follow-up — 4 VAT DISPLAY fixes, presentation/arrangement
+    only.** Stored VAT data itself (migration `0056`) was already correct
+    and verified — nothing here recomputes VAT, touches an RPC, or touches
+    `lib/inventory-vat.ts`/`vat.ts`/`prepaid.ts`/`invoice.ts`. Every figure
+    below reads a value already stored or already being computed the same
+    way as some other already-built spot in this feature.
+    - **Item 1 — Add Part's VAT readout wasn't visible enough.** Was a
+      single `text-[11px] muted` caption ("+ VAT (15%): X per unit") — easy
+      to miss, unlike New PO's own clearly-labeled VAT column. Replaced
+      with two labeled, normal-weight readouts side by side ("VAT (15%):
+      X" / "Total (incl. VAT): Y"), same `calculateInventoryVatDocument()`
+      helper New PO's own footer already calls (one line item, qty 1) —
+      not a new formula, just a more visible presentation of the same
+      number.
+      - **Follow-up (Turki: still not rendering at all after the above).**
+        Investigated the 3 candidate causes named in the ask (dead
+        condition, qty/price not wired, dead branch, values 0/hiding) —
+        none reproduced. Live-verified through all 3 real mount paths this
+        component is actually used from (New PO's "+ New Item", Add
+        Parts' "+ New Item", and a standalone mount) via a throwaway
+        route + Playwright, typing a price into Unit price each time —
+        the readout rendered correctly (`VAT (15%): 15 SAR` /
+        `Total (incl. VAT): 115 SAR` for a 100 SAR entry) in every case,
+        both before AND after the hardening below. No reproducible code
+        defect found — most likely a stale dev-server/fast-refresh state
+        on the browser side at the time it was checked, not a logic bug.
+        Hardened anyway, since it was already there: `parseNumField
+        (unitCost)` was being called twice (once for the VAT figure, once
+        for Total) — collapsed into one parsed `price` value read once.
+        Deliberately did NOT hoist the readout out of the Unit-price
+        `<label>` into its own grid cell — this form is `grid
+        grid-cols-2`, and a sibling node there would have shifted every
+        field after it into the wrong column; stayed nested inside the
+        same `<label>`, same position as before.
+    - **Item 2a — Stock batches' "Subtotal" was pre-VAT; renamed "Total",
+      made VAT-inclusive.** Was `qty_remaining x price_sar`, labeled
+      "Subtotal". Now the VAT column (added in the original Stage 5 pass)
+      switched its own basis from `qty_purchased` (the batch's original
+      received quantity — a historical "what was booked at receipt time"
+      figure) to `qty_remaining`, matching the renamed "Total" column's own
+      basis — so the row now foots correctly (VAT + pre-VAT subtotal =
+      Total), instead of two columns quietly using two different
+      quantities. `price_lots` still has no stored VAT column (0056's own
+      design — a FIFO ledger row isn't a booked document) — both figures
+      stay live-computed from its own `qty_remaining`/`price_sar`, same as
+      before, just consistently.
+    - **Item 2b + item 3 — same fix, two spots: total-first, breakdown
+      below (was subtotal-first, breakdown below).** The Financial summary
+      card's "Purchases" stat and the Purchase history table
+      (`PartFinanceModal`, opened via the part-row chart-icon button) both
+      used to show the pre-VAT subtotal as the bold headline figure with a
+      small "+ VAT = total" line underneath — backwards from what Turki
+      wanted. Both now lead with the bold VAT-inclusive total, with a
+      faded "{subtotal} + {vat} VAT" line below it — same two source
+      numbers each time (`totalPurchased`/`purchasesVat` for the stat;
+      `cost`/`vat` per row for the history table), just re-perspectived,
+      not recomputed. The history table's separate "VAT" and "Cost"
+      columns were merged into one "Total (incl. VAT)" column (5 columns
+      now, not 6) to make room for the stacked total/breakdown, same
+      pattern the Approvals queue's own Actual Total column already uses.
+    - **Item 4 — Open PO list's "PO Total" was pre-VAT; now VAT-inclusive,
+      reading the stored header figure.** `POListModal` (opened via
+      "Active Procurement"'s "Open POs" chip) always shows draft/issued
+      POs — never yet received, so only the ORDERED-side header total
+      applies. Was `poTotal()` (a local helper re-deriving
+      `qty x unit_price_sar` from lines, pre-VAT) — now reads
+      `po.total_sar` directly (written by `create_purchase_order`/
+      `updatePurchaseOrder` at write time, already VAT-inclusive), falling
+      back to the old `poTotal()` derivation only for a pre-0056 PO
+      (`total_sar` reads 0 there, honestly — not back-computed, same
+      precedent as every other pre-migration fallback in this feature).
+      `poTotal()` itself stays alive as that fallback, not removed.
+    - **Verification:** built a throwaway `/inv-vat-fix-test` diagnostic
+      route + temporary middleware bypass (same technique as every prior
+      stage), reusing the same REAL existing part/price-lot pair (queried
+      live via the Supabase MCP) as the original Stage 5 pass, plus a new
+      mock draft PO (`po3`, real stored ordered-side VAT: 500 subtotal / 75
+      VAT / 575 total) to exercise the Open PO list. New
+      `tests/inventory-vat-fixes.spec.ts`, 5 tests, all passed (Add Part
+      readout visibility, Stock batches rename+basis, Financial summary
+      total-first, Purchase history total-first, Open PO list VAT-
+      inclusive total). Diagnostic route deleted and the middleware bypass
+      reverted (confirmed `git diff` empty) before finishing; dev server
+      restarted clean, `/login` 200 and `/inventory` 307 reconfirmed.
   - **Working rules that held, keep applying through Phase 7:** every migration
     drafted to disk and reviewed/run by Turki before any app code assumes it
     exists; exactly one signature per RPC (see `0038`'s incident above for why);
