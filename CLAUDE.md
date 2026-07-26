@@ -888,6 +888,26 @@ relevant skill(s) **when the task calls for it**:
         grid-cols-2`, and a sibling node there would have shifted every
         field after it into the wrong column; stayed nested inside the
         same `<label>`, same position as before.
+      - **Second follow-up — Turki: still absent from the STANDALONE
+        header "Add Part" button specifically ("unit price and quantity
+        both filled"), distinct from the "+ New Item" paths already
+        verified.** The "quantity" detail was the tell: `AddPartModal`
+        (the single-new-SKU form) has no qty field at all — the header
+        has no standalone "Add Part" (singular) button either (only "New
+        PO" / "Add Parts" / "AI-Suggest", confirmed by reading the actual
+        JSX, not just the historical comment saying the old standalone
+        button was deleted). What Turki meant was the header's "Add
+        Parts" (plural) button — `ReceivePartsModal`, the LOOSE receiving
+        flow (no PO), which DOES have a qty + unit price per line, same
+        shape as `ReceivePOModal` (its PO-linked sibling, already
+        VAT-treated). This one had never been touched — genuinely 0
+        VAT anywhere in it, not a rendering bug, a real gap. Fixed with
+        the exact same pattern as `ReceivePOModal`: VAT column after
+        "Actual unit price" (`lineVat(l.qty, l.unit_price_sar)`), and the
+        footer's single "Actual total" row replaced with the subtotal/
+        VAT/total stack (`calculateInventoryVatDocument` over `lines`).
+        Verified live through the actual header "Add Parts" button
+        specifically (not a standalone mount) before reporting fixed.
     - **Item 2a — Stock batches' "Subtotal" was pre-VAT; renamed "Total",
       made VAT-inclusive.** Was `qty_remaining x price_sar`, labeled
       "Subtotal". Now the VAT column (added in the original Stage 5 pass)

@@ -213,7 +213,7 @@ import { PageHeader, Btn, Stat, Table, TH, TD, Card } from "@/components/ui";
 import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
 // VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
 // NOT lib/vat.ts (see lib/inventory-vat.ts's own header).
-import { lineVat, formatSarVat } from "@/lib/inventory-vat";
+import { lineVat, calculateInventoryVatDocument, formatSarVat } from "@/lib/inventory-vat";
 import type {
   Warehouse,
   Part,
@@ -1775,6 +1775,13 @@ function ReceivePartsModal({
   );
 
   const total = lines.reduce((s, l) => s + l.qty * l.unit_price_sar, 0);
+  // VAT — this is the loose "Add Parts" receiving flow (header "Add Parts"
+  // button; ReceivePOModal is its PO-linked sibling, already VAT-treated).
+  // Client-side preview only, per-line-then-summed (never lib/vat.ts's
+  // document-level rounding — see lib/inventory-vat.ts's own header);
+  // receive_loose_parts (0056) recomputes and stores the real per-line/
+  // document figures server-side at submit time.
+  const vatDoc = calculateInventoryVatDocument(lines.map((l) => ({ qty: l.qty, unitPriceSar: l.unit_price_sar })));
   const linesValid = lines.length > 0 && lines.every((l) => l.qty > 0 && l.unit_price_sar >= 0);
   const canSubmit = supplierId !== "" && warehouseId !== "" && linesValid && files.length > 0;
 
@@ -1991,6 +1998,7 @@ function ReceivePartsModal({
                     <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
                     <TH>{lang === "en" ? "Actual qty received" : "الكمية الفعلية"}</TH>
                     <TH>{lang === "en" ? "Actual unit price" : "سعر الوحدة الفعلي"}</TH>
+                    <TH>{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}</TH>
                     <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
                     <TH></TH>
                   </tr>
@@ -1999,7 +2007,7 @@ function ReceivePartsModal({
                   {lines.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         className="py-6 px-3 border-t text-center muted text-sm"
                         style={{ borderColor: "rgb(var(--border))" }}
                       >
@@ -2046,6 +2054,7 @@ function ReceivePartsModal({
                               style={INPUT_STYLE}
                             />
                           </TD>
+                          <TD className="tabular muted text-xs">{formatSarVat(lineVat(l.qty, l.unit_price_sar))}</TD>
                           <TD className="tabular font-semibold">{formatSar(l.qty * l.unit_price_sar)}</TD>
                           <TD>
                             <button
@@ -2064,22 +2073,28 @@ function ReceivePartsModal({
                 </tbody>
                 {/* preview's own tfoot total row (pages-2.js ~2695-2699) —
                     "Actual total" under the Subtotal column, inside the
-                    table, not a floating div below it. */}
+                    table, not a floating div below it. Actual-total block
+                    convention — subtotal (pre-VAT), then VAT (sum of line
+                    VATs), then bold total. */}
                 {lines.length > 0 && (
                   <tfoot>
                     <tr>
                       <td
-                        colSpan={3}
+                        colSpan={4}
                         className="text-end font-semibold py-2.5 px-3 border-t text-sm"
                         style={{ borderColor: "rgb(var(--border))" }}
                       >
                         {lang === "en" ? "Actual total" : "الإجمالي الفعلي"}
                       </td>
                       <td
-                        className="tabular font-bold text-brand-600 py-2.5 px-3 border-t text-sm"
+                        className="py-2.5 px-3 border-t text-sm"
                         style={{ borderColor: "rgb(var(--border))" }}
                       >
-                        {formatSar(total)}
+                        <div className="text-[11px] muted tabular-nums">{formatSarVat(vatDoc.subtotal)}</div>
+                        <div className="text-[11px] muted tabular-nums">
+                          + {formatSarVat(vatDoc.vat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                        </div>
+                        <div className="tabular font-bold text-brand-600">{formatSarVat(vatDoc.total)}</div>
                       </td>
                       <td className="border-t" style={{ borderColor: "rgb(var(--border))" }} />
                     </tr>
