@@ -45,7 +45,7 @@ import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { X, Save, ChevronDown } from "lucide-react";
 import { Btn, Card } from "@/components/ui";
-import { cn, formatSar } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { Warehouse, Part, Supplier, Unit } from "@/lib/db-types";
 // VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
 // NOT lib/vat.ts (see lib/inventory-vat.ts's own header).

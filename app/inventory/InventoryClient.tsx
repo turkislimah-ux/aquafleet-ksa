@@ -211,7 +211,7 @@ import {
 } from "lucide-react";
 import { useApp } from "@/components/AppShell";
 import { PageHeader, Btn, Stat, Table, TH, TD, Card } from "@/components/ui";
-import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
+import { cn, formatSar, formatNum } from "@/lib/utils";
 // VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
 // NOT lib/vat.ts (see lib/inventory-vat.ts's own header).
 import { lineVat, calculateInventoryVatDocument, formatSarVat } from "@/lib/inventory-vat";
@@ -263,7 +263,6 @@ import {
   parseNumField,
   PartPicker,
   stockTier,
-  type StockTier,
   TIER_TEXT,
   TIER_DOT,
   TIER_LABEL,
@@ -1899,7 +1898,6 @@ function ReceivePartsModal({
     [allParts, warehouseId]
   );
 
-  const total = lines.reduce((s, l) => s + l.qty * l.unit_price_sar, 0);
   // VAT — this is the loose "Add Parts" receiving flow (header "Add Parts"
   // button; ReceivePOModal is its PO-linked sibling, already VAT-treated).
   // Client-side preview only, per-line-then-summed (never lib/vat.ts's

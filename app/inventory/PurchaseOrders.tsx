@@ -1845,10 +1845,6 @@ export function ReceivePOModal({
   });
   const canSubmit = linesValid && receiveLines.length > 0 && files.length > 0;
 
-  const total = receiveLines.reduce(
-    (s, l) => s + (Number(l.received_qty) || 0) * (Number(l.received_unit_price_sar) || 0),
-    0
-  );
   // VAT (0056) — client-side preview only (receive_purchase_order/
   // receive_loose_parts recompute and store the real per-line/document
   // figures server-side at submit time — same per-line-then-summed rule).
@@ -2300,20 +2296,6 @@ export function ReceivePOModal({
   );
 }
 
-// Approve a PO — preview's openApprove (pages-2.js ~2928-2957), trimmed:
-// preview has a persona picker ("Approve as") because it has no real auth;
-// this app derives the approver from the authenticated session server-side
-// (same substitution every other actor field in this feature already
-// made), so there's nothing to pick here — just the running count and an
-// optional comment. Role eligibility (staff.role in the approver set) is
-// still enforced only by the RPC, not duplicated client-side (see actions.ts's
-// own comment on why) — but a duplicate-approval attempt (this session
-// already signed off on this exact PO) IS pre-checked client-side now
-// (`alreadyApproved`), swapping the form for preview's own message
-// (inv.youCannotApprove, i18n.js:604, pages-2.js:2953-2955) instead of only
-// surfacing the DB's UNIQUE(purchase_order_id, approver_email) constraint
-// (migration 0052) as a raw error after submit. The constraint stays the
-// real enforcement either way — this is a friendlier message in front of it.
 // Unified approval-queue row — Stage B (0057). A "PO" row is a
 // pending_approval purchase order (its own stock_receipts row resolved via
 // po_id, since approve/reject now always act on the RECEIPT, keeping
