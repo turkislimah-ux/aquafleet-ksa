@@ -225,6 +225,9 @@ import type {
   PurchaseOrder,
   PurchaseOrderLine,
   PurchaseOrderApproval,
+  StockReceipt,
+  StockReceiptApproval,
+  StockReceiptLine,
 } from "@/lib/db-types";
 import {
   ProcStrip,
@@ -233,8 +236,10 @@ import {
   PODetailModal,
   ReceiveListModal,
   ReceivePOModal,
-  ApprovePOModal,
-  RejectPOModal,
+  ApproveReceiptModal,
+  RejectReceiptModal,
+  ReceiptDetailModal,
+  type ApprovalRow,
   ApprovalsTab,
   FinancialAnalysisTab,
   PartFinanceModal,
@@ -302,6 +307,9 @@ export default function InventoryClient({
   purchaseOrders,
   purchaseOrderLines,
   purchaseOrderApprovals,
+  stockReceipts,
+  stockReceiptApprovals,
+  stockReceiptLines,
   currentUserEmail,
   error,
 }: {
@@ -313,6 +321,9 @@ export default function InventoryClient({
   purchaseOrders: PurchaseOrder[];
   purchaseOrderLines: PurchaseOrderLine[];
   purchaseOrderApprovals: PurchaseOrderApproval[];
+  stockReceipts: StockReceipt[];
+  stockReceiptApprovals: StockReceiptApproval[];
+  stockReceiptLines: StockReceiptLine[];
   currentUserEmail: string | null;
   error: string | null;
 }) {
@@ -359,8 +370,18 @@ export default function InventoryClient({
   // Approvals tab directly (ProcStrip's onGoToApprovals -> setInvTab), no
   // standalone list-modal in between — matches preview's own setTab, which
   // has no popup for this at all.
-  const [approvePO, setApprovePO] = useState<PurchaseOrder | null>(null);
-  const [rejectPO, setRejectPO] = useState<PurchaseOrder | null>(null);
+  // Stage B (migration 0057) — approve/reject now act on a unified
+  // ApprovalRow (PO or Direct receipt), not a bare PurchaseOrder — see
+  // PurchaseOrders.tsx's own header on why (approve/reject always target
+  // the underlying stock_receipts row now, PO status is kept in lockstep
+  // by actions.ts, not read/written directly here).
+  const [approveRow, setApproveRow] = useState<ApprovalRow | null>(null);
+  const [rejectRow, setRejectRow] = useState<ApprovalRow | null>(null);
+  // Direct-receipt detail popup (this pass) — the fix for "clicking a
+  // Direct row does nothing." PO rows keep opening viewPO/PODetailModal;
+  // Direct rows open this instead, dispatched from ApprovalsTab's single
+  // onViewRow callback below.
+  const [viewReceipt, setViewReceipt] = useState<StockReceipt | null>(null);
   // Phase 7 — AI-Suggest-PO (migration 0053). Set right before opening
   // NewPOModal so it renders with the .ai-banner + prefilled lines; cleared
   // on close so a plain "New PO" click afterwards opens blank again.
@@ -421,7 +442,13 @@ export default function InventoryClient({
     0
   );
   const openPOsCount = purchaseOrders.filter((o) => o.status === "draft" || o.status === "issued").length;
-  const pendingReviewCount = purchaseOrders.filter((o) => o.status === "pending_approval").length;
+  // Stage B (0057) — Direct receipts now join the same Approvals queue as
+  // POs, so this badge (and its warehouse-scoped kpi* sibling below) must
+  // count both kinds or it would silently undercount vs. what
+  // ApprovalsTab actually lists.
+  const pendingReviewCount =
+    purchaseOrders.filter((o) => o.status === "pending_approval").length +
+    stockReceipts.filter((r) => r.receipt_type === "direct" && r.status === "pending_approval").length;
 
   // WAREHOUSE-SCOPED versions ("risky batch" Stage 3, items 2/3) — the KPI
   // row and the "Active procurement" (ProcStrip) strip now reflect ONLY the
@@ -444,7 +471,11 @@ export default function InventoryClient({
   ).length;
   const kpiOpenPOsCount = kpiPurchaseOrders.filter((o) => o.status === "draft" || o.status === "issued").length;
   const kpiAwaitingReceiptCount = kpiPurchaseOrders.filter((o) => o.status === "issued").length;
-  const kpiPendingReviewCount = kpiPurchaseOrders.filter((o) => o.status === "pending_approval").length;
+  const kpiPendingReviewCount =
+    kpiPurchaseOrders.filter((o) => o.status === "pending_approval").length +
+    stockReceipts.filter(
+      (r) => r.receipt_type === "direct" && r.status === "pending_approval" && r.warehouse_id === warehouseTab
+    ).length;
 
   // AI-Suggest-PO (Phase 7, migration 0053, LIVE) — preview's INV.openAIPO()
   // (pages-2.js ~2115-2133). No toast utility exists anywhere in this app
@@ -787,10 +818,12 @@ export default function InventoryClient({
               lang={lang}
               purchaseOrders={purchaseOrders}
               purchaseOrderLines={purchaseOrderLines}
-              purchaseOrderApprovals={purchaseOrderApprovals}
+              stockReceipts={stockReceipts}
+              stockReceiptApprovals={stockReceiptApprovals}
               suppliers={suppliers}
-              onView={(po) => setViewPO(po)}
-              onApprove={(po) => setApprovePO(po)}
+              onViewRow={(row) => (row.kind === "po" ? setViewPO(row.po) : setViewReceipt(row.receipt))}
+              onApprove={(row) => setApproveRow(row)}
+              onReject={(row) => setRejectRow(row)}
             />
           )}
 
@@ -949,11 +982,11 @@ export default function InventoryClient({
           }}
           onApprove={(po) => {
             setViewPO(null);
-            setApprovePO(po);
+            setApproveRow({ kind: "po", po, receipt: stockReceipts.find((r) => r.po_id === po.id) ?? null });
           }}
           onReject={(po) => {
             setViewPO(null);
-            setRejectPO(po);
+            setRejectRow({ kind: "po", po, receipt: stockReceipts.find((r) => r.po_id === po.id) ?? null });
           }}
           onEdit={(po) => {
             setViewPO(null);
@@ -992,25 +1025,50 @@ export default function InventoryClient({
         />
       )}
 
-      {approvePO && (
-        <ApprovePOModal
+      {viewReceipt && (
+        <ReceiptDetailModal
           lang={lang}
-          po={approvePO}
-          approvalCount={purchaseOrderApprovals.filter((a) => a.purchase_order_id === approvePO.id).length}
-          alreadyApproved={purchaseOrderApprovals.some(
-            (a) => a.purchase_order_id === approvePO.id && a.approver_email === currentUserEmail
-          )}
-          onClose={() => setApprovePO(null)}
-          onApproved={() => setApprovePO(null)}
+          receipt={viewReceipt}
+          lines={stockReceiptLines}
+          approvals={stockReceiptApprovals.filter((a) => a.stock_receipt_id === viewReceipt.id)}
+          parts={parts}
+          suppliers={suppliers}
+          warehouses={warehouses}
+          onClose={() => setViewReceipt(null)}
+          onApprove={(row) => {
+            setViewReceipt(null);
+            setApproveRow(row);
+          }}
+          onReject={(row) => {
+            setViewReceipt(null);
+            setRejectRow(row);
+          }}
         />
       )}
 
-      {rejectPO && (
-        <RejectPOModal
+      {approveRow && (
+        <ApproveReceiptModal
           lang={lang}
-          po={rejectPO}
-          onClose={() => setRejectPO(null)}
-          onRejected={() => setRejectPO(null)}
+          row={approveRow}
+          approvals={stockReceiptApprovals.filter(
+            (a) => a.stock_receipt_id === (approveRow.kind === "po" ? approveRow.receipt?.id : approveRow.receipt.id)
+          )}
+          currentUserEmail={currentUserEmail}
+          onClose={() => setApproveRow(null)}
+          onApproved={() => setApproveRow(null)}
+        />
+      )}
+
+      {rejectRow && (
+        <RejectReceiptModal
+          lang={lang}
+          row={rejectRow}
+          approvals={stockReceiptApprovals.filter(
+            (a) => a.stock_receipt_id === (rejectRow.kind === "po" ? rejectRow.receipt?.id : rejectRow.receipt.id)
+          )}
+          currentUserEmail={currentUserEmail}
+          onClose={() => setRejectRow(null)}
+          onRejected={() => setRejectRow(null)}
         />
       )}
     </div>

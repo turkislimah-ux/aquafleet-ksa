@@ -79,6 +79,9 @@ import type {
   PurchaseOrderApproval,
   PriceLot,
   StockMovement,
+  StockReceipt,
+  StockReceiptApproval,
+  StockReceiptLine,
 } from "@/lib/db-types";
 import {
   createPurchaseOrder,
@@ -86,12 +89,14 @@ import {
   issuePurchaseOrder,
   receivePurchaseOrder,
   receiveLooseParts,
-  approvePurchaseOrder,
-  rejectPurchaseOrder,
+  approveReceipt,
+  rejectReceipt,
+  getReceiptStatus,
   getPartMovements,
   type PurchaseOrderLineInput,
   type ReceivePoLineInput,
   type ReceiveLine,
+  type RejectionMode,
 } from "./actions";
 import {
   ModalOverlay,
@@ -128,6 +133,55 @@ const STATUS_STYLE: Record<PurchaseOrder["status"], { bg: string; fg: string; do
 
 function poTotal(poId: string, lines: PurchaseOrderLine[]): number {
   return lines.reduce((s, l) => (l.purchase_order_id === poId ? s + l.qty * l.unit_price_sar : s), 0);
+}
+
+// Stage B variance rule (locked with Turki, migration 0057's approval
+// batch): a received QUANTITY that differs from ordered is ALWAYS a
+// variance — quantity has no tolerance band. A received UNIT PRICE is only
+// a variance if it differs by MORE THAN 15% from the ordered price — small
+// price drift is normal and shouldn't flag every receipt. Replaces the
+// prior exact-match-only comparison in ReceivePOModal's Match/Variance
+// pill (Stage 4/0055 — was `received !== ordered` for both fields, no
+// tolerance at all).
+export function isReceiptVariance(
+  orderedQty: number | null,
+  receivedQty: number,
+  orderedPrice: number | null,
+  receivedPrice: number
+): boolean {
+  if (orderedQty != null && receivedQty !== orderedQty) return true;
+  if (orderedPrice != null) {
+    if (orderedPrice === 0) {
+      // Can't express "more than 15% of zero" — any nonzero received price
+      // against a zero ordered price is a real variance.
+      if (receivedPrice !== 0) return true;
+    } else if (Math.abs(receivedPrice - orderedPrice) / orderedPrice > 0.15) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Type badge — Direct (loose Add-Parts receive) vs PO (receive_purchase_
+// order). Stage B (0057): every receipt now carries this so it's
+// distinguishable everywhere an invoice/receipt is shown. No preview
+// equivalent — preview never had a Direct-invoice-approval concept at all
+// (confirmed against preview/archive.js and pages-2.js's invApprovalsView
+// before this stage's plan — Turki's own explicit addition).
+export function ReceiptTypeBadge({ type, lang }: { type: "direct" | "po"; lang: "en" | "ar" }) {
+  const isDirect = type === "direct";
+  return (
+    <span
+      className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full uppercase tracking-wide"
+      style={
+        isDirect
+          ? { background: "rgba(20,184,166,.12)", color: "#0f766e" }
+          : { background: "rgba(11,126,234,.12)", color: "#0c66bf" }
+      }
+    >
+      {isDirect ? (lang === "en" ? "Direct" : "مباشر") : "PO"}
+    </span>
+  );
 }
 
 export function PoStatusPill({ status, lang }: { status: PurchaseOrder["status"]; lang: "en" | "ar" }) {
@@ -1998,9 +2052,16 @@ export function ReceivePOModal({
                   // ~2586-2590, pill-ok/pill-warn, exact hex from
                   // app.css:148/150) — only meaningful for a PO-derived
                   // line, which has an ordered figure to compare against.
+                  // Stage B (0057): qty mismatch always flags; price only
+                  // flags past a 15% band — see isReceiptVariance's header.
                   const variance =
                     l.line_id !== null &&
-                    (Number(l.received_qty) !== l.ordered_qty || Number(l.received_unit_price_sar) !== l.ordered_unit_price_sar);
+                    isReceiptVariance(
+                      l.ordered_qty,
+                      Number(l.received_qty) || 0,
+                      l.ordered_unit_price_sar,
+                      Number(l.received_unit_price_sar) || 0
+                    );
                   return (
                     <tr key={l.key}>
                       <TD>
@@ -2253,18 +2314,89 @@ export function ReceivePOModal({
 // surfacing the DB's UNIQUE(purchase_order_id, approver_email) constraint
 // (migration 0052) as a raw error after submit. The constraint stays the
 // real enforcement either way — this is a friendlier message in front of it.
-export function ApprovePOModal({
+// Unified approval-queue row — Stage B (0057). A "PO" row is a
+// pending_approval purchase order (its own stock_receipts row resolved via
+// po_id, since approve/reject now always act on the RECEIPT, keeping
+// purchase_orders.status in lockstep — see actions.ts's approveReceipt()/
+// rejectReceipt() header). A "direct" row is a loose Add-Parts receive with
+// no PO at all — approvable in its own right, per Turki's Stage B ask.
+export type ApprovalRow =
+  | { kind: "po"; po: PurchaseOrder; receipt: StockReceipt | null }
+  | { kind: "direct"; receipt: StockReceipt };
+
+function approvalRowId(row: ApprovalRow): string | null {
+  return row.kind === "po" ? row.receipt?.id ?? null : row.receipt.id;
+}
+
+function approvalRowTitle(row: ApprovalRow, lang: "en" | "ar"): string {
+  if (row.kind === "po") return row.po.po_number;
+  return `${lang === "en" ? "Direct Receipt" : "استلام مباشر"} — ${row.receipt.id.slice(0, 8).toUpperCase()}`;
+}
+
+const OUTCOME_LABEL: Record<RejectionMode, { en: string; ar: string }> = {
+  void_cost: { en: "void-cost", ar: "إلغاء التكلفة" },
+  remove_stock: { en: "remove-stock", ar: "إزالة المخزون" },
+};
+
+// Vote-state display — Stage B vote model (0058). While a receipt is
+// pending_approval, at most ONE vote row can exist (a matching second
+// vote always finalizes in the same transaction, flipping status away
+// from pending_approval) — so this only ever needs to render 0 or 1 row
+// in practice, but handles more defensively (e.g. if ever shown for an
+// already-resolved receipt via a future Archive view).
+function VoteSummary({ approvals, lang }: { approvals: StockReceiptApproval[]; lang: "en" | "ar" }) {
+  if (approvals.length === 0) {
+    return <span className="muted text-xs">{lang === "en" ? "No votes yet" : "لا توجد أصوات بعد"}</span>;
+  }
+  return (
+    <div className="flex flex-col gap-0.5">
+      {approvals.map((a) => (
+        <div key={a.id} className="text-[11px]">
+          <span
+            className={
+              a.action === "approve"
+                ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                : "text-rose-600 dark:text-rose-400 font-medium"
+            }
+          >
+            {a.action === "approve" ? (lang === "en" ? "Approve" : "اعتماد") : (lang === "en" ? "Reject" : "رفض")}
+          </span>
+          {a.outcome && (
+            <span className="muted"> · {lang === "en" ? OUTCOME_LABEL[a.outcome].en : OUTCOME_LABEL[a.outcome].ar}</span>
+          )}
+          <span className="muted"> — {a.approver_email}</span>
+        </div>
+      ))}
+      {approvals.length === 1 && (
+        <span className="text-[10px] muted italic">
+          {lang === "en" ? "awaiting a matching second vote" : "بانتظار صوت ثانٍ مطابق"}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Approve a receipt (Direct or PO) — Stage B vote model (0058): both
+// approvers must cast the SAME action. The first vote records only, no
+// stock/status change — a mismatched second vote is blocked server-side
+// with a clear message (surfaced below as plain res.error). A sole voter
+// can freely change their own vote by submitting again — no dead-end
+// "already voted" state anymore (that was the pre-vote-model design;
+// under voting, resubmitting is either a harmless reaffirm or a real,
+// allowed change). Reused for the Approvals queue, PODetailModal's own
+// Approve button, and the new Direct ReceiptDetailModal.
+export function ApproveReceiptModal({
   lang,
-  po,
-  approvalCount,
-  alreadyApproved,
+  row,
+  approvals,
+  currentUserEmail,
   onClose,
   onApproved,
 }: {
   lang: "en" | "ar";
-  po: PurchaseOrder;
-  approvalCount: number;
-  alreadyApproved: boolean;
+  row: ApprovalRow;
+  approvals: StockReceiptApproval[];
+  currentUserEmail: string | null;
   onClose: () => void;
   onApproved: () => void;
 }) {
@@ -2272,6 +2404,8 @@ export function ApprovePOModal({
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const receiptId = approvalRowId(row);
+  const myVote = approvals.find((a) => a.approver_email === currentUserEmail);
 
   function close() {
     if (saving) return;
@@ -2280,9 +2414,27 @@ export function ApprovePOModal({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!receiptId) {
+      setError(lang === "en" ? "No receipt is linked to this record yet." : "لا يوجد إيصال مرتبط بهذا السجل بعد.");
+      return;
+    }
     setSaving(true);
     setError(null);
-    const res = await approvePurchaseOrder(po.id, comment.trim() || null);
+
+    // Re-check live status right before submitting — a second approver
+    // may have finalized this receipt since the modal opened.
+    const live = await getReceiptStatus(receiptId);
+    if (live.confirmedNotPending) {
+      setSaving(false);
+      setError(
+        lang === "en"
+          ? "This has already been resolved — closing this form. Refresh to see its final state."
+          : "تم حسم هذا بالفعل — سيُغلق هذا النموذج. حدّث الصفحة لرؤية حالته النهائية."
+      );
+      return;
+    }
+
+    const res = await approveReceipt(receiptId, comment.trim() || null);
     setSaving(false);
     if (res.error) {
       setError(res.error);
@@ -2300,84 +2452,109 @@ export function ApprovePOModal({
       >
         <form onSubmit={submit}>
           <div className="flex items-start justify-between gap-4 mb-1">
-            <h2 className="text-lg font-semibold">
-              {lang === "en" ? "Approve" : "اعتماد"} — {po.po_number}
+            <h2 className="text-lg font-semibold inline-flex items-center gap-2 flex-wrap">
+              {lang === "en" ? "Approve" : "اعتماد"} — {approvalRowTitle(row, lang)}
+              <ReceiptTypeBadge type={row.kind === "po" ? "po" : "direct"} lang={lang} />
             </h2>
             <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
               <X className="h-4 w-4" />
             </button>
           </div>
-          <p className="text-sm muted mb-4">
-            {lang === "en" ? "Minimum approvals required" : "الحد الأدنى من الاعتمادات"}: <b>2</b> ·{" "}
-            {lang === "en" ? "Approved by" : "تم الاعتماد من"}: <b>{approvalCount}</b>
+          <p className="text-sm muted mb-2">
+            {lang === "en"
+              ? "Both approvers must cast the SAME action — two approves, or two matching rejects."
+              : "يجب أن يتخذ المعتمِدان نفس الإجراء — اعتمادان، أو رفضان متطابقان."}
           </p>
+          <div className="mb-3">
+            <VoteSummary approvals={approvals} lang={lang} />
+          </div>
 
-          {alreadyApproved ? (
-            <>
-              <p className="text-sm muted">
-                {lang === "en" ? "You've already signed off on this PO" : "لقد اعتمدتَ هذا الأمر مسبقًا"}
-              </p>
-              <div className="mt-5 flex justify-end">
-                <Btn variant="outline" onClick={close}>
-                  {lang === "en" ? "Close" : "إغلاق"}
-                </Btn>
-              </div>
-            </>
-          ) : (
-            <>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">{lang === "en" ? "Optional comment" : "تعليق اختياري"}</span>
-                <input
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  className={INPUT}
-                  style={INPUT_STYLE}
-                  placeholder={lang === "en" ? "Optional comment" : "تعليق اختياري"}
-                />
-              </label>
-
-              {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
-
-              <div className="mt-5 flex justify-end gap-2">
-                <Btn variant="outline" onClick={close}>
-                  {lang === "en" ? "Cancel" : "إلغاء"}
-                </Btn>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
-                >
-                  <Check className="h-4 w-4" />
-                  {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Approve" : "اعتماد"}
-                </button>
-              </div>
-            </>
+          {myVote && (
+            <p className="text-xs muted mb-3 italic">
+              {lang === "en"
+                ? myVote.action === "approve"
+                  ? "You've already voted Approve — submitting again just reaffirms it."
+                  : "You previously voted Reject — submitting this will change your vote to Approve."
+                : myVote.action === "approve"
+                ? "لقد صوّتَّ بالاعتماد مسبقًا — الإرسال مرة أخرى يؤكد ذلك فقط."
+                : "صوّتَّ سابقًا بالرفض — الإرسال هنا سيغيّر صوتك إلى اعتماد."}
+            </p>
           )}
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted">{lang === "en" ? "Optional comment" : "تعليق اختياري"}</span>
+            <input
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              className={INPUT}
+              style={INPUT_STYLE}
+              placeholder={lang === "en" ? "Optional comment" : "تعليق اختياري"}
+            />
+          </label>
+
+          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
+
+          <div className="mt-5 flex justify-end gap-2">
+            <Btn variant="outline" onClick={close}>
+              {lang === "en" ? "Cancel" : "إلغاء"}
+            </Btn>
+            <button
+              type="submit"
+              disabled={saving || !receiptId}
+              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
+            >
+              <Check className="h-4 w-4" />
+              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Approve" : "اعتماد"}
+            </button>
+          </div>
         </form>
       </div>
     </ModalOverlay>
   );
 }
 
-// Reject a PO — preview's openReject (pages-2.js ~2968-2986). Terminal;
-// same warning copy preview uses about stock not auto-reversing (accurate
-// here too — receiving already moved stock via receive_purchase_order,
-// 0051, and rejecting doesn't undo it).
-export function RejectPOModal({
+// Reject a receipt (Direct or PO) — Stage B vote model (0058): both
+// approvers must pick the SAME outcome (reason may differ, never
+// compared). The first reject vote touches NO stock at all — the stock
+// effect (void-cost repricing / remove-stock reversal, plus the
+// untraceable-line and already-consumed blocks) only runs on the
+// completing, matching second vote. A mismatched action or outcome from
+// the second voter is blocked server-side with a clear message. Terminal
+// once approved (approved-is-final, enforced inside the RPC, not just
+// hidden here) — surfaced as a plain RPC error like every other guard.
+export function RejectReceiptModal({
   lang,
-  po,
+  row,
+  approvals,
+  currentUserEmail,
   onClose,
   onRejected,
 }: {
   lang: "en" | "ar";
-  po: PurchaseOrder;
+  row: ApprovalRow;
+  approvals: StockReceiptApproval[];
+  currentUserEmail: string | null;
   onClose: () => void;
   onRejected: () => void;
 }) {
   const router = useRouter();
+  const myVote = approvals.find((a) => a.approver_email === currentUserEmail);
+  const otherVote = approvals.find((a) => a.approver_email !== currentUserEmail);
+  // Default the outcome radio to whichever reject outcome is already
+  // pending (mine first, else the other voter's) — reduces the chance of
+  // an easily-avoidable outcome mismatch; the server still blocks a real
+  // mismatch regardless, this is just a friendlier starting point.
+  const [mode, setMode] = useState<RejectionMode>(
+    myVote?.action === "reject" && myVote.outcome
+      ? myVote.outcome
+      : otherVote?.action === "reject" && otherVote.outcome
+      ? otherVote.outcome
+      : "void_cost"
+  );
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const receiptId = approvalRowId(row);
 
   function close() {
     if (saving) return;
@@ -2386,11 +2563,37 @@ export function RejectPOModal({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!receiptId) {
+      setError(lang === "en" ? "No receipt is linked to this record yet." : "لا يوجد إيصال مرتبط بهذا السجل بعد.");
+      return;
+    }
     setSaving(true);
     setError(null);
-    const res = await rejectPurchaseOrder(po.id, reason.trim() || null);
+
+    // Re-check live status right before submitting — a second approver
+    // may have finalized this receipt since the modal opened.
+    const live = await getReceiptStatus(receiptId);
+    if (live.confirmedNotPending) {
+      setSaving(false);
+      setError(
+        lang === "en"
+          ? "This has already been resolved — closing this form. Refresh to see its final state."
+          : "تم حسم هذا بالفعل — سيُغلق هذا النموذج. حدّث الصفحة لرؤية حالته النهائية."
+      );
+      return;
+    }
+
+    const res = await rejectReceipt(receiptId, mode, reason.trim() || null);
     setSaving(false);
     if (res.error) {
+      // Surfaces reject_stock_receipt's own guard messages verbatim —
+      // the "already consumed" block ("Cannot remove this receipt's
+      // stock — some of it has already been consumed. Use void-cost
+      // instead."), the untraceable-line block ("Part % on this receipt
+      // has no traceable price lot — cannot safely reject (either
+      // outcome)..."), and the outcome-mismatch block — no client-side
+      // re-derivation of any of these, the RPC's own guard is the only
+      // source of truth.
       setError(res.error);
       return;
     }
@@ -2406,18 +2609,85 @@ export function RejectPOModal({
       >
         <form onSubmit={submit}>
           <div className="flex items-start justify-between gap-4 mb-1">
-            <h2 className="text-lg font-semibold">
-              {lang === "en" ? "Reject" : "رفض"} — {po.po_number}
+            <h2 className="text-lg font-semibold inline-flex items-center gap-2 flex-wrap">
+              {lang === "en" ? "Reject" : "رفض"} — {approvalRowTitle(row, lang)}
+              <ReceiptTypeBadge type={row.kind === "po" ? "po" : "direct"} lang={lang} />
             </h2>
             <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
               <X className="h-4 w-4" />
             </button>
           </div>
-          <p className="text-sm muted mb-4">
+
+          <p className="text-sm muted mb-2">
             {lang === "en"
-              ? "Rejection ends this PO. Stock changes from the receipt are not reversed automatically."
-              : "الرفض ينهي هذا الأمر. التغييرات في المخزون لا تُعكس تلقائيًا."}
+              ? "Both approvers must pick the SAME outcome — reason may differ."
+              : "يجب أن يختار المعتمِدان نفس النتيجة — يمكن أن يختلف السبب."}
           </p>
+          <div className="mb-3">
+            <VoteSummary approvals={approvals} lang={lang} />
+          </div>
+
+          {myVote && (
+            <p className="text-xs muted mb-3 italic">
+              {lang === "en"
+                ? myVote.action === "reject"
+                  ? `You've already voted Reject (${myVote.outcome ? OUTCOME_LABEL[myVote.outcome].en : ""}) — submitting again updates it.`
+                  : "You previously voted Approve — submitting this will change your vote to Reject."
+                : myVote.action === "reject"
+                ? `صوّتَّ بالرفض مسبقًا (${myVote.outcome ? OUTCOME_LABEL[myVote.outcome].ar : ""}) — الإرسال يحدّثه.`
+                : "صوّتَّ بالاعتماد سابقًا — الإرسال هنا سيغيّر صوتك إلى رفض."}
+            </p>
+          )}
+
+          <div className="flex flex-col gap-2 text-sm mb-4">
+            <span className="muted">{lang === "en" ? "Rejection outcome" : "نتيجة الرفض"}</span>
+
+            <label
+              className="flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer"
+              style={{ borderColor: mode === "void_cost" ? "#0b7eea" : "rgb(var(--border))" }}
+            >
+              <input
+                type="radio"
+                name="rejection-mode"
+                checked={mode === "void_cost"}
+                onChange={() => setMode("void_cost")}
+                className="mt-1"
+              />
+              <span>
+                <span className="font-medium block">
+                  {lang === "en" ? "Keep parts, void cost" : "الاحتفاظ بالقطع، إلغاء التكلفة"}
+                </span>
+                <span className="text-xs muted">
+                  {lang === "en"
+                    ? "Stock stays on hand — this receipt's cost lots are repriced to 0."
+                    : "يبقى المخزون كما هو — تُعاد تسعير دفعات هذا الإيصال إلى صفر."}
+                </span>
+              </span>
+            </label>
+
+            <label
+              className="flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer"
+              style={{ borderColor: mode === "remove_stock" ? "#0b7eea" : "rgb(var(--border))" }}
+            >
+              <input
+                type="radio"
+                name="rejection-mode"
+                checked={mode === "remove_stock"}
+                onChange={() => setMode("remove_stock")}
+                className="mt-1"
+              />
+              <span>
+                <span className="font-medium block">
+                  {lang === "en" ? "Remove stock entirely" : "إزالة المخزون بالكامل"}
+                </span>
+                <span className="text-xs muted">
+                  {lang === "en"
+                    ? "Reverses the stock this receipt added. Blocked if any of it has already been consumed."
+                    : "يعكس المخزون الذي أضافه هذا الإيصال. يُمنع إذا استُهلك جزء منه بالفعل."}
+                </span>
+              </span>
+            </label>
+          </div>
 
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">{lang === "en" ? "Rejection reason" : "سبب الرفض"}</span>
@@ -2439,7 +2709,7 @@ export function RejectPOModal({
             </Btn>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !receiptId}
               className="h-9 px-3 rounded-lg text-sm font-medium text-white disabled:opacity-50 inline-flex items-center gap-2"
               style={{ background: "#be123c" }}
             >
@@ -2454,21 +2724,27 @@ export function RejectPOModal({
 }
 
 // Approvals TAB — preview's invApprovalsView (pages-2.js ~3277-3329),
-// inline on the Inventory page's own "Approvals" tab. Reached via the
-// invTab strip directly, or via the ProcStrip's "Pending review" chip
-// (onGoToApprovals -> setInvTab('approvals'), no popup — the standalone
-// ApprovalsListModal this used to open was deleted, no other entry point,
-// see the post-Phase-7 audit gap-closing pass). Same queue (pending_approval
-// POs, oldest received first), approval-dot progress + approver names,
-// quick "Approve" action per row.
+// inline on the Inventory page's own "Approvals" tab. Stage B (0057):
+// merges the existing PO queue with a new Direct-receipt queue into one
+// list, each row typed (PO/Direct badge). Every row is clickable now
+// (opens PODetailModal for a PO row, ReceiptDetailModal for a Direct row —
+// Direct rows used to have no detail view at all, fixed this pass) with
+// Approve/Reject quick actions inline too. Both actions re-check the
+// receipt's LIVE status right before opening their modal (0058's vote
+// model + two real approvers acting close together means cached page
+// props can go stale between load and click) — if it's already resolved,
+// this shows an inline notice and refreshes instead of opening a form for
+// something no longer actionable.
 export function ApprovalsTab({
   lang,
   purchaseOrders,
   purchaseOrderLines,
-  purchaseOrderApprovals,
+  stockReceipts,
+  stockReceiptApprovals,
   suppliers,
-  onView,
+  onViewRow,
   onApprove,
+  onReject,
 }: {
   lang: "en" | "ar";
   purchaseOrders: PurchaseOrder[];
@@ -2479,82 +2755,143 @@ export function ApprovalsTab({
   // unlike PODetailModal's line table, which also has to handle a PO that
   // hasn't been received yet.
   purchaseOrderLines: PurchaseOrderLine[];
-  purchaseOrderApprovals: PurchaseOrderApproval[];
+  // purchase_order_approvals is intentionally NOT read here anymore — vote
+  // state (action/outcome) only exists on stock_receipt_approvals; a PO
+  // row reads its own linked receipt's votes from there instead (see
+  // rowVotes below).
+  stockReceipts: StockReceipt[];
+  stockReceiptApprovals: StockReceiptApproval[];
   suppliers: Supplier[];
-  onView: (po: PurchaseOrder) => void;
-  onApprove: (po: PurchaseOrder) => void;
+  onViewRow: (row: ApprovalRow) => void;
+  onApprove: (row: ApprovalRow) => void;
+  onReject: (row: ApprovalRow) => void;
 }) {
+  const router = useRouter();
+  const [notice, setNotice] = useState<string | null>(null);
+
   const suppliersById = useMemo(() => {
     const m = new Map<string, Supplier>();
     for (const s of suppliers) m.set(s.id, s);
     return m;
   }, [suppliers]);
 
-  const queue = purchaseOrders
-    .filter((o) => o.status === "pending_approval")
-    .slice()
-    .sort((a, b) => {
-      const ad = a.received_date ?? "";
-      const bd = b.received_date ?? "";
+  const queue: ApprovalRow[] = useMemo(() => {
+    const poRows: ApprovalRow[] = purchaseOrders
+      .filter((o) => o.status === "pending_approval")
+      .map((po) => ({ kind: "po", po, receipt: stockReceipts.find((r) => r.po_id === po.id) ?? null }));
+    const directRows: ApprovalRow[] = stockReceipts
+      .filter((r) => r.receipt_type === "direct" && r.status === "pending_approval")
+      .map((receipt) => ({ kind: "direct", receipt }));
+    return [...poRows, ...directRows].sort((a, b) => {
+      const ad = a.kind === "po" ? a.po.received_date ?? "" : a.receipt.received_on;
+      const bd = b.kind === "po" ? b.po.received_date ?? "" : b.receipt.received_on;
       return ad < bd ? -1 : ad > bd ? 1 : 0;
     });
+  }, [purchaseOrders, stockReceipts]);
+
+  // Shared re-check — used by both the quick Approve and Reject buttons.
+  // Returns true (proceed) if still pending_approval; otherwise shows an
+  // inline notice + refreshes, and returns false (caller must not open a
+  // modal for a receipt that's no longer actionable).
+  async function stillPending(row: ApprovalRow): Promise<boolean> {
+    const id = row.kind === "po" ? row.receipt?.id ?? null : row.receipt.id;
+    if (!id) return true; // defensive fallback — modal itself also guards on a missing id
+    const live = await getReceiptStatus(id);
+    if (live.confirmedNotPending) {
+      setNotice(
+        lang === "en"
+          ? "That was already resolved by someone else — refreshing…"
+          : "تم حسم هذا بالفعل من قبل شخص آخر — يتم التحديث…"
+      );
+      router.refresh();
+      return false;
+    }
+    return true;
+  }
 
   return (
     <Card className="!p-0 overflow-hidden">
       <div className="p-3 border-b" style={{ borderColor: "rgb(var(--border))" }}>
         <h3 className="font-semibold">{lang === "en" ? "Approvals Queue" : "قائمة الاعتمادات"}</h3>
         <p className="text-sm muted">
-          {lang === "en" ? "Minimum approvals required" : "الحد الأدنى من الاعتمادات"}: <b>2</b>
+          {lang === "en"
+            ? "Both approvers must cast the same action to finalize"
+            : "يجب أن يتخذ المعتمِدان نفس الإجراء لحسم الأمر"}
         </p>
+        {notice && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{notice}</p>}
       </div>
       {queue.length === 0 ? (
         <p className="muted text-sm py-6 text-center">
-          {lang === "en" ? "No POs awaiting approval." : "لا توجد أوامر بانتظار الاعتماد."}
+          {lang === "en" ? "Nothing awaiting approval." : "لا شيء بانتظار الاعتماد."}
         </p>
       ) : (
         <Table>
           <thead>
             <tr>
-              <TH>{lang === "en" ? "PO Number" : "رقم الأمر"}</TH>
+              <TH>{lang === "en" ? "Reference" : "المرجع"}</TH>
               <TH>{lang === "en" ? "Supplier" : "المورد"}</TH>
               <TH>{lang === "en" ? "Received on" : "تاريخ الاستلام"}</TH>
               <TH>{lang === "en" ? "Actual Total (incl. VAT)" : "الإجمالي الفعلي (شامل الضريبة)"}</TH>
-              <TH>{lang === "en" ? "Approved by" : "تم الاعتماد من"}</TH>
+              <TH>{lang === "en" ? "Votes" : "الأصوات"}</TH>
               <TH></TH>
             </tr>
           </thead>
           <tbody>
-            {queue.map((po) => {
-              const supplier = suppliersById.get(po.supplier_id);
-              const approvals = purchaseOrderApprovals.filter((a) => a.purchase_order_id === po.id);
-              // VAT (0056) — prefer the STORED received-side header figures
-              // (set at write time by receive_purchase_order) over
-              // recomputing client-side; fall back to summing lines only
-              // for a pre-0056 receipt (received_vat_sar reads 0 there,
-              // honestly — not back-computed).
+            {queue.map((row) => {
+              const supplierId = row.kind === "po" ? row.po.supplier_id : row.receipt.supplier_id;
+              const supplier = suppliersById.get(supplierId);
+              const receivedOn = row.kind === "po" ? row.po.received_date ?? "—" : row.receipt.received_on;
+
+              // Votes always live on stock_receipt_approvals (the vote
+              // model's action/outcome columns only exist there) — a PO
+              // row reads its OWN linked receipt's votes, not
+              // purchase_order_approvals (that table stays the old
+              // immediate/count-based ledger, mirrored only once the
+              // receipt-side vote actually finalizes — see actions.ts).
+              const rowVotes =
+                row.kind === "po"
+                  ? stockReceiptApprovals.filter((a) => a.stock_receipt_id === row.receipt?.id)
+                  : stockReceiptApprovals.filter((a) => a.stock_receipt_id === row.receipt.id);
+
+              // VAT (0056/0057) — PO rows prefer the STORED received-side
+              // header figures (fallback to summing lines for a pre-0056
+              // receipt); Direct rows read stock_receipts' own stored
+              // total_cost_sar/vat_sar directly — always populated, no
+              // fallback needed (0047/0056 both required them).
               const actualSubtotal =
-                po.received_subtotal_sar ??
-                purchaseOrderLines
-                  .filter((l) => l.purchase_order_id === po.id)
-                  .reduce((s, l) => s + (l.received_qty ?? 0) * (l.received_unit_price_sar ?? 0), 0);
-              const actualVat = po.received_vat_sar ?? 0;
+                row.kind === "po"
+                  ? row.po.received_subtotal_sar ??
+                    purchaseOrderLines
+                      .filter((l) => l.purchase_order_id === row.po.id)
+                      .reduce((s, l) => s + (l.received_qty ?? 0) * (l.received_unit_price_sar ?? 0), 0)
+                  : row.receipt.total_cost_sar;
+              const actualVat = row.kind === "po" ? row.po.received_vat_sar ?? 0 : row.receipt.vat_sar;
               const actualTotal = actualSubtotal + actualVat;
+              const key = row.kind === "po" ? `po-${row.po.id}` : `direct-${row.receipt.id}`;
+
               return (
                 <tr
-                  key={po.id}
+                  key={key}
                   className="cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
-                  onClick={() => onView(po)}
+                  onClick={() => onViewRow(row)}
                 >
                   <TD className="font-mono text-xs font-semibold">
-                    <span className="inline-flex items-center gap-1.5">
-                      {po.po_number}
-                      {po.ai_generated && <AiPill lang={lang} />}
+                    <span className="inline-flex items-center gap-1.5 flex-wrap">
+                      <ReceiptTypeBadge type={row.kind === "po" ? "po" : "direct"} lang={lang} />
+                      {row.kind === "po" ? (
+                        <>
+                          {row.po.po_number}
+                          {row.po.ai_generated && <AiPill lang={lang} />}
+                        </>
+                      ) : (
+                        row.receipt.id.slice(0, 8).toUpperCase()
+                      )}
                     </span>
                   </TD>
                   <TD>
                     <div className="text-sm">{supplier?.name ?? "—"}</div>
                   </TD>
-                  <TD className="text-xs">{po.received_date ?? "—"}</TD>
+                  <TD className="text-xs">{receivedOn}</TD>
                   <TD className="tabular-nums text-xs">
                     {/* Actual-total block convention (0056) — subtotal
                         (pre-VAT), then VAT, then bold Actual Total. */}
@@ -2565,35 +2902,64 @@ export function ApprovalsTab({
                     <div className="font-medium">{formatSarVat(actualTotal)}</div>
                   </TD>
                   <TD className="text-xs">
+                    {/* Prior dot-indicator style, restored (was replaced
+                        with VoteSummary's text-list in the vote-model
+                        pass — reverted per Turki's explicit ask, "Votes"
+                        label kept, "Approved by" not brought back). Each
+                        name now also shows its reject outcome (void-cost/
+                        remove-stock) when applicable — the vote model
+                        adds that info, the dot display didn't lose it. */}
                     <div className="inline-flex items-center gap-1">
                       {Array.from({ length: 2 }).map((_, i) => (
                         <span
                           key={i}
                           className="h-2 w-2 rounded-full inline-block"
                           style={{
-                            background: i < approvals.length ? "#10b981" : "rgb(var(--border))",
-                            boxShadow: i < approvals.length ? "0 0 0 1px rgba(16,185,129,.4)" : undefined,
+                            background: i < rowVotes.length ? "#10b981" : "rgb(var(--border))",
+                            boxShadow: i < rowVotes.length ? "0 0 0 1px rgba(16,185,129,.4)" : undefined,
                           }}
                         />
                       ))}
-                      <span className="muted ms-1">{approvals.length}/2</span>
+                      <span className="muted ms-1">{rowVotes.length}/2</span>
                     </div>
-                    {approvals.length > 0 && (
-                      <div className="text-[11px] muted">{approvals.map((a) => a.approver_email).join(", ")}</div>
+                    {rowVotes.length > 0 && (
+                      <div className="text-[11px] muted">
+                        {rowVotes
+                          .map((a) =>
+                            a.action === "reject" && a.outcome
+                              ? `${a.approver_email} (${OUTCOME_LABEL[a.outcome][lang]})`
+                              : a.approver_email
+                          )
+                          .join(", ")}
+                      </div>
                     )}
                   </TD>
-                  <TD className="text-right">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onApprove(po);
-                      }}
-                      className="h-7 px-2.5 rounded-md text-xs font-medium bg-brand-600 hover:bg-brand-700 text-white inline-flex items-center gap-1.5"
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                      {lang === "en" ? "Approve" : "اعتماد"}
-                    </button>
+                  <TD className="text-right whitespace-nowrap">
+                    <div className="inline-flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (await stillPending(row)) onApprove(row);
+                        }}
+                        className="h-7 px-2.5 rounded-md text-xs font-medium bg-brand-600 hover:bg-brand-700 text-white inline-flex items-center gap-1.5"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        {lang === "en" ? "Approve" : "اعتماد"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (await stillPending(row)) onReject(row);
+                        }}
+                        className="h-7 px-2.5 rounded-md text-xs font-medium text-white inline-flex items-center gap-1.5"
+                        style={{ background: "#be123c" }}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        {lang === "en" ? "Reject" : "رفض"}
+                      </button>
+                    </div>
                   </TD>
                 </tr>
               );
@@ -2602,6 +2968,340 @@ export function ApprovalsTab({
         </Table>
       )}
     </Card>
+  );
+}
+
+const RECEIPT_STATUS_STYLE: Record<StockReceipt["status"], { bg: string; fg: string; dot: string }> = {
+  pending_approval: { bg: "rgba(245,158,11,.14)", fg: "#b45309", dot: "#f59e0b" },
+  approved: { bg: "rgba(16,185,129,.14)", fg: "#047857", dot: "#10b981" },
+  rejected: { bg: "rgba(244,63,94,.14)", fg: "#be123c", dot: "#f43f5e" },
+};
+
+function ReceiptStatusPill({ status, lang }: { status: StockReceipt["status"]; lang: "en" | "ar" }) {
+  const style = RECEIPT_STATUS_STYLE[status];
+  const label =
+    status === "pending_approval"
+      ? { en: "Pending Approval", ar: "بانتظار الاعتماد" }
+      : status === "approved"
+      ? { en: "Approved", ar: "معتمد" }
+      : { en: "Rejected", ar: "مرفوض" };
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium"
+      style={{ background: style.bg, color: style.fg }}
+    >
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: style.dot }} />
+      {lang === "en" ? label.en : label.ar}
+    </span>
+  );
+}
+
+// Direct-receipt detail popup — Stage B fix (this pass). Previously a
+// Direct row in the Approvals queue had NO click target at all (no detail
+// view existed); it now opens this, mirroring PODetailModal's shape
+// (header info grid, line items, votes, Approve/Reject actions) for the
+// one entity type that never had an equivalent. Also works for a
+// PO-linked receipt if ever opened directly (defensive — today only
+// Direct rows dispatch here, PO rows still open PODetailModal, see
+// InventoryClient's onViewRow).
+export function ReceiptDetailModal({
+  lang,
+  receipt,
+  lines,
+  approvals,
+  parts,
+  suppliers,
+  warehouses,
+  onClose,
+  onApprove,
+  onReject,
+}: {
+  lang: "en" | "ar";
+  receipt: StockReceipt;
+  lines: StockReceiptLine[];
+  approvals: StockReceiptApproval[];
+  parts: Part[];
+  suppliers: Supplier[];
+  warehouses: Warehouse[];
+  onClose: () => void;
+  onApprove: (row: ApprovalRow) => void;
+  onReject: (row: ApprovalRow) => void;
+}) {
+  const supplier = suppliers.find((s) => s.id === receipt.supplier_id);
+  const warehouse = warehouses.find((w) => w.id === receipt.warehouse_id);
+  const partsById = useMemo(() => {
+    const m = new Map<string, Part>();
+    for (const p of parts) m.set(p.id, p);
+    return m;
+  }, [parts]);
+  const ownLines = lines.filter((l) => l.receipt_id === receipt.id);
+  const row: ApprovalRow = { kind: "direct", receipt };
+  const [notice, setNotice] = useState<string | null>(null);
+  const router = useRouter();
+
+  // Same live re-check as the Approvals queue's own buttons (see
+  // ApprovalsTab's stillPending) — this modal can sit open a while after
+  // being opened from a stale row.
+  async function stillPending(): Promise<boolean> {
+    const live = await getReceiptStatus(receipt.id);
+    if (live.confirmedNotPending) {
+      setNotice(
+        lang === "en"
+          ? "This has already been resolved — refreshing…"
+          : "تم حسم هذا بالفعل — يتم التحديث…"
+      );
+      router.refresh();
+      return false;
+    }
+    return true;
+  }
+
+  const receiptTotal = receipt.total_cost_sar + receipt.vat_sar;
+
+  return (
+    <ModalOverlay onClick={onClose}>
+      <div
+        className="card p-6 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header — mirrors PODetailModal exactly: mono title + type badge,
+            supplier name as the subtitle (not duplicated in the grid
+            below), close only (no print — a receipt has no printable
+            invoice document the way a PO does). */}
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-lg font-semibold font-mono inline-flex items-center gap-2">
+              {receipt.id.slice(0, 8).toUpperCase()}
+              <ReceiptTypeBadge type={receipt.receipt_type} lang={lang} />
+            </h2>
+            <p className="text-sm muted mt-0.5">{supplier?.name ?? "—"}</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Info grid — same container class/shape as PODetailModal's own
+            8-field grid; a receipt has no issued/expected-delivery/
+            requested-by equivalents (those are PO-lifecycle-specific), so
+            this one's shorter, but the fields it does share (Status,
+            Received by, Received on, Warehouse) use the exact same
+            layout/order convention. Rejection details live in the Votes
+            card below now, matching where PODetailModal puts them — not
+            up here. */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-4">
+          <div>
+            <div className="text-[11px] muted uppercase">{lang === "en" ? "Reference" : "المرجع"}</div>
+            <div className="font-mono font-medium">{receipt.id.slice(0, 8).toUpperCase()}</div>
+          </div>
+          <div>
+            <div className="text-[11px] muted uppercase">{lang === "en" ? "Status" : "الحالة"}</div>
+            <div className="mt-0.5">
+              <ReceiptStatusPill status={receipt.status} lang={lang} />
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] muted uppercase">{lang === "en" ? "Received on" : "تاريخ الاستلام"}</div>
+            <div className="font-medium">{receipt.received_on}</div>
+          </div>
+          <div>
+            <div className="text-[11px] muted uppercase">{lang === "en" ? "Received by" : "استُلم بواسطة"}</div>
+            <div className="font-medium">{receipt.received_by ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-[11px] muted uppercase">{lang === "en" ? "Warehouse" : "المستودع"}</div>
+            <div className="font-medium">{warehouse?.name ?? "—"}</div>
+          </div>
+        </div>
+
+        {/* Supplier contact card — byte-for-byte the same markup as
+            PODetailModal's own (same tint, same fields, same position:
+            right after the info grid, before the line items). */}
+        {supplier && (
+          <Card className="!p-3 mb-4 !bg-[rgba(11,126,234,.06)] dark:!bg-[rgba(96,196,255,.06)]">
+            <div className="text-[11px] muted uppercase mb-1">
+              {lang === "en" ? "Supplier contact" : "بيانات المورّد"}
+            </div>
+            <div className="font-semibold text-sm mb-1">{supplier.name}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+              <div>
+                <span className="muted">{lang === "en" ? "Contact person" : "الشخص المسؤول"}:</span>{" "}
+                {supplier.contact_person ?? "—"}
+              </div>
+              <div>
+                <span className="muted">{lang === "en" ? "Phone" : "الهاتف"}:</span>{" "}
+                <span className="font-mono">{supplier.phone ?? "—"}</span>
+              </div>
+              <div>
+                <span className="muted">{lang === "en" ? "Email" : "البريد الإلكتروني"}:</span>{" "}
+                <span className="font-mono">{supplier.email ?? "—"}</span>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        <Card className="!p-0 overflow-hidden mb-4">
+          <Table>
+            <thead>
+              <tr>
+                <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
+                <TH>{lang === "en" ? "Qty" : "الكمية"}</TH>
+                <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
+                <TH>{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}</TH>
+                <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
+              </tr>
+            </thead>
+            <tbody>
+              {ownLines.map((l) => {
+                const part = partsById.get(l.part_id);
+                return (
+                  <tr key={l.id}>
+                    <TD>
+                      <div className="font-mono text-[11px] muted">{part?.sku ?? ""}</div>
+                      <div className="text-sm font-medium">
+                        {part ? (lang === "ar" && part.name_ar ? part.name_ar : part.name) : "—"}
+                      </div>
+                      {l.price_lot_id === null && (
+                        <span
+                          className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                          style={{ background: "rgba(244,63,94,.10)", color: "#be123c" }}
+                          title={
+                            lang === "en"
+                              ? "No traceable price lot — this line cannot be rejected (either outcome)."
+                              : "لا توجد دفعة سعر يمكن تتبعها — لا يمكن رفض هذا البند (أي نتيجة)."
+                          }
+                        >
+                          {lang === "en" ? "Not traceable" : "غير قابل للتتبع"}
+                        </span>
+                      )}
+                    </TD>
+                    <TD className="tabular">{l.qty}</TD>
+                    <TD className="tabular">{formatSar(l.unit_price_sar)}</TD>
+                    <TD className="tabular muted text-xs">{formatSarVat(l.line_vat_sar)}</TD>
+                    <TD className="tabular font-medium">{formatSar(l.qty * l.unit_price_sar)}</TD>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td
+                  colSpan={4}
+                  className="text-end font-semibold py-2.5 px-3 border-t text-sm"
+                  style={{ borderColor: "rgb(var(--border))" }}
+                >
+                  {lang === "en" ? "Total" : "الإجمالي"}
+                </td>
+                <td className="py-2.5 px-3 border-t text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                  <div className="text-[11px] muted tabular-nums">{formatSarVat(receipt.total_cost_sar)}</div>
+                  <div className="text-[11px] muted tabular-nums">
+                    + {formatSarVat(receipt.vat_sar)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                  </div>
+                  <div className="tabular font-bold text-brand-600">{formatSarVat(receiptTotal)}</div>
+                </td>
+              </tr>
+            </tfoot>
+          </Table>
+        </Card>
+
+        {/* Note — its own Card, positioned AFTER the line items table,
+            same as PODetailModal's own po.note card (not folded into the
+            info grid above it, which is where this used to sit). */}
+        {receipt.note && (
+          <Card className="!p-3 mb-4">
+            <div className="text-[11px] muted uppercase mb-1">{lang === "en" ? "Note" : "ملاحظة"}</div>
+            <p className="text-sm whitespace-pre-wrap">{receipt.note}</p>
+          </Card>
+        )}
+
+        {/* Votes card — same shape/position as PODetailModal's own
+            "Approved by" card (icon + heading + count, list of voters,
+            rejected-by block at the bottom when terminal) — labeled
+            "Votes" (not "Approved by"), and each vote shows its outcome
+            type (void-cost/remove-stock) right next to a reject, not just
+            the fact that it was a reject. */}
+        <Card className="!p-3 mb-4">
+          <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+            <Check className="h-4 w-4 text-emerald-600" />
+            {lang === "en" ? "Votes" : "الأصوات"}{" "}
+            <span className="muted text-xs font-normal">({approvals.length}/2)</span>
+          </h4>
+          {approvals.length === 0 ? (
+            <p className="muted text-sm">{lang === "en" ? "Awaiting approval" : "بانتظار الاعتماد"}</p>
+          ) : (
+            <ul className="space-y-2">
+              {approvals.map((a) => (
+                <li key={a.id} className="flex items-start gap-2 text-sm">
+                  {a.action === "approve" ? (
+                    <Check className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                  ) : (
+                    <X className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      {a.approver_email}
+                      {a.action === "reject" && a.outcome && (
+                        <span className="muted font-normal"> — {OUTCOME_LABEL[a.outcome][lang]}</span>
+                      )}
+                    </div>
+                    <div className="text-[11px] muted">
+                      {new Date(a.approved_at).toLocaleString(lang === "ar" ? "ar-SA" : "en-US")}
+                      {a.comment ? ` · "${a.comment}"` : ""}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {receipt.status === "rejected" && (
+            <div className="mt-3 pt-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+              <div className="font-semibold text-sm text-rose-600">
+                {lang === "en" ? "Rejected by" : "رُفض من"}: {receipt.rejected_by ?? "—"}
+                {receipt.rejection_mode && (
+                  <span className="muted font-normal"> — {OUTCOME_LABEL[receipt.rejection_mode][lang]}</span>
+                )}
+              </div>
+              <div className="text-xs muted mt-1">
+                {receipt.rejected_at ? new Date(receipt.rejected_at).toLocaleString(lang === "ar" ? "ar-SA" : "en-US") : "—"}
+              </div>
+              {receipt.rejection_reason && <div className="text-sm mt-1">&quot;{receipt.rejection_reason}&quot;</div>}
+            </div>
+          )}
+          {notice && <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">{notice}</p>}
+        </Card>
+
+        <div className="flex justify-end gap-2">
+          <Btn variant="outline" onClick={onClose}>
+            {lang === "en" ? "Close" : "إغلاق"}
+          </Btn>
+          {receipt.status === "pending_approval" && (
+            <>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (await stillPending()) onReject(row);
+                }}
+                className="h-9 px-3 rounded-lg text-sm font-medium text-white disabled:opacity-50 inline-flex items-center gap-2"
+                style={{ background: "#be123c" }}
+              >
+                <X className="h-4 w-4" />
+                {lang === "en" ? "Reject" : "رفض"}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (await stillPending()) onApprove(row);
+                }}
+                className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white inline-flex items-center gap-2"
+              >
+                <Check className="h-4 w-4" />
+                {lang === "en" ? "Approve" : "اعتماد"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </ModalOverlay>
   );
 }
 

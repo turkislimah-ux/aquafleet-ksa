@@ -899,3 +899,171 @@ export async function rejectPurchaseOrder(
   revalidatePath("/inventory");
   return { error: null, po: data as PurchaseOrder };
 }
+
+// ---------------------------------------------------------------------------
+// Receipt Approvals (Stage B — migration 0057, revised to a matching-vote
+// model by migration 0058, both LIVE). Wraps approve_stock_receipt()/
+// reject_stock_receipt(), the canonical approval path for BOTH a loose
+// (Direct) receive and a PO receive — every receipt is its own approvable
+// invoice now (stock already booked at receive time in both cases; this
+// is a pure after-the-fact sign-off, never a stock gate).
+//
+// VOTE MODEL (0058): both approvers must take the SAME action (two
+// approves -> approved; two matching rejects -> rejected, same outcome,
+// reason may differ). The first vote records only — no stock touched, no
+// status change. A mismatched second vote is blocked server-side with a
+// clear message (surfaced here as plain res.error, not re-derived
+// client-side). The sole first voter can change their own vote freely
+// pre-finalization by just calling either action again — there's no
+// separate "change vote" endpoint, approve_stock_receipt/
+// reject_stock_receipt already upsert the caller's own row. So a single
+// call here may return a receipt whose status is STILL 'pending_approval'
+// (first vote or a vote change) — that is success, not an error.
+//
+// IMPORTANT — keeping purchase_orders in lockstep for a PO-linked receipt,
+// UNDER THE VOTE MODEL: approve_stock_receipt()/reject_stock_receipt()
+// operate ONLY on stock_receipts/stock_receipt_approvals — they never
+// touch purchase_orders (confirmed reading their live bodies). That table
+// stays approve_purchase_order()/reject_purchase_order()'s job (0052,
+// unchanged, its OWN separate immediate/count-based model — not a vote).
+// Mirroring on EVERY vote (as this used to do, pre-0058) would drift once
+// vote-changing exists: the PO ledger has no way to "un-approve" a stale
+// mirrored vote if the receipt-side voter later switches to reject. Fixed
+// by mirroring ONLY at the moment the receipt vote actually FINALIZES
+// (returned status leaves 'pending_approval'):
+//   - approve finalizes -> replay BOTH real voters' approvals onto
+//     purchase_order_approvals (read back from stock_receipt_approvals,
+//     so it's the actual two approvers, not guessed) — approve_purchase_
+//     order is itself threshold-based (needs 2 distinct approvers), so
+//     replaying both in the same moment reaches its own 2/2 immediately.
+//   - reject finalizes -> reject_purchase_order is a single-shot terminal
+//     action (no voting on the PO side at all), so call it once with the
+//     completing actor + the receipt's own final rejection_reason.
+// Best-effort either way: a PO-mirror failure (e.g. "already approved" on
+// stale pre-0058 data) is logged, not thrown — the receipt-level result is
+// this feature's real source of truth.
+// ---------------------------------------------------------------------------
+
+export type RejectionMode = "void_cost" | "remove_stock";
+
+// Live status check — called client-side right before a vote action opens
+// its modal AND again right before it submits (Turki's explicit ask:
+// "re-check live status at click time"), since two real approvers acting
+// close together can make cached page props stale between page load and
+// the click. Read-only, no RPC needed.
+// Returns `confirmedNotPending: true` ONLY when a real row was read back
+// with a status other than 'pending_approval' — a genuine "someone else
+// already resolved this" fact. On any read failure (network blip, RLS
+// edge case, etc.) this fails OPEN (confirmedNotPending: false), since
+// this check is a UX nicety layered on top of the real gate — the RPCs
+// themselves (approve_stock_receipt/reject_stock_receipt) hard-enforce
+// "status must be pending_approval" server-side regardless; blocking the
+// UI on an inconclusive read here would just be a worse user experience
+// for no real safety gain.
+export async function getReceiptStatus(
+  receiptId: string,
+): Promise<{ status: StockReceipt["status"] | null; confirmedNotPending: boolean }> {
+  if (!receiptId) return { status: null, confirmedNotPending: false };
+  const supabase = createClient();
+  const { data, error } = await supabase.from("stock_receipts").select("status").eq("id", receiptId).single();
+  if (error || !data) return { status: null, confirmedNotPending: false };
+  const status = data.status as StockReceipt["status"];
+  return { status, confirmedNotPending: status !== "pending_approval" };
+}
+
+export async function approveReceipt(
+  receiptId: string,
+  comment: string | null,
+): Promise<{ error: string | null; receipt?: StockReceipt }> {
+  if (!receiptId) return { error: "Missing receipt." };
+
+  const supabase = createClient();
+  const actor = await actorEmail(supabase);
+  const trimmedComment = comment?.trim() || null;
+
+  const { data: receiptRow } = await supabase
+    .from("stock_receipts")
+    .select("po_id")
+    .eq("id", receiptId)
+    .single();
+
+  const { data, error } = await supabase.rpc("approve_stock_receipt", {
+    p_receipt_id: receiptId,
+    p_comment: trimmedComment,
+    p_actor: actor,
+  });
+  if (error) return { error: error.message };
+
+  const receipt = data as StockReceipt;
+
+  // Mirror onto purchase_orders ONLY once the vote actually finalizes —
+  // see this file's own header for why mirroring every vote would drift
+  // once vote-changing exists.
+  if (receipt.status === "approved" && receiptRow?.po_id) {
+    const { data: votes } = await supabase
+      .from("stock_receipt_approvals")
+      .select("approver_email, comment")
+      .eq("stock_receipt_id", receiptId);
+
+    for (const vote of votes ?? []) {
+      const { error: poError } = await supabase.rpc("approve_purchase_order", {
+        p_po_id: receiptRow.po_id,
+        p_comment: vote.comment,
+        p_actor: vote.approver_email,
+      });
+      if (poError && !/already approved/i.test(poError.message)) {
+        console.error("approveReceipt: purchase_orders status mirror failed:", poError.message);
+      }
+    }
+  }
+
+  revalidatePath("/inventory");
+  return { error: null, receipt };
+}
+
+export async function rejectReceipt(
+  receiptId: string,
+  mode: RejectionMode,
+  reason: string | null,
+): Promise<{ error: string | null; receipt?: StockReceipt }> {
+  if (!receiptId) return { error: "Missing receipt." };
+
+  const supabase = createClient();
+  const actor = await actorEmail(supabase);
+  const trimmedReason = reason?.trim() || null;
+
+  const { data: receiptRow } = await supabase
+    .from("stock_receipts")
+    .select("po_id")
+    .eq("id", receiptId)
+    .single();
+
+  const { data, error } = await supabase.rpc("reject_stock_receipt", {
+    p_receipt_id: receiptId,
+    p_mode: mode,
+    p_reason: trimmedReason,
+    p_actor: actor,
+  });
+  if (error) return { error: error.message };
+
+  const receipt = data as StockReceipt;
+
+  // Mirror onto purchase_orders ONLY once the vote actually finalizes.
+  // reject_purchase_order is single-shot/terminal (no vote of its own) —
+  // one call, from the completing actor, with the receipt's own final
+  // reason (not necessarily this call's p_reason — the first voter's own
+  // reason may differ and is never compared, per the vote model).
+  if (receipt.status === "rejected" && receiptRow?.po_id) {
+    const { error: poError } = await supabase.rpc("reject_purchase_order", {
+      p_po_id: receiptRow.po_id,
+      p_reason: receipt.rejection_reason,
+      p_actor: actor,
+    });
+    if (poError && !/awaiting approval/i.test(poError.message)) {
+      console.error("rejectReceipt: purchase_orders status mirror failed:", poError.message);
+    }
+  }
+
+  revalidatePath("/inventory");
+  return { error: null, receipt };
+}

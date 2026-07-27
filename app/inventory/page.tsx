@@ -8,6 +8,9 @@ import type {
   PurchaseOrder,
   PurchaseOrderLine,
   PurchaseOrderApproval,
+  StockReceipt,
+  StockReceiptApproval,
+  StockReceiptLine,
 } from "@/lib/db-types";
 import InventoryClient from "./InventoryClient";
 
@@ -19,13 +22,13 @@ export const dynamic = "force-dynamic";
 export default async function InventoryPage() {
   const supabase = createClient();
 
-  // Current session email — used client-side only for a UX pre-check on
-  // ApprovePOModal (preview's openApprove shows "You've already signed off
-  // on this PO" instead of the approve form when the active persona has no
-  // eligibility left, pages-2.js:2928-2955/i18n.js:604). The real
-  // enforcement stays the DB's UNIQUE(purchase_order_id, approver_email)
-  // constraint (migration 0052) — this is only a friendlier message before
-  // submit, not a security control.
+  // Current session email — used client-side to show "your current vote"
+  // context inside ApproveReceiptModal/RejectReceiptModal (Stage B vote
+  // model, migration 0058) rather than preview's own dead-end "you already
+  // signed off" message — under the vote model a sole voter can freely
+  // change their own vote, so the form always stays active for them; this
+  // is display-only, the real enforcement stays server-side inside
+  // approve_stock_receipt()/reject_stock_receipt().
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -40,6 +43,9 @@ export default async function InventoryPage() {
     purchaseOrdersRes,
     purchaseOrderLinesRes,
     purchaseOrderApprovalsRes,
+    stockReceiptsRes,
+    stockReceiptApprovalsRes,
+    stockReceiptLinesRes,
   ] = await Promise.all([
     supabase
       .from("warehouses")
@@ -101,6 +107,26 @@ export default async function InventoryPage() {
       .from("purchase_order_approvals")
       .select("id, purchase_order_id, approver_email, comment, approved_at")
       .order("approved_at", { ascending: true }),
+    // Stage B (migration 0057) — every receipt is its own approvable
+    // invoice now (Direct or PO-linked). Bulk read, same "fetch
+    // everything, derive client-side" pattern as purchaseOrders/
+    // priceLots above.
+    supabase
+      .from("stock_receipts")
+      .select(
+        "id, supplier_id, warehouse_id, po_id, received_on, received_by, note, total_cost_sar, created_at, vat_sar, grand_total_sar, status, receipt_type, rejected_by, rejected_at, rejection_reason, rejection_mode"
+      )
+      .order("created_at", { ascending: false }),
+    // Stage B revision (migration 0058) — action/outcome added, vote model.
+    supabase
+      .from("stock_receipt_approvals")
+      .select("id, stock_receipt_id, approver_email, comment, approved_at, action, outcome")
+      .order("approved_at", { ascending: true }),
+    // Direct-receipt detail popup (this pass) needs line items — same
+    // "fetch everything, derive client-side" pattern as purchaseOrderLines.
+    supabase
+      .from("stock_receipt_lines")
+      .select("id, receipt_id, part_id, price_lot_id, qty, unit_price_sar, created_at, line_vat_sar"),
   ]);
 
   const warehouses = (warehousesRes.data ?? []) as Warehouse[];
@@ -111,6 +137,9 @@ export default async function InventoryPage() {
   const purchaseOrders = (purchaseOrdersRes.data ?? []) as PurchaseOrder[];
   const purchaseOrderLines = (purchaseOrderLinesRes.data ?? []) as PurchaseOrderLine[];
   const purchaseOrderApprovals = (purchaseOrderApprovalsRes.data ?? []) as PurchaseOrderApproval[];
+  const stockReceipts = (stockReceiptsRes.data ?? []) as StockReceipt[];
+  const stockReceiptApprovals = (stockReceiptApprovalsRes.data ?? []) as StockReceiptApproval[];
+  const stockReceiptLines = (stockReceiptLinesRes.data ?? []) as StockReceiptLine[];
   const error =
     warehousesRes.error?.message ??
     partsRes.error?.message ??
@@ -120,6 +149,9 @@ export default async function InventoryPage() {
     purchaseOrdersRes.error?.message ??
     purchaseOrderLinesRes.error?.message ??
     purchaseOrderApprovalsRes.error?.message ??
+    stockReceiptsRes.error?.message ??
+    stockReceiptApprovalsRes.error?.message ??
+    stockReceiptLinesRes.error?.message ??
     null;
 
   return (
@@ -132,6 +164,9 @@ export default async function InventoryPage() {
       purchaseOrders={purchaseOrders}
       purchaseOrderLines={purchaseOrderLines}
       purchaseOrderApprovals={purchaseOrderApprovals}
+      stockReceipts={stockReceipts}
+      stockReceiptApprovals={stockReceiptApprovals}
+      stockReceiptLines={stockReceiptLines}
       currentUserEmail={currentUserEmail}
       error={error}
     />

@@ -797,4 +797,68 @@ export type StockReceipt = {
   // reads 0/grand_total_sar===total_cost_sar (not back-computed).
   vat_sar: number;
   grand_total_sar: number;
+  // Stage B (migration 0057, LIVE) — every receipt (loose or PO-linked) is
+  // now an approvable "invoice" in its own right. `status` starts
+  // 'pending_approval' at receive time (stock still books immediately —
+  // approval is an after-the-fact sign-off, never a stock gate);
+  // `receipt_type` distinguishes a loose Add-Parts receive ('direct') from
+  // one created by receive_purchase_order ('po') — every existing PO-linked
+  // row is backfilled 'po', everything else 'approved'/'direct'. Rejection
+  // fields mirror purchase_orders' own rejected_by/rejected_at/
+  // rejection_reason shape; `rejection_mode` ('void_cost' = keep the
+  // received parts, zero that receipt's lot costs | 'remove_stock' =
+  // reverse the stock this receipt added, blocked if any of it was already
+  // consumed) is set only once rejected. The ONLY writers are
+  // approve_stock_receipt()/reject_stock_receipt() (see actions.ts) —
+  // never written directly from app code.
+  status: "pending_approval" | "approved" | "rejected";
+  receipt_type: "direct" | "po";
+  rejected_by: string | null;
+  rejected_at: string | null;
+  rejection_reason: string | null;
+  rejection_mode: "void_cost" | "remove_stock" | null;
+};
+
+// stock_receipt_approvals row (migration 0057, LIVE; `action`/`outcome`
+// added by 0058 — LIVE) — Stage B's vote model: one row per distinct
+// approver's CURRENT vote on a receipt (UNIQUE on
+// stock_receipt_id+approver_email is now an UPSERT key, not a pure
+// append-only insert — the sole first voter can freely change `action`/
+// `outcome` on their own row until a second, matching voter finalizes the
+// receipt; see actions.ts's approveReceipt()/rejectReceipt() and
+// migration 0058's own header for why mutability here is a deliberate,
+// scoped exception to this feature's usual append-only-ledger
+// convention). `action` is 'approve'|'reject'; `outcome` is
+// 'void_cost'|'remove_stock', set only when action='reject'. `comment`
+// holds either an approve comment or a reject reason (reused, not
+// renamed). Parallel to, not a merge of, PurchaseOrderApproval above — a
+// PO-linked receipt's `purchase_orders.status` is mirrored separately,
+// only once the receipt-level vote actually finalizes (see actions.ts).
+// The ONLY writers are approve_stock_receipt()/reject_stock_receipt().
+export type StockReceiptApproval = {
+  id: string;
+  stock_receipt_id: string;
+  approver_email: string;
+  comment: string | null;
+  approved_at: string;
+  action: "approve" | "reject";
+  outcome: "void_cost" | "remove_stock" | null;
+};
+
+// stock_receipt_lines row (migration 0047, LIVE; `price_lot_id` reliably
+// populated going forward by migration 0058 — older rows may read null,
+// never backfilled, see that migration's own header) — one row per part/
+// qty/price on a receipt, loose or PO-linked. `price_lot_id` traces this
+// line back to the exact `price_lots` row it created — this is the entire
+// mechanism reject_stock_receipt (0058) uses to find "this receipt's
+// lots." The ONLY writer is receive_loose_parts().
+export type StockReceiptLine = {
+  id: string;
+  receipt_id: string;
+  part_id: string;
+  price_lot_id: string | null;
+  qty: number;
+  unit_price_sar: number;
+  created_at: string;
+  line_vat_sar: number;
 };
