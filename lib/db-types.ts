@@ -862,3 +862,84 @@ export type StockReceiptLine = {
   created_at: string;
   line_vat_sar: number;
 };
+
+// ---------------------------------------------------------------------------
+// Maintenance — Phase 1 (migration 0060, LIVE). Mirrors preview/'s pages-2.js
+// `MT` module + data.js `workOrders` shape. In-house scheduling core only —
+// no lifecycle transitions (start/complete), no photos, no outsourced track
+// yet (later phases, separate migrations).
+// ---------------------------------------------------------------------------
+
+// repair_descriptions row — shared task/description chip catalog, consumed
+// by both in-house work_order_tasks (this phase) and the outsourced track's
+// description chips (later phase). Inline-addable, same shape/role as
+// `units` (0049).
+export type RepairDescription = {
+  id: string;
+  en: string;
+  ar: string;
+  active: boolean;
+  created_at: string;
+};
+
+export type WorkOrderType = "preventive" | "corrective" | "inspection" | "predictive";
+export type WorkOrderPriority = "low" | "medium" | "high" | "critical";
+// 'awaiting_parts'/'cancelled' are valid stored values (preview parity) but
+// no RPC in this build writes them yet — only open/in_progress/completed are
+// reachable. Kept in the union so status-pill/lookup code doesn't need a cast.
+export type WorkOrderStatus = "open" | "in_progress" | "awaiting_parts" | "completed" | "cancelled";
+
+// work_orders row. `actual_cost_sar` stays null until Phase 2's
+// complete_work_order recomputes it from true consumed FIFO lot prices +
+// labor (never a copy of the estimate — Turki's explicit call).
+// `prior_truck_status` is null until Phase 2's start_work_order captures it
+// (used to restore trucks.status on complete/cancel instead of hard-coding
+// 'active'). `created_by` is the actor email, nullable (p_actor is optional).
+export type WorkOrder = {
+  id: string;
+  wo_number: string;
+  truck_id: string;
+  type: WorkOrderType;
+  priority: WorkOrderPriority;
+  status: WorkOrderStatus;
+  title: string;
+  title_ar: string;
+  opened_at: string;
+  due_by: string;
+  closed_at: string | null;
+  assigned_mechanic_id: string;
+  estimated_cost_sar: number;
+  actual_cost_sar: number | null;
+  labor_hours: number;
+  labor_rate_sar: number;
+  mechanic_notes: string | null;
+  inventory_deducted_at: string | null;
+  odometer_at_service: number | null;
+  prior_truck_status: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+// work_order_tasks row — description_en/ar are a SNAPSHOT of the
+// repair_description at the moment the WO was created, not a live FK.
+export type WorkOrderTask = {
+  id: string;
+  work_order_id: string;
+  description_en: string;
+  description_ar: string;
+  done: boolean;
+  ordinal: number;
+  created_at: string;
+};
+
+// work_order_parts row — unit_price_sar is a snapshot at reservation time
+// (= parts.unit_cost_sar at save). Phase 2's start_work_order overwrites it
+// with the true FIFO weighted price actually drawn via consume_from_lots.
+export type WorkOrderPart = {
+  id: string;
+  work_order_id: string;
+  part_id: string;
+  qty: number;
+  unit_price_sar: number;
+  created_at: string;
+};

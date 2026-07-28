@@ -1,141 +1,105 @@
-"use client";
+import { createClient } from "@/lib/supabase/server";
+import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart } from "@/lib/db-types";
+import MaintenanceClient from "./MaintenanceClient";
 
-import { useApp } from "@/components/AppShell";
-import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD, Section } from "@/components/ui";
-import { workOrders, parts, findTruck, findPerson, trucks } from "@/lib/mock-data";
-import { t } from "@/lib/i18n";
-import { formatSar, cn } from "@/lib/utils";
-import { Plus, Wrench, Calendar, AlertTriangle } from "lucide-react";
-import { useMemo, useState } from "react";
+// Maintenance — Phase 1 (in-house scheduling core, migration 0060). Server
+// component fetches, client island renders + wires — same split as
+// app/inventory/page.tsx. This REPLACES the earlier mock-data-backed
+// page.tsx (lib/mock-data.ts's workOrders/parts/findTruck/findPerson) that
+// predates this build and never matched preview/'s actual Maintenance
+// layout (no calendar, no track switch, no New Work Order form) — that
+// scaffolding is gone as of this commit.
+export const dynamic = "force-dynamic";
 
-export default function MaintenancePage() {
-  const { lang } = useApp();
-  const [filter, setFilter] = useState<"all" | "open" | "in_progress" | "awaiting_parts" | "completed">("all");
+export default async function MaintenancePage() {
+  const supabase = createClient();
 
-  const list = useMemo(() => workOrders.filter(w => filter === "all" ? true : w.status === filter), [filter]);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const currentUserEmail = user?.email ?? null;
 
-  const open = workOrders.filter(w => w.status !== "completed" && w.status !== "cancelled").length;
-  const overdue = workOrders.filter(w => w.status !== "completed" && new Date(w.dueBy) < new Date(2026, 4, 10)).length;
-  const totalEstCost = workOrders.filter(w => w.status !== "completed").reduce((s, w) => s + w.estimatedCostSar, 0);
-  const completedCost = workOrders.filter(w => w.status === "completed").reduce((s, w) => s + (w.actualCostSar ?? 0), 0);
+  const [
+    trucksRes,
+    mechanicsRes,
+    partsRes,
+    repairDescriptionsRes,
+    workOrdersRes,
+    workOrderTasksRes,
+    workOrderPartsRes,
+  ] = await Promise.all([
+    supabase
+      .from("trucks")
+      .select("id, plate, model, year, capacity_m3, status, health_score, home_station, odometer_km, engine_hours, vin, assigned_driver_id, last_service_date, utilization_pct, fuel_efficiency_km_per_l, active, created_at, terminated_at, termination_reason, termination_price, released_date")
+      .eq("active", true)
+      .is("terminated_at", null)
+      .order("plate", { ascending: true }),
+    // Mechanic picker — role='mechanic' is a hard eligibility gate mirrored
+    // server-side inside create_work_order() itself; this is just the list
+    // to populate the dropdown from, same "server is the real gate" split
+    // as every eligible-approver picker in Inventory.
+    supabase
+      .from("staff")
+      .select("id, name, name_ar, role, station, email, phone, active, terminated_at, created_at, duty_hours, hire_date, iqama_expiry")
+      .eq("role", "mechanic")
+      .eq("active", true)
+      .is("terminated_at", null)
+      .order("name", { ascending: true }),
+    supabase
+      .from("parts")
+      .select("id, sku, name, name_ar, category, unit, unit_cost_sar, qty_on_hand, reorder_level, reorder_qty, lead_time_days, supplier, warehouse_id, active, created_at")
+      .eq("active", true)
+      .order("category", { ascending: true })
+      .order("name", { ascending: true }),
+    supabase
+      .from("repair_descriptions")
+      .select("id, en, ar, active, created_at")
+      .eq("active", true)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("work_orders")
+      .select(
+        "id, wo_number, truck_id, type, priority, status, title, title_ar, opened_at, due_by, closed_at, assigned_mechanic_id, estimated_cost_sar, actual_cost_sar, labor_hours, labor_rate_sar, mechanic_notes, inventory_deducted_at, odometer_at_service, prior_truck_status, created_by, created_at"
+      )
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("work_order_tasks")
+      .select("id, work_order_id, description_en, description_ar, done, ordinal, created_at")
+      .order("ordinal", { ascending: true }),
+    supabase
+      .from("work_order_parts")
+      .select("id, work_order_id, part_id, qty, unit_price_sar, created_at"),
+  ]);
 
-  const upcoming = trucks
-    .map(tr => ({ truck: tr, kmTo: tr.nextServiceKm - tr.odometerKm }))
-    .filter(x => x.kmTo > 0 && x.kmTo < 3000)
-    .sort((a, b) => a.kmTo - b.kmTo)
-    .slice(0, 8);
+  const trucks = (trucksRes.data ?? []) as Truck[];
+  const mechanics = (mechanicsRes.data ?? []) as Staff[];
+  const parts = (partsRes.data ?? []) as Part[];
+  const repairDescriptions = (repairDescriptionsRes.data ?? []) as RepairDescription[];
+  const workOrders = (workOrdersRes.data ?? []) as WorkOrder[];
+  const workOrderTasks = (workOrderTasksRes.data ?? []) as WorkOrderTask[];
+  const workOrderParts = (workOrderPartsRes.data ?? []) as WorkOrderPart[];
+
+  const error =
+    trucksRes.error?.message ??
+    mechanicsRes.error?.message ??
+    partsRes.error?.message ??
+    repairDescriptionsRes.error?.message ??
+    workOrdersRes.error?.message ??
+    workOrderTasksRes.error?.message ??
+    workOrderPartsRes.error?.message ??
+    null;
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title={t("nav.maintenance", lang)}
-        subtitle={lang === "en" ? "Work orders, preventive schedules, and history" : "أوامر العمل والصيانة الوقائية والسجل"}
-        actions={
-          <>
-            <Btn variant="outline"><Calendar className="h-4 w-4" />{lang === "en" ? "Schedule PM" : "جدولة وقائية"}</Btn>
-            <Btn variant="primary"><Plus className="h-4 w-4" />{lang === "en" ? "New Work Order" : "أمر عمل جديد"}</Btn>
-          </>
-        }
-      />
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label={lang === "en" ? "Open Work Orders" : "أوامر مفتوحة"} value={open} tone={open > 12 ? "warn" : "ok"} />
-        <Stat label={lang === "en" ? "Overdue" : "متأخرة"} value={overdue} tone={overdue > 0 ? "bad" : "ok"} />
-        <Stat label={lang === "en" ? "Est. Cost (open)" : "تكلفة تقديرية"} value={formatSar(totalEstCost)} tone="warn" />
-        <Stat label={lang === "en" ? "Completed Cost (30d)" : "تكلفة مكتملة (30 يوم)"} value={formatSar(completedCost)} />
-      </div>
-
-      <Card className="!p-3">
-        <div className="flex items-center gap-1 flex-wrap">
-          {(["all", "open", "in_progress", "awaiting_parts", "completed"] as const).map(s => (
-            <button key={s} onClick={() => setFilter(s)}
-              className={cn("h-9 px-3 rounded-lg text-xs font-medium border",
-                filter === s ? "bg-brand-600 text-white border-brand-600" : "")}
-              style={filter !== s ? { borderColor: "rgb(var(--border))" } : undefined}>
-              {s === "all" ? t("common.all", lang) : t(`status.${s}`, lang)}
-              <span className="ms-1 muted">{s === "all" ? workOrders.length : workOrders.filter(w => w.status === s).length}</span>
-            </button>
-          ))}
-        </div>
-      </Card>
-
-      <Card className="!p-0 overflow-hidden">
-        <Table>
-          <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-            <tr>
-              <TH>WO</TH>
-              <TH>{lang === "en" ? "Title" : "العنوان"}</TH>
-              <TH>{lang === "en" ? "Truck" : "الشاحنة"}</TH>
-              <TH>{lang === "en" ? "Type" : "النوع"}</TH>
-              <TH>{lang === "en" ? "Priority" : "الأولوية"}</TH>
-              <TH>{t("common.status", lang)}</TH>
-              <TH>{lang === "en" ? "Mechanic" : "الفني"}</TH>
-              <TH>{lang === "en" ? "Opened" : "تاريخ الفتح"}</TH>
-              <TH>{lang === "en" ? "Due" : "تاريخ الاستحقاق"}</TH>
-              <TH>{lang === "en" ? "Est. Cost" : "تكلفة تقديرية"}</TH>
-              <TH>{lang === "en" ? "Hrs" : "ساعات"}</TH>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map(w => {
-              const truck = findTruck(w.truckId);
-              const mech = w.assignedMechanicId ? findPerson(w.assignedMechanicId) : null;
-              const overdue = w.status !== "completed" && new Date(w.dueBy) < new Date(2026, 4, 10);
-              const priorityCls = {
-                low: "text-slate-500",
-                medium: "text-blue-600",
-                high: "text-amber-600",
-                critical: "text-rose-600 font-semibold",
-              }[w.priority];
-              return (
-                <tr key={w.id}>
-                  <TD className="font-mono text-xs">{w.id}</TD>
-                  <TD>
-                    <div className="flex items-center gap-2">
-                      {w.type === "predictive" && <span className="text-[10px] bg-purple-500/10 text-purple-700 dark:text-purple-300 rounded px-1.5 py-0.5 font-medium">AI</span>}
-                      <span className="font-medium">{lang === "ar" ? w.titleAr : w.title}</span>
-                    </div>
-                    {w.predictiveSignal && <div className="text-[11px] muted">{w.predictiveSignal}</div>}
-                  </TD>
-                  <TD className="font-mono text-xs">{truck?.id} · {lang === "ar" ? truck?.plateAr : truck?.plate}</TD>
-                  <TD className="capitalize">{w.type}</TD>
-                  <TD className={priorityCls}>{w.priority}</TD>
-                  <TD><StatusPill status={w.status} label={t(`status.${w.status}`, lang)} /></TD>
-                  <TD>{mech ? (lang === "ar" ? mech.nameAr : mech.name) : "—"}</TD>
-                  <TD className="text-xs">{new Date(w.openedAt).toLocaleDateString()}</TD>
-                  <TD className={cn("text-xs", overdue ? "text-rose-600 font-medium" : "")}>
-                    {overdue && <AlertTriangle className="inline h-3 w-3 me-1" />}
-                    {new Date(w.dueBy).toLocaleDateString()}
-                  </TD>
-                  <TD className="tabular-nums">{formatSar(w.estimatedCostSar)}</TD>
-                  <TD className="tabular-nums">{w.laborHours}</TD>
-                </tr>
-              );
-            })}
-          </tbody>
-        </Table>
-      </Card>
-
-      <Section title={lang === "en" ? "Upcoming Preventive Maintenance" : "الصيانة الوقائية القادمة"}>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {upcoming.map(({ truck, kmTo }) => (
-            <div key={truck.id} className="rounded-lg border p-3" style={{ borderColor: "rgb(var(--border))" }}>
-              <div className="flex items-center gap-2 mb-1">
-                <Wrench className="h-4 w-4 text-amber-500" />
-                <span className="font-mono text-xs">{truck.id}</span>
-              </div>
-              <div className="text-sm font-medium truncate">{truck.model}</div>
-              <div className="text-[11px] muted">{lang === "ar" ? truck.plateAr : truck.plate} · {truck.homeDepot}</div>
-              <div className="text-xs mt-2">
-                <span className="muted">{lang === "en" ? "Next service in" : "الصيانة بعد"}:</span>{" "}
-                <span className={cn("font-semibold tabular-nums", kmTo < 1000 ? "text-rose-600" : kmTo < 2000 ? "text-amber-600" : "text-emerald-600")}>
-                  {kmTo} km
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
-    </div>
+    <MaintenanceClient
+      trucks={trucks}
+      mechanics={mechanics}
+      parts={parts}
+      repairDescriptions={repairDescriptions}
+      workOrders={workOrders}
+      workOrderTasks={workOrderTasks}
+      workOrderParts={workOrderParts}
+      currentUserEmail={currentUserEmail}
+      error={error}
+    />
   );
 }
