@@ -17,7 +17,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import type { RepairDescription, WorkOrder } from "@/lib/db-types";
+import type { RepairDescription, WorkOrder, WorkOrderTask } from "@/lib/db-types";
 
 async function actorEmail(supabase: ReturnType<typeof createClient>): Promise<string | null> {
   const { data } = await supabase.auth.getUser();
@@ -110,4 +110,91 @@ export async function addRepairDescription(
 
   revalidatePath("/maintenance");
   return { error: null, description: data as RepairDescription };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — lifecycle (migration 0061). start_work_order/complete_work_order
+// route ALL stock deduction through consume_from_lots (the sole stock
+// writer) via the private deduct_work_order_parts() helper — this file never
+// touches parts/price_lots/stock_movements directly, same "server RPC is
+// the real gate" split as create_work_order above. No truck-status handling
+// anywhere in this phase (Turki's call — that's a separate, later,
+// cross-module build).
+// ---------------------------------------------------------------------------
+
+// Both messages below are already plain/specific from the RPC itself
+// (consume_from_lots' own "Not enough stock on hand: have X, requested Y."
+// surfacing through deduct_work_order_parts, or start_work_order's own
+// status guard) — passed through as-is, same convention as
+// friendlyWoError above.
+function friendlyLifecycleError(message: string): string {
+  return message;
+}
+
+export async function startWorkOrder(
+  woId: string,
+): Promise<{ error: string | null; workOrder?: WorkOrder }> {
+  if (!woId) return { error: "Work order is required." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("start_work_order", {
+    p_wo_id: woId,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: friendlyLifecycleError(error.message) };
+
+  revalidatePath("/maintenance");
+  return { error: null, workOrder: data as WorkOrder };
+}
+
+export async function completeWorkOrder(
+  woId: string,
+): Promise<{ error: string | null; workOrder?: WorkOrder }> {
+  if (!woId) return { error: "Work order is required." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("complete_work_order", {
+    p_wo_id: woId,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: friendlyLifecycleError(error.message) };
+
+  revalidatePath("/maintenance");
+  return { error: null, workOrder: data as WorkOrder };
+}
+
+export async function toggleWorkOrderTask(
+  taskId: string,
+  done: boolean,
+): Promise<{ error: string | null; task?: WorkOrderTask }> {
+  if (!taskId) return { error: "Task is required." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("toggle_work_order_task", {
+    p_task_id: taskId,
+    p_done: done,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: friendlyLifecycleError(error.message) };
+
+  revalidatePath("/maintenance");
+  return { error: null, task: data as WorkOrderTask };
+}
+
+export async function saveWorkOrderNotes(
+  woId: string,
+  notes: string,
+): Promise<{ error: string | null; workOrder?: WorkOrder }> {
+  if (!woId) return { error: "Work order is required." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("save_work_order_notes", {
+    p_wo_id: woId,
+    p_notes: notes,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: friendlyLifecycleError(error.message) };
+
+  revalidatePath("/maintenance");
+  return { error: null, workOrder: data as WorkOrder };
 }

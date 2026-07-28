@@ -1,21 +1,31 @@
 "use client";
 
-// Work Order detail — READ-ONLY in Phase 1. Mirrors preview/'s pages-2.js
-// MT.openJob() layout (header strip / Work Performed / Mechanic Notes /
-// Parts Replaced / cost breakdown) minus everything that needs a Phase-2
-// RPC that doesn't exist yet: no task-toggle (toggle_work_order_task), no
-// notes editing (save_work_order_notes), no Start/Complete buttons
-// (start_work_order/complete_work_order), no photo gallery (Phase 3). Those
-// land on this same shell in later phases rather than a second modal —
-// flagged explicitly in the footer instead of silently omitted.
+// Work Order detail — Phase 2: now interactive. Mirrors preview/'s
+// pages-2.js MT.openJob() layout (header strip / Work Performed / Mechanic
+// Notes / Parts Replaced / cost breakdown / Start-Complete footer).
+//
+// No local optimistic state for workOrder/tasks/lines — same convention as
+// InventoryClient's own modals (e.g. createPurchaseOrder): call the action,
+// router.refresh() on success, let the server component's fresh props flow
+// back down. This modal isn't unmounted across a refresh (still keyed by
+// viewingWoId in the parent), so it picks up the new status/tasks/line
+// prices (deduct_work_order_parts overwrites unit_price_sar on start)
+// automatically once the refresh resolves — no manual merging needed.
+//
+// Photos (Phase 3) still not built — Parts Replaced has no photo column yet.
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, CheckSquare, Square } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { X, CheckSquare, Square, Play, Check } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn, formatSar } from "@/lib/utils";
 import { Btn, StatusPill } from "@/components/ui";
 import type { Truck, Staff, Part, WorkOrder, WorkOrderTask, WorkOrderPart } from "@/lib/db-types";
+import { startWorkOrder, completeWorkOrder, toggleWorkOrderTask, saveWorkOrderNotes } from "./actions";
+
+const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
+const INPUT_STYLE = { borderColor: "rgb(var(--border))" } as const;
 
 function ModalOverlay({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
@@ -52,13 +62,78 @@ export default function WorkOrderDetailModal({
   parts: Part[];
   onClose: () => void;
 }) {
+  const router = useRouter();
   const partsById = new Map(parts.map((p) => [p.id, p]));
   const delayed = isWoDelayed(workOrder);
+  const editable = workOrder.status !== "completed" && workOrder.status !== "cancelled";
 
   const partsCost = lines.reduce((s, l) => s + l.unit_price_sar * l.qty, 0);
   const laborCost = workOrder.labor_hours * workOrder.labor_rate_sar;
   const total = workOrder.actual_cost_sar ?? partsCost + laborCost;
   const doneCount = tasks.filter((tk) => tk.done).length;
+
+  const [error, setError] = useState<string | null>(null);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [draftNotes, setDraftNotes] = useState(workOrder.mechanic_notes ?? "");
+  const [savingNotes, setSavingNotes] = useState(false);
+
+  async function onToggleTask(task: WorkOrderTask) {
+    if (!editable || busyTaskId) return;
+    setBusyTaskId(task.id);
+    setError(null);
+    const res = await toggleWorkOrderTask(task.id, !task.done);
+    setBusyTaskId(null);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
+  function startEditingNotes() {
+    setDraftNotes(workOrder.mechanic_notes ?? "");
+    setEditingNotes(true);
+  }
+
+  async function onSaveNotes() {
+    setSavingNotes(true);
+    setError(null);
+    const res = await saveWorkOrderNotes(workOrder.id, draftNotes);
+    setSavingNotes(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    setEditingNotes(false);
+    router.refresh();
+  }
+
+  async function onStart() {
+    setLifecycleBusy(true);
+    setError(null);
+    const res = await startWorkOrder(workOrder.id);
+    setLifecycleBusy(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
+  async function onComplete() {
+    setLifecycleBusy(true);
+    setError(null);
+    const res = await completeWorkOrder(workOrder.id);
+    setLifecycleBusy(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    router.refresh();
+  }
 
   return (
     <ModalOverlay onClick={onClose}>
@@ -74,6 +149,10 @@ export default function WorkOrderDetailModal({
         </div>
 
         <div className="p-4 space-y-4">
+          {error && (
+            <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">{error}</div>
+          )}
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div>
               <div className="muted mb-0.5">{t("common.truck", lang)}</div>
@@ -119,18 +198,45 @@ export default function WorkOrderDetailModal({
             ) : (
               <div className="space-y-1.5">
                 {tasks.map((tk) => (
-                  <div key={tk.id} className="flex items-center gap-2 text-sm">
+                  <button
+                    key={tk.id}
+                    type="button"
+                    onClick={() => onToggleTask(tk)}
+                    disabled={!editable || busyTaskId === tk.id}
+                    className="flex items-center gap-2 text-sm w-full text-start disabled:cursor-default"
+                  >
                     {tk.done ? <CheckSquare className="h-4 w-4 text-emerald-600 shrink-0" /> : <Square className="h-4 w-4 muted shrink-0" />}
                     <span className={cn(tk.done ? "line-through muted" : "")}>{lang === "ar" ? tk.description_ar : tk.description_en}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
           </div>
 
           <div className="rounded-lg border p-3" style={{ borderColor: "rgb(var(--border))" }}>
-            <h3 className="text-sm font-semibold mb-2">{t("mt.mechanicNotes", lang)}</h3>
-            <p className="text-sm muted">{workOrder.mechanic_notes || "—"}</p>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold">{t("mt.mechanicNotes", lang)}</h3>
+              {editable && !editingNotes && (
+                <button onClick={startEditingNotes} className="text-xs text-brand-600 hover:underline">{t("mt.editNotes", lang)}</button>
+              )}
+            </div>
+            {editingNotes ? (
+              <div className="space-y-2">
+                <textarea
+                  value={draftNotes}
+                  onChange={(e) => setDraftNotes(e.target.value)}
+                  rows={3}
+                  className={cn(INPUT, "resize-none")}
+                  style={INPUT_STYLE}
+                />
+                <div className="flex justify-end gap-2">
+                  <Btn variant="outline" onClick={() => setEditingNotes(false)} disabled={savingNotes}>{t("common.cancel", lang)}</Btn>
+                  <Btn variant="primary" onClick={onSaveNotes} disabled={savingNotes}>{savingNotes ? "…" : t("mt.saveNotes", lang)}</Btn>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm muted">{workOrder.mechanic_notes || "—"}</p>
+            )}
           </div>
 
           <div className="rounded-lg border overflow-hidden" style={{ borderColor: "rgb(var(--border))" }}>
@@ -167,6 +273,13 @@ export default function WorkOrderDetailModal({
                 </tbody>
               </table>
             )}
+            {workOrder.inventory_deducted_at && (
+              <div className="px-3 py-2 text-[11px] muted border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                {lang === "en"
+                  ? "Inventory is automatically reduced when the maintenance team consumes parts."
+                  : "ينخفض المخزون تلقائياً عند استهلاك فريق الصيانة للقطع."}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -193,7 +306,18 @@ export default function WorkOrderDetailModal({
         </div>
 
         <div className="flex items-center justify-between gap-2 p-4 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-          <span className="text-xs muted">{t("mt.phase2Note", lang)}</span>
+          <div className="flex gap-2">
+            {workOrder.status === "open" && (
+              <Btn variant="primary" onClick={onStart} disabled={lifecycleBusy}>
+                <Play className="h-4 w-4" />{lifecycleBusy ? "…" : t("mt.markInProg", lang)}
+              </Btn>
+            )}
+            {(workOrder.status === "in_progress" || workOrder.status === "awaiting_parts") && (
+              <Btn variant="primary" onClick={onComplete} disabled={lifecycleBusy}>
+                <Check className="h-4 w-4" />{lifecycleBusy ? "…" : t("mt.markComplete", lang)}
+              </Btn>
+            )}
+          </div>
           <Btn variant="outline" onClick={onClose}>{lang === "en" ? "Close" : "إغلاق"}</Btn>
         </div>
       </div>
