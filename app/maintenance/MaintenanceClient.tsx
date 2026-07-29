@@ -20,7 +20,7 @@ import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD } from "@/compon
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
 import { cn, formatSar } from "@/lib/utils";
-import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings } from "@/lib/db-types";
+import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, WorkOrderPartPhoto, CompanySettings } from "@/lib/db-types";
 import MaintenanceCalendar from "./MaintenanceCalendar";
 import NewWorkOrderModal from "./NewWorkOrderModal";
 import WorkOrderDetailModal from "./WorkOrderDetailModal";
@@ -53,6 +53,7 @@ export default function MaintenanceClient({
   workOrders,
   workOrderTasks,
   workOrderParts,
+  workOrderPartPhotos,
   companySettings,
   currentUserEmail,
   error,
@@ -64,6 +65,7 @@ export default function MaintenanceClient({
   workOrders: WorkOrder[];
   workOrderTasks: WorkOrderTask[];
   workOrderParts: WorkOrderPart[];
+  workOrderPartPhotos: WorkOrderPartPhoto[];
   companySettings: CompanySettings | null;
   currentUserEmail: string | null;
   error: string | null;
@@ -447,19 +449,24 @@ export default function MaintenanceClient({
         />
       )}
 
-      {viewingWo && (
-        <WorkOrderDetailModal
-          lang={lang}
-          workOrder={viewingWo}
-          tasks={workOrderTasks.filter((tk) => tk.work_order_id === viewingWo.id)}
-          lines={workOrderParts.filter((l) => l.work_order_id === viewingWo.id)}
-          truck={trucksById.get(viewingWo.truck_id) ?? null}
-          mechanic={mechanicsById.get(viewingWo.assigned_mechanic_id) ?? null}
-          parts={parts}
-          onClose={() => setViewingWoId(null)}
-          onEdit={() => openEdit(viewingWo.id)}
-        />
-      )}
+      {viewingWo && (() => {
+        const viewingLines = workOrderParts.filter((l) => l.work_order_id === viewingWo.id);
+        const viewingLineIds = new Set(viewingLines.map((l) => l.id));
+        return (
+          <WorkOrderDetailModal
+            lang={lang}
+            workOrder={viewingWo}
+            tasks={workOrderTasks.filter((tk) => tk.work_order_id === viewingWo.id)}
+            lines={viewingLines}
+            photos={workOrderPartPhotos.filter((p) => viewingLineIds.has(p.work_order_part_id))}
+            truck={trucksById.get(viewingWo.truck_id) ?? null}
+            mechanic={mechanicsById.get(viewingWo.assigned_mechanic_id) ?? null}
+            parts={parts}
+            onClose={() => setViewingWoId(null)}
+            onEdit={() => openEdit(viewingWo.id)}
+          />
+        );
+      })()}
     </div>
   );
 }

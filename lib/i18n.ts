@@ -158,6 +158,12 @@ export const dict = {
     createdBy: { en: "Created by", ar: "أنشأه" },
     startedBy: { en: "Started by", ar: "بدأه" },
     completedBy: { en: "Completed by", ar: "أنهاه" },
+    photos: { en: "Photos", ar: "الصور" },
+    uploadPhoto: { en: "Upload photo", ar: "رفع صورة" },
+    noPhotos: { en: "No photos yet", ar: "لا توجد صور بعد" },
+    photoTooLarge: { en: "Photo too large (max 2 MB)", ar: "الصورة كبيرة جدًا (الحد 2 ميغابايت)" },
+    photoCapReached: { en: "Maximum 4 photos per part", ar: "الحد الأقصى 4 صور لكل قطعة" },
+    removePhoto: { en: "Remove photo", ar: "حذف الصورة" },
   },
 } as const;
 

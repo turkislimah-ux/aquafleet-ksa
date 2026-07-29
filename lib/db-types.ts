@@ -961,3 +961,17 @@ export type WorkOrderPart = {
   unit_price_sar: number;
   created_at: string;
 };
+
+// work_order_part_photos row (migration 0067, LIVE) — metadata for a photo
+// attached to a Parts Replaced line. Actual bytes live in the private
+// `maintenance-photos` Storage bucket; storage_path is the pointer.
+// Deleting the parent work_order_parts row cascades its photos away too
+// (same "delete after settled" precedent as the reversal work).
+export type WorkOrderPartPhoto = {
+  id: string;
+  work_order_part_id: string;
+  storage_path: string;
+  file_name: string;
+  mime_type: string | null;
+  uploaded_at: string;
+};

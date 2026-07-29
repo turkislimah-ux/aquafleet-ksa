@@ -1,8 +1,9 @@
 "use client";
 
-// Work Order detail — Phase 2: now interactive. Mirrors preview/'s
+// Work Order detail — Phase 3 adds per-part-line photos. Mirrors preview/'s
 // pages-2.js MT.openJob() layout (header strip / Work Performed / Mechanic
-// Notes / Parts Replaced / cost breakdown / Start-Complete footer).
+// Notes / Parts Replaced (now with a Photos column) / cost breakdown /
+// Start-Complete footer).
 //
 // No local optimistic state for workOrder/tasks/lines — same convention as
 // InventoryClient's own modals (e.g. createPurchaseOrder): call the action,
@@ -12,17 +13,37 @@
 // prices (deduct_work_order_parts overwrites unit_price_sar on start)
 // automatically once the refresh resolves — no manual merging needed.
 //
-// Photos (Phase 3) still not built — Parts Replaced has no photo column yet.
+// PHOTOS (migration 0067): count (4) and size (2 MB) caps mirror preview's
+// own limits exactly (mt.photoCapReached/photoTooLarge). Allowed while the
+// job isn't 'cancelled' — preview's own rule is "even on completed jobs,
+// for retroactive documentation," so 'completed' still permits upload,
+// only 'cancelled' blocks it (a dormant status with no UI path in this
+// build, but the check is here per preview parity regardless). Signed
+// URLs are fetched once per photo set change (private bucket, 5-minute
+// links, same on-demand convention as invoiceActions.ts's
+// getSpecialChargeImageSignedUrl) — never persisted, re-fetched if this
+// modal is reopened.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { X, CheckSquare, Square, Play, Check, Pencil, AlertTriangle } from "lucide-react";
+import { X, CheckSquare, Square, Play, Check, Pencil, AlertTriangle, ImagePlus } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn, formatSar } from "@/lib/utils";
 import { Btn, StatusPill } from "@/components/ui";
-import type { Truck, Staff, Part, WorkOrder, WorkOrderTask, WorkOrderPart } from "@/lib/db-types";
-import { startWorkOrder, completeWorkOrder, toggleWorkOrderTask, saveWorkOrderNotes } from "./actions";
+import type { Truck, Staff, Part, WorkOrder, WorkOrderTask, WorkOrderPart, WorkOrderPartPhoto } from "@/lib/db-types";
+import {
+  startWorkOrder,
+  completeWorkOrder,
+  toggleWorkOrderTask,
+  saveWorkOrderNotes,
+  uploadWorkOrderPartPhoto,
+  removeWorkOrderPartPhoto,
+  getWorkOrderPartPhotoSignedUrls,
+} from "./actions";
+
+const MAX_PHOTOS_PER_LINE = 4;
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))" } as const;
@@ -48,6 +69,7 @@ export default function WorkOrderDetailModal({
   workOrder,
   tasks,
   lines,
+  photos,
   truck,
   mechanic,
   parts,
@@ -58,6 +80,7 @@ export default function WorkOrderDetailModal({
   workOrder: WorkOrder;
   tasks: WorkOrderTask[];
   lines: WorkOrderPart[];
+  photos: WorkOrderPartPhoto[];
   truck: Truck | null;
   mechanic: Staff | null;
   parts: Part[];
@@ -68,6 +91,10 @@ export default function WorkOrderDetailModal({
   const partsById = new Map(parts.map((p) => [p.id, p]));
   const delayed = isWoDelayed(workOrder);
   const editable = workOrder.status !== "completed" && workOrder.status !== "cancelled";
+  // Photos: allowed on completed jobs too (retroactive documentation),
+  // blocked only on cancelled — matches preview exactly, distinct from
+  // `editable` above (which gates tasks/notes/lifecycle, not photos).
+  const canUploadPhotos = workOrder.status !== "cancelled";
 
   const partsCost = lines.reduce((s, l) => s + l.unit_price_sar * l.qty, 0);
   const laborCost = workOrder.labor_hours * workOrder.labor_rate_sar;
@@ -94,6 +121,73 @@ export default function WorkOrderDetailModal({
   const [editingNotes, setEditingNotes] = useState(false);
   const [draftNotes, setDraftNotes] = useState(workOrder.mechanic_notes ?? "");
   const [savingNotes, setSavingNotes] = useState(false);
+
+  const photosByLine = useMemo(() => {
+    const m = new Map<string, WorkOrderPartPhoto[]>();
+    for (const ph of photos) {
+      const arr = m.get(ph.work_order_part_id) ?? [];
+      arr.push(ph);
+      m.set(ph.work_order_part_id, arr);
+    }
+    return m;
+  }, [photos]);
+
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [busyLineId, setBusyLineId] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const paths = photos.map((ph) => ph.storage_path);
+    if (paths.length === 0) {
+      setSignedUrls({});
+      return;
+    }
+    let cancelled = false;
+    getWorkOrderPartPhotoSignedUrls(paths).then((res) => {
+      if (!cancelled && res.urls) setSignedUrls(res.urls);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photos.map((ph) => ph.storage_path).join(",")]);
+
+  async function onUploadPhoto(lineId: string, file: File | undefined) {
+    if (!file) return;
+    setPhotoError(null);
+    if (file.size > MAX_PHOTO_BYTES) {
+      setPhotoError(t("mt.photoTooLarge", lang));
+      return;
+    }
+    if ((photosByLine.get(lineId)?.length ?? 0) >= MAX_PHOTOS_PER_LINE) {
+      setPhotoError(t("mt.photoCapReached", lang));
+      return;
+    }
+    setBusyLineId(lineId);
+    const fd = new FormData();
+    fd.set("workOrderPartId", lineId);
+    fd.set("file", file);
+    const res = await uploadWorkOrderPartPhoto(fd);
+    setBusyLineId(null);
+    if (res.error) {
+      setPhotoError(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
+  async function onRemovePhoto(photoId: string) {
+    setPhotoError(null);
+    setBusyLineId(photoId);
+    const res = await removeWorkOrderPartPhoto(photoId);
+    setBusyLineId(null);
+    if (res.error) {
+      setPhotoError(res.error);
+      return;
+    }
+    router.refresh();
+  }
 
   async function onToggleTask(task: WorkOrderTask) {
     if (!editable || busyTaskId) return;
@@ -186,6 +280,9 @@ export default function WorkOrderDetailModal({
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>{t("mt.outOfPartBlockStart", lang)}</span>
             </div>
+          )}
+          {photoError && (
+            <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">{photoError}</div>
           )}
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -290,20 +387,83 @@ export default function WorkOrderDetailModal({
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("common.qty", lang)}</th>
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("common.unitPrice", lang)}</th>
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{lang === "en" ? "Subtotal" : "المجموع"}</th>
+                    <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("mt.photos", lang)}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lines.map((l) => {
                     const p = partsById.get(l.part_id);
+                    const linePhotos = photosByLine.get(l.id) ?? [];
+                    const atCap = linePhotos.length >= MAX_PHOTOS_PER_LINE;
+                    const busy = busyLineId === l.id;
                     return (
                       <tr key={l.id}>
-                        <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                        <td className="py-2 px-3 border-t align-top" style={{ borderColor: "rgb(var(--border))" }}>
                           <div className="font-medium">{p ? (lang === "ar" ? p.name_ar || p.name : p.name) : l.part_id}</div>
                           <div className="text-[11px] muted font-mono">{p?.sku ?? ""}</div>
                         </td>
-                        <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>{l.qty}</td>
-                        <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>{formatSar(l.unit_price_sar)}</td>
-                        <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>{formatSar(l.unit_price_sar * l.qty)}</td>
+                        <td className="py-2 px-3 border-t tabular-nums align-top" style={{ borderColor: "rgb(var(--border))" }}>{l.qty}</td>
+                        <td className="py-2 px-3 border-t tabular-nums align-top" style={{ borderColor: "rgb(var(--border))" }}>{formatSar(l.unit_price_sar)}</td>
+                        <td className="py-2 px-3 border-t tabular-nums align-top" style={{ borderColor: "rgb(var(--border))" }}>{formatSar(l.unit_price_sar * l.qty)}</td>
+                        <td className="py-2 px-3 border-t align-top" style={{ borderColor: "rgb(var(--border))" }}>
+                          {linePhotos.length === 0 && !canUploadPhotos ? (
+                            <span className="text-[11px] muted">{t("mt.noPhotos", lang)}</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5 items-center">
+                              {linePhotos.map((ph) => {
+                                const url = signedUrls[ph.storage_path];
+                                return (
+                                  <div key={ph.id} className="relative group h-12 w-12 rounded-md overflow-hidden border" style={{ borderColor: "rgb(var(--border))" }}>
+                                    {url ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img
+                                        src={url}
+                                        alt={ph.file_name}
+                                        className="h-full w-full object-cover cursor-pointer"
+                                        onClick={() => setLightboxUrl(url)}
+                                      />
+                                    ) : (
+                                      <div className="h-full w-full bg-black/5 dark:bg-white/5 animate-pulse" />
+                                    )}
+                                    {canUploadPhotos && (
+                                      <button
+                                        type="button"
+                                        onClick={() => onRemovePhoto(ph.id)}
+                                        disabled={busyLineId === ph.id}
+                                        title={t("mt.removePhoto", lang)}
+                                        className="absolute top-0.5 end-0.5 h-4 w-4 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 grid place-items-center transition"
+                                      >
+                                        <X className="h-2.5 w-2.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              {canUploadPhotos && !atCap && (
+                                <label
+                                  title={t("mt.uploadPhoto", lang)}
+                                  className={cn(
+                                    "h-12 w-12 rounded-md border border-dashed grid place-items-center cursor-pointer hover:bg-black/5 dark:hover:bg-white/5",
+                                    busy ? "opacity-50 pointer-events-none" : "",
+                                  )}
+                                  style={{ borderColor: "rgb(var(--border))" }}
+                                >
+                                  <ImagePlus className="h-4 w-4 muted" />
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      onUploadPhoto(l.id, file);
+                                      e.target.value = "";
+                                    }}
+                                  />
+                                </label>
+                              )}
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -365,6 +525,22 @@ export default function WorkOrderDetailModal({
           <Btn variant="outline" onClick={onClose}>{lang === "en" ? "Close" : "إغلاق"}</Btn>
         </div>
       </div>
+
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-[60] grid place-items-center p-6 bg-black/80"
+          onClick={(e) => { e.stopPropagation(); setLightboxUrl(null); }}
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); setLightboxUrl(null); }}
+            className="absolute top-4 end-4 h-9 w-9 rounded-lg bg-white/10 text-white grid place-items-center hover:bg-white/20"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightboxUrl} alt="" className="max-w-full max-h-full rounded-lg" onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </ModalOverlay>
   );
 }

@@ -7,6 +7,7 @@ import type {
   WorkOrder,
   WorkOrderTask,
   WorkOrderPart,
+  WorkOrderPartPhoto,
   CompanySettings,
 } from "@/lib/db-types";
 import MaintenanceClient from "./MaintenanceClient";
@@ -31,6 +32,7 @@ export default async function MaintenancePage() {
     workOrdersRes,
     workOrderTasksRes,
     workOrderPartsRes,
+    workOrderPartPhotosRes,
     companySettingsRes,
   ] = await Promise.all([
     supabase
@@ -77,6 +79,14 @@ export default async function MaintenancePage() {
     supabase
       .from("work_order_parts")
       .select("id, work_order_id, part_id, qty, unit_price_sar, created_at"),
+    // Phase 3 (0067) — metadata only, bulk read (same "fetch everything,
+    // derive client-side" pattern as every other Maintenance table). Actual
+    // bytes stay in the private maintenance-photos bucket, fetched as
+    // signed URLs on demand inside the detail modal, not here.
+    supabase
+      .from("work_order_part_photos")
+      .select("id, work_order_part_id, storage_path, file_name, mime_type, uploaded_at")
+      .order("uploaded_at", { ascending: true }),
     // Working-days-per-month constant (0063) — needed client-side for the
     // same labor-cost preview mentioned above.
     supabase.from("company_settings").select("*").eq("id", true).single(),
@@ -89,6 +99,7 @@ export default async function MaintenancePage() {
   const workOrders = (workOrdersRes.data ?? []) as WorkOrder[];
   const workOrderTasks = (workOrderTasksRes.data ?? []) as WorkOrderTask[];
   const workOrderParts = (workOrderPartsRes.data ?? []) as WorkOrderPart[];
+  const workOrderPartPhotos = (workOrderPartPhotosRes.data ?? []) as WorkOrderPartPhoto[];
   const companySettings = (companySettingsRes.data ?? null) as CompanySettings | null;
 
   const error =
@@ -99,6 +110,7 @@ export default async function MaintenancePage() {
     workOrdersRes.error?.message ??
     workOrderTasksRes.error?.message ??
     workOrderPartsRes.error?.message ??
+    workOrderPartPhotosRes.error?.message ??
     companySettingsRes.error?.message ??
     null;
 
@@ -111,6 +123,7 @@ export default async function MaintenancePage() {
       workOrders={workOrders}
       workOrderTasks={workOrderTasks}
       workOrderParts={workOrderParts}
+      workOrderPartPhotos={workOrderPartPhotos}
       companySettings={companySettings}
       currentUserEmail={currentUserEmail}
       error={error}

@@ -17,7 +17,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import type { RepairDescription, WorkOrder, WorkOrderTask } from "@/lib/db-types";
+import type { RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPartPhoto } from "@/lib/db-types";
 
 async function actorEmail(supabase: ReturnType<typeof createClient>): Promise<string | null> {
   const { data } = await supabase.auth.getUser();
@@ -259,4 +259,113 @@ export async function saveWorkOrderNotes(
 
   revalidatePath("/maintenance");
   return { error: null, workOrder: data as WorkOrder };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — part photos (migration 0067). Plain table + private Storage
+// bucket, no RPC (no invariant to protect — same reasoning as 0043's
+// warehouses/parts having no RPCs at all). Mirrors receiveLooseParts'
+// upload-then-insert pattern in app/inventory/actions.ts: bytes go to
+// Storage FIRST under an app-generated key, never the raw filename, then
+// the pointer row is inserted. Count (4) and size (2 MB) limits enforced
+// here — the RPC-less equivalent of every other server-side "real gate"
+// in this app; the modal's own client-side checks are the UX affordance,
+// not a substitute for these.
+// ---------------------------------------------------------------------------
+
+const PHOTO_BUCKET = "maintenance-photos";
+const MAX_PHOTOS_PER_LINE = 4;
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // 2 MB, matches preview's own cap
+
+export async function uploadWorkOrderPartPhoto(
+  formData: FormData,
+): Promise<{ error: string | null; photo?: WorkOrderPartPhoto }> {
+  const workOrderPartId = String(formData.get("workOrderPartId") ?? "").trim();
+  const file = formData.get("file");
+
+  if (!workOrderPartId) return { error: "Work order part line is required." };
+  if (!(file instanceof File) || file.size === 0) return { error: "Photo file is required." };
+  if (file.size > MAX_PHOTO_BYTES) return { error: "Photo too large (max 2 MB)." };
+
+  const supabase = createClient();
+
+  const { count, error: countErr } = await supabase
+    .from("work_order_part_photos")
+    .select("id", { count: "exact", head: true })
+    .eq("work_order_part_id", workOrderPartId);
+  if (countErr) return { error: countErr.message };
+  if ((count ?? 0) >= MAX_PHOTOS_PER_LINE) return { error: "Maximum 4 photos per part." };
+
+  const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
+  const ext = extMatch ? extMatch[1].toLowerCase() : "bin";
+  const path = `${workOrderPartId}/photo-${Date.now()}.${ext}`;
+
+  const { error: uploadErr } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
+    contentType: file.type || "application/octet-stream",
+  });
+  if (uploadErr) return { error: `Photo upload failed: ${uploadErr.message}` };
+
+  const { data, error } = await supabase
+    .from("work_order_part_photos")
+    .insert({
+      work_order_part_id: workOrderPartId,
+      storage_path: path,
+      file_name: file.name,
+      mime_type: file.type || null,
+    })
+    .select("id, work_order_part_id, storage_path, file_name, mime_type, uploaded_at")
+    .single();
+  if (error) {
+    // Best-effort cleanup — avoid an orphaned storage object for a row
+    // that never landed.
+    await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+    return { error: error.message };
+  }
+
+  revalidatePath("/maintenance");
+  return { error: null, photo: data as WorkOrderPartPhoto };
+}
+
+export async function removeWorkOrderPartPhoto(photoId: string): Promise<{ error: string | null }> {
+  if (!photoId) return { error: "Photo is required." };
+
+  const supabase = createClient();
+
+  const { data: photo, error: fetchErr } = await supabase
+    .from("work_order_part_photos")
+    .select("storage_path")
+    .eq("id", photoId)
+    .single();
+  if (fetchErr || !photo) return { error: fetchErr?.message ?? "Photo not found." };
+
+  const { error: deleteErr } = await supabase.from("work_order_part_photos").delete().eq("id", photoId);
+  if (deleteErr) return { error: deleteErr.message };
+
+  // Storage cleanup after the row is gone — a leftover blob with no
+  // pointer is harmless; a pointer to a deleted blob is not.
+  await supabase.storage.from(PHOTO_BUCKET).remove([photo.storage_path]);
+
+  revalidatePath("/maintenance");
+  return { error: null };
+}
+
+// Signed URLs, same on-demand convention as
+// getSpecialChargeImageSignedUrl (app/trips/invoiceActions.ts) — generated
+// when the modal actually needs to show them, not batch-prefetched on page
+// load (a private bucket's signed links are time-limited, 5 minutes here,
+// same as that precedent).
+export async function getWorkOrderPartPhotoSignedUrls(
+  paths: string[],
+): Promise<{ error: string | null; urls?: Record<string, string> }> {
+  if (paths.length === 0) return { error: null, urls: {} };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrls(paths, 300);
+  if (error || !data) return { error: error?.message ?? "Could not generate photo links." };
+
+  const urls: Record<string, string> = {};
+  for (const item of data) {
+    if (item.path && item.signedUrl) urls[item.path] = item.signedUrl;
+  }
+  return { error: null, urls };
 }
