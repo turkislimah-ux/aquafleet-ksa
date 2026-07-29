@@ -1,23 +1,34 @@
 "use client";
 
-// New Work Order — mirrors preview/'s pages-2.js MT.openNewJob/saveNewJob
-// (lines ~956-1131) field-for-field: Truck / Type / Priority / Due date /
-// Mechanic, a description chip picker (repair_descriptions catalog, inline
-// "+ add" same as units'/suppliers' inline-create), and a parts picker
-// grouped by category with a qty stepper.
+// New / Edit Work Order — mirrors preview/'s pages-2.js MT.openNewJob/
+// saveNewJob field-for-field: Truck / Type / Priority / Due date / Mechanic
+// / Labor hours, a description chip picker (repair_descriptions catalog,
+// inline "+ add"), and a parts picker grouped by category with a qty
+// stepper. One component handles both create AND edit (via the optional
+// `editingWorkOrder` prop) — same "one modal, edit prop" convention
+// Inventory's own NewPOModal already established for editable drafts.
 //
 // *** OUT-OF-STOCK HARD BLOCK (Turki, explicit) ***
-// create_work_order (migration 0060) rejects any line whose qty exceeds
-// that part's CURRENT qty_on_hand — server-side, authoritative. Turki's ask
-// was to prevent it at the point of SELECTION, not discover it on save:
-//   - A part with qty_on_hand <= 0 renders its whole row disabled (greyed,
-//     no stepper, "Out of stock" badge instead of a price/qty control).
-//   - Every other part's stepper is hard-capped at qty_on_hand — the "+"
-//     button stops incrementing at the ceiling, and the numeric input itself
-//     has a native max= so a typed value above on-hand snaps back down.
-// This is a UX affordance layered on top of the server gate, not a
-// replacement for it — the RPC still re-checks qty_on_hand at save time
-// (stock can move between opening this modal and submitting).
+// create_work_order/edit_work_order reject any line whose qty exceeds that
+// part's CURRENT qty_on_hand — server-side, authoritative. Mirrored here at
+// the point of selection:
+//   - A part with zero EFFECTIVE headroom renders disabled (greyed, no
+//     stepper, "Out of stock" badge).
+//   - Every other part's stepper is hard-capped at its effective headroom.
+// EFFECTIVE HEADROOM, when editing an in-progress/awaiting_parts WO's
+// EXISTING line: qty_on_hand (live) + that line's OWN currently-held qty —
+// because that qty already left the ledger for this line specifically, so
+// reducing it gives stock back and increasing it draws only the delta from
+// the live pool, exactly matching edit_work_order's own delta-based
+// consume/return logic. For a brand-new line, or any line on a still-'open'
+// WO, effective headroom is just plain live qty_on_hand (nothing held yet).
+//
+// LABOR COST: hourlyLaborCost() (./laborCost.ts) mirrors create_work_order/
+// edit_work_order's salary-based snapshot formula for a DISPLAY-ONLY
+// preview — shows "Labor cost: X SAR" for the chosen hour count, never the
+// bare hourly rate (Turki: salary stays off the Maintenance UI; a total
+// job-cost figure is fine, a per-hour rate is one division away from
+// reconstructing a salary).
 
 import { Fragment, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -26,8 +37,9 @@ import { Plus, Minus, X } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
-import type { Truck, Staff, Part, RepairDescription, WorkOrder } from "@/lib/db-types";
-import { createWorkOrder, addRepairDescription } from "./actions";
+import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings } from "@/lib/db-types";
+import { createWorkOrder, editWorkOrder, addRepairDescription } from "./actions";
+import { hourlyLaborCost } from "./laborCost";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))" } as const;
@@ -46,8 +58,6 @@ function ModalOverlay({ onClick, children }: { onClick: () => void; children: Re
 
 const TYPES = ["preventive", "corrective", "inspection", "predictive"] as const;
 const PRIORITIES = ["low", "medium", "high", "critical"] as const;
-const DEFAULT_LABOR_HOURS = 4;
-const DEFAULT_LABOR_RATE = 145;
 
 export default function NewWorkOrderModal({
   lang,
@@ -55,29 +65,56 @@ export default function NewWorkOrderModal({
   mechanics,
   parts,
   repairDescriptions,
+  companySettings,
+  editingWorkOrder,
+  editingTasks,
+  editingLines,
   onClose,
   onCreated,
+  onEdited,
 }: {
   lang: "en" | "ar";
   trucks: Truck[];
   mechanics: Staff[];
   parts: Part[];
   repairDescriptions: RepairDescription[];
+  companySettings: CompanySettings | null;
+  // When set, the modal opens in EDIT mode for this WO instead of create.
+  editingWorkOrder?: WorkOrder | null;
+  editingTasks?: WorkOrderTask[];
+  editingLines?: WorkOrderPart[];
   onClose: () => void;
-  onCreated: (wo: WorkOrder) => void;
+  onCreated?: (wo: WorkOrder) => void;
+  onEdited?: (wo: WorkOrder) => void;
 }) {
-  const [truckId, setTruckId] = useState(trucks[0]?.id ?? "");
-  const [type, setType] = useState<(typeof TYPES)[number]>("preventive");
-  const [priority, setPriority] = useState<(typeof PRIORITIES)[number]>("medium");
-  const [dueBy, setDueBy] = useState(todayKey());
-  const [mechanicId, setMechanicId] = useState(mechanics[0]?.id ?? "");
+  const isEdit = !!editingWorkOrder;
+  const editableStatus = editingWorkOrder?.status ?? "open";
+
+  const [truckId, setTruckId] = useState(editingWorkOrder?.truck_id ?? trucks[0]?.id ?? "");
+  const [type, setType] = useState<(typeof TYPES)[number]>((editingWorkOrder?.type as (typeof TYPES)[number]) ?? "preventive");
+  const [priority, setPriority] = useState<(typeof PRIORITIES)[number]>((editingWorkOrder?.priority as (typeof PRIORITIES)[number]) ?? "medium");
+  const [dueBy, setDueBy] = useState(editingWorkOrder ? editingWorkOrder.due_by.slice(0, 10) : todayKey());
+  const [mechanicId, setMechanicId] = useState(editingWorkOrder?.assigned_mechanic_id ?? mechanics[0]?.id ?? "");
+  const [laborHours, setLaborHours] = useState(editingWorkOrder?.labor_hours ?? 4);
 
   const [localDescriptions, setLocalDescriptions] = useState<RepairDescription[]>([]);
-  const [selectedChipIds, setSelectedChipIds] = useState<string[]>([]);
+  const [selectedChipIds, setSelectedChipIds] = useState<string[]>(() => {
+    if (!editingTasks || editingTasks.length === 0) return [];
+    // Text-match against the current catalog — same reconciliation
+    // convention edit_work_order itself uses server-side (tasks are a
+    // snapshot, no live FK back to repair_descriptions).
+    return repairDescriptions
+      .filter((d) => editingTasks.some((tk) => tk.description_en === d.en))
+      .map((d) => d.id);
+  });
   const [newChipText, setNewChipText] = useState("");
   const [addingChip, setAddingChip] = useState(false);
 
-  const [qtyByPart, setQtyByPart] = useState<Record<string, number>>({});
+  const [qtyByPart, setQtyByPart] = useState<Record<string, number>>(() => {
+    const seed: Record<string, number> = {};
+    for (const l of editingLines ?? []) seed[l.part_id] = l.qty;
+    return seed;
+  });
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +125,8 @@ export default function NewWorkOrderModal({
   }, [repairDescriptions, localDescriptions]);
 
   const selectedTruck = trucks.find((tr) => tr.id === truckId) ?? null;
+  const selectedMechanic = mechanics.find((m) => m.id === mechanicId) ?? null;
+  const previewLaborCost = hourlyLaborCost(selectedMechanic, companySettings);
 
   const partsByCategory = useMemo(() => {
     const sorted = [...parts].sort((a, b) => (a.category ?? "").localeCompare(b.category ?? "") || a.name.localeCompare(b.name));
@@ -100,6 +139,22 @@ export default function NewWorkOrderModal({
     }
     return Array.from(groups.entries());
   }, [parts, lang]);
+
+  // Existing (pre-edit) qty per part, for the "already-held stock counts
+  // toward headroom" rule — only meaningful once the WO has left 'open'.
+  const existingLineQtyByPart = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of editingLines ?? []) m.set(l.part_id, l.qty);
+    return m;
+  }, [editingLines]);
+
+  function effectiveMax(part: Part): number {
+    if (isEdit && editableStatus !== "open") {
+      const held = existingLineQtyByPart.get(part.id) ?? 0;
+      return part.qty_on_hand + held;
+    }
+    return part.qty_on_hand;
+  }
 
   function toggleChip(id: string) {
     setSelectedChipIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -120,23 +175,20 @@ export default function NewWorkOrderModal({
     setNewChipText("");
   }
 
-  function setQty(partId: string, raw: number) {
-    const part = parts.find((p) => p.id === partId);
-    const onHand = part?.qty_on_hand ?? 0;
-    // Hard cap at on-hand — the server-side data rule mirrored in the UI
-    // (Turki's explicit ask: block at selection, not just at save).
-    const clamped = Math.max(0, Math.min(raw, onHand));
+  function setQty(part: Part, raw: number) {
+    const max = effectiveMax(part);
+    const clamped = Math.max(0, Math.min(raw, max));
     setQtyByPart((prev) => {
       const next = { ...prev };
-      if (clamped <= 0) delete next[partId];
-      else next[partId] = clamped;
+      if (clamped <= 0) delete next[part.id];
+      else next[part.id] = clamped;
       return next;
     });
   }
 
-  function bumpQty(partId: string, delta: number) {
-    const current = qtyByPart[partId] ?? 0;
-    setQty(partId, current + delta);
+  function bumpQty(part: Part, delta: number) {
+    const current = qtyByPart[part.id] ?? 0;
+    setQty(part, current + delta);
   }
 
   const lines = useMemo(
@@ -151,9 +203,10 @@ export default function NewWorkOrderModal({
   }, [parts]);
 
   const partsCost = lines.reduce((s, l) => s + (partsById.get(l.part_id)?.unit_cost_sar ?? 0) * l.qty, 0);
-  const estimatedCost = Math.round(partsCost + DEFAULT_LABOR_HOURS * DEFAULT_LABOR_RATE);
+  const laborCostForEstimate = previewLaborCost != null ? laborHours * previewLaborCost : 0;
+  const estimatedCost = Math.round(partsCost + laborCostForEstimate);
 
-  const canSubmit = truckId !== "" && mechanicId !== "" && dueBy !== "" && !saving;
+  const canSubmit = truckId !== "" && mechanicId !== "" && dueBy !== "" && laborHours > 0 && !saving;
 
   function close() {
     if (saving) return;
@@ -164,6 +217,27 @@ export default function NewWorkOrderModal({
     if (!canSubmit) return;
     setSaving(true);
     setError(null);
+
+    if (isEdit && editingWorkOrder) {
+      const res = await editWorkOrder({
+        wo_id: editingWorkOrder.id,
+        type,
+        priority,
+        due_by: dueBy,
+        mechanic_staff_id: mechanicId,
+        task_description_ids: selectedChipIds,
+        lines,
+        labor_hours: laborHours,
+      });
+      setSaving(false);
+      if (res.error || !res.workOrder) {
+        setError(res.error ?? "Could not save changes.");
+        return;
+      }
+      onEdited?.(res.workOrder);
+      return;
+    }
+
     const res = await createWorkOrder({
       truck_id: truckId,
       type,
@@ -172,13 +246,14 @@ export default function NewWorkOrderModal({
       mechanic_staff_id: mechanicId,
       task_description_ids: selectedChipIds,
       lines,
+      labor_hours: laborHours,
     });
     setSaving(false);
     if (res.error || !res.workOrder) {
       setError(res.error ?? "Could not create work order.");
       return;
     }
-    onCreated(res.workOrder);
+    onCreated?.(res.workOrder);
   }
 
   return (
@@ -188,7 +263,7 @@ export default function NewWorkOrderModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
-          <h2 className="font-semibold">{t("mt.addJob", lang)}</h2>
+          <h2 className="font-semibold">{isEdit ? t("mt.editJob", lang) : t("mt.addJob", lang)}</h2>
           <button onClick={close} className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5">
             <X className="h-4 w-4" />
           </button>
@@ -202,6 +277,11 @@ export default function NewWorkOrderModal({
                 : "لا يوجد فني نشط — أضف فنياً من صفحة الموظفين قبل جدولة عمل."}
             </div>
           )}
+          {isEdit && editableStatus !== "open" && (
+            <div className="rounded-lg px-3 py-2 text-sm bg-amber-500/10 text-amber-700 dark:text-amber-300">
+              {t("mt.editInProgressNote", lang)}
+            </div>
+          )}
           {error && (
             <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">{error}</div>
           )}
@@ -209,7 +289,7 @@ export default function NewWorkOrderModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs muted block mb-1">{t("common.truck", lang)}</label>
-              <select value={truckId} onChange={(e) => setTruckId(e.target.value)} className={INPUT} style={INPUT_STYLE}>
+              <select value={truckId} onChange={(e) => setTruckId(e.target.value)} className={INPUT} style={INPUT_STYLE} disabled={isEdit}>
                 {trucks.map((tr) => (
                   <option key={tr.id} value={tr.id}>
                     {tr.plate} · {tr.model ?? ""}
@@ -250,6 +330,27 @@ export default function NewWorkOrderModal({
                   <option key={m.id} value={m.id}>{lang === "ar" ? m.name_ar || m.name : m.name}</option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="text-xs muted block mb-1">{t("mt.laborHours", lang)}</label>
+              <input
+                type="number"
+                min={0.5}
+                step={0.5}
+                value={laborHours}
+                onChange={(e) => setLaborHours(Number(e.target.value) || 0)}
+                className={INPUT}
+                style={INPUT_STYLE}
+              />
+            </div>
+            <div>
+              <label className="text-xs muted block mb-1">{t("mt.laborCostPreview", lang)}</label>
+              <input
+                readOnly
+                value={previewLaborCost != null ? formatSar(Math.round(laborHours * previewLaborCost)) : "—"}
+                className={cn(INPUT, "opacity-70")}
+                style={INPUT_STYLE}
+              />
             </div>
           </div>
 
@@ -323,7 +424,8 @@ export default function NewWorkOrderModal({
                           </td>
                         </tr>
                         {items.map((p) => {
-                          const outOfStock = p.qty_on_hand <= 0;
+                          const max = effectiveMax(p);
+                          const outOfStock = max <= 0;
                           const qty = qtyByPart[p.id] ?? 0;
                           return (
                             <tr key={p.id} className={cn(outOfStock ? "opacity-50" : "")}>
@@ -347,7 +449,7 @@ export default function NewWorkOrderModal({
                                   <div className="flex items-center gap-1.5">
                                     <button
                                       type="button"
-                                      onClick={() => bumpQty(p.id, -1)}
+                                      onClick={() => bumpQty(p, -1)}
                                       disabled={qty <= 0}
                                       className="h-7 w-7 rounded-md border grid place-items-center hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-40"
                                       style={INPUT_STYLE}
@@ -357,16 +459,16 @@ export default function NewWorkOrderModal({
                                     <input
                                       type="number"
                                       min={0}
-                                      max={p.qty_on_hand}
+                                      max={max}
                                       value={qty}
-                                      onChange={(e) => setQty(p.id, Number(e.target.value) || 0)}
+                                      onChange={(e) => setQty(p, Number(e.target.value) || 0)}
                                       className="w-14 text-center px-1 py-1 rounded-md border text-sm tabular-nums"
                                       style={INPUT_STYLE}
                                     />
                                     <button
                                       type="button"
-                                      onClick={() => bumpQty(p.id, 1)}
-                                      disabled={qty >= p.qty_on_hand}
+                                      onClick={() => bumpQty(p, 1)}
+                                      disabled={qty >= max}
                                       className="h-7 w-7 rounded-md border grid place-items-center hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-40"
                                       style={INPUT_STYLE}
                                     >

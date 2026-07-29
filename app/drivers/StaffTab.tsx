@@ -269,6 +269,18 @@ export default function StaffTab({
               <Field label="Duty hours">
                 <input name="duty_hours" type="number" step="1" min="0" defaultValue={editing?.duty_hours ?? 10} className={INPUT} style={INPUT_STYLE} />
               </Field>
+              <Field label="Monthly salary (SAR)">
+                <input
+                  name="monthly_salary_sar"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  defaultValue={editing?.monthly_salary_sar ?? ""}
+                  placeholder="e.g. 4500"
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                />
+              </Field>
               <OperationStationField
                 name="station"
                 stations={operationStations}

@@ -164,6 +164,10 @@ function parseStaff(formData: FormData) {
     duty_hours: numOrDefault(formData.get("duty_hours"), 10),
     hire_date: nullable(formData.get("hire_date")),
     iqama_expiry: nullable(formData.get("iqama_expiry")),
+    // Added by migration 0063 (Maintenance labor costing) — nullable until
+    // entered. Required by create_work_order/edit_work_order whenever this
+    // staff member is assigned as a WO's mechanic; not required otherwise.
+    monthly_salary_sar: numOrNull(formData.get("monthly_salary_sar")),
   };
 }
 

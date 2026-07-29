@@ -15,12 +15,12 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ChevronDown, ChevronRight, Eye, Layers, X } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, Eye, Layers, X, AlertTriangle } from "lucide-react";
 import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
 import { cn, formatSar } from "@/lib/utils";
-import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart } from "@/lib/db-types";
+import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings } from "@/lib/db-types";
 import MaintenanceCalendar from "./MaintenanceCalendar";
 import NewWorkOrderModal from "./NewWorkOrderModal";
 import WorkOrderDetailModal from "./WorkOrderDetailModal";
@@ -53,6 +53,7 @@ export default function MaintenanceClient({
   workOrders,
   workOrderTasks,
   workOrderParts,
+  companySettings,
   currentUserEmail,
   error,
 }: {
@@ -63,6 +64,7 @@ export default function MaintenanceClient({
   workOrders: WorkOrder[];
   workOrderTasks: WorkOrderTask[];
   workOrderParts: WorkOrderPart[];
+  companySettings: CompanySettings | null;
   currentUserEmail: string | null;
   error: string | null;
 }) {
@@ -78,9 +80,31 @@ export default function MaintenanceClient({
 
   const [newWOOpen, setNewWOOpen] = useState(false);
   const [viewingWoId, setViewingWoId] = useState<string | null>(null);
+  const [editingWoId, setEditingWoId] = useState<string | null>(null);
 
   const trucksById = useMemo(() => new Map(trucks.map((tr) => [tr.id, tr])), [trucks]);
   const mechanicsById = useMemo(() => new Map(mechanics.map((m) => [m.id, m])), [mechanics]);
+  const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+
+  // Out-of-part — DERIVED, not stored (see WorkOrderDetailModal's own
+  // comment for the full rule): only 'open' WOs are at risk, since a
+  // started WO already holds its parts. Computed once here so both the
+  // top banner and the row-level red highlight share one source of truth.
+  const outOfPartWoIds = useMemo(() => {
+    const linesByWo = new Map<string, WorkOrderPart[]>();
+    for (const l of workOrderParts) {
+      const arr = linesByWo.get(l.work_order_id) ?? [];
+      arr.push(l);
+      linesByWo.set(l.work_order_id, arr);
+    }
+    const ids = new Set<string>();
+    for (const w of workOrders) {
+      if (w.status !== "open") continue;
+      const lines = linesByWo.get(w.id) ?? [];
+      if (lines.some((l) => (partsById.get(l.part_id)?.qty_on_hand ?? 0) < l.qty)) ids.add(w.id);
+    }
+    return ids;
+  }, [workOrders, workOrderParts, partsById]);
 
   const withSections = useMemo(() => workOrders.map((w) => ({ w, section: sectionOf(w) })), [workOrders]);
 
@@ -135,11 +159,18 @@ export default function MaintenanceClient({
   }
 
   const viewingWo = viewingWoId ? workOrders.find((w) => w.id === viewingWoId) ?? null : null;
+  const editingWo = editingWoId ? workOrders.find((w) => w.id === editingWoId) ?? null : null;
+
+  function openEdit(woId: string) {
+    setViewingWoId(null);
+    setEditingWoId(woId);
+  }
 
   function renderRow(w: WorkOrder) {
     const truck = trucksById.get(w.truck_id);
     const mech = mechanicsById.get(w.assigned_mechanic_id);
     const delayed = isWoDelayed(w);
+    const outOfPart = outOfPartWoIds.has(w.id);
     const priorityCls = {
       low: "text-slate-500",
       medium: "text-blue-600",
@@ -147,7 +178,7 @@ export default function MaintenanceClient({
       critical: "text-rose-600 font-semibold",
     }[w.priority];
     return (
-      <tr key={w.id}>
+      <tr key={w.id} className={cn(outOfPart ? "bg-rose-500/5" : "")} title={outOfPart ? t("mt.outOfPartRow", lang) : undefined}>
         <TD className="font-mono text-xs">{w.wo_number}</TD>
         {!groups && (
           <TD className="font-mono text-xs">{truck ? `${truck.plate}` : w.truck_id}</TD>
@@ -159,7 +190,15 @@ export default function MaintenanceClient({
         <TD>{mech ? (lang === "ar" ? mech.name_ar || mech.name : mech.name) : "—"}</TD>
         <TD className="text-xs">{new Date(w.opened_at).toLocaleDateString()}</TD>
         <TD className={cn("text-xs", delayed ? "text-rose-600 font-medium" : "")}>{new Date(w.due_by).toLocaleDateString()}</TD>
-        <TD>{delayed ? <StatusPill status="critical" label={t("mt.delayed", lang)} /> : <StatusPill status={w.status} label={t(`status.${w.status}`, lang)} />}</TD>
+        <TD>
+          {outOfPart ? (
+            <StatusPill status="critical" label={t("mt.outOfPart", lang)} />
+          ) : delayed ? (
+            <StatusPill status="critical" label={t("mt.delayed", lang)} />
+          ) : (
+            <StatusPill status={w.status} label={t(`status.${w.status}`, lang)} />
+          )}
+        </TD>
         <TD className="tabular-nums">{formatSar(w.estimated_cost_sar)}</TD>
         <TD>
           <Btn variant="outline" onClick={() => setViewingWoId(w.id)}><Eye className="h-3.5 w-3.5" />{t("mt.viewJob", lang)}</Btn>
@@ -184,6 +223,26 @@ export default function MaintenanceClient({
 
       {error && (
         <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">{error}</div>
+      )}
+
+      {outOfPartWoIds.size > 0 && (
+        <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300 flex items-center gap-2 flex-wrap">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="font-medium">{outOfPartWoIds.size} {t("mt.outOfPartBanner", lang)}:</span>
+          {Array.from(outOfPartWoIds).map((id) => {
+            const w = workOrders.find((x) => x.id === id);
+            if (!w) return null;
+            return (
+              <button
+                key={id}
+                onClick={() => setViewingWoId(id)}
+                className="font-mono underline hover:no-underline"
+              >
+                {w.wo_number}
+              </button>
+            );
+          })}
+        </div>
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -359,9 +418,30 @@ export default function MaintenanceClient({
           mechanics={mechanics}
           parts={parts}
           repairDescriptions={repairDescriptions}
+          companySettings={companySettings}
           onClose={() => setNewWOOpen(false)}
           onCreated={() => {
             setNewWOOpen(false);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {editingWo && (
+        <NewWorkOrderModal
+          lang={lang}
+          trucks={trucks}
+          mechanics={mechanics}
+          parts={parts}
+          repairDescriptions={repairDescriptions}
+          companySettings={companySettings}
+          editingWorkOrder={editingWo}
+          editingTasks={workOrderTasks.filter((tk) => tk.work_order_id === editingWo.id)}
+          editingLines={workOrderParts.filter((l) => l.work_order_id === editingWo.id)}
+          onClose={() => setEditingWoId(null)}
+          onEdited={(wo) => {
+            setEditingWoId(null);
+            setViewingWoId(wo.id);
             router.refresh();
           }}
         />
@@ -377,6 +457,7 @@ export default function MaintenanceClient({
           mechanic={mechanicsById.get(viewingWo.assigned_mechanic_id) ?? null}
           parts={parts}
           onClose={() => setViewingWoId(null)}
+          onEdit={() => openEdit(viewingWo.id)}
         />
       )}
     </div>

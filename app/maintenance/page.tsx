@@ -1,14 +1,18 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart } from "@/lib/db-types";
+import type {
+  Truck,
+  Staff,
+  Part,
+  RepairDescription,
+  WorkOrder,
+  WorkOrderTask,
+  WorkOrderPart,
+  CompanySettings,
+} from "@/lib/db-types";
 import MaintenanceClient from "./MaintenanceClient";
 
-// Maintenance — Phase 1 (in-house scheduling core, migration 0060). Server
-// component fetches, client island renders + wires — same split as
-// app/inventory/page.tsx. This REPLACES the earlier mock-data-backed
-// page.tsx (lib/mock-data.ts's workOrders/parts/findTruck/findPerson) that
-// predates this build and never matched preview/'s actual Maintenance
-// layout (no calendar, no track switch, no New Work Order form) — that
-// scaffolding is gone as of this commit.
+// Maintenance — server component fetches, client island renders + wires —
+// same split as app/inventory/page.tsx.
 export const dynamic = "force-dynamic";
 
 export default async function MaintenancePage() {
@@ -27,6 +31,7 @@ export default async function MaintenancePage() {
     workOrdersRes,
     workOrderTasksRes,
     workOrderPartsRes,
+    companySettingsRes,
   ] = await Promise.all([
     supabase
       .from("trucks")
@@ -35,12 +40,15 @@ export default async function MaintenancePage() {
       .is("terminated_at", null)
       .order("plate", { ascending: true }),
     // Mechanic picker — role='mechanic' is a hard eligibility gate mirrored
-    // server-side inside create_work_order() itself; this is just the list
-    // to populate the dropdown from, same "server is the real gate" split
-    // as every eligible-approver picker in Inventory.
+    // server-side inside create_work_order()/edit_work_order() themselves;
+    // this is just the list to populate the dropdown from. monthly_salary_sar
+    // (0063) travels with it ONLY so the New/Edit form can compute a labor
+    // cost preview client-side (mirroring the RPC's own formula) — never
+    // rendered as a bare rate/salary figure, per Turki's instruction that
+    // compensation data stays off the Maintenance UI.
     supabase
       .from("staff")
-      .select("id, name, name_ar, role, station, email, phone, active, terminated_at, created_at, duty_hours, hire_date, iqama_expiry")
+      .select("id, name, name_ar, role, station, email, phone, active, terminated_at, created_at, duty_hours, hire_date, iqama_expiry, monthly_salary_sar")
       .eq("role", "mechanic")
       .eq("active", true)
       .is("terminated_at", null)
@@ -59,7 +67,7 @@ export default async function MaintenancePage() {
     supabase
       .from("work_orders")
       .select(
-        "id, wo_number, truck_id, type, priority, status, title, title_ar, opened_at, due_by, closed_at, assigned_mechanic_id, estimated_cost_sar, actual_cost_sar, labor_hours, labor_rate_sar, mechanic_notes, inventory_deducted_at, odometer_at_service, prior_truck_status, created_by, created_at"
+        "id, wo_number, truck_id, type, priority, status, title, title_ar, opened_at, due_by, closed_at, assigned_mechanic_id, estimated_cost_sar, actual_cost_sar, labor_hours, labor_rate_sar, mechanic_notes, inventory_deducted_at, odometer_at_service, prior_truck_status, created_by, started_by, completed_by, created_at"
       )
       .order("created_at", { ascending: false }),
     supabase
@@ -69,6 +77,9 @@ export default async function MaintenancePage() {
     supabase
       .from("work_order_parts")
       .select("id, work_order_id, part_id, qty, unit_price_sar, created_at"),
+    // Working-days-per-month constant (0063) — needed client-side for the
+    // same labor-cost preview mentioned above.
+    supabase.from("company_settings").select("*").eq("id", true).single(),
   ]);
 
   const trucks = (trucksRes.data ?? []) as Truck[];
@@ -78,6 +89,7 @@ export default async function MaintenancePage() {
   const workOrders = (workOrdersRes.data ?? []) as WorkOrder[];
   const workOrderTasks = (workOrderTasksRes.data ?? []) as WorkOrderTask[];
   const workOrderParts = (workOrderPartsRes.data ?? []) as WorkOrderPart[];
+  const companySettings = (companySettingsRes.data ?? null) as CompanySettings | null;
 
   const error =
     trucksRes.error?.message ??
@@ -87,6 +99,7 @@ export default async function MaintenancePage() {
     workOrdersRes.error?.message ??
     workOrderTasksRes.error?.message ??
     workOrderPartsRes.error?.message ??
+    companySettingsRes.error?.message ??
     null;
 
   return (
@@ -98,6 +111,7 @@ export default async function MaintenancePage() {
       workOrders={workOrders}
       workOrderTasks={workOrderTasks}
       workOrderParts={workOrderParts}
+      companySettings={companySettings}
       currentUserEmail={currentUserEmail}
       error={error}
     />

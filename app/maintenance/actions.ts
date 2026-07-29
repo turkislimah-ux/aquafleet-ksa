@@ -34,6 +34,9 @@ export type CreateWorkOrderInput = {
   mechanic_staff_id: string;
   task_description_ids: string[];
   lines: CreateWorkOrderLine[];
+  // Added by migration 0063 (labor costing) — real per-WO input now,
+  // no longer a hardcoded constant. Server defaults to 4 if omitted.
+  labor_hours?: number;
 };
 
 function friendlyWoError(message: string): string {
@@ -44,6 +47,10 @@ function friendlyWoError(message: string): string {
   }
   if (message.includes("Mechanic not found")) {
     return "Selected mechanic is no longer eligible. Pick another mechanic.";
+  }
+  if (message.includes("no monthly salary set")) {
+    // Already plain/actionable from the RPC — pass through as-is.
+    return message;
   }
   return message;
 }
@@ -56,6 +63,9 @@ export async function createWorkOrder(
   if (!input.priority) return { error: "Priority is required." };
   if (!input.due_by) return { error: "Due date is required." };
   if (!input.mechanic_staff_id) return { error: "Mechanic is required." };
+  if (input.labor_hours != null && !(input.labor_hours > 0)) {
+    return { error: "Labor hours must be positive." };
+  }
   for (const l of input.lines ?? []) {
     if (!l?.part_id) return { error: "Line item is missing a part." };
     if (!(l.qty > 0)) return { error: "Line item quantity must be positive." };
@@ -70,6 +80,58 @@ export async function createWorkOrder(
     p_mechanic_staff_id: input.mechanic_staff_id,
     p_task_description_ids: input.task_description_ids ?? [],
     p_lines: input.lines ?? [],
+    p_labor_hours: input.labor_hours ?? 4,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: friendlyWoError(error.message) };
+
+  revalidatePath("/maintenance");
+  return { error: null, workOrder: data as WorkOrder };
+}
+
+// ---------------------------------------------------------------------------
+// edit_work_order (migration 0065) — editable while status is 'open' or
+// 'in_progress'/'awaiting_parts'. Same "server RPC is the real gate" split:
+// this file never touches parts/price_lots/stock_movements/
+// work_order_part_consumptions directly. All reversal accuracy lives in
+// return_to_lots/consume_work_order_line inside the RPC.
+// ---------------------------------------------------------------------------
+
+export type EditWorkOrderInput = {
+  wo_id: string;
+  type: string;
+  priority: string;
+  due_by: string;
+  mechanic_staff_id: string;
+  task_description_ids: string[];
+  lines: CreateWorkOrderLine[];
+  labor_hours: number;
+};
+
+export async function editWorkOrder(
+  input: EditWorkOrderInput,
+): Promise<{ error: string | null; workOrder?: WorkOrder }> {
+  if (!input.wo_id) return { error: "Work order is required." };
+  if (!input.type) return { error: "Type is required." };
+  if (!input.priority) return { error: "Priority is required." };
+  if (!input.due_by) return { error: "Due date is required." };
+  if (!input.mechanic_staff_id) return { error: "Mechanic is required." };
+  if (!(input.labor_hours > 0)) return { error: "Labor hours must be positive." };
+  for (const l of input.lines ?? []) {
+    if (!l?.part_id) return { error: "Line item is missing a part." };
+    if (!(l.qty > 0)) return { error: "Line item quantity must be positive." };
+  }
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("edit_work_order", {
+    p_wo_id: input.wo_id,
+    p_type: input.type,
+    p_priority: input.priority,
+    p_due_by: input.due_by,
+    p_mechanic_staff_id: input.mechanic_staff_id,
+    p_task_description_ids: input.task_description_ids ?? [],
+    p_lines: input.lines ?? [],
+    p_labor_hours: input.labor_hours,
     p_actor: await actorEmail(supabase),
   });
   if (error) return { error: friendlyWoError(error.message) };

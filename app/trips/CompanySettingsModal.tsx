@@ -28,6 +28,7 @@ const EMPTY: CompanySettingsInput = {
   description: "",
   telephone: "",
   phone: "",
+  standard_working_days_per_month: 26,
 };
 
 export default function CompanySettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -53,6 +54,7 @@ export default function CompanySettingsModal({ open, onClose }: { open: boolean;
           description: r.data.description ?? "",
           telephone: r.data.telephone ?? "",
           phone: r.data.phone ?? "",
+          standard_working_days_per_month: r.data.standard_working_days_per_month ?? 26,
         });
       }
       if (r.error) setError(r.error);
@@ -194,6 +196,26 @@ export default function CompanySettingsModal({ open, onClose }: { open: boolean;
                 placeholder="e.g. info@binslimah.com"
               />
             </label>
+            <div className="pt-2 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+              <p className="text-xs font-semibold uppercase muted mt-3 mb-2">Operations</p>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">Working days per month</span>
+                <input
+                  value={form.standard_working_days_per_month}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, standard_working_days_per_month: Number(e.target.value) || 0 }))
+                  }
+                  type="number"
+                  step="1"
+                  min="1"
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                />
+                <span className="text-[11px] muted">
+                  Used to turn a mechanic's per-day duty hours into monthly hours for Maintenance labor costing.
+                </span>
+              </label>
+            </div>
             {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
             <div className="flex justify-end gap-2 pt-2">
               <Btn variant="outline" onClick={close}>Cancel</Btn>

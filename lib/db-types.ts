@@ -255,6 +255,14 @@ export type Staff = {
   duty_hours: number;
   hire_date: string | null;
   iqama_expiry: string | null;
+  // Added by migration 0063 (Maintenance labor costing) — monthly
+  // compensation, nullable until entered. Hourly labor cost for a work
+  // order = monthly_salary_sar / (duty_hours * company_settings
+  // .standard_working_days_per_month), snapshotted onto work_orders
+  // .labor_rate_sar at create/edit time, never re-derived live. Surface
+  // ONLY on the People page — never in the Maintenance UI (Turki's
+  // explicit instruction; compensation data stays with the staff record).
+  monthly_salary_sar: number | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -353,6 +361,12 @@ export type CompanySettings = {
   telephone: string | null; // landline
   phone: string | null; // mobile
   updated_at: string;
+  // Added by migration 0063 (Maintenance labor costing) — the single,
+  // company-wide work-calendar constant used to turn a mechanic's
+  // per-day/shift staff.duty_hours into monthly hours (duty_hours *
+  // standard_working_days_per_month). One global value, not per-staff —
+  // deliberately not on `staff` (see that table's own comment).
+  standard_working_days_per_month: number;
 };
 
 // invoice_special_charges row (0025, widened 0032) — mutable while the
@@ -917,6 +931,10 @@ export type WorkOrder = {
   odometer_at_service: number | null;
   prior_truck_status: string | null;
   created_by: string | null;
+  // Added by migration 0061 (Phase 2 lifecycle) — actor capture for the
+  // start/complete milestones, same convention as created_by.
+  started_by: string | null;
+  completed_by: string | null;
   created_at: string;
 };
 

@@ -138,6 +138,26 @@ export const dict = {
     saveNotes: { en: "Save", ar: "حفظ" },
     outsourcedComingSoon: { en: "Out-sourced jobs — coming in a later phase", ar: "الأعمال الخارجية — قادمة في مرحلة لاحقة" },
     noWorkOrders: { en: "No work orders in this view", ar: "لا توجد أوامر عمل في هذا العرض" },
+    editJob: { en: "Edit Work Order", ar: "تعديل أمر العمل" },
+    laborCostPreview: { en: "Labor cost", ar: "تكلفة العمالة" },
+    editInProgressNote: {
+      en: "This job is already in progress — parts changes here consume or return stock immediately.",
+      ar: "هذا العمل قيد التنفيذ بالفعل — تغييرات القطع هنا تستهلك أو تُعيد المخزون فوراً.",
+    },
+    outOfPart: { en: "Out of part", ar: "نقص في القطع" },
+    outOfPartRow: {
+      en: "One or more parts on this job no longer have enough stock",
+      ar: "قطعة واحدة أو أكثر في هذا العمل لم يعد لها مخزون كافٍ",
+    },
+    outOfPartBlockStart: {
+      en: "Cannot start — stock has dropped below what this job needs. Edit the parts list or wait for restock.",
+      ar: "تعذر البدء — انخفض المخزون عن حاجة هذا العمل. عدّل قائمة القطع أو انتظر التوريد.",
+    },
+    outOfPartBanner: { en: "work order(s) can't start — stock is short", ar: "أمر/أوامر عمل لا يمكنها البدء — المخزون غير كافٍ" },
+    allTasksRequired: { en: "All tasks must be checked before completing", ar: "يجب تحديد كل المهام قبل الإنهاء" },
+    createdBy: { en: "Created by", ar: "أنشأه" },
+    startedBy: { en: "Started by", ar: "بدأه" },
+    completedBy: { en: "Completed by", ar: "أنهاه" },
   },
 } as const;
 

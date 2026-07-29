@@ -805,11 +805,18 @@ export type CompanySettingsInput = {
   description: string | null;
   telephone: string | null;
   phone: string | null;
+  // Added by migration 0063 (Maintenance labor costing) — the single
+  // company-wide working-days-per-month constant. Lives here (not on
+  // staff) because it's one work calendar, not one per employee.
+  standard_working_days_per_month: number;
 };
 
 export async function updateCompanySettings(input: CompanySettingsInput): Promise<ActionResult> {
   const legalName = input.legal_name.trim();
   if (!legalName) return { error: "CR Company Name is required." };
+  if (!(input.standard_working_days_per_month > 0)) {
+    return { error: "Working days per month must be a positive number." };
+  }
 
   const supabase = createClient();
   const { error } = await supabase
@@ -824,6 +831,7 @@ export async function updateCompanySettings(input: CompanySettingsInput): Promis
       description: input.description?.trim() || null,
       telephone: input.telephone?.trim() || null,
       phone: input.phone?.trim() || null,
+      standard_working_days_per_month: input.standard_working_days_per_month,
       updated_at: new Date().toISOString(),
     })
     .eq("id", true);
