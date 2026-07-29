@@ -407,48 +407,48 @@ export default function WorkOrderDetailModal({
                         <td className="py-2 px-3 border-t tabular-nums align-top" style={{ borderColor: "rgb(var(--border))" }}>{formatSar(l.unit_price_sar * l.qty)}</td>
                         <td className="py-2 px-3 border-t align-top" style={{ borderColor: "rgb(var(--border))" }}>
                           {linePhotos.length === 0 && !canUploadPhotos ? (
-                            <span className="text-[11px] muted">{t("mt.noPhotos", lang)}</span>
+                            <span className="photo-empty">{t("mt.noPhotos", lang)}</span>
                           ) : (
-                            <div className="flex flex-wrap gap-1.5 items-center">
+                            <div className="photo-grid">
                               {linePhotos.map((ph) => {
                                 const url = signedUrls[ph.storage_path];
                                 return (
-                                  <div key={ph.id} className="relative group h-12 w-12 rounded-md overflow-hidden border" style={{ borderColor: "rgb(var(--border))" }}>
+                                  <span
+                                    key={ph.id}
+                                    className="photo-thumb"
+                                    onClick={() => url && setLightboxUrl(url)}
+                                  >
                                     {url ? (
                                       // eslint-disable-next-line @next/next/no-img-element
-                                      <img
-                                        src={url}
-                                        alt={ph.file_name}
-                                        className="h-full w-full object-cover cursor-pointer"
-                                        onClick={() => setLightboxUrl(url)}
-                                      />
+                                      <img src={url} alt={ph.file_name} />
                                     ) : (
-                                      <div className="h-full w-full bg-black/5 dark:bg-white/5 animate-pulse" />
+                                      <span className="block h-full w-full bg-black/5 dark:bg-white/5 animate-pulse" />
                                     )}
                                     {canUploadPhotos && (
-                                      <button
-                                        type="button"
-                                        onClick={() => onRemovePhoto(ph.id)}
-                                        disabled={busyLineId === ph.id}
+                                      <span
+                                        role="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (busyLineId === ph.id) return;
+                                          onRemovePhoto(ph.id);
+                                        }}
+                                        aria-disabled={busyLineId === ph.id}
                                         title={t("mt.removePhoto", lang)}
-                                        className="absolute top-0.5 end-0.5 h-4 w-4 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 grid place-items-center transition"
+                                        className="x-btn"
                                       >
-                                        <X className="h-2.5 w-2.5" />
-                                      </button>
+                                        ×
+                                      </span>
                                     )}
-                                  </div>
+                                  </span>
                                 );
                               })}
                               {canUploadPhotos && !atCap && (
                                 <label
                                   title={t("mt.uploadPhoto", lang)}
-                                  className={cn(
-                                    "h-12 w-12 rounded-md border border-dashed grid place-items-center cursor-pointer hover:bg-black/5 dark:hover:bg-white/5",
-                                    busy ? "opacity-50 pointer-events-none" : "",
-                                  )}
-                                  style={{ borderColor: "rgb(var(--border))" }}
+                                  className={cn("upload-btn", busy ? "opacity-50 pointer-events-none" : "")}
                                 >
-                                  <ImagePlus className="h-4 w-4 muted" />
+                                  <ImagePlus className="h-3.5 w-3.5" />
+                                  {t("mt.uploadPhoto", lang)}
                                   <input
                                     type="file"
                                     accept="image/*"

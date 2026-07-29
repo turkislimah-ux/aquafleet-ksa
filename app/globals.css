@@ -54,6 +54,31 @@ body {
 .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 4px; }
 
+/* Maintenance — Parts Replaced photo grid (Phase 3, migration 0067).
+   Ported directly from preview/app.css's .photo-grid/.photo-thumb/
+   .upload-btn (not reproduced via ad-hoc Tailwind utility composition) —
+   same "defined after @tailwind utilities" placement as .card above, so it
+   wins deterministically regardless of any utility-class interaction.
+   Root cause of the thumbnail-invisible-but-lightbox-fine bug: the
+   thumbnail was built from bare h-full/w-full/object-cover utilities with
+   no explicit `display:block` on the <img> itself — Tailwind's own
+   preflight sets img,video { max-width:100%; height:auto } as a base
+   reset, and while class-selector specificity normally beats that
+   tag-selector rule, the actual rendered thumbnail relied on that
+   marginal win inside a <table><td> layout context instead of an
+   explicit, self-contained size — exactly the kind of subtle cascade
+   fragility this file's own .card/.trip-highlight comment above already
+   flagged once before. Porting preview's real, pixel-tested CSS removes
+   the ambiguity entirely rather than re-guessing the utility combination. */
+.photo-grid { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+.photo-thumb { width: 48px; height: 48px; border-radius: .4rem; overflow: hidden; border: 1px solid rgb(var(--border)); position: relative; cursor: pointer; background: rgba(0,0,0,.04); display: inline-block; }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-thumb .x-btn { position: absolute; top: -.25rem; inset-inline-end: -.25rem; width: 1.1rem; height: 1.1rem; border-radius: 9999px; background: #be123c; color: white; font-size: .65rem; display: none; align-items: center; justify-content: center; cursor: pointer; }
+.photo-thumb:hover .x-btn { display: flex; }
+.photo-empty { font-size: .7rem; color: rgb(var(--muted)); }
+.upload-btn { display: inline-flex; align-items: center; gap: .35rem; height: 32px; padding: 0 .55rem; border: 1px dashed rgb(var(--border)); border-radius: .4rem; font-size: .72rem; color: rgb(var(--muted)); cursor: pointer; background: transparent; }
+.upload-btn:hover { color: #0b7eea; border-color: #0b7eea; background: rgba(11,126,234,.04); }
+
 .tabular-nums { font-variant-numeric: tabular-nums; }
 
 @keyframes pulse-dot {
