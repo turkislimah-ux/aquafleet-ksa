@@ -9,6 +9,14 @@ import type {
   WorkOrderPart,
   WorkOrderPartPhoto,
   CompanySettings,
+  RepairerType,
+  Repairer,
+  OutsourcedDescription,
+  OutsourcedJob,
+  OutsourcedJobRepairer,
+  OutsourcedJobTask,
+  WorkshopPayment,
+  WorkshopPaymentFile,
 } from "@/lib/db-types";
 import MaintenanceClient from "./MaintenanceClient";
 
@@ -34,6 +42,14 @@ export default async function MaintenancePage() {
     workOrderPartsRes,
     workOrderPartPhotosRes,
     companySettingsRes,
+    repairerTypesRes,
+    repairersRes,
+    outsourcedDescriptionsRes,
+    outsourcedJobsRes,
+    outsourcedJobRepairersRes,
+    outsourcedJobTasksRes,
+    workshopPaymentsRes,
+    workshopPaymentFilesRes,
   ] = await Promise.all([
     supabase
       .from("trucks")
@@ -47,7 +63,8 @@ export default async function MaintenancePage() {
     // (0063) travels with it ONLY so the New/Edit form can compute a labor
     // cost preview client-side (mirroring the RPC's own formula) — never
     // rendered as a bare rate/salary figure, per Turki's instruction that
-    // compensation data stays off the Maintenance UI.
+    // compensation data stays off the Maintenance UI. Same list reused as
+    // the "responsible mechanic" picker for outsourced jobs (0068).
     supabase
       .from("staff")
       .select("id, name, name_ar, role, station, email, phone, active, terminated_at, created_at, duty_hours, hire_date, iqama_expiry, monthly_salary_sar")
@@ -90,6 +107,46 @@ export default async function MaintenancePage() {
     // Working-days-per-month constant (0063) — needed client-side for the
     // same labor-cost preview mentioned above.
     supabase.from("company_settings").select("*").eq("id", true).single(),
+    // ---- Phase 4 (0068/0069) — outsourced-jobs track, fully separate ----
+    supabase
+      .from("repairer_types")
+      .select("id, key, label_en, label_ar, active, created_at")
+      .eq("active", true)
+      .order("label_en", { ascending: true }),
+    supabase
+      .from("repairers")
+      .select("id, name, name_ar, location, type, contact_name, contact_number, description, active, created_at")
+      .eq("active", true)
+      .order("name", { ascending: true }),
+    supabase
+      .from("outsourced_descriptions")
+      .select("id, en, ar, active, created_at")
+      .eq("active", true)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("outsourced_jobs")
+      .select(
+        "id, os_number, truck_id, responsible_mechanic_id, type, title, title_ar, start_date, estimated_finish, status, created_by, started_by, completed_by, closed_at, created_at"
+      )
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("outsourced_job_repairers")
+      .select("id, outsourced_job_id, repairer_id, created_at"),
+    supabase
+      .from("outsourced_job_tasks")
+      .select("id, outsourced_job_id, description_en, description_ar, done, ordinal, created_at")
+      .order("ordinal", { ascending: true }),
+    // MONEY — external, VAT-inclusive vendor AP. Bulk read (same pattern as
+    // everything else here); actual cost is summed client-side from this,
+    // NEVER stored on outsourced_jobs.
+    supabase
+      .from("workshop_payments")
+      .select("id, outsourced_job_id, repairer_id, invoice_number, invoice_date, subtotal_sar, vat_sar, grand_total_sar, note, created_by, created_at")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("workshop_payment_files")
+      .select("id, payment_id, storage_path, file_name, mime_type, uploaded_at")
+      .order("uploaded_at", { ascending: true }),
   ]);
 
   const trucks = (trucksRes.data ?? []) as Truck[];
@@ -101,6 +158,14 @@ export default async function MaintenancePage() {
   const workOrderParts = (workOrderPartsRes.data ?? []) as WorkOrderPart[];
   const workOrderPartPhotos = (workOrderPartPhotosRes.data ?? []) as WorkOrderPartPhoto[];
   const companySettings = (companySettingsRes.data ?? null) as CompanySettings | null;
+  const repairerTypes = (repairerTypesRes.data ?? []) as RepairerType[];
+  const repairers = (repairersRes.data ?? []) as Repairer[];
+  const outsourcedDescriptions = (outsourcedDescriptionsRes.data ?? []) as OutsourcedDescription[];
+  const outsourcedJobs = (outsourcedJobsRes.data ?? []) as OutsourcedJob[];
+  const outsourcedJobRepairers = (outsourcedJobRepairersRes.data ?? []) as OutsourcedJobRepairer[];
+  const outsourcedJobTasks = (outsourcedJobTasksRes.data ?? []) as OutsourcedJobTask[];
+  const workshopPayments = (workshopPaymentsRes.data ?? []) as WorkshopPayment[];
+  const workshopPaymentFiles = (workshopPaymentFilesRes.data ?? []) as WorkshopPaymentFile[];
 
   const error =
     trucksRes.error?.message ??
@@ -112,6 +177,14 @@ export default async function MaintenancePage() {
     workOrderPartsRes.error?.message ??
     workOrderPartPhotosRes.error?.message ??
     companySettingsRes.error?.message ??
+    repairerTypesRes.error?.message ??
+    repairersRes.error?.message ??
+    outsourcedDescriptionsRes.error?.message ??
+    outsourcedJobsRes.error?.message ??
+    outsourcedJobRepairersRes.error?.message ??
+    outsourcedJobTasksRes.error?.message ??
+    workshopPaymentsRes.error?.message ??
+    workshopPaymentFilesRes.error?.message ??
     null;
 
   return (
@@ -125,6 +198,14 @@ export default async function MaintenancePage() {
       workOrderParts={workOrderParts}
       workOrderPartPhotos={workOrderPartPhotos}
       companySettings={companySettings}
+      repairerTypes={repairerTypes}
+      repairers={repairers}
+      outsourcedDescriptions={outsourcedDescriptions}
+      outsourcedJobs={outsourcedJobs}
+      outsourcedJobRepairers={outsourcedJobRepairers}
+      outsourcedJobTasks={outsourcedJobTasks}
+      workshopPayments={workshopPayments}
+      workshopPaymentFiles={workshopPaymentFiles}
       currentUserEmail={currentUserEmail}
       error={error}
     />

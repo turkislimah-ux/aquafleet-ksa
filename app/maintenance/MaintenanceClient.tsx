@@ -20,10 +20,29 @@ import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD } from "@/compon
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
 import { cn, formatSar } from "@/lib/utils";
-import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, WorkOrderPartPhoto, CompanySettings } from "@/lib/db-types";
+import type {
+  Truck,
+  Staff,
+  Part,
+  RepairDescription,
+  WorkOrder,
+  WorkOrderTask,
+  WorkOrderPart,
+  WorkOrderPartPhoto,
+  CompanySettings,
+  RepairerType,
+  Repairer,
+  OutsourcedDescription,
+  OutsourcedJob,
+  OutsourcedJobRepairer,
+  OutsourcedJobTask,
+  WorkshopPayment,
+  WorkshopPaymentFile,
+} from "@/lib/db-types";
 import MaintenanceCalendar from "./MaintenanceCalendar";
 import NewWorkOrderModal from "./NewWorkOrderModal";
 import WorkOrderDetailModal from "./WorkOrderDetailModal";
+import OutsourcedTrack from "./OutsourcedTrack";
 
 type Section = "scheduled" | "in_progress" | "delayed" | "historical";
 
@@ -55,6 +74,14 @@ export default function MaintenanceClient({
   workOrderParts,
   workOrderPartPhotos,
   companySettings,
+  repairerTypes,
+  repairers,
+  outsourcedDescriptions,
+  outsourcedJobs,
+  outsourcedJobRepairers,
+  outsourcedJobTasks,
+  workshopPayments,
+  workshopPaymentFiles,
   currentUserEmail,
   error,
 }: {
@@ -67,6 +94,14 @@ export default function MaintenanceClient({
   workOrderParts: WorkOrderPart[];
   workOrderPartPhotos: WorkOrderPartPhoto[];
   companySettings: CompanySettings | null;
+  repairerTypes: RepairerType[];
+  repairers: Repairer[];
+  outsourcedDescriptions: OutsourcedDescription[];
+  outsourcedJobs: OutsourcedJob[];
+  outsourcedJobRepairers: OutsourcedJobRepairer[];
+  outsourcedJobTasks: OutsourcedJobTask[];
+  workshopPayments: WorkshopPayment[];
+  workshopPaymentFiles: WorkshopPaymentFile[];
   currentUserEmail: string | null;
   error: string | null;
 }) {
@@ -251,7 +286,7 @@ export default function MaintenanceClient({
         <Stat label={t("status.scheduled", lang)} value={kpiScheduled} />
         <Stat label={t("status.in_progress", lang)} value={kpiInProgress} tone={kpiInProgress > 0 ? "warn" : "ok"} />
         <Stat label={t("mt.delayed", lang)} value={kpiDelayed} tone={kpiDelayed > 0 ? "bad" : "ok"} />
-        <Stat label={t("mt.outsourced", lang)} value={0} sub={lang === "en" ? "Coming in a later phase" : "قادم في مرحلة لاحقة"} />
+        <Stat label={t("mt.outsourced", lang)} value={outsourcedJobs.length} />
       </div>
 
       <MaintenanceCalendar
@@ -276,15 +311,25 @@ export default function MaintenanceClient({
             onClick={() => setTrack("outsourced")}
             className={cn("h-8 px-3 rounded-md text-xs font-medium", track === "outsourced" ? "bg-brand-600 text-white" : "hover:bg-black/5 dark:hover:bg-white/5")}
           >
-            {t("mt.outsourced", lang)} (0)
+            {t("mt.outsourced", lang)} ({outsourcedJobs.length})
           </button>
         </div>
       </Card>
 
       {track === "outsourced" ? (
-        <Card>
-          <p className="text-sm muted p-6 text-center">{t("mt.outsourcedComingSoon", lang)}</p>
-        </Card>
+        <OutsourcedTrack
+          lang={lang}
+          trucks={trucks}
+          mechanics={mechanics}
+          repairerTypes={repairerTypes}
+          repairers={repairers}
+          outsourcedDescriptions={outsourcedDescriptions}
+          outsourcedJobs={outsourcedJobs}
+          outsourcedJobRepairers={outsourcedJobRepairers}
+          outsourcedJobTasks={outsourcedJobTasks}
+          workshopPayments={workshopPayments}
+          workshopPaymentFiles={workshopPaymentFiles}
+        />
       ) : (
         <>
           <Card className="!p-3">

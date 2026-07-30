@@ -975,3 +975,123 @@ export type WorkOrderPartPhoto = {
   mime_type: string | null;
   uploaded_at: string;
 };
+
+// ---------------------------------------------------------------------------
+// Maintenance — Phase 4 (migrations 0068/0069). Outsourced-jobs track — a
+// fully separate entity from work_orders, zero stock/FIFO coupling. See
+// 0068's own header for the full reasoning (separate outsourced_descriptions
+// catalog, multi-repairer junction, workshop_payments money model).
+// ---------------------------------------------------------------------------
+
+export type RepairerType = {
+  id: string;
+  key: string;
+  label_en: string;
+  label_ar: string | null;
+  active: boolean;
+  created_at: string;
+};
+
+// type is a soft FK -> repairer_types.id (nullable — a repairer can exist
+// without a type set, though the form requires one at create time).
+export type Repairer = {
+  id: string;
+  name: string;
+  name_ar: string | null;
+  location: string | null;
+  type: string | null;
+  contact_name: string | null;
+  contact_number: string | null;
+  description: string | null;
+  active: boolean;
+  created_at: string;
+};
+
+// OS's OWN scoped description catalog — a SEPARATE table from
+// RepairDescription (in-house), not a shared table with a context column.
+export type OutsourcedDescription = {
+  id: string;
+  en: string;
+  ar: string;
+  active: boolean;
+  created_at: string;
+};
+
+export type OutsourcedJobType = "preventive" | "corrective" | "inspection" | "predictive";
+export type OutsourcedJobStatus = "scheduled" | "in_progress" | "completed";
+
+// truck_id is IMMUTABLE after creation (edit_outsourced_job, 0069, doesn't
+// accept it) — a job's truck is its identity, per Turki's call.
+// estimated_finish is a SOFT target — red-in-view when exceeded, derived
+// at display time, never a stored status.
+export type OutsourcedJob = {
+  id: string;
+  os_number: string;
+  truck_id: string;
+  responsible_mechanic_id: string;
+  type: OutsourcedJobType;
+  title: string;
+  title_ar: string;
+  start_date: string;
+  estimated_finish: string;
+  status: OutsourcedJobStatus;
+  created_by: string | null;
+  started_by: string | null;
+  completed_by: string | null;
+  closed_at: string | null;
+  created_at: string;
+};
+
+// Junction — MANY repairers per job (not every shop does everything).
+export type OutsourcedJobRepairer = {
+  id: string;
+  outsourced_job_id: string;
+  repairer_id: string;
+  created_at: string;
+};
+
+// Checkable per-job instances — mirrors WorkOrderTask exactly (snapshot
+// text, no live FK back to the catalog, done boolean). Complete is gated
+// on every one of these being done, same rule as in-house work orders.
+export type OutsourcedJobTask = {
+  id: string;
+  outsourced_job_id: string;
+  description_en: string;
+  description_ar: string;
+  done: boolean;
+  ordinal: number;
+  created_at: string;
+};
+
+// The money table — MULTIPLE per job, one per vendor invoice. Actual cost
+// for a job = SUM(grand_total_sar) across all its payments, computed at
+// display time (app code), NEVER stored on outsourced_jobs. VAT-inclusive
+// vendor AP — never mixed with Inventory's internal VAT-exclusive cost or
+// customer invoice VAT anywhere. The DB itself enforces
+// grand_total_sar = subtotal_sar + vat_sar via a CHECK constraint — the
+// app computes the rate (lib/outsourced-vat.ts) but the DB is the final
+// consistency floor regardless of how a row got written.
+export type WorkshopPayment = {
+  id: string;
+  outsourced_job_id: string;
+  repairer_id: string;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  subtotal_sar: number;
+  vat_sar: number;
+  grand_total_sar: number;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+// Invoice image(s) per payment. Bytes live in the private
+// outsourced-invoices Storage bucket; this is just the pointer.
+export type WorkshopPaymentFile = {
+  id: string;
+  payment_id: string;
+  storage_path: string;
+  file_name: string;
+  mime_type: string | null;
+  uploaded_at: string;
+};
