@@ -78,6 +78,12 @@ relevant skill(s) **when the task calls for it**:
   gsd, report how it fits with this project's existing workflow (preview/-as-spec,
   the commit discipline below, HANDOFF.json) so we adopt it deliberately, not blindly.**
 
+- **Domain rules (money, stock, RPCs, invariants)** → read
+  `.claude/skills/aquafleet-domain/SKILL.md` at session start. This encodes
+  business logic constraints (FIFO invariant, money-core boundary, one-SKU-one-
+  warehouse, RPC conventions, counter-table pattern) that CLAUDE.md does not cover.
+  **Read it before any migration, RPC, or server action work.**
+
 ---
 
 ## 5. Workflow discipline (non-negotiable)
