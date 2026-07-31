@@ -14,15 +14,33 @@
 // WORKSHOP PAYMENT REPAIRER PICKER — Turki's explicit rule: only offer
 // repairers ALREADY ASSIGNED to this job (jobRepairers prop), not the full
 // repairers catalog — you can't bill for a shop that was never on the job.
+//
+// WORKSHOP PAYMENTS layout — an INPUT card (always visible while the job
+// isn't completed, doubles as add/edit) sits ABOVE a live-reflecting
+// TABLE card — Phase-4 fix: these are now two visually separate bordered
+// cards (were merged into one box before), and the "Workshop Payments"
+// heading itself sits OUTSIDE both, plain/standalone with a border-t
+// separator above it, not boxed. Same form drives both add and edit —
+// editingPaymentId set = edit mode. Discount + Note share one row (note
+// input shrinks to make room) instead of note being its own full-width
+// row. "Actual Total" is a <tfoot> row directly under the table's own
+// Grand Total column — same column, one row down — with the Files/
+// Actions columns left blank beside it, so it never reads as sitting
+// next to the edit/delete icons.
+//
+// Note box sits beside Work Performed, same 2-column layout
+// WorkOrderDetailModal's own Work Performed | Mechanic Notes pair already
+// uses — wired to save_outsourced_job_notes (0072).
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { X, CheckSquare, Square, Play, Check, Pencil, Plus, FileText } from "lucide-react";
+import { X, CheckSquare, Square, Play, Check, Pencil, Plus, FileText, Trash2, Upload } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn, formatSar, todayKey } from "@/lib/utils";
-import { Btn, StatusPill } from "@/components/ui";
+import { Btn } from "@/components/ui";
+import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
 import { formatSarVat } from "@/lib/inventory-vat";
 import { computeWorkshopPaymentTotals } from "@/lib/outsourced-vat";
 import type {
@@ -39,7 +57,10 @@ import {
   dispatchOutsourcedJob,
   completeOutsourcedJob,
   toggleOutsourcedJobTask,
+  saveOutsourcedJobNotes,
   addWorkshopPayment,
+  updateWorkshopPayment,
+  deleteWorkshopPayment,
   uploadWorkshopPaymentFile,
   removeWorkshopPaymentFile,
   getWorkshopPaymentFileSignedUrls,
@@ -63,6 +84,21 @@ function ModalOverlay({ onClick, children }: { onClick: () => void; children: Re
 function isOverdue(job: OutsourcedJob): boolean {
   return job.status !== "completed" && job.estimated_finish < todayKey();
 }
+
+function osKind(status: OutsourcedJob["status"]): MtPillKind {
+  if (status === "completed") return "completed";
+  if (status === "in_progress") return "in_progress";
+  return "scheduled";
+}
+
+const emptyPaymentForm = {
+  repairerId: "",
+  invoiceNumber: "",
+  invoiceDate: todayKey(),
+  subtotal: 0,
+  discount: 0,
+  note: "",
+};
 
 export default function OutsourcedJobDetailModal({
   lang,
@@ -132,30 +168,74 @@ export default function OutsourcedJobDetailModal({
     router.refresh();
   }
 
-  // ---- Add payment form ----
-  const [addingPayment, setAddingPayment] = useState(false);
-  const [payRepairerId, setPayRepairerId] = useState(jobRepairers[0]?.id ?? "");
-  const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState(todayKey());
-  const [subtotal, setSubtotal] = useState<number>(0);
-  const [note, setNote] = useState("");
+  // ---- Notes (beside Work Performed) ----
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [draftNotes, setDraftNotes] = useState(job.notes ?? "");
+  const [savingNotes, setSavingNotes] = useState(false);
+
+  function startEditingNotes() {
+    setDraftNotes(job.notes ?? "");
+    setEditingNotes(true);
+  }
+
+  async function onSaveNotes() {
+    setSavingNotes(true);
+    setError(null);
+    const res = await saveOutsourcedJobNotes(job.id, draftNotes);
+    setSavingNotes(false);
+    if (res.error) { setError(res.error); return; }
+    setEditingNotes(false);
+    router.refresh();
+  }
+
+  // ---- Payment form (add + edit share this) ----
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [form, setForm] = useState(() => ({ ...emptyPaymentForm, repairerId: jobRepairers[0]?.id ?? "" }));
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [savingPayment, setSavingPayment] = useState(false);
+  const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
 
-  const preview = computeWorkshopPaymentTotals(subtotal || 0);
+  const preview = computeWorkshopPaymentTotals(form.subtotal || 0, form.discount || 0);
+  const isPaymentEdit = !!editingPaymentId;
 
-  async function saveNewPayment() {
-    if (!payRepairerId || !(subtotal > 0) || savingPayment) return;
+  function resetPaymentForm() {
+    setEditingPaymentId(null);
+    setForm({ ...emptyPaymentForm, repairerId: jobRepairers[0]?.id ?? "" });
+    setPendingFile(null);
+  }
+
+  function startEditPayment(p: WorkshopPayment) {
+    setEditingPaymentId(p.id);
+    setForm({
+      repairerId: p.repairer_id,
+      invoiceNumber: p.invoice_number ?? "",
+      invoiceDate: p.invoice_date ?? todayKey(),
+      subtotal: p.subtotal_sar,
+      discount: p.discount_sar,
+      note: p.note ?? "",
+    });
+    setPendingFile(null);
+  }
+
+  async function savePayment() {
+    if (!form.repairerId || !(form.subtotal > 0) || savingPayment) return;
     setSavingPayment(true);
     setError(null);
-    const res = await addWorkshopPayment({
+
+    const input = {
       outsourced_job_id: job.id,
-      repairer_id: payRepairerId,
-      invoice_number: invoiceNumber || null,
-      invoice_date: invoiceDate || null,
-      subtotal_sar: subtotal,
-      note: note || null,
-    });
+      repairer_id: form.repairerId,
+      invoice_number: form.invoiceNumber || null,
+      invoice_date: form.invoiceDate || null,
+      subtotal_sar: form.subtotal,
+      discount_sar: form.discount,
+      note: form.note || null,
+    };
+
+    const res = isPaymentEdit
+      ? await updateWorkshopPayment(editingPaymentId!, input)
+      : await addWorkshopPayment(input);
+
     if (res.error || !res.payment) {
       setSavingPayment(false);
       setError(res.error ?? "Could not save payment.");
@@ -173,12 +253,18 @@ export default function OutsourcedJobDetailModal({
       }
     }
     setSavingPayment(false);
-    setAddingPayment(false);
-    setInvoiceNumber("");
-    setInvoiceDate(todayKey());
-    setSubtotal(0);
-    setNote("");
-    setPendingFile(null);
+    resetPaymentForm();
+    router.refresh();
+  }
+
+  async function confirmDeletePayment(paymentId: string) {
+    if (!window.confirm(t("mt.confirmDeletePayment", lang))) return;
+    setDeletingPaymentId(paymentId);
+    setError(null);
+    const res = await deleteWorkshopPayment(paymentId);
+    setDeletingPaymentId(null);
+    if (res.error) { setError(res.error); return; }
+    if (editingPaymentId === paymentId) resetPaymentForm();
     router.refresh();
   }
 
@@ -196,7 +282,7 @@ export default function OutsourcedJobDetailModal({
 
   return (
     <ModalOverlay onClick={onClose}>
-      <div className="card w-full max-w-[900px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0" onClick={(e) => e.stopPropagation()}>
+      <div className="card w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
           <div>
             <h2 className="font-semibold">{lang === "ar" ? job.title_ar : job.title}</h2>
@@ -235,9 +321,9 @@ export default function OutsourcedJobDetailModal({
               <div className="muted mb-0.5">{t("common.status", lang)}</div>
               <div>
                 {overdue ? (
-                  <StatusPill status="critical" label={t("mt.osOverdue", lang)} />
+                  <MtStatusPill kind="overdue" label={t("mt.osOverdue", lang)} />
                 ) : (
-                  <StatusPill status={job.status} label={t(`status.${job.status}`, lang)} />
+                  <MtStatusPill kind={osKind(job.status)} label={t(`status.${job.status}`, lang)} />
                 )}
               </div>
             </div>
@@ -278,44 +364,168 @@ export default function OutsourcedJobDetailModal({
             )}
           </div>
 
-          <div className="rounded-lg border p-3" style={{ borderColor: "rgb(var(--border))" }}>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold">{t("mt.workPerformed", lang)}</h3>
-              <span className="text-xs muted">{doneCount} / {tasks.length}</span>
-            </div>
-            {tasks.length === 0 ? (
-              <p className="text-xs muted">—</p>
-            ) : (
-              <div className="space-y-1.5">
-                {tasks.map((tk) => (
-                  <button
-                    key={tk.id}
-                    type="button"
-                    onClick={() => onToggleTask(tk)}
-                    disabled={!editable || busyTaskId === tk.id}
-                    className="flex items-center gap-2 text-sm w-full text-start disabled:cursor-default"
-                  >
-                    {tk.done ? <CheckSquare className="h-4 w-4 text-emerald-600 shrink-0" /> : <Square className="h-4 w-4 muted shrink-0" />}
-                    <span className={cn(tk.done ? "line-through muted" : "")}>{lang === "ar" ? tk.description_ar : tk.description_en}</span>
-                  </button>
-                ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-lg border p-3" style={{ borderColor: "rgb(var(--border))" }}>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold">{t("mt.workPerformed", lang)}</h3>
+                <span className="text-xs muted">{doneCount} / {tasks.length}</span>
               </div>
-            )}
-          </div>
-
-          {/* MONEY — own card, own total, never mixed with in-house/Inventory cost. */}
-          <div className="rounded-lg border overflow-hidden" style={{ borderColor: "rgb(var(--border))" }}>
-            <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: "rgb(var(--border))" }}>
-              <h3 className="text-sm font-semibold">{t("mt.workshopPayments", lang)}</h3>
-              {!addingPayment && (
-                <button onClick={() => setAddingPayment(true)} className="text-xs text-brand-600 hover:underline flex items-center gap-1">
-                  <Plus className="h-3 w-3" />{t("mt.addPayment", lang)}
-                </button>
+              {tasks.length === 0 ? (
+                <p className="text-xs muted">—</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {tasks.map((tk) => (
+                    <button
+                      key={tk.id}
+                      type="button"
+                      onClick={() => onToggleTask(tk)}
+                      disabled={!editable || busyTaskId === tk.id}
+                      className="flex items-center gap-2 text-sm w-full text-start disabled:cursor-default"
+                    >
+                      {tk.done ? <CheckSquare className="h-4 w-4 text-emerald-600 shrink-0" /> : <Square className="h-4 w-4 muted shrink-0" />}
+                      <span className={cn(tk.done ? "line-through muted" : "")}>{lang === "ar" ? tk.description_ar : tk.description_en}</span>
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
 
+            <div className="rounded-lg border p-3" style={{ borderColor: "rgb(var(--border))" }}>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold">{t("mt.note", lang)}</h3>
+                {editable && !editingNotes && (
+                  <button onClick={startEditingNotes} className="text-xs text-brand-600 hover:underline">{t("mt.editNotes", lang)}</button>
+                )}
+              </div>
+              {editingNotes ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={draftNotes}
+                    onChange={(e) => setDraftNotes(e.target.value)}
+                    rows={3}
+                    className={cn(INPUT, "resize-none")}
+                    style={INPUT_STYLE}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Btn variant="outline" onClick={() => setEditingNotes(false)} disabled={savingNotes}>{t("common.cancel", lang)}</Btn>
+                    <Btn variant="primary" onClick={onSaveNotes} disabled={savingNotes}>{savingNotes ? "…" : t("mt.saveNotes", lang)}</Btn>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm muted">{job.notes || "—"}</p>
+              )}
+            </div>
+          </div>
+
+          {/* MONEY — own section, own total, never mixed with in-house/
+              Inventory cost. Turki's Phase-4 fix: title is a plain
+              standalone heading (not boxed) with a separator line above
+              it; the input area and the payments table are now two
+              visually SEPARATE cards, not one merged box. */}
+          <div className="pt-2 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+            <h3 className="text-sm font-semibold pt-3">{t("mt.workshopPayments", lang)}</h3>
+          </div>
+
+          {editable && (
+            <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: "rgb(var(--border))" }}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium muted">{isPaymentEdit ? t("mt.edit", lang) : t("mt.addPayment", lang)}</span>
+                {isPaymentEdit && (
+                  <button onClick={resetPaymentForm} className="text-xs text-brand-600 hover:underline">{t("common.cancel", lang)}</button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div>
+                  <label className="text-xs muted block mb-1">{t("mt.billedBy", lang)} *</label>
+                  <select value={form.repairerId} onChange={(e) => setForm((f) => ({ ...f, repairerId: e.target.value }))} className={INPUT} style={INPUT_STYLE}>
+                    {jobRepairers.map((r) => (
+                      <option key={r.id} value={r.id}>{lang === "ar" ? r.name_ar || r.name : r.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs muted block mb-1">{t("mt.invoiceNumber", lang)}</label>
+                  <input value={form.invoiceNumber} onChange={(e) => setForm((f) => ({ ...f, invoiceNumber: e.target.value }))} className={INPUT} style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label className="text-xs muted block mb-1">{t("mt.invoiceDate", lang)}</label>
+                  <input type="date" value={form.invoiceDate} onChange={(e) => setForm((f) => ({ ...f, invoiceDate: e.target.value }))} className={INPUT} style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label className="text-xs muted block mb-1">{t("mt.subtotal", lang)} *</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={form.subtotal}
+                    onChange={(e) => setForm((f) => ({ ...f, subtotal: Number(e.target.value) || 0 }))}
+                    className={INPUT}
+                    style={INPUT_STYLE}
+                  />
+                </div>
+              </div>
+              {/* Discount + Note share a row — Turki: note sits beside
+                  discount so the note box shrinks, instead of its own
+                  full-width row. */}
+              <div className="grid grid-cols-[140px_1fr] gap-2">
+                <div>
+                  <label className="text-xs muted block mb-1">{t("mt.discount", lang)}</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={form.discount}
+                    onChange={(e) => setForm((f) => ({ ...f, discount: Number(e.target.value) || 0 }))}
+                    className={INPUT}
+                    style={INPUT_STYLE}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs muted block mb-1">{lang === "en" ? "Note (optional)" : "ملاحظة (اختياري)"}</label>
+                  <input
+                    value={form.note}
+                    onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+                    className={INPUT}
+                    style={INPUT_STYLE}
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-4 text-xs muted flex-wrap">
+                <span>{t("mt.vat", lang)}: {formatSarVat(preview.vat_sar)}</span>
+                {form.discount > 0 && <span>{t("mt.discount", lang)}: -{formatSarVat(preview.discount_sar)}</span>}
+                <span className="font-medium text-[rgb(var(--fg))]">{t("mt.grandTotal", lang)}: {formatSarVat(preview.grand_total_sar)}</span>
+              </div>
+              <div>
+                <label className="text-xs muted block mb-1">{isPaymentEdit ? t("mt.changeInvoice", lang) : t("mt.uploadInvoice", lang)}</label>
+                <label className="upload-btn">
+                  <Upload className="h-3.5 w-3.5" />
+                  {pendingFile ? pendingFile.name : t("mt.uploadInvoice", lang)}
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                {isPaymentEdit && <Btn variant="outline" onClick={resetPaymentForm} disabled={savingPayment}>{t("common.cancel", lang)}</Btn>}
+                <Btn variant="primary" onClick={savePayment} disabled={savingPayment || !form.repairerId || !(form.subtotal > 0)}>
+                  {savingPayment ? "…" : t("common.save", lang)}
+                </Btn>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-lg border overflow-hidden" style={{ borderColor: "rgb(var(--border))" }}>
             {payments.length === 0 ? (
-              <p className="text-xs muted p-3">{t("mt.noPayments", lang)}</p>
+              <>
+                <p className="text-xs muted p-3">{t("mt.noPayments", lang)}</p>
+                <div className="px-3 py-2.5 border-t flex items-center justify-between" style={{ borderColor: "rgb(var(--border))" }}>
+                  <span className="text-sm font-semibold">{t("mt.actualCost", lang)}</span>
+                  <span className="text-base font-semibold tabular-nums">{formatSar(actualCost)}</span>
+                </div>
+              </>
             ) : (
               <table className="w-full text-sm">
                 <thead>
@@ -325,7 +535,9 @@ export default function OutsourcedJobDetailModal({
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("mt.invoiceDate", lang)}</th>
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("mt.subtotal", lang)}</th>
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("mt.vat", lang)}</th>
+                    <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("mt.discount", lang)}</th>
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("mt.grandTotal", lang)}</th>
+                    <th className="text-start font-medium muted py-2 px-3 text-xs uppercase"></th>
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase"></th>
                   </tr>
                 </thead>
@@ -334,12 +546,13 @@ export default function OutsourcedJobDetailModal({
                     const r = jobRepairersById.get(p.repairer_id);
                     const files = paymentFiles.filter((f) => f.payment_id === p.id);
                     return (
-                      <tr key={p.id}>
+                      <tr key={p.id} className={cn(editingPaymentId === p.id ? "bg-brand-500/5" : "")}>
                         <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{r ? (lang === "ar" ? r.name_ar || r.name : r.name) : "—"}</td>
                         <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{p.invoice_number || "—"}</td>
                         <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{p.invoice_date ? new Date(p.invoice_date).toLocaleDateString() : "—"}</td>
                         <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>{formatSarVat(p.subtotal_sar)}</td>
                         <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>{formatSarVat(p.vat_sar)}</td>
+                        <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>{p.discount_sar > 0 ? `-${formatSarVat(p.discount_sar)}` : "—"}</td>
                         <td className="py-2 px-3 border-t tabular-nums font-medium" style={{ borderColor: "rgb(var(--border))" }}>{formatSarVat(p.grand_total_sar)}</td>
                         <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>
                           {files.map((f) => (
@@ -355,78 +568,46 @@ export default function OutsourcedJobDetailModal({
                             </span>
                           ))}
                         </td>
+                        <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                          {editable && (
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => startEditPayment(p)} className="h-6 w-6 rounded grid place-items-center hover:bg-black/10 dark:hover:bg-white/10" title={t("mt.edit", lang)}>
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                              <button
+                                onClick={() => confirmDeletePayment(p.id)}
+                                disabled={deletingPaymentId === p.id}
+                                className="h-6 w-6 rounded grid place-items-center hover:bg-rose-500/10 text-rose-600"
+                                title={t("mt.delete", lang)}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
+                {/* Actual Total — sits directly below the Grand Total
+                    column specifically (same column, one row down), with
+                    the Files/Actions columns left blank beside it so it
+                    never reads as sitting next to the edit/delete icons
+                    (Turki's exact ask). */}
+                <tfoot>
+                  <tr>
+                    <td colSpan={6} className="py-2.5 px-3 border-t text-end text-sm font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
+                      {t("mt.actualCost", lang)}
+                    </td>
+                    <td className="py-2.5 px-3 border-t tabular-nums text-base font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
+                      {formatSar(actualCost)}
+                    </td>
+                    <td className="border-t" style={{ borderColor: "rgb(var(--border))" }}></td>
+                    <td className="border-t" style={{ borderColor: "rgb(var(--border))" }}></td>
+                  </tr>
+                </tfoot>
               </table>
             )}
-
-            {addingPayment && (
-              <div className="p-3 border-t space-y-2" style={{ borderColor: "rgb(var(--border))" }}>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs muted block mb-1">{t("mt.billedBy", lang)}</label>
-                    <select value={payRepairerId} onChange={(e) => setPayRepairerId(e.target.value)} className={INPUT} style={INPUT_STYLE}>
-                      {jobRepairers.map((r) => (
-                        <option key={r.id} value={r.id}>{lang === "ar" ? r.name_ar || r.name : r.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs muted block mb-1">{t("mt.invoiceNumber", lang)}</label>
-                    <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} className={INPUT} style={INPUT_STYLE} />
-                  </div>
-                  <div>
-                    <label className="text-xs muted block mb-1">{t("mt.invoiceDate", lang)}</label>
-                    <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={INPUT} style={INPUT_STYLE} />
-                  </div>
-                  <div>
-                    <label className="text-xs muted block mb-1">{t("mt.subtotal", lang)}</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={subtotal}
-                      onChange={(e) => setSubtotal(Number(e.target.value) || 0)}
-                      className={INPUT}
-                      style={INPUT_STYLE}
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 text-xs muted">
-                  <span>{t("mt.vat", lang)}: {formatSarVat(preview.vat_sar)}</span>
-                  <span className="font-medium text-[rgb(var(--fg))]">{t("mt.grandTotal", lang)}: {formatSarVat(preview.grand_total_sar)}</span>
-                </div>
-                <input
-                  placeholder={lang === "en" ? "Note (optional)" : "ملاحظة (اختياري)"}
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  className={INPUT}
-                  style={INPUT_STYLE}
-                />
-                <div>
-                  <label className="text-xs muted block mb-1">{t("mt.uploadPhoto", lang)}</label>
-                  <input
-                    type="file"
-                    accept="image/*,application/pdf"
-                    onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
-                    className="text-xs"
-                  />
-                </div>
-                <div className="flex justify-end gap-2 pt-1">
-                  <Btn variant="outline" onClick={() => setAddingPayment(false)} disabled={savingPayment}>{t("common.cancel", lang)}</Btn>
-                  <Btn variant="primary" onClick={saveNewPayment} disabled={savingPayment || !payRepairerId || !(subtotal > 0)}>
-                    {savingPayment ? "…" : t("common.save", lang)}
-                  </Btn>
-                </div>
-              </div>
-            )}
-
-            <div className="px-3 py-2 border-t flex items-center justify-between" style={{ borderColor: "rgb(var(--border))" }}>
-              <span className="text-sm font-semibold">{t("mt.actualCost", lang)}</span>
-              <span className="text-lg font-semibold tabular-nums">{formatSar(actualCost)}</span>
-            </div>
           </div>
         </div>
 
@@ -437,14 +618,14 @@ export default function OutsourcedJobDetailModal({
                 <Play className="h-4 w-4" />{lifecycleBusy ? "…" : t("mt.dispatch", lang)}
               </Btn>
             )}
-            {job.status !== "completed" && (
+            {job.status === "in_progress" && (
               <span title={!allTasksDone ? t("mt.allTasksRequired", lang) : undefined}>
                 <Btn variant="primary" onClick={onComplete} disabled={lifecycleBusy || !allTasksDone}>
                   <Check className="h-4 w-4" />{lifecycleBusy ? "…" : t("mt.markComplete", lang)}
                 </Btn>
               </span>
             )}
-            {!allTasksDone && job.status !== "completed" && (
+            {!allTasksDone && job.status === "in_progress" && (
               <span className="text-xs muted">{t("mt.allTasksRequired", lang)}</span>
             )}
           </div>

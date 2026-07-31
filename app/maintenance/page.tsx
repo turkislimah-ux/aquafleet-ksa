@@ -86,7 +86,7 @@ export default async function MaintenancePage() {
     supabase
       .from("work_orders")
       .select(
-        "id, wo_number, truck_id, type, priority, status, title, title_ar, opened_at, due_by, closed_at, assigned_mechanic_id, estimated_cost_sar, actual_cost_sar, labor_hours, labor_rate_sar, mechanic_notes, inventory_deducted_at, odometer_at_service, prior_truck_status, created_by, started_by, completed_by, created_at"
+        "id, wo_number, truck_id, type, priority, status, title, title_ar, opened_at, due_by, closed_at, assigned_mechanic_id, estimated_cost_sar, actual_cost_sar, labor_hours, labor_rate_sar, mechanic_notes, inventory_deducted_at, odometer_at_service, prior_truck_status, created_by, started_by, completed_by, start_date, created_at"
       )
       .order("created_at", { ascending: false }),
     supabase
@@ -126,7 +126,7 @@ export default async function MaintenancePage() {
     supabase
       .from("outsourced_jobs")
       .select(
-        "id, os_number, truck_id, responsible_mechanic_id, type, title, title_ar, start_date, estimated_finish, status, created_by, started_by, completed_by, closed_at, created_at"
+        "id, os_number, truck_id, responsible_mechanic_id, type, title, title_ar, start_date, estimated_finish, status, created_by, started_by, completed_by, closed_at, notes, created_at"
       )
       .order("created_at", { ascending: false }),
     supabase
@@ -141,7 +141,7 @@ export default async function MaintenancePage() {
     // NEVER stored on outsourced_jobs.
     supabase
       .from("workshop_payments")
-      .select("id, outsourced_job_id, repairer_id, invoice_number, invoice_date, subtotal_sar, vat_sar, grand_total_sar, note, created_by, created_at")
+      .select("id, outsourced_job_id, repairer_id, invoice_number, invoice_date, subtotal_sar, vat_sar, discount_sar, grand_total_sar, note, created_by, created_at")
       .order("created_at", { ascending: false }),
     supabase
       .from("workshop_payment_files")

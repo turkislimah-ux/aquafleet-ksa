@@ -8,6 +8,15 @@
 // `editingWorkOrder` prop) — same "one modal, edit prop" convention
 // Inventory's own NewPOModal already established for editable drafts.
 //
+// TITLE FIELD — Phase-3 residual fix: was showing a client-composed
+// "Maintenance — {plate}" string, stale since migration 0074 made the
+// real stored title the wo_number itself (WO-YY-####). Now mirrors the OS
+// form's own fix exactly: on EDIT, shows the real stored title read-only;
+// on CREATE, the number is only assigned server-side at insert (the
+// year-keyed counter), so there's nothing real to preview client-side —
+// shows a disabled "assigned automatically on save" placeholder instead
+// of fabricating one.
+//
 // *** OUT-OF-STOCK HARD BLOCK (Turki, explicit) ***
 // create_work_order/edit_work_order reject any line whose qty exceeds that
 // part's CURRENT qty_on_hand — server-side, authoritative. Mirrored here at
@@ -94,6 +103,7 @@ export default function NewWorkOrderModal({
   const [type, setType] = useState<(typeof TYPES)[number]>((editingWorkOrder?.type as (typeof TYPES)[number]) ?? "preventive");
   const [priority, setPriority] = useState<(typeof PRIORITIES)[number]>((editingWorkOrder?.priority as (typeof PRIORITIES)[number]) ?? "medium");
   const [dueBy, setDueBy] = useState(editingWorkOrder ? editingWorkOrder.due_by.slice(0, 10) : todayKey());
+  const [startDate, setStartDate] = useState(editingWorkOrder?.start_date ?? todayKey());
   const [mechanicId, setMechanicId] = useState(editingWorkOrder?.assigned_mechanic_id ?? mechanics[0]?.id ?? "");
   const [laborHours, setLaborHours] = useState(editingWorkOrder?.labor_hours ?? 4);
 
@@ -124,7 +134,6 @@ export default function NewWorkOrderModal({
     return [...repairDescriptions, ...localDescriptions.filter((d) => !ids.has(d.id))];
   }, [repairDescriptions, localDescriptions]);
 
-  const selectedTruck = trucks.find((tr) => tr.id === truckId) ?? null;
   const selectedMechanic = mechanics.find((m) => m.id === mechanicId) ?? null;
   const previewLaborCost = hourlyLaborCost(selectedMechanic, companySettings);
 
@@ -206,7 +215,7 @@ export default function NewWorkOrderModal({
   const laborCostForEstimate = previewLaborCost != null ? laborHours * previewLaborCost : 0;
   const estimatedCost = Math.round(partsCost + laborCostForEstimate);
 
-  const canSubmit = truckId !== "" && mechanicId !== "" && dueBy !== "" && laborHours > 0 && !saving;
+  const canSubmit = truckId !== "" && mechanicId !== "" && dueBy !== "" && startDate !== "" && laborHours > 0 && !saving;
 
   function close() {
     if (saving) return;
@@ -224,6 +233,7 @@ export default function NewWorkOrderModal({
         type,
         priority,
         due_by: dueBy,
+        start_date: startDate,
         mechanic_staff_id: mechanicId,
         task_description_ids: selectedChipIds,
         lines,
@@ -243,6 +253,7 @@ export default function NewWorkOrderModal({
       type,
       priority,
       due_by: dueBy,
+      start_date: startDate,
       mechanic_staff_id: mechanicId,
       task_description_ids: selectedChipIds,
       lines,
@@ -259,7 +270,7 @@ export default function NewWorkOrderModal({
   return (
     <ModalOverlay onClick={close}>
       <div
-        className="card w-full max-w-[900px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0"
+        className="card w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
@@ -288,7 +299,7 @@ export default function NewWorkOrderModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs muted block mb-1">{t("common.truck", lang)}</label>
+              <label className="text-xs muted block mb-1">{t("common.truck", lang)} *</label>
               <select value={truckId} onChange={(e) => setTruckId(e.target.value)} className={INPUT} style={INPUT_STYLE} disabled={isEdit}>
                 {trucks.map((tr) => (
                   <option key={tr.id} value={tr.id}>
@@ -299,12 +310,19 @@ export default function NewWorkOrderModal({
             </div>
             <div>
               <label className="text-xs muted block mb-1">
-                {t("common.title", lang)} <span className="muted text-[10px]">({t("mt.titleAuto", lang)})</span>
+                {t("common.title", lang)} <span className="muted text-[10px]">({t("mt.woTitleAuto", lang)})</span>
               </label>
-              <input readOnly value={selectedTruck ? `${lang === "en" ? "Maintenance" : "صيانة"} — ${selectedTruck.plate}` : ""} className={cn(INPUT, "opacity-70")} style={INPUT_STYLE} />
+              <input
+                readOnly
+                disabled
+                value={isEdit ? editingWorkOrder!.title : ""}
+                placeholder={isEdit ? undefined : t("mt.woTitlePendingSave", lang)}
+                className={cn(INPUT, "opacity-70")}
+                style={INPUT_STYLE}
+              />
             </div>
             <div>
-              <label className="text-xs muted block mb-1">{t("common.type", lang)}</label>
+              <label className="text-xs muted block mb-1">{t("common.type", lang)} *</label>
               <select value={type} onChange={(e) => setType(e.target.value as (typeof TYPES)[number])} className={INPUT} style={INPUT_STYLE}>
                 {TYPES.map((ty) => (
                   <option key={ty} value={ty}>{t(`status.${ty}`, lang)}</option>
@@ -312,7 +330,7 @@ export default function NewWorkOrderModal({
               </select>
             </div>
             <div>
-              <label className="text-xs muted block mb-1">{t("common.priority", lang)}</label>
+              <label className="text-xs muted block mb-1">{t("common.priority", lang)} *</label>
               <select value={priority} onChange={(e) => setPriority(e.target.value as (typeof PRIORITIES)[number])} className={INPUT} style={INPUT_STYLE}>
                 {PRIORITIES.map((p) => (
                   <option key={p} value={p}>{t(`status.${p}`, lang)}</option>
@@ -320,11 +338,15 @@ export default function NewWorkOrderModal({
               </select>
             </div>
             <div>
-              <label className="text-xs muted block mb-1">{t("common.due", lang)}</label>
+              <label className="text-xs muted block mb-1">{t("mt.startDate", lang)} *</label>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+            </div>
+            <div>
+              <label className="text-xs muted block mb-1">{t("common.due", lang)} *</label>
               <input type="date" value={dueBy} onChange={(e) => setDueBy(e.target.value)} className={INPUT} style={INPUT_STYLE} />
             </div>
             <div>
-              <label className="text-xs muted block mb-1">{t("common.mechanic", lang)}</label>
+              <label className="text-xs muted block mb-1">{t("common.mechanic", lang)} *</label>
               <select value={mechanicId} onChange={(e) => setMechanicId(e.target.value)} className={INPUT} style={INPUT_STYLE} disabled={mechanics.length === 0}>
                 {mechanics.map((m) => (
                   <option key={m.id} value={m.id}>{lang === "ar" ? m.name_ar || m.name : m.name}</option>

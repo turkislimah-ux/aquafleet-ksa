@@ -30,7 +30,8 @@ import { useRouter } from "next/navigation";
 import { X, CheckSquare, Square, Play, Check, Pencil, AlertTriangle, ImagePlus } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn, formatSar } from "@/lib/utils";
-import { Btn, StatusPill } from "@/components/ui";
+import { Btn } from "@/components/ui";
+import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
 import type { Truck, Staff, Part, WorkOrder, WorkOrderTask, WorkOrderPart, WorkOrderPartPhoto } from "@/lib/db-types";
 import {
   startWorkOrder,
@@ -62,6 +63,12 @@ function ModalOverlay({ onClick, children }: { onClick: () => void; children: Re
 
 function isWoDelayed(w: WorkOrder): boolean {
   return w.status !== "completed" && w.status !== "cancelled" && new Date(w.due_by).getTime() < Date.now();
+}
+
+function woKind(status: WorkOrder["status"]): MtPillKind {
+  if (status === "completed" || status === "cancelled") return "completed";
+  if (status === "in_progress" || status === "awaiting_parts") return "in_progress";
+  return "scheduled";
 }
 
 export default function WorkOrderDetailModal({
@@ -246,7 +253,7 @@ export default function WorkOrderDetailModal({
 
   return (
     <ModalOverlay onClick={onClose}>
-      <div className="card w-full max-w-[900px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0" onClick={(e) => e.stopPropagation()}>
+      <div className="card w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
           <div>
             <h2 className="font-semibold">{lang === "ar" ? workOrder.title_ar : workOrder.title}</h2>
@@ -292,7 +299,7 @@ export default function WorkOrderDetailModal({
             </div>
             <div>
               <div className="muted mb-0.5">{t("common.status", lang)}</div>
-              <div>{delayed ? <StatusPill status="critical" label={t("mt.delayed", lang)} /> : <StatusPill status={workOrder.status} label={t(`status.${workOrder.status}`, lang)} />}</div>
+              <div>{delayed ? <MtStatusPill kind="overdue" label={t("mt.delayed", lang)} /> : <MtStatusPill kind={woKind(workOrder.status)} label={t(`status.${workOrder.status}`, lang)} />}</div>
             </div>
             <div>
               <div className="muted mb-0.5">{t("common.type", lang)}</div>
@@ -309,6 +316,10 @@ export default function WorkOrderDetailModal({
             <div>
               <div className="muted mb-0.5">{t("common.opened", lang)}</div>
               <div>{new Date(workOrder.opened_at).toLocaleDateString()}</div>
+            </div>
+            <div>
+              <div className="muted mb-0.5">{t("mt.startDate", lang)}</div>
+              <div>{workOrder.start_date ? new Date(workOrder.start_date).toLocaleDateString() : "—"}</div>
             </div>
             <div>
               <div className="muted mb-0.5">{t("common.due", lang)}</div>

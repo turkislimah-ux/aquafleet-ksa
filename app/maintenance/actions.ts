@@ -31,6 +31,10 @@ export type CreateWorkOrderInput = {
   type: string;
   priority: string;
   due_by: string; // ISO date (yyyy-mm-dd) or datetime
+  // Added by migration 0073 — calendar placement parity with
+  // outsourced_jobs.start_date. due_by is unchanged and still drives
+  // in-house overdue.
+  start_date: string;
   mechanic_staff_id: string;
   task_description_ids: string[];
   lines: CreateWorkOrderLine[];
@@ -62,6 +66,7 @@ export async function createWorkOrder(
   if (!input.type) return { error: "Type is required." };
   if (!input.priority) return { error: "Priority is required." };
   if (!input.due_by) return { error: "Due date is required." };
+  if (!input.start_date) return { error: "Start date is required." };
   if (!input.mechanic_staff_id) return { error: "Mechanic is required." };
   if (input.labor_hours != null && !(input.labor_hours > 0)) {
     return { error: "Labor hours must be positive." };
@@ -77,6 +82,7 @@ export async function createWorkOrder(
     p_type: input.type,
     p_priority: input.priority,
     p_due_by: input.due_by,
+    p_start_date: input.start_date,
     p_mechanic_staff_id: input.mechanic_staff_id,
     p_task_description_ids: input.task_description_ids ?? [],
     p_lines: input.lines ?? [],
@@ -102,6 +108,7 @@ export type EditWorkOrderInput = {
   type: string;
   priority: string;
   due_by: string;
+  start_date: string;
   mechanic_staff_id: string;
   task_description_ids: string[];
   lines: CreateWorkOrderLine[];
@@ -115,6 +122,7 @@ export async function editWorkOrder(
   if (!input.type) return { error: "Type is required." };
   if (!input.priority) return { error: "Priority is required." };
   if (!input.due_by) return { error: "Due date is required." };
+  if (!input.start_date) return { error: "Start date is required." };
   if (!input.mechanic_staff_id) return { error: "Mechanic is required." };
   if (!(input.labor_hours > 0)) return { error: "Labor hours must be positive." };
   for (const l of input.lines ?? []) {
@@ -128,6 +136,7 @@ export async function editWorkOrder(
     p_type: input.type,
     p_priority: input.priority,
     p_due_by: input.due_by,
+    p_start_date: input.start_date,
     p_mechanic_staff_id: input.mechanic_staff_id,
     p_task_description_ids: input.task_description_ids ?? [],
     p_lines: input.lines ?? [],

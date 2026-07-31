@@ -26,15 +26,25 @@ function round2(n: number): number {
 export type WorkshopPaymentTotals = {
   subtotal_sar: number;
   vat_sar: number;
+  discount_sar: number;
   grand_total_sar: number;
 };
 
 // One computation, one place — the DB's own CHECK
-// (grand_total_sar = subtotal_sar + vat_sar) is the authoritative floor;
-// this is what the form uses to arrive at numbers that will actually pass
-// it, computed from the user's single entered subtotal.
-export function computeWorkshopPaymentTotals(subtotalSar: number): WorkshopPaymentTotals {
+// (grand_total_sar = subtotal_sar + vat_sar - discount_sar, migration 0071)
+// is the authoritative floor; this is what the form uses to arrive at
+// numbers that will actually pass it, computed from the user's entered
+// subtotal + discount. VAT is STILL computed on the FULL subtotal — the
+// discount only affects the final grand total, never the VAT figure
+// itself (migration 0071's own explicit rule).
+export function computeWorkshopPaymentTotals(subtotalSar: number, discountSar = 0): WorkshopPaymentTotals {
   const subtotal = round2(subtotalSar);
   const vat = round2(subtotal * VAT_RATE);
-  return { subtotal_sar: subtotal, vat_sar: vat, grand_total_sar: round2(subtotal + vat) };
+  const discount = round2(discountSar);
+  return {
+    subtotal_sar: subtotal,
+    vat_sar: vat,
+    discount_sar: discount,
+    grand_total_sar: round2(subtotal + vat - discount),
+  };
 }

@@ -171,6 +171,27 @@ export async function toggleOutsourcedJobTask(
   return { error: null, task: data as OutsourcedJobTask };
 }
 
+// save_outsourced_job_notes (migration 0072) — dedicated RPC, same
+// reasoning save_work_order_notes has: a single-field quick save
+// shouldn't carry edit_outsourced_job's full validation weight.
+export async function saveOutsourcedJobNotes(
+  jobId: string,
+  notes: string,
+): Promise<{ error: string | null; job?: OutsourcedJob }> {
+  if (!jobId) return { error: "Outsourced job is required." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("save_outsourced_job_notes", {
+    p_job_id: jobId,
+    p_notes: notes,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: friendlyOsError(error.message) };
+
+  revalidatePath("/maintenance");
+  return { error: null, job: data as OutsourcedJob };
+}
+
 // ---------------------------------------------------------------------------
 // Inline-add lookups — plain inserts, no RPC (no invariant to protect),
 // same reasoning addRepairDescription (0060)/units already established.
@@ -251,6 +272,54 @@ export async function addRepairer(
   return { error: null, repairer: data as Repairer };
 }
 
+// Plain update — repairer edit has no invariant to protect (no FIFO/stock
+// coupling on this entity at all).
+export async function updateRepairer(
+  repairerId: string,
+  input: RepairerInput,
+): Promise<{ error: string | null; repairer?: Repairer }> {
+  if (!repairerId) return { error: "Repairer is required." };
+  const name = input.name?.trim() ?? "";
+  if (!name) return { error: "Repairer name is required." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("repairers")
+    .update({
+      name,
+      name_ar: input.name_ar?.trim() || null,
+      location: input.location?.trim() || null,
+      type: input.type || null,
+      contact_name: input.contact_name?.trim() || null,
+      contact_number: input.contact_number?.trim() || null,
+      description: input.description?.trim() || null,
+    })
+    .eq("id", repairerId)
+    .select("id, name, name_ar, location, type, contact_name, contact_number, description, active, created_at")
+    .single();
+  if (error) return { error: error.message };
+
+  revalidatePath("/maintenance");
+  return { error: null, repairer: data as Repairer };
+}
+
+// SOFT delete only — Turki's explicit rule: a repairer is never
+// hard-deleted (payments/jobs reference it via ON DELETE RESTRICT anyway,
+// so a hard delete would fail the moment it's ever been used regardless;
+// this is a deliberate pre-filter, same "active=false, never gone"
+// convention as every other entity in this app — suppliers, warehouses,
+// units, drivers/trucks).
+export async function deleteRepairer(repairerId: string): Promise<{ error: string | null }> {
+  if (!repairerId) return { error: "Repairer is required." };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("repairers").update({ active: false }).eq("id", repairerId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/maintenance");
+  return { error: null };
+}
+
 export async function addOutsourcedDescription(
   en: string,
   ar: string,
@@ -286,12 +355,16 @@ export async function addOutsourcedDescription(
 // configured rate — never a fresh hardcoded 15%.
 // ---------------------------------------------------------------------------
 
+const PAYMENT_COLUMNS =
+  "id, outsourced_job_id, repairer_id, invoice_number, invoice_date, subtotal_sar, vat_sar, discount_sar, grand_total_sar, note, created_by, created_at";
+
 export type AddWorkshopPaymentInput = {
   outsourced_job_id: string;
   repairer_id: string;
   invoice_number: string | null;
   invoice_date: string | null;
   subtotal_sar: number;
+  discount_sar: number;
   note: string | null;
 };
 
@@ -301,8 +374,12 @@ export async function addWorkshopPayment(
   if (!input.outsourced_job_id) return { error: "Outsourced job is required." };
   if (!input.repairer_id) return { error: "Repairer is required." };
   if (!(input.subtotal_sar >= 0)) return { error: "Subtotal cannot be negative." };
+  if (!(input.discount_sar >= 0)) return { error: "Discount cannot be negative." };
 
-  const totals = computeWorkshopPaymentTotals(input.subtotal_sar);
+  const totals = computeWorkshopPaymentTotals(input.subtotal_sar, input.discount_sar);
+  if (totals.grand_total_sar < 0) {
+    return { error: "Discount cannot exceed subtotal + VAT." };
+  }
 
   const supabase = createClient();
   const { data, error } = await supabase
@@ -314,16 +391,82 @@ export async function addWorkshopPayment(
       invoice_date: input.invoice_date || null,
       subtotal_sar: totals.subtotal_sar,
       vat_sar: totals.vat_sar,
+      discount_sar: totals.discount_sar,
       grand_total_sar: totals.grand_total_sar,
       note: input.note?.trim() || null,
       created_by: await actorEmail(supabase),
     })
-    .select("id, outsourced_job_id, repairer_id, invoice_number, invoice_date, subtotal_sar, vat_sar, grand_total_sar, note, created_by, created_at")
+    .select(PAYMENT_COLUMNS)
     .single();
   if (error) return { error: error.message };
 
   revalidatePath("/maintenance");
   return { error: null, payment: data as WorkshopPayment };
+}
+
+// Plain update — no invariant beyond the DB's own CHECK, same reasoning
+// addWorkshopPayment already has. VAT/discount recomputed the same way.
+export async function updateWorkshopPayment(
+  paymentId: string,
+  input: AddWorkshopPaymentInput,
+): Promise<{ error: string | null; payment?: WorkshopPayment }> {
+  if (!paymentId) return { error: "Payment is required." };
+  if (!input.repairer_id) return { error: "Repairer is required." };
+  if (!(input.subtotal_sar >= 0)) return { error: "Subtotal cannot be negative." };
+  if (!(input.discount_sar >= 0)) return { error: "Discount cannot be negative." };
+
+  const totals = computeWorkshopPaymentTotals(input.subtotal_sar, input.discount_sar);
+  if (totals.grand_total_sar < 0) {
+    return { error: "Discount cannot exceed subtotal + VAT." };
+  }
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("workshop_payments")
+    .update({
+      repairer_id: input.repairer_id,
+      invoice_number: input.invoice_number?.trim() || null,
+      invoice_date: input.invoice_date || null,
+      subtotal_sar: totals.subtotal_sar,
+      vat_sar: totals.vat_sar,
+      discount_sar: totals.discount_sar,
+      grand_total_sar: totals.grand_total_sar,
+      note: input.note?.trim() || null,
+    })
+    .eq("id", paymentId)
+    .select(PAYMENT_COLUMNS)
+    .single();
+  if (error) return { error: error.message };
+
+  revalidatePath("/maintenance");
+  return { error: null, payment: data as WorkshopPayment };
+}
+
+// Hard delete — same as removing a photo/invoice file elsewhere in this
+// app: no invariant protects a workshop_payments row (nothing sums it
+// except the display-time reduce over whatever rows currently exist), and
+// its own files cascade-delete in the DB. Storage cleanup for those files
+// happens here explicitly first, same "fetch paths before the row is gone"
+// convention removeWorkOrderPartPhoto/removeWorkshopPaymentFile already use.
+export async function deleteWorkshopPayment(paymentId: string): Promise<{ error: string | null }> {
+  if (!paymentId) return { error: "Payment is required." };
+
+  const supabase = createClient();
+
+  const { data: files } = await supabase
+    .from("workshop_payment_files")
+    .select("storage_path")
+    .eq("payment_id", paymentId);
+
+  const { error } = await supabase.from("workshop_payments").delete().eq("id", paymentId);
+  if (error) return { error: error.message };
+
+  if (files && files.length > 0) {
+    await supabase.storage.from(INVOICE_BUCKET).remove(files.map((f) => f.storage_path));
+  }
+
+  revalidatePath("/maintenance");
+  return { error: null };
 }
 
 // ---------------------------------------------------------------------------

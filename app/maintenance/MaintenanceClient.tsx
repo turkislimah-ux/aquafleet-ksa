@@ -12,11 +12,24 @@
 //
 // This REPLACES the earlier mock-data page (see page.tsx's own header) —
 // every number here is live from Supabase, nothing is a demo fixture.
+//
+// Phase-5 fixes: `truckFilter` is now SHARED between in-house and
+// outsourced (matches preview's single S.mtTruckFilter — was two
+// independent filters before). OS view/edit/new-job state is now owned
+// HERE (see the newOsOpen/viewingOsId/editingOsId trio below, mirroring
+// the in-house newWOOpen/viewingWoId/editingWoId trio) instead of inside
+// OutsourcedTrack, so the shared calendar can open a specific OS job's
+// detail view from a day-cell pill click regardless of which track's tab
+// is active — and so the header's "+ New" action can target whichever
+// track is active from one place, matching preview's own layout (the
+// create button always sits in the page header, never inside the track's
+// own table toolbar).
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, ChevronDown, ChevronRight, Eye, Layers, X, AlertTriangle } from "lucide-react";
-import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD } from "@/components/ui";
+import { PageHeader, Card, Stat, Btn, Table, TH, TD } from "@/components/ui";
+import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
 import { cn, formatSar } from "@/lib/utils";
@@ -39,12 +52,18 @@ import type {
   WorkshopPayment,
   WorkshopPaymentFile,
 } from "@/lib/db-types";
-import MaintenanceCalendar from "./MaintenanceCalendar";
+import MaintenanceCalendar, { woCalendarKey } from "./MaintenanceCalendar";
 import NewWorkOrderModal from "./NewWorkOrderModal";
 import WorkOrderDetailModal from "./WorkOrderDetailModal";
 import OutsourcedTrack from "./OutsourcedTrack";
+import NewOutsourcedJobModal from "./NewOutsourcedJobModal";
+import OutsourcedJobDetailModal from "./OutsourcedJobDetailModal";
 
-type Section = "scheduled" | "in_progress" | "delayed" | "historical";
+// "all" is a pseudo-section — a filter view, never something sectionOf()
+// itself returns. Means "every non-historical phase of THIS track,
+// combined" (Turki's Phase-3 correction: All is scoped per-track, never a
+// cross-track merge — that's what the deleted AllTrack.tsx got wrong).
+type Section = "all" | "scheduled" | "in_progress" | "delayed" | "historical";
 
 function isWoDelayed(w: WorkOrder): boolean {
   return w.status !== "completed" && w.status !== "cancelled" && new Date(w.due_by).getTime() < Date.now();
@@ -57,11 +76,10 @@ function sectionOf(w: WorkOrder): Section {
   return "scheduled";
 }
 
-function ymd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function woKind(status: WorkOrder["status"]): MtPillKind {
+  if (status === "completed" || status === "cancelled") return "completed";
+  if (status === "in_progress" || status === "awaiting_parts") return "in_progress";
+  return "scheduled";
 }
 
 export default function MaintenanceClient({
@@ -119,9 +137,34 @@ export default function MaintenanceClient({
   const [viewingWoId, setViewingWoId] = useState<string | null>(null);
   const [editingWoId, setEditingWoId] = useState<string | null>(null);
 
+  // OS view/edit/new state — LIFTED here from OutsourcedTrack (Phase-5
+  // fix): the calendar's day cells now show both tracks' own pills
+  // depending on the active tab, and clicking an OS pill must open that
+  // job's detail modal — which OutsourcedTrack's own internal state
+  // couldn't do from outside it. Mirrors the in-house viewingWoId/
+  // editingWoId pair immediately above, same pattern.
+  const [newOsOpen, setNewOsOpen] = useState(false);
+  const [viewingOsId, setViewingOsId] = useState<string | null>(null);
+  const [editingOsId, setEditingOsId] = useState<string | null>(null);
+
   const trucksById = useMemo(() => new Map(trucks.map((tr) => [tr.id, tr])), [trucks]);
   const mechanicsById = useMemo(() => new Map(mechanics.map((m) => [m.id, m])), [mechanics]);
   const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+
+  const repairerIdsByJob = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const jr of outsourcedJobRepairers) {
+      const arr = m.get(jr.outsourced_job_id) ?? [];
+      arr.push(jr.repairer_id);
+      m.set(jr.outsourced_job_id, arr);
+    }
+    return m;
+  }, [outsourcedJobRepairers]);
+
+  function jobRepairerObjs(jobId: string): Repairer[] {
+    const ids = repairerIdsByJob.get(jobId) ?? [];
+    return ids.map((id) => repairers.find((r) => r.id === id)).filter((r): r is Repairer => !!r);
+  }
 
   // Out-of-part — DERIVED, not stored (see WorkOrderDetailModal's own
   // comment for the full rule): only 'open' WOs are at risk, since a
@@ -150,6 +193,7 @@ export default function MaintenanceClient({
   const kpiDelayed = withSections.filter((x) => x.section === "delayed").length;
 
   const sectionCounts: Record<Section, number> = {
+    all: kpiScheduled + kpiInProgress + kpiDelayed,
     scheduled: kpiScheduled,
     in_progress: kpiInProgress,
     delayed: kpiDelayed,
@@ -158,9 +202,9 @@ export default function MaintenanceClient({
 
   const filtered = useMemo(() => {
     return withSections
-      .filter((x) => x.section === section)
+      .filter((x) => (section === "all" ? x.section !== "historical" : x.section === section))
       .filter((x) => truckFilter === "all" || x.w.truck_id === truckFilter)
-      .filter((x) => !selectedDate || ymd(new Date(x.w.due_by)) === selectedDate)
+      .filter((x) => !selectedDate || woCalendarKey(x.w) === selectedDate)
       .map((x) => x.w)
       .sort((a, b) => new Date(a.due_by).getTime() - new Date(b.due_by).getTime());
   }, [withSections, section, truckFilter, selectedDate]);
@@ -203,6 +247,14 @@ export default function MaintenanceClient({
     setEditingWoId(woId);
   }
 
+  const viewingOs = viewingOsId ? outsourcedJobs.find((j) => j.id === viewingOsId) ?? null : null;
+  const editingOs = editingOsId ? outsourcedJobs.find((j) => j.id === editingOsId) ?? null : null;
+
+  function openOsEdit(jobId: string) {
+    setViewingOsId(null);
+    setEditingOsId(jobId);
+  }
+
   function renderRow(w: WorkOrder) {
     const truck = trucksById.get(w.truck_id);
     const mech = mechanicsById.get(w.assigned_mechanic_id);
@@ -229,11 +281,11 @@ export default function MaintenanceClient({
         <TD className={cn("text-xs", delayed ? "text-rose-600 font-medium" : "")}>{new Date(w.due_by).toLocaleDateString()}</TD>
         <TD>
           {outOfPart ? (
-            <StatusPill status="critical" label={t("mt.outOfPart", lang)} />
+            <MtStatusPill kind="overdue" label={t("mt.outOfPart", lang)} />
           ) : delayed ? (
-            <StatusPill status="critical" label={t("mt.delayed", lang)} />
+            <MtStatusPill kind="overdue" label={t("mt.delayed", lang)} />
           ) : (
-            <StatusPill status={w.status} label={t(`status.${w.status}`, lang)} />
+            <MtStatusPill kind={woKind(w.status)} label={t(`status.${w.status}`, lang)} />
           )}
         </TD>
         <TD className="tabular-nums">{formatSar(w.estimated_cost_sar)}</TD>
@@ -254,7 +306,11 @@ export default function MaintenanceClient({
             <Btn variant="primary" onClick={() => setNewWOOpen(true)} disabled={trucks.length === 0}>
               <Plus className="h-4 w-4" />{t("common.newWO", lang)}
             </Btn>
-          ) : undefined
+          ) : (
+            <Btn variant="primary" onClick={() => setNewOsOpen(true)} disabled={trucks.length === 0}>
+              <Plus className="h-4 w-4" />{t("mt.newOutsourcedJob", lang)}
+            </Btn>
+          )
         }
       />
 
@@ -291,12 +347,15 @@ export default function MaintenanceClient({
 
       <MaintenanceCalendar
         lang={lang}
+        track={track}
         workOrders={workOrders}
+        outsourcedJobs={outsourcedJobs}
         trucks={trucks}
         truckFilter={truckFilter}
         selectedDate={selectedDate}
         onSelectDate={setSelectedDate}
         onOpenWorkOrder={setViewingWoId}
+        onOpenOutsourcedJob={setViewingOsId}
       />
 
       <Card className="!p-2">
@@ -320,29 +379,30 @@ export default function MaintenanceClient({
         <OutsourcedTrack
           lang={lang}
           trucks={trucks}
-          mechanics={mechanics}
+          truckFilter={truckFilter}
+          onTruckFilterChange={setTruckFilter}
+          selectedDate={selectedDate}
+          onClearDate={() => setSelectedDate(null)}
+          onViewJob={setViewingOsId}
           repairerTypes={repairerTypes}
           repairers={repairers}
-          outsourcedDescriptions={outsourcedDescriptions}
           outsourcedJobs={outsourcedJobs}
           outsourcedJobRepairers={outsourcedJobRepairers}
-          outsourcedJobTasks={outsourcedJobTasks}
           workshopPayments={workshopPayments}
-          workshopPaymentFiles={workshopPaymentFiles}
         />
       ) : (
         <>
           <Card className="!p-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-1 flex-wrap">
-                {(["scheduled", "in_progress", "delayed", "historical"] as Section[]).map((s) => (
+                {(["all", "scheduled", "in_progress", "delayed", "historical"] as Section[]).map((s) => (
                   <button
                     key={s}
                     onClick={() => setSection(s)}
                     className={cn("h-9 px-3 rounded-lg text-xs font-medium border", section === s ? "bg-brand-600 text-white border-brand-600" : "")}
                     style={section !== s ? { borderColor: "rgb(var(--border))" } : undefined}
                   >
-                    {s === "historical" ? t("mt.historical", lang) : s === "delayed" ? t("mt.delayed", lang) : t(`status.${s}`, lang)}
+                    {s === "all" ? t("mt.all", lang) : s === "historical" ? t("mt.historical", lang) : s === "delayed" ? t("mt.delayed", lang) : t(`status.${s}`, lang)}
                     <span className="ms-1 muted">{sectionCounts[s]}</span>
                   </button>
                 ))}
@@ -400,7 +460,7 @@ export default function MaintenanceClient({
                       </div>
                       <div className="flex items-center gap-1.5 text-[11px]">
                         <span className="rounded px-1.5 py-0.5 bg-brand-500/10 text-brand-700 dark:text-brand-300">{t("status.scheduled", lang)} {rollup.scheduled}</span>
-                        <span className="rounded px-1.5 py-0.5 bg-amber-500/10 text-amber-700 dark:text-amber-300">{t("status.in_progress", lang)} {rollup.in_progress}</span>
+                        <span className="rounded px-1.5 py-0.5 bg-yellow-400/15 text-yellow-800 dark:text-yellow-300">{t("status.in_progress", lang)} {rollup.in_progress}</span>
                         <span className="rounded px-1.5 py-0.5 bg-rose-500/10 text-rose-700 dark:text-rose-300">{t("mt.delayed", lang)} {rollup.delayed}</span>
                         <span className="rounded px-1.5 py-0.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">{t("mt.historical", lang)} {rollup.historical}</span>
                       </div>
@@ -512,6 +572,60 @@ export default function MaintenanceClient({
           />
         );
       })()}
+
+      {newOsOpen && (
+        <NewOutsourcedJobModal
+          lang={lang}
+          trucks={trucks}
+          mechanics={mechanics}
+          repairerTypes={repairerTypes}
+          repairers={repairers}
+          outsourcedDescriptions={outsourcedDescriptions}
+          onClose={() => setNewOsOpen(false)}
+          onCreated={() => {
+            setNewOsOpen(false);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {editingOs && (
+        <NewOutsourcedJobModal
+          lang={lang}
+          trucks={trucks}
+          mechanics={mechanics}
+          repairerTypes={repairerTypes}
+          repairers={repairers}
+          outsourcedDescriptions={outsourcedDescriptions}
+          editingJob={editingOs}
+          editingRepairerIds={repairerIdsByJob.get(editingOs.id) ?? []}
+          editingTasks={outsourcedJobTasks.filter((tk) => tk.outsourced_job_id === editingOs.id)}
+          onClose={() => setEditingOsId(null)}
+          onEdited={(job) => {
+            setEditingOsId(null);
+            setViewingOsId(job.id);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {viewingOs && (
+        <OutsourcedJobDetailModal
+          lang={lang}
+          job={viewingOs}
+          tasks={outsourcedJobTasks.filter((tk) => tk.outsourced_job_id === viewingOs.id)}
+          jobRepairers={jobRepairerObjs(viewingOs.id)}
+          repairerTypes={repairerTypes}
+          payments={workshopPayments.filter((p) => p.outsourced_job_id === viewingOs.id)}
+          paymentFiles={workshopPaymentFiles.filter((f) =>
+            workshopPayments.some((p) => p.outsourced_job_id === viewingOs.id && p.id === f.payment_id),
+          )}
+          truck={trucksById.get(viewingOs.truck_id) ?? null}
+          mechanic={mechanicsById.get(viewingOs.responsible_mechanic_id) ?? null}
+          onClose={() => setViewingOsId(null)}
+          onEdit={() => openOsEdit(viewingOs.id)}
+        />
+      )}
     </div>
   );
 }

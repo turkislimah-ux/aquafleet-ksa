@@ -935,6 +935,11 @@ export type WorkOrder = {
   // start/complete milestones, same convention as created_by.
   started_by: string | null;
   completed_by: string | null;
+  // Added by migration 0073 — calendar placement parity with
+  // outsourced_jobs.start_date. due_by is UNCHANGED and still drives
+  // in-house overdue; start_date only decides which calendar day a WO
+  // appears on. Nullable — existing rows have none, not backfilled.
+  start_date: string | null;
   created_at: string;
 };
 
@@ -1039,6 +1044,9 @@ export type OutsourcedJob = {
   started_by: string | null;
   completed_by: string | null;
   closed_at: string | null;
+  // Added by migration 0072 — the Note box beside Work Performed, saved
+  // via the dedicated save_outsourced_job_notes RPC.
+  notes: string | null;
   created_at: string;
 };
 
@@ -1079,6 +1087,10 @@ export type WorkshopPayment = {
   invoice_date: string | null;
   subtotal_sar: number;
   vat_sar: number;
+  // Added by migration 0071. VAT stays computed on the FULL subtotal
+  // (unchanged) — discount only affects grand_total_sar. DB CHECK:
+  // grand_total_sar = subtotal_sar + vat_sar - discount_sar.
+  discount_sar: number;
   grand_total_sar: number;
   note: string | null;
   created_by: string | null;

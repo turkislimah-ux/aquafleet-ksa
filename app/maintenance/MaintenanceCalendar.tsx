@@ -1,23 +1,44 @@
 "use client";
 
 // Maintenance — forward-looking Sun–Sat week strip. Mirrors preview/'s
-// pages-2.js MT.calendar() (lines ~49-167): buckets in-house work orders by
-// due_by, excludes completed/cancelled (history lives in the Historical
-// tab, not here), tags each line delayed > active > planned, day-click
-// selects/deselects a date that filters the table below.
+// pages-2.js MT.calendar() (lines ~49-167): excludes completed/cancelled
+// (history lives in the Historical tab, not here), tags each line
+// overdue > active > planned, day-click selects/deselects a date that
+// filters the table below.
+//
+// BOTH TRACKS BY start_date (OS adjustments batch): in-house work orders
+// now place by start_date too, matching outsourced_jobs' own start_date —
+// due_by is UNCHANGED and still drives in-house overdue, it just no longer
+// decides which day cell a WO lands in. Existing pre-0073 rows have no
+// start_date yet (nullable, no backfill) — they fall back to due_by so
+// they don't vanish from the calendar entirely until edited.
 //
 // Real-date difference from preview/: preview pins "today" to a fixed demo
 // date (new Date(2026,4,13)). This app has real data, so "today" is the
 // real local clock (matches lib/utils.ts's todayKey() local-date
 // convention elsewhere in this app), not a frozen constant.
+//
+// TRACK-SCOPED (Phase-5 fix) — the calendar now reflects ONLY the active
+// tab's track, via the `track` prop: in-house tab shows only work orders,
+// outsourced tab shows only outsourced jobs, never both overlapping in
+// the same day cell. Was showing both tracks unconditionally regardless
+// of which tab was open — a real bug, not a design choice.
 
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import { t } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
-import type { Truck, WorkOrder } from "@/lib/db-types";
+import { cn, todayKey as todayKeyUtil } from "@/lib/utils";
+import type { Truck, WorkOrder, OutsourcedJob } from "@/lib/db-types";
 
-function ymd(d: Date): string {
+// EXPORTED — MaintenanceClient's own day-filter (Phase-5 fix) must bucket
+// a WO by the exact same key the calendar uses to place it, or clicking a
+// day shows an empty/wrong list (today's actual bug: the table was still
+// filtering by due_by while the calendar had already moved to start_date).
+export function woCalendarKey(w: WorkOrder): string {
+  return w.start_date ?? ymd(new Date(w.due_by));
+}
+
+export function ymd(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -35,6 +56,14 @@ function isWoDelayed(w: WorkOrder): boolean {
   return w.status !== "completed" && w.status !== "cancelled" && new Date(w.due_by).getTime() < Date.now();
 }
 
+function isOsOverdue(j: OutsourcedJob): boolean {
+  return j.status !== "completed" && j.estimated_finish < todayKeyUtil();
+}
+
+type CalItem =
+  | { kind: "wo"; wo: WorkOrder }
+  | { kind: "os"; os: OutsourcedJob };
+
 const MONTHS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -42,20 +71,26 @@ const WEEKDAYS_AR = ["أحد", "اثن", "ثلا", "أرب", "خمي", "جمع",
 
 export default function MaintenanceCalendar({
   lang,
+  track,
   workOrders,
+  outsourcedJobs,
   trucks,
   truckFilter,
   selectedDate,
   onSelectDate,
   onOpenWorkOrder,
+  onOpenOutsourcedJob,
 }: {
   lang: "en" | "ar";
+  track: "in_house" | "outsourced";
   workOrders: WorkOrder[];
+  outsourcedJobs: OutsourcedJob[];
   trucks: Truck[];
   truckFilter: string; // "all" | truck id
   selectedDate: string | null;
   onSelectDate: (iso: string | null) => void;
   onOpenWorkOrder: (id: string) => void;
+  onOpenOutsourcedJob: (id: string) => void;
 }) {
   const [weekStart, setWeekStart] = useState<Date>(() => weekStartOf(new Date()));
 
@@ -67,23 +102,38 @@ export default function MaintenanceCalendar({
 
   const inHouse = useMemo(
     () =>
-      workOrders.filter((w) => {
+      track !== "in_house" ? [] : workOrders.filter((w) => {
         if (w.status === "completed" || w.status === "cancelled") return false;
         return truckFilter === "all" || w.truck_id === truckFilter;
       }),
-    [workOrders, truckFilter],
+    [track, workOrders, truckFilter],
+  );
+
+  const outsourced = useMemo(
+    () =>
+      track !== "outsourced" ? [] : outsourcedJobs.filter((j) => {
+        if (j.status === "completed") return false;
+        return truckFilter === "all" || j.truck_id === truckFilter;
+      }),
+    [track, outsourcedJobs, truckFilter],
   );
 
   const byDay = useMemo(() => {
-    const m = new Map<string, WorkOrder[]>();
+    const m = new Map<string, CalItem[]>();
     for (const w of inHouse) {
-      const k = ymd(new Date(w.due_by));
+      const k = woCalendarKey(w);
       const arr = m.get(k) ?? [];
-      arr.push(w);
+      arr.push({ kind: "wo", wo: w });
+      m.set(k, arr);
+    }
+    for (const j of outsourced) {
+      const k = j.start_date;
+      const arr = m.get(k) ?? [];
+      arr.push({ kind: "os", os: j });
       m.set(k, arr);
     }
     return m;
-  }, [inHouse]);
+  }, [inHouse, outsourced]);
 
   const cells = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => {
@@ -101,10 +151,18 @@ export default function MaintenanceCalendar({
 
   let cActive = 0, cPlanned = 0, cDelayed = 0;
   for (const c of cells) {
-    for (const w of byDay.get(c.iso) ?? []) {
-      if (isWoDelayed(w)) cDelayed++;
-      else if (w.status === "in_progress" || w.status === "awaiting_parts") cActive++;
-      else if (w.status === "open") cPlanned++;
+    for (const item of byDay.get(c.iso) ?? []) {
+      if (item.kind === "wo") {
+        const w = item.wo;
+        if (isWoDelayed(w)) cDelayed++;
+        else if (w.status === "in_progress" || w.status === "awaiting_parts") cActive++;
+        else if (w.status === "open") cPlanned++;
+      } else {
+        const j = item.os;
+        if (isOsOverdue(j)) cDelayed++;
+        else if (j.status === "in_progress") cActive++;
+        else cPlanned++;
+      }
     }
   }
 
@@ -137,7 +195,7 @@ export default function MaintenanceCalendar({
           </button>
         </div>
         <div className="flex items-center gap-3 text-xs flex-wrap">
-          <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-amber-500 inline-block" />{t("mt.weekActive", lang)}: <b className="tabular-nums">{cActive}</b></span>
+          <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-yellow-400 inline-block" />{t("mt.weekActive", lang)}: <b className="tabular-nums">{cActive}</b></span>
           <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-brand-500 inline-block" />{t("mt.weekPlanned", lang)}: <b className="tabular-nums">{cPlanned}</b></span>
           <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-rose-500 inline-block" />{t("mt.weekDelayed", lang)}: <b className="tabular-nums">{cDelayed}</b></span>
         </div>
@@ -167,20 +225,39 @@ export default function MaintenanceCalendar({
               </div>
               {today && <div className="text-[9px] text-brand-600 font-medium mb-1">{lang === "en" ? "Today" : "اليوم"}</div>}
               <div className="space-y-1">
-                {shown.map((w) => {
-                  const truck = trucksById.get(w.truck_id);
-                  const delayed = isWoDelayed(w);
-                  const tone = delayed ? "bg-rose-500/15 text-rose-700 dark:text-rose-300" :
-                    (w.status === "in_progress" || w.status === "awaiting_parts") ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" :
+                {shown.map((item) => {
+                  if (item.kind === "wo") {
+                    const w = item.wo;
+                    const truck = trucksById.get(w.truck_id);
+                    const delayed = isWoDelayed(w);
+                    const tone = delayed ? "bg-rose-500/15 text-rose-700 dark:text-rose-300" :
+                      (w.status === "in_progress" || w.status === "awaiting_parts") ? "bg-yellow-400/20 text-yellow-800 dark:text-yellow-300" :
+                      "bg-brand-500/15 text-brand-700 dark:text-brand-300";
+                    return (
+                      <div
+                        key={`wo-${w.id}`}
+                        onClick={(e) => { e.stopPropagation(); onOpenWorkOrder(w.id); }}
+                        className={cn("text-[10px] rounded px-1.5 py-0.5 truncate cursor-pointer", tone)}
+                        title={lang === "ar" ? w.title_ar : w.title}
+                      >
+                        {truck?.id ?? w.truck_id} · {truck?.plate ?? ""}
+                      </div>
+                    );
+                  }
+                  const j = item.os;
+                  const truck = trucksById.get(j.truck_id);
+                  const overdue = isOsOverdue(j);
+                  const tone = overdue ? "bg-rose-500/15 text-rose-700 dark:text-rose-300" :
+                    j.status === "in_progress" ? "bg-yellow-400/20 text-yellow-800 dark:text-yellow-300" :
                     "bg-brand-500/15 text-brand-700 dark:text-brand-300";
                   return (
                     <div
-                      key={w.id}
-                      onClick={(e) => { e.stopPropagation(); onOpenWorkOrder(w.id); }}
+                      key={`os-${j.id}`}
+                      onClick={(e) => { e.stopPropagation(); onOpenOutsourcedJob(j.id); }}
                       className={cn("text-[10px] rounded px-1.5 py-0.5 truncate cursor-pointer", tone)}
-                      title={lang === "ar" ? w.title_ar : w.title}
+                      title={j.title}
                     >
-                      {truck?.id ?? w.truck_id} · {truck?.plate ?? ""}
+                      <span className="font-semibold">OS</span> {truck?.plate ?? ""}
                     </div>
                   );
                 })}
