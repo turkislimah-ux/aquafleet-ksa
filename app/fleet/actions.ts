@@ -51,6 +51,11 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
     odometer_km: numOrNull(formData.get("odometer_km")),
     vin: nullable(formData.get("vin")),
     assigned_driver_id: nullable(formData.get("assigned_driver_id")),
+    // Phase-5 iteration B: Last Service is now a create-only field (the
+    // pre-purchase fix/inspection date — no work order behind it). Wasn't
+    // captured here before since the form only ever rendered this input in
+    // Edit mode pre-swap; now it's the reverse, so this write is new.
+    last_service_date: nullable(formData.get("last_service_date")),
     active: true,
   };
 
@@ -82,6 +87,11 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
   const plate = str(formData.get("plate"));
   if (!plate) return { error: "Plate is required." };
 
+  // last_service_date is deliberately NOT in this row — Phase-5 iteration B:
+  // the field was removed from the Edit form (it's now auto-advanced by
+  // complete_work_order/complete_outsourced_job, migration 0075), and this
+  // action must not silently null it out just because the form no longer
+  // submits it.
   const row = {
     plate,
     model: nullable(formData.get("model")),
@@ -91,7 +101,6 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
     vin: nullable(formData.get("vin")),
-    last_service_date: nullable(formData.get("last_service_date")),
   };
 
   const supabase = createClient();

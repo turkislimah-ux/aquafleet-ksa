@@ -1,10 +1,16 @@
 "use client";
 
 // Shared truck form modal used in three places: Add (Fleet list header), Edit
-// (Fleet list row pencil), and Edit (Fleet Detail header). Add mode exposes the
-// "Assigned driver" select; Edit mode hides it (driver assignment lives in the
-// dedicated Assign Driver modal) and instead exposes "Last Service" date. Both
-// modes reject a duplicate plate cleanly via the server action.
+// (Fleet list row pencil), and Edit (Fleet Detail header). Add mode exposes
+// "Assigned driver" (Edit mode hides it — driver assignment lives in the
+// dedicated Assign Driver modal instead) AND "Last Service" (the pre-purchase
+// fix/inspection date, which has no work order behind it — a one-time
+// baseline set at creation). Edit mode no longer has a Last Service field at
+// all (Phase-5 iteration B): the column is now auto-advanced by
+// complete_work_order/complete_outsourced_job (migration 0075) whenever a
+// real job finishes for that truck, so it's no longer hand-editable after
+// creation. Both modes reject a duplicate plate cleanly via the server
+// action.
 
 import { useState } from "react";
 import { Btn } from "@/components/ui";
@@ -146,29 +152,30 @@ export default function TruckFormModal({
             <input name="vin" defaultValue={t?.vin ?? ""} className={INPUT} style={INPUT_STYLE} />
           </label>
 
-          {isEdit ? (
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">Last Service</span>
-              <input
-                name="last_service_date"
-                type="date"
-                defaultValue={dateInputValue(t?.last_service_date)}
-                className={INPUT}
-                style={INPUT_STYLE}
-              />
-            </label>
-          ) : (
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">Assigned driver</span>
-              <select name="assigned_driver_id" defaultValue="" className={INPUT} style={INPUT_STYLE}>
-                <option value="">Unassigned</option>
-                {drivers.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {!isEdit && (
+            <>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">Last Service</span>
+                <input
+                  name="last_service_date"
+                  type="date"
+                  defaultValue={dateInputValue(t?.last_service_date)}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">Assigned driver</span>
+                <select name="assigned_driver_id" defaultValue="" className={INPUT} style={INPUT_STYLE}>
+                  <option value="">Unassigned</option>
+                  {drivers.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
           )}
 
           {error && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{error}</p>}
