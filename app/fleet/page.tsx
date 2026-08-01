@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Truck, OperationStation } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
+import { buildTruckStatusMap, type TruckOpsState } from "@/lib/truck-status";
 import { todayKey } from "@/lib/utils";
 import FleetClient from "./FleetClient";
 
@@ -28,7 +29,17 @@ export default async function FleetPage() {
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   const today = todayKey(); // local (matches trip day-math), not UTC
 
-  const [trucksRes, driversRes, tripsRes, leavePeriodsRes, activeProjectsRes, projectDriversRes, operationStationsRes] = await Promise.all([
+  const [
+    trucksRes,
+    driversRes,
+    tripsRes,
+    leavePeriodsRes,
+    activeProjectsRes,
+    projectDriversRes,
+    operationStationsRes,
+    activeWorkOrdersRes,
+    activeOutsourcedJobsRes,
+  ] = await Promise.all([
     // Terminated trucks vanish from the fleet list entirely (0020) — restorable
     // later from Archive. Filtering here also frees their driver: the
     // truckDriverIds set below is built from this array, so a terminated
@@ -69,6 +80,11 @@ export default async function FleetPage() {
       .from("operation_stations")
       .select("id, name, latitude, longitude, active, created_at")
       .order("name", { ascending: true }),
+    // Auto Truck-Status Phase 2a — the two facts behind the derived status
+    // (lib/truck-status.ts): any in_progress job on a truck, across BOTH
+    // tracks. Minimal columns, filtered server-side to in_progress only.
+    supabase.from("work_orders").select("truck_id").eq("status", "in_progress"),
+    supabase.from("outsourced_jobs").select("truck_id").eq("status", "in_progress"),
   ]);
 
   const drivers = (driversRes.data ?? []) as DriverLite[];
@@ -127,13 +143,23 @@ export default async function FleetPage() {
 
   const error =
     trucksRes.error || driversRes.error || tripsRes.error || leavePeriodsRes.error ||
-    activeProjectsRes.error || projectDriversRes.error || operationStationsRes.error;
+    activeProjectsRes.error || projectDriversRes.error || operationStationsRes.error ||
+    activeWorkOrdersRes.error || activeOutsourcedJobsRes.error;
+
+  // ---- Derived truck status (lib/truck-status) — Auto Truck-Status Phase
+  // 2a. REPLACES the demo's stored/health-score-based trucks.status for
+  // every display below (table pills, filters, KPI counts). ----
+  const activeJobTruckIds = new Set<string>([
+    ...((activeWorkOrdersRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
+    ...((activeOutsourcedJobsRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
+  ]);
+  const truckStatusById: Record<string, TruckOpsState> = buildTruckStatusMap(trucks, activeJobTruckIds);
 
   // ---- KPI strip (6) — all REAL, nulls skipped, no division-by-zero ----
   const total = trucks.length;
-  const active = trucks.filter((t) => t.status === "active").length;
-  const maint = trucks.filter((t) => t.status === "maintenance").length;
-  const oos = trucks.filter((t) => t.status === "out_of_service").length;
+  const active = trucks.filter((t) => truckStatusById[t.id] === "active").length;
+  const maint = trucks.filter((t) => truckStatusById[t.id] === "maintenance").length;
+  const idle = trucks.filter((t) => truckStatusById[t.id] === "idle").length;
 
   const capVals = trucks.map((t) => t.capacity_m3).filter((v): v is number => v != null);
   const totalCap = capVals.reduce((s, v) => s + v, 0);
@@ -147,7 +173,7 @@ export default async function FleetPage() {
     total,
     active,
     maint,
-    oos,
+    idle,
     totalCap,
     capHasData: capVals.length > 0,
     avgHealth,
@@ -160,6 +186,7 @@ export default async function FleetPage() {
       trips30d={trips30d}
       onLeaveDriverIds={onLeaveDriverIds}
       driverStateById={driverStateById}
+      truckStatusById={truckStatusById}
       activeProjectNamesByDriver={activeProjectNamesByDriver}
       operationStations={operationStations}
       kpis={kpis}

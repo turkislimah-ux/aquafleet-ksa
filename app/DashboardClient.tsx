@@ -27,7 +27,9 @@ import { Activity, Plus, TrendingUp, TrendingDown, Droplets, Zap, X, GripVertica
 import { formatSar, cn } from "@/lib/utils";
 import { WATER_TYPE_LABELS, TRIP_STAGE_LABELS, type WaterType, type TripStage } from "@/lib/db-types";
 
-type Fleet = { total: number; active: number; idle: number; maint: number; oos: number; avgHealth: number };
+// Auto Truck-Status Phase 2a — 3-state derived model (lib/truck-status.ts).
+// oos ("out of service") is gone: no manual-override path produces it anymore.
+type Fleet = { total: number; active: number; idle: number; maint: number; avgHealth: number };
 type Bottom = { onDuty: number; driversTotal: number };
 type LiveTrip = {
   id: string;
@@ -281,12 +283,11 @@ export default function DashboardClient({
   datasets: Datasets;
   errorMsg: string | null;
 }) {
-  // Fleet Status pie — REAL (trucks.status counts).
+  // Fleet Status pie — Auto Truck-Status Phase 2a: derived, not stored.
   const pie = [
     { label: "Active", value: fleet.active, color: "#10b981" },
     { label: "Idle", value: fleet.idle, color: "#3b82f6" },
     { label: "Maintenance", value: fleet.maint, color: "#f59e0b" },
-    { label: "Out of Service", value: fleet.oos, color: "#ef4444" },
   ];
 
   // AI summary widgets — session state (demo persists in APP_STATE.dashWidgets).

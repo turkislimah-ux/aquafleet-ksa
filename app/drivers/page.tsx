@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Driver, Staff, StaffRole, OperationStation, DriverIncident } from "@/lib/db-types";
 import type { LeavePeriod, LeaveType } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
+import { buildTruckStatusMap } from "@/lib/truck-status";
 import { todayKey } from "@/lib/utils";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
 import {
@@ -43,7 +44,7 @@ export default async function DriversPage() {
   const supabase = createClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes, activeWorkOrdersRes, activeOutsourcedJobsRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       // Terminated trucks vanish from the driver-detail "Current Assignment"
@@ -120,6 +121,11 @@ export default async function DriversPage() {
         .from("driver_incidents")
         .select("id, driver_id, incident_date, type, description, created_at")
         .order("incident_date", { ascending: false }),
+      // Auto Truck-Status Phase 2a — the two facts behind the derived truck
+      // status (lib/truck-status.ts), same as app/fleet/page.tsx. Feeds the
+      // driver detail card's "Current Assignment" truck pill.
+      supabase.from("work_orders").select("truck_id").eq("status", "in_progress"),
+      supabase.from("outsourced_jobs").select("truck_id").eq("status", "in_progress"),
     ]);
 
   // ---- Driver set split (termination) ----------------------------------
@@ -137,6 +143,12 @@ export default async function DriversPage() {
   const allDrivers = (driversRes.data ?? []) as Driver[];
   const activeDrivers = allDrivers.filter((d) => !d.terminated_at);
   const trucks = (trucksRes.data ?? []) as TruckLite[];
+  // Auto Truck-Status Phase 2a — derived, single source of truth.
+  const activeJobTruckIds = new Set<string>([
+    ...((activeWorkOrdersRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
+    ...((activeOutsourcedJobsRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
+  ]);
+  const truckStatusById = buildTruckStatusMap(trucks, activeJobTruckIds);
   const trips = (tripsRes.data ?? []) as TripJoin[];
   const commTrips = (commTripsRes.data ?? []) as CommTripRow[];
   const cycles = (cyclesRes.data ?? []) as CommCycle[];
@@ -245,6 +257,7 @@ export default async function DriversPage() {
       allDrivers={allDrivers}
       commissionDrivers={commissionDrivers}
       trucks={trucks}
+      truckStatusById={truckStatusById}
       trips30dByDriver={trips30dByDriver}
       recentByDriver={recentByDriver}
       commTrips={commTrips}

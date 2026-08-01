@@ -25,13 +25,13 @@ import {
   type StaffRole,
   type OperationStation,
   type DriverIncident,
-  TRUCK_STATUS_LABELS,
   type TruckStatus,
 } from "@/lib/db-types";
 import OperationStationField from "@/components/OperationStationField";
 import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
+import { TRUCK_OPS_STATE_LABELS, type TruckOpsState } from "@/lib/truck-status";
 import {
   createDriver,
   updateDriver,
@@ -100,6 +100,7 @@ export default function DriversClient({
   allDrivers,
   commissionDrivers,
   trucks,
+  truckStatusById,
   trips30dByDriver,
   recentByDriver,
   commTrips,
@@ -126,6 +127,9 @@ export default function DriversClient({
   // Active ∪ terminated-with-nonzero-balance — Commissions tab.
   commissionDrivers: Driver[];
   trucks: TruckLite[];
+  // Auto Truck-Status Phase 2a — derived, single source of truth (lib/
+  // truck-status.ts). REPLACES truck.status for display here.
+  truckStatusById: Record<string, TruckOpsState>;
   trips30dByDriver: Record<string, number>;
   recentByDriver: Record<string, RecentTrip[]>;
   commTrips: CommTripRow[];
@@ -474,6 +478,7 @@ export default function DriversClient({
         <DriverDetail
           driver={detail}
           truck={truckByDriver.get(detail.id) ?? null}
+          truckStatusById={truckStatusById}
           trips30d={trips30dByDriver[detail.id] ?? 0}
           recent={recentByDriver[detail.id] ?? []}
           leavePeriods={driverLeaveById.get(detail.id) ?? []}
@@ -665,6 +670,7 @@ function Cell({ label, children }: { label: string; children: React.ReactNode })
 function DriverDetail({
   driver: d,
   truck,
+  truckStatusById,
   trips30d,
   recent,
   leavePeriods,
@@ -679,6 +685,7 @@ function DriverDetail({
 }: {
   driver: Driver;
   truck: TruckLite | null;
+  truckStatusById: Record<string, TruckOpsState>;
   trips30d: number;
   recent: RecentTrip[];
   leavePeriods: LeavePeriod[];
@@ -812,7 +819,7 @@ function DriverDetail({
                   </div>
                   <div className="text-xs muted">{[truck.model, stationName(truck.home_station)].filter(Boolean).join(" · ") || "—"}</div>
                 </div>
-                <StatusPill status={truck.status} label={TRUCK_STATUS_LABELS[truck.status]} />
+                <StatusPill status={truckStatusById[truck.id] ?? "idle"} label={TRUCK_OPS_STATE_LABELS[truckStatusById[truck.id] ?? "idle"]} />
                 <Btn variant="outline" onClick={onUnassignTruck} className="shrink-0">
                   {unassigning ? "Unassigning…" : "Unassign"}
                 </Btn>

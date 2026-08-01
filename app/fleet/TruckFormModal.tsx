@@ -11,10 +11,16 @@
 // real job finishes for that truck, so it's no longer hand-editable after
 // creation. Both modes reject a duplicate plate cleanly via the server
 // action.
+//
+// STATUS FIELD REMOVED ENTIRELY (Auto Truck-Status Phase 2a) — status is now
+// derived (lib/truck-status.ts: MAINTENANCE if any in_progress job, else
+// ACTIVE if a driver is assigned, else IDLE), computed fresh at render time
+// everywhere it's shown. Never hand-set again, in either mode — there's no
+// manual override path left to produce a stored status at all.
 
 import { useState } from "react";
 import { Btn } from "@/components/ui";
-import { TRUCK_STATUS_LABELS, type OperationStation } from "@/lib/db-types";
+import { type OperationStation } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "./page";
 import { createTruck, updateTruck } from "./actions";
 import OperationStationField from "@/components/OperationStationField";
@@ -111,21 +117,6 @@ export default function TruckFormModal({
               {CAPACITY_OPTIONS_M3.map((c) => (
                 <option key={c} value={c}>
                   {c} m³
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Status</span>
-            <select
-              name="status"
-              defaultValue={t?.status ?? "active"}
-              className={INPUT}
-              style={INPUT_STYLE}
-            >
-              {Object.entries(TRUCK_STATUS_LABELS).map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
                 </option>
               ))}
             </select>

@@ -10,6 +10,7 @@ import type {
 } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
+import { truckOpsStatus, type TruckOpsState } from "@/lib/truck-status";
 import { todayKey } from "@/lib/utils";
 import type { TruckRow, DriverLite } from "../page";
 import FleetDetailClient from "./FleetDetailClient";
@@ -141,6 +142,18 @@ export default async function FleetDetailPage({
   // not worth forcing into the first Promise.all). ----
   const workOrders = (workOrdersRes.data ?? []) as WorkOrder[];
   const outsourcedJobs = (outsourcedJobsRes.data ?? []) as OutsourcedJob[];
+
+  // Auto Truck-Status Phase 2a — derived status for THIS truck. Reuses the
+  // work_orders/outsourced_jobs already fetched above for the Maintenance
+  // History card (every status, this truck only) — no extra query needed.
+  const truckStatus: TruckOpsState | null = truck
+    ? truckOpsStatus({
+        hasActiveJob:
+          workOrders.some((w) => w.status === "in_progress") ||
+          outsourcedJobs.some((j) => j.status === "in_progress"),
+        hasDriver: truck.assigned_driver_id != null,
+      })
+    : null;
   const woIds = workOrders.map((w) => w.id);
   const osIds = outsourcedJobs.map((j) => j.id);
 
@@ -177,6 +190,7 @@ export default async function FleetDetailPage({
   return (
     <FleetDetailClient
       truck={truck}
+      truckStatus={truckStatus}
       trucks={trucks}
       drivers={drivers}
       trips30d={trips30d}

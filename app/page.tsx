@@ -3,6 +3,7 @@ import { formatSar, todayKey } from "@/lib/utils";
 import { TRIP_STAGE_LABELS } from "@/lib/db-types";
 import { type LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
+import { buildTruckStatusMap } from "@/lib/truck-status";
 import DashboardClient, { type Datasets, type DashboardCharts } from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
@@ -17,10 +18,10 @@ export default async function DashboardPage() {
   const supabase = createClient();
   const today = todayKey(); // local (matches trip day-math), not UTC
 
-  const [trucksRes, tripsRes, driversRes, leavePeriodsRes, archivedProjectsRes, projectDriversRes] = await Promise.all([
+  const [trucksRes, tripsRes, driversRes, leavePeriodsRes, archivedProjectsRes, projectDriversRes, activeWorkOrdersRes, activeOutsourcedJobsRes] = await Promise.all([
     // Terminated trucks must never reach the KPI strip / driver-state facts —
     // filtered at the fetch (frees their driver to off_duty via the missing row).
-    supabase.from("trucks").select("id, status, health_score, assigned_driver_id").is("terminated_at", null),
+    supabase.from("trucks").select("id, health_score, assigned_driver_id").is("terminated_at", null),
     supabase
       .from("trips")
       .select(
@@ -43,6 +44,10 @@ export default async function DashboardPage() {
     // Project↔driver membership — feeds the derived hasActiveProject fact (a driver
     // with a truck but no NON-archived project is "idle", not "active").
     supabase.from("project_drivers").select("project_id, driver_id"),
+    // Auto Truck-Status Phase 2a — the two facts behind the derived truck
+    // status (lib/truck-status.ts), same as app/fleet/page.tsx.
+    supabase.from("work_orders").select("truck_id").eq("status", "in_progress"),
+    supabase.from("outsourced_jobs").select("truck_id").eq("status", "in_progress"),
   ]);
 
   type JoinedTrip = {
@@ -93,12 +98,19 @@ export default async function DashboardPage() {
     today,
   );
 
-  // ---- Fleet KPIs (REAL: trucks.status, trucks.health_score) ----
+  // ---- Fleet KPIs (Auto Truck-Status Phase 2a: derived, not stored) ----
+  const activeJobTruckIds = new Set<string>([
+    ...((activeWorkOrdersRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
+    ...((activeOutsourcedJobsRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
+  ]);
+  const truckStatusById = buildTruckStatusMap(
+    trucks as { id: string; assigned_driver_id: string | null }[],
+    activeJobTruckIds,
+  );
   const total = trucks.length;
-  const active = trucks.filter((t) => t.status === "active").length;
-  const idle = trucks.filter((t) => t.status === "idle").length;
-  const maint = trucks.filter((t) => t.status === "maintenance").length;
-  const oos = trucks.filter((t) => t.status === "out_of_service").length;
+  const active = trucks.filter((t) => truckStatusById[t.id] === "active").length;
+  const idle = trucks.filter((t) => truckStatusById[t.id] === "idle").length;
+  const maint = trucks.filter((t) => truckStatusById[t.id] === "maintenance").length;
   const healthVals = trucks
     .map((t) => t.health_score)
     .filter((h): h is number => h != null);
@@ -276,13 +288,12 @@ export default async function DashboardPage() {
       stats: [
         { label: "Active Trucks", value: `${active}/${total}`, tone: "ok" },
         { label: "Maintenance", value: maint, tone: "warn" },
-        { label: "Out of Service", value: oos, tone: "bad" },
+        { label: "Idle", value: idle, tone: "info" },
       ],
       items: [
         { label: "Active", value: active, color: "#10b981" },
         { label: "Idle", value: idle, color: "#3b82f6" },
         { label: "Maintenance", value: maint, color: "#f59e0b" },
-        { label: "Out of Service", value: oos, color: "#ef4444" },
       ],
     },
     drivers: {
@@ -330,7 +341,7 @@ export default async function DashboardPage() {
       items: [
         { label: "Active", value: active, color: "#10b981" },
         { label: "Maintenance", value: maint, color: "#f59e0b" },
-        { label: "Out of Service", value: oos, color: "#ef4444" },
+        { label: "Idle", value: idle, color: "#3b82f6" },
       ],
     },
     // schema not present yet → "No data yet" (wired when their pages land)
@@ -349,7 +360,7 @@ export default async function DashboardPage() {
 
   return (
     <DashboardClient
-      fleet={{ total, active, idle, maint, oos, avgHealth }}
+      fleet={{ total, active, idle, maint, avgHealth }}
       bottom={{ onDuty, driversTotal: drivers.length }}
       liveTrips={liveTrips}
       charts={charts}

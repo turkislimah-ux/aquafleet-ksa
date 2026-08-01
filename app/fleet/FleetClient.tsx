@@ -9,12 +9,9 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Card, Stat, StatusPill, Bar, Btn, Table, TH, TD } from "@/components/ui";
-import {
-  type TruckStatus,
-  type OperationStation,
-  TRUCK_STATUS_LABELS,
-} from "@/lib/db-types";
+import { type OperationStation } from "@/lib/db-types";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
+import { TRUCK_OPS_STATE_LABELS, type TruckOpsState } from "@/lib/truck-status";
 import type { TruckRow, DriverLite } from "./page";
 import { assignDriver, unassignDriver } from "./actions";
 import TruckFormModal from "./TruckFormModal";
@@ -26,19 +23,21 @@ type Kpis = {
   total: number;
   active: number;
   maint: number;
-  oos: number;
+  idle: number;
   totalCap: number;
   capHasData: boolean;
   avgHealth: number | null;
 };
 
-// Status filter chips — our 4 statuses (Idle kept), plus "all".
-const STATUS_CHIPS: Array<"all" | TruckStatus> = [
+// Status filter chips — Auto Truck-Status's 3-state derived model, plus
+// "all". Precedence order (maintenance > active > idle) matches
+// lib/truck-status.ts's own. "out_of_service" is gone — no manual-override
+// path produces it anymore (see lib/truck-status.ts's own header).
+const STATUS_CHIPS: Array<"all" | TruckOpsState> = [
   "all",
+  "maintenance",
   "active",
   "idle",
-  "maintenance",
-  "out_of_service",
 ];
 
 function lastServiceLabel(iso: string | null): string {
@@ -54,6 +53,7 @@ export default function FleetClient({
   trips30d,
   onLeaveDriverIds,
   driverStateById,
+  truckStatusById,
   activeProjectNamesByDriver,
   operationStations,
   kpis,
@@ -64,6 +64,9 @@ export default function FleetClient({
   trips30d: Record<string, number>;
   onLeaveDriverIds: string[];
   driverStateById: Record<string, DriverState>;
+  // Auto Truck-Status Phase 2a — derived, single source of truth (lib/
+  // truck-status.ts). REPLACES trucks.status for every display here.
+  truckStatusById: Record<string, TruckOpsState>;
   // driver_id -> stacked {id, name} of their active projects — resolved per
   // truck via its assigned driver. id feeds pillColor() so a project's pill
   // color matches the Trips board.
@@ -116,7 +119,7 @@ export default function FleetClient({
   const list = useMemo(
     () =>
       trucks.filter((tr) => {
-        if (status !== "all" && tr.status !== status) return false;
+        if (status !== "all" && truckStatusById[tr.id] !== status) return false;
         if (station !== "all" && tr.home_station !== station) return false;
         if (q) {
           const s = q.toLowerCase();
@@ -125,7 +128,7 @@ export default function FleetClient({
         }
         return true;
       }),
-    [trucks, status, station, q],
+    [trucks, status, station, q, truckStatusById],
   );
 
   function openAssign(tr: TruckRow) {
@@ -188,7 +191,7 @@ export default function FleetClient({
         <Stat label="Total Trucks" value={kpis.total} tone="info" />
         <Stat label="Active" value={kpis.active} tone="ok" />
         <Stat label="In Maintenance" value={kpis.maint} tone={kpis.maint > 6 ? "warn" : "info"} />
-        <Stat label="Out of Service" value={kpis.oos} tone={kpis.oos > 0 ? "bad" : "ok"} />
+        <Stat label="Idle" value={kpis.idle} tone="info" />
         <Stat
           label="Total Capacity"
           value={kpis.capHasData ? `${formatNum(kpis.totalCap)} m³` : "—"}
@@ -223,7 +226,7 @@ export default function FleetClient({
                 )}
                 style={status !== s ? { borderColor: "rgb(var(--border))" } : undefined}
               >
-                {s === "all" ? "All" : TRUCK_STATUS_LABELS[s]}
+                {s === "all" ? "All" : TRUCK_OPS_STATE_LABELS[s]}
               </button>
             ))}
           </div>
@@ -290,7 +293,7 @@ export default function FleetClient({
                 </TD>
                 <TD>{tr.home_station ? stationNameById.get(tr.home_station) ?? "—" : "—"}</TD>
                 <TD>
-                  <StatusPill status={tr.status} label={TRUCK_STATUS_LABELS[tr.status]} />
+                  <StatusPill status={truckStatusById[tr.id] ?? "idle"} label={TRUCK_OPS_STATE_LABELS[truckStatusById[tr.id] ?? "idle"]} />
                 </TD>
                 <TD>
                   {tr.driverName ? (

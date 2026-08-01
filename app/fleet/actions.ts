@@ -46,7 +46,12 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
     model: nullable(formData.get("model")),
     year: numOrNull(formData.get("year")),
     capacity_m3: numOrNull(formData.get("capacity_m3")),
-    status: str(formData.get("status")) || "active",
+    // status is a fixed literal, not read from the form — Auto Truck-Status
+    // Phase 2a removed the manual status control entirely (lib/truck-
+    // status.ts derives it fresh at every read instead). This column is
+    // still NOT NULL at the schema level, so a new row needs SOME value;
+    // "active" is a harmless seed since nothing displays it anymore.
+    status: "active",
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
     vin: nullable(formData.get("vin")),
@@ -87,17 +92,17 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
   const plate = str(formData.get("plate"));
   if (!plate) return { error: "Plate is required." };
 
-  // last_service_date is deliberately NOT in this row — Phase-5 iteration B:
-  // the field was removed from the Edit form (it's now auto-advanced by
-  // complete_work_order/complete_outsourced_job, migration 0075), and this
-  // action must not silently null it out just because the form no longer
-  // submits it.
+  // last_service_date and status are deliberately NOT in this row:
+  // last_service_date is now auto-advanced by complete_work_order/
+  // complete_outsourced_job (migration 0075, Phase-5 iteration B); status
+  // is now fully derived (lib/truck-status.ts, Auto Truck-Status Phase 2a).
+  // Neither field is in the Edit form anymore, and this action must not
+  // silently overwrite either just because the form no longer submits them.
   const row = {
     plate,
     model: nullable(formData.get("model")),
     year: numOrNull(formData.get("year")),
     capacity_m3: numOrNull(formData.get("capacity_m3")),
-    status: str(formData.get("status")) || "active",
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
     vin: nullable(formData.get("vin")),
