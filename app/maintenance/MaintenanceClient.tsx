@@ -25,8 +25,8 @@
 // create button always sits in the page header, never inside the track's
 // own table toolbar).
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, ChevronDown, ChevronRight, Eye, Layers, X, AlertTriangle } from "lucide-react";
 import { PageHeader, Card, Stat, Btn, Table, TH, TD } from "@/components/ui";
 import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
@@ -125,6 +125,7 @@ export default function MaintenanceClient({
 }) {
   const { lang } = useApp();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [track, setTrack] = useState<"in_house" | "outsourced">("in_house");
   const [section, setSection] = useState<Section>("scheduled");
@@ -165,6 +166,25 @@ export default function MaintenanceClient({
     const ids = repairerIdsByJob.get(jobId) ?? [];
     return ids.map((id) => repairers.find((r) => r.id === id)).filter((r): r is Repairer => !!r);
   }
+
+  // Deep-link open — Fleet Detail's own Maintenance History card ("View")
+  // links here as /maintenance?wo=<id> or /maintenance?os=<id> instead of
+  // just the bare page, so a job opens straight into its detail modal on
+  // arrival, same as preview's own single-page-app MT.openJob() would.
+  // Guarded against a stale/foreign id (job deleted, or belongs to a
+  // different environment) — silently does nothing rather than crash.
+  useEffect(() => {
+    const woParam = searchParams.get("wo");
+    const osParam = searchParams.get("os");
+    if (woParam && workOrders.some((w) => w.id === woParam)) {
+      setTrack("in_house");
+      setViewingWoId(woParam);
+    } else if (osParam && outsourcedJobs.some((j) => j.id === osParam)) {
+      setTrack("outsourced");
+      setViewingOsId(osParam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Out-of-part — DERIVED, not stored (see WorkOrderDetailModal's own
   // comment for the full rule): only 'open' WOs are at risk, since a

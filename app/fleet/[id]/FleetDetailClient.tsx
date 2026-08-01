@@ -1,24 +1,69 @@
 "use client";
 
 // Client island for Fleet Detail. Stats are REAL where the column has data and
-// honest-empty ("—") otherwise. The Driver card is REAL. The three rich panels
-// — Engine Component Health, Predictive AI, Maintenance History — are
-// honest-empty placeholders until their owning subsystems (IoT, Predictive,
-// Maintenance) are built; they render the real layout with an empty state so the
-// page never shows fabricated telemetry. Change/Assign Driver reuses the same
-// busy-locked modal as the list page.
+// honest-empty ("—") otherwise. The Driver card is REAL. Engine Component
+// Health and Predictive AI are honest-empty placeholders until their owning
+// subsystems (IoT, Predictive) are built; they render the real layout with an
+// empty state so the page never shows fabricated telemetry. Change/Assign
+// Driver reuses the same busy-locked modal as the list page.
+//
+// Maintenance History (Phase 5) — REAL now, both tracks. In-house work
+// orders and outsourced jobs for THIS truck, merged into one list/sorted by
+// date, newest first (mirrors preview's own woHistory table shape — Opened/
+// ID/Title/Type/Status/Assigned-to/Cost/View — extended with the OS track,
+// which preview's own demo table never included). COST RULE (architect,
+// explicit): in-house cost (internal) and OS cost (external, VAT-inclusive)
+// are always shown as separate per-row figures — never summed into one
+// combined total anywhere on this card.
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Card, Stat, StatusPill, Section, Btn, Table, TH, TD } from "@/components/ui";
-import { TRUCK_STATUS_LABELS, type OperationStation } from "@/lib/db-types";
+import { TRUCK_STATUS_LABELS, type OperationStation, type WorkOrder, type WorkOrderPart, type OutsourcedJob, type OutsourcedJobRepairer, type WorkshopPayment } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "../page";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 import { assignDriver, unassignDriver, terminateTruck } from "../actions";
 import TruckFormModal from "../TruckFormModal";
-import { cn, formatNum, todayKey } from "@/lib/utils";
-import { ArrowLeft, Users, X, Activity, Pencil } from "lucide-react";
+import { cn, formatNum, formatSar, todayKey } from "@/lib/utils";
+import { ArrowLeft, Users, X, Activity, Pencil, Eye, Wrench, Package } from "lucide-react";
+import MtStatusPill, { type MtPillKind } from "@/app/maintenance/MtStatusPill";
+
+const TYPE_LABEL: Record<string, string> = {
+  preventive: "Preventive",
+  corrective: "Corrective",
+  inspection: "Inspection",
+  predictive: "Predictive",
+};
+
+function isWoDelayed(w: WorkOrder): boolean {
+  return w.status !== "completed" && w.status !== "cancelled" && new Date(w.due_by).getTime() < Date.now();
+}
+function woKind(status: WorkOrder["status"]): MtPillKind {
+  if (status === "completed" || status === "cancelled") return "completed";
+  if (status === "in_progress" || status === "awaiting_parts") return "in_progress";
+  return "scheduled";
+}
+function woLabel(w: WorkOrder): string {
+  if (isWoDelayed(w)) return "Delayed";
+  return { open: "Scheduled", in_progress: "In Progress", awaiting_parts: "Awaiting Parts", completed: "Completed", cancelled: "Cancelled" }[w.status];
+}
+function isOsOverdue(j: OutsourcedJob): boolean {
+  return j.status !== "completed" && j.estimated_finish < todayKey();
+}
+function osKind(status: OutsourcedJob["status"]): MtPillKind {
+  if (status === "completed") return "completed";
+  if (status === "in_progress") return "in_progress";
+  return "scheduled";
+}
+function osLabel(j: OutsourcedJob): string {
+  if (isOsOverdue(j)) return "Overdue";
+  return { scheduled: "Scheduled", in_progress: "In Progress", completed: "Completed" }[j.status];
+}
+
+type HistoryRow =
+  | { track: "wo"; date: string; wo: WorkOrder }
+  | { track: "os"; date: string; os: OutsourcedJob };
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -52,6 +97,13 @@ export default function FleetDetailClient({
   onLeaveDriverIds,
   driverStateById,
   operationStations,
+  workOrders,
+  workOrderParts,
+  outsourcedJobs,
+  outsourcedJobRepairers,
+  workshopPayments,
+  staffNames,
+  repairerNames,
   errorMsg,
 }: {
   truck: TruckRow | null;
@@ -61,9 +113,53 @@ export default function FleetDetailClient({
   onLeaveDriverIds: string[];
   driverStateById: Record<string, DriverState>;
   operationStations: OperationStation[];
+  workOrders: WorkOrder[];
+  workOrderParts: WorkOrderPart[];
+  outsourcedJobs: OutsourcedJob[];
+  outsourcedJobRepairers: OutsourcedJobRepairer[];
+  workshopPayments: WorkshopPayment[];
+  staffNames: { id: string; name: string }[];
+  repairerNames: { id: string; name: string }[];
   errorMsg: string | null;
 }) {
   const router = useRouter();
+
+  // ---- Maintenance History (Phase 5) ----
+  const staffNameById = useMemo(() => new Map(staffNames.map((s) => [s.id, s.name])), [staffNames]);
+  const repairerNameById = useMemo(() => new Map(repairerNames.map((r) => [r.id, r.name])), [repairerNames]);
+
+  const partsCountByWo = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of workOrderParts) m.set(l.work_order_id, (m.get(l.work_order_id) ?? 0) + l.qty);
+    return m;
+  }, [workOrderParts]);
+
+  const repairerNamesByJob = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const jr of outsourcedJobRepairers) {
+      const name = repairerNameById.get(jr.repairer_id);
+      if (!name) continue;
+      const arr = m.get(jr.outsourced_job_id) ?? [];
+      arr.push(name);
+      m.set(jr.outsourced_job_id, arr);
+    }
+    return m;
+  }, [outsourcedJobRepairers, repairerNameById]);
+
+  // OS actual cost — DERIVED, summed at display time from workshop_payments,
+  // NEVER a stored figure. External/VAT-inclusive money, kept separate from
+  // in-house cost everywhere on this card (architect's explicit rule).
+  const actualCostByJob = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of workshopPayments) m.set(p.outsourced_job_id, (m.get(p.outsourced_job_id) ?? 0) + p.grand_total_sar);
+    return m;
+  }, [workshopPayments]);
+
+  const historyRows = useMemo<HistoryRow[]>(() => {
+    const woRows: HistoryRow[] = workOrders.map((w) => ({ track: "wo", date: w.opened_at, wo: w }));
+    const osRows: HistoryRow[] = outsourcedJobs.map((j) => ({ track: "os", date: j.created_at, os: j }));
+    return [...woRows, ...osRows].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [workOrders, outsourcedJobs]);
 
   // On-leave-today driver ids (computed availability — UI lock only, like the list page).
   const onLeave = useMemo(() => new Set(onLeaveDriverIds), [onLeaveDriverIds]);
@@ -298,13 +394,101 @@ export default function FleetDetailClient({
         </div>
       </div>
 
-      {/* Maintenance History — honest-empty until Maintenance lands */}
+      {/* Maintenance History — REAL, both tracks (Phase 5) */}
       <Card className="!p-0 overflow-hidden">
         <div className="flex items-center justify-between p-3 border-b" style={{ borderColor: "rgb(var(--border))" }}>
-          <h3 className="font-semibold">Maintenance History</h3>
-          <span className="muted text-xs">0 All jobs</span>
+          <h3 className="font-semibold flex items-center gap-2">
+            <Wrench className="h-4 w-4 muted" />
+            Maintenance History
+          </h3>
+          <span className="muted text-xs">{historyRows.length} all jobs</span>
         </div>
-        <p className="text-sm muted p-6 text-center">No maintenance history</p>
+        {historyRows.length === 0 ? (
+          <p className="text-sm muted p-6 text-center">No maintenance history</p>
+        ) : (
+          <div className="overflow-x-auto scrollbar-thin">
+            <table className="w-full text-sm">
+              <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+                <tr>
+                  <TH>Date</TH>
+                  <TH>ID</TH>
+                  <TH>Title</TH>
+                  <TH>Type</TH>
+                  <TH>Status</TH>
+                  <TH>Assigned to</TH>
+                  <TH>Parts</TH>
+                  <TH>Cost</TH>
+                  <TH></TH>
+                </tr>
+              </thead>
+              <tbody>
+                {historyRows.map((row) => {
+                  if (row.track === "wo") {
+                    const w = row.wo;
+                    const mechName = staffNameById.get(w.assigned_mechanic_id) ?? "—";
+                    const partsChanged = partsCountByWo.get(w.id) ?? 0;
+                    const cost = w.actual_cost_sar ?? w.estimated_cost_sar;
+                    return (
+                      <tr key={`wo-${w.id}`}>
+                        <TD className="text-xs">{new Date(w.opened_at).toLocaleDateString()}</TD>
+                        <TD className="font-mono text-xs">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Wrench className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
+                            {w.wo_number}
+                          </span>
+                        </TD>
+                        <TD className="font-medium">{w.title}</TD>
+                        <TD>{TYPE_LABEL[w.type] ?? w.type}</TD>
+                        <TD><MtStatusPill kind={isWoDelayed(w) ? "overdue" : woKind(w.status)} label={woLabel(w)} /></TD>
+                        <TD className="text-xs">{mechName}</TD>
+                        <TD className="text-xs tabular-nums">{partsChanged}</TD>
+                        <TD className="tabular-nums">{formatSar(cost)}<div className="text-[10px] muted">internal</div></TD>
+                        <TD>
+                          <Link
+                            href={`/maintenance?wo=${w.id}`}
+                            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-xs font-medium hover:bg-black/5 dark:hover:bg-white/5"
+                            style={{ borderColor: "rgb(var(--border))" }}
+                          >
+                            <Eye className="h-3.5 w-3.5" /> View
+                          </Link>
+                        </TD>
+                      </tr>
+                    );
+                  }
+                  const j = row.os;
+                  const jRepairers = repairerNamesByJob.get(j.id) ?? [];
+                  const cost = actualCostByJob.get(j.id) ?? 0;
+                  return (
+                    <tr key={`os-${j.id}`}>
+                      <TD className="text-xs">{new Date(j.start_date).toLocaleDateString()}</TD>
+                      <TD className="font-mono text-xs">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Package className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+                          {j.os_number}
+                        </span>
+                      </TD>
+                      <TD className="font-medium">{j.title}</TD>
+                      <TD>{TYPE_LABEL[j.type] ?? j.type}</TD>
+                      <TD><MtStatusPill kind={isOsOverdue(j) ? "overdue" : osKind(j.status)} label={osLabel(j)} /></TD>
+                      <TD className="text-xs">{jRepairers.length === 0 ? "—" : jRepairers.join(", ")}</TD>
+                      <TD className="text-xs muted">—</TD>
+                      <TD className="tabular-nums">{formatSar(cost)}<div className="text-[10px] muted">external, incl. VAT</div></TD>
+                      <TD>
+                        <Link
+                          href={`/maintenance?os=${j.id}`}
+                          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-xs font-medium hover:bg-black/5 dark:hover:bg-white/5"
+                          style={{ borderColor: "rgb(var(--border))" }}
+                        >
+                          <Eye className="h-3.5 w-3.5" /> View
+                        </Link>
+                      </TD>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
 
       {/* Danger zone — soft-delete termination. Terminated trucks vanish from
