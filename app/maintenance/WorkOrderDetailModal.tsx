@@ -98,6 +98,14 @@ export default function WorkOrderDetailModal({
   const partsById = new Map(parts.map((p) => [p.id, p]));
   const delayed = isWoDelayed(workOrder);
   const editable = workOrder.status !== "completed" && workOrder.status !== "cancelled";
+  // Task-gate parity with the outsourced track (0078) — tasks are only
+  // checkable once the WO is started (in_progress), not while still
+  // 'open'. Mirrors the RPC's own guard exactly (raises on 'open', on
+  // completed/cancelled — everything else, including the dormant
+  // 'awaiting_parts' enum value, is allowed) rather than hardcoding to
+  // 'in_progress' only. Separate from `editable` above, which still gates
+  // notes/edit/lifecycle — only the checkbox disable condition changes.
+  const tasksEditable = workOrder.status !== "open" && editable;
   // Photos: allowed on completed jobs too (retroactive documentation),
   // blocked only on cancelled — matches preview exactly, distinct from
   // `editable` above (which gates tasks/notes/lifecycle, not photos).
@@ -197,7 +205,7 @@ export default function WorkOrderDetailModal({
   }
 
   async function onToggleTask(task: WorkOrderTask) {
-    if (!editable || busyTaskId) return;
+    if (!tasksEditable || busyTaskId) return;
     setBusyTaskId(task.id);
     setError(null);
     const res = await toggleWorkOrderTask(task.id, !task.done);
@@ -346,7 +354,8 @@ export default function WorkOrderDetailModal({
                       key={tk.id}
                       type="button"
                       onClick={() => onToggleTask(tk)}
-                      disabled={!editable || busyTaskId === tk.id}
+                      disabled={!tasksEditable || busyTaskId === tk.id}
+                      title={!tasksEditable && editable ? "Start this work order before checking off tasks" : undefined}
                       className="flex items-center gap-2 text-sm w-full text-start disabled:cursor-default"
                     >
                       {tk.done ? <CheckSquare className="h-4 w-4 text-emerald-600 shrink-0" /> : <Square className="h-4 w-4 muted shrink-0" />}

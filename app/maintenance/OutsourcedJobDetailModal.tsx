@@ -127,6 +127,14 @@ export default function OutsourcedJobDetailModal({
 }) {
   const router = useRouter();
   const editable = job.status !== "completed";
+  // Task checkboxes: checkable ONLY while in_progress (0072's own RPC
+  // guard blocks both 'scheduled' and 'completed') — found a real gap
+  // while building in-house's parity for this same rule (0078): this UI
+  // was only ever disabling on `editable` (completed-only), never actually
+  // greying out while scheduled, even though the RPC already rejected it.
+  // Fixed alongside — separate from `editable`, which still gates notes/
+  // payments/edit.
+  const tasksEditable = job.status === "in_progress";
   const overdue = isOverdue(job);
   const allTasksDone = tasks.length === 0 || tasks.every((tk) => tk.done);
   const doneCount = tasks.filter((tk) => tk.done).length;
@@ -141,7 +149,7 @@ export default function OutsourcedJobDetailModal({
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
 
   async function onToggleTask(task: OutsourcedJobTask) {
-    if (!editable || busyTaskId) return;
+    if (!tasksEditable || busyTaskId) return;
     setBusyTaskId(task.id);
     setError(null);
     const res = await toggleOutsourcedJobTask(task.id, !task.done);
@@ -379,7 +387,8 @@ export default function OutsourcedJobDetailModal({
                       key={tk.id}
                       type="button"
                       onClick={() => onToggleTask(tk)}
-                      disabled={!editable || busyTaskId === tk.id}
+                      disabled={!tasksEditable || busyTaskId === tk.id}
+                      title={!tasksEditable && editable ? "Dispatch this job before checking off tasks" : undefined}
                       className="flex items-center gap-2 text-sm w-full text-start disabled:cursor-default"
                     >
                       {tk.done ? <CheckSquare className="h-4 w-4 text-emerald-600 shrink-0" /> : <Square className="h-4 w-4 muted shrink-0" />}
