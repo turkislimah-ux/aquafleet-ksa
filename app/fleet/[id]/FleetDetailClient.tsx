@@ -20,7 +20,8 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Card, Stat, StatusPill, Section, Btn, Table, TH, TD } from "@/components/ui";
-import { TRUCK_STATUS_LABELS, type OperationStation, type WorkOrder, type WorkOrderPart, type OutsourcedJob, type OutsourcedJobRepairer, type WorkshopPayment } from "@/lib/db-types";
+import { type OperationStation, type WorkOrder, type WorkOrderPart, type OutsourcedJob, type OutsourcedJobRepairer, type WorkshopPayment } from "@/lib/db-types";
+import { TRUCK_OPS_STATE_LABELS, type TruckOpsState } from "@/lib/truck-status";
 import type { TruckRow, DriverLite } from "../page";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 import { assignDriver, unassignDriver, terminateTruck } from "../actions";
@@ -91,6 +92,7 @@ function healthTone(v: number | null): "ok" | "warn" | "bad" {
 
 export default function FleetDetailClient({
   truck,
+  truckStatus,
   trucks,
   drivers,
   trips30d,
@@ -107,6 +109,10 @@ export default function FleetDetailClient({
   errorMsg,
 }: {
   truck: TruckRow | null;
+  // Auto Truck-Status Phase 2a — derived, single source of truth (lib/
+  // truck-status.ts). REPLACES truck.status for display here. Null only
+  // when truck itself is null (not-found fallback renders first).
+  truckStatus: TruckOpsState | null;
   trucks: TruckRow[];
   drivers: DriverLite[];
   trips30d: Record<string, number>;
@@ -205,6 +211,23 @@ export default function FleetDetailClient({
     ? drivers.find((d) => d.id === truck.assigned_driver_id) ?? null
     : null;
 
+  // Auto Truck-Status Phase 2b — while this truck is in maintenance and its
+  // freed driver (trucks.driver_before_maintenance) hasn't been reassigned
+  // anywhere else, keep showing them here so it's still visible who this
+  // truck belongs to. NO foreign key on that column (0077 dropped it — a
+  // second trucks->drivers FK broke the Fleet page's PostgREST embed), so
+  // this is a plain by-id lookup against the already-fetched `drivers`
+  // array, never an embed/join. Hidden the moment that driver picks up ANY
+  // truck (checked across the full fleet, not just this one) or once this
+  // truck itself gets a real assigned_driver_id again (the `driver` branch
+  // above takes over then).
+  const freedDriver =
+    truckStatus === "maintenance" && !truck.assigned_driver_id && truck.driver_before_maintenance
+      ? trucks.some((t) => t.assigned_driver_id === truck.driver_before_maintenance)
+        ? null // already given another truck — no longer waiting on this one
+        : drivers.find((d) => d.id === truck.driver_before_maintenance) ?? null
+      : null;
+
   // Subtitle = the non-empty descriptive bits joined, honest-empty otherwise.
   const subParts = [
     truck.model,
@@ -297,7 +320,7 @@ export default function FleetDetailClient({
         subtitle={subParts.join(" · ") || "—"}
         actions={
           <>
-            <StatusPill status={truck.status} label={TRUCK_STATUS_LABELS[truck.status]} />
+            {truckStatus && <StatusPill status={truckStatus} label={TRUCK_OPS_STATE_LABELS[truckStatus]} />}
             <Btn variant="outline" onClick={openAssign}>
               <Users className="h-4 w-4" /> {truck.driverName ? "Change Driver" : "Assign Driver"}
             </Btn>
@@ -379,6 +402,24 @@ export default function FleetDetailClient({
                   <div>
                     <span className="muted">Rating:</span>{" "}
                     <span className="font-medium">{driver.rating != null ? `${driver.rating} / 5` : "—"}</span>
+                  </div>
+                </div>
+              </div>
+            ) : freedDriver ? (
+              <div>
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-brand-700 text-white grid place-items-center font-semibold opacity-70">
+                    {initials(freedDriver.name)}
+                  </div>
+                  <div>
+                    <div className="font-medium">{freedDriver.name}</div>
+                    {(() => {
+                      const state = driverStateById[freedDriver.id] ?? "off_duty";
+                      return <StatusPill status={state} label={DRIVER_STATE_LABELS[state]} />;
+                    })()}
+                    <div className="text-xs muted mt-1">
+                      Waiting for {truck.plate} to be released from maintenance
+                    </div>
                   </div>
                 </div>
               </div>

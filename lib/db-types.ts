@@ -178,6 +178,13 @@ export type Truck = {
   termination_reason: "sold" | "total_loss" | null;
   termination_price: number | null;
   released_date: string | null;
+  // Added in 0076 (Auto Truck-Status Phase 1) — remembers the driver freed
+  // when this truck entered maintenance, so LAST-OUT can try to give them
+  // back. NO foreign key (0077 dropped it — a second trucks->drivers FK
+  // broke PostgREST's embed disambiguation on the Fleet page). Fetch that
+  // driver BY ID with a separate lookup, never an embed — and never re-add
+  // the FK.
+  driver_before_maintenance: string | null;
 };
 
 export const TRUCK_TERMINATION_REASON_LABELS: Record<"sold" | "total_loss", string> = {
