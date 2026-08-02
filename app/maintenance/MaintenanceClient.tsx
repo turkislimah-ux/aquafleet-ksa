@@ -28,7 +28,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, ChevronDown, ChevronRight, Eye, Layers, X, AlertTriangle } from "lucide-react";
-import { PageHeader, Card, Stat, Btn, Table, TH, TD } from "@/components/ui";
+import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
@@ -106,6 +106,95 @@ const URGENT_ROW_TONE: Record<Exclude<Section, "all">, string> = {
   delayed: "bg-rose-500/10 hover:bg-rose-500/15",
   historical: "bg-emerald-500/10 hover:bg-emerald-500/15",
 };
+
+// P3 item 4 — per-tab phase KPIs. OS has no separate "delayed" bucket in
+// its own sectionOf (isOverdue is a derived flag layered on any status),
+// so a small local mirror of OutsourcedTrack.tsx's own logic lives here —
+// not exported/shared, since it's two one-line functions, not worth an
+// import-cycle risk for.
+function isOsOverdue(j: OutsourcedJob): boolean {
+  return j.status !== "completed" && j.estimated_finish < todayKeyLocal();
+}
+function todayKeyLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+type PhaseKey = "scheduled" | "in_progress" | "delayed" | "completed";
+function osPhaseOf(j: OutsourcedJob): PhaseKey {
+  if (isOsOverdue(j)) return "delayed";
+  if (j.status === "completed") return "completed";
+  if (j.status === "in_progress") return "in_progress";
+  return "scheduled";
+}
+
+// Same fixed per-phase color scheme the pills/grouping already use
+// (scheduled=blue, in_progress=TRUE yellow — not the shared component's
+// amber "warn", same distinction MtStatusPill's own header comment makes
+// — delayed=red, completed=green). Not `components/ui.tsx`'s `Stat` tone
+// enum (only amber, no true-yellow option) — a small local variant here.
+const PHASE_VALUE_COLOR: Record<PhaseKey, string> = {
+  scheduled: "text-brand-600 dark:text-brand-300",
+  in_progress: "text-yellow-600 dark:text-yellow-400",
+  delayed: "text-rose-600 dark:text-rose-400",
+  completed: "text-emerald-600 dark:text-emerald-400",
+};
+
+function PhaseStat({ label, value, phase }: { label: string; value: number; phase: PhaseKey }) {
+  return (
+    <div className="card p-4">
+      <div className="text-xs muted uppercase tracking-wide">{label}</div>
+      <div className={cn("text-2xl font-semibold mt-1 tabular-nums", PHASE_VALUE_COLOR[phase])}>{value}</div>
+    </div>
+  );
+}
+
+// P3 item 4B — "this month" count + month-over-month trend, per tab.
+// "This month" = created_at falls in the current calendar month (an
+// explicit read, flagged as an assumption in the ask). Trend shows a
+// raw +/-delta when last month was 0 (percent is undefined at a 0
+// baseline), otherwise a percent change with an up/down arrow — thin/
+// flat right now is expected with days-old test data, not a bug.
+function monthCreatedCounts(items: { created_at: string }[]) {
+  const now = new Date();
+  const thisStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const nextStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const lastStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  let thisMonth = 0;
+  let lastMonth = 0;
+  for (const it of items) {
+    const d = new Date(it.created_at);
+    if (d >= thisStart && d < nextStart) thisMonth++;
+    else if (d >= lastStart && d < thisStart) lastMonth++;
+  }
+  return { thisMonth, lastMonth };
+}
+
+function MonthTrendStat({ label, thisMonth, lastMonth, lang }: { label: string; thisMonth: number; lastMonth: number; lang: "en" | "ar" }) {
+  let trendNode: React.ReactNode;
+  if (lastMonth === 0) {
+    if (thisMonth === 0) {
+      trendNode = <span className="muted">{lang === "en" ? "No change" : "لا تغيير"}</span>;
+    } else {
+      trendNode = <span className="text-emerald-600 dark:text-emerald-400">{`+${thisMonth}`} {lang === "en" ? "vs last month" : "مقارنة بالشهر الماضي"}</span>;
+    }
+  } else {
+    const pct = Math.round(((thisMonth - lastMonth) / lastMonth) * 100);
+    const up = pct > 0;
+    const flat = pct === 0;
+    trendNode = (
+      <span className={flat ? "muted" : up ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}>
+        {flat ? "→" : up ? "↑" : "↓"} {Math.abs(pct)}% {lang === "en" ? "vs last month" : "مقارنة بالشهر الماضي"}
+      </span>
+    );
+  }
+  return (
+    <div className="card p-4">
+      <div className="text-xs muted uppercase tracking-wide">{label}</div>
+      <div className="text-2xl font-semibold mt-1 tabular-nums">{thisMonth}</div>
+      <div className="text-xs mt-1">{trendNode}</div>
+    </div>
+  );
+}
 
 export default function MaintenanceClient({
   trucks,
@@ -250,6 +339,26 @@ export default function MaintenanceClient({
     delayed: kpiDelayed,
     historical: withSections.filter((x) => x.section === "historical").length,
   };
+
+  // P3 item 4A — per-tab phase KPIs. In-house's own 4 counts already exist
+  // above (kpiScheduled/kpiInProgress/kpiDelayed/sectionCounts.historical);
+  // outsourced's own 4 are computed the same way, from its own osPhaseOf.
+  const osPhaseCounts = useMemo(() => {
+    const c: Record<PhaseKey, number> = { scheduled: 0, in_progress: 0, delayed: 0, completed: 0 };
+    for (const j of outsourcedJobs) c[osPhaseOf(j)]++;
+    return c;
+  }, [outsourcedJobs]);
+  const activePhaseCounts: Record<PhaseKey, number> =
+    track === "in_house"
+      ? { scheduled: kpiScheduled, in_progress: kpiInProgress, delayed: kpiDelayed, completed: sectionCounts.historical }
+      : osPhaseCounts;
+
+  // P3 item 4B — "this month created" + trend, scoped to the active tab's
+  // own items.
+  const monthCounts = useMemo(
+    () => (track === "in_house" ? monthCreatedCounts(workOrders) : monthCreatedCounts(outsourcedJobs)),
+    [track, workOrders, outsourcedJobs],
+  );
 
   const filtered = useMemo(() => {
     return withSections
@@ -406,11 +515,21 @@ export default function MaintenanceClient({
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label={t("status.scheduled", lang)} value={kpiScheduled} />
-        <Stat label={t("status.in_progress", lang)} value={kpiInProgress} tone={kpiInProgress > 0 ? "warn" : "ok"} />
-        <Stat label={t("mt.delayed", lang)} value={kpiDelayed} tone={kpiDelayed > 0 ? "bad" : "ok"} />
-        <Stat label={t("mt.outsourced", lang)} value={outsourcedJobs.length} />
+      {/* P3 item 4 — per-tab phase KPIs (A) + a new "this month" count +
+          trend box (B), both scoped to the active track. Preview's own
+          KPI row is global/work-orders-only with no trend box at all —
+          both halves here are beyond preview, per Turki's explicit ask. */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <PhaseStat label={t("status.scheduled", lang)} value={activePhaseCounts.scheduled} phase="scheduled" />
+        <PhaseStat label={t("status.in_progress", lang)} value={activePhaseCounts.in_progress} phase="in_progress" />
+        <PhaseStat label={t("mt.delayed", lang)} value={activePhaseCounts.delayed} phase="delayed" />
+        <PhaseStat label={t("status.completed", lang)} value={activePhaseCounts.completed} phase="completed" />
+        <MonthTrendStat
+          label={track === "in_house" ? t("mt.thisMonthInHouse", lang) : t("mt.thisMonthOutsourced", lang)}
+          thisMonth={monthCounts.thisMonth}
+          lastMonth={monthCounts.lastMonth}
+          lang={lang}
+        />
       </div>
 
       <MaintenanceCalendar

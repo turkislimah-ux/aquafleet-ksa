@@ -151,6 +151,9 @@ export const dict = {
     // P3 item 2 — combined group-by-truck table row count, matches
     // preview's own T("mt.jobCount") (pages-2.js's groupHeader).
     jobCount: { en: "jobs", ar: "عمل" },
+    // P3 item 4B — "this month created" KPI box label, per active tab.
+    thisMonthInHouse: { en: "This Month (Work Orders)", ar: "هذا الشهر (أوامر العمل)" },
+    thisMonthOutsourced: { en: "This Month (Outsourced Jobs)", ar: "هذا الشهر (الأعمال الخارجية)" },
     editJob: { en: "Edit Work Order", ar: "تعديل أمر العمل" },
     laborCostPreview: { en: "Labor cost", ar: "تكلفة العمالة" },
     editInProgressNote: {
