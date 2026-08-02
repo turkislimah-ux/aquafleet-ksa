@@ -194,10 +194,31 @@ export default function MaintenanceCalendar({
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
+        {/* P2 item 2 — legend "bolder": preview's own .cal-pill (a small
+            rounded-pill background behind the bullet, font-weight 600,
+            not a bare dot) — mirrored here, colored with THIS app's own
+            already-established tones (yellow=active, brand=planned,
+            rose=delayed) rather than preview's own legend color, which
+            is genuinely inconsistent with preview's own day-chip color
+            for the same status (preview's legend "Active" swatch is
+            amber/.cal-pill-in_progress, but preview's own day-chip for
+            the same in_progress status is emerald/.week-active — a real
+            mismatch in the demo itself, flagged rather than copied; kept
+            this app's single already-consistent yellow-for-active
+            convention instead, matching MtStatusPill's in_progress). */}
         <div className="flex items-center gap-3 text-xs flex-wrap">
-          <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-yellow-400 inline-block" />{t("mt.weekActive", lang)}: <b className="tabular-nums">{cActive}</b></span>
-          <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-brand-500 inline-block" />{t("mt.weekPlanned", lang)}: <b className="tabular-nums">{cPlanned}</b></span>
-          <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-rose-500 inline-block" />{t("mt.weekDelayed", lang)}: <b className="tabular-nums">{cDelayed}</b></span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-flex items-center justify-center h-[0.95rem] px-1.5 rounded-full text-[10px] font-semibold bg-yellow-400/20 text-yellow-800 dark:text-yellow-300">●</span>
+            {t("mt.weekActive", lang)}: <b className="tabular-nums">{cActive}</b>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-flex items-center justify-center h-[0.95rem] px-1.5 rounded-full text-[10px] font-semibold bg-brand-500/20 text-brand-700 dark:text-brand-300">●</span>
+            {t("mt.weekPlanned", lang)}: <b className="tabular-nums">{cPlanned}</b>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-flex items-center justify-center h-[0.95rem] px-1.5 rounded-full text-[10px] font-semibold bg-rose-500/20 text-rose-700 dark:text-rose-300">●</span>
+            {t("mt.weekDelayed", lang)}: <b className="tabular-nums">{cDelayed}</b>
+          </span>
         </div>
       </div>
 
@@ -206,38 +227,58 @@ export default function MaintenanceCalendar({
           const items = byDay.get(c.iso) ?? [];
           const sel = c.iso === selectedDate;
           const today = c.iso === todayKey;
-          const shown = items.slice(0, 3);
-          const more = items.length - shown.length;
           return (
             <div
               key={c.iso}
               onClick={() => onSelectDate(sel ? null : c.iso)}
+              // P2 item 2 — taller card (preview's own .week-day
+              // min-height:11rem -> h-44 here, but FIXED not min, so a
+              // busy day never stretches the row; overflow goes to the
+              // scrollable jobs list below instead, per Turki's explicit
+              // "never overflows/stretches the page" ask).
               className={cn(
-                "rounded-lg border p-2 min-h-[110px] cursor-pointer transition",
+                "rounded-lg border p-2.5 h-44 flex flex-col gap-1.5 cursor-pointer transition",
                 today ? "ring-1 ring-brand-500" : "",
                 sel ? "bg-brand-500/10" : "hover:bg-black/5 dark:hover:bg-white/5",
               )}
               style={{ borderColor: "rgb(var(--border))" }}
             >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] muted uppercase">{WEEK[c.dow]}</span>
-                <span className="text-xs font-semibold tabular-nums">{c.date.getDate()}</span>
+              {/* Weekday + day-of-month on one baseline (day number bold,
+                  bigger) — preview's own .week-day-head/.dow/.dnum shape,
+                  this app previously split them justify-between on two
+                  ends instead of side by side. "Today" now sits INLINE in
+                  this same row, pushed to the end via ms-auto (preview's
+                  own margin-inline-start:auto) — top-right of the card,
+                  not a separate line underneath like before. */}
+              <div className="flex items-baseline gap-1.5 shrink-0">
+                <span className="text-[11px] muted uppercase tracking-wide font-semibold">{WEEK[c.dow]}</span>
+                <span className="text-base font-bold tabular-nums">{c.date.getDate()}</span>
+                {today && <span className="ms-auto text-[10px] font-bold text-brand-600">{lang === "en" ? "Today" : "اليوم"}</span>}
               </div>
-              {today && <div className="text-[9px] text-brand-600 font-medium mb-1">{lang === "en" ? "Today" : "اليوم"}</div>}
-              <div className="space-y-1">
-                {shown.map((item) => {
+
+              {/* Job list — scrolls internally, no truncate-to-3/"+N more"
+                  anymore (that was preview's own workaround for a
+                  fixed-height card; a real scroll area does the same job
+                  better, per Turki's explicit ask). */}
+              <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin space-y-1">
+                {items.length === 0 && <div className="text-[10px] muted">{t("mt.weekNoJobs", lang)}</div>}
+                {items.map((item) => {
                   if (item.kind === "wo") {
                     const w = item.wo;
                     const truck = trucksById.get(w.truck_id);
                     const delayed = isWoDelayed(w);
-                    const tone = delayed ? "bg-rose-500/15 text-rose-700 dark:text-rose-300" :
-                      (w.status === "in_progress" || w.status === "awaiting_parts") ? "bg-yellow-400/20 text-yellow-800 dark:text-yellow-300" :
-                      "bg-brand-500/15 text-brand-700 dark:text-brand-300";
+                    // P2 item 2 — bold solid color segment before the ID
+                    // (preview's own .week-line border-inline-start:3px
+                    // solid <tone>), this app previously had a flat tint
+                    // with no leading segment at all.
+                    const tone = delayed ? "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-s-rose-500" :
+                      (w.status === "in_progress" || w.status === "awaiting_parts") ? "bg-yellow-400/15 text-yellow-800 dark:text-yellow-300 border-s-yellow-400" :
+                      "bg-brand-500/10 text-brand-700 dark:text-brand-300 border-s-brand-500";
                     return (
                       <div
                         key={`wo-${w.id}`}
                         onClick={(e) => { e.stopPropagation(); onOpenWorkOrder(w.id); }}
-                        className={cn("text-[10px] rounded px-1.5 py-0.5 truncate cursor-pointer", tone)}
+                        className={cn("text-[10px] rounded px-1.5 py-1 truncate cursor-pointer border-s-[3px]", tone)}
                         title={lang === "ar" ? w.title_ar : w.title}
                       >
                         {truck?.id ?? w.truck_id} · {truck?.plate ?? ""}
@@ -247,22 +288,24 @@ export default function MaintenanceCalendar({
                   const j = item.os;
                   const truck = trucksById.get(j.truck_id);
                   const overdue = isOsOverdue(j);
-                  const tone = overdue ? "bg-rose-500/15 text-rose-700 dark:text-rose-300" :
-                    j.status === "in_progress" ? "bg-yellow-400/20 text-yellow-800 dark:text-yellow-300" :
-                    "bg-brand-500/15 text-brand-700 dark:text-brand-300";
+                  const tone = overdue ? "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-s-rose-500" :
+                    j.status === "in_progress" ? "bg-yellow-400/15 text-yellow-800 dark:text-yellow-300 border-s-yellow-400" :
+                    "bg-brand-500/10 text-brand-700 dark:text-brand-300 border-s-brand-500";
                   return (
                     <div
                       key={`os-${j.id}`}
                       onClick={(e) => { e.stopPropagation(); onOpenOutsourcedJob(j.id); }}
-                      className={cn("text-[10px] rounded px-1.5 py-0.5 truncate cursor-pointer", tone)}
+                      className={cn("text-[10px] rounded px-1.5 py-1 truncate cursor-pointer border-s-[3px]", tone)}
                       title={j.title}
                     >
-                      <span className="font-semibold">OS</span> {truck?.plate ?? ""}
+                      {/* P2 item 2 (spotted, flagged) — preview's own
+                          .os-badge is a small solid violet pill before the
+                          truck info, not bare bold text like this app had. */}
+                      <span className="inline-block align-middle text-[9px] font-bold bg-violet-600 text-white px-1 rounded-sm me-1">OS</span>
+                      {truck?.id ?? j.truck_id} · {truck?.plate ?? ""}
                     </div>
                   );
                 })}
-                {items.length === 0 && <div className="text-[10px] muted">{t("mt.weekNoJobs", lang)}</div>}
-                {more > 0 && <div className="text-[10px] muted">+{more} {t("mt.moreCount", lang)}</div>}
               </div>
             </div>
           );
