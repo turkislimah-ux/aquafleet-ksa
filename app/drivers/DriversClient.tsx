@@ -26,6 +26,8 @@ import {
   type OperationStation,
   type DriverIncident,
   type TruckStatus,
+  type StaffCommission,
+  type StaffCommissionType,
 } from "@/lib/db-types";
 import OperationStationField from "@/components/OperationStationField";
 import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
@@ -112,6 +114,8 @@ export default function DriversClient({
   staffRoles,
   leavePeriods,
   leaveTypes,
+  staffCommissions,
+  commissionTypes,
   operationStations,
   driverIncidents,
   today,
@@ -141,6 +145,10 @@ export default function DriversClient({
   staffRoles: StaffRole[];
   leavePeriods: LeavePeriod[];
   leaveTypes: LeaveType[];
+  // Polish item 4 — mechanic commissions (0080). Unfiltered fetch, same
+  // convention as leavePeriods above.
+  staffCommissions: StaffCommission[];
+  commissionTypes: StaffCommissionType[];
   operationStations: OperationStation[];
   // Unfiltered across ALL drivers (termination included) — a soft-deleted
   // driver's incidents persist and must still resolve if their detail is ever
@@ -471,7 +479,16 @@ export default function DriversClient({
       )}
 
       {tab === "staff" && (
-        <StaffTab staff={staff} staffRoles={staffRoles} leavePeriods={leavePeriods} leaveTypes={leaveTypes} operationStations={operationStations} today={today} />
+        <StaffTab
+          staff={staff}
+          staffRoles={staffRoles}
+          leavePeriods={leavePeriods}
+          leaveTypes={leaveTypes}
+          staffCommissions={staffCommissions}
+          commissionTypes={commissionTypes}
+          operationStations={operationStations}
+          today={today}
+        />
       )}
 
       {detail && (

@@ -1114,3 +1114,37 @@ export type WorkshopPaymentFile = {
   mime_type: string | null;
   uploaded_at: string;
 };
+
+// ---------------------------------------------------------------------------
+// Staff-page polish item 4 — mechanic commissions (migration 0080). A
+// STANDALONE money record, Staff-page only, unrelated to app/drivers'
+// existing driver trip-commission/payout system (CommissionsTab.tsx,
+// commission_specials/commission_adjustments/commission_bonus) — deliberately
+// distinct naming everywhere (StaffCommission*, not Commission*) so the two
+// never get confused. amount_sar is a bare typed number: no formula, no join,
+// never summed into any work-order/maintenance/payroll figure.
+// ---------------------------------------------------------------------------
+
+export type StaffCommissionType = {
+  id: string;
+  key: string;
+  label_en: string;
+  label_ar: string;
+  active: boolean;
+  created_at: string;
+};
+
+// staff_id ties this to a mechanic (staff.role='mechanic'). No mirrored
+// active/deleted flag — "gone once the mechanic is deactivated" is read from
+// staff's own live active/terminated_at at query time, same as every other
+// staff-owned record in this app (leave_periods, assigned_mechanic_id...).
+export type StaffCommission = {
+  id: string;
+  staff_id: string;
+  commission_type: string;
+  amount_sar: number;
+  commission_date: string;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+};

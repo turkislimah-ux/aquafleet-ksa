@@ -802,3 +802,130 @@ export async function deleteDriverIncident(id: string): Promise<ActionResult> {
   revalidatePath("/drivers");
   return { error: null };
 }
+
+// ============================================================================
+// STAFF COMMISSIONS (Polish item 4, migration 0080) — Staff-page only,
+// role='mechanic' section. STANDALONE money record: amount_sar is a bare
+// typed number, no formula, never joined into any work-order/maintenance/
+// payroll figure anywhere in this app. Deliberately distinct naming
+// (StaffCommission*) from this file's existing driver trip-commission/
+// payout system above (addCommissionSpecial etc.) — different feature,
+// different tables, never to be confused.
+//
+// Plain CRUD, no RPC — same "no invariant to protect" reasoning
+// addLeave/updateLeave/deleteLeave above already use for a plain
+// amount+date+note record.
+// ============================================================================
+
+function parseStaffCommission(formData: FormData) {
+  const staffId = str(formData.get("staff_id"));
+  const commission_type = str(formData.get("commission_type"));
+  const amount_sar = numOrNull(formData.get("amount_sar"));
+  const commission_date = str(formData.get("commission_date"));
+  const note = nullable(formData.get("note"));
+  return { staffId, commission_type, amount_sar, commission_date, note };
+}
+
+function validateStaffCommission(p: ReturnType<typeof parseStaffCommission>): string | null {
+  if (!p.staffId) return "Missing mechanic.";
+  if (!p.commission_type) return "Pick a commission type.";
+  if (p.amount_sar == null || p.amount_sar <= 0) return "Enter an amount greater than 0.";
+  if (!ISO_DATE_RE.test(p.commission_date)) return "Pick a date.";
+  return null;
+}
+
+export async function addStaffCommission(formData: FormData): Promise<ActionResult> {
+  const p = parseStaffCommission(formData);
+  const bad = validateStaffCommission(p);
+  if (bad) return { error: bad };
+
+  const supabase = createClient();
+  const { data: auth } = await supabase.auth.getUser();
+
+  const { error } = await supabase.from("staff_commissions").insert({
+    staff_id: p.staffId,
+    commission_type: p.commission_type,
+    amount_sar: p.amount_sar,
+    commission_date: p.commission_date,
+    note: p.note,
+    created_by: auth?.user?.email ?? null,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function updateStaffCommission(id: string, formData: FormData): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  const p = parseStaffCommission(formData);
+  const bad = validateStaffCommission(p);
+  if (bad) return { error: bad };
+
+  // Mechanic (staff_id) is fixed at creation; only the entry's own fields change.
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("staff_commissions")
+    .update({
+      commission_type: p.commission_type,
+      amount_sar: p.amount_sar,
+      commission_date: p.commission_date,
+      note: p.note,
+    })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function deleteStaffCommission(id: string): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+  const supabase = createClient();
+  const { error } = await supabase.from("staff_commissions").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+// "Add custom type": insert a commission_types row and return its key (mirrors
+// addLeaveType/addStaffRole). Reuses/re-activates an existing key. Slug via
+// the shared lib/slug helper (matches the form preview + DB CHECK).
+// label_ar has a NOT NULL constraint (0080) but this inline-add flow only
+// takes one text field (same UX as leave/role/repairer-type inline-add,
+// none of which prompt for a separate Arabic label either) — the typed
+// label is used for BOTH label_en and label_ar as a best-effort placeholder,
+// editable later directly in the DB if a real Arabic translation is wanted.
+export async function addStaffCommissionType(label: string): Promise<{ error: string | null; key?: string }> {
+  const clean = label.trim();
+  if (!clean) return { error: "Type name is required." };
+  const key = slugifyKey(clean);
+  if (!key) return { error: "Type name needs letters or numbers." };
+  if (!isValidSlug(key)) return { error: "Label must start with a letter." };
+
+  const supabase = createClient();
+  const { data: existing, error: lookupErr } = await supabase
+    .from("commission_types")
+    .select("key, active")
+    .eq("key", key)
+    .maybeSingle();
+  if (lookupErr) return { error: lookupErr.message };
+
+  if (existing) {
+    if (!existing.active) {
+      const { error } = await supabase.from("commission_types").update({ active: true }).eq("key", key);
+      if (error) return { error: error.message };
+    }
+    revalidatePath("/drivers");
+    return { error: null, key };
+  }
+
+  const { error } = await supabase
+    .from("commission_types")
+    .insert({ key, label_en: clean, label_ar: clean, active: true });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  return { error: null, key };
+}

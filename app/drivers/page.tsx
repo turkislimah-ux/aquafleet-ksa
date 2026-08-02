@@ -6,7 +6,7 @@
 // feed the Driver Detail modal. Both derived from one trips fetch.
 
 import { createClient } from "@/lib/supabase/server";
-import type { Driver, Staff, StaffRole, OperationStation, DriverIncident } from "@/lib/db-types";
+import type { Driver, Staff, StaffRole, OperationStation, DriverIncident, StaffCommission, StaffCommissionType } from "@/lib/db-types";
 import type { LeavePeriod, LeaveType } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { buildTruckStatusMap } from "@/lib/truck-status";
@@ -44,7 +44,7 @@ export default async function DriversPage() {
   const supabase = createClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes, activeWorkOrdersRes, activeOutsourcedJobsRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, staffCommissionsRes, commissionTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes, activeWorkOrdersRes, activeOutsourcedJobsRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       // Terminated trucks vanish from the driver-detail "Current Assignment"
@@ -105,6 +105,19 @@ export default async function DriversPage() {
         .eq("active", true)
         .order("is_default", { ascending: false })
         .order("label", { ascending: true }),
+      // Polish item 4 (0080) — mechanic commissions. Unfiltered fetch (same
+      // "one fetch, split client-side" convention as leave_periods above);
+      // StaffTab/MechanicCommissionsSection read the mechanic's own live
+      // active/terminated_at to decide what to show.
+      supabase
+        .from("staff_commissions")
+        .select("id, staff_id, commission_type, amount_sar, commission_date, note, created_by, created_at")
+        .order("commission_date", { ascending: false }),
+      supabase
+        .from("commission_types")
+        .select("id, key, label_en, label_ar, active, created_at")
+        .eq("active", true)
+        .order("created_at", { ascending: true }),
       // Project↔driver membership → hasActiveProject fact for the derived pill.
       supabase.from("project_drivers").select("project_id, driver_id"),
       // Operation stations (0022) — the driver/truck/staff BASE. ALL rows (active
@@ -159,6 +172,8 @@ export default async function DriversPage() {
   const staffRoles = (staffRolesRes.data ?? []) as StaffRole[];
   const leavePeriods = (leavePeriodsRes.data ?? []) as LeavePeriod[];
   const leaveTypes = (leaveTypesRes.data ?? []) as LeaveType[];
+  const staffCommissions = (staffCommissionsRes.data ?? []) as StaffCommission[];
+  const commissionTypes = (commissionTypesRes.data ?? []) as StaffCommissionType[];
   const operationStations = (operationStationsRes.data ?? []) as OperationStation[];
   const driverIncidents = (driverIncidentsRes.data ?? []) as DriverIncident[];
   const today = todayKey(); // local (matches trip day-math), not UTC
@@ -227,6 +242,8 @@ export default async function DriversPage() {
     staffRolesRes.error ||
     leavePeriodsRes.error ||
     leaveTypesRes.error ||
+    staffCommissionsRes.error ||
+    commissionTypesRes.error ||
     projectDriversRes.error ||
     operationStationsRes.error ||
     driverIncidentsRes.error;
@@ -269,6 +286,8 @@ export default async function DriversPage() {
       staffRoles={staffRoles}
       leavePeriods={leavePeriods}
       leaveTypes={leaveTypes}
+      staffCommissions={staffCommissions}
+      commissionTypes={commissionTypes}
       operationStations={operationStations}
       driverIncidents={driverIncidents}
       today={today}

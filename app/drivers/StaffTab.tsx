@@ -13,12 +13,13 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Ban } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { type Staff, type StaffRole, type OperationStation } from "@/lib/db-types";
+import { type Staff, type StaffRole, type OperationStation, type StaffCommission, type StaffCommissionType } from "@/lib/db-types";
 import { onLeaveTodaySet, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
 import { cn } from "@/lib/utils";
 import { createStaff, updateStaff, terminateStaff, addStaffRole } from "./actions";
 import LeaveSection from "./LeaveSection";
+import MechanicCommissionsSection from "./MechanicCommissionsSection";
 import OperationStationField from "@/components/OperationStationField";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -38,6 +39,8 @@ export default function StaffTab({
   leaveTypes,
   operationStations,
   today,
+  staffCommissions,
+  commissionTypes,
 }: {
   staff: Staff[];
   staffRoles: StaffRole[];
@@ -45,6 +48,12 @@ export default function StaffTab({
   leaveTypes: LeaveType[];
   operationStations: OperationStation[];
   today: string;
+  // Polish item 4 — mechanic commissions (0080). Unfiltered fetch (same
+  // "one fetch, split/filter client-side" convention as leavePeriods
+  // above); MechanicCommissionsSection itself reads the mechanic's own
+  // live active/terminated_at to decide whether to show anything.
+  staffCommissions: StaffCommission[];
+  commissionTypes: StaffCommissionType[];
 }) {
   const router = useRouter();
   const [detail, setDetail] = useState<Staff | null>(null);
@@ -83,6 +92,16 @@ export default function StaffTab({
     for (const [staffId, periods] of leaveByStaff) m.set(staffId, leaveDaysInYear(periods, currentYear));
     return m;
   }, [leaveByStaff, currentYear]);
+
+  // Polish item 4 — mechanic commissions grouped by staff, same pattern as
+  // leaveByStaff above.
+  const commissionsByStaff = useMemo(() => {
+    const m = new Map<string, StaffCommission[]>();
+    for (const c of staffCommissions) {
+      (m.get(c.staff_id) ?? m.set(c.staff_id, []).get(c.staff_id)!).push(c);
+    }
+    return m;
+  }, [staffCommissions]);
 
   function openNew() {
     setEditing(null);
@@ -230,6 +249,15 @@ export default function StaffTab({
                 leaveTypes={leaveTypes}
                 today={today}
               />
+
+              {/* Polish item 4 — mechanic commissions, role='mechanic' ONLY. */}
+              {detail.role === "mechanic" && (
+                <MechanicCommissionsSection
+                  mechanic={detail}
+                  commissions={commissionsByStaff.get(detail.id) ?? []}
+                  commissionTypes={commissionTypes}
+                />
+              )}
             </div>
 
             <div className="flex justify-end gap-2 mt-5">
