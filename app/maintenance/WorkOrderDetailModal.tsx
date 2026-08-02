@@ -111,9 +111,12 @@ export default function WorkOrderDetailModal({
   // `editable` above (which gates tasks/notes/lifecycle, not photos).
   const canUploadPhotos = workOrder.status !== "cancelled";
 
-  const partsCost = lines.reduce((s, l) => s + l.unit_price_sar * l.qty, 0);
   const laborCost = workOrder.labor_hours * workOrder.labor_rate_sar;
-  const total = workOrder.actual_cost_sar ?? partsCost + laborCost;
+  // Polish item 2 — parts-only total, read straight from the stored value
+  // (0079 migration made estimated_cost_sar/actual_cost_sar parts-only at
+  // the source — no client-side recompute needed anymore). Labor is shown
+  // as its own separate figure (laborCost, above) and never folded in.
+  const total = workOrder.actual_cost_sar ?? workOrder.estimated_cost_sar;
   const doneCount = tasks.filter((tk) => tk.done).length;
   const allTasksDone = tasks.length === 0 || tasks.every((tk) => tk.done);
 
@@ -500,24 +503,21 @@ export default function WorkOrderDetailModal({
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="card p-3">
+            <div className="card p-3 !bg-yellow-400/10">
               <div className="text-xs muted uppercase">{t("mt.laborHours", lang)}</div>
               <div className="text-lg font-semibold tabular-nums mt-1">{workOrder.labor_hours}</div>
             </div>
-            <div className="card p-3">
+            <div className="card p-3 !bg-yellow-400/10">
               <div className="text-xs muted uppercase">{t("mt.laborCost", lang)}</div>
               <div className="text-lg font-semibold tabular-nums mt-1">{formatSar(laborCost)}</div>
             </div>
-            <div className="card p-3">
-              <div className="text-xs muted uppercase">{t("mt.partsCost", lang)}</div>
-              <div className="text-lg font-semibold tabular-nums mt-1">{formatSar(partsCost)}</div>
-            </div>
-            <div className="card p-3">
-              <div className="text-xs muted uppercase">{t("mt.totalCost", lang)}</div>
+            {/* Polish item 2 display refinement — "Estimated Cost" box removed
+                (the migration made estimated_cost_sar itself parts-only, so a
+                separate estimate/actual pair no longer says anything different).
+                "Part Cost" renamed "Actual Cost" and spans the freed width. */}
+            <div className="card p-3 col-span-2">
+              <div className="text-xs muted uppercase">{t("mt.woActualCost", lang)}</div>
               <div className="text-lg font-semibold tabular-nums mt-1">{formatSar(total)}</div>
-              {workOrder.actual_cost_sar == null && (
-                <div className="text-[11px] muted mt-0.5">{lang === "en" ? "Estimated" : "تقديري"}: {formatSar(workOrder.estimated_cost_sar)}</div>
-              )}
             </div>
           </div>
         </div>

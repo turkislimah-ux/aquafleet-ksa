@@ -122,12 +122,21 @@ export const dict = {
     partsHelp: { en: "Reserved now — stock deducts when the job is started", ar: "محجوزة الآن — يخصم المخزون عند بدء العمل" },
     onHand: { en: "On hand", ar: "المتوفر" },
     outOfStock: { en: "Out of stock", ar: "غير متوفر" },
-    woTitleAuto: { en: "Title = WO number (auto)", ar: "العنوان = رقم أمر العمل (تلقائي)" },
-    woTitlePendingSave: { en: "Assigned automatically on save", ar: "يُخصص تلقائياً عند الحفظ" },
+    // Polish item 1 (manual title) — replaces the old woTitleAuto/
+    // woTitlePendingSave keys (title is a real optional field now, not an
+    // auto-number preview). Shared by both tracks' create forms.
+    titleOptionalHint: { en: "Describe the work — optional", ar: "وصف العمل — اختياري" },
     totalCost: { en: "Total Cost", ar: "التكلفة الإجمالية" },
     laborHours: { en: "Labor Hrs", ar: "ساعات العمل" },
     laborCost: { en: "Labor Cost", ar: "تكلفة العمالة" },
     partsCost: { en: "Parts Cost", ar: "تكلفة القطع" },
+    // Polish item 2 display refinement — in-house track's parts-only total
+    // (0079 migration). A NEW key, not a reuse of `mt.actualCost` — that one
+    // already means something different (the OS track's workshop-payment
+    // total, worded "Actual Total") and is used in unrelated screens
+    // (OutsourcedJobDetailModal, OutsourcedTrack); reusing it here would
+    // show the wrong wording and couple two unrelated figures.
+    woActualCost: { en: "Actual Cost", ar: "التكلفة الفعلية" },
     inHouse: { en: "In-House", ar: "داخلية" },
     outsourced: { en: "Out-Sourced", ar: "خارجية" },
     groupByTruck: { en: "Group by truck", ar: "تجميع حسب الشاحنة" },
@@ -168,8 +177,6 @@ export const dict = {
     // Phase 4 — Outsourced-jobs track.
     newOutsourcedJob: { en: "New Outsourced Job", ar: "عمل خارجي جديد" },
     editOutsourcedJob: { en: "Edit Outsourced Job", ar: "تعديل العمل الخارجي" },
-    osTitleAuto: { en: "Title = OS number (auto)", ar: "العنوان = رقم العمل الخارجي (تلقائي)" },
-    osTitlePendingSave: { en: "Assigned automatically on save", ar: "يُخصص تلقائياً عند الحفظ" },
     dispatch: { en: "Dispatch", ar: "إرسال" },
     responsibleMechanic: { en: "Responsible Mechanic", ar: "الفني المسؤول" },
     startDate: { en: "Start Date", ar: "تاريخ البدء" },

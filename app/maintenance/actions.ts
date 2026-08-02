@@ -41,6 +41,13 @@ export type CreateWorkOrderInput = {
   // Added by migration 0063 (labor costing) — real per-WO input now,
   // no longer a hardcoded constant. Server defaults to 4 if omitted.
   labor_hours?: number;
+  // Polish item 1 (manual title, no migration) — optional, one field, the
+  // user types in Arabic OR English. create_work_order itself is
+  // UNTOUCHED (still sets title=title_ar=wo_number) — if this is set,
+  // createWorkOrder() below does one plain follow-up update mirroring it
+  // into both title and title_ar right after the RPC succeeds. Blank ->
+  // the RPC's own number-as-title stands.
+  title?: string;
 };
 
 function friendlyWoError(message: string): string {
@@ -90,6 +97,53 @@ export async function createWorkOrder(
     p_actor: await actorEmail(supabase),
   });
   if (error) return { error: friendlyWoError(error.message) };
+
+  let workOrder = data as WorkOrder;
+
+  // Polish item 1 — plain follow-up write, no RPC. create_work_order
+  // itself is untouched (still sets title=title_ar=wo_number); if the
+  // user typed a title, mirror it into both columns right here. Best-
+  // effort: if this second write fails for any reason, the WO still
+  // exists with its number-as-title fallback — never blocks creation.
+  const typedTitle = input.title?.trim();
+  if (typedTitle) {
+    const { data: retitled } = await supabase
+      .from("work_orders")
+      .update({ title: typedTitle, title_ar: typedTitle })
+      .eq("id", workOrder.id)
+      .select("*")
+      .single();
+    if (retitled) workOrder = retitled as WorkOrder;
+  }
+
+  revalidatePath("/maintenance");
+  return { error: null, workOrder };
+}
+
+// ---------------------------------------------------------------------------
+// saveWorkOrderTitle — Polish item 1. Plain write, NO RPC (same pattern
+// photos/repairers already use). Called from NewWorkOrderModal's own
+// edit-save flow, which is only reachable while the job isn't completed —
+// "editable until completed" falls out of that existing gate for free.
+// This action itself doesn't re-check status. One field, mirrored into
+// both title and title_ar.
+// ---------------------------------------------------------------------------
+export async function saveWorkOrderTitle(
+  woId: string,
+  title: string,
+): Promise<{ error: string | null; workOrder?: WorkOrder }> {
+  if (!woId) return { error: "Work order is required." };
+  const t = title.trim();
+  if (!t) return { error: "Title is required." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("work_orders")
+    .update({ title: t, title_ar: t })
+    .eq("id", woId)
+    .select("*")
+    .single();
+  if (error) return { error: error.message };
 
   revalidatePath("/maintenance");
   return { error: null, workOrder: data as WorkOrder };

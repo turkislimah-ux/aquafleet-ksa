@@ -49,6 +49,11 @@ export type CreateOutsourcedJobInput = {
   estimated_finish: string;
   repairer_ids: string[];
   task_description_ids: string[];
+  // Polish item 1 (manual title, no migration) — same treatment as
+  // createWorkOrder: optional, one field, mirrored into both title
+  // columns via a plain follow-up write. create_outsourced_job itself is
+  // UNTOUCHED (still sets title=title_ar=os_number).
+  title?: string;
 };
 
 export async function createOutsourcedJob(
@@ -75,6 +80,49 @@ export async function createOutsourcedJob(
     p_actor: await actorEmail(supabase),
   });
   if (error) return { error: friendlyOsError(error.message) };
+
+  let job = data as OutsourcedJob;
+
+  // Polish item 1 — plain follow-up write, no RPC. Best-effort: a failure
+  // here never blocks creation, the os_number-as-title fallback stands.
+  const typedTitle = input.title?.trim();
+  if (typedTitle) {
+    const { data: retitled } = await supabase
+      .from("outsourced_jobs")
+      .update({ title: typedTitle, title_ar: typedTitle })
+      .eq("id", job.id)
+      .select("*")
+      .single();
+    if (retitled) job = retitled as OutsourcedJob;
+  }
+
+  revalidatePath("/maintenance");
+  return { error: null, job };
+}
+
+// ---------------------------------------------------------------------------
+// saveOutsourcedJobTitle — Polish item 1. Plain write, NO RPC. Called from
+// NewOutsourcedJobModal's own edit-save flow, which is only reachable
+// while the job isn't completed — "editable until completed" falls out
+// of that existing gate for free. This action doesn't re-check status
+// itself.
+// ---------------------------------------------------------------------------
+export async function saveOutsourcedJobTitle(
+  jobId: string,
+  title: string,
+): Promise<{ error: string | null; job?: OutsourcedJob }> {
+  if (!jobId) return { error: "Outsourced job is required." };
+  const t = title.trim();
+  if (!t) return { error: "Title is required." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("outsourced_jobs")
+    .update({ title: t, title_ar: t })
+    .eq("id", jobId)
+    .select("*")
+    .single();
+  if (error) return { error: error.message };
 
   revalidatePath("/maintenance");
   return { error: null, job: data as OutsourcedJob };

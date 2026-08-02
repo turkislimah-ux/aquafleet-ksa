@@ -8,14 +8,12 @@
 // `editingWorkOrder` prop) — same "one modal, edit prop" convention
 // Inventory's own NewPOModal already established for editable drafts.
 //
-// TITLE FIELD — Phase-3 residual fix: was showing a client-composed
-// "Maintenance — {plate}" string, stale since migration 0074 made the
-// real stored title the wo_number itself (WO-YY-####). Now mirrors the OS
-// form's own fix exactly: on EDIT, shows the real stored title read-only;
-// on CREATE, the number is only assigned server-side at insert (the
-// year-keyed counter), so there's nothing real to preview client-side —
-// shows a disabled "assigned automatically on save" placeholder instead
-// of fabricating one.
+// TITLE FIELD — Polish item 1 (manual title, no migration/RPC change):
+// one optional input, EN or AR, shown on both create and edit, saved via
+// a plain follow-up write (never touches create_work_order/edit_work_order).
+// Blank leaves the wo_number fallback (WO-YY-####, set by create_work_order
+// itself) standing. This is the ONLY place title editing lives — there is
+// no separate inline editor on the detail view.
 //
 // *** OUT-OF-STOCK HARD BLOCK (Turki, explicit) ***
 // create_work_order/edit_work_order reject any line whose qty exceeds that
@@ -47,11 +45,17 @@ import { t } from "@/lib/i18n";
 import { cn, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings } from "@/lib/db-types";
-import { createWorkOrder, editWorkOrder, addRepairDescription } from "./actions";
+import { createWorkOrder, editWorkOrder, saveWorkOrderTitle, addRepairDescription } from "./actions";
 import { hourlyLaborCost } from "./laborCost";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))" } as const;
+// Polish item 2 — faded yellow tint on the Labor Hours / Labor Cost boxes,
+// so they read as visually distinct from the parts-only cost total.
+// `!` (important) needed — plain-CSS `.card`/input rules elsewhere in this
+// app have silently overridden a same-specificity bg-* utility before
+// (see globals.css's own documented .trip-highlight/.card precedent).
+const LABOR_TINT = "!bg-yellow-400/10";
 
 function ModalOverlay({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
@@ -100,6 +104,16 @@ export default function NewWorkOrderModal({
   const editableStatus = editingWorkOrder?.status ?? "open";
 
   const [truckId, setTruckId] = useState(editingWorkOrder?.truck_id ?? trucks[0]?.id ?? "");
+  // Polish item 1 (manual title) — one optional field, EN or AR, shown on
+  // BOTH create and edit (moved out of a separate detail-view inline
+  // editor per Turki's correction — this IS the only place title editing
+  // lives now). On edit, prefill with the real custom title only if one
+  // was actually set (create_work_order snapshots title=wo_number when
+  // none was typed) — otherwise leave blank, symmetric with "blank on
+  // save leaves the number fallback standing."
+  const [title, setTitle] = useState(
+    editingWorkOrder && editingWorkOrder.title !== editingWorkOrder.wo_number ? editingWorkOrder.title : "",
+  );
   const [type, setType] = useState<(typeof TYPES)[number]>((editingWorkOrder?.type as (typeof TYPES)[number]) ?? "preventive");
   const [priority, setPriority] = useState<(typeof PRIORITIES)[number]>((editingWorkOrder?.priority as (typeof PRIORITIES)[number]) ?? "medium");
   const [dueBy, setDueBy] = useState(editingWorkOrder ? editingWorkOrder.due_by.slice(0, 10) : todayKey());
@@ -212,8 +226,10 @@ export default function NewWorkOrderModal({
   }, [parts]);
 
   const partsCost = lines.reduce((s, l) => s + (partsById.get(l.part_id)?.unit_cost_sar ?? 0) * l.qty, 0);
-  const laborCostForEstimate = previewLaborCost != null ? laborHours * previewLaborCost : 0;
-  const estimatedCost = Math.round(partsCost + laborCostForEstimate);
+  // Polish item 2 — parts-only total (labor is its own separate figure,
+  // shown in the Labor Cost box below, never added in here). Mirrors
+  // create_work_order/edit_work_order's own estimated_cost_sar exactly.
+  const estimatedCost = Math.round(partsCost);
 
   const canSubmit = truckId !== "" && mechanicId !== "" && dueBy !== "" && startDate !== "" && laborHours > 0 && !saving;
 
@@ -239,12 +255,23 @@ export default function NewWorkOrderModal({
         lines,
         labor_hours: laborHours,
       });
-      setSaving(false);
       if (res.error || !res.workOrder) {
+        setSaving(false);
         setError(res.error ?? "Could not save changes.");
         return;
       }
-      onEdited?.(res.workOrder);
+
+      // Polish item 1 (manual title) — same plain mirrored update as
+      // create, folded into the edit save. Blank field resolves to the
+      // wo_number fallback (saveWorkOrderTitle rejects a blank string).
+      const resolvedTitle = title.trim() || editingWorkOrder.wo_number;
+      const titleRes = await saveWorkOrderTitle(editingWorkOrder.id, resolvedTitle);
+      setSaving(false);
+      if (titleRes.error) {
+        setError(titleRes.error);
+        return;
+      }
+      onEdited?.(titleRes.workOrder ?? res.workOrder);
       return;
     }
 
@@ -258,6 +285,7 @@ export default function NewWorkOrderModal({
       task_description_ids: selectedChipIds,
       lines,
       labor_hours: laborHours,
+      title,
     });
     setSaving(false);
     if (res.error || !res.workOrder) {
@@ -309,15 +337,12 @@ export default function NewWorkOrderModal({
               </select>
             </div>
             <div>
-              <label className="text-xs muted block mb-1">
-                {t("common.title", lang)} <span className="muted text-[10px]">({t("mt.woTitleAuto", lang)})</span>
-              </label>
+              <label className="text-xs muted block mb-1">{t("common.title", lang)}</label>
               <input
-                readOnly
-                disabled
-                value={isEdit ? editingWorkOrder!.title : ""}
-                placeholder={isEdit ? undefined : t("mt.woTitlePendingSave", lang)}
-                className={cn(INPUT, "opacity-70")}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={t("mt.titleOptionalHint", lang)}
+                className={INPUT}
                 style={INPUT_STYLE}
               />
             </div>
@@ -361,7 +386,7 @@ export default function NewWorkOrderModal({
                 step={0.5}
                 value={laborHours}
                 onChange={(e) => setLaborHours(Number(e.target.value) || 0)}
-                className={INPUT}
+                className={cn(INPUT, LABOR_TINT)}
                 style={INPUT_STYLE}
               />
             </div>
@@ -370,7 +395,7 @@ export default function NewWorkOrderModal({
               <input
                 readOnly
                 value={previewLaborCost != null ? formatSar(Math.round(laborHours * previewLaborCost)) : "—"}
-                className={cn(INPUT, "opacity-70")}
+                className={cn(INPUT, "opacity-70", LABOR_TINT)}
                 style={INPUT_STYLE}
               />
             </div>

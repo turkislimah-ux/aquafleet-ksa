@@ -496,7 +496,7 @@ export default function MaintenanceClient({
                             <TH>{t("common.opened", lang)}</TH>
                             <TH>{t("common.due", lang)}</TH>
                             <TH>{t("common.status", lang)}</TH>
-                            <TH>{lang === "en" ? "Est. Cost" : "تكلفة تقديرية"}</TH>
+                            <TH>{t("mt.woActualCost", lang)}</TH>
                             <TH></TH>
                           </tr>
                         </thead>
@@ -526,7 +526,7 @@ export default function MaintenanceClient({
                       <TH>{t("common.opened", lang)}</TH>
                       <TH>{t("common.due", lang)}</TH>
                       <TH>{t("common.status", lang)}</TH>
-                      <TH>{lang === "en" ? "Est. Cost" : "تكلفة تقديرية"}</TH>
+                      <TH>{t("mt.woActualCost", lang)}</TH>
                       <TH></TH>
                     </tr>
                   </thead>

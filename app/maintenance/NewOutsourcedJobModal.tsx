@@ -3,16 +3,17 @@
 // New / Edit Outsourced Job — Turki's spec is behavioral source of truth.
 // One component handles create AND edit (via optional `editingJob` prop).
 //
-// TRUCK + TITLE ROWS — Phase-3 fix: both are always shown, on create AND
-// edit (an earlier pass wrongly hid them on edit entirely — Turki caught
-// it). On CREATE, truck is a real picker (it's how the job gets its truck)
-// and title is a disabled field with no value yet — the real os_number
-// (0070) is only assigned server-side at insert, via the year-keyed
-// counter, so there's nothing real to preview client-side; it shows a
-// "assigned automatically on save" placeholder instead of a fabricated
-// number. On EDIT, both are shown read-only for reference: truck disabled
-// (immutable once created — a job's truck is fixed for its lifetime) and
-// title shows the job's real os_number-derived title.
+// TRUCK ROW — always shown, on create AND edit. Truck is a real picker on
+// create (it's how the job gets its truck); disabled on edit (immutable
+// once created — a job's truck is fixed for its lifetime).
+//
+// TITLE FIELD — Polish item 1 (manual title, no migration/RPC change):
+// one optional input, EN or AR, shown on both create and edit, saved via
+// a plain follow-up write (never touches create_outsourced_job/
+// edit_outsourced_job). Blank leaves the os_number fallback (OS-YY-####,
+// set by create_outsourced_job itself) standing. This is the ONLY place
+// title editing lives — there is no separate inline editor on the detail
+// view.
 //
 // REPAIRERS — many per job (checkbox list). "+ New Repairer" is a proper
 // Btn (Phase-4 fix — was a text link) next to the section title, opens
@@ -34,6 +35,7 @@ import type { Truck, Staff, RepairerType, Repairer, OutsourcedDescription, Outso
 import {
   createOutsourcedJob,
   editOutsourcedJob,
+  saveOutsourcedJobTitle,
   deleteRepairer,
   addOutsourcedDescription,
 } from "./osActions";
@@ -86,6 +88,13 @@ export default function NewOutsourcedJobModal({
   const isEdit = !!editingJob;
 
   const [truckId, setTruckId] = useState(editingJob?.truck_id ?? trucks[0]?.id ?? "");
+  // Polish item 1 (manual title) — mirrors NewWorkOrderModal's own title
+  // field exactly. Prefill with the real custom title only if one was
+  // actually set (create_outsourced_job snapshots title=os_number when
+  // none was typed) — otherwise leave blank.
+  const [title, setTitle] = useState(
+    editingJob && editingJob.title !== editingJob.os_number ? editingJob.title : "",
+  );
   const [mechanicId, setMechanicId] = useState(editingJob?.responsible_mechanic_id ?? mechanics[0]?.id ?? "");
   const [type, setType] = useState<(typeof TYPES)[number]>((editingJob?.type as (typeof TYPES)[number]) ?? "corrective");
   const [startDate, setStartDate] = useState(editingJob?.start_date ?? todayKey());
@@ -205,12 +214,23 @@ export default function NewOutsourcedJobModal({
         repairer_ids: selectedRepairerIds,
         task_description_ids: selectedChipIds,
       });
-      setSaving(false);
       if (res.error || !res.job) {
+        setSaving(false);
         setError(res.error ?? "Could not save changes.");
         return;
       }
-      onEdited?.(res.job);
+
+      // Polish item 1 (manual title) — same plain mirrored update as
+      // create, folded into the edit save. Blank field resolves to the
+      // os_number fallback (saveOutsourcedJobTitle rejects a blank string).
+      const resolvedTitle = title.trim() || editingJob.os_number;
+      const titleRes = await saveOutsourcedJobTitle(editingJob.id, resolvedTitle);
+      setSaving(false);
+      if (titleRes.error) {
+        setError(titleRes.error);
+        return;
+      }
+      onEdited?.(titleRes.job ?? res.job);
       return;
     }
 
@@ -222,6 +242,7 @@ export default function NewOutsourcedJobModal({
       estimated_finish: estimatedFinish,
       repairer_ids: selectedRepairerIds,
       task_description_ids: selectedChipIds,
+      title,
     });
     setSaving(false);
     if (res.error || !res.job) {
@@ -263,15 +284,12 @@ export default function NewOutsourcedJobModal({
               </select>
             </div>
             <div>
-              <label className="text-xs muted block mb-1">
-                {t("common.title", lang)} <span className="muted text-[10px]">({t("mt.osTitleAuto", lang)})</span>
-              </label>
+              <label className="text-xs muted block mb-1">{t("common.title", lang)}</label>
               <input
-                readOnly
-                disabled
-                value={isEdit ? editingJob!.title : ""}
-                placeholder={isEdit ? undefined : t("mt.osTitlePendingSave", lang)}
-                className={cn(INPUT, "opacity-70")}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={t("mt.titleOptionalHint", lang)}
+                className={INPUT}
                 style={INPUT_STYLE}
               />
             </div>
