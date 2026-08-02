@@ -47,6 +47,7 @@ import { Btn } from "@/components/ui";
 import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings } from "@/lib/db-types";
 import { createWorkOrder, editWorkOrder, saveWorkOrderTitle, addRepairDescription } from "./actions";
 import { hourlyLaborCost } from "./laborCost";
+import { MechanicPicker } from "./MechanicPicker";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))" } as const;
@@ -76,6 +77,7 @@ export default function NewWorkOrderModal({
   lang,
   trucks,
   mechanics,
+  onLeaveMechanicIds,
   parts,
   repairDescriptions,
   companySettings,
@@ -89,6 +91,10 @@ export default function NewWorkOrderModal({
   lang: "en" | "ar";
   trucks: Truck[];
   mechanics: Staff[];
+  // Polish item 3 (on-leave-today mechanics, UI-only) — the mechanic
+  // picker below disables/grays these, it never touches create_work_order/
+  // edit_work_order.
+  onLeaveMechanicIds: Set<string>;
   parts: Part[];
   repairDescriptions: RepairDescription[];
   companySettings: CompanySettings | null;
@@ -118,7 +124,13 @@ export default function NewWorkOrderModal({
   const [priority, setPriority] = useState<(typeof PRIORITIES)[number]>((editingWorkOrder?.priority as (typeof PRIORITIES)[number]) ?? "medium");
   const [dueBy, setDueBy] = useState(editingWorkOrder ? editingWorkOrder.due_by.slice(0, 10) : todayKey());
   const [startDate, setStartDate] = useState(editingWorkOrder?.start_date ?? todayKey());
-  const [mechanicId, setMechanicId] = useState(editingWorkOrder?.assigned_mechanic_id ?? mechanics[0]?.id ?? "");
+  // Polish item 3 — on CREATE, default to the first mechanic who ISN'T on
+  // leave today (never silently pre-select someone the picker itself would
+  // block from being newly chosen). On EDIT, keep the existing assignment
+  // as-is even if that mechanic has since gone on leave — unaffected.
+  const [mechanicId, setMechanicId] = useState(
+    editingWorkOrder?.assigned_mechanic_id ?? (mechanics.find((m) => !onLeaveMechanicIds.has(m.id)) ?? mechanics[0])?.id ?? "",
+  );
   const [laborHours, setLaborHours] = useState(editingWorkOrder?.labor_hours ?? 4);
 
   const [localDescriptions, setLocalDescriptions] = useState<RepairDescription[]>([]);
@@ -372,11 +384,16 @@ export default function NewWorkOrderModal({
             </div>
             <div>
               <label className="text-xs muted block mb-1">{t("common.mechanic", lang)} *</label>
-              <select value={mechanicId} onChange={(e) => setMechanicId(e.target.value)} className={INPUT} style={INPUT_STYLE} disabled={mechanics.length === 0}>
-                {mechanics.map((m) => (
-                  <option key={m.id} value={m.id}>{lang === "ar" ? m.name_ar || m.name : m.name}</option>
-                ))}
-              </select>
+              <MechanicPicker
+                value={mechanicId}
+                onChange={setMechanicId}
+                mechanics={mechanics}
+                onLeaveMechanicIds={onLeaveMechanicIds}
+                lang={lang}
+                disabled={mechanics.length === 0}
+                inputClassName={INPUT}
+                inputStyle={INPUT_STYLE}
+              />
             </div>
             <div>
               <label className="text-xs muted block mb-1">{t("mt.laborHours", lang)}</label>

@@ -18,6 +18,8 @@ import type {
   WorkshopPayment,
   WorkshopPaymentFile,
 } from "@/lib/db-types";
+import { todayKey } from "@/lib/utils";
+import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
 import MaintenanceClient from "./MaintenanceClient";
 
 // Maintenance — server component fetches, client island renders + wires —
@@ -26,6 +28,7 @@ export const dynamic = "force-dynamic";
 
 export default async function MaintenancePage() {
   const supabase = createClient();
+  const today = todayKey(); // local (matches every other on-leave-today read), not UTC
 
   const {
     data: { user },
@@ -35,6 +38,7 @@ export default async function MaintenancePage() {
   const [
     trucksRes,
     mechanicsRes,
+    leavePeriodsRes,
     partsRes,
     repairDescriptionsRes,
     workOrdersRes,
@@ -72,6 +76,14 @@ export default async function MaintenancePage() {
       .eq("active", true)
       .is("terminated_at", null)
       .order("name", { ascending: true }),
+    // Polish item 3 — on-leave-today mechanics (UI-only, no RPC/gate
+    // change). Same DB-date-filtered read + lib/leave.ts canonical helper
+    // as Fleet's own on-leave-today drivers read (app/fleet/page.tsx).
+    supabase
+      .from("leave_periods")
+      .select("driver_id, staff_id, start_date, end_date")
+      .lte("start_date", today)
+      .gte("end_date", today),
     supabase
       .from("parts")
       .select("id, sku, name, name_ar, category, unit, unit_cost_sar, qty_on_hand, reorder_level, reorder_qty, lead_time_days, supplier, warehouse_id, active, created_at")
@@ -151,6 +163,8 @@ export default async function MaintenancePage() {
 
   const trucks = (trucksRes.data ?? []) as Truck[];
   const mechanics = (mechanicsRes.data ?? []) as Staff[];
+  const leavePeriods = (leavePeriodsRes.data ?? []) as unknown as LeavePeriod[];
+  const onLeaveMechanicIds = Array.from(onLeaveTodaySet(leavePeriods, today).staff);
   const parts = (partsRes.data ?? []) as Part[];
   const repairDescriptions = (repairDescriptionsRes.data ?? []) as RepairDescription[];
   const workOrders = (workOrdersRes.data ?? []) as WorkOrder[];
@@ -170,6 +184,7 @@ export default async function MaintenancePage() {
   const error =
     trucksRes.error?.message ??
     mechanicsRes.error?.message ??
+    leavePeriodsRes.error?.message ??
     partsRes.error?.message ??
     repairDescriptionsRes.error?.message ??
     workOrdersRes.error?.message ??
@@ -191,6 +206,7 @@ export default async function MaintenancePage() {
     <MaintenanceClient
       trucks={trucks}
       mechanics={mechanics}
+      onLeaveMechanicIds={onLeaveMechanicIds}
       parts={parts}
       repairDescriptions={repairDescriptions}
       workOrders={workOrders}

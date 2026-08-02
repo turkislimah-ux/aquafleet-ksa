@@ -110,6 +110,7 @@ export default function OutsourcedJobDetailModal({
   paymentFiles,
   truck,
   mechanic,
+  mechanicOnLeave,
   onClose,
   onEdit,
 }: {
@@ -122,6 +123,9 @@ export default function OutsourcedJobDetailModal({
   paymentFiles: WorkshopPaymentFile[];
   truck: Truck | null;
   mechanic: Staff | null;
+  // Polish item 3 (on-leave-today, UI display only) — whether `mechanic`
+  // above is on leave today (lib/leave.ts, resolved by the caller).
+  mechanicOnLeave: boolean;
   onClose: () => void;
   onEdit: () => void;
 }) {
@@ -341,7 +345,10 @@ export default function OutsourcedJobDetailModal({
             </div>
             <div>
               <div className="muted mb-0.5">{t("mt.responsibleMechanic", lang)}</div>
-              <div>{mechanic ? (lang === "ar" ? mechanic.name_ar || mechanic.name : mechanic.name) : "—"}</div>
+              <div className={cn("flex flex-col items-start gap-0.5", mechanicOnLeave && "muted")}>
+                <span>{mechanic ? (lang === "ar" ? mechanic.name_ar || mechanic.name : mechanic.name) : "—"}</span>
+                {mechanicOnLeave && <MtStatusPill kind="on_leave" label={t("status.leave", lang)} />}
+              </div>
             </div>
             <div>
               <div className="muted mb-0.5">{t("mt.startDate", lang)}</div>

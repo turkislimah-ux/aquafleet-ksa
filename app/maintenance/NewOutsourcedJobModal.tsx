@@ -40,6 +40,7 @@ import {
   addOutsourcedDescription,
 } from "./osActions";
 import RepairerFormModal from "./RepairerFormModal";
+import { MechanicPicker } from "./MechanicPicker";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))" } as const;
@@ -62,6 +63,7 @@ export default function NewOutsourcedJobModal({
   lang,
   trucks,
   mechanics,
+  onLeaveMechanicIds,
   repairerTypes,
   repairers,
   outsourcedDescriptions,
@@ -75,6 +77,10 @@ export default function NewOutsourcedJobModal({
   lang: "en" | "ar";
   trucks: Truck[];
   mechanics: Staff[];
+  // Polish item 3 (on-leave-today mechanics, UI-only) — the mechanic
+  // picker below disables/grays these, it never touches
+  // create_outsourced_job/edit_outsourced_job.
+  onLeaveMechanicIds: Set<string>;
   repairerTypes: RepairerType[];
   repairers: Repairer[];
   outsourcedDescriptions: OutsourcedDescription[];
@@ -95,7 +101,13 @@ export default function NewOutsourcedJobModal({
   const [title, setTitle] = useState(
     editingJob && editingJob.title !== editingJob.os_number ? editingJob.title : "",
   );
-  const [mechanicId, setMechanicId] = useState(editingJob?.responsible_mechanic_id ?? mechanics[0]?.id ?? "");
+  // Polish item 3 — on CREATE, default to the first mechanic who ISN'T on
+  // leave today (never silently pre-select someone the picker itself would
+  // block from being newly chosen). On EDIT, keep the existing assignment
+  // as-is even if that mechanic has since gone on leave — unaffected.
+  const [mechanicId, setMechanicId] = useState(
+    editingJob?.responsible_mechanic_id ?? (mechanics.find((m) => !onLeaveMechanicIds.has(m.id)) ?? mechanics[0])?.id ?? "",
+  );
   const [type, setType] = useState<(typeof TYPES)[number]>((editingJob?.type as (typeof TYPES)[number]) ?? "corrective");
   const [startDate, setStartDate] = useState(editingJob?.start_date ?? todayKey());
   const [estimatedFinish, setEstimatedFinish] = useState(editingJob?.estimated_finish ?? todayKey());
@@ -303,11 +315,16 @@ export default function NewOutsourcedJobModal({
             </div>
             <div>
               <label className="text-xs muted block mb-1">{t("mt.responsibleMechanic", lang)} *</label>
-              <select value={mechanicId} onChange={(e) => setMechanicId(e.target.value)} className={INPUT} style={INPUT_STYLE} disabled={mechanics.length === 0}>
-                {mechanics.map((m) => (
-                  <option key={m.id} value={m.id}>{lang === "ar" ? m.name_ar || m.name : m.name}</option>
-                ))}
-              </select>
+              <MechanicPicker
+                value={mechanicId}
+                onChange={setMechanicId}
+                mechanics={mechanics}
+                onLeaveMechanicIds={onLeaveMechanicIds}
+                lang={lang}
+                disabled={mechanics.length === 0}
+                inputClassName={INPUT}
+                inputStyle={INPUT_STYLE}
+              />
             </div>
             <div>
               <label className="text-xs muted block mb-1">{t("mt.startDate", lang)} *</label>

@@ -85,6 +85,7 @@ function woKind(status: WorkOrder["status"]): MtPillKind {
 export default function MaintenanceClient({
   trucks,
   mechanics,
+  onLeaveMechanicIds,
   parts,
   repairDescriptions,
   workOrders,
@@ -105,6 +106,7 @@ export default function MaintenanceClient({
 }: {
   trucks: Truck[];
   mechanics: Staff[];
+  onLeaveMechanicIds: string[];
   parts: Part[];
   repairDescriptions: RepairDescription[];
   workOrders: WorkOrder[];
@@ -151,6 +153,10 @@ export default function MaintenanceClient({
   const trucksById = useMemo(() => new Map(trucks.map((tr) => [tr.id, tr])), [trucks]);
   const mechanicsById = useMemo(() => new Map(mechanics.map((m) => [m.id, m])), [mechanics]);
   const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+  // Polish item 3 — on-leave-today mechanics (UI-only display/block, no DB
+  // change). Server already date-filtered the leave_periods read; this Set
+  // is just a fast lookup for the pill/gray/disable treatment below.
+  const onLeaveMechanicIdSet = useMemo(() => new Set(onLeaveMechanicIds), [onLeaveMechanicIds]);
 
   const repairerIdsByJob = useMemo(() => {
     const m = new Map<string, string[]>();
@@ -296,7 +302,14 @@ export default function MaintenanceClient({
           <span className="font-medium">{lang === "ar" ? w.title_ar : w.title}</span>
         </TD>
         <TD className={priorityCls}>{t(`status.${w.priority}`, lang)}</TD>
-        <TD>{mech ? (lang === "ar" ? mech.name_ar || mech.name : mech.name) : "—"}</TD>
+        <TD>
+          {mech ? (
+            <div className={cn("flex flex-col items-start gap-0.5", onLeaveMechanicIdSet.has(mech.id) && "muted")}>
+              <span>{lang === "ar" ? mech.name_ar || mech.name : mech.name}</span>
+              {onLeaveMechanicIdSet.has(mech.id) && <MtStatusPill kind="on_leave" label={t("status.leave", lang)} />}
+            </div>
+          ) : "—"}
+        </TD>
         <TD className="text-xs">{new Date(w.opened_at).toLocaleDateString()}</TD>
         <TD className={cn("text-xs", delayed ? "text-rose-600 font-medium" : "")}>{new Date(w.due_by).toLocaleDateString()}</TD>
         <TD>
@@ -543,6 +556,7 @@ export default function MaintenanceClient({
           lang={lang}
           trucks={trucks}
           mechanics={mechanics}
+          onLeaveMechanicIds={onLeaveMechanicIdSet}
           parts={parts}
           repairDescriptions={repairDescriptions}
           companySettings={companySettings}
@@ -559,6 +573,7 @@ export default function MaintenanceClient({
           lang={lang}
           trucks={trucks}
           mechanics={mechanics}
+          onLeaveMechanicIds={onLeaveMechanicIdSet}
           parts={parts}
           repairDescriptions={repairDescriptions}
           companySettings={companySettings}
@@ -586,6 +601,7 @@ export default function MaintenanceClient({
             photos={workOrderPartPhotos.filter((p) => viewingLineIds.has(p.work_order_part_id))}
             truck={trucksById.get(viewingWo.truck_id) ?? null}
             mechanic={mechanicsById.get(viewingWo.assigned_mechanic_id) ?? null}
+            mechanicOnLeave={onLeaveMechanicIdSet.has(viewingWo.assigned_mechanic_id)}
             parts={parts}
             onClose={() => setViewingWoId(null)}
             onEdit={() => openEdit(viewingWo.id)}
@@ -598,6 +614,7 @@ export default function MaintenanceClient({
           lang={lang}
           trucks={trucks}
           mechanics={mechanics}
+          onLeaveMechanicIds={onLeaveMechanicIdSet}
           repairerTypes={repairerTypes}
           repairers={repairers}
           outsourcedDescriptions={outsourcedDescriptions}
@@ -614,6 +631,7 @@ export default function MaintenanceClient({
           lang={lang}
           trucks={trucks}
           mechanics={mechanics}
+          onLeaveMechanicIds={onLeaveMechanicIdSet}
           repairerTypes={repairerTypes}
           repairers={repairers}
           outsourcedDescriptions={outsourcedDescriptions}
@@ -642,6 +660,7 @@ export default function MaintenanceClient({
           )}
           truck={trucksById.get(viewingOs.truck_id) ?? null}
           mechanic={mechanicsById.get(viewingOs.responsible_mechanic_id) ?? null}
+          mechanicOnLeave={onLeaveMechanicIdSet.has(viewingOs.responsible_mechanic_id)}
           onClose={() => setViewingOsId(null)}
           onEdit={() => openOsEdit(viewingOs.id)}
         />
