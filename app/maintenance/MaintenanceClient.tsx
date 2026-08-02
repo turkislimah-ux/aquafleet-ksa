@@ -215,7 +215,6 @@ export default function MaintenanceClient({
   outsourcedJobTasks,
   workshopPayments,
   workshopPaymentFiles,
-  currentUserEmail,
   error,
 }: {
   trucks: Truck[];
@@ -236,7 +235,6 @@ export default function MaintenanceClient({
   outsourcedJobTasks: OutsourcedJobTask[];
   workshopPayments: WorkshopPayment[];
   workshopPaymentFiles: WorkshopPaymentFile[];
-  currentUserEmail: string | null;
   error: string | null;
 }) {
   const { lang } = useApp();
@@ -554,7 +552,6 @@ export default function MaintenanceClient({
           selectedDate={selectedDate}
           onClearDate={() => setSelectedDate(null)}
           onViewJob={setViewingOsId}
-          repairerTypes={repairerTypes}
           repairers={repairers}
           mechanics={mechanics}
           outsourcedJobs={outsourcedJobs}

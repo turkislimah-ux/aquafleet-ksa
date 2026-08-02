@@ -30,11 +30,6 @@ export default async function MaintenancePage() {
   const supabase = createClient();
   const today = todayKey(); // local (matches every other on-leave-today read), not UTC
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const currentUserEmail = user?.email ?? null;
-
   const [
     trucksRes,
     mechanicsRes,
@@ -98,7 +93,7 @@ export default async function MaintenancePage() {
     supabase
       .from("work_orders")
       .select(
-        "id, wo_number, truck_id, type, priority, status, title, title_ar, opened_at, due_by, closed_at, assigned_mechanic_id, estimated_cost_sar, actual_cost_sar, labor_hours, labor_rate_sar, mechanic_notes, inventory_deducted_at, odometer_at_service, prior_truck_status, created_by, started_by, completed_by, start_date, created_at"
+        "id, wo_number, truck_id, type, priority, status, title, title_ar, opened_at, due_by, closed_at, assigned_mechanic_id, estimated_cost_sar, actual_cost_sar, labor_hours, labor_rate_sar, mechanic_notes, inventory_deducted_at, odometer_at_service, created_by, started_by, completed_by, start_date, created_at"
       )
       .order("created_at", { ascending: false }),
     supabase
@@ -222,7 +217,6 @@ export default async function MaintenancePage() {
       outsourcedJobTasks={outsourcedJobTasks}
       workshopPayments={workshopPayments}
       workshopPaymentFiles={workshopPaymentFiles}
-      currentUserEmail={currentUserEmail}
       error={error}
     />
   );

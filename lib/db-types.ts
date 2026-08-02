@@ -913,9 +913,7 @@ export type WorkOrderStatus = "open" | "in_progress" | "awaiting_parts" | "compl
 // work_orders row. `actual_cost_sar` stays null until Phase 2's
 // complete_work_order recomputes it from true consumed FIFO lot prices +
 // labor (never a copy of the estimate — Turki's explicit call).
-// `prior_truck_status` is null until Phase 2's start_work_order captures it
-// (used to restore trucks.status on complete/cancel instead of hard-coding
-// 'active'). `created_by` is the actor email, nullable (p_actor is optional).
+// `created_by` is the actor email, nullable (p_actor is optional).
 export type WorkOrder = {
   id: string;
   wo_number: string;
@@ -936,7 +934,6 @@ export type WorkOrder = {
   mechanic_notes: string | null;
   inventory_deducted_at: string | null;
   odometer_at_service: number | null;
-  prior_truck_status: string | null;
   created_by: string | null;
   // Added by migration 0061 (Phase 2 lifecycle) — actor capture for the
   // start/complete milestones, same convention as created_by.

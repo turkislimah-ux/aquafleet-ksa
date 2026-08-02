@@ -36,7 +36,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { X, CheckSquare, Square, Play, Check, Pencil, Plus, FileText, Trash2, Upload } from "lucide-react";
+import { X, CheckSquare, Square, Play, Check, Pencil, FileText, Trash2, Upload } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";

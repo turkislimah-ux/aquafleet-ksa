@@ -47,7 +47,6 @@ import { cn, formatSar, todayKey } from "@/lib/utils";
 import type {
   Truck,
   Staff,
-  RepairerType,
   Repairer,
   OutsourcedJob,
   OutsourcedJobRepairer,
@@ -104,7 +103,6 @@ export default function OutsourcedTrack({
   selectedDate,
   onClearDate,
   onViewJob,
-  repairerTypes,
   repairers,
   mechanics,
   outsourcedJobs,
@@ -118,7 +116,6 @@ export default function OutsourcedTrack({
   selectedDate: string | null;
   onClearDate: () => void;
   onViewJob: (id: string) => void;
-  repairerTypes: RepairerType[];
   repairers: Repairer[];
   // P3 item 1 — responsible mechanic, shown under the repairer names in
   // the table's repairer column (replaces preview's own contact-number-
