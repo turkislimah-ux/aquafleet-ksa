@@ -129,6 +129,9 @@ export default function NewOutsourcedJobModal({
   });
   const [newChipText, setNewChipText] = useState("");
   const [addingChip, setAddingChip] = useState(false);
+  // Polish P2 item 3 — filters which chips are VISIBLE in the scrollable
+  // box below; never touches selection state.
+  const [chipSearch, setChipSearch] = useState("");
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -145,6 +148,13 @@ export default function NewOutsourcedJobModal({
     const ids = new Set(outsourcedDescriptions.map((d) => d.id));
     return [...outsourcedDescriptions, ...localDescriptions.filter((d) => !ids.has(d.id))];
   }, [outsourcedDescriptions, localDescriptions]);
+
+  // Polish P2 item 3 — search filters the visible chip list only.
+  const visibleDescriptions = useMemo(() => {
+    const q = chipSearch.trim().toLowerCase();
+    if (!q) return allDescriptions;
+    return allDescriptions.filter((d) => (lang === "ar" ? d.ar : d.en).toLowerCase().includes(q));
+  }, [allDescriptions, chipSearch, lang]);
 
   function toggleRepairer(id: string) {
     setSelectedRepairerIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -393,37 +403,57 @@ export default function NewOutsourcedJobModal({
             <label className="text-xs muted block mb-1">
               {t("mt.description", lang)} <span className="muted text-[10px]">{t("mt.chipsHelp", lang)}</span>
             </label>
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              {allDescriptions.map((d) => {
-                const on = selectedChipIds.includes(d.id);
-                return (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => toggleChip(d.id)}
-                    className={cn(
-                      "text-xs rounded-full px-2.5 py-1 border transition",
-                      on ? "bg-brand-600 text-white border-brand-600" : "hover:bg-black/5 dark:hover:bg-white/5",
-                    )}
-                    style={on ? undefined : INPUT_STYLE}
-                  >
-                    {lang === "ar" ? d.ar : d.en}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex gap-2">
-              <input
-                value={newChipText}
-                onChange={(e) => setNewChipText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addChip(); } }}
-                placeholder={t("mt.addDescription", lang)}
-                className={cn(INPUT, "flex-1")}
-                style={INPUT_STYLE}
-              />
-              <Btn variant="outline" onClick={addChip} disabled={addingChip || !newChipText.trim()}>
-                <Plus className="h-4 w-4" />{t("common.add", lang)}
-              </Btn>
+            {/* Polish P2 item 3 — bordered, scrollable chip box (mirrors
+                preview's own .chip-strip max-height:9rem/overflow-y:auto,
+                which this app never actually carried over) plus a search
+                bar + the add-description control side by side at the top
+                (both new beyond preview, per Turki's explicit ask). */}
+            <div className="rounded-lg border p-2" style={INPUT_STYLE}>
+              <div className="flex gap-2 mb-2 flex-wrap">
+                <input
+                  value={chipSearch}
+                  onChange={(e) => setChipSearch(e.target.value)}
+                  placeholder={t("common.search", lang)}
+                  className={cn(INPUT, "flex-1 min-w-[140px]")}
+                  style={INPUT_STYLE}
+                />
+                <input
+                  value={newChipText}
+                  onChange={(e) => setNewChipText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addChip(); } }}
+                  placeholder={t("mt.addDescription", lang)}
+                  className={cn(INPUT, "flex-1 min-w-[140px]")}
+                  style={INPUT_STYLE}
+                />
+                <Btn variant="outline" onClick={addChip} disabled={addingChip || !newChipText.trim()}>
+                  <Plus className="h-4 w-4" />{t("common.add", lang)}
+                </Btn>
+              </div>
+              <div className="max-h-36 overflow-y-auto scrollbar-thin">
+                <div className="flex flex-wrap gap-1.5">
+                  {visibleDescriptions.length === 0 ? (
+                    <p className="muted text-xs py-2">{lang === "en" ? "No matches" : "لا توجد نتائج"}</p>
+                  ) : (
+                    visibleDescriptions.map((d) => {
+                      const on = selectedChipIds.includes(d.id);
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => toggleChip(d.id)}
+                          className={cn(
+                            "text-xs rounded-full px-2.5 py-1 border transition",
+                            on ? "bg-brand-600 text-white border-brand-600" : "hover:bg-black/5 dark:hover:bg-white/5",
+                          )}
+                          style={on ? undefined : INPUT_STYLE}
+                        >
+                          {lang === "ar" ? d.ar : d.en}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

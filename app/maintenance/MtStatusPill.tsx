@@ -9,6 +9,7 @@
 // concept, one shared visual.
 
 import { cn } from "@/lib/utils";
+import type { WorkOrderPriority } from "@/lib/db-types";
 
 // Polish item 3 — "on_leave" kind added: gray/faded, for a mechanic who is
 // on leave today (lib/leave.ts's onLeaveTodaySet, read-only — this pill
@@ -37,6 +38,36 @@ export default function MtStatusPill({ kind, label }: { kind: MtPillKind; label:
   return (
     <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", KIND_CLASSES[kind])}>
       <span className={cn("h-1.5 w-1.5 rounded-full", DOT_CLASSES[kind])} />
+      {label}
+    </span>
+  );
+}
+
+// P2 item 4 — priority as a colored pill, ascending severity. No preview/
+// equivalent (preview only ever renders priority as plain text, checked
+// directly — pages-2.js's own detail view is `T(status.${w.priority})`
+// inside a plain font-medium div, never a badge) — Turki's own scheme,
+// built here rather than components/ui.tsx's shared StatusPill for the
+// same "Maintenance gets its own exact shades" reasoning as MtPillKind
+// above. In-house only — outsourced_jobs has no priority column at all.
+const PRIORITY_CLASSES: Record<WorkOrderPriority, string> = {
+  low: "bg-slate-500/10 text-slate-600 dark:text-slate-400 ring-slate-500/20",
+  medium: "bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20",
+  high: "bg-orange-500/10 text-orange-700 dark:text-orange-300 ring-orange-500/20",
+  critical: "bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20",
+};
+
+const PRIORITY_DOT: Record<WorkOrderPriority, string> = {
+  low: "bg-slate-400",
+  medium: "bg-amber-500",
+  high: "bg-orange-500",
+  critical: "bg-rose-500",
+};
+
+export function MtPriorityPill({ priority, label }: { priority: WorkOrderPriority; label: string }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", PRIORITY_CLASSES[priority])}>
+      <span className={cn("h-1.5 w-1.5 rounded-full", PRIORITY_DOT[priority])} />
       {label}
     </span>
   );

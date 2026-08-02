@@ -29,7 +29,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, ChevronDown, ChevronRight, Eye, Layers, X, AlertTriangle } from "lucide-react";
 import { PageHeader, Card, Stat, Btn, Table, TH, TD } from "@/components/ui";
-import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
+import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
 import { cn, formatSar } from "@/lib/utils";
@@ -286,12 +286,6 @@ export default function MaintenanceClient({
     const mech = mechanicsById.get(w.assigned_mechanic_id);
     const delayed = isWoDelayed(w);
     const outOfPart = outOfPartWoIds.has(w.id);
-    const priorityCls = {
-      low: "text-slate-500",
-      medium: "text-blue-600",
-      high: "text-amber-600",
-      critical: "text-rose-600 font-semibold",
-    }[w.priority];
     return (
       <tr key={w.id} className={cn(outOfPart ? "bg-rose-500/5" : "")} title={outOfPart ? t("mt.outOfPartRow", lang) : undefined}>
         <TD className="font-mono text-xs">{w.wo_number}</TD>
@@ -301,7 +295,7 @@ export default function MaintenanceClient({
         <TD>
           <span className="font-medium">{lang === "ar" ? w.title_ar : w.title}</span>
         </TD>
-        <TD className={priorityCls}>{t(`status.${w.priority}`, lang)}</TD>
+        <TD><MtPriorityPill priority={w.priority} label={t(`status.${w.priority}`, lang)} /></TD>
         <TD>
           {mech ? (
             <div className={cn("flex flex-col items-start gap-0.5", onLeaveMechanicIdSet.has(mech.id) && "muted")}>
@@ -425,8 +419,8 @@ export default function MaintenanceClient({
         />
       ) : (
         <>
-          <Card className="!p-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
+          <Card className="!p-0 overflow-hidden">
+            <div className={cn("flex items-center justify-between gap-3 flex-wrap p-3", !groups && "border-b")} style={!groups ? { borderColor: "rgb(var(--border))" } : undefined}>
               <div className="flex items-center gap-1 flex-wrap">
                 {(["all", "scheduled", "in_progress", "delayed", "historical"] as Section[]).map((s) => (
                   <button
@@ -459,10 +453,11 @@ export default function MaintenanceClient({
                     <Layers className="h-3 w-3" />{t("mt.groupByTruck", lang)}
                   </button>
                 )}
+                <span className="text-xs muted">{t("common.truck", lang)}:</span>
                 <select
                   value={truckFilter}
                   onChange={(e) => setTruckFilter(e.target.value)}
-                  className="h-9 px-2.5 rounded-lg text-xs border"
+                  className="h-9 px-2.5 rounded-lg text-xs border w-44"
                   style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
                 >
                   <option value="all">{t("common.all", lang)}</option>
@@ -472,6 +467,34 @@ export default function MaintenanceClient({
                 </select>
               </div>
             </div>
+
+            {/* Polish P2 item 5 — table attached directly to the filter
+                header (one connected unit, like the demo). Only when
+                ungrouped: grouped-by-truck renders its own per-truck cards
+                below instead, no single table to attach to. */}
+            {!groups && (
+              filtered.length === 0 ? (
+                <p className="text-sm muted p-6 text-center">{t("mt.noWorkOrders", lang)}</p>
+              ) : (
+                <Table>
+                  <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+                    <tr>
+                      <TH>WO</TH>
+                      <TH>{t("common.truck", lang)}</TH>
+                      <TH>{t("common.title", lang)}</TH>
+                      <TH>{t("common.priority", lang)}</TH>
+                      <TH>{t("common.mechanic", lang)}</TH>
+                      <TH>{t("common.opened", lang)}</TH>
+                      <TH>{t("common.due", lang)}</TH>
+                      <TH>{t("common.status", lang)}</TH>
+                      <TH>{t("mt.woActualCost", lang)}</TH>
+                      <TH></TH>
+                    </tr>
+                  </thead>
+                  <tbody>{filtered.map(renderRow)}</tbody>
+                </Table>
+              )
+            )}
           </Card>
 
           {groups ? (
@@ -523,31 +546,7 @@ export default function MaintenanceClient({
                 <Card><p className="text-sm muted p-6 text-center">{t("mt.noWorkOrders", lang)}</p></Card>
               )}
             </div>
-          ) : (
-            <Card className="!p-0 overflow-hidden">
-              {filtered.length === 0 ? (
-                <p className="text-sm muted p-6 text-center">{t("mt.noWorkOrders", lang)}</p>
-              ) : (
-                <Table>
-                  <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-                    <tr>
-                      <TH>WO</TH>
-                      <TH>{t("common.truck", lang)}</TH>
-                      <TH>{t("common.title", lang)}</TH>
-                      <TH>{t("common.priority", lang)}</TH>
-                      <TH>{t("common.mechanic", lang)}</TH>
-                      <TH>{t("common.opened", lang)}</TH>
-                      <TH>{t("common.due", lang)}</TH>
-                      <TH>{t("common.status", lang)}</TH>
-                      <TH>{t("mt.woActualCost", lang)}</TH>
-                      <TH></TH>
-                    </tr>
-                  </thead>
-                  <tbody>{filtered.map(renderRow)}</tbody>
-                </Table>
-              )}
-            </Card>
-          )}
+          ) : null}
         </>
       )}
 

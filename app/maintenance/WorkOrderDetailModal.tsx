@@ -31,7 +31,7 @@ import { X, CheckSquare, Square, Play, Check, Pencil, Trash2, AlertTriangle, Ima
 import { t } from "@/lib/i18n";
 import { cn, formatSar } from "@/lib/utils";
 import { Btn } from "@/components/ui";
-import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
+import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
 import type { Truck, Staff, Part, WorkOrder, WorkOrderTask, WorkOrderPart, WorkOrderPartPhoto } from "@/lib/db-types";
 import {
   startWorkOrder,
@@ -354,7 +354,7 @@ export default function WorkOrderDetailModal({
             </div>
             <div>
               <div className="muted mb-0.5">{t("common.priority", lang)}</div>
-              <div className="font-medium">{t(`status.${workOrder.priority}`, lang)}</div>
+              <div><MtPriorityPill priority={workOrder.priority} label={t(`status.${workOrder.priority}`, lang)} /></div>
             </div>
             <div>
               <div className="muted mb-0.5">{t("common.mechanic", lang)}</div>

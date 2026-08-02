@@ -209,8 +209,8 @@ export default function OutsourcedTrack({
 
   return (
     <>
-      <Card className="!p-3">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
+      <Card className="!p-0 overflow-hidden">
+        <div className={cn("flex items-center justify-between gap-3 flex-wrap p-3", !groups && "border-b")} style={!groups ? { borderColor: "rgb(var(--border))" } : undefined}>
           <div className="flex items-center gap-1 flex-wrap">
             {(["all", "scheduled", "in_progress", "historical"] as OsSection[]).map((s) => (
               <button
@@ -243,10 +243,11 @@ export default function OutsourcedTrack({
                 <Layers className="h-3 w-3" />{t("mt.groupByTruck", lang)}
               </button>
             )}
+            <span className="text-xs muted">{t("common.truck", lang)}:</span>
             <select
               value={truckFilter}
               onChange={(e) => onTruckFilterChange(e.target.value)}
-              className="h-9 px-2.5 rounded-lg text-xs border"
+              className="h-9 px-2.5 rounded-lg text-xs border w-44"
               style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
             >
               <option value="all">{t("common.all", lang)}</option>
@@ -256,6 +257,33 @@ export default function OutsourcedTrack({
             </select>
           </div>
         </div>
+
+        {/* Polish P2 item 5 — table attached directly to the filter
+            header (one connected unit, like the demo). Only when
+            ungrouped: grouped-by-truck renders its own per-truck cards
+            below instead, no single table to attach to. */}
+        {!groups && (
+          filtered.length === 0 ? (
+            <p className="text-sm muted p-6 text-center">{t("mt.osNoJobs", lang)}</p>
+          ) : (
+            <Table>
+              <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+                <tr>
+                  <TH>OS</TH>
+                  <TH>{t("common.truck", lang)}</TH>
+                  <TH>{t("common.type", lang)}</TH>
+                  <TH>{t("mt.repairers", lang)}</TH>
+                  <TH>{t("mt.startDate", lang)}</TH>
+                  <TH>{t("mt.estimatedFinish", lang)}</TH>
+                  <TH>{t("common.status", lang)}</TH>
+                  <TH>{t("mt.actualCost", lang)}</TH>
+                  <TH></TH>
+                </tr>
+              </thead>
+              <tbody>{filtered.map((j) => renderRow(j, false))}</tbody>
+            </Table>
+          )
+        )}
       </Card>
 
       {groups ? (
@@ -305,30 +333,7 @@ export default function OutsourcedTrack({
             <Card><p className="text-sm muted p-6 text-center">{t("mt.osNoJobs", lang)}</p></Card>
           )}
         </div>
-      ) : (
-        <Card className="!p-0 overflow-hidden">
-          {filtered.length === 0 ? (
-            <p className="text-sm muted p-6 text-center">{t("mt.osNoJobs", lang)}</p>
-          ) : (
-            <Table>
-              <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-                <tr>
-                  <TH>OS</TH>
-                  <TH>{t("common.truck", lang)}</TH>
-                  <TH>{t("common.type", lang)}</TH>
-                  <TH>{t("mt.repairers", lang)}</TH>
-                  <TH>{t("mt.startDate", lang)}</TH>
-                  <TH>{t("mt.estimatedFinish", lang)}</TH>
-                  <TH>{t("common.status", lang)}</TH>
-                  <TH>{t("mt.actualCost", lang)}</TH>
-                  <TH></TH>
-                </tr>
-              </thead>
-              <tbody>{filtered.map((j) => renderRow(j, false))}</tbody>
-            </Table>
-          )}
-        </Card>
-      )}
+      ) : null}
     </>
   );
 }
