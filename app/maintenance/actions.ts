@@ -432,3 +432,49 @@ export async function getWorkOrderPartPhotoSignedUrls(
   }
   return { error: null, urls };
 }
+
+// ---------------------------------------------------------------------------
+// deleteWorkOrder — Polish P2 item 1 (migration 0081). delete_work_order
+// itself is the real gate (RAISEs unless status='open'); this wrapper's
+// only extra responsibility is the storage side Postgres can't reach:
+// every work_order_part_photos.storage_path belonging to this WO is read
+// FIRST (the rows are about to cascade away with the row delete), then —
+// only after the RPC actually succeeds — those objects are removed from
+// the maintenance-photos bucket. Same "read pointers, delete row, then
+// clean up storage" order removeWorkOrderPartPhoto() already uses.
+// ---------------------------------------------------------------------------
+export async function deleteWorkOrder(woId: string): Promise<{ error: string | null }> {
+  if (!woId) return { error: "Work order is required." };
+
+  const supabase = createClient();
+
+  const { data: lines } = await supabase
+    .from("work_order_parts")
+    .select("id")
+    .eq("work_order_id", woId);
+  const lineIds = (lines ?? []).map((l) => l.id as string);
+
+  let photoPaths: string[] = [];
+  if (lineIds.length > 0) {
+    const { data: photos } = await supabase
+      .from("work_order_part_photos")
+      .select("storage_path")
+      .in("work_order_part_id", lineIds);
+    photoPaths = (photos ?? []).map((p) => p.storage_path as string);
+  }
+
+  const { error } = await supabase.rpc("delete_work_order", {
+    p_wo_id: woId,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: friendlyLifecycleError(error.message) };
+
+  if (photoPaths.length > 0) {
+    // Best-effort — the WO row is already gone either way; a leftover blob
+    // with no pointer left behind is a minor cleanup gap, not a data bug.
+    await supabase.storage.from(PHOTO_BUCKET).remove(photoPaths);
+  }
+
+  revalidatePath("/maintenance");
+  return { error: null };
+}

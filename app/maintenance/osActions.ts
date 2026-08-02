@@ -602,3 +602,25 @@ export async function getWorkshopPaymentFileSignedUrls(
   }
   return { error: null, urls };
 }
+
+// ---------------------------------------------------------------------------
+// deleteOutsourcedJob — Polish P2 item 1 (migration 0081).
+// delete_outsourced_job is the real gate: RAISEs unless status='scheduled',
+// RAISEs "Remove all workshop payments before deleting this job." if any
+// workshop_payments row exists for it. No storage cleanup needed here —
+// a deletable job structurally has zero payments (the guard above), and
+// workshop_payment_files FKs to workshop_payments, not this job directly.
+// ---------------------------------------------------------------------------
+export async function deleteOutsourcedJob(jobId: string): Promise<{ error: string | null }> {
+  if (!jobId) return { error: "Outsourced job is required." };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("delete_outsourced_job", {
+    p_job_id: jobId,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: friendlyOsError(error.message) };
+
+  revalidatePath("/maintenance");
+  return { error: null };
+}

@@ -56,6 +56,7 @@ import type {
 import {
   dispatchOutsourcedJob,
   completeOutsourcedJob,
+  deleteOutsourcedJob,
   toggleOutsourcedJobTask,
   saveOutsourcedJobNotes,
   addWorkshopPayment,
@@ -151,6 +152,10 @@ export default function OutsourcedJobDetailModal({
   const [error, setError] = useState<string | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  // Polish P2 item 1 — delete-block message (workshop payments exist),
+  // rendered at the bottom of the Workshop Payments section, separate
+  // from the generic `error` banner above.
+  const [deleteBlockMessage, setDeleteBlockMessage] = useState<string | null>(null);
 
   async function onToggleTask(task: OutsourcedJobTask) {
     if (!tasksEditable || busyTaskId) return;
@@ -177,6 +182,31 @@ export default function OutsourcedJobDetailModal({
     const res = await completeOutsourcedJob(job.id);
     setLifecycleBusy(false);
     if (res.error) { setError(res.error); return; }
+    router.refresh();
+  }
+
+  // Polish P2 item 1 — permanent delete. Server-side gate
+  // (delete_outsourced_job, 0081) is the real enforcement: status must be
+  // 'scheduled' AND zero workshop_payments. `deletable` mirrors the status
+  // half so the button never shows once that's no longer true; the
+  // payments-count half can only be discovered by actually calling the
+  // RPC, so its block message renders separately, at the bottom of the
+  // Workshop Payments section (Turki's exact placement ask) — not the
+  // generic top-of-modal `error` banner every other lifecycle error uses.
+  const deletable = job.status === "scheduled";
+  async function onDelete() {
+    if (!confirm(lang === "en"
+      ? "Permanently delete this outsourced job? This cannot be undone."
+      : "حذف هذا العمل الخارجي نهائياً؟ لا يمكن التراجع عن هذا الإجراء.")) return;
+    setLifecycleBusy(true);
+    setDeleteBlockMessage(null);
+    const res = await deleteOutsourcedJob(job.id);
+    setLifecycleBusy(false);
+    if (res.error) {
+      setDeleteBlockMessage(res.error);
+      return;
+    }
+    onClose();
     router.refresh();
   }
 
@@ -311,6 +341,16 @@ export default function OutsourcedJobDetailModal({
             {editable && (
               <button onClick={onEdit} className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5" title={t("mt.editOutsourcedJob", lang)}>
                 <Pencil className="h-4 w-4" />
+              </button>
+            )}
+            {deletable && (
+              <button
+                onClick={onDelete}
+                disabled={lifecycleBusy}
+                className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"
+                title={t("mt.delete", lang)}
+              >
+                <Trash2 className="h-4 w-4" />
               </button>
             )}
             <button onClick={onClose} className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5">
@@ -625,6 +665,15 @@ export default function OutsourcedJobDetailModal({
               </table>
             )}
           </div>
+
+          {/* Polish P2 item 1 — delete-block message, bottom of the
+              Workshop Payments section (Turki's exact placement ask),
+              not the generic top-of-modal error banner. */}
+          {deleteBlockMessage && (
+            <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">
+              {deleteBlockMessage}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between gap-2 p-4 border-t" style={{ borderColor: "rgb(var(--border))" }}>

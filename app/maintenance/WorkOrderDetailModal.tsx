@@ -27,7 +27,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { X, CheckSquare, Square, Play, Check, Pencil, AlertTriangle, ImagePlus } from "lucide-react";
+import { X, CheckSquare, Square, Play, Check, Pencil, Trash2, AlertTriangle, ImagePlus } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn, formatSar } from "@/lib/utils";
 import { Btn } from "@/components/ui";
@@ -36,6 +36,7 @@ import type { Truck, Staff, Part, WorkOrder, WorkOrderTask, WorkOrderPart, WorkO
 import {
   startWorkOrder,
   completeWorkOrder,
+  deleteWorkOrder,
   toggleWorkOrderTask,
   saveWorkOrderNotes,
   uploadWorkOrderPartPhoto,
@@ -266,6 +267,27 @@ export default function WorkOrderDetailModal({
     router.refresh();
   }
 
+  // Polish P2 item 1 — permanent delete. Server-side gate
+  // (delete_work_order, 0081) is the real enforcement, restricted to
+  // status='open'; deletable is the same client-side condition so the
+  // button never even shows once that's no longer true.
+  const deletable = workOrder.status === "open";
+  async function onDelete() {
+    if (!confirm(lang === "en"
+      ? "Permanently delete this work order? This cannot be undone."
+      : "حذف أمر العمل هذا نهائياً؟ لا يمكن التراجع عن هذا الإجراء.")) return;
+    setLifecycleBusy(true);
+    setError(null);
+    const res = await deleteWorkOrder(workOrder.id);
+    setLifecycleBusy(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    onClose();
+    router.refresh();
+  }
+
   return (
     <ModalOverlay onClick={onClose}>
       <div className="card w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0" onClick={(e) => e.stopPropagation()}>
@@ -285,6 +307,16 @@ export default function WorkOrderDetailModal({
             {editable && (
               <button onClick={onEdit} className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5" title={t("mt.editJob", lang)}>
                 <Pencil className="h-4 w-4" />
+              </button>
+            )}
+            {deletable && (
+              <button
+                onClick={onDelete}
+                disabled={lifecycleBusy}
+                className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"
+                title={t("mt.delete", lang)}
+              >
+                <Trash2 className="h-4 w-4" />
               </button>
             )}
             <button onClick={onClose} className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5">
