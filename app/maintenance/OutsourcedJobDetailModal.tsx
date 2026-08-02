@@ -482,6 +482,16 @@ export default function OutsourcedJobDetailModal({
             <h3 className="text-sm font-semibold pt-3">{t("mt.workshopPayments", lang)}</h3>
           </div>
 
+          {/* Polish P2 item 1 — delete-block message, just below the
+              Workshop Payments title (moved here from the section's
+              bottom per Turki's follow-up), not the generic top-of-modal
+              error banner. */}
+          {deleteBlockMessage && (
+            <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">
+              {deleteBlockMessage}
+            </div>
+          )}
+
           {editable && (
             <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: "rgb(var(--border))" }}>
               <div className="flex items-center justify-between">
@@ -665,15 +675,6 @@ export default function OutsourcedJobDetailModal({
               </table>
             )}
           </div>
-
-          {/* Polish P2 item 1 — delete-block message, bottom of the
-              Workshop Payments section (Turki's exact placement ask),
-              not the generic top-of-modal error banner. */}
-          {deleteBlockMessage && (
-            <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">
-              {deleteBlockMessage}
-            </div>
-          )}
         </div>
 
         <div className="flex items-center justify-between gap-2 p-4 border-t" style={{ borderColor: "rgb(var(--border))" }}>
