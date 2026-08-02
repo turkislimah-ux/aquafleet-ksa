@@ -25,7 +25,7 @@
 // create button always sits in the page header, never inside the track's
 // own table toolbar).
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, ChevronDown, ChevronRight, Eye, Layers, X, AlertTriangle } from "lucide-react";
 import { PageHeader, Card, Stat, Btn, Table, TH, TD } from "@/components/ui";
@@ -81,6 +81,31 @@ function woKind(status: WorkOrder["status"]): MtPillKind {
   if (status === "in_progress" || status === "awaiting_parts") return "in_progress";
   return "scheduled";
 }
+
+// P3 item 2 — combined group-by-truck table: the truck's title row is
+// colored by the MOST URGENT state among its own jobs (Turki's explicit
+// spec, no preview equivalent — preview's own group-row is a flat neutral
+// tint regardless of urgency). Rank: delayed (most urgent) > in_progress >
+// scheduled > historical/completed (least urgent).
+const SECTION_RANK: Record<Exclude<Section, "all">, number> = { delayed: 0, in_progress: 1, scheduled: 2, historical: 3 };
+function mostUrgentSection(rows: WorkOrder[]): Exclude<Section, "all"> {
+  let best: Exclude<Section, "all"> = "historical";
+  let bestRank = 3;
+  for (const w of rows) {
+    // sectionOf() never actually returns "all" (that's a filter-only
+    // pseudo-value elsewhere) — safe narrow.
+    const s = sectionOf(w) as Exclude<Section, "all">;
+    const r = SECTION_RANK[s];
+    if (r < bestRank) { bestRank = r; best = s; }
+  }
+  return best;
+}
+const URGENT_ROW_TONE: Record<Exclude<Section, "all">, string> = {
+  scheduled: "bg-brand-500/10 hover:bg-brand-500/15",
+  in_progress: "bg-yellow-400/15 hover:bg-yellow-400/20",
+  delayed: "bg-rose-500/10 hover:bg-rose-500/15",
+  historical: "bg-emerald-500/10 hover:bg-emerald-500/15",
+};
 
 export default function MaintenanceClient({
   trucks,
@@ -246,16 +271,6 @@ export default function MaintenanceClient({
     return m;
   }, [filtered, groupByTruck, truckFilter]);
 
-  function truckRollup(truckId: string) {
-    const rows = withSections.filter((x) => x.w.truck_id === truckId);
-    return {
-      scheduled: rows.filter((x) => x.section === "scheduled").length,
-      in_progress: rows.filter((x) => x.section === "in_progress").length,
-      delayed: rows.filter((x) => x.section === "delayed").length,
-      historical: rows.filter((x) => x.section === "historical").length,
-    };
-  }
-
   function toggleExpanded(truckId: string) {
     setExpandedTrucks((prev) => {
       const next = new Set(prev);
@@ -341,6 +356,32 @@ export default function MaintenanceClient({
         }
       />
 
+      {/* P3 item 3 — track tabs moved here, directly below the page title,
+          styled like the Trips page's own tab bar (TripsTabs.tsx: a
+          border-b underline container, each tab border-b-2 -mb-px). Was
+          a small pill-segmented control further down the page, below the
+          calendar. */}
+      <div className="flex items-center gap-1 border-b mb-4 flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
+        <button
+          onClick={() => setTrack("in_house")}
+          className={cn(
+            "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
+            track === "in_house" ? "border-brand-600 text-brand-600 dark:text-brand-300" : "border-transparent muted hover:text-[rgb(var(--fg))]",
+          )}
+        >
+          {t("mt.inHouse", lang)} ({workOrders.length})
+        </button>
+        <button
+          onClick={() => setTrack("outsourced")}
+          className={cn(
+            "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
+            track === "outsourced" ? "border-brand-600 text-brand-600 dark:text-brand-300" : "border-transparent muted hover:text-[rgb(var(--fg))]",
+          )}
+        >
+          {t("mt.outsourced", lang)} ({outsourcedJobs.length})
+        </button>
+      </div>
+
       {error && (
         <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">{error}</div>
       )}
@@ -385,23 +426,6 @@ export default function MaintenanceClient({
         onOpenOutsourcedJob={setViewingOsId}
       />
 
-      <Card className="!p-2">
-        <div className="inline-flex rounded-lg border p-1 gap-1" style={{ borderColor: "rgb(var(--border))" }}>
-          <button
-            onClick={() => setTrack("in_house")}
-            className={cn("h-8 px-3 rounded-md text-xs font-medium", track === "in_house" ? "bg-brand-600 text-white" : "hover:bg-black/5 dark:hover:bg-white/5")}
-          >
-            {t("mt.inHouse", lang)} ({workOrders.length})
-          </button>
-          <button
-            onClick={() => setTrack("outsourced")}
-            className={cn("h-8 px-3 rounded-md text-xs font-medium", track === "outsourced" ? "bg-brand-600 text-white" : "hover:bg-black/5 dark:hover:bg-white/5")}
-          >
-            {t("mt.outsourced", lang)} ({outsourcedJobs.length})
-          </button>
-        </div>
-      </Card>
-
       {track === "outsourced" ? (
         <OutsourcedTrack
           lang={lang}
@@ -413,6 +437,7 @@ export default function MaintenanceClient({
           onViewJob={setViewingOsId}
           repairerTypes={repairerTypes}
           repairers={repairers}
+          mechanics={mechanics}
           outsourcedJobs={outsourcedJobs}
           outsourcedJobRepairers={outsourcedJobRepairers}
           workshopPayments={workshopPayments}
@@ -420,7 +445,7 @@ export default function MaintenanceClient({
       ) : (
         <>
           <Card className="!p-0 overflow-hidden">
-            <div className={cn("flex items-center justify-between gap-3 flex-wrap p-3", !groups && "border-b")} style={!groups ? { borderColor: "rgb(var(--border))" } : undefined}>
+            <div className="flex items-center justify-between gap-3 flex-wrap p-3 border-b" style={{ borderColor: "rgb(var(--border))" }}>
               <div className="flex items-center gap-1 flex-wrap">
                 {(["all", "scheduled", "in_progress", "delayed", "historical"] as Section[]).map((s) => (
                   <button
@@ -468,19 +493,20 @@ export default function MaintenanceClient({
               </div>
             </div>
 
-            {/* Polish P2 item 5 — table attached directly to the filter
-                header (one connected unit, like the demo). Only when
-                ungrouped: grouped-by-truck renders its own per-truck cards
-                below instead, no single table to attach to. */}
-            {!groups && (
-              filtered.length === 0 ? (
+            {/* P3 item 2 — ONE combined table always attached directly to
+                this filter header (extends P2 item 5's "connected unit"
+                to the grouped case too, per Turki's own re-description of
+                that same structure here) — grouped-by-truck is no longer
+                a separate stack of per-truck cards; it's group-header
+                rows interleaved with job rows inside this same table. */}
+            {groups ? (
+              groups.size === 0 ? (
                 <p className="text-sm muted p-6 text-center">{t("mt.noWorkOrders", lang)}</p>
               ) : (
                 <Table>
                   <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                     <tr>
                       <TH>WO</TH>
-                      <TH>{t("common.truck", lang)}</TH>
                       <TH>{t("common.title", lang)}</TH>
                       <TH>{t("common.priority", lang)}</TH>
                       <TH>{t("common.mechanic", lang)}</TH>
@@ -491,62 +517,52 @@ export default function MaintenanceClient({
                       <TH></TH>
                     </tr>
                   </thead>
-                  <tbody>{filtered.map(renderRow)}</tbody>
+                  <tbody>
+                    {Array.from(groups.entries()).map(([truckId, rows]) => {
+                      const truck = trucksById.get(truckId);
+                      const expanded = expandedTrucks.has(truckId);
+                      const urgent = mostUrgentSection(rows);
+                      return (
+                        <Fragment key={truckId}>
+                          <tr onClick={() => toggleExpanded(truckId)} className={cn("cursor-pointer transition", URGENT_ROW_TONE[urgent])}>
+                            <td colSpan={9} className="px-3 py-2.5" style={{ borderTop: "1px solid rgb(var(--border))" }}>
+                              <div className="flex items-center gap-2 flex-wrap font-medium">
+                                {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                <span className="font-mono text-xs">{truck?.plate ?? truckId}</span>
+                                <span className="text-sm">{truck?.model ?? ""}</span>
+                                <span className="ms-auto text-[11px] font-normal muted">{rows.length} {t("mt.jobCount", lang)}</span>
+                              </div>
+                            </td>
+                          </tr>
+                          {expanded && rows.map(renderRow)}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
                 </Table>
               )
+            ) : filtered.length === 0 ? (
+              <p className="text-sm muted p-6 text-center">{t("mt.noWorkOrders", lang)}</p>
+            ) : (
+              <Table>
+                <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+                  <tr>
+                    <TH>WO</TH>
+                    <TH>{t("common.truck", lang)}</TH>
+                    <TH>{t("common.title", lang)}</TH>
+                    <TH>{t("common.priority", lang)}</TH>
+                    <TH>{t("common.mechanic", lang)}</TH>
+                    <TH>{t("common.opened", lang)}</TH>
+                    <TH>{t("common.due", lang)}</TH>
+                    <TH>{t("common.status", lang)}</TH>
+                    <TH>{t("mt.woActualCost", lang)}</TH>
+                    <TH></TH>
+                  </tr>
+                </thead>
+                <tbody>{filtered.map(renderRow)}</tbody>
+              </Table>
             )}
           </Card>
-
-          {groups ? (
-            <div className="space-y-3">
-              {Array.from(groups.entries()).map(([truckId, rows]) => {
-                const truck = trucksById.get(truckId);
-                const rollup = truckRollup(truckId);
-                const expanded = expandedTrucks.has(truckId);
-                return (
-                  <Card key={truckId} className="!p-0 overflow-hidden">
-                    <button
-                      onClick={() => toggleExpanded(truckId)}
-                      className="w-full flex items-center justify-between p-3 hover:bg-black/5 dark:hover:bg-white/5"
-                    >
-                      <div className="flex items-center gap-2">
-                        {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                        <span className="font-mono text-xs">{truck?.plate ?? truckId}</span>
-                        <span className="text-sm font-medium">{truck?.model ?? ""}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[11px]">
-                        <span className="rounded px-1.5 py-0.5 bg-brand-500/10 text-brand-700 dark:text-brand-300">{t("status.scheduled", lang)} {rollup.scheduled}</span>
-                        <span className="rounded px-1.5 py-0.5 bg-yellow-400/15 text-yellow-800 dark:text-yellow-300">{t("status.in_progress", lang)} {rollup.in_progress}</span>
-                        <span className="rounded px-1.5 py-0.5 bg-rose-500/10 text-rose-700 dark:text-rose-300">{t("mt.delayed", lang)} {rollup.delayed}</span>
-                        <span className="rounded px-1.5 py-0.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">{t("mt.historical", lang)} {rollup.historical}</span>
-                      </div>
-                    </button>
-                    {expanded && (
-                      <Table>
-                        <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-                          <tr>
-                            <TH>WO</TH>
-                            <TH>{t("common.title", lang)}</TH>
-                            <TH>{t("common.priority", lang)}</TH>
-                            <TH>{t("common.mechanic", lang)}</TH>
-                            <TH>{t("common.opened", lang)}</TH>
-                            <TH>{t("common.due", lang)}</TH>
-                            <TH>{t("common.status", lang)}</TH>
-                            <TH>{t("mt.woActualCost", lang)}</TH>
-                            <TH></TH>
-                          </tr>
-                        </thead>
-                        <tbody>{rows.map(renderRow)}</tbody>
-                      </Table>
-                    )}
-                  </Card>
-                );
-              })}
-              {groups.size === 0 && (
-                <Card><p className="text-sm muted p-6 text-center">{t("mt.noWorkOrders", lang)}</p></Card>
-              )}
-            </div>
-          ) : null}
         </>
       )}
 

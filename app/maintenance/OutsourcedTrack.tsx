@@ -38,7 +38,7 @@
 // - Group-by-truck added, mirroring the in-house table's own
 //   expandedTrucks/groups pattern exactly (was in-house-only before).
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Eye, Layers, X } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
@@ -46,6 +46,7 @@ import { t } from "@/lib/i18n";
 import { cn, formatSar, todayKey } from "@/lib/utils";
 import type {
   Truck,
+  Staff,
   RepairerType,
   Repairer,
   OutsourcedJob,
@@ -71,6 +72,30 @@ function osKind(status: OutsourcedJob["status"]): MtPillKind {
   return "scheduled";
 }
 
+// P3 item 2 — combined group-by-truck table: the truck's title row is
+// colored by the MOST URGENT state among its own jobs (Turki's explicit
+// spec, no preview equivalent). OS has no separate "delayed" bucket in
+// sectionOf() (isOverdue is a derived flag layered on any status, not its
+// own section) — checked here directly, ranked above in_progress.
+type OsUrgent = "delayed" | "in_progress" | "scheduled" | "historical";
+const OS_URGENT_RANK: Record<OsUrgent, number> = { delayed: 0, in_progress: 1, scheduled: 2, historical: 3 };
+function mostUrgentOsSection(rows: OutsourcedJob[]): OsUrgent {
+  let best: OsUrgent = "historical";
+  let bestRank = 3;
+  for (const j of rows) {
+    const s: OsUrgent = isOverdue(j) ? "delayed" : (sectionOf(j) as Exclude<OsSection, "all">);
+    const r = OS_URGENT_RANK[s];
+    if (r < bestRank) { bestRank = r; best = s; }
+  }
+  return best;
+}
+const OS_URGENT_ROW_TONE: Record<OsUrgent, string> = {
+  scheduled: "bg-brand-500/10 hover:bg-brand-500/15",
+  in_progress: "bg-yellow-400/15 hover:bg-yellow-400/20",
+  delayed: "bg-rose-500/10 hover:bg-rose-500/15",
+  historical: "bg-emerald-500/10 hover:bg-emerald-500/15",
+};
+
 export default function OutsourcedTrack({
   lang,
   trucks,
@@ -81,6 +106,7 @@ export default function OutsourcedTrack({
   onViewJob,
   repairerTypes,
   repairers,
+  mechanics,
   outsourcedJobs,
   outsourcedJobRepairers,
   workshopPayments,
@@ -94,6 +120,10 @@ export default function OutsourcedTrack({
   onViewJob: (id: string) => void;
   repairerTypes: RepairerType[];
   repairers: Repairer[];
+  // P3 item 1 — responsible mechanic, shown under the repairer names in
+  // the table's repairer column (replaces preview's own contact-number-
+  // underneath, per Turki's explicit ask).
+  mechanics: Staff[];
   outsourcedJobs: OutsourcedJob[];
   outsourcedJobRepairers: OutsourcedJobRepairer[];
   workshopPayments: WorkshopPayment[];
@@ -104,6 +134,7 @@ export default function OutsourcedTrack({
 
   const trucksById = useMemo(() => new Map(trucks.map((tr) => [tr.id, tr])), [trucks]);
   const repairersById = useMemo(() => new Map(repairers.map((r) => [r.id, r])), [repairers]);
+  const mechanicsById = useMemo(() => new Map(mechanics.map((m) => [m.id, m])), [mechanics]);
 
   const repairerIdsByJob = useMemo(() => {
     const m = new Map<string, string[]>();
@@ -152,15 +183,6 @@ export default function OutsourcedTrack({
     return m;
   }, [filtered, groupByTruck, truckFilter]);
 
-  function truckRollup(truckId: string) {
-    const rows = withSections.filter((x) => x.j.truck_id === truckId);
-    return {
-      scheduled: rows.filter((x) => x.section === "scheduled").length,
-      in_progress: rows.filter((x) => x.section === "in_progress").length,
-      historical: rows.filter((x) => x.section === "historical").length,
-    };
-  }
-
   function toggleExpanded(truckId: string) {
     setExpandedTrucks((prev) => {
       const next = new Set(prev);
@@ -179,6 +201,7 @@ export default function OutsourcedTrack({
     const truck = trucksById.get(j.truck_id);
     const overdue = isOverdue(j);
     const jRepairers = jobRepairerObjs(j.id);
+    const mechanic = mechanicsById.get(j.responsible_mechanic_id) ?? null;
     const cost = actualCostByJob.get(j.id) ?? 0;
     return (
       <tr key={j.id} className={cn(overdue ? "bg-rose-500/5" : "")}>
@@ -188,7 +211,14 @@ export default function OutsourcedTrack({
         )}
         <TD>{t(`status.${j.type}`, lang)}</TD>
         <TD className="text-xs">
-          {jRepairers.length === 0 ? "—" : jRepairers.map((r) => (lang === "ar" ? r.name_ar || r.name : r.name)).join(", ")}
+          <span className="font-bold">{jRepairers.length === 0 ? "—" : jRepairers.map((r) => (lang === "ar" ? r.name_ar || r.name : r.name)).join(", ")}</span>
+          {/* P3 item 1 — responsible mechanic underneath, replacing
+              preview's own contact-number-underneath for this column.
+              Repairer name bolded so it stands out from the mechanic
+              name below it. */}
+          {mechanic && (
+            <div className="muted">{lang === "ar" ? mechanic.name_ar || mechanic.name : mechanic.name}</div>
+          )}
         </TD>
         <TD className="text-xs">{new Date(j.start_date).toLocaleDateString()}</TD>
         <TD className={cn("text-xs", overdue ? "text-rose-600 font-medium" : "")}>{new Date(j.estimated_finish).toLocaleDateString()}</TD>
@@ -210,7 +240,7 @@ export default function OutsourcedTrack({
   return (
     <>
       <Card className="!p-0 overflow-hidden">
-        <div className={cn("flex items-center justify-between gap-3 flex-wrap p-3", !groups && "border-b")} style={!groups ? { borderColor: "rgb(var(--border))" } : undefined}>
+        <div className="flex items-center justify-between gap-3 flex-wrap p-3 border-b" style={{ borderColor: "rgb(var(--border))" }}>
           <div className="flex items-center gap-1 flex-wrap">
             {(["all", "scheduled", "in_progress", "historical"] as OsSection[]).map((s) => (
               <button
@@ -258,19 +288,18 @@ export default function OutsourcedTrack({
           </div>
         </div>
 
-        {/* Polish P2 item 5 — table attached directly to the filter
-            header (one connected unit, like the demo). Only when
-            ungrouped: grouped-by-truck renders its own per-truck cards
-            below instead, no single table to attach to. */}
-        {!groups && (
-          filtered.length === 0 ? (
+        {/* P3 item 2 — ONE combined table always attached directly to
+            this filter header. Grouped-by-truck is group-header rows
+            interleaved with job rows inside this same table, not a
+            separate stack of per-truck cards. */}
+        {groups ? (
+          groups.size === 0 ? (
             <p className="text-sm muted p-6 text-center">{t("mt.osNoJobs", lang)}</p>
           ) : (
             <Table>
               <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                 <tr>
                   <TH>OS</TH>
-                  <TH>{t("common.truck", lang)}</TH>
                   <TH>{t("common.type", lang)}</TH>
                   <TH>{t("mt.repairers", lang)}</TH>
                   <TH>{t("mt.startDate", lang)}</TH>
@@ -280,60 +309,51 @@ export default function OutsourcedTrack({
                   <TH></TH>
                 </tr>
               </thead>
-              <tbody>{filtered.map((j) => renderRow(j, false))}</tbody>
+              <tbody>
+                {Array.from(groups.entries()).map(([truckId, rows]) => {
+                  const truck = trucksById.get(truckId);
+                  const expanded = expandedTrucks.has(truckId);
+                  const urgent = mostUrgentOsSection(rows);
+                  return (
+                    <Fragment key={truckId}>
+                      <tr onClick={() => toggleExpanded(truckId)} className={cn("cursor-pointer transition", OS_URGENT_ROW_TONE[urgent])}>
+                        <td colSpan={8} className="px-3 py-2.5" style={{ borderTop: "1px solid rgb(var(--border))" }}>
+                          <div className="flex items-center gap-2 flex-wrap font-medium">
+                            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            <span className="font-mono text-xs">{truck?.plate ?? truckId}</span>
+                            <span className="text-sm">{truck?.model ?? ""}</span>
+                            <span className="ms-auto text-[11px] font-normal muted">{rows.length} {t("mt.jobCount", lang)}</span>
+                          </div>
+                        </td>
+                      </tr>
+                      {expanded && rows.map((j) => renderRow(j, true))}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
             </Table>
           )
+        ) : filtered.length === 0 ? (
+          <p className="text-sm muted p-6 text-center">{t("mt.osNoJobs", lang)}</p>
+        ) : (
+          <Table>
+            <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+              <tr>
+                <TH>OS</TH>
+                <TH>{t("common.truck", lang)}</TH>
+                <TH>{t("common.type", lang)}</TH>
+                <TH>{t("mt.repairers", lang)}</TH>
+                <TH>{t("mt.startDate", lang)}</TH>
+                <TH>{t("mt.estimatedFinish", lang)}</TH>
+                <TH>{t("common.status", lang)}</TH>
+                <TH>{t("mt.actualCost", lang)}</TH>
+                <TH></TH>
+              </tr>
+            </thead>
+            <tbody>{filtered.map((j) => renderRow(j, false))}</tbody>
+          </Table>
         )}
       </Card>
-
-      {groups ? (
-        <div className="space-y-3">
-          {Array.from(groups.entries()).map(([truckId, rows]) => {
-            const truck = trucksById.get(truckId);
-            const rollup = truckRollup(truckId);
-            const expanded = expandedTrucks.has(truckId);
-            return (
-              <Card key={truckId} className="!p-0 overflow-hidden">
-                <button
-                  onClick={() => toggleExpanded(truckId)}
-                  className="w-full flex items-center justify-between p-3 hover:bg-black/5 dark:hover:bg-white/5"
-                >
-                  <div className="flex items-center gap-2">
-                    {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                    <span className="font-mono text-xs">{truck?.plate ?? truckId}</span>
-                    <span className="text-sm font-medium">{truck?.model ?? ""}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[11px]">
-                    <span className="rounded px-1.5 py-0.5 bg-brand-500/10 text-brand-700 dark:text-brand-300">{t("status.scheduled", lang)} {rollup.scheduled}</span>
-                    <span className="rounded px-1.5 py-0.5 bg-yellow-400/15 text-yellow-800 dark:text-yellow-300">{t("status.in_progress", lang)} {rollup.in_progress}</span>
-                    <span className="rounded px-1.5 py-0.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">{t("mt.historical", lang)} {rollup.historical}</span>
-                  </div>
-                </button>
-                {expanded && (
-                  <Table>
-                    <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-                      <tr>
-                        <TH>OS</TH>
-                        <TH>{t("common.type", lang)}</TH>
-                        <TH>{t("mt.repairers", lang)}</TH>
-                        <TH>{t("mt.startDate", lang)}</TH>
-                        <TH>{t("mt.estimatedFinish", lang)}</TH>
-                        <TH>{t("common.status", lang)}</TH>
-                        <TH>{t("mt.actualCost", lang)}</TH>
-                        <TH></TH>
-                      </tr>
-                    </thead>
-                    <tbody>{rows.map((j) => renderRow(j, true))}</tbody>
-                  </Table>
-                )}
-              </Card>
-            );
-          })}
-          {groups.size === 0 && (
-            <Card><p className="text-sm muted p-6 text-center">{t("mt.osNoJobs", lang)}</p></Card>
-          )}
-        </div>
-      ) : null}
     </>
   );
 }

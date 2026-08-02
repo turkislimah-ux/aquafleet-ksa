@@ -148,6 +148,9 @@ export const dict = {
     saveNotes: { en: "Save", ar: "حفظ" },
     outsourcedComingSoon: { en: "Out-sourced jobs — coming in a later phase", ar: "الأعمال الخارجية — قادمة في مرحلة لاحقة" },
     noWorkOrders: { en: "No work orders in this view", ar: "لا توجد أوامر عمل في هذا العرض" },
+    // P3 item 2 — combined group-by-truck table row count, matches
+    // preview's own T("mt.jobCount") (pages-2.js's groupHeader).
+    jobCount: { en: "jobs", ar: "عمل" },
     editJob: { en: "Edit Work Order", ar: "تعديل أمر العمل" },
     laborCostPreview: { en: "Labor cost", ar: "تكلفة العمالة" },
     editInProgressNote: {
