@@ -260,6 +260,17 @@ export default function MaintenanceCalendar({
                   anymore (that was preview's own workaround for a
                   fixed-height card; a real scroll area does the same job
                   better, per Turki's explicit ask). */}
+              {/* Chip text — plate only. Was `{truck?.id ?? w.truck_id} ·
+                  {truck?.plate ?? ""}`, a direct port of preview's own
+                  markup: preview's MOCK trucks use short human-readable
+                  ids like "TRK-001", so showing `.id` there made sense.
+                  This app's real trucks table keys every row by UUID
+                  (confirmed live) — `.id` was never meant to be shown to
+                  a user, exactly the same "id for routing/keys only,
+                  plate for display" convention FleetClient.tsx/
+                  DriversClient.tsx already follow. Was rendering a raw
+                  UUID for every truck, every time, looking like a broken
+                  lookup when the truck was actually found correctly. */}
               <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin space-y-1">
                 {items.length === 0 && <div className="text-[10px] muted">{t("mt.weekNoJobs", lang)}</div>}
                 {items.map((item) => {
@@ -281,7 +292,7 @@ export default function MaintenanceCalendar({
                         className={cn("text-[10px] rounded px-1.5 py-1 truncate cursor-pointer border-s-[3px]", tone)}
                         title={lang === "ar" ? w.title_ar : w.title}
                       >
-                        {truck?.id ?? w.truck_id} · {truck?.plate ?? ""}
+                        {truck?.plate ?? w.truck_id}
                       </div>
                     );
                   }
@@ -302,7 +313,7 @@ export default function MaintenanceCalendar({
                           .os-badge is a small solid violet pill before the
                           truck info, not bare bold text like this app had. */}
                       <span className="inline-block align-middle text-[9px] font-bold bg-violet-600 text-white px-1 rounded-sm me-1">OS</span>
-                      {truck?.id ?? j.truck_id} · {truck?.plate ?? ""}
+                      {truck?.plate ?? j.truck_id}
                     </div>
                   );
                 })}
