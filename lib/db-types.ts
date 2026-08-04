@@ -1145,3 +1145,81 @@ export type StaffCommission = {
   created_by: string | null;
   created_at: string;
 };
+
+// ---------------------------------------------------------------------------
+// Archive page (migration 0084) — the UNIVERSAL document schema. One model
+// serves all four tabs (Company built in Phase 1; Staff/Truck/Customer in
+// Phases 2-3) — `tab` on the group is what scopes them.
+//
+// Status (Valid / Expiring soon / Expired) is NOT here, deliberately: it is
+// DERIVED at read from (expiry_date, group.warning_days) by lib/archive.ts,
+// never stored, so it can't go stale. Same rule as lib/driver-state.ts and
+// lib/truck-status.ts.
+// ---------------------------------------------------------------------------
+
+export type ArchiveTab = "company" | "staff" | "truck" | "customer";
+
+export type ArchiveDocumentGroup = {
+  id: string;
+  tab: ArchiveTab;
+  title: string;
+  description: string | null;
+  color: string | null;
+  // Per-group expiring-soon window (Turki's ask): a licence may warn at 30
+  // days while insurance warns at 90. DB CHECK enforces > 0.
+  warning_days: number;
+  sort_order: number;
+  created_by: string | null;
+  created_at: string;
+};
+
+// One row = one document's CURRENT state. Superseded versions live in
+// ArchiveDocumentRenewal, never here — so "current documents" needs no
+// is_current filter that a query could forget (see 0084's Decision 2).
+//
+// driver_id/staff_id/truck_id: at most ONE may be set (DB CHECK); all null
+// = a company document. All three are ON DELETE RESTRICT — a regulatory
+// document outlives its subject.
+export type ArchiveDocument = {
+  id: string;
+  group_id: string;
+  title: string;
+  reference_no: string | null;
+  issue_date: string | null;
+  expiry_date: string | null;
+  note: string | null;
+  driver_id: string | null;
+  staff_id: string | null;
+  truck_id: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+// Append-only history. One row per SUPERSEDED version — a snapshot of what
+// the parent row used to hold, written at renewal time. Nothing ever updates
+// these rows (same append-only discipline as stock_movements).
+export type ArchiveDocumentRenewal = {
+  id: string;
+  document_id: string;
+  reference_no: string | null;
+  issue_date: string | null;
+  expiry_date: string | null;
+  note: string | null;
+  superseded_at: string;
+  superseded_by: string | null;
+  created_at: string;
+};
+
+// Multiple files per document. renewal_id is NULL for files belonging to the
+// CURRENT version; at renewal the outgoing files get stamped with the new
+// renewal row's id, so an old scan stays attached to the version it belongs
+// to instead of being deleted or re-attributed to the new one.
+export type ArchiveDocumentFile = {
+  id: string;
+  document_id: string;
+  renewal_id: string | null;
+  storage_path: string;
+  file_name: string;
+  mime_type: string | null;
+  uploaded_at: string;
+};
