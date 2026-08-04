@@ -15,6 +15,7 @@ import { revalidatePath } from "next/cache";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
 import type {
   ArchiveTab,
+  ArchiveSubjectKind,
   ArchiveDocumentGroup,
   ArchiveDocument,
   ArchiveDocumentFile,
@@ -35,6 +36,10 @@ async function actorEmail(supabase: ReturnType<typeof createClient>): Promise<st
 
 export type ArchiveGroupInput = {
   tab: ArchiveTab;
+  // Which population this group's rows are keyed by (0086). The DB CHECK
+  // requires it to agree with `tab` — a staff-tab group left at the default
+  // 'none' is REFUSED, so the create form must always send a real value.
+  subject_kind: ArchiveSubjectKind;
   title: string;
   description: string | null;
   color: string | null;
@@ -43,6 +48,19 @@ export type ArchiveGroupInput = {
 
 function validateGroup(input: ArchiveGroupInput): string | null {
   if (!input.title.trim()) return "Group title is required.";
+  // Mirror of 0086's tab/subject_kind CHECK, so the user sees a sentence
+  // instead of a raw constraint violation. The DB stays the real gate.
+  const expected: Record<ArchiveTab, ArchiveSubjectKind[]> = {
+    company: ["none"],
+    staff: ["driver", "staff"],
+    truck: ["truck"],
+    customer: ["customer"],
+  };
+  if (!expected[input.tab].includes(input.subject_kind)) {
+    return input.tab === "staff"
+      ? "Choose whether this group is for drivers or management staff."
+      : `A ${input.tab} group cannot be a "${input.subject_kind}" group.`;
+  }
   // Mirrors the DB CHECK (warning_days > 0) so the user gets a plain message
   // instead of a raw constraint-violation string. The DB stays the real gate.
   if (!Number.isFinite(input.warning_days) || input.warning_days <= 0) {
@@ -62,6 +80,7 @@ export async function createArchiveGroup(
     .from("archive_document_groups")
     .insert({
       tab: input.tab,
+      subject_kind: input.subject_kind,
       title: input.title.trim(),
       description: input.description?.trim() || null,
       color: input.color,
@@ -85,9 +104,12 @@ export async function updateArchiveGroup(
   if (bad) return { error: bad };
 
   const supabase = createClient();
-  // `tab` is deliberately NOT updatable — moving a group between tabs would
-  // strand its documents' subject links (a staff document has a staff_id
-  // that means nothing under the Company tab).
+  // `tab` and `subject_kind` are deliberately NOT updatable. Moving a group
+  // between tabs would strand its documents' subject links (a staff document
+  // has a staff_id that means nothing under the Company tab), and flipping
+  // subject_kind on a group that already holds documents would put every one
+  // of them in violation of 0087's guard at once — the next edit to any of
+  // them would then be refused by the DB. Both are create-time decisions.
   const { data, error } = await supabase
     .from("archive_document_groups")
     .update({

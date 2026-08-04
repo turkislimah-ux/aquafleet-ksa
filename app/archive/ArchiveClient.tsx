@@ -38,9 +38,15 @@ import type {
   ArchiveDocumentFile,
   ArchiveDocumentRenewal,
   ArchiveDocumentType,
+  ArchiveDriverRow,
+  ArchiveStaffRow,
+  ArchiveSubjectKind,
+  StaffCommission,
+  StaffCommissionType,
 } from "@/lib/db-types";
 import { deleteArchiveGroup, deleteArchiveDocument, getArchiveFileSignedUrls } from "./actions";
 import { GroupModal, DocumentModal, RenewModal, DocumentDetailModal } from "./ArchiveModals";
+import ArchiveStaffTab, { STAFF_SUB_TABS, type StaffSubTab } from "./ArchiveStaffTab";
 
 const TABS: { key: ArchiveTab; label: string }[] = [
   { key: "company", label: "Company" },
@@ -60,6 +66,10 @@ export default function ArchiveClient({
   files,
   renewals,
   types,
+  drivers,
+  staff,
+  commissions,
+  commissionTypes,
   today,
   error,
 }: {
@@ -68,6 +78,10 @@ export default function ArchiveClient({
   files: ArchiveDocumentFile[];
   renewals: ArchiveDocumentRenewal[];
   types: ArchiveDocumentType[];
+  drivers: ArchiveDriverRow[];
+  staff: ArchiveStaffRow[];
+  commissions: StaffCommission[];
+  commissionTypes: StaffCommissionType[];
   today: string;
   error: string | null;
 }) {
@@ -81,9 +95,20 @@ export default function ArchiveClient({
   const [renewingDoc, setRenewingDoc] = useState<ArchiveDocument | null>(null);
   const [historyDocId, setHistoryDocId] = useState<string | null>(null);
   const [detailDocId, setDetailDocId] = useState<string | null>(null);
+  // Lifted OUT of ArchiveStaffTab on purpose: the page-header "Create Group"
+  // button needs to know which sub-tab you're standing in, because that is
+  // what decides the new group's subject_kind (0086 refuses 'none' here).
+  const [staffSubTab, setStaffSubTab] = useState<StaffSubTab>("drivers");
+  const [newGroupKind, setNewGroupKind] = useState<ArchiveSubjectKind>("none");
+  // WHOSE document the open DocumentModal is for. Set from the matrix row
+  // that was clicked, cleared for company documents.
+  const [docSubject, setDocSubject] = useState<{ kind: "driver" | "staff"; id: string; name: string } | undefined>(undefined);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const groupsById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+  // Groups arrive for every fetched tab; each tab renders its own slice.
+  const companyGroups = useMemo(() => groups.filter((g) => g.tab === "company"), [groups]);
+  const staffGroups = useMemo(() => groups.filter((g) => g.tab === "staff"), [groups]);
   const typesByKey = useMemo(() => new Map(types.map((t) => [t.key, t])), [types]);
 
   const docsByGroup = useMemo(() => {
@@ -174,6 +199,7 @@ export default function ArchiveClient({
     setEditingGroup(null);
     setDocModalGroupId(null);
     setEditingDoc(null);
+    setDocSubject(undefined);
     setRenewingDoc(null);
     router.refresh();
   }
@@ -184,9 +210,28 @@ export default function ArchiveClient({
         title="Archive"
         subtitle="Company, staff, truck and customer documents — with expiry tracking and renewal history"
         actions={
+          // Group creation only exists where groups exist: the Company tab,
+          // and the Staff tab's two PEOPLE sub-tabs. Commission History and
+          // Soft-deleted are read-only views over other tables — there is
+          // nothing to create there.
           tab === "company" ? (
-            <Btn variant="primary" onClick={() => { setEditingGroup(null); setGroupModalOpen(true); }}>
+            <Btn
+              variant="primary"
+              onClick={() => { setEditingGroup(null); setNewGroupKind("none"); setGroupModalOpen(true); }}
+            >
               <Plus className="h-4 w-4" />Create Group
+            </Btn>
+          ) : tab === "staff" && (staffSubTab === "drivers" || staffSubTab === "management") ? (
+            <Btn
+              variant="primary"
+              onClick={() => {
+                setEditingGroup(null);
+                setNewGroupKind(staffSubTab === "drivers" ? "driver" : "staff");
+                setGroupModalOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              {staffSubTab === "drivers" ? "Create Driver Group" : "Create Staff Group"}
             </Btn>
           ) : undefined
         }
@@ -237,13 +282,63 @@ export default function ArchiveClient({
         </div>
       </div>
 
-      {tab !== "company" ? (
+      {tab === "staff" ? (
+        <div className="space-y-4">
+          {/* Sub-tabs — pill row, deliberately NOT the underline style of the
+              row above it, so two tab strips stacked on one page read as a
+              hierarchy instead of competing for the same job. */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {STAFF_SUB_TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setStaffSubTab(t.key)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-sm font-medium transition border",
+                  staffSubTab === t.key
+                    ? "bg-brand-500/10 border-brand-600 text-brand-700 dark:text-brand-300"
+                    : "border-transparent muted hover:bg-black/5 dark:hover:bg-white/5",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <ArchiveStaffTab
+            subTab={staffSubTab}
+            groups={staffGroups}
+            documents={documents}
+            filesByDoc={filesByDoc}
+            drivers={drivers}
+            staff={staff}
+            commissions={commissions}
+            commissionTypes={commissionTypes}
+            today={today}
+            onAddDocument={(g, person) => {
+              setEditingDoc(null);
+              setDocSubject({ kind: g.subject_kind === "driver" ? "driver" : "staff", id: person.id, name: person.name });
+              setDocModalGroupId(g.id);
+            }}
+            onEditDocument={(d, g, person) => {
+              setEditingDoc(d);
+              setDocSubject({ kind: g.subject_kind === "driver" ? "driver" : "staff", id: person.id, name: person.name });
+              setDocModalGroupId(g.id);
+            }}
+            onRenewDocument={setRenewingDoc}
+            onDeleteDocument={onDeleteDocument}
+            onOpenDocument={(d) => setDetailDocId(d.id)}
+            onOpenFile={openFile}
+            onEditGroup={(g) => { setEditingGroup(g); setGroupModalOpen(true); }}
+            onDeleteGroup={onDeleteGroup}
+          />
+        </div>
+      ) : tab !== "company" ? (
         <Card>
           <p className="text-sm muted p-6 text-center">
             {TABS.find((t) => t.key === tab)?.label} documents — coming in a later phase.
           </p>
         </Card>
-      ) : groups.length === 0 ? (
+      ) : companyGroups.length === 0 ? (
         <Card>
           <div className="p-8 text-center">
             <p className="text-sm muted">No document groups yet.</p>
@@ -254,7 +349,7 @@ export default function ArchiveClient({
         </Card>
       ) : (
         <div className="space-y-3">
-          {groups.map((g) => {
+          {companyGroups.map((g) => {
             const docs = docsByGroup.get(g.id) ?? [];
             const isCollapsed = collapsed.has(g.id);
             return (
@@ -282,7 +377,7 @@ export default function ArchiveClient({
                   <div className="flex items-center gap-1 shrink-0">
                     {/* "Add Document" sits next to THIS group's title — the
                         second step of the two-step model. */}
-                    <Btn variant="outline" onClick={() => { setEditingDoc(null); setDocModalGroupId(g.id); }}>
+                    <Btn variant="outline" onClick={() => { setEditingDoc(null); setDocSubject(undefined); setDocModalGroupId(g.id); }}>
                       <Plus className="h-3.5 w-3.5" />Add Document
                     </Btn>
                     <button
@@ -385,7 +480,7 @@ export default function ArchiveClient({
                                       <RefreshCw className="h-3.5 w-3.5" />Renew
                                     </Btn>
                                     <button
-                                      onClick={() => { setEditingDoc(d); setDocModalGroupId(g.id); }}
+                                      onClick={() => { setEditingDoc(d); setDocSubject(undefined); setDocModalGroupId(g.id); }}
                                       className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
                                       title="Edit document"
                                     >
@@ -457,12 +552,19 @@ export default function ArchiveClient({
       )}
 
       {groupModalOpen && (
-        <GroupModal tab="company" editingGroup={editingGroup} onClose={closeModals} onSaved={closeModals} />
+        <GroupModal
+          tab={editingGroup?.tab ?? tab}
+          defaultSubjectKind={newGroupKind}
+          editingGroup={editingGroup}
+          onClose={closeModals}
+          onSaved={closeModals}
+        />
       )}
 
       {docModalGroupId && (
         <DocumentModal
           types={types}
+          subject={docSubject}
           groupId={docModalGroupId}
           groupTitle={groupsById.get(docModalGroupId)?.title ?? ""}
           editingDocument={editingDoc}

@@ -1159,9 +1159,17 @@ export type StaffCommission = {
 
 export type ArchiveTab = "company" | "staff" | "truck" | "customer";
 
+// Which population a group's rows are keyed by (migration 0086). Declared at
+// group creation, NOT inferred from the group's documents — an empty group
+// must still render its full subject list, which is the whole point of the
+// Staff tab's matrix. A DB CHECK ties this to `tab`: company -> 'none',
+// staff -> 'driver' | 'staff', truck -> 'truck', customer -> 'customer'.
+export type ArchiveSubjectKind = "none" | "driver" | "staff" | "truck" | "customer";
+
 export type ArchiveDocumentGroup = {
   id: string;
   tab: ArchiveTab;
+  subject_kind: ArchiveSubjectKind;
   title: string;
   description: string | null;
   color: string | null;
@@ -1171,6 +1179,34 @@ export type ArchiveDocumentGroup = {
   sort_order: number;
   created_by: string | null;
   created_at: string;
+};
+
+// Narrow subject rows for the Staff tab's matrix. Deliberately NOT the full
+// Driver / Staff types: the page selects exactly these columns, so a narrow
+// type stays honest about what was actually fetched. (The maintenance cleanup
+// pass hit the opposite of this — narrowing a select while the type still
+// claimed every column would have made the type lie, so it was skipped there.)
+//
+// The ACTIVE matrix rows and the Soft-deleted sub-tab read from the SAME
+// fetch, so the termination fields live here rather than needing a second
+// query per population.
+export type ArchiveDriverRow = {
+  id: string;
+  name: string;
+  name_ar: string | null;
+  iqama_number: string | null;
+  active: boolean;
+  terminated_at: string | null;
+  termination_date: string | null;
+};
+
+export type ArchiveStaffRow = {
+  id: string;
+  name: string;
+  name_ar: string | null;
+  role: string;
+  active: boolean;
+  terminated_at: string | null;
 };
 
 // One row = one document's CURRENT state. Superseded versions live in

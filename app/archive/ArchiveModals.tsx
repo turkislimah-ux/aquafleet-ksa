@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Trash2, FileText, Upload } from "lucide-react";
+import { X, Trash2, FileText, Upload, User } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
@@ -21,6 +21,7 @@ import {
 } from "@/lib/archive";
 import type {
   ArchiveTab,
+  ArchiveSubjectKind,
   ArchiveDocumentGroup,
   ArchiveDocument,
   ArchiveDocumentFile,
@@ -204,11 +205,16 @@ function ModalShell({
 // ---------------------------------------------------------------------------
 export function GroupModal({
   tab,
+  defaultSubjectKind = "none",
   editingGroup,
   onClose,
   onSaved,
 }: {
   tab: ArchiveTab;
+  // Which population a NEW group is for. The caller passes the sub-tab the
+  // user is standing in, so the picker below opens on the right answer
+  // instead of making them restate it.
+  defaultSubjectKind?: ArchiveSubjectKind;
   editingGroup?: ArchiveDocumentGroup | null;
   onClose: () => void;
   onSaved: () => void;
@@ -218,6 +224,9 @@ export function GroupModal({
   const [description, setDescription] = useState(editingGroup?.description ?? "");
   const [color, setColor] = useState(editingGroup?.color ?? "brand");
   const [warningDays, setWarningDays] = useState(editingGroup?.warning_days ?? 30);
+  const [subjectKind, setSubjectKind] = useState<ArchiveSubjectKind>(
+    editingGroup?.subject_kind ?? defaultSubjectKind,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -228,7 +237,14 @@ export function GroupModal({
     }
     setSaving(true);
     setError(null);
-    const input = { tab, title, description: description || null, color, warning_days: warningDays };
+    const input = {
+      tab,
+      subject_kind: subjectKind,
+      title,
+      description: description || null,
+      color,
+      warning_days: warningDays,
+    };
     const res = isEdit
       ? await updateArchiveGroup(editingGroup!.id, input)
       : await createArchiveGroup(input);
@@ -261,6 +277,49 @@ export function GroupModal({
         <label className="text-xs muted block mb-1">Title *</label>
         <input value={title} onChange={(e) => setTitle(e.target.value)} className={INPUT} style={INPUT_STYLE} autoFocus />
       </div>
+
+      {/* WHO the group is for — staff tab only, because it is the only tab
+          with two populations. Required by the DB: 0086's CHECK refuses a
+          staff group left at the default 'none'. LOCKED once the group
+          exists: flipping it would put every document already filed in the
+          group in violation of 0087's guard at once. */}
+      {tab === "staff" && (
+        <div>
+          <label className="text-xs muted block mb-1">This group is for *</label>
+          {isEdit ? (
+            <div className="px-3 py-2 rounded-lg border text-sm opacity-60" style={INPUT_STYLE}>
+              {subjectKind === "driver" ? "Drivers" : "Management staff"}
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              {([
+                { key: "driver" as const, label: "Drivers" },
+                { key: "staff" as const, label: "Management staff" },
+              ]).map((o) => (
+                <button
+                  key={o.key}
+                  type="button"
+                  onClick={() => setSubjectKind(o.key)}
+                  className={cn(
+                    "flex-1 px-3 py-2 rounded-lg border text-sm transition",
+                    subjectKind === o.key
+                      ? "border-brand-600 bg-brand-500/10 text-brand-700 dark:text-brand-300 font-medium"
+                      : "hover:bg-black/5 dark:hover:bg-white/5",
+                  )}
+                  style={subjectKind === o.key ? undefined : INPUT_STYLE}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] muted mt-1">
+            {isEdit
+              ? "Cannot be changed after the group is created."
+              : "Every person in this list gets a row, whether or not they have the document yet."}
+          </p>
+        </div>
+      )}
 
       <div>
         <label className="text-xs muted block mb-1">Description</label>
@@ -328,6 +387,7 @@ export function GroupModal({
 export function DocumentModal({
   groupId,
   groupTitle,
+  subject,
   editingDocument,
   existingFiles,
   types,
@@ -336,6 +396,14 @@ export function DocumentModal({
 }: {
   groupId: string;
   groupTitle: string;
+  // WHOSE document this is, when the group demands a subject (0086/0087).
+  // Supplied by the matrix row that was clicked — never typed, never picked
+  // in this form. That is what makes the guard unreachable in normal use
+  // rather than merely unlikely: the group and the subject arrive together,
+  // from the same click.
+  //
+  // Undefined = a company group (subject_kind 'none'), Phase 1's behaviour.
+  subject?: { kind: "driver" | "staff"; id: string; name: string };
   editingDocument?: ArchiveDocument | null;
   existingFiles?: ArchiveDocumentFile[];
   types: ArchiveDocumentType[];
@@ -440,6 +508,14 @@ export function DocumentModal({
       issuing_entity: issuingEntity || null,
       holder_name: holderName || null,
       type_key: typeKey || null,
+      // Exactly ONE of these is ever set, and only on create — the subject is
+      // fixed at filing. updateArchiveDocument doesn't write subject columns
+      // at all, so re-assigning a document to a different person isn't an
+      // edit, it's a new document. (Editing one that way would also have to
+      // clear the old column to stay inside 0087's guard — a second failure
+      // mode not worth opening for a case nobody asked for.)
+      driver_id: subject?.kind === "driver" ? subject.id : null,
+      staff_id: subject?.kind === "staff" ? subject.id : null,
     };
 
     if (isEdit) {
@@ -503,6 +579,13 @@ export function DocumentModal({
 
       {/* IDENTITY — what this document is, who issued it, whose it is. */}
       <div className="text-[11px] font-semibold uppercase tracking-wide muted">Identity</div>
+      {subject && (
+        <div className="rounded-lg border px-3 py-2 text-sm flex items-center gap-2" style={INPUT_STYLE}>
+          <User className="h-4 w-4 muted shrink-0" />
+          <span className="muted">{subject.kind === "driver" ? "Driver" : "Staff member"}:</span>
+          <span className="font-medium">{subject.name}</span>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="md:col-span-1">
           <label className="text-xs muted block mb-1">Document title *</label>
