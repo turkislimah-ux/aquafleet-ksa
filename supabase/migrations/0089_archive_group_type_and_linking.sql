@@ -16,15 +16,21 @@
 -- live. This file has been REWRITTEN to describe the live columns-on-types
 -- schema instead. It is a reconciliation, not a restore.
 --
--- >>> ONE PART OF THIS FILE IS UNVERIFIED. <<<
--- I have had NO DB read access for this whole stretch of work (the Supabase
--- MCP returns "You do not have permission to perform this action" on every
--- query), so I could not run pg_get_functiondef() against the live
--- archive_linked_one_per_person(). The body below is a faithful
--- RECONSTRUCTION from the architect's description, not a byte-for-byte copy.
--- Please paste the live definition and I will reconcile it, exactly as was
--- done for 0087. Everything else here is stated directly from the
--- architect's canonical description of live.
+-- RECONCILED TO THE LIVE FUNCTION BODY. An earlier revision of this file
+-- carried a RECONSTRUCTION of archive_linked_one_per_person() (I have no DB
+-- read access — the Supabase MCP returns "You do not have permission to
+-- perform this action" on every query — so it could not be diffed at the
+-- time). The architect has since supplied pg_get_functiondef()'s output and
+-- the body below is now that, verbatim.
+--
+-- Worth recording what the reconstruction got WRONG, since it is the case for
+-- reconciling rather than trusting a plausible-looking body: it collapsed the
+-- two populations into one coalesce()d subject check with a single error
+-- message, and gated the self-row exclusion on tg_op. Live keeps driver and
+-- staff as two independent branches, each with its own message naming which
+-- population it is about, and excludes the current row with a plain
+-- `d.id <> new.id` that works for INSERT and UPDATE alike. Same rule, but not
+-- the same code — and the messages a user would have seen were different.
 --
 -- ===========================================================================
 -- THE PRINCIPLE
@@ -76,7 +82,7 @@
 -- the app from a closed union (iqama_number -> iqama_expiry, license_number
 -- -> license_expiry), never by string-munging a column name out of table
 -- data. That keeps the write surface exactly as narrow as
--- app/archive/actions.ts's setPersonIdNumber() already made it: the app picks
+-- app/archive/actions.ts's setPersonLinkedId() already makes it: the app picks
 -- its table/column from code, so a row in this table can never retarget a
 -- write to an arbitrary column.
 --
@@ -120,8 +126,12 @@
 --  - ADDITIVE: one column on groups, two on types, one function, one trigger.
 --    No column dropped, no row written, no RLS policy altered.
 --  - 0087's subject guard is NOT touched by this file.
---  - Re-runnable: `add column if not exists`, guarded DO blocks,
---    `create or replace`, `drop trigger if exists` before create.
+--  - PARTIALLY re-runnable: `add column if not exists`, a guarded DO block
+--    for the FK, and `create or replace` for the function are all safe to
+--    repeat. The CREATE TRIGGER is NOT guarded by a preceding drop — that
+--    matches live, and it is the safer shape for a file that has already been
+--    double-applied once: a second run ERRORS on the trigger instead of
+--    quietly recreating it.
 --
 -- ===========================================================================
 -- PRE-FLIGHT (run before applying — I cannot run these myself)
@@ -197,8 +207,14 @@ update public.archive_document_types
 -- ---------------------------------------------------------------------------
 -- 3) One document per person, for linked types only.
 --
---    >>> RECONSTRUCTED, NOT VERIFIED — see the header. Paste the live
---    >>> pg_get_functiondef() output and I will reconcile this body.
+--    Body below is the LIVE definition, verbatim (see the header note).
+--    SECURITY INVOKER is the default, so Postgres omits the keyword — its
+--    absence here IS invoker, not an oversight.
+--
+--    Note the trigger is created WITHOUT a preceding `drop trigger if
+--    exists`, matching live. Re-running this file therefore errors on the
+--    CREATE TRIGGER rather than silently recreating it — which is the safer
+--    failure for a file that has already been double-applied once.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.archive_linked_one_per_person()
  RETURNS trigger
@@ -206,48 +222,41 @@ CREATE OR REPLACE FUNCTION public.archive_linked_one_per_person()
  SET search_path TO 'public'
 AS $function$
 declare
-  v_kind       text;
-  v_type_key   text;
-  v_linked     text;
-  v_subject_id uuid;
-  v_existing   int;
+  v_type          text;
+  v_linked_driver text;
+  v_linked_staff  text;
 begin
-  select g.subject_kind, g.type_key into v_kind, v_type_key
+  select g.type_key into v_type
     from public.archive_document_groups g
    where g.id = new.group_id;
 
-  -- No type on the group = not a linked group. Nothing to enforce.
-  if v_type_key is null then
+  if v_type is null then
     return new;
   end if;
 
-  select case when v_kind = 'driver' then t.linked_driver_field
-              when v_kind = 'staff'  then t.linked_staff_field
-              else null end
-    into v_linked
-    from public.archive_document_types t
-   where t.key = v_type_key;
+  select linked_driver_field, linked_staff_field
+    into v_linked_driver, v_linked_staff
+    from public.archive_document_types
+   where key = v_type;
 
-  -- Not a linked combination: multiple documents per person stay allowed.
-  if v_linked is null then
-    return new;
+  if new.driver_id is not null and v_linked_driver is not null then
+    if exists (
+      select 1 from public.archive_documents d
+       where d.group_id = new.group_id and d.driver_id = new.driver_id and d.id <> new.id
+    ) then
+      raise exception 'This driver already has a "%" document in this group (linked types allow one per person; renew instead).', v_type
+        using errcode = '23505';
+    end if;
   end if;
 
-  v_subject_id := coalesce(new.driver_id, new.staff_id, new.truck_id);
-  if v_subject_id is null then
-    return new; -- 0087's guard already refuses this case
-  end if;
-
-  select count(*) into v_existing
-    from public.archive_documents d
-   where d.group_id = new.group_id
-     and coalesce(d.driver_id, d.staff_id, d.truck_id) = v_subject_id
-     and (tg_op = 'INSERT' or d.id <> new.id);
-
-  if v_existing > 0 then
-    raise exception
-      'This person already has a % document. Renew it instead of adding a second one.', v_type_key
-      using errcode = '23505';
+  if new.staff_id is not null and v_linked_staff is not null then
+    if exists (
+      select 1 from public.archive_documents d
+       where d.group_id = new.group_id and d.staff_id = new.staff_id and d.id <> new.id
+    ) then
+      raise exception 'This staff member already has a "%" document in this group (linked types allow one per person; renew instead).', v_type
+        using errcode = '23505';
+    end if;
   end if;
 
   return new;
@@ -256,10 +265,8 @@ $function$;
 
 revoke execute on function public.archive_linked_one_per_person() from public, anon;
 
-drop trigger if exists archive_linked_one_per_person_trg on public.archive_documents;
-create trigger archive_linked_one_per_person_trg
-  before insert or update on public.archive_documents
-  for each row execute function public.archive_linked_one_per_person();
+CREATE TRIGGER archive_linked_one_per_person_trg BEFORE INSERT OR UPDATE ON public.archive_documents
+  FOR EACH ROW EXECUTE FUNCTION archive_linked_one_per_person();
 
 commit;
 
