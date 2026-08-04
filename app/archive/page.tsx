@@ -12,6 +12,7 @@ import type {
   ArchiveDocument,
   ArchiveDocumentFile,
   ArchiveDocumentRenewal,
+  ArchiveDocumentType,
 } from "@/lib/db-types";
 import ArchiveClient from "./ArchiveClient";
 
@@ -21,7 +22,7 @@ export default async function ArchivePage() {
   const supabase = createClient();
   const today = todayKey(); // Riyadh-local, same convention as every other page
 
-  const [groupsRes, documentsRes, filesRes, renewalsRes] = await Promise.all([
+  const [groupsRes, documentsRes, filesRes, renewalsRes, typesRes] = await Promise.all([
     supabase
       .from("archive_document_groups")
       .select("id, tab, title, description, color, warning_days, sort_order, created_by, created_at")
@@ -35,7 +36,7 @@ export default async function ArchivePage() {
     supabase
       .from("archive_documents")
       .select(
-        "id, group_id, title, reference_no, issue_date, expiry_date, note, driver_id, staff_id, truck_id, created_by, created_at",
+        "id, group_id, title, reference_no, issue_date, expiry_date, note, issuing_entity, holder_name, type_key, driver_id, staff_id, truck_id, created_by, created_at",
       )
       .order("created_at", { ascending: false }),
     // File METADATA only, bulk — bytes stay in the private archive-documents
@@ -48,12 +49,21 @@ export default async function ArchivePage() {
       .from("archive_document_renewals")
       .select("id, document_id, reference_no, issue_date, expiry_date, note, superseded_at, superseded_by, created_at")
       .order("superseded_at", { ascending: false }),
+    // INCLUDING retired types (no .eq("active", true)): a document filed
+    // under a type that was later retired still has to render its own type
+    // name. The picker does the active-only filtering client-side, where it
+    // can also keep the current document's type in the list.
+    supabase
+      .from("archive_document_types")
+      .select("id, key, label_en, label_ar, active, created_at")
+      .order("label_en", { ascending: true }),
   ]);
 
   const groups = (groupsRes.data ?? []) as ArchiveDocumentGroup[];
   const allDocuments = (documentsRes.data ?? []) as ArchiveDocument[];
   const files = (filesRes.data ?? []) as ArchiveDocumentFile[];
   const renewals = (renewalsRes.data ?? []) as ArchiveDocumentRenewal[];
+  const types = (typesRes.data ?? []) as ArchiveDocumentType[];
 
   // Scope documents to the fetched (company) groups. Phases 2-3 will fetch
   // more groups; this same filter keeps working unchanged.
@@ -65,6 +75,7 @@ export default async function ArchivePage() {
     documentsRes.error?.message ??
     filesRes.error?.message ??
     renewalsRes.error?.message ??
+    typesRes.error?.message ??
     null;
 
   return (
@@ -73,6 +84,7 @@ export default async function ArchivePage() {
       documents={documents}
       files={files}
       renewals={renewals}
+      types={types}
       today={today}
       error={error}
     />

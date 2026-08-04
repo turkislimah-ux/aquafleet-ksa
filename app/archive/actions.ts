@@ -12,11 +12,13 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { slugifyKey, isValidSlug } from "@/lib/slug";
 import type {
   ArchiveTab,
   ArchiveDocumentGroup,
   ArchiveDocument,
   ArchiveDocumentFile,
+  ArchiveDocumentType,
 } from "@/lib/db-types";
 
 const BUCKET = "archive-documents";
@@ -151,6 +153,10 @@ export type ArchiveDocumentInput = {
   issue_date: string | null;
   expiry_date: string | null;
   note: string | null;
+  // Added by 0085 — all optional identity attributes.
+  issuing_entity: string | null;
+  holder_name: string | null;
+  type_key: string | null;
   // Phase 1 (Company) never sets these; Phases 2-3 will. At most one may be
   // non-null — the DB CHECK is the real gate.
   driver_id?: string | null;
@@ -187,6 +193,9 @@ export async function createArchiveDocument(
       issue_date: input.issue_date || null,
       expiry_date: input.expiry_date || null,
       note: input.note?.trim() || null,
+      issuing_entity: input.issuing_entity?.trim() || null,
+      holder_name: input.holder_name?.trim() || null,
+      type_key: input.type_key || null,
       driver_id: input.driver_id ?? null,
       staff_id: input.staff_id ?? null,
       truck_id: input.truck_id ?? null,
@@ -219,6 +228,9 @@ export async function updateArchiveDocument(
       issue_date: input.issue_date || null,
       expiry_date: input.expiry_date || null,
       note: input.note?.trim() || null,
+      issuing_entity: input.issuing_entity?.trim() || null,
+      holder_name: input.holder_name?.trim() || null,
+      type_key: input.type_key || null,
     })
     .eq("id", documentId)
     .select("*")
@@ -227,6 +239,59 @@ export async function updateArchiveDocument(
 
   revalidatePath("/archive");
   return { error: null, document: data as ArchiveDocument };
+}
+
+// ---------------------------------------------------------------------------
+// Document types — the managed pick-list (0085). Inline "add new type"
+// mirrors addStaffCommissionType (0080) exactly: slugify the typed label
+// into a stable `key`, and RE-ACTIVATE an existing key rather than erroring
+// on a duplicate. label_ar gets the same typed label as label_en — the
+// inline-add flow has one text field, same UX as leave types / staff roles /
+// repairer types, none of which prompt for a separate Arabic label either.
+// ---------------------------------------------------------------------------
+export async function addArchiveDocumentType(
+  label: string,
+): Promise<{ error: string | null; type?: ArchiveDocumentType }> {
+  const clean = label.trim();
+  if (!clean) return { error: "Type name is required." };
+  const key = slugifyKey(clean);
+  if (!key) return { error: "Type name needs letters or numbers." };
+  if (!isValidSlug(key)) return { error: "Type name must start with a letter." };
+
+  const supabase = createClient();
+
+  const { data: existing } = await supabase
+    .from("archive_document_types")
+    .select("*")
+    .eq("key", key)
+    .maybeSingle();
+
+  if (existing) {
+    // Reuse. If it was retired, bring it back rather than refusing — the
+    // user is explicitly asking for this type to exist again.
+    if (!existing.active) {
+      const { data: revived, error } = await supabase
+        .from("archive_document_types")
+        .update({ active: true })
+        .eq("key", key)
+        .select("*")
+        .single();
+      if (error) return { error: error.message };
+      revalidatePath("/archive");
+      return { error: null, type: revived as ArchiveDocumentType };
+    }
+    return { error: null, type: existing as ArchiveDocumentType };
+  }
+
+  const { data, error } = await supabase
+    .from("archive_document_types")
+    .insert({ key, label_en: clean, label_ar: clean })
+    .select("*")
+    .single();
+  if (error) return { error: error.message };
+
+  revalidatePath("/archive");
+  return { error: null, type: data as ArchiveDocumentType };
 }
 
 export async function deleteArchiveDocument(documentId: string): Promise<{ error: string | null }> {

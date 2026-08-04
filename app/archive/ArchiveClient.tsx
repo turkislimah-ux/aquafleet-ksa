@@ -27,9 +27,9 @@ import {
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
-  docStatus, expirySummary, daysUntil,
-  ARCHIVE_STATUS_ROW_TONE, groupAccent, groupDot,
-  type ArchiveDocStatus,
+  docStatus, expirySummary,
+  ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
+  groupAccent, groupDot,
 } from "@/lib/archive";
 import type {
   ArchiveTab,
@@ -37,9 +37,10 @@ import type {
   ArchiveDocument,
   ArchiveDocumentFile,
   ArchiveDocumentRenewal,
+  ArchiveDocumentType,
 } from "@/lib/db-types";
 import { deleteArchiveGroup, deleteArchiveDocument, getArchiveFileSignedUrls } from "./actions";
-import { GroupModal, DocumentModal, RenewModal } from "./ArchiveModals";
+import { GroupModal, DocumentModal, RenewModal, DocumentDetailModal } from "./ArchiveModals";
 
 const TABS: { key: ArchiveTab; label: string }[] = [
   { key: "company", label: "Company" },
@@ -47,23 +48,6 @@ const TABS: { key: ArchiveTab; label: string }[] = [
   { key: "truck", label: "Truck" },
   { key: "customer", label: "Customer" },
 ];
-
-// Status pill — preview/'s own .exp-ok/.exp-warn/.exp-bad tones (app.css
-// ~1142-1149) in this app's Tailwind convention.
-const STATUS_PILL: Record<ArchiveDocStatus, string> = {
-  expired: "bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20",
-  expiring_soon: "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/25",
-  valid: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20",
-  none: "bg-slate-500/10 text-slate-600 dark:text-slate-400 ring-slate-500/20",
-};
-
-function statusLabel(s: ArchiveDocStatus, expiry: string | null, today: string): string {
-  if (s === "none") return "No expiry";
-  if (s === "valid") return "Valid";
-  const days = expiry ? daysUntil(expiry, today) : 0;
-  if (s === "expired") return `Expired · ${Math.abs(days)}d ago`;
-  return days === 0 ? "Expires today" : `${days}d left`;
-}
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -75,6 +59,7 @@ export default function ArchiveClient({
   documents,
   files,
   renewals,
+  types,
   today,
   error,
 }: {
@@ -82,6 +67,7 @@ export default function ArchiveClient({
   documents: ArchiveDocument[];
   files: ArchiveDocumentFile[];
   renewals: ArchiveDocumentRenewal[];
+  types: ArchiveDocumentType[];
   today: string;
   error: string | null;
 }) {
@@ -94,9 +80,11 @@ export default function ArchiveClient({
   const [editingDoc, setEditingDoc] = useState<ArchiveDocument | null>(null);
   const [renewingDoc, setRenewingDoc] = useState<ArchiveDocument | null>(null);
   const [historyDocId, setHistoryDocId] = useState<string | null>(null);
+  const [detailDocId, setDetailDocId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const groupsById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+  const typesByKey = useMemo(() => new Map(types.map((t) => [t.key, t])), [types]);
 
   const docsByGroup = useMemo(() => {
     const m = new Map<string, ArchiveDocument[]>();
@@ -135,6 +123,9 @@ export default function ArchiveClient({
     () => expirySummary(documents, groupsById, today),
     [documents, groupsById, today],
   );
+
+  const detailDoc = detailDocId ? documents.find((d) => d.id === detailDocId) ?? null : null;
+  const detailGroup = detailDoc ? groupsById.get(detailDoc.group_id) ?? null : null;
 
   function toggleCollapsed(groupId: string) {
     setCollapsed((prev) => {
@@ -335,7 +326,10 @@ export default function ArchiveClient({
                           const showingHistory = historyDocId === d.id;
                           return (
                             <Fragment key={d.id}>
-                              <tr className={ARCHIVE_STATUS_ROW_TONE[status]}>
+                              <tr
+                                onClick={() => setDetailDocId(d.id)}
+                                className={cn("cursor-pointer", ARCHIVE_STATUS_ROW_TONE[status])}
+                              >
                                 <TD>
                                   <span className="font-medium">{d.title}</span>
                                   {d.note && <div className="text-[11px] muted truncate max-w-[220px]">{d.note}</div>}
@@ -344,15 +338,15 @@ export default function ArchiveClient({
                                 <TD className="text-xs">{fmtDate(d.issue_date)}</TD>
                                 <TD className="text-xs">{fmtDate(d.expiry_date)}</TD>
                                 <TD>
-                                  <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", STATUS_PILL[status])}>
-                                    {statusLabel(status, d.expiry_date, today)}
+                                  <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", ARCHIVE_STATUS_PILL[status])}>
+                                    {archiveStatusLabel(status, d.expiry_date, today)}
                                   </span>
                                 </TD>
                                 <TD>
                                   {docFiles.length === 0 ? (
                                     <span className="text-xs muted">—</span>
                                   ) : (
-                                    <div className="flex items-center gap-1 flex-wrap">
+                                    <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
                                       {docFiles.map((f) => (
                                         <button
                                           key={f.id}
@@ -369,7 +363,10 @@ export default function ArchiveClient({
                                   )}
                                 </TD>
                                 <TD>
-                                  <div className="flex items-center gap-1 justify-end">
+                                  <div
+                                    className="flex items-center gap-1 justify-end"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     {docRenewals.length > 0 && (
                                       <button
                                         onClick={() => setHistoryDocId(showingHistory ? null : d.id)}
@@ -465,6 +462,7 @@ export default function ArchiveClient({
 
       {docModalGroupId && (
         <DocumentModal
+          types={types}
           groupId={docModalGroupId}
           groupTitle={groupsById.get(docModalGroupId)?.title ?? ""}
           editingDocument={editingDoc}
@@ -476,6 +474,28 @@ export default function ArchiveClient({
 
       {renewingDoc && (
         <RenewModal document={renewingDoc} onClose={closeModals} onSaved={closeModals} />
+      )}
+
+      {detailDoc && detailGroup && (
+        <DocumentDetailModal
+          document={detailDoc}
+          group={detailGroup}
+          type={detailDoc.type_key ? typesByKey.get(detailDoc.type_key) ?? null : null}
+          files={filesByDoc.get(detailDoc.id) ?? []}
+          renewals={renewalsByDoc.get(detailDoc.id) ?? []}
+          today={today}
+          onOpenFile={openFile}
+          onClose={() => setDetailDocId(null)}
+          onEdit={() => {
+            setDetailDocId(null);
+            setEditingDoc(detailDoc);
+            setDocModalGroupId(detailDoc.group_id);
+          }}
+          onRenew={() => {
+            setDetailDocId(null);
+            setRenewingDoc(detailDoc);
+          }}
+        />
       )}
     </div>
   );

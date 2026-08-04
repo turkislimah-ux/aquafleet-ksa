@@ -11,17 +11,21 @@
 // Next's dev module system and blanks the whole page, and neither tsc nor
 // next build catches it).
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Trash2, FileText, Upload } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { ARCHIVE_GROUP_COLORS } from "@/lib/archive";
+import {
+  ARCHIVE_GROUP_COLORS, ARCHIVE_STATUS_PILL, archiveStatusLabel, docStatus, groupDot,
+} from "@/lib/archive";
 import type {
   ArchiveTab,
   ArchiveDocumentGroup,
   ArchiveDocument,
   ArchiveDocumentFile,
+  ArchiveDocumentRenewal,
+  ArchiveDocumentType,
 } from "@/lib/db-types";
 import {
   createArchiveGroup,
@@ -31,11 +35,98 @@ import {
   renewArchiveDocument,
   uploadArchiveDocumentFile,
   removeArchiveDocumentFile,
+  addArchiveDocumentType,
 } from "./actions";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))" } as const;
+
+// Widened well beyond images (Turki's ask). Verified: the archive-documents
+// bucket has NO mime-type or size restriction at the storage level, so this
+// list is purely what the PICKER offers — the only real ceiling is the
+// project-global upload cap enforced in actions.ts (MAX_FILE_BYTES).
+// Extensions are listed alongside mime types because Windows/macOS report
+// Office files inconsistently (a .docx can arrive as
+// application/octet-stream), and an extension match is what makes the picker
+// actually accept them in that case.
+const ACCEPT_FILE_TYPES = [
+  "image/*",
+  "application/pdf",
+  ".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.odt,.ods,.ppt,.pptx",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+].join(",");
+
+// A file chosen but NOT yet uploaded — the create/renew popups stage these
+// locally and upload them only AFTER the row they attach to exists.
+export type StagedFile = { id: string; file: File };
+
+function newStagedId(): string {
+  return `staged-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Shared staged-file picker + list. Used by BOTH create and renew, so the
+// two behave identically instead of drifting apart.
+function StagedFilePicker({
+  staged,
+  onAdd,
+  onRemove,
+  hint,
+}: {
+  staged: StagedFile[];
+  onAdd: (files: File[]) => void;
+  onRemove: (id: string) => void;
+  hint: string;
+}) {
+  return (
+    <div className="space-y-2">
+      {staged.length > 0 && (
+        <ul className="space-y-1">
+          {staged.map((sf) => (
+            <li
+              key={sf.id}
+              className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs"
+              style={INPUT_STYLE}
+            >
+              <FileText className="h-3.5 w-3.5 shrink-0 muted" />
+              <span className="truncate flex-1">{sf.file.name}</span>
+              <span className="muted shrink-0">{(sf.file.size / 1024).toFixed(0)} KB</span>
+              <button
+                type="button"
+                onClick={() => onRemove(sf.id)}
+                className="p-1 rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                aria-label="Remove file"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <label
+        className="inline-flex items-center gap-1.5 text-xs rounded-lg border px-2.5 py-1.5 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5"
+        style={INPUT_STYLE}
+      >
+        <Upload className="h-3.5 w-3.5" />
+        Attach files
+        <input
+          type="file"
+          multiple
+          accept={ACCEPT_FILE_TYPES}
+          onChange={(e) => {
+            onAdd(Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+          className="hidden"
+        />
+      </label>
+      <p className="text-[11px] muted">{hint}</p>
+    </div>
+  );
+}
 
 // Portal + mounted guard + stopPropagation on the backdrop — the exact
 // pattern Inventory's ModalOverlay settled on. Portaling makes stacked
@@ -64,16 +155,24 @@ function ModalShell({
   onClose,
   children,
   footer,
+  wide,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   footer: React.ReactNode;
+  // `wide` = the 1080px width every other size:lg popup in this app uses
+  // (see InventoryClient.tsx). The document form earns it: it now carries
+  // 9 fields plus an attachment list.
+  wide?: boolean;
 }) {
   return (
     <ModalOverlay onClick={onClose}>
       <div
-        className="card w-full max-w-[560px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0"
+        className={cn(
+          "card w-full max-h-[90vh] overflow-y-auto scrollbar-thin p-0",
+          wide ? "max-w-[1080px]" : "max-w-[560px]",
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         <div
@@ -213,20 +312,25 @@ export function GroupModal({
 }
 
 // ---------------------------------------------------------------------------
-// Add / edit document — the UNIVERSAL input set (reference no, issue date,
-// expiry date, note) plus multi-file upload. Deliberately generic so ONE form
-// fits any regulatory document.
+// Add / edit document — the UNIVERSAL input set. Deliberately generic so ONE
+// form fits any regulatory document, now in three labelled sections
+// (Identity / Reference + validity / Attachments) across a wide layout,
+// because the field count outgrew a single narrow column.
 //
-// Files upload IMMEDIATELY on pick (once the document exists), matching how
-// the workshop-payment / part-photo flows already behave — the alternative
-// (stage locally, upload at submit) means a failed submit silently drops
-// files the user believes are attached.
+// FILE HANDLING DIFFERS BY MODE, on purpose:
+//   - CREATE: files are STAGED locally and uploaded only after the document
+//     row exists (a file needs a document_id to attach to). If the row saves
+//     but an upload fails, the document is kept and the failure is reported
+//     with the file named — never a silent drop.
+//   - EDIT: the document already exists, so files upload immediately, which
+//     also lets existing attachments be removed inline.
 // ---------------------------------------------------------------------------
 export function DocumentModal({
   groupId,
   groupTitle,
   editingDocument,
   existingFiles,
+  types,
   onClose,
   onSaved,
 }: {
@@ -234,6 +338,7 @@ export function DocumentModal({
   groupTitle: string;
   editingDocument?: ArchiveDocument | null;
   existingFiles?: ArchiveDocumentFile[];
+  types: ArchiveDocumentType[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -243,18 +348,54 @@ export function DocumentModal({
   const [issueDate, setIssueDate] = useState(editingDocument?.issue_date ?? "");
   const [expiryDate, setExpiryDate] = useState(editingDocument?.expiry_date ?? "");
   const [note, setNote] = useState(editingDocument?.note ?? "");
+  const [issuingEntity, setIssuingEntity] = useState(editingDocument?.issuing_entity ?? "");
+  const [holderName, setHolderName] = useState(editingDocument?.holder_name ?? "");
+  const [typeKey, setTypeKey] = useState(editingDocument?.type_key ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Files attached to the CURRENT version only (renewal_id null) — superseded
-  // versions' files belong to their renewal and are shown in the history view.
+  // Inline "add new type" — locally merged so a just-created type is
+  // selectable immediately, without waiting for the page to refetch. Same
+  // merge-in-flight pattern the Inventory create-modals already use.
+  const [localTypes, setLocalTypes] = useState<ArchiveDocumentType[]>([]);
+  const [addingType, setAddingType] = useState(false);
+  const [newTypeLabel, setNewTypeLabel] = useState("");
+  const [savingType, setSavingType] = useState(false);
+
+  // The picker offers ACTIVE types only — plus, always, whatever this
+  // document is already set to. A type retired after a document was filed
+  // must still show as that document's type, otherwise opening Edit and
+  // pressing Save would silently blank a field nobody touched.
+  const allTypes = useMemo(() => {
+    const seen = new Set(types.map((t) => t.key));
+    const merged = [...types, ...localTypes.filter((t) => !seen.has(t.key))];
+    return merged.filter((t) => t.active || t.key === editingDocument?.type_key);
+  }, [types, localTypes, editingDocument]);
+
+  async function submitNewType() {
+    const label = newTypeLabel.trim();
+    if (!label) return;
+    setSavingType(true);
+    setError(null);
+    const res = await addArchiveDocumentType(label);
+    setSavingType(false);
+    if (res.error || !res.type) {
+      setError(res.error ?? "Could not add type.");
+      return;
+    }
+    setLocalTypes((prev) => [...prev, res.type!]);
+    setTypeKey(res.type.key);
+    setNewTypeLabel("");
+    setAddingType(false);
+  }
+
   const currentFiles = (existingFiles ?? []).filter((f) => f.renewal_id === null);
+  const [staged, setStaged] = useState<StagedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [busyFileId, setBusyFileId] = useState<string | null>(null);
 
-  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const picked = Array.from(e.target.files ?? []);
-    if (picked.length === 0 || !editingDocument) return;
+  async function onUploadNow(picked: File[]) {
+    if (!editingDocument) return;
     setUploading(true);
     setError(null);
     for (const file of picked) {
@@ -263,12 +404,11 @@ export function DocumentModal({
       fd.set("file", file);
       const res = await uploadArchiveDocumentFile(fd);
       if (res.error) {
-        setError(res.error);
+        setError(`${file.name}: ${res.error}`);
         break;
       }
     }
     setUploading(false);
-    e.target.value = "";
     onSaved();
   }
 
@@ -297,13 +437,47 @@ export function DocumentModal({
       issue_date: issueDate || null,
       expiry_date: expiryDate || null,
       note: note || null,
+      issuing_entity: issuingEntity || null,
+      holder_name: holderName || null,
+      type_key: typeKey || null,
     };
-    const res = isEdit
-      ? await updateArchiveDocument(editingDocument!.id, input)
-      : await createArchiveDocument(input);
+
+    if (isEdit) {
+      const res = await updateArchiveDocument(editingDocument!.id, input);
+      setSaving(false);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      onSaved();
+      return;
+    }
+
+    // CREATE — row first, then the staged files against its new id.
+    const res = await createArchiveDocument(input);
+    if (res.error || !res.document) {
+      setSaving(false);
+      setError(res.error ?? "Could not create document.");
+      return;
+    }
+
+    const failed: string[] = [];
+    for (const sf of staged) {
+      const fd = new FormData();
+      fd.set("documentId", res.document.id);
+      fd.set("file", sf.file);
+      const up = await uploadArchiveDocumentFile(fd);
+      if (up.error) failed.push(sf.file.name);
+    }
     setSaving(false);
-    if (res.error) {
-      setError(res.error);
+
+    // The document IS saved either way — report the upload failures by name
+    // and keep the popup open so the user can retry, rather than closing and
+    // silently losing the attachments they thought they'd added.
+    if (failed.length > 0) {
+      setError(
+        `Document saved, but ${failed.length} file(s) failed to upload: ${failed.join(", ")}. Reopen the document to attach them.`,
+      );
       return;
     }
     onSaved();
@@ -311,13 +485,14 @@ export function DocumentModal({
 
   return (
     <ModalShell
+      wide
       title={isEdit ? "Edit Document" : `Add Document — ${groupTitle}`}
       onClose={onClose}
       footer={
         <>
           <Btn variant="outline" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={submit} disabled={saving || !title.trim()}>
-            {saving ? "…" : "Save"}
+          <Btn variant="primary" onClick={submit} disabled={saving || uploading || !title.trim()}>
+            {saving ? "Saving…" : "Save"}
           </Btn>
         </>
       }
@@ -326,17 +501,86 @@ export function DocumentModal({
         <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">{error}</div>
       )}
 
-      <div>
-        <label className="text-xs muted block mb-1">Document title *</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} className={INPUT} style={INPUT_STYLE} autoFocus />
+      {/* IDENTITY — what this document is, who issued it, whose it is. */}
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted">Identity</div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="md:col-span-1">
+          <label className="text-xs muted block mb-1">Document title *</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className={INPUT} style={INPUT_STYLE} autoFocus />
+        </div>
+
+        <div>
+          <label className="text-xs muted block mb-1">Type of document</label>
+          {addingType ? (
+            <div className="flex gap-2">
+              <input
+                value={newTypeLabel}
+                onChange={(e) => setNewTypeLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitNewType(); } }}
+                placeholder="New type name"
+                className={cn(INPUT, "flex-1")}
+                style={INPUT_STYLE}
+                autoFocus
+              />
+              <Btn variant="primary" onClick={submitNewType} disabled={savingType || !newTypeLabel.trim()}>
+                {savingType ? "…" : "Add"}
+              </Btn>
+              <Btn variant="outline" onClick={() => { setAddingType(false); setNewTypeLabel(""); }}>Cancel</Btn>
+            </div>
+          ) : (
+            <select
+              value={typeKey}
+              onChange={(e) => {
+                if (e.target.value === "__add__") setAddingType(true);
+                else setTypeKey(e.target.value);
+              }}
+              className={INPUT}
+              style={INPUT_STYLE}
+            >
+              <option value="">—</option>
+              {allTypes.map((t) => (
+                <option key={t.key} value={t.key}>{t.label_en}</option>
+              ))}
+              <option value="__add__">+ Add new type…</option>
+            </select>
+          )}
+        </div>
+
+        <div>
+          <label className="text-xs muted block mb-1">Issuing entity</label>
+          <input
+            value={issuingEntity}
+            onChange={(e) => setIssuingEntity(e.target.value)}
+            placeholder="e.g. Ministry of Transport"
+            className={INPUT}
+            style={INPUT_STYLE}
+          />
+        </div>
+
+        <div>
+          <label className="text-xs muted block mb-1">Holder name</label>
+          <input
+            value={holderName}
+            onChange={(e) => setHolderName(e.target.value)}
+            placeholder="Whose name it is in"
+            className={INPUT}
+            style={INPUT_STYLE}
+          />
+        </div>
+
+        <div className="md:col-span-2">
+          <label className="text-xs muted block mb-1">Note</label>
+          <input value={note} onChange={(e) => setNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+        </div>
       </div>
 
-      <div>
-        <label className="text-xs muted block mb-1">Reference / ID number</label>
-        <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} className={INPUT} style={INPUT_STYLE} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
+      {/* REFERENCE + VALIDITY — the numbers and dates that drive expiry. */}
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Reference &amp; validity</div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label className="text-xs muted block mb-1">Reference / ID number</label>
+          <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+        </div>
         <div>
           <label className="text-xs muted block mb-1">Issue date</label>
           <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} className={INPUT} style={INPUT_STYLE} />
@@ -347,53 +591,54 @@ export function DocumentModal({
         </div>
       </div>
 
-      <div>
-        <label className="text-xs muted block mb-1">Note</label>
-        <input value={note} onChange={(e) => setNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
-      </div>
-
-      {/* Files: only available once the document row exists — a file needs a
-          document_id to attach to. On create, the user saves first, then
-          reopens to attach; the hint below says so rather than showing a
-          dead control. */}
-      <div>
-        <label className="text-xs muted block mb-1">Files</label>
-        {!isEdit ? (
-          <p className="text-[11px] muted">Save the document first, then reopen it to attach files.</p>
-        ) : (
-          <div className="space-y-2">
-            {currentFiles.length > 0 && (
-              <ul className="space-y-1">
-                {currentFiles.map((f) => (
-                  <li
-                    key={f.id}
-                    className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs"
-                    style={{ borderColor: "rgb(var(--border))" }}
+      {/* ATTACHMENTS */}
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Attachments</div>
+      {isEdit ? (
+        <div className="space-y-2">
+          {currentFiles.length > 0 && (
+            <ul className="space-y-1">
+              {currentFiles.map((f) => (
+                <li key={f.id} className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs" style={INPUT_STYLE}>
+                  <FileText className="h-3.5 w-3.5 shrink-0 muted" />
+                  <span className="truncate flex-1">{f.file_name}</span>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveFile(f.id)}
+                    disabled={busyFileId === f.id}
+                    className="p-1 rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"
+                    aria-label="Remove file"
                   >
-                    <FileText className="h-3.5 w-3.5 shrink-0 muted" />
-                    <span className="truncate flex-1">{f.file_name}</span>
-                    <button
-                      type="button"
-                      onClick={() => onRemoveFile(f.id)}
-                      disabled={busyFileId === f.id}
-                      className="p-1 rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"
-                      aria-label="Remove file"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <label className="inline-flex items-center gap-1.5 text-xs rounded-lg border px-2.5 py-1.5 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" style={{ borderColor: "rgb(var(--border))" }}>
-              <Upload className="h-3.5 w-3.5" />
-              {uploading ? "Uploading…" : "Add files"}
-              <input type="file" multiple accept="image/*,application/pdf" onChange={onPickFile} className="hidden" disabled={uploading} />
-            </label>
-            <p className="text-[11px] muted">Multiple files allowed — front/back scans, receipts. Max 10 MB each.</p>
-          </div>
-        )}
-      </div>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <label
+            className="inline-flex items-center gap-1.5 text-xs rounded-lg border px-2.5 py-1.5 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5"
+            style={INPUT_STYLE}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            {uploading ? "Uploading…" : "Add files"}
+            <input
+              type="file"
+              multiple
+              accept={ACCEPT_FILE_TYPES}
+              onChange={(e) => { onUploadNow(Array.from(e.target.files ?? [])); e.target.value = ""; }}
+              className="hidden"
+              disabled={uploading}
+            />
+          </label>
+          <p className="text-[11px] muted">Images, PDF, Word, Excel and more. Max 10 MB each.</p>
+        </div>
+      ) : (
+        <StagedFilePicker
+          staged={staged}
+          onAdd={(picked) => setStaged((prev) => [...prev, ...picked.map((f) => ({ id: newStagedId(), file: f }))])}
+          onRemove={(id) => setStaged((prev) => prev.filter((sf) => sf.id !== id))}
+          hint="Attached when you save. Images, PDF, Word, Excel and more. Max 10 MB each."
+        />
+      )}
     </ModalShell>
   );
 }
@@ -421,6 +666,13 @@ export function RenewModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Staged files = the NEW version's documents. They upload only AFTER the
+  // renewal succeeds, so they land on the refreshed current version — the
+  // outgoing files have already been stamped onto the superseded record by
+  // then (renewArchiveDocument's step 2), so these can never be mistakenly
+  // swept into history.
+  const [staged, setStaged] = useState<StagedFile[]>([]);
+
   async function submit() {
     setSaving(true);
     setError(null);
@@ -430,9 +682,28 @@ export function RenewModal({
       expiry_date: expiryDate || null,
       note: note || null,
     });
-    setSaving(false);
     if (res.error) {
+      setSaving(false);
       setError(res.error);
+      return;
+    }
+
+    const failed: string[] = [];
+    for (const sf of staged) {
+      const fd = new FormData();
+      fd.set("documentId", doc.id);
+      fd.set("file", sf.file);
+      const up = await uploadArchiveDocumentFile(fd);
+      if (up.error) failed.push(sf.file.name);
+    }
+    setSaving(false);
+
+    // The renewal itself succeeded — say so, name what failed, and stay open
+    // rather than closing on a half-done state.
+    if (failed.length > 0) {
+      setError(
+        `Renewed, but ${failed.length} file(s) failed to upload: ${failed.join(", ")}. Open the document to attach them.`,
+      );
       return;
     }
     onSaved();
@@ -479,6 +750,193 @@ export function RenewModal({
         <label className="text-xs muted block mb-1">Note</label>
         <input value={note} onChange={(e) => setNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
       </div>
+
+      <div>
+        <label className="text-xs muted block mb-1">New version files</label>
+        <StagedFilePicker
+          staged={staged}
+          onAdd={(picked) => setStaged((prev) => [...prev, ...picked.map((f) => ({ id: newStagedId(), file: f }))])}
+          onRemove={(id) => setStaged((prev) => prev.filter((sf) => sf.id !== id))}
+          hint="Attached to the renewed document when you save. The current files move to history."
+        />
+      </div>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Full-details view — Turki's item 5: clicking a document ROW opens the whole
+// record, attachments included, instead of forcing Edit just to read it.
+//
+// READ-ONLY by design. Edit and Renew are offered as hand-offs to the popups
+// that already own those writes (this modal closes itself first, so the two
+// are never stacked). Nothing here writes, so there is no second save path
+// that could drift from DocumentModal's.
+//
+// Attachments are split CURRENT (renewal_id === null) vs. PREVIOUS VERSIONS
+// (stamped with the renewal they belonged to) — the same distinction 0084's
+// file model encodes, surfaced instead of flattened, so an old scan is never
+// mistaken for the live one.
+// ---------------------------------------------------------------------------
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[11px] muted mb-0.5">{label}</div>
+      <div className="text-sm">{value}</div>
+    </div>
+  );
+}
+
+function FileChip({ file, onOpen }: { file: ArchiveDocumentFile; onOpen: (p: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(file.storage_path)}
+      className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-black/5 dark:hover:bg-white/5 max-w-full"
+      style={INPUT_STYLE}
+      title={file.file_name}
+    >
+      <FileText className="h-3.5 w-3.5 shrink-0 muted" />
+      <span className="truncate">{file.file_name}</span>
+    </button>
+  );
+}
+
+export function DocumentDetailModal({
+  document: doc,
+  group,
+  type,
+  files,
+  renewals,
+  today,
+  onOpenFile,
+  onClose,
+  onEdit,
+  onRenew,
+}: {
+  document: ArchiveDocument;
+  group: ArchiveDocumentGroup;
+  type: ArchiveDocumentType | null;
+  files: ArchiveDocumentFile[];
+  renewals: ArchiveDocumentRenewal[];
+  today: string;
+  onOpenFile: (path: string) => void;
+  onClose: () => void;
+  onEdit: () => void;
+  onRenew: () => void;
+}) {
+  const status = docStatus(doc.expiry_date, group.warning_days, today);
+  const currentFiles = files.filter((f) => f.renewal_id === null);
+  const filesByRenewal = new Map<string, ArchiveDocumentFile[]>();
+  for (const f of files) {
+    if (!f.renewal_id) continue;
+    const arr = filesByRenewal.get(f.renewal_id) ?? [];
+    arr.push(f);
+    filesByRenewal.set(f.renewal_id, arr);
+  }
+  const dash = (v: string | null) => (v && v.trim() ? v : "—");
+  const date = (iso: string | null) =>
+    iso ? new Date(iso + "T00:00:00").toLocaleDateString() : "—";
+
+  return (
+    <ModalShell
+      wide
+      title={doc.title}
+      onClose={onClose}
+      footer={
+        <>
+          <Btn variant="outline" onClick={onClose}>Close</Btn>
+          <Btn variant="outline" onClick={onEdit}>Edit</Btn>
+          <Btn variant="primary" onClick={onRenew}>Renew</Btn>
+        </>
+      }
+    >
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="inline-flex items-center gap-1.5 text-xs">
+          <span className={cn("h-2 w-2 rounded-full", groupDot(group.color))} />
+          {group.title}
+        </span>
+        <span
+          className={cn(
+            "text-xs px-2 py-0.5 rounded-full ring-1 ring-inset",
+            ARCHIVE_STATUS_PILL[status],
+          )}
+        >
+          {archiveStatusLabel(status, doc.expiry_date, today)}
+        </span>
+      </div>
+
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Identity</div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <DetailRow label="Type of document" value={type ? type.label_en : "—"} />
+        <DetailRow label="Issuing entity" value={dash(doc.issuing_entity)} />
+        <DetailRow label="Holder name" value={dash(doc.holder_name)} />
+      </div>
+
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
+        Reference &amp; validity
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <DetailRow label="Reference no." value={dash(doc.reference_no)} />
+        <DetailRow label="Issue date" value={date(doc.issue_date)} />
+        <DetailRow label="Expiry date" value={date(doc.expiry_date)} />
+      </div>
+
+      {doc.note && doc.note.trim() && (
+        <>
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Note</div>
+          <p className="text-sm whitespace-pre-wrap">{doc.note}</p>
+        </>
+      )}
+
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
+        Attachments ({currentFiles.length})
+      </div>
+      {currentFiles.length === 0 ? (
+        <p className="text-sm muted">No files attached to the current version.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {currentFiles.map((f) => (
+            <FileChip key={f.id} file={f} onOpen={onOpenFile} />
+          ))}
+        </div>
+      )}
+
+      {renewals.length > 0 && (
+        <>
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
+            Previous versions ({renewals.length})
+          </div>
+          <div className="space-y-2">
+            {renewals.map((r) => {
+              const rf = filesByRenewal.get(r.id) ?? [];
+              return (
+                <div key={r.id} className="rounded-lg border p-2.5 space-y-2" style={INPUT_STYLE}>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <DetailRow label="Reference no." value={dash(r.reference_no)} />
+                    <DetailRow label="Issue date" value={date(r.issue_date)} />
+                    <DetailRow label="Expiry date" value={date(r.expiry_date)} />
+                    <DetailRow
+                      label="Replaced on"
+                      value={new Date(r.superseded_at).toLocaleDateString()}
+                    />
+                  </div>
+                  {r.note && r.note.trim() && (
+                    <p className="text-xs muted whitespace-pre-wrap">{r.note}</p>
+                  )}
+                  {rf.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {rf.map((f) => (
+                        <FileChip key={f.id} file={f} onOpen={onOpenFile} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </ModalShell>
   );
 }

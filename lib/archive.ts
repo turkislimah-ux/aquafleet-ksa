@@ -102,6 +102,36 @@ export const ARCHIVE_STATUS_ROW_TONE: Record<ArchiveDocStatus, string> = {
   none: "",
 };
 
+// Pill tone + pill TEXT per status. These live here, next to docStatus, for
+// the same reason the status itself does: the table row and the document
+// details popup both render this pill, and a second copy of the label logic
+// is exactly how one of them ends up still saying "Valid" after the other
+// starts saying "12d left".
+export const ARCHIVE_STATUS_PILL: Record<ArchiveDocStatus, string> = {
+  expired: "bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20",
+  expiring_soon: "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/25",
+  valid: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20",
+  none: "bg-slate-500/10 text-slate-600 dark:text-slate-400 ring-slate-500/20",
+};
+
+// Turki's ask: a valid document shows the STATE AND the runway — "Valid ·
+// 47d left". The word carries the verdict, the number carries the urgency;
+// dropping either one makes the pill answer only half the question.
+// Expiring-soon stays bare ("12d left") because its amber tone is already
+// saying "not simply valid" and a second word would just crowd the pill.
+export function archiveStatusLabel(
+  s: ArchiveDocStatus,
+  expiryIso: string | null,
+  today: string,
+): string {
+  if (s === "none") return "No expiry";
+  const days = expiryIso ? daysUntil(expiryIso, today) : 0;
+  if (s === "expired") return `Expired · ${Math.abs(days)}d ago`;
+  if (days === 0) return "Expires today";
+  if (s === "valid") return `Valid · ${days}d left`;
+  return `${days}d left`;
+}
+
 // Colors a group can be tagged with (the "coloring option" at group create).
 // Free text in the DB (like parts.category) so extending the palette never
 // needs a migration — this list is just what the picker offers today.

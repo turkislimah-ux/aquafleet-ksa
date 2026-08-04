@@ -1188,6 +1188,16 @@ export type ArchiveDocument = {
   issue_date: string | null;
   expiry_date: string | null;
   note: string | null;
+  // Added by 0085 — OPTIONAL identity attributes. Deliberately NOT part of
+  // the renewal snapshot: a renewed licence is still from the same
+  // authority, in the same holder's name, and still a licence. Changing one
+  // is an identity CORRECTION (an edit), not a new coverage period.
+  issuing_entity: string | null;
+  holder_name: string | null;
+  // FK -> archive_document_types.key. Nullable (every 0085 field is
+  // optional, and Phase-1 documents predate it). ON DELETE RESTRICT, so a
+  // type in use cannot be deleted.
+  type_key: string | null;
   driver_id: string | null;
   staff_id: string | null;
   truck_id: string | null;
@@ -1222,4 +1232,18 @@ export type ArchiveDocumentFile = {
   file_name: string;
   mime_type: string | null;
   uploaded_at: string;
+};
+
+// Managed pick-list for a document's type (0085). Same shape/pattern as
+// commission_types (0080) and repairer_types (0068): `key` is the stable FK
+// target, labels are display-only, `active` retires a type from the picker
+// without deleting it (the safe path for an in-use type, since the FK's
+// ON DELETE RESTRICT will refuse a real delete).
+export type ArchiveDocumentType = {
+  id: string;
+  key: string;
+  label_en: string;
+  label_ar: string;
+  active: boolean;
+  created_at: string;
 };
