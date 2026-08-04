@@ -13,11 +13,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Trash2, FileText, Upload, User } from "lucide-react";
+import { X, Trash2, FileText, Upload, User, ChevronDown, Link as LinkIcon } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
   ARCHIVE_GROUP_COLORS, ARCHIVE_STATUS_PILL, archiveStatusLabel, docStatus, groupDot,
+  linkedFieldFor, groupExpectsLink, PERSON_ID_LABEL, type PersonIdField,
 } from "@/lib/archive";
 import type {
   ArchiveTab,
@@ -37,7 +38,87 @@ import {
   uploadArchiveDocumentFile,
   removeArchiveDocumentFile,
   addArchiveDocumentType,
+  setPersonLinkedId,
 } from "./actions";
+
+// The purple "Link" pill. Purple because every other status colour in the
+// archive is already spoken for by expiry (red/amber/green/slate) — a link is
+// a different kind of fact, so it gets a colour that can never be misread as
+// an expiry state.
+export function LinkPill() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset bg-violet-500/10 text-violet-700 dark:text-violet-300 ring-violet-500/25">
+      <LinkIcon className="h-3 w-3" />
+      Link
+    </span>
+  );
+}
+
+// Type dropdown with the Link pill on the RIGHT of each type name. Native
+// <option> can't hold markup, so this is a real listbox.
+function TypePicker({
+  types,
+  value,
+  subjectKind,
+  onChange,
+}: {
+  types: ArchiveDocumentType[];
+  value: string;
+  subjectKind: "driver" | "staff" | null;
+  onChange: (key: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = types.find((t) => t.key === value) ?? null;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(INPUT, "flex items-center justify-between gap-2 text-start")}
+        style={INPUT_STYLE}
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          <span className={cn("truncate", !selected && "muted")}>
+            {selected ? selected.label_en : "Choose a type…"}
+          </span>
+          {selected && linkedFieldFor(selected, subjectKind) && <LinkPill />}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 muted" />
+      </button>
+
+      {open && (
+        <>
+          {/* Click-away layer — keeps the popover self-contained. */}
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <ul
+            className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto scrollbar-thin rounded-lg border shadow-lg py-1"
+            style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
+          >
+            {types.map((t) => (
+              <li key={t.key}>
+                <button
+                  type="button"
+                  onClick={() => { onChange(t.key); setOpen(false); }}
+                  className={cn(
+                    "w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-start hover:bg-black/5 dark:hover:bg-white/5",
+                    t.key === value && "bg-brand-500/10",
+                  )}
+                >
+                  <span className="truncate">{t.label_en}</span>
+                  {/* RIGHT of the type text, per Turki. Shown when the type
+                      links for THIS group's population — an iqama type shows
+                      it for both, a license type only for drivers. */}
+                  {linkedFieldFor(t, subjectKind) && <LinkPill />}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
@@ -206,11 +287,15 @@ function ModalShell({
 export function GroupModal({
   tab,
   defaultSubjectKind = "none",
+  types,
   editingGroup,
   onClose,
   onSaved,
 }: {
   tab: ArchiveTab;
+  // Offered as the group's type on staff/truck tabs. Carries the linked_*
+  // columns, so the purple Link pill is read straight off the data.
+  types: ArchiveDocumentType[];
   // Which population a NEW group is for. The caller passes the sub-tab the
   // user is standing in, so the picker below opens on the right answer
   // instead of making them restate it.
@@ -227,8 +312,17 @@ export function GroupModal({
   const [subjectKind, setSubjectKind] = useState<ArchiveSubjectKind>(
     editingGroup?.subject_kind ?? defaultSubjectKind,
   );
+  // 0089 — the group's type. Every document in a staff/truck group is this
+  // type, which is what lets the LINK be decided once, at the group, instead
+  // of per document.
+  const [groupTypeKey, setGroupTypeKey] = useState(editingGroup?.type_key ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const selectedLinkField = linkedFieldFor(
+    types.find((t) => t.key === groupTypeKey),
+    subjectKind === "driver" ? "driver" : subjectKind === "staff" ? "staff" : null,
+  );
 
   async function submit() {
     if (!title.trim()) {
@@ -240,6 +334,7 @@ export function GroupModal({
     const input = {
       tab,
       subject_kind: subjectKind,
+      type_key: tab === "staff" || tab === "truck" ? groupTypeKey || null : null,
       title,
       description: description || null,
       color,
@@ -321,6 +416,46 @@ export function GroupModal({
         </div>
       )}
 
+      {(tab === "staff" || tab === "truck") && (
+        <div>
+          <label className="text-xs muted block mb-1">Document type *</label>
+          {isEdit ? (
+            <div className="px-3 py-2 rounded-lg border text-sm opacity-60 flex items-center gap-2" style={INPUT_STYLE}>
+              {types.find((t) => t.key === groupTypeKey)?.label_en ?? "—"}
+              {linkedFieldFor(types.find((t) => t.key === groupTypeKey), subjectKind === "driver" ? "driver" : subjectKind === "staff" ? "staff" : null) && <LinkPill />}
+            </div>
+          ) : (
+            <>
+              {/* A custom listbox, not a native <select>: an <option> cannot
+                  carry a styled pill in any browser, and Turki wants the
+                  purple Link pill sitting to the RIGHT of the type name in
+                  the dropdown itself. Same reason Inventory's PartPicker
+                  exists rather than a restyled select. */}
+              <TypePicker
+                types={types.filter((t) => t.active || t.key === groupTypeKey)}
+                value={groupTypeKey}
+                subjectKind={subjectKind === "driver" ? "driver" : subjectKind === "staff" ? "staff" : null}
+                onChange={setGroupTypeKey}
+              />
+              {/* The pill itself now sits in the picker — on the selected
+                  row and on each option — so this is the explanation only. A
+                  second pill here would repeat what is visible two lines up. */}
+              {selectedLinkField && (
+                <p className="text-[11px] muted mt-1.5">
+                  The {PERSON_ID_LABEL[selectedLinkField].toLowerCase()} and its expiry live on the
+                  person. Documents here read those; they store no copy.
+                </p>
+              )}
+            </>
+          )}
+          <p className="text-[11px] muted mt-1">
+            {isEdit
+              ? "Cannot be changed after the group is created."
+              : "Every document in this group is this type."}
+          </p>
+        </div>
+      )}
+
       <div>
         <label className="text-xs muted block mb-1">Description</label>
         <input
@@ -388,6 +523,7 @@ export function DocumentModal({
   groupId,
   groupTitle,
   subject,
+  groupType,
   editingDocument,
   existingFiles,
   types,
@@ -403,7 +539,21 @@ export function DocumentModal({
   // from the same click.
   //
   // Undefined = a company group (subject_kind 'none'), Phase 1's behaviour.
-  subject?: { kind: "driver" | "staff"; id: string; name: string };
+  subject?: {
+    kind: "driver" | "staff";
+    id: string;
+    name: string;
+    // The person's CURRENT number AND expiry for whichever field this
+    // group's type links to. Both arrive together because both live on the
+    // person and both are edited here (0089).
+    linkedNumber?: string | null;
+    linkedExpiry?: string | null;
+  };
+  // The group's own type (0089), for staff/truck groups. When set, the Type
+  // field is INHERITED and shown blocked/faded — the group already answered
+  // that question, and letting a document disagree with its group is exactly
+  // what moving the type up to the group was meant to prevent.
+  groupType?: ArchiveDocumentType | null;
   editingDocument?: ArchiveDocument | null;
   existingFiles?: ArchiveDocumentFile[];
   types: ArchiveDocumentType[];
@@ -413,6 +563,12 @@ export function DocumentModal({
   const isEdit = !!editingDocument;
   const [title, setTitle] = useState(editingDocument?.title ?? "");
   const [referenceNo, setReferenceNo] = useState(editingDocument?.reference_no ?? "");
+  // THE LINK (0088/0089). For a linked combination the number AND expiry
+  // live on the PERSON, so these are seeded from their row — not from the
+  // document — and saved back to them. Held separately from referenceNo /
+  // expiryDate so the two pairs can never be written to the same place.
+  const [personNumber, setPersonNumber] = useState("");
+  const [personExpiry, setPersonExpiry] = useState("");
   const [issueDate, setIssueDate] = useState(editingDocument?.issue_date ?? "");
   const [expiryDate, setExpiryDate] = useState(editingDocument?.expiry_date ?? "");
   const [note, setNote] = useState(editingDocument?.note ?? "");
@@ -439,6 +595,30 @@ export function DocumentModal({
     const merged = [...types, ...localTypes.filter((t) => !seen.has(t.key))];
     return merged.filter((t) => t.active || t.key === editingDocument?.type_key);
   }, [types, localTypes, editingDocument]);
+
+  // In a staff/truck group the type is INHERITED from the group and cannot
+  // be chosen here; on the company tab it is still per-document (0085).
+  const inheritedType = groupType ?? null;
+  const effectiveTypeKey = inheritedType ? inheritedType.key : typeKey;
+
+  // Is this document linked? Resolved from the SUBJECT — for a driver
+  // document that is linked_driver_field, for a staff document
+  // linked_staff_field — even when BOTH are set, which is the case for iqama
+  // and was the source of the persistence bug.
+  const idField: PersonIdField | null = linkedFieldFor(inheritedType, subject?.kind ?? null);
+
+  // The guard that removes the silent fallback. If the group's type links for
+  // this subject but no concrete field resolved, the number must NOT quietly
+  // go onto the document's reference_no — that is precisely how a linked
+  // number goes missing from the person's record and never sticks on re-edit.
+  const linkExpected = groupExpectsLink(inheritedType, subject?.kind ?? null);
+
+  // Seed the person's number + expiry once the linked field is known.
+  useEffect(() => {
+    if (!idField || !subject) return;
+    setPersonNumber(subject.linkedNumber ?? "");
+    setPersonExpiry(subject.linkedExpiry ?? "");
+  }, [idField, subject]);
 
   async function submitNewType() {
     const label = newTypeLabel.trim();
@@ -496,18 +676,52 @@ export function DocumentModal({
       setError("Document title is required.");
       return;
     }
+    // FAIL LOUDLY rather than write the number to the wrong place.
+    if (linkExpected && !idField) {
+      setError(
+        "This group's type is linked to a person field, but that field could not be resolved. Not saving — the number would be stored on the document instead of the person.",
+      );
+      return;
+    }
+
     setSaving(true);
     setError(null);
+
+    // The person's number is saved FIRST for a linked document. If it fails,
+    // nothing else is written — better to save neither than to file a
+    // document whose ID number silently didn't stick.
+    if (idField && subject) {
+      const res = await setPersonLinkedId(idField, subject.id, {
+        number: personNumber,
+        expiry: personExpiry || null,
+      });
+      if (res.error) {
+        setSaving(false);
+        setError(res.error);
+        return;
+      }
+    }
+
     const input = {
       group_id: groupId,
       title,
-      reference_no: referenceNo || null,
       issue_date: issueDate || null,
-      expiry_date: expiryDate || null,
+      // A LINKED document stores no expiry of its own — the person's is the
+      // single source, and 0089's trigger refuses a second copy outright.
+      expiry_date: idField || linkExpected ? null : (expiryDate || null),
       note: note || null,
+      // LINKED documents deliberately store NO reference_no. The number is on
+      // the person; writing a copy here is exactly the drift this model
+      // exists to prevent, so the column is forced null rather than merely
+      // left alone (which would strand a stale value if a document's type
+      // were changed from unlinked to linked).
+      // A linked document NEVER stores a number of its own. `linkExpected` is
+      // belt-and-braces alongside idField: either one being true is enough to
+      // keep reference_no empty.
+      reference_no: idField || linkExpected ? null : (referenceNo || null),
       issuing_entity: issuingEntity || null,
       holder_name: holderName || null,
-      type_key: typeKey || null,
+      type_key: effectiveTypeKey || null,
       // Exactly ONE of these is ever set, and only on create — the subject is
       // fixed at filing. updateArchiveDocument doesn't write subject columns
       // at all, so re-assigning a document to a different person isn't an
@@ -594,7 +808,19 @@ export function DocumentModal({
 
         <div>
           <label className="text-xs muted block mb-1">Type of document</label>
-          {addingType ? (
+          {inheritedType ? (
+            <>
+              <div
+                className="px-3 py-2 rounded-lg border text-sm opacity-60 cursor-not-allowed flex items-center gap-2 bg-black/[0.03] dark:bg-white/[0.03]"
+                style={INPUT_STYLE}
+                aria-disabled
+              >
+                {inheritedType.label_en}
+                {idField && <LinkPill />}
+              </div>
+              <p className="text-[11px] muted mt-1">Set by the group — every document here is this type.</p>
+            </>
+          ) : addingType ? (
             <div className="flex gap-2">
               <input
                 value={newTypeLabel}
@@ -661,16 +887,56 @@ export function DocumentModal({
       <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Reference &amp; validity</div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
-          <label className="text-xs muted block mb-1">Reference / ID number</label>
-          <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+          {idField ? (
+            <>
+              <label className="text-xs muted flex items-center gap-2 mb-1">
+                {PERSON_ID_LABEL[idField]} — {subject?.name}
+                <LinkPill />
+              </label>
+              <input
+                value={personNumber}
+                onChange={(e) => setPersonNumber(e.target.value)}
+                className={INPUT}
+                style={INPUT_STYLE}
+              />
+              <p className="text-[11px] muted mt-1">
+                Saved on the person. This is the only place it is edited.
+              </p>
+            </>
+          ) : (
+            <>
+              <label className="text-xs muted block mb-1">Reference / ID number</label>
+              <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+            </>
+          )}
         </div>
         <div>
           <label className="text-xs muted block mb-1">Issue date</label>
           <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} className={INPUT} style={INPUT_STYLE} />
         </div>
         <div>
+          {idField ? (
+            <>
+              <label className="text-xs muted flex items-center gap-2 mb-1">
+                Expiry date<LinkPill />
+              </label>
+              <input
+                type="date"
+                value={personExpiry}
+                onChange={(e) => setPersonExpiry(e.target.value)}
+                className={INPUT}
+                style={INPUT_STYLE}
+              />
+              <p className="text-[11px] muted mt-1">
+                The person&apos;s expiry — this document&apos;s red/yellow status reads it.
+              </p>
+            </>
+          ) : (
+            <>
           <label className="text-xs muted block mb-1">Expiry date</label>
           <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+            </>
+          )}
         </div>
       </div>
 
@@ -892,6 +1158,7 @@ export function DocumentDetailModal({
   files,
   renewals,
   today,
+  linkedId,
   onOpenFile,
   onClose,
   onEdit,
@@ -900,6 +1167,10 @@ export function DocumentDetailModal({
   document: ArchiveDocument;
   group: ArchiveDocumentGroup;
   type: ArchiveDocumentType | null;
+  // For a linked document (0088) the reference IS the person's own number,
+  // so the row below reads it from them rather than showing an empty
+  // reference_no that is empty BY DESIGN and would look like missing data.
+  linkedId?: { label: string; value: string | null; expiry: string | null; personName: string } | null;
   files: ArchiveDocumentFile[];
   renewals: ArchiveDocumentRenewal[];
   today: string;
@@ -908,7 +1179,9 @@ export function DocumentDetailModal({
   onEdit: () => void;
   onRenew: () => void;
 }) {
-  const status = docStatus(doc.expiry_date, group.warning_days, today);
+  // A linked document has no expiry of its own — the person's is the single
+  // source, so the pill here reads exactly what the matrix row reads.
+  const status = docStatus(linkedId ? linkedId.expiry : doc.expiry_date, group.warning_days, today);
   const currentFiles = files.filter((f) => f.renewal_id === null);
   const filesByRenewal = new Map<string, ArchiveDocumentFile[]>();
   for (const f of files) {
@@ -945,7 +1218,7 @@ export function DocumentDetailModal({
             ARCHIVE_STATUS_PILL[status],
           )}
         >
-          {archiveStatusLabel(status, doc.expiry_date, today)}
+          {archiveStatusLabel(status, linkedId ? linkedId.expiry : doc.expiry_date, today)}
         </span>
       </div>
 
@@ -960,9 +1233,33 @@ export function DocumentDetailModal({
         Reference &amp; validity
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <DetailRow label="Reference no." value={dash(doc.reference_no)} />
+        {linkedId ? (
+          <DetailRow
+            label={`${linkedId.label} (${linkedId.personName})`}
+            value={
+              <>
+                {dash(linkedId.value)}
+                <span className="block text-[11px] muted">Held on the person</span>
+              </>
+            }
+          />
+        ) : (
+          <DetailRow label="Reference no." value={dash(doc.reference_no)} />
+        )}
         <DetailRow label="Issue date" value={date(doc.issue_date)} />
-        <DetailRow label="Expiry date" value={date(doc.expiry_date)} />
+        <DetailRow
+          label="Expiry date"
+          value={
+            linkedId ? (
+              <>
+                {date(linkedId.expiry)}
+                <span className="block text-[11px] muted">Held on the person</span>
+              </>
+            ) : (
+              date(doc.expiry_date)
+            )
+          }
+        />
       </div>
 
       {doc.note && doc.note.trim() && (

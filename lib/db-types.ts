@@ -112,6 +112,10 @@ export type Driver = {
   name: string;
   name_ar: string | null;
   iqama_number: string | null;
+  // Added by 0088. The PERSON owns the number: a licence-type archive
+  // document for this driver reads/writes THIS field and leaves its own
+  // reference_no unused, so the number exists in exactly one place.
+  license_number: string | null;
   license_expiry: string | null;
   status: DriverStatus;
   safety_score: number | null;
@@ -261,6 +265,9 @@ export type Staff = {
   // iqama_expiry are optional.
   duty_hours: number;
   hire_date: string | null;
+  // Added by 0088 — same name and meaning as drivers.iqama_number, because
+  // the archive matrix reads both through one shared code path.
+  iqama_number: string | null;
   iqama_expiry: string | null;
   // Added by migration 0063 (Maintenance labor costing) — monthly
   // compensation, nullable until entered. Hourly labor cost for a work
@@ -1170,6 +1177,10 @@ export type ArchiveDocumentGroup = {
   id: string;
   tab: ArchiveTab;
   subject_kind: ArchiveSubjectKind;
+  // 0089 — ONE type for every document in this group (staff/truck tabs).
+  // NULL on company groups, which keep 0085's per-document type, and on
+  // legacy pre-0089 groups, which behave as untyped/non-linked.
+  type_key: string | null;
   title: string;
   description: string | null;
   color: string | null;
@@ -1190,11 +1201,24 @@ export type ArchiveDocumentGroup = {
 // The ACTIVE matrix rows and the Soft-deleted sub-tab read from the SAME
 // fetch, so the termination fields live here rather than needing a second
 // query per population.
+// The extra profile columns beyond name/id exist for the Soft-deleted
+// sub-tab's view-details popup, which shows a terminated person's past data.
+// Everything listed here IS selected by app/archive/page.tsx — the type says
+// what was fetched and nothing more.
 export type ArchiveDriverRow = {
   id: string;
   name: string;
   name_ar: string | null;
   iqama_number: string | null;
+  license_number: string | null;
+  iqama_expiry: string | null;
+  license_expiry: string | null;
+  phone: string | null;
+  hire_date: string | null;
+  home_station: string | null;
+  duty_hours: number;
+  salary_sar: number | null;
+  status: DriverStatus;
   active: boolean;
   terminated_at: string | null;
   termination_date: string | null;
@@ -1205,6 +1229,14 @@ export type ArchiveStaffRow = {
   name: string;
   name_ar: string | null;
   role: string;
+  iqama_number: string | null;
+  iqama_expiry: string | null;
+  email: string | null;
+  phone: string | null;
+  hire_date: string | null;
+  station: string | null;
+  duty_hours: number;
+  monthly_salary_sar: number | null;
   active: boolean;
   terminated_at: string | null;
 };
@@ -1282,4 +1314,19 @@ export type ArchiveDocumentType = {
   label_ar: string;
   active: boolean;
   created_at: string;
+  // 0089 — THE LINK. Non-null names the column on that person's table where
+  // this type's number lives; the archive document then stores NO number and
+  // NO expiry of its own, it reads the person's. Non-null is also exactly
+  // what the purple "Link" pill tests.
+  //
+  // Only the NUMBER column is named here. The matching expiry column is
+  // resolved in lib/archive.ts from a closed union, never string-munged out
+  // of this value — so a row in this table can never point a write at an
+  // arbitrary column.
+  //
+  // Live: iqama -> iqama_number / iqama_number; license -> license_number /
+  // null. No linked_truck_field exists yet (Phase 3, with the truck columns
+  // it would point at).
+  linked_driver_field: string | null;
+  linked_staff_field: string | null;
 };

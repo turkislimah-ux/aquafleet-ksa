@@ -18,7 +18,7 @@
 // "render the real layout, empty state until it lands" convention
 // FleetDetailClient.tsx and the original Maintenance OS tab both used.
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw,
@@ -41,12 +41,21 @@ import type {
   ArchiveDriverRow,
   ArchiveStaffRow,
   ArchiveSubjectKind,
-  StaffCommission,
-  StaffCommissionType,
 } from "@/lib/db-types";
-import { deleteArchiveGroup, deleteArchiveDocument, getArchiveFileSignedUrls } from "./actions";
+import type { CommPayout, DriverLite } from "@/lib/commission-rows";
+import { linkedFieldFor, linkedFieldForDoc, readPersonLink, PERSON_ID_LABEL } from "@/lib/archive";
+import {
+  deleteArchiveGroup, deleteArchiveDocument, getArchiveFileSignedUrls,
+  restoreDriver, restoreStaff,
+} from "./actions";
 import { GroupModal, DocumentModal, RenewModal, DocumentDetailModal } from "./ArchiveModals";
 import ArchiveStaffTab, { STAFF_SUB_TABS, type StaffSubTab } from "./ArchiveStaffTab";
+// The Staff page's OWN History tab, reused verbatim for the Commission
+// History sub-tab. One-way import (archive -> drivers); HistoryTab imports
+// only lib/ and components/, so there is no cycle to create. Reusing it is
+// what makes "same data, same view button, same KPIs" structural instead of
+// a lookalike that drifts the first time that tab changes.
+import HistoryTab from "../drivers/HistoryTab";
 
 const TABS: { key: ArchiveTab; label: string }[] = [
   { key: "company", label: "Company" },
@@ -68,8 +77,7 @@ export default function ArchiveClient({
   types,
   drivers,
   staff,
-  commissions,
-  commissionTypes,
+  payouts,
   today,
   error,
 }: {
@@ -80,8 +88,7 @@ export default function ArchiveClient({
   types: ArchiveDocumentType[];
   drivers: ArchiveDriverRow[];
   staff: ArchiveStaffRow[];
-  commissions: StaffCommission[];
-  commissionTypes: StaffCommissionType[];
+  payouts: CommPayout[];
   today: string;
   error: string | null;
 }) {
@@ -99,13 +106,53 @@ export default function ArchiveClient({
   // button needs to know which sub-tab you're standing in, because that is
   // what decides the new group's subject_kind (0086 refuses 'none' here).
   const [staffSubTab, setStaffSubTab] = useState<StaffSubTab>("drivers");
+  // DEEP LINK. A clicked ID number elsewhere in the app lands here as
+  // ?tab=staff&sub=drivers&person=<id>. Read once on mount (not kept in sync
+  // with later in-page tab clicks — the URL is the entry point, not a second
+  // source of truth for where you are now).
+  const [highlightPersonId, setHighlightPersonId] = useState<string | null>(null);
   const [newGroupKind, setNewGroupKind] = useState<ArchiveSubjectKind>("none");
   // WHOSE document the open DocumentModal is for. Set from the matrix row
   // that was clicked, cleared for company documents.
   const [docSubject, setDocSubject] = useState<{ kind: "driver" | "staff"; id: string; name: string } | undefined>(undefined);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const t = p.get("tab");
+    if (t === "staff" || t === "company" || t === "truck" || t === "customer") setTab(t);
+    const sub = p.get("sub");
+    if (sub === "drivers" || sub === "management" || sub === "commissions" || sub === "deleted") {
+      setStaffSubTab(sub);
+    }
+    const person = p.get("person");
+    if (person) {
+      setHighlightPersonId(person);
+      // Scroll after paint, once the matrix rows exist.
+      requestAnimationFrame(() => {
+        document.querySelector(`[data-person="${person}"]`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      });
+    }
+  }, []);
+
   const groupsById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+  const driversById = useMemo(() => new Map(drivers.map((d) => [d.id, d])), [drivers]);
+  const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff]);
+
+  // HistoryTab resolves names from every driver ever (terminated included) and
+  // scopes its filter dropdown to those with payout history — the same two
+  // lists the Staff page passes it, rebuilt from this page's own driver fetch.
+  const historyDrivers = useMemo<DriverLite[]>(
+    () => drivers.map((d) => ({ id: d.id, name: d.name, name_ar: d.name_ar })),
+    [drivers],
+  );
+  const historyDropdownDrivers = useMemo<DriverLite[]>(() => {
+    const paid = new Set(payouts.map((p) => p.driver_id));
+    return historyDrivers.filter((d) => paid.has(d.id));
+  }, [historyDrivers, payouts]);
   // Groups arrive for every fetched tab; each tab renders its own slice.
   const companyGroups = useMemo(() => groups.filter((g) => g.tab === "company"), [groups]);
   const staffGroups = useMemo(() => groups.filter((g) => g.tab === "staff"), [groups]);
@@ -145,12 +192,53 @@ export default function ArchiveClient({
   // flat document list + a group lookup and has no tab awareness, so Phases
   // 2-3 widen the input without changing this call or adding a second counter.
   const summary = useMemo(
-    () => expirySummary(documents, groupsById, today),
-    [documents, groupsById, today],
+    () =>
+      expirySummary(documents, groupsById, today, (d) => {
+        // A linked document's expiry lives on the person (0089). Resolve it
+        // here so an expired licence cannot go missing from the compliance
+        // counts just because the document itself stores no date.
+        const g = groupsById.get(d.group_id);
+        const kind =
+          g?.subject_kind === "driver" ? "driver" : g?.subject_kind === "staff" ? "staff" : null;
+        // From the document's own subject — see linkedFieldForDoc's note on
+        // the iqama both-set case.
+        const field =
+          linkedFieldForDoc(g?.type_key ? typesByKey.get(g.type_key) : null, d) ??
+          linkedFieldFor(g?.type_key ? typesByKey.get(g.type_key) : null, kind);
+        if (!field) return d.expiry_date;
+        const person = d.driver_id
+          ? driversById.get(d.driver_id)
+          : d.staff_id ? staffById.get(d.staff_id) : undefined;
+        return readPersonLink(field, person).expiry;
+      }),
+    [documents, groupsById, typesByKey, driversById, staffById, today],
   );
 
   const detailDoc = detailDocId ? documents.find((d) => d.id === detailDocId) ?? null : null;
   const detailGroup = detailDoc ? groupsById.get(detailDoc.group_id) ?? null : null;
+
+  // For a linked document the reference IS the person's own number (0088) —
+  // resolved here, where both the document and the person lists are in hand.
+  const detailLinkedId = (() => {
+    if (!detailDoc || !detailGroup) return null;
+    const kind =
+      detailGroup.subject_kind === "driver" ? "driver"
+      : detailGroup.subject_kind === "staff" ? "staff"
+      : null;
+    const type = detailGroup.type_key ? typesByKey.get(detailGroup.type_key) : null;
+    const field = linkedFieldForDoc(type, detailDoc) ?? linkedFieldFor(type, kind);
+    if (!field) return null;
+    const person = detailDoc.driver_id
+      ? driversById.get(detailDoc.driver_id)
+      : detailDoc.staff_id ? staffById.get(detailDoc.staff_id) : undefined;
+    const linked = readPersonLink(field, person);
+    return {
+      label: PERSON_ID_LABEL[field],
+      value: linked.number,
+      expiry: linked.expiry,
+      personName: person?.name ?? "",
+    };
+  })();
 
   function toggleCollapsed(groupId: string) {
     setCollapsed((prev) => {
@@ -185,6 +273,26 @@ export default function ArchiveClient({
     router.refresh();
   }
 
+  async function onRestoreDriver(d: ArchiveDriverRow) {
+    if (!confirm(`Restore ${d.name} to the active roster?`)) return;
+    const res = await restoreDriver(d.id);
+    if (res.error) {
+      setActionError(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
+  async function onRestoreStaff(s: ArchiveStaffRow) {
+    if (!confirm(`Restore ${s.name} to the active roster?`)) return;
+    const res = await restoreStaff(s.id);
+    if (res.error) {
+      setActionError(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
   async function openFile(path: string) {
     const res = await getArchiveFileSignedUrls([path]);
     if (res.error || !res.urls?.[path]) {
@@ -192,6 +300,24 @@ export default function ArchiveClient({
       return;
     }
     window.open(res.urls[path], "_blank", "noopener,noreferrer");
+  }
+
+  // One builder for the document form's subject, so the person's linked
+  // numbers are always attached the same way from every entry point.
+  function makeSubject(g: ArchiveDocumentGroup, personId: string, name: string) {
+    const kind = g.subject_kind === "driver" ? ("driver" as const) : ("staff" as const);
+    const person = kind === "driver" ? driversById.get(personId) : staffById.get(personId);
+    // Which of the person's fields this group links to (0089) — read from
+    // the group's TYPE, so the form auto-fills from that person's Staff data.
+    const field = linkedFieldFor(g.type_key ? typesByKey.get(g.type_key) : null, kind);
+    const linked = field ? readPersonLink(field, person) : { number: null, expiry: null };
+    return {
+      kind,
+      id: personId,
+      name,
+      linkedNumber: linked.number,
+      linkedExpiry: linked.expiry,
+    };
   }
 
   function closeModals() {
@@ -309,19 +435,27 @@ export default function ArchiveClient({
             groups={staffGroups}
             documents={documents}
             filesByDoc={filesByDoc}
+            renewalsByDoc={renewalsByDoc}
             drivers={drivers}
             staff={staff}
-            commissions={commissions}
-            commissionTypes={commissionTypes}
+            types={types}
+            commissionHistory={
+              <HistoryTab
+                payouts={payouts}
+                drivers={historyDrivers}
+                dropdownDrivers={historyDropdownDrivers}
+              />
+            }
             today={today}
+            highlightPersonId={highlightPersonId}
             onAddDocument={(g, person) => {
               setEditingDoc(null);
-              setDocSubject({ kind: g.subject_kind === "driver" ? "driver" : "staff", id: person.id, name: person.name });
+              setDocSubject(makeSubject(g, person.id, person.name));
               setDocModalGroupId(g.id);
             }}
             onEditDocument={(d, g, person) => {
               setEditingDoc(d);
-              setDocSubject({ kind: g.subject_kind === "driver" ? "driver" : "staff", id: person.id, name: person.name });
+              setDocSubject(makeSubject(g, person.id, person.name));
               setDocModalGroupId(g.id);
             }}
             onRenewDocument={setRenewingDoc}
@@ -330,6 +464,8 @@ export default function ArchiveClient({
             onOpenFile={openFile}
             onEditGroup={(g) => { setEditingGroup(g); setGroupModalOpen(true); }}
             onDeleteGroup={onDeleteGroup}
+            onRestoreDriver={onRestoreDriver}
+            onRestoreStaff={onRestoreStaff}
           />
         </div>
       ) : tab !== "company" ? (
@@ -553,6 +689,7 @@ export default function ArchiveClient({
 
       {groupModalOpen && (
         <GroupModal
+          types={types}
           tab={editingGroup?.tab ?? tab}
           defaultSubjectKind={newGroupKind}
           editingGroup={editingGroup}
@@ -565,6 +702,11 @@ export default function ArchiveClient({
         <DocumentModal
           types={types}
           subject={docSubject}
+          groupType={
+            groupsById.get(docModalGroupId)?.type_key
+              ? typesByKey.get(groupsById.get(docModalGroupId)!.type_key!) ?? null
+              : null
+          }
           groupId={docModalGroupId}
           groupTitle={groupsById.get(docModalGroupId)?.title ?? ""}
           editingDocument={editingDoc}
@@ -583,6 +725,7 @@ export default function ArchiveClient({
           document={detailDoc}
           group={detailGroup}
           type={detailDoc.type_key ? typesByKey.get(detailDoc.type_key) ?? null : null}
+          linkedId={detailLinkedId}
           files={filesByDoc.get(detailDoc.id) ?? []}
           renewals={renewalsByDoc.get(detailDoc.id) ?? []}
           today={today}

@@ -13,6 +13,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
+import { linkTarget, type PersonIdField } from "@/lib/archive";
 import type {
   ArchiveTab,
   ArchiveSubjectKind,
@@ -40,6 +41,12 @@ export type ArchiveGroupInput = {
   // requires it to agree with `tab` — a staff-tab group left at the default
   // 'none' is REFUSED, so the create form must always send a real value.
   subject_kind: ArchiveSubjectKind;
+  // 0089 — ONE type for every document in a staff/truck group. Required by
+  // the app for those tabs (a group with no type can never be linked, so it
+  // would silently lose the whole point of the rework); must stay NULL on
+  // company groups, which keep 0085's per-document type. The DB allows NULL
+  // so legacy pre-0089 groups keep working.
+  type_key: string | null;
   title: string;
   description: string | null;
   color: string | null;
@@ -66,6 +73,12 @@ function validateGroup(input: ArchiveGroupInput): string | null {
   if (!Number.isFinite(input.warning_days) || input.warning_days <= 0) {
     return "Warning threshold must be at least 1 day.";
   }
+  if ((input.tab === "staff" || input.tab === "truck") && !input.type_key) {
+    return "Choose the document type this group holds.";
+  }
+  if (input.tab !== "staff" && input.tab !== "truck" && input.type_key) {
+    return "Only staff and truck groups carry a group-level document type.";
+  }
   return null;
 }
 
@@ -81,6 +94,7 @@ export async function createArchiveGroup(
     .insert({
       tab: input.tab,
       subject_kind: input.subject_kind,
+      type_key: input.type_key,
       title: input.title.trim(),
       description: input.description?.trim() || null,
       color: input.color,
@@ -110,6 +124,12 @@ export async function updateArchiveGroup(
   // subject_kind on a group that already holds documents would put every one
   // of them in violation of 0087's guard at once — the next edit to any of
   // them would then be refused by the DB. Both are create-time decisions.
+  //
+  // `type_key` joins them for the same reason, and a sharper one: changing a
+  // group from a non-linked type to a linked one would instantly make every
+  // document in it illegal (they hold their own reference_no/expiry_date,
+  // which a linked document may not) AND could collide with the one-per-
+  // person rule. Retype = new group.
   const { data, error } = await supabase
     .from("archive_document_groups")
     .update({
@@ -514,4 +534,87 @@ export async function getArchiveFileSignedUrls(
     if (item.path && item.signedUrl) urls[item.path] = item.signedUrl;
   }
   return { error: null, urls };
+}
+
+// ---------------------------------------------------------------------------
+// THE LINK — writing a linked number + expiry to the PERSON (0088/0089).
+//
+// For a linked (type + subject) combination the number AND its expiry belong
+// to the person, not the document. This is the archive's only writer of those
+// columns, and the document keeps NO copy of either — so the two can never
+// disagree, because there is only ever one of them.
+//
+// SECURITY NOTE, and the reason this doesn't take a column name: the table
+// and both columns are resolved HERE from a closed union via
+// lib/archive.ts's linkTarget(). archive_document_types.linked_driver_field
+// stores a column NAME, but that value is never interpolated into SQL — it is
+// matched against known cases and thrown away. A row in that table can pick
+// which of three known targets is used; it can never invent a fourth.
+//
+// Plain single-table update, no RPC — same precedent as every other write in
+// this file: one table, no cross-table invariant, no money, no counter.
+// ---------------------------------------------------------------------------
+export async function setPersonLinkedId(
+  field: PersonIdField,
+  personId: string,
+  value: { number: string | null; expiry: string | null },
+): Promise<{ error: string | null }> {
+  if (!personId) return { error: "Person is required." };
+
+  const target = linkTarget(field);
+  const supabase = createClient();
+
+  const { error } = await supabase
+    .from(target.table)
+    .update({
+      [target.numberColumn]: value.number?.trim() || null,
+      [target.expiryColumn]: value.expiry || null,
+    })
+    .eq("id", personId);
+  if (error) return { error: error.message };
+
+  // Both pages read these columns, so both are revalidated — the Archive
+  // shows the document row, the Staff page shows the profile field.
+  revalidatePath("/archive");
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// RESTORE a soft-deleted person — the exact inverse of termination.
+//
+// active = true, terminated_at = null. For a driver, termination_date is
+// cleared too: it is the effective last-working-day that accompanied the
+// termination, and leaving it set on a restored driver would leave a "last
+// day" on someone who is back at work.
+//
+// Deliberately NOT touching anything else. Termination is a soft-delete
+// (architecture lock: records persist), so nothing was destroyed to restore —
+// commissions, incidents, leave and archive documents all kept resolving
+// throughout, and they keep resolving now.
+// ---------------------------------------------------------------------------
+export async function restoreDriver(driverId: string): Promise<{ error: string | null }> {
+  if (!driverId) return { error: "Driver is required." };
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("drivers")
+    .update({ active: true, terminated_at: null, termination_date: null })
+    .eq("id", driverId);
+  if (error) return { error: error.message };
+  revalidatePath("/archive");
+  revalidatePath("/drivers");
+  return { error: null };
+}
+
+export async function restoreStaff(staffId: string): Promise<{ error: string | null }> {
+  if (!staffId) return { error: "Staff member is required." };
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("staff")
+    .update({ active: true, terminated_at: null })
+    .eq("id", staffId);
+  if (error) return { error: error.message };
+  revalidatePath("/archive");
+  revalidatePath("/drivers");
+  return { error: null };
 }

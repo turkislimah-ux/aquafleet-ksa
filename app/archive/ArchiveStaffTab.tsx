@@ -35,21 +35,23 @@
 import { Fragment, useMemo, useState } from "react";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, FileText, CornerDownRight,
+  History, Eye, RotateCcw, X,
 } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
+import { LinkPill } from "./ArchiveModals";
 import { cn } from "@/lib/utils";
 import {
   docStatus, ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
-  groupAccent, groupDot,
+  groupAccent, groupDot, linkedFieldFor, linkedFieldForDoc, readPersonLink, PERSON_ID_LABEL,
 } from "@/lib/archive";
 import type {
   ArchiveDocumentGroup,
   ArchiveDocument,
   ArchiveDocumentFile,
+  ArchiveDocumentRenewal,
+  ArchiveDocumentType,
   ArchiveDriverRow,
   ArchiveStaffRow,
-  StaffCommission,
-  StaffCommissionType,
 } from "@/lib/db-types";
 
 export type StaffSubTab = "drivers" | "management" | "commissions" | "deleted";
@@ -65,7 +67,19 @@ export const STAFF_SUB_TABS: { key: StaffSubTab; label: string }[] = [
 // render through the SAME row component — the two populations differ only in
 // which table they came from and which subject column their documents use,
 // not in how a compliance row looks.
-type Person = { id: string; name: string; secondary: string | null };
+type Person = {
+  id: string;
+  name: string;
+  secondary: string | null;
+  // The person's own ID columns (0088/0089). For a LINKED document the
+  // matrix reads BOTH the number and the expiry from here — the document
+  // stores neither, so this is the only source for its reference cell and
+  // for its red/yellow status.
+  iqama_number: string | null;
+  iqama_expiry: string | null;
+  license_number: string | null;
+  license_expiry: string | null;
+};
 
 // "Missing" is a ROW state, not a document status — there is no document, so
 // there is nothing for docStatus() to be computed from. Keeping it out of
@@ -89,11 +103,13 @@ export default function ArchiveStaffTab({
   groups,
   documents,
   filesByDoc,
+  renewalsByDoc,
   drivers,
   staff,
-  commissions,
-  commissionTypes,
+  types,
+  commissionHistory,
   today,
+  highlightPersonId,
   onAddDocument,
   onEditDocument,
   onRenewDocument,
@@ -102,16 +118,26 @@ export default function ArchiveStaffTab({
   onOpenFile,
   onEditGroup,
   onDeleteGroup,
+  onRestoreDriver,
+  onRestoreStaff,
 }: {
   subTab: StaffSubTab;
   groups: ArchiveDocumentGroup[];
   documents: ArchiveDocument[];
   filesByDoc: Map<string, ArchiveDocumentFile[]>;
+  renewalsByDoc: Map<string, ArchiveDocumentRenewal[]>;
   drivers: ArchiveDriverRow[];
   staff: ArchiveStaffRow[];
-  commissions: StaffCommission[];
-  commissionTypes: StaffCommissionType[];
+  // Carries linked_driver_field / linked_staff_field, so whether a group is
+  // linked is read from the data rather than a hardcoded list of type keys.
+  types: ArchiveDocumentType[];
+  // The Commission History sub-tab is a MIRROR of the Staff page's own
+  // History tab, rendered by that very component — see its mount below.
+  commissionHistory: React.ReactNode;
   today: string;
+  // Deep-link target: the person whose row to scroll to and flash, arriving
+  // from a clicked ID number elsewhere in the app.
+  highlightPersonId: string | null;
   onAddDocument: (group: ArchiveDocumentGroup, person: Person) => void;
   onEditDocument: (doc: ArchiveDocument, group: ArchiveDocumentGroup, person: Person) => void;
   onRenewDocument: (doc: ArchiveDocument) => void;
@@ -120,8 +146,17 @@ export default function ArchiveStaffTab({
   onOpenFile: (path: string) => void;
   onEditGroup: (group: ArchiveDocumentGroup) => void;
   onDeleteGroup: (group: ArchiveDocumentGroup) => void;
+  onRestoreDriver: (d: ArchiveDriverRow) => void;
+  onRestoreStaff: (s: ArchiveStaffRow) => void;
 }) {
+  const typesByKey = useMemo(() => new Map(types.map((t) => [t.key, t])), [types]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Which document's renewal history is expanded — same one-at-a-time model
+  // the Company tab's table uses.
+  const [historyDocId, setHistoryDocId] = useState<string | null>(null);
+  const [detailPerson, setDetailPerson] = useState<
+    { kind: "driver"; row: ArchiveDriverRow } | { kind: "staff"; row: ArchiveStaffRow } | null
+  >(null);
 
   // ACTIVE = the app-wide soft-delete convention (0011/0020): terminated_at
   // NULL and active true. Terminated people are a PRE-FILTER, never a state —
@@ -131,7 +166,15 @@ export default function ArchiveStaffTab({
     () =>
       drivers
         .filter((d) => d.active && !d.terminated_at)
-        .map((d) => ({ id: d.id, name: d.name, secondary: d.iqama_number }))
+        .map((d) => ({
+          id: d.id,
+          name: d.name,
+          secondary: null,
+          iqama_number: d.iqama_number,
+          iqama_expiry: d.iqama_expiry,
+          license_number: d.license_number,
+          license_expiry: d.license_expiry,
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     [drivers],
   );
@@ -140,7 +183,15 @@ export default function ArchiveStaffTab({
     () =>
       staff
         .filter((s) => s.active && !s.terminated_at)
-        .map((s) => ({ id: s.id, name: s.name, secondary: s.role }))
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          secondary: s.role,
+          iqama_number: s.iqama_number,
+          iqama_expiry: s.iqama_expiry,
+          license_number: null,
+          license_expiry: null,
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     [staff],
   );
@@ -153,15 +204,6 @@ export default function ArchiveStaffTab({
     () => staff.filter((s) => s.terminated_at || !s.active),
     [staff],
   );
-
-  const commissionTypeLabel = useMemo(() => {
-    const m = new Map(commissionTypes.map((t) => [t.key, t.label_en]));
-    // Falls back to the raw key rather than "—": a retired type still has to
-    // name itself in history, and the key is readable enough to be useful.
-    return (key: string) => m.get(key) ?? key;
-  }, [commissionTypes]);
-
-  const staffNameById = useMemo(() => new Map(staff.map((s) => [s.id, s.name])), [staff]);
 
   function toggleCollapsed(id: string) {
     setCollapsed((prev) => {
@@ -209,6 +251,11 @@ export default function ArchiveStaffTab({
       <div className="space-y-3">
         {kindGroups.map((g) => {
           const isCollapsed = collapsed.has(g.id);
+          // Decided ONCE per group (0089 put the type on the group), not per
+          // document — so every row in a group agrees about whether it is
+          // linked.
+          const groupTypeRow = g.type_key ? typesByKey.get(g.type_key) ?? null : null;
+          const linkField = linkedFieldFor(groupTypeRow, kind);
 
           // The LEFT JOIN, in memory. One entry per person, always — the
           // people list drives it, not the documents.
@@ -222,11 +269,19 @@ export default function ArchiveStaffTab({
           }));
 
           const missing = rows.filter((r) => r.docs.length === 0).length;
-          const expired = rows.reduce(
-            (n, r) =>
-              n + r.docs.filter((d) => docStatus(d.expiry_date, g.warning_days, today) === "expired").length,
-            0,
-          );
+          // Expiry comes from the PERSON for a linked group — the documents
+          // hold none. Same source the row pills use, so the header count and
+          // the rows can never disagree.
+          const expired = rows.reduce((n, r) => {
+            const personExpiry = linkField ? readPersonLink(linkField, r.person).expiry : null;
+            return (
+              n +
+              r.docs.filter(
+                (d) =>
+                  docStatus(linkField ? personExpiry : d.expiry_date, g.warning_days, today) === "expired",
+              ).length
+            );
+          }, 0);
 
           return (
             <Card key={g.id} className={cn("!p-0 overflow-hidden border-s-4", groupAccent(g.color))}>
@@ -244,6 +299,7 @@ export default function ArchiveStaffTab({
                     <span className="font-semibold block truncate">{g.title}</span>
                     {g.description && <span className="text-xs muted block">{g.description}</span>}
                     <span className="text-[11px] muted block mt-0.5">
+                      {groupTypeRow ? `${groupTypeRow.label_en} · ` : ""}
                       {people.length} {kind === "driver" ? "driver" : "staff"}
                       {people.length === 1 ? "" : "s"} · warns at {g.warning_days}d
                     </span>
@@ -253,6 +309,7 @@ export default function ArchiveStaffTab({
                 <div className="flex items-center gap-1 shrink-0">
                   {/* Gap counters. These are the tab's headline numbers — the
                       whole reason every person gets a row. */}
+                  {linkField && <LinkPill />}
                   {missing > 0 && (
                     <span className={cn("text-xs px-2 py-1 rounded-full ring-1 ring-inset font-medium", MISSING_PILL)}>
                       {missing} missing
@@ -302,7 +359,14 @@ export default function ArchiveStaffTab({
                       // read cell by cell.
                       if (docs.length === 0) {
                         return (
-                          <tr key={person.id} className="bg-slate-500/[0.04]">
+                          <tr
+                            key={person.id}
+                            data-person={person.id}
+                            className={cn(
+                              "bg-slate-500/[0.04]",
+                              person.id === highlightPersonId && "ring-2 ring-inset ring-brand-500",
+                            )}
+                          >
                             <TD>
                               <span className="font-medium">{person.name}</span>
                               {person.secondary && (
@@ -339,13 +403,28 @@ export default function ArchiveStaffTab({
                       return (
                         <Fragment key={person.id}>
                           {docs.map((d, i) => {
-                            const status = docStatus(d.expiry_date, g.warning_days, today);
+                            // ONE source per row, resolved from the DOCUMENT's
+                            // own driver_id/staff_id rather than the group's
+                            // kind — so an iqama document (linked for BOTH
+                            // populations) can never resolve to the wrong
+                            // person column.
+                            const rowField = linkedFieldForDoc(groupTypeRow, d) ?? linkField;
+                            const link = rowField ? readPersonLink(rowField, person) : null;
+                            const effectiveExpiry = link ? link.expiry : d.expiry_date;
+                            const status = docStatus(effectiveExpiry, g.warning_days, today);
                             const docFiles = (filesByDoc.get(d.id) ?? []).filter((f) => f.renewal_id === null);
+                            const docRenewals = renewalsByDoc.get(d.id) ?? [];
+                            const showingHistory = historyDocId === d.id;
                             return (
+                              <Fragment key={d.id}>
                               <tr
-                                key={d.id}
+                                data-person={person.id}
                                 onClick={() => onOpenDocument(d)}
-                                className={cn("cursor-pointer", ARCHIVE_STATUS_ROW_TONE[status])}
+                                className={cn(
+                                  "cursor-pointer",
+                                  ARCHIVE_STATUS_ROW_TONE[status],
+                                  i === 0 && person.id === highlightPersonId && "ring-2 ring-inset ring-brand-500",
+                                )}
                               >
                                 <TD>
                                   {i === 0 ? (
@@ -367,9 +446,20 @@ export default function ArchiveStaffTab({
                                     </span>
                                   )}
                                 </TD>
-                                <TD className="font-mono text-xs">{d.reference_no || "—"}</TD>
+                                <TD className="font-mono text-xs">
+                                  {rowField ? (
+                                    <>
+                                      {link?.number || "—"}
+                                      <span className="block font-sans text-[10px] muted">
+                                        {PERSON_ID_LABEL[rowField]}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    d.reference_no || "—"
+                                  )}
+                                </TD>
                                 <TD className="text-xs">{fmtDate(d.issue_date)}</TD>
-                                <TD className="text-xs">{fmtDate(d.expiry_date)}</TD>
+                                <TD className="text-xs">{fmtDate(effectiveExpiry)}</TD>
                                 <TD className="text-xs">
                                   {d.note ? (
                                     <span className="block truncate max-w-[180px]" title={d.note}>{d.note}</span>
@@ -399,7 +489,7 @@ export default function ArchiveStaffTab({
                                 </TD>
                                 <TD>
                                   <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", ARCHIVE_STATUS_PILL[status])}>
-                                    {archiveStatusLabel(status, d.expiry_date, today)}
+                                    {archiveStatusLabel(status, effectiveExpiry, today)}
                                   </span>
                                 </TD>
                                 <TD>
@@ -407,6 +497,20 @@ export default function ArchiveStaffTab({
                                     className="flex items-center gap-1 justify-end"
                                     onClick={(e) => e.stopPropagation()}
                                   >
+                                    {docRenewals.length > 0 && (
+                                      <button
+                                        onClick={() => setHistoryDocId(showingHistory ? null : d.id)}
+                                        className={cn(
+                                          "inline-flex items-center gap-1 text-[11px] rounded-lg border px-2 py-1 hover:bg-black/5 dark:hover:bg-white/5",
+                                          showingHistory && "bg-black/5 dark:bg-white/5",
+                                        )}
+                                        style={{ borderColor: "rgb(var(--border))" }}
+                                        title="Renewal history"
+                                      >
+                                        <History className="h-3.5 w-3.5" />
+                                        {docRenewals.length}
+                                      </button>
+                                    )}
                                     <Btn variant="outline" onClick={() => onRenewDocument(d)}>
                                       <RefreshCw className="h-3.5 w-3.5" />Renew
                                     </Btn>
@@ -440,6 +544,54 @@ export default function ArchiveStaffTab({
                                   </div>
                                 </TD>
                               </tr>
+
+                              {/* Prior versions, expanded under the row —
+                                  identical to the Company tab's own history
+                                  rows. A renewal keeps the person's ID number
+                                  unchanged (that is the whole point of 0088),
+                                  so the reference column is blank here for a
+                                  linked document rather than repeating it. */}
+                              {showingHistory && docRenewals.map((r) => {
+                                const rFiles = (filesByDoc.get(d.id) ?? []).filter((f) => f.renewal_id === r.id);
+                                return (
+                                  <tr key={r.id} className="bg-black/[0.02] dark:bg-white/[0.02]">
+                                    <TD className="text-xs muted ps-8">
+                                      Previous version
+                                      <div className="text-[11px]">
+                                        superseded {new Date(r.superseded_at).toLocaleDateString()}
+                                        {r.superseded_by ? ` · ${r.superseded_by}` : ""}
+                                      </div>
+                                    </TD>
+                                    <TD className="font-mono text-xs muted">{linkField ? "—" : (r.reference_no || "—")}</TD>
+                                    <TD className="text-xs muted">{fmtDate(r.issue_date)}</TD>
+                                    <TD className="text-xs muted">{linkField ? "—" : fmtDate(r.expiry_date)}</TD>
+                                    <TD className="text-xs muted">{r.note || "—"}</TD>
+                                    <TD>
+                                      {rFiles.length === 0 ? (
+                                        <span className="text-xs muted">—</span>
+                                      ) : (
+                                        <div className="flex items-center gap-1 flex-wrap">
+                                          {rFiles.map((f) => (
+                                            <button
+                                              key={f.id}
+                                              onClick={() => onOpenFile(f.storage_path)}
+                                              className="inline-flex items-center gap-1 text-[11px] rounded border px-1.5 py-0.5 hover:bg-black/5 dark:hover:bg-white/5 max-w-[120px] muted"
+                                              style={{ borderColor: "rgb(var(--border))" }}
+                                              title={f.file_name}
+                                            >
+                                              <FileText className="h-3 w-3 shrink-0" />
+                                              <span className="truncate">{f.file_name}</span>
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </TD>
+                                    <TD><span className="text-xs muted">Superseded</span></TD>
+                                    <TD>{null}</TD>
+                                  </tr>
+                                );
+                              })}
+                              </Fragment>
                             );
                           })}
                         </Fragment>
@@ -459,75 +611,26 @@ export default function ArchiveStaffTab({
   if (subTab === "management") return renderMatrix("staff", activeStaff);
 
   // -------------------------------------------------------------------------
-  // Commission history — READ-ONLY over staff_commissions (0080).
+  // Commission History — a READ-ONLY MIRROR of the Staff page's History tab.
   //
-  // The archive DISPLAYS this history; it never copies it. There is no
-  // archive-side commission table and no write path here — staff_commissions
-  // stays the single source, edited only on the People page where it lives.
-  // Commission money is standalone (Turki's money boundary) and is not summed
-  // into any work-order, payroll or maintenance figure — including here: the
-  // total below is a total of THIS LIST, nothing else.
+  // It renders that page's OWN HistoryTab component, passed in as a node by
+  // ArchiveClient. Not a lookalike rebuilt here: "same data, same view
+  // button, same KPIs" is guaranteed structurally, because it IS the same
+  // component. A copy would drift the first time that tab changes.
+  //
+  // Read-only needs no enforcement: HistoryTab has no write path at all. A
+  // paid cycle is immutable ("Nothing here mutates" — its own header), so the
+  // archive gets the view and the frozen payout snapshot with nothing to
+  // suppress.
+  //
+  // NOTE, corrected in this round: Phase 2 built this sub-tab over
+  // staff_commissions (0080 — MECHANIC commissions, recorded on the staff
+  // page's own section). That is a different dataset from the Staff page's
+  // History tab, which lists frozen DRIVER payouts from commission_payouts.
+  // Turki asked for the History tab, so this now mirrors that one.
   // -------------------------------------------------------------------------
   if (subTab === "commissions") {
-    const rows = [...commissions].sort((a, b) => b.commission_date.localeCompare(a.commission_date));
-    const total = rows.reduce((n, c) => n + Number(c.amount_sar), 0);
-
-    return (
-      <Card className="!p-0 overflow-hidden">
-        <div
-          className="flex items-center justify-between gap-3 p-3 border-b flex-wrap"
-          style={{ borderColor: "rgb(var(--border))" }}
-        >
-          <div>
-            <span className="font-semibold block">Commission History</span>
-            <span className="text-[11px] muted">
-              Read-only — recorded on the Staff page, shown here for the record.
-            </span>
-          </div>
-          <div className="text-end">
-            <div className="text-[11px] muted uppercase tracking-wide">Total shown</div>
-            <div className="text-lg font-semibold tabular-nums">{fmtMoney(total)} SAR</div>
-          </div>
-        </div>
-
-        {rows.length === 0 ? (
-          <p className="text-sm muted p-6 text-center">No commissions recorded yet.</p>
-        ) : (
-          <Table>
-            <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-              <tr>
-                <TH>Date</TH>
-                <TH>Staff member</TH>
-                <TH>Type</TH>
-                <TH>Note</TH>
-                <TH>Amount</TH>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((c) => (
-                <tr key={c.id}>
-                  <TD className="text-xs">{fmtDate(c.commission_date)}</TD>
-                  <TD>
-                    {/* A commission whose staff row is gone from this fetch
-                        still shows — never dropped silently. */}
-                    <span className="font-medium">{staffNameById.get(c.staff_id) ?? "Unknown staff"}</span>
-                  </TD>
-                  <TD className="text-xs">{commissionTypeLabel(c.commission_type)}</TD>
-                  <TD className="text-xs">
-                    {c.note ? (
-                      <span className="block truncate max-w-[260px]" title={c.note}>{c.note}</span>
-                    ) : (
-                      <span className="muted">—</span>
-                    )}
-                  </TD>
-                  <TD className="tabular-nums font-medium">{fmtMoney(Number(c.amount_sar))} SAR</TD>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Card>
-    );
+    return <>{commissionHistory}</>;
   }
 
   // -------------------------------------------------------------------------
@@ -554,9 +657,10 @@ export default function ArchiveStaffTab({
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
                 <TH>Driver</TH>
-                <TH>Iqama no.</TH>
+                <TH>Iqama ID</TH>
                 <TH>Last working day</TH>
                 <TH>Terminated on</TH>
+                <TH>{null}</TH>
               </tr>
             </thead>
             <tbody>
@@ -570,6 +674,16 @@ export default function ArchiveStaffTab({
                   <TD className="text-xs">{fmtDate(d.termination_date)}</TD>
                   <TD className="text-xs">
                     {d.terminated_at ? new Date(d.terminated_at).toLocaleDateString() : "—"}
+                  </TD>
+                  <TD>
+                    <div className="flex items-center gap-1 justify-end">
+                      <Btn variant="outline" onClick={() => setDetailPerson({ kind: "driver", row: d })}>
+                        <Eye className="h-3.5 w-3.5" />View
+                      </Btn>
+                      <Btn variant="outline" onClick={() => onRestoreDriver(d)}>
+                        <RotateCcw className="h-3.5 w-3.5" />Restore
+                      </Btn>
+                    </div>
                   </TD>
                 </tr>
               ))}
@@ -594,6 +708,7 @@ export default function ArchiveStaffTab({
                 <TH>Staff member</TH>
                 <TH>Role</TH>
                 <TH>Terminated on</TH>
+                <TH>{null}</TH>
               </tr>
             </thead>
             <tbody>
@@ -607,12 +722,200 @@ export default function ArchiveStaffTab({
                   <TD className="text-xs">
                     {s.terminated_at ? new Date(s.terminated_at).toLocaleDateString() : "—"}
                   </TD>
+                  <TD>
+                    <div className="flex items-center gap-1 justify-end">
+                      <Btn variant="outline" onClick={() => setDetailPerson({ kind: "staff", row: s })}>
+                        <Eye className="h-3.5 w-3.5" />View
+                      </Btn>
+                      <Btn variant="outline" onClick={() => onRestoreStaff(s)}>
+                        <RotateCcw className="h-3.5 w-3.5" />Restore
+                      </Btn>
+                    </div>
+                  </TD>
                 </tr>
               ))}
             </tbody>
           </Table>
         )}
       </Card>
+
+      {detailPerson && (
+        <TerminatedPersonDetail
+          person={detailPerson}
+          documents={documents}
+          groups={groups}
+          today={today}
+          onRestore={() =>
+            detailPerson.kind === "driver"
+              ? onRestoreDriver(detailPerson.row)
+              : onRestoreStaff(detailPerson.row)
+          }
+          onClose={() => setDetailPerson(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Terminated-person details — every field this page holds on them, plus the
+// archive documents that OUTLIVED the termination (0084's subject FKs are ON
+// DELETE RESTRICT precisely so a regulatory document survives its subject).
+//
+// Read-only apart from Restore. Rendered inline rather than in
+// ArchiveModals.tsx because it is specific to this tab and nothing else
+// mounts it — the leaf rule is about not importing BACK to a parent, which
+// this does not do.
+// ---------------------------------------------------------------------------
+function TerminatedPersonDetail({
+  person,
+  documents,
+  groups,
+  today,
+  onRestore,
+  onClose,
+}: {
+  person: { kind: "driver"; row: ArchiveDriverRow } | { kind: "staff"; row: ArchiveStaffRow };
+  documents: ArchiveDocument[];
+  groups: ArchiveDocumentGroup[];
+  today: string;
+  onRestore: () => void;
+  onClose: () => void;
+}) {
+  const isDriver = person.kind === "driver";
+  const row = person.row;
+  const groupsById = new Map(groups.map((g) => [g.id, g]));
+  const theirDocs = documents.filter((d) =>
+    isDriver ? d.driver_id === row.id : d.staff_id === row.id,
+  );
+  const dash = (v: string | number | null | undefined) =>
+    v === null || v === undefined || v === "" ? "—" : String(v);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="card w-full max-w-[860px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="flex items-center justify-between p-4 border-b"
+          style={{ borderColor: "rgb(var(--border))" }}
+        >
+          <div>
+            <h2 className="font-semibold">{row.name}</h2>
+            <p className="text-[11px] muted">
+              {isDriver ? "Terminated driver" : "Terminated staff member"} · record kept, never deleted
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted">Identity</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <PersonField label="Name (Arabic)" value={dash(row.name_ar)} />
+            <PersonField label="Iqama ID" value={dash(row.iqama_number)} mono />
+            <PersonField label="Iqama expiry" value={fmtDate(row.iqama_expiry)} />
+            {isDriver && (
+              <>
+                <PersonField label="License ID" value={dash((row as ArchiveDriverRow).license_number)} mono />
+                <PersonField label="License expiry" value={fmtDate((row as ArchiveDriverRow).license_expiry)} />
+              </>
+            )}
+            {!isDriver && <PersonField label="Role" value={dash((row as ArchiveStaffRow).role)} />}
+          </div>
+
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Employment</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <PersonField label="Phone" value={dash(row.phone)} />
+            {!isDriver && <PersonField label="Email" value={dash((row as ArchiveStaffRow).email)} />}
+            <PersonField label="Hire date" value={fmtDate(row.hire_date)} />
+            <PersonField label="Duty hours" value={dash(row.duty_hours)} />
+            <PersonField
+              label="Monthly salary"
+              value={
+                isDriver
+                  ? (row as ArchiveDriverRow).salary_sar != null
+                    ? `${fmtMoney(Number((row as ArchiveDriverRow).salary_sar))} SAR`
+                    : "—"
+                  : (row as ArchiveStaffRow).monthly_salary_sar != null
+                    ? `${fmtMoney(Number((row as ArchiveStaffRow).monthly_salary_sar))} SAR`
+                    : "—"
+              }
+            />
+            {isDriver && (
+              <PersonField label="Last working day" value={fmtDate((row as ArchiveDriverRow).termination_date)} />
+            )}
+            <PersonField
+              label="Terminated on"
+              value={row.terminated_at ? new Date(row.terminated_at).toLocaleDateString() : "—"}
+            />
+          </div>
+
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
+            Archived documents ({theirDocs.length})
+          </div>
+          {theirDocs.length === 0 ? (
+            <p className="text-sm muted">No archived documents for this person.</p>
+          ) : (
+            <Table>
+              <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+                <tr>
+                  <TH>Group</TH>
+                  <TH>Document</TH>
+                  <TH>Expires</TH>
+                  <TH>Status</TH>
+                </tr>
+              </thead>
+              <tbody>
+                {theirDocs.map((d) => {
+                  const g = groupsById.get(d.group_id);
+                  const status = docStatus(d.expiry_date, g?.warning_days ?? 30, today);
+                  return (
+                    <tr key={d.id}>
+                      <TD className="text-xs">{g?.title ?? "—"}</TD>
+                      <TD className="text-xs font-medium">{d.title}</TD>
+                      <TD className="text-xs">{fmtDate(d.expiry_date)}</TD>
+                      <TD>
+                        <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", ARCHIVE_STATUS_PILL[status])}>
+                          {archiveStatusLabel(status, d.expiry_date, today)}
+                        </span>
+                      </TD>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
+        </div>
+
+        <div
+          className="flex justify-end gap-2 p-4 border-t"
+          style={{ borderColor: "rgb(var(--border))" }}
+        >
+          <Btn variant="outline" onClick={onClose}>Close</Btn>
+          <Btn variant="primary" onClick={onRestore}>
+            <RotateCcw className="h-4 w-4" />Restore
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PersonField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <div className="text-[11px] muted mb-0.5">{label}</div>
+      <div className={cn("text-sm", mono && "font-mono text-xs")}>{value}</div>
     </div>
   );
 }

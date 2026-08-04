@@ -21,6 +21,8 @@ import { createStaff, updateStaff, terminateStaff, addStaffRole } from "./action
 import LeaveSection from "./LeaveSection";
 import MechanicCommissionsSection from "./MechanicCommissionsSection";
 import OperationStationField from "@/components/OperationStationField";
+import PersonIdLink from "./PersonIdLink";
+import LinkedIdField from "./LinkedIdField";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -232,6 +234,12 @@ export default function StaffTab({
                 <Cell label="Branch of operation">{stationName(detail.station) ?? <span className="muted">—</span>}</Cell>
                 <Cell label="Email">{detail.email ?? <span className="muted">—</span>}</Cell>
                 <Cell label="Phone">{detail.phone ?? <span className="muted">—</span>}</Cell>
+                {/* Deep-links to this staff member's own row in the archive's
+                    Management Staff matrix. */}
+                <Cell label="Iqama ID">
+                  <PersonIdLink personId={detail.id} sub="management" value={detail.iqama_number} />
+                </Cell>
+                <Cell label="Iqama expiry">{detail.iqama_expiry ?? <span className="muted">—</span>}</Cell>
                 <Cell label="Status">
                   {detail.terminated_at
                     ? `Terminated · ${new Date(detail.terminated_at).toLocaleDateString()}`
@@ -324,8 +332,27 @@ export default function StaffTab({
               <Field label="Hiring date">
                 <input name="hire_date" type="date" defaultValue={editing?.hire_date ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
+              {/* LINKED IDENTITY FIELDS (0088/0089) — seed at creation, then
+                  read-only. The Archive is the single edit point; see the
+                  matching block in DriversClient.tsx for the full reasoning. */}
+              <Field label="Iqama ID">
+                <LinkedIdField
+                  name="iqama_number"
+                  value={editing?.iqama_number ?? ""}
+                  locked={!!editing}
+                  personId={editing?.id}
+                  sub="management"
+                />
+              </Field>
               <Field label="Iqama expiry">
-                <input name="iqama_expiry" type="date" defaultValue={editing?.iqama_expiry ?? ""} className={INPUT} style={INPUT_STYLE} />
+                <LinkedIdField
+                  name="iqama_expiry"
+                  type="date"
+                  value={editing?.iqama_expiry ?? ""}
+                  locked={!!editing}
+                  personId={editing?.id}
+                  sub="management"
+                />
               </Field>
               <label className="flex items-center gap-2 text-sm sm:col-span-2">
                 <input name="active" type="checkbox" defaultChecked={editing ? editing.active : true} />

@@ -64,7 +64,9 @@
 --    a caller-controlled search_path resolving `archive_document_groups` to
 --    something else. Mandatory under 0083 for every function in this project.
 --
---  - SECURITY INVOKER (the default, left explicit below for the reader).
+--  - SECURITY INVOKER — the DEFAULT, which is why Postgres omits the keyword
+--    from the live definition below (its absence IS invoker, not an
+--    oversight).
 --    Turki's instruction, and correct here: the function reads
 --    archive_document_groups, whose RLS policy from 0084 already grants
 --    `authenticated` full read. There is no privilege the caller lacks, so
@@ -82,9 +84,10 @@
 --    directly callable (its privileges are checked at CREATE TRIGGER time,
 --    not at fire time), so this is belt-and-braces — but 0083's whole point
 --    is that the surface stays at zero without anyone having to reason about
---    exceptions. `authenticated` is granted EXECUTE for the same reason: the
---    project's convention is that every function has an explicit, minimal
---    grant rather than an implicit one.
+--    exceptions. Live carries NO counter-grant to `authenticated`, so no
+--    role can call this directly at all — the strictest correct end state
+--    for a trigger function, whose EXECUTE is checked at CREATE TRIGGER
+--    time rather than at fire time.
 --
 -- ===========================================================================
 -- SAFETY / SCOPE
@@ -124,100 +127,71 @@ begin;
 
 -- ---------------------------------------------------------------------------
 -- 1) The guard function.
+--
+--    RECONCILED to the LIVE definition (the architect applied its own
+--    reconstruction, functionally identical to the draft but worded
+--    differently). Body below is byte-for-byte what pg_get_functiondef()
+--    returns, so re-running this file is a no-op rather than a silent
+--    rewrite of the deployed function.
 -- ---------------------------------------------------------------------------
-create or replace function public.archive_document_subject_guard()
-returns trigger
-language plpgsql
-security invoker
-set search_path = public
-as $$
+CREATE OR REPLACE FUNCTION public.archive_document_subject_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
 declare
-  v_subject_kind text;
-  v_group_title  text;
+  v_kind text;
 begin
-  select g.subject_kind, g.title
-    into v_subject_kind, v_group_title
-    from public.archive_document_groups g
-   where g.id = new.group_id;
-
-  -- Fail closed. group_id is NOT NULL with an FK, so the parent is
-  -- guaranteed to exist — not finding it means it is not VISIBLE to this
-  -- caller under RLS. Allowing the write in that case would let the guard be
-  -- bypassed by anyone who cannot see the group they are writing into.
-  if v_subject_kind is null then
-    raise exception
-      'Archive: parent group % is not readable, cannot validate the document subject.', new.group_id
-      using errcode = '23514';
+  select subject_kind into v_kind
+    from public.archive_document_groups
+   where id = new.group_id;
+  if v_kind is null then
+    raise exception 'Archive document group % not found.', new.group_id using errcode = '23514';
   end if;
-
-  if v_subject_kind = 'none' then
-    if num_nonnulls(new.driver_id, new.staff_id, new.truck_id) > 0 then
-      raise exception
-        'Archive: group "%" holds company documents, which must have no driver, staff or truck subject.', v_group_title
-        using errcode = '23514';
+  if v_kind = 'none' then
+    if new.driver_id is not null or new.staff_id is not null or new.truck_id is not null then
+      raise exception 'A company document (group %) must have no subject.', new.group_id using errcode = '23514';
     end if;
-
-  elsif v_subject_kind = 'driver' then
+  elsif v_kind = 'driver' then
     if new.driver_id is null or new.staff_id is not null or new.truck_id is not null then
-      raise exception
-        'Archive: group "%" is a driver group — a document in it must have a driver subject and no other.', v_group_title
-        using errcode = '23514';
+      raise exception 'A document in a driver group must reference exactly one driver and nothing else.' using errcode = '23514';
     end if;
-
-  elsif v_subject_kind = 'staff' then
+  elsif v_kind = 'staff' then
     if new.staff_id is null or new.driver_id is not null or new.truck_id is not null then
-      raise exception
-        'Archive: group "%" is a staff group — a document in it must have a staff subject and no other.', v_group_title
-        using errcode = '23514';
+      raise exception 'A document in a staff group must reference exactly one staff member and nothing else.' using errcode = '23514';
     end if;
-
-  elsif v_subject_kind = 'truck' then
+  elsif v_kind = 'truck' then
     if new.truck_id is null or new.driver_id is not null or new.staff_id is not null then
-      raise exception
-        'Archive: group "%" is a truck group — a document in it must have a truck subject and no other.', v_group_title
-        using errcode = '23514';
+      raise exception 'A document in a truck group must reference exactly one truck and nothing else.' using errcode = '23514';
     end if;
-
-  elsif v_subject_kind = 'customer' then
-    -- See the EDGE DECISION block at the top. archive_documents has no
-    -- customer_id column, so a customer document has no way to record WHICH
-    -- customer it belongs to. Refused rather than stored unattributable.
-    raise exception
-      'Archive: group "%" is a customer group, which cannot hold documents yet (archive_documents has no customer subject column).', v_group_title
-      using errcode = '23514';
-
+  elsif v_kind = 'customer' then
+    raise exception 'Customer groups do not hold documents (the customer tab is read-only).' using errcode = '23514';
   else
-    -- Unreachable while 0086's CHECK holds. Kept so that ADDING a value to
-    -- that CHECK without teaching this function about it fails loudly on the
-    -- first write, instead of silently accepting anything for the new kind.
-    raise exception
-      'Archive: unknown subject_kind "%" on group "%".', v_subject_kind, v_group_title
-      using errcode = '23514';
+    raise exception 'Unknown subject_kind "%" on group %.', v_kind, new.group_id using errcode = '23514';
   end if;
-
   return new;
 end;
-$$;
-
-comment on function public.archive_document_subject_guard() is
-  'BEFORE INSERT/UPDATE guard on archive_documents: the document''s subject column must match its parent group''s subject_kind (0086). Cross-row rule, so it cannot be a CHECK constraint. Fails closed if the parent group is not visible.';
+$function$;
 
 -- ---------------------------------------------------------------------------
 -- 2) Lock the function down per 0083. Trigger functions are not directly
 --    callable, so this is defence in depth — the surface stays at zero
 --    without anyone needing to remember why this one was an exception.
+--
+--    NOTE, reconciled: live has NO `grant execute ... to authenticated`, so
+--    this file no longer issues one either. With PUBLIC revoked and no
+--    explicit grant, NO role can call this function directly — which is the
+--    correct end state for a trigger function, since Postgres checks EXECUTE
+--    at CREATE TRIGGER time, not at fire time. The trigger still fires
+--    normally for every caller.
 -- ---------------------------------------------------------------------------
-revoke all on function public.archive_document_subject_guard() from public;
-revoke all on function public.archive_document_subject_guard() from anon;
-grant execute on function public.archive_document_subject_guard() to authenticated;
+revoke execute on function public.archive_document_subject_guard() from public, anon;
 
 -- ---------------------------------------------------------------------------
--- 3) The trigger.
+-- 3) The trigger. Name reconciled to live: archive_document_subject_guard_trg.
 -- ---------------------------------------------------------------------------
-drop trigger if exists archive_documents_subject_guard on public.archive_documents;
-create trigger archive_documents_subject_guard
-  before insert or update on public.archive_documents
-  for each row execute function public.archive_document_subject_guard();
+CREATE TRIGGER archive_document_subject_guard_trg BEFORE INSERT OR UPDATE ON public.archive_documents
+  FOR EACH ROW EXECUTE FUNCTION archive_document_subject_guard();
 
 commit;
 
@@ -238,7 +212,8 @@ commit;
 --      join pg_namespace n on n.oid = p.pronamespace
 --      where n.nspname = 'public' and p.proname = 'archive_document_subject_guard';
 --    Expect: is_definer = false, proconfig = {search_path=public},
---            anon_can = false, auth_can = true.
+--            anon_can = false, auth_can = FALSE (no counter-grant exists;
+--            a trigger function needs none to fire).
 --
 -- 3) IT BITES — each of these must RAISE, and the whole block rolls back so
 --    nothing is left behind. Run them ONE AT A TIME (the first raise aborts

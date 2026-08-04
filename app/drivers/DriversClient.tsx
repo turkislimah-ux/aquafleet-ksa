@@ -56,6 +56,8 @@ import CommissionsTab, {
   type CommAdjustmentRow,
 } from "./CommissionsTab";
 import HistoryTab from "./HistoryTab";
+import PersonIdLink from "./PersonIdLink";
+import LinkedIdField from "./LinkedIdField";
 import StaffTab from "./StaffTab";
 import type { CommPayout } from "@/lib/commission-rows";
 
@@ -528,11 +530,52 @@ export default function DriversClient({
               <Field label="Phone">
                 <input name="phone" defaultValue={editing?.phone ?? ""} placeholder="+966 5…" className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Iqama number">
-                <input name="iqama_number" defaultValue={editing?.iqama_number ?? ""} className={INPUT} style={INPUT_STYLE} />
+              {/* LINKED IDENTITY FIELDS (0088/0089) — editable ONLY at
+                  creation, as the seed. After that the ARCHIVE is the single
+                  edit point: its iqama/licence documents read and write these
+                  very columns, so a second editor here would be a second way
+                  to change one fact, and the two screens would disagree the
+                  first time someone used the "wrong" one.
+                  Read-only is rendered as a real disabled box (not a removed
+                  field) so the value stays visible where people expect it —
+                  with a link straight to where it IS edited. */}
+              <Field label="Iqama ID">
+                <LinkedIdField
+                  name="iqama_number"
+                  value={editing?.iqama_number ?? ""}
+                  locked={!!editing}
+                  personId={editing?.id}
+                  sub="drivers"
+                />
+              </Field>
+              <Field label="Iqama expiry">
+                <LinkedIdField
+                  name="iqama_expiry"
+                  type="date"
+                  value={editing?.iqama_expiry ?? ""}
+                  locked={!!editing}
+                  personId={editing?.id}
+                  sub="drivers"
+                />
+              </Field>
+              <Field label="License ID">
+                <LinkedIdField
+                  name="license_number"
+                  value={editing?.license_number ?? ""}
+                  locked={!!editing}
+                  personId={editing?.id}
+                  sub="drivers"
+                />
               </Field>
               <Field label="License expiry">
-                <input name="license_expiry" type="date" defaultValue={editing?.license_expiry ?? ""} className={INPUT} style={INPUT_STYLE} />
+                <LinkedIdField
+                  name="license_expiry"
+                  type="date"
+                  value={editing?.license_expiry ?? ""}
+                  locked={!!editing}
+                  personId={editing?.id}
+                  sub="drivers"
+                />
               </Field>
               <Field label="Hire date">
                 <input name="hire_date" type="date" defaultValue={editing?.hire_date ?? ""} className={INPUT} style={INPUT_STYLE} />
@@ -616,9 +659,6 @@ export default function DriversClient({
               </Field>
               <Field label="Duty hours">
                 <input name="duty_hours" type="number" step="1" min="0" defaultValue={editing?.duty_hours ?? 10} className={INPUT} style={INPUT_STYLE} />
-              </Field>
-              <Field label="Iqama expiry">
-                <input name="iqama_expiry" type="date" defaultValue={editing?.iqama_expiry ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
               <Field label="Salary (SAR / month)">
                 <input name="salary_sar" type="number" step="0.01" min="0" defaultValue={editing?.salary_sar ?? ""} placeholder="—" className={INPUT} style={INPUT_STYLE} />
@@ -788,8 +828,12 @@ function DriverDetail({
               <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><Phone className="h-4 w-4" /> Contact &amp; ID</h4>
               <div className="grid grid-cols-2 gap-2">
                 <Cell label="Phone">{d.phone ?? <span className="muted">—</span>}</Cell>
-                <Cell label="Iqama number"><span className="font-mono text-xs">{d.iqama_number ?? "—"}</span></Cell>
+                {/* Both ID numbers DEEP-LINK into the archive, to this
+                    driver's own row in the Drivers matrix — the documents
+                    that carry these numbers live there. */}
+                <Cell label="Iqama ID"><PersonIdLink personId={d.id} sub="drivers" value={d.iqama_number} /></Cell>
                 <Cell label="Iqama expiry">{d.iqama_expiry ?? <span className="muted">—</span>}</Cell>
+                <Cell label="License ID"><PersonIdLink personId={d.id} sub="drivers" value={d.license_number} /></Cell>
                 <Cell label="License expiry"><span className={expSoon ? "text-amber-600 dark:text-amber-400 font-medium" : ""}>{d.license_expiry ?? "—"}</span></Cell>
                 <Cell label="Hire date">{d.hire_date ?? <span className="muted">—</span>}</Cell>
               </div>

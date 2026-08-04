@@ -38,6 +38,9 @@ function parse(formData: FormData) {
     name: str(formData.get("name")),
     name_ar: nullable(formData.get("name_ar")),
     iqama_number: nullable(formData.get("iqama_number")),
+    // 0088 — the person owns the number; the archive's licence documents
+    // read/write this same column rather than keeping a copy.
+    license_number: nullable(formData.get("license_number")),
     license_expiry: nullable(formData.get("license_expiry")),
     // status is dead (Commit 4): derived driver state (lib/driver-state.ts)
     // reads drivers.active, not this column. No longer written from the form —
@@ -163,6 +166,10 @@ function parseStaff(formData: FormData) {
     // hire_date/iqama_expiry are optional.
     duty_hours: numOrDefault(formData.get("duty_hours"), 10),
     hire_date: nullable(formData.get("hire_date")),
+    // 0088 — same column name and meaning as drivers.iqama_number. The
+    // archive's iqama documents for this person read/write it directly
+    // rather than storing their own copy of the number.
+    iqama_number: nullable(formData.get("iqama_number")),
     iqama_expiry: nullable(formData.get("iqama_expiry")),
     // Added by migration 0063 (Maintenance labor costing) — nullable until
     // entered. Required by create_work_order/edit_work_order whenever this

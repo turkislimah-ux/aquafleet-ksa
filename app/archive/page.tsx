@@ -19,13 +19,12 @@ import type {
   ArchiveDocumentGroup,
   ArchiveDriverRow,
   ArchiveStaffRow,
-  StaffCommission,
-  StaffCommissionType,
   ArchiveDocument,
   ArchiveDocumentFile,
   ArchiveDocumentRenewal,
   ArchiveDocumentType,
 } from "@/lib/db-types";
+import type { CommPayout } from "@/lib/commission-rows";
 import ArchiveClient from "./ArchiveClient";
 
 export const dynamic = "force-dynamic";
@@ -36,11 +35,11 @@ export default async function ArchivePage() {
 
   const [
     groupsRes, documentsRes, filesRes, renewalsRes, typesRes,
-    driversRes, staffRes, commissionsRes, commissionTypesRes,
+    driversRes, staffRes, payoutsRes,
   ] = await Promise.all([
     supabase
       .from("archive_document_groups")
-      .select("id, tab, subject_kind, title, description, color, warning_days, sort_order, created_by, created_at")
+      .select("id, tab, subject_kind, type_key, title, description, color, warning_days, sort_order, created_by, created_at")
       .in("tab", ["company", "staff"])
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true }),
@@ -70,30 +69,30 @@ export default async function ArchivePage() {
     // can also keep the current document's type in the list.
     supabase
       .from("archive_document_types")
-      .select("id, key, label_en, label_ar, active, created_at")
+      .select("id, key, label_en, label_ar, active, created_at, linked_driver_field, linked_staff_field")
       .order("label_en", { ascending: true }),
     // Subject lists for the Staff tab's matrices. Narrow selects, matched
     // exactly by ArchiveDriverRow / ArchiveStaffRow — the type says what was
     // fetched and nothing more.
     supabase
       .from("drivers")
-      .select("id, name, name_ar, iqama_number, active, terminated_at, termination_date")
+      .select(
+        "id, name, name_ar, iqama_number, license_number, iqama_expiry, license_expiry, phone, hire_date, home_station, duty_hours, salary_sar, status, active, terminated_at, termination_date",
+      )
       .order("name", { ascending: true }),
     supabase
       .from("staff")
-      .select("id, name, name_ar, role, active, terminated_at")
+      .select(
+        "id, name, name_ar, role, iqama_number, iqama_expiry, email, phone, hire_date, station, duty_hours, monthly_salary_sar, active, terminated_at",
+      )
       .order("name", { ascending: true }),
-    // Commission history — READ-ONLY here. The archive displays
-    // staff_commissions (0080); it never copies it into a table of its own.
+    // Commission History — the SAME query the Staff page's own History tab
+    // runs, because the archive renders that very component. Frozen driver
+    // payouts, newest first; READ-ONLY (a paid cycle is immutable).
     supabase
-      .from("staff_commissions")
-      .select("id, staff_id, commission_type, amount_sar, commission_date, note, created_by, created_at")
-      .order("commission_date", { ascending: false }),
-    // Including RETIRED types, same reasoning as archive_document_types: a
-    // commission filed under a since-retired type still has to name itself.
-    supabase
-      .from("commission_types")
-      .select("id, key, label_en, label_ar, active, created_at"),
+      .from("commission_payouts")
+      .select("id, driver_id, paid_at, approved_by, period_label, base_sar, specials_sar, adjustments_sar, bonus_sar, total_sar, snapshot")
+      .order("paid_at", { ascending: false }),
   ]);
 
   const groups = (groupsRes.data ?? []) as ArchiveDocumentGroup[];
@@ -103,8 +102,7 @@ export default async function ArchivePage() {
   const types = (typesRes.data ?? []) as ArchiveDocumentType[];
   const drivers = (driversRes.data ?? []) as ArchiveDriverRow[];
   const staff = (staffRes.data ?? []) as ArchiveStaffRow[];
-  const commissions = (commissionsRes.data ?? []) as StaffCommission[];
-  const commissionTypes = (commissionTypesRes.data ?? []) as StaffCommissionType[];
+  const payouts = (payoutsRes.data ?? []) as CommPayout[];
 
   // Scope documents to the fetched groups. Written tab-agnostically in Phase
   // 1 and it kept working unchanged when the group query widened — the only
@@ -120,8 +118,7 @@ export default async function ArchivePage() {
     typesRes.error?.message ??
     driversRes.error?.message ??
     staffRes.error?.message ??
-    commissionsRes.error?.message ??
-    commissionTypesRes.error?.message ??
+    payoutsRes.error?.message ??
     null;
 
   return (
@@ -133,8 +130,7 @@ export default async function ArchivePage() {
       types={types}
       drivers={drivers}
       staff={staff}
-      commissions={commissions}
-      commissionTypes={commissionTypes}
+      payouts={payouts}
       today={today}
       error={error}
     />
