@@ -342,3 +342,29 @@ export function readPersonLink(
   }
   return { number: subject.iqama_number ?? null, expiry: subject.iqama_expiry ?? null };
 }
+
+// ---------------------------------------------------------------------------
+// The STANDING SET of document types — seeded by 0085 (7) and 0088 ('iqama').
+//
+// These live HERE, not in app/archive/actions.ts, for a structural reason: a
+// "use server" module may only export async functions, so a plain constant
+// and a sync predicate cannot live there. (next build catches this; tsc does
+// not — the error is "Only async functions are allowed to be exported in a
+// 'use server' file".)
+//
+// Why they are protected from deletion: 'iqama', 'license' and 'registration'
+// are the three keys the linked mapping is defined against, so deleting any
+// of them would break linking outright. The remaining five are the base
+// vocabulary every install starts with. Delete is therefore offered for
+// USER-ADDED types only — and only when nothing references them. The FK is
+// the real guarantee: archive_document_groups.type_key and
+// archive_documents.type_key are both ON DELETE RESTRICT, so a type in use is
+// refused by the database no matter what any screen offers.
+export const STANDING_TYPE_KEYS = [
+  "license", "permit", "insurance", "registration",
+  "certificate", "contract", "other", "iqama",
+] as const;
+
+export function isStandingType(key: string): boolean {
+  return (STANDING_TYPE_KEYS as readonly string[]).includes(key);
+}

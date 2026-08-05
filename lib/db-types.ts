@@ -1282,6 +1282,30 @@ export type ArchiveInvoiceRow = {
   voided_at: string | null;
 };
 
+// The archived customer's 1:1 PROJECT (0015 enforces one customer = one
+// project; 0019 archives the customer as a side effect of archiving it). Its
+// fields are what the Add-Project form collects, so the archived-customer
+// view can show the full picture rather than contact details alone.
+export type ArchiveProjectRow = {
+  id: string;
+  customer_id: string;
+  name: string;
+  initials: string;
+  rate_per_trip_sar: number;
+  commission_mode: CommissionMode;
+  commission_value: number;
+  commission_bump_pct: number;
+  payment_mode: PaymentMode | null;
+  water_type: WaterType | null;
+  default_station: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  status: ProjectStatus;
+  location: string | null;
+  description: string | null;
+  created_at: string;
+};
+
 export type ArchiveStaffRow = {
   id: string;
   name: string;

@@ -35,10 +35,11 @@
 import { Fragment, useMemo, useState } from "react";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, FileText, CornerDownRight,
-  History, Eye, RotateCcw, X,
+  History, Eye, RotateCcw, X, IdCard, Users, Wallet, Archive,
 } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { LinkPill } from "./ArchiveModals";
+import type { SubTabItem } from "./SubTabPicker";
 import { cn } from "@/lib/utils";
 import {
   docStatus, ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
@@ -56,11 +57,11 @@ import type {
 
 export type StaffSubTab = "drivers" | "management" | "commissions" | "deleted";
 
-export const STAFF_SUB_TABS: { key: StaffSubTab; label: string }[] = [
-  { key: "drivers", label: "Drivers" },
-  { key: "management", label: "Management Staff" },
-  { key: "commissions", label: "Commission History" },
-  { key: "deleted", label: "Soft-deleted" },
+export const STAFF_SUB_TABS: SubTabItem<StaffSubTab>[] = [
+  { key: "drivers", label: "Drivers", icon: IdCard },
+  { key: "management", label: "Management Staff", icon: Users },
+  { key: "commissions", label: "Commission History", icon: Wallet },
+  { key: "deleted", label: "Soft-deleted", icon: Archive },
 ];
 
 // A person in a matrix, flattened to what the row needs. Drivers and staff

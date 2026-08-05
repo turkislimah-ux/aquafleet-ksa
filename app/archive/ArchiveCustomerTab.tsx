@@ -14,16 +14,20 @@
 // reached for.
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, FileText, Eye, X } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, Eye, X, Archive } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import type { ArchiveCustomerRow, ArchiveInvoiceRow } from "@/lib/db-types";
+import type { SubTabItem } from "./SubTabPicker";
+import {
+  PROJECT_STATUS_LABELS, PAYMENT_MODE_LABELS, COMMISSION_MODE_LABELS,
+} from "@/lib/db-types";
+import type { ArchiveCustomerRow, ArchiveInvoiceRow, ArchiveProjectRow } from "@/lib/db-types";
 
 export type CustomerSubTab = "invoices" | "deleted";
 
-export const CUSTOMER_SUB_TABS: { key: CustomerSubTab; label: string }[] = [
-  { key: "invoices", label: "Invoices" },
-  { key: "deleted", label: "Soft-deleted" },
+export const CUSTOMER_SUB_TABS: SubTabItem<CustomerSubTab>[] = [
+  { key: "invoices", label: "Invoices", icon: FileText },
+  { key: "deleted", label: "Soft-deleted", icon: Archive },
 ];
 
 // Paid / unpaid, plus the two states that are neither yet.
@@ -72,15 +76,24 @@ export default function ArchiveCustomerTab({
   subTab,
   customers,
   invoices,
+  projects,
   onOpenInvoice,
 }: {
   subTab: CustomerSubTab;
   customers: ArchiveCustomerRow[];
   invoices: ArchiveInvoiceRow[];
+  // The 1:1 project per customer (0015). A customer is archived as a side
+  // effect of archiving its project (0019), so the project is the rest of
+  // that record — shown in the archived-customer view.
+  projects: ArchiveProjectRow[];
   onOpenInvoice: (invoiceId: string, customerEmail: string | null) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [detailCustomer, setDetailCustomer] = useState<ArchiveCustomerRow | null>(null);
+  const projectByCustomer = useMemo(
+    () => new Map(projects.map((p) => [p.customer_id, p])),
+    [projects],
+  );
 
   const activeCustomers = useMemo(
     () =>
@@ -292,6 +305,7 @@ export default function ArchiveCustomerTab({
       {detailCustomer && (
         <ArchivedCustomerDetail
           customer={detailCustomer}
+          project={projectByCustomer.get(detailCustomer.id) ?? null}
           invoices={invoicesByCustomer.get(detailCustomer.id) ?? []}
           onOpenInvoice={onOpenInvoice}
           onClose={() => setDetailCustomer(null)}
@@ -303,22 +317,35 @@ export default function ArchiveCustomerTab({
 
 function ArchivedCustomerDetail({
   customer,
+  project,
   invoices,
   onOpenInvoice,
   onClose,
 }: {
   customer: ArchiveCustomerRow;
+  project: ArchiveProjectRow | null;
   invoices: ArchiveInvoiceRow[];
   onOpenInvoice: (invoiceId: string, customerEmail: string | null) => void;
   onClose: () => void;
 }) {
+  // REVENUE — collected means PAID. status 'paid' is the settled state
+  // (paid_at is stamped with it), so this counts what actually came in, not
+  // what was billed: a confirmed-but-unpaid invoice is a receivable, and
+  // adding it here would overstate the figure on the one screen where nobody
+  // can drill in to check.
+  const paid = invoices.filter((i) => i.status === "paid");
+  const collected = paid.reduce((n, i) => n + Number(i.grand_total_sar), 0);
+  const billed = invoices
+    .filter((i) => i.status !== "void" && i.status !== "draft" && i.status !== "review")
+    .reduce((n, i) => n + Number(i.grand_total_sar), 0);
+
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
       onClick={onClose}
     >
       <div
-        className="card w-full max-w-[720px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0"
+        className="card w-full max-w-[860px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0"
         onClick={(e) => e.stopPropagation()}
       >
         <div
@@ -338,6 +365,28 @@ function ArchivedCustomerDetail({
         </div>
 
         <div className="p-4 space-y-3">
+          {/* Revenue first — on an archived record the money question is the
+              one people open this for. */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <Stat
+              label="Total collected"
+              value={money(collected)}
+              hint={`${paid.length} paid invoice${paid.length === 1 ? "" : "s"}`}
+              strong
+            />
+            <Stat
+              label="Total billed"
+              value={money(billed)}
+              hint="Confirmed, paid and returned"
+            />
+            <Stat
+              label="Outstanding"
+              value={money(billed - collected)}
+              hint={billed - collected > 0 ? "Never collected" : "Fully settled"}
+            />
+          </div>
+
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Customer</div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <Field label="Name (Arabic)" value={customer.name_ar || "—"} />
             <Field label="Contact" value={customer.contact_name || "—"} />
@@ -346,6 +395,51 @@ function ArchivedCustomerDetail({
             <Field label="Archived on" value={fmtDate(customer.archived_at)} />
             <Field label="Customer since" value={fmtDate(customer.created_at)} />
           </div>
+
+          {/* THE PROJECT — a customer is archived as a side effect of
+              archiving its 1:1 project (0019), so without this the record was
+              only ever half the story. These are the Add-Project fields. */}
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Project</div>
+          {!project ? (
+            <p className="text-sm muted">
+              No project on record for this customer — unusual, since a customer is normally
+              archived alongside one.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <Field label="Project name" value={project.name} />
+              <Field label="Trip-ref prefix" value={project.initials} />
+              <Field label="Status" value={PROJECT_STATUS_LABELS[project.status] ?? project.status} />
+              <Field
+                label="Payment method"
+                value={project.payment_mode ? PAYMENT_MODE_LABELS[project.payment_mode] : "—"}
+              />
+              <Field label="Rate per trip" value={money(Number(project.rate_per_trip_sar))} />
+              <Field
+                label="Water type"
+                value={project.water_type === "potable" ? "Potable"
+                  : project.water_type === "non_potable" ? "Non-potable" : "—"}
+              />
+              <Field
+                label="Commission mode"
+                value={COMMISSION_MODE_LABELS[project.commission_mode] ?? project.commission_mode}
+              />
+              <Field label="Commission per trip" value={money(Number(project.commission_value))} />
+              <Field
+                label="Bump % per trip"
+                value={project.commission_mode === "scalable" ? `${project.commission_bump_pct}%` : "—"}
+              />
+              <Field label="Start date" value={fmtDate(project.start_date)} />
+              <Field label="End date" value={fmtDate(project.end_date)} />
+              <Field label="Location" value={project.location || "—"} />
+              {project.description && (
+                <div className="col-span-2 md:col-span-3">
+                  <div className="text-[11px] muted mb-0.5">Description</div>
+                  <div className="text-sm whitespace-pre-wrap">{project.description}</div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
             Invoices ({invoices.length})
@@ -407,6 +501,28 @@ function Field({ label, value }: { label: string; value: string }) {
     <div>
       <div className="text-[11px] muted mb-0.5">{label}</div>
       <div className="text-sm">{value}</div>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  hint,
+  strong,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  strong?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border p-3" style={{ borderColor: "rgb(var(--border))" }}>
+      <div className="text-[11px] muted uppercase tracking-wide">{label}</div>
+      <div className={cn("tabular-nums mt-0.5", strong ? "text-lg font-semibold" : "text-base font-medium")}>
+        {value}
+      </div>
+      {hint && <div className="text-[11px] muted mt-0.5">{hint}</div>}
     </div>
   );
 }

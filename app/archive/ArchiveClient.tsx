@@ -49,6 +49,7 @@ import type {
   ArchiveTruckRow,
   ArchiveCustomerRow,
   ArchiveInvoiceRow,
+  ArchiveProjectRow,
 } from "@/lib/db-types";
 import type { CommPayout, DriverLite } from "@/lib/commission-rows";
 import { linkedFieldFor, linkedFieldForDoc, readPersonLink, PERSON_ID_LABEL } from "@/lib/archive";
@@ -65,6 +66,7 @@ import ArchiveTruckTab, {
   type ArchiveTruckTabOutsourcedJob,
 } from "./ArchiveTruckTab";
 import ArchiveCustomerTab, { CUSTOMER_SUB_TABS, type CustomerSubTab } from "./ArchiveCustomerTab";
+import SubTabPicker from "./SubTabPicker";
 // The Finance tab's OWN invoice workspace, reused verbatim and mounted
 // READ-ONLY. Rebuilding a lookalike would mean two definitions of what a full
 // invoice looks like, and the archive's copy would drift the first time the
@@ -103,6 +105,7 @@ export default function ArchiveClient({
   outsourcedJobs,
   customers,
   invoices,
+  projects,
   today,
   error,
 }: {
@@ -119,6 +122,7 @@ export default function ArchiveClient({
   outsourcedJobs: ArchiveTruckTabOutsourcedJob[];
   customers: ArchiveCustomerRow[];
   invoices: ArchiveInvoiceRow[];
+  projects: ArchiveProjectRow[];
   today: string;
   error: string | null;
 }) {
@@ -209,6 +213,20 @@ export default function ArchiveClient({
   const truckGroups = useMemo(() => groups.filter((g) => g.tab === "truck"), [groups]);
   const trucksById = useMemo(() => new Map(trucks.map((t) => [t.id, t])), [trucks]);
   const typesByKey = useMemo(() => new Map(types.map((t) => [t.key, t])), [types]);
+
+  // Reference counts per type, derived from data this page ALREADY has —
+  // groups and documents are both in memory, so this needs no extra query.
+  // It decides whether the picker offers Delete; the FK is the real gate.
+  const typeUsage = useMemo(() => {
+    const m = new Map<string, number>();
+    const bump = (k: string | null) => {
+      if (!k) return;
+      m.set(k, (m.get(k) ?? 0) + 1);
+    };
+    for (const g of groups) bump(g.type_key);
+    for (const d of documents) bump(d.type_key);
+    return m;
+  }, [groups, documents]);
 
   const docsByGroup = useMemo(() => {
     const m = new Map<string, ArchiveDocument[]>();
@@ -527,22 +545,12 @@ export default function ArchiveClient({
           {/* Sub-tabs — pill row, deliberately NOT the underline style of the
               row above it, so two tab strips stacked on one page read as a
               hierarchy instead of competing for the same job. */}
-          <div className="flex items-center gap-1 flex-wrap">
-            {STAFF_SUB_TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setStaffSubTab(t.key)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-sm font-medium transition border",
-                  staffSubTab === t.key
-                    ? "bg-brand-500/10 border-brand-600 text-brand-700 dark:text-brand-300"
-                    : "border-transparent muted hover:bg-black/5 dark:hover:bg-white/5",
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <SubTabPicker
+            ariaLabel="Staff sub-sections"
+            items={STAFF_SUB_TABS}
+            value={staffSubTab}
+            onChange={setStaffSubTab}
+          />
 
           <ArchiveStaffTab
             subTab={staffSubTab}
@@ -584,22 +592,12 @@ export default function ArchiveClient({
         </div>
       ) : tab === "truck" ? (
         <div className="space-y-4">
-          <div className="flex items-center gap-1 flex-wrap">
-            {TRUCK_SUB_TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTruckSubTab(t.key)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-sm font-medium transition border",
-                  truckSubTab === t.key
-                    ? "bg-brand-500/10 border-brand-600 text-brand-700 dark:text-brand-300"
-                    : "border-transparent muted hover:bg-black/5 dark:hover:bg-white/5",
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <SubTabPicker
+            ariaLabel="Truck sub-sections"
+            items={TRUCK_SUB_TABS}
+            value={truckSubTab}
+            onChange={setTruckSubTab}
+          />
 
           <ArchiveTruckTab
             subTab={truckSubTab}
@@ -634,27 +632,18 @@ export default function ArchiveClient({
         </div>
       ) : tab === "customer" ? (
         <div className="space-y-4">
-          <div className="flex items-center gap-1 flex-wrap">
-            {CUSTOMER_SUB_TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setCustomerSubTab(t.key)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-sm font-medium transition border",
-                  customerSubTab === t.key
-                    ? "bg-brand-500/10 border-brand-600 text-brand-700 dark:text-brand-300"
-                    : "border-transparent muted hover:bg-black/5 dark:hover:bg-white/5",
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <SubTabPicker
+            ariaLabel="Customer sub-sections"
+            items={CUSTOMER_SUB_TABS}
+            value={customerSubTab}
+            onChange={setCustomerSubTab}
+          />
 
           <ArchiveCustomerTab
             subTab={customerSubTab}
             customers={customers}
             invoices={invoices}
+            projects={projects}
             onOpenInvoice={(id, email) => setOpenInvoice({ id, email })}
           />
         </div>
@@ -874,6 +863,7 @@ export default function ArchiveClient({
       {groupModalOpen && (
         <GroupModal
           types={types}
+          typeUsage={typeUsage}
           tab={editingGroup?.tab ?? tab}
           defaultSubjectKind={newGroupKind}
           editingGroup={editingGroup}

@@ -13,7 +13,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
-import { linkTarget, type PersonIdField } from "@/lib/archive";
+import { linkTarget, isStandingType, type PersonIdField } from "@/lib/archive";
 import type {
   ArchiveTab,
   ArchiveSubjectKind,
@@ -291,6 +291,57 @@ export async function updateArchiveDocument(
 // inline-add flow has one text field, same UX as leave types / staff roles /
 // repairer types, none of which prompt for a separate Arabic label either.
 // ---------------------------------------------------------------------------
+// Delete a document type. Refuses a standing type, and refuses one that is
+// still referenced.
+//
+// The usage check here is a COURTESY, not the guarantee: between checking and
+// deleting, someone could create a group using the type. That race is exactly
+// what the FK's ON DELETE RESTRICT is for — it turns the race into a clean
+// error instead of an orphaned reference, so this function checks first for a
+// readable message and lets the constraint be the backstop.
+export async function deleteArchiveDocumentType(
+  key: string,
+): Promise<{ error: string | null }> {
+  if (!key) return { error: "Type is required." };
+  if (isStandingType(key)) {
+    return { error: "Built-in types cannot be deleted. Retire it instead by leaving it unused." };
+  }
+
+  const supabase = createClient();
+
+  const [{ count: groupCount }, { count: docCount }] = await Promise.all([
+    supabase
+      .from("archive_document_groups")
+      .select("id", { count: "exact", head: true })
+      .eq("type_key", key),
+    supabase
+      .from("archive_documents")
+      .select("id", { count: "exact", head: true })
+      .eq("type_key", key),
+  ]);
+
+  const used = (groupCount ?? 0) + (docCount ?? 0);
+  if (used > 0) {
+    return {
+      error: `This type is used by ${groupCount ?? 0} group(s) and ${docCount ?? 0} document(s). It cannot be deleted while anything references it.`,
+    };
+  }
+
+  const { error } = await supabase.from("archive_document_types").delete().eq("key", key);
+  if (error) {
+    // 23503 = foreign_key_violation: something started using the type between
+    // the check above and this delete. Say so plainly rather than surfacing a
+    // raw constraint string.
+    if (error.code === "23503") {
+      return { error: "That type just came into use and can no longer be deleted." };
+    }
+    return { error: error.message };
+  }
+
+  revalidatePath("/archive");
+  return { error: null };
+}
+
 export async function addArchiveDocumentType(
   label: string,
 ): Promise<{ error: string | null; type?: ArchiveDocumentType }> {

@@ -22,6 +22,7 @@ import type {
   ArchiveTruckRow,
   ArchiveCustomerRow,
   ArchiveInvoiceRow,
+  ArchiveProjectRow,
   ArchiveDocument,
   ArchiveDocumentFile,
   ArchiveDocumentRenewal,
@@ -43,7 +44,7 @@ export default async function ArchivePage() {
     groupsRes, documentsRes, filesRes, renewalsRes, typesRes,
     driversRes, staffRes, payoutsRes,
     trucksRes, workOrdersRes, outsourcedJobsRes,
-    customersRes, invoicesRes,
+    customersRes, invoicesRes, projectsRes,
   ] = await Promise.all([
     supabase
       .from("archive_document_groups")
@@ -136,6 +137,13 @@ export default async function ArchivePage() {
       .from("invoices")
       .select("id, customer_id, invoice_number, status, grand_total_sar, period_start, period_end, confirmed_at, created_at, paid_at, voided_at")
       .order("created_at", { ascending: false }),
+    // The customer's 1:1 project (0015). Fetched for the archived-customer
+    // view, which shows the project's own Add-Project fields — a customer is
+    // archived as a side effect of archiving its project (0019), so the
+    // project IS the rest of that record.
+    supabase
+      .from("projects")
+      .select("id, customer_id, name, initials, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, payment_mode, water_type, default_station, start_date, end_date, status, location, description, created_at"),
   ]);
 
   const groups = (groupsRes.data ?? []) as ArchiveDocumentGroup[];
@@ -153,6 +161,7 @@ export default async function ArchivePage() {
   const outsourcedJobs = (outsourcedJobsRes.data ?? []) as ArchiveTruckTabOutsourcedJob[];
   const customers = (customersRes.data ?? []) as ArchiveCustomerRow[];
   const invoices = (invoicesRes.data ?? []) as ArchiveInvoiceRow[];
+  const projects = (projectsRes.data ?? []) as ArchiveProjectRow[];
 
   // Scope documents to the fetched groups. Written tab-agnostically in Phase
   // 1 and it kept working unchanged when the group query widened — the only
@@ -174,6 +183,7 @@ export default async function ArchivePage() {
     outsourcedJobsRes.error?.message ??
     customersRes.error?.message ??
     invoicesRes.error?.message ??
+    projectsRes.error?.message ??
     null;
 
   return (
@@ -191,6 +201,7 @@ export default async function ArchivePage() {
       outsourcedJobs={outsourcedJobs}
       customers={customers}
       invoices={invoices}
+      projects={projects}
       today={today}
       error={error}
     />

@@ -13,12 +13,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Trash2, FileText, Upload, User, Truck as TruckIcon, ChevronDown, Lock, Link as LinkIcon } from "lucide-react";
+import { X, Plus, Trash2, FileText, Upload, User, Truck as TruckIcon, ChevronDown, Lock, Link as LinkIcon } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
   ARCHIVE_GROUP_COLORS, ARCHIVE_STATUS_PILL, archiveStatusLabel, docStatus, groupDot,
-  linkedFieldFor, groupExpectsLink, PERSON_ID_LABEL,
+  linkedFieldFor, groupExpectsLink, isStandingType, PERSON_ID_LABEL,
   type PersonIdField, type LinkSubjectKind,
 } from "@/lib/archive";
 import type {
@@ -39,6 +39,7 @@ import {
   uploadArchiveDocumentFile,
   removeArchiveDocumentFile,
   addArchiveDocumentType,
+  deleteArchiveDocumentType,
   setPersonLinkedId,
 } from "./actions";
 
@@ -78,15 +79,60 @@ function TypePicker({
   types,
   value,
   subjectKind,
+  usageByKey,
   onChange,
+  onAdded,
+  onDeleted,
 }: {
   types: ArchiveDocumentType[];
   value: string;
   subjectKind: LinkSubjectKind | null;
+  // How many groups + documents reference each type. Delete is offered only
+  // at zero — the FK (ON DELETE RESTRICT on both referencing columns) is the
+  // real guarantee, this just avoids showing an action that would fail.
+  usageByKey: Map<string, number>;
   onChange: (key: string) => void;
+  onAdded: (t: ArchiveDocumentType) => void;
+  onDeleted: (key: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const selected = types.find((t) => t.key === value) ?? null;
+
+  async function submitNew() {
+    const label = newLabel.trim();
+    if (!label) return;
+    setBusy(true);
+    setErr(null);
+    const res = await addArchiveDocumentType(label);
+    setBusy(false);
+    if (res.error || !res.type) {
+      setErr(res.error ?? "Could not add type.");
+      return;
+    }
+    onAdded(res.type);
+    onChange(res.type.key);
+    setNewLabel("");
+    setAdding(false);
+    setOpen(false);
+  }
+
+  async function remove(key: string, label: string) {
+    if (!confirm(`Delete the "${label}" type? This cannot be undone.`)) return;
+    setBusy(true);
+    setErr(null);
+    const res = await deleteArchiveDocumentType(key);
+    setBusy(false);
+    if (res.error) {
+      setErr(res.error);
+      return;
+    }
+    if (value === key) onChange("");
+    onDeleted(key);
+  }
 
   return (
     <div className="relative">
@@ -113,24 +159,82 @@ function TypePicker({
             className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto scrollbar-thin rounded-lg border shadow-lg py-1"
             style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
           >
-            {types.map((t) => (
-              <li key={t.key}>
+            {types.map((t) => {
+              // Delete is offered ONLY for a user-added type with nothing
+              // referencing it. Built-ins are excluded outright: 'iqama',
+              // 'license' and 'registration' are the keys the linked mapping
+              // is defined against, so deleting one would break linking, and
+              // the rest are the base vocabulary.
+              const deletable = !isStandingType(t.key) && (usageByKey.get(t.key) ?? 0) === 0;
+              return (
+                <li key={t.key} className="flex items-stretch">
+                  <button
+                    type="button"
+                    onClick={() => { onChange(t.key); setOpen(false); }}
+                    className={cn(
+                      "flex-1 min-w-0 flex items-center justify-between gap-2 px-3 py-2 text-sm text-start hover:bg-black/5 dark:hover:bg-white/5",
+                      t.key === value && "bg-brand-500/10",
+                    )}
+                  >
+                    <span className="truncate">{t.label_en}</span>
+                    {/* RIGHT of the type text, per Turki. Shown when the type
+                        links for THIS group's population — an iqama type shows
+                        it for both, a license type only for drivers. */}
+                    {linkedFieldFor(t, subjectKind) && <LinkPill />}
+                  </button>
+                  {deletable && (
+                    <button
+                      type="button"
+                      onClick={() => remove(t.key, t.label_en)}
+                      disabled={busy}
+                      className="px-2 grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-40"
+                      title={`Delete "${t.label_en}"`}
+                      aria-label={`Delete ${t.label_en}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+
+            {/* Inline add — the same mechanism the Add-Document form uses, so
+                a type can be created from wherever it is first needed rather
+                than only from the other screen. */}
+            <li className="border-t mt-1 pt-1" style={{ borderColor: "rgb(var(--border))" }}>
+              {adding ? (
+                <div className="p-2 flex gap-2">
+                  <input
+                    value={newLabel}
+                    onChange={(e) => setNewLabel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); submitNew(); }
+                      if (e.key === "Escape") { setAdding(false); setNewLabel(""); }
+                    }}
+                    placeholder="New type name"
+                    className={cn(INPUT, "flex-1")}
+                    style={INPUT_STYLE}
+                    autoFocus
+                  />
+                  <Btn variant="primary" onClick={submitNew} disabled={busy || !newLabel.trim()}>
+                    {busy ? "…" : "Add"}
+                  </Btn>
+                </div>
+              ) : (
                 <button
                   type="button"
-                  onClick={() => { onChange(t.key); setOpen(false); }}
-                  className={cn(
-                    "w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-start hover:bg-black/5 dark:hover:bg-white/5",
-                    t.key === value && "bg-brand-500/10",
-                  )}
+                  onClick={() => setAdding(true)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-start text-brand-600 dark:text-brand-300 hover:bg-black/5 dark:hover:bg-white/5"
                 >
-                  <span className="truncate">{t.label_en}</span>
-                  {/* RIGHT of the type text, per Turki. Shown when the type
-                      links for THIS group's population — an iqama type shows
-                      it for both, a license type only for drivers. */}
-                  {linkedFieldFor(t, subjectKind) && <LinkPill />}
+                  <Plus className="h-3.5 w-3.5" />
+                  Add new type
                 </button>
-              </li>
-            ))}
+              )}
+            </li>
+
+            {err && (
+              <li className="px-3 py-2 text-[11px] text-rose-600 dark:text-rose-400">{err}</li>
+            )}
           </ul>
         </>
       )}
@@ -306,6 +410,7 @@ export function GroupModal({
   tab,
   defaultSubjectKind = "none",
   types,
+  typeUsage,
   editingGroup,
   onClose,
   onSaved,
@@ -314,6 +419,9 @@ export function GroupModal({
   // Offered as the group's type on staff/truck tabs. Carries the linked_*
   // columns, so the purple Link pill is read straight off the data.
   types: ArchiveDocumentType[];
+  // Reference counts per type key, so the picker only offers delete on a
+  // type nothing points at.
+  typeUsage: Map<string, number>;
   // Which population a NEW group is for. The caller passes the sub-tab the
   // user is standing in, so the picker below opens on the right answer
   // instead of making them restate it.
@@ -334,11 +442,22 @@ export function GroupModal({
   // type, which is what lets the LINK be decided once, at the group, instead
   // of per document.
   const [groupTypeKey, setGroupTypeKey] = useState(editingGroup?.type_key ?? "");
+  // Locally created / deleted types, merged in-flight so the picker reflects
+  // the change immediately instead of waiting for the page to refetch — same
+  // pattern the Add-Document form's inline add already uses.
+  const [localTypes, setLocalTypes] = useState<ArchiveDocumentType[]>([]);
+  const [deletedTypeKeys, setDeletedTypeKeys] = useState<string[]>([]);
+  const allGroupTypes = (() => {
+    const seen = new Set(types.map((t) => t.key));
+    return [...types, ...localTypes.filter((t) => !seen.has(t.key))].filter(
+      (t) => !deletedTypeKeys.includes(t.key),
+    );
+  })();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedLinkField = linkedFieldFor(
-    types.find((t) => t.key === groupTypeKey),
+    allGroupTypes.find((t) => t.key === groupTypeKey),
     subjectKind === "driver" ? "driver"
     : subjectKind === "staff" ? "staff"
     : subjectKind === "truck" ? "truck"
@@ -442,9 +561,9 @@ export function GroupModal({
           <label className="text-xs muted block mb-1">Document type *</label>
           {isEdit ? (
             <div className="px-3 py-2 rounded-lg border text-sm opacity-60 flex items-center gap-2" style={INPUT_STYLE}>
-              {types.find((t) => t.key === groupTypeKey)?.label_en ?? "—"}
+              {allGroupTypes.find((t) => t.key === groupTypeKey)?.label_en ?? "—"}
               {linkedFieldFor(
-                types.find((t) => t.key === groupTypeKey),
+                allGroupTypes.find((t) => t.key === groupTypeKey),
                 subjectKind === "driver" ? "driver"
                 : subjectKind === "staff" ? "staff"
                 : subjectKind === "truck" ? "truck"
@@ -459,7 +578,10 @@ export function GroupModal({
                   the dropdown itself. Same reason Inventory's PartPicker
                   exists rather than a restyled select. */}
               <TypePicker
-                types={types.filter((t) => t.active || t.key === groupTypeKey)}
+                types={allGroupTypes.filter((t) => t.active || t.key === groupTypeKey)}
+                usageByKey={typeUsage}
+                onAdded={(t) => setLocalTypes((prev) => [...prev, t])}
+                onDeleted={(key) => setDeletedTypeKeys((prev) => [...prev, key])}
                 value={groupTypeKey}
                 subjectKind={
                   subjectKind === "driver" ? "driver"

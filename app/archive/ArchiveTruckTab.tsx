@@ -24,10 +24,11 @@
 import { Fragment, useMemo, useState } from "react";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, FileText,
-  CornerDownRight, History, Eye, RotateCcw, X, Wrench, ArrowRight,
+  CornerDownRight, History, Eye, RotateCcw, X, Wrench, ArrowRight, Archive,
 } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { LinkPill } from "./ArchiveModals";
+import type { SubTabItem } from "./SubTabPicker";
 import { getMaintenanceJobDetail, type MaintenanceJobDetail } from "./actions";
 import { cn } from "@/lib/utils";
 import {
@@ -71,10 +72,10 @@ export type ArchiveTruckTabOutsourcedJob = {
 
 export type TruckSubTab = "documents" | "maintenance" | "deleted";
 
-export const TRUCK_SUB_TABS: { key: TruckSubTab; label: string }[] = [
-  { key: "documents", label: "Documents" },
-  { key: "maintenance", label: "Maintenance History" },
-  { key: "deleted", label: "Soft-deleted" },
+export const TRUCK_SUB_TABS: SubTabItem<TruckSubTab>[] = [
+  { key: "documents", label: "Documents", icon: FileText },
+  { key: "maintenance", label: "Maintenance History", icon: Wrench },
+  { key: "deleted", label: "Soft-deleted", icon: Archive },
 ];
 
 // Same reasoning as the Staff tab's: "Missing" is a ROW state, never a member
