@@ -381,6 +381,17 @@ export type ArchiveRenewInput = {
   issue_date: string | null;
   expiry_date: string | null;
   note: string | null;
+  // LINKED renewal (0089/0091/0092). Present only when the document's group
+  // type links to a subject field. When set, `reference_no`/`expiry_date`
+  // above are IGNORED — the new values go to the subject instead, and the
+  // parent document is written NULL for both, because 0092's guard refuses a
+  // linked document that carries either.
+  linked?: {
+    field: PersonIdField;
+    subjectId: string;
+    number: string | null;
+    expiry: string | null;
+  };
 };
 
 export async function renewArchiveDocument(
@@ -402,14 +413,44 @@ export async function renewArchiveDocument(
     .single();
   if (readErr || !current) return { error: readErr?.message ?? "Document not found." };
 
+  // LINKED RENEWAL (0089/0091/0092). For a linked document the number and
+  // expiry live on the SUBJECT, and 0092's guard now REFUSES a linked
+  // document that carries either — so this path cannot write them to the
+  // parent, and the outgoing values are not on the parent to snapshot from.
+  //
+  // The outgoing pair is read HERE, server-side, rather than trusted from the
+  // client: the history row is the only record that survives once the
+  // subject's own columns are overwritten, so it must reflect what was
+  // actually there a moment ago, not what a form believed.
+  let outgoing: { number: string | null; expiry: string | null } | null = null;
+  if (input.linked) {
+    const target = linkTarget(input.linked.field);
+    const { data: subject, error: subjErr } = await supabase
+      .from(target.table)
+      .select(`${target.numberColumn}, ${target.expiryColumn}`)
+      .eq("id", input.linked.subjectId)
+      .single();
+    if (subjErr) return { error: subjErr.message };
+    const row = subject as Record<string, string | null> | null;
+    outgoing = {
+      number: row?.[target.numberColumn] ?? null,
+      expiry: row?.[target.expiryColumn] ?? null,
+    };
+  }
+
   // STEP 1 — snapshot the outgoing version (append-only history).
+  //
+  // archive_document_renewals is HISTORY, not current state, so 0092's guard
+  // does not apply to it — which is what lets a linked document keep a
+  // truthful record of the number and expiry it used to have. Without this
+  // the history would record blanks and the previous number would be gone.
   const { data: renewal, error: renewalErr } = await supabase
     .from("archive_document_renewals")
     .insert({
       document_id: documentId,
-      reference_no: current.reference_no,
+      reference_no: outgoing ? outgoing.number : current.reference_no,
       issue_date: current.issue_date,
-      expiry_date: current.expiry_date,
+      expiry_date: outgoing ? outgoing.expiry : current.expiry_date,
       note: current.note,
       superseded_by: await actorEmail(supabase),
     })
@@ -432,15 +473,29 @@ export async function renewArchiveDocument(
   const { data: updated, error: updateErr } = await supabase
     .from("archive_documents")
     .update({
-      reference_no: input.reference_no?.trim() || null,
+      // A linked document stores NEITHER — forced null rather than merely
+      // left alone, so there is no path by which a stale value survives.
+      reference_no: input.linked ? null : (input.reference_no?.trim() || null),
       issue_date: input.issue_date || null,
-      expiry_date: input.expiry_date || null,
+      expiry_date: input.linked ? null : (input.expiry_date || null),
       note: input.note?.trim() || null,
     })
     .eq("id", documentId)
     .select("*")
     .single();
   if (updateErr) return { error: updateErr.message };
+
+  // STEP 4 (linked only) — the renewal's whole point: the SUBJECT's number
+  // and expiry move forward. Written LAST, after the history row exists, so a
+  // failure here leaves the old values in place with the snapshot already
+  // recorded, rather than moving the number with no record of what it was.
+  if (input.linked) {
+    const res = await setPersonLinkedId(input.linked.field, input.linked.subjectId, {
+      number: input.linked.number,
+      expiry: input.linked.expiry,
+    });
+    if (res.error) return { error: res.error };
+  }
 
   revalidatePath("/archive");
   return { error: null, document: updated as ArchiveDocument };

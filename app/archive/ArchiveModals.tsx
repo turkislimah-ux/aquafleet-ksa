@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Trash2, FileText, Upload, User, Truck as TruckIcon, ChevronDown, Link as LinkIcon } from "lucide-react";
+import { X, Trash2, FileText, Upload, User, Truck as TruckIcon, ChevronDown, Lock, Link as LinkIcon } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
@@ -52,6 +52,23 @@ export function LinkPill() {
       <LinkIcon className="h-3 w-3" />
       Link
     </span>
+  );
+}
+
+// A pulled, read-only value. Used wherever a linked number/expiry is SHOWN
+// rather than entered — Add attaches a document to a fact that already
+// exists, so a fresh-looking input there would invite typing a second copy of
+// it, which 0092 now refuses at the database anyway.
+function LockedValue({ value }: { value: string }) {
+  return (
+    <div
+      className="px-3 py-2 rounded-lg border text-sm opacity-60 cursor-not-allowed flex items-center gap-2 bg-black/[0.03] dark:bg-white/[0.03]"
+      style={INPUT_STYLE}
+      aria-disabled
+    >
+      <Lock className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">{value || "Not set"}</span>
+    </div>
   );
 }
 
@@ -702,10 +719,12 @@ export function DocumentModal({
     setSaving(true);
     setError(null);
 
-    // The person's number is saved FIRST for a linked document. If it fails,
-    // nothing else is written — better to save neither than to file a
-    // document whose ID number silently didn't stick.
-    if (idField && subject) {
+    // The subject's number is saved FIRST for a linked document — but ONLY
+    // on EDIT. On CREATE the fields are locked and pulled (Turki's UX lock):
+    // Add means "attach a document to the number that already exists", not
+    // "type a number here", so there is nothing new to write and nothing to
+    // accidentally overwrite on the subject's record.
+    if (idField && subject && isEdit) {
       const res = await setPersonLinkedId(idField, subject.id, {
         number: personNumber,
         expiry: personExpiry || null,
@@ -913,15 +932,26 @@ export function DocumentModal({
                 {PERSON_ID_LABEL[idField]} — {subject?.name}
                 <LinkPill />
               </label>
-              <input
-                value={personNumber}
-                onChange={(e) => setPersonNumber(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-              />
-              <p className="text-[11px] muted mt-1">
-                Saved on the person. This is the only place it is edited.
-              </p>
+              {isEdit ? (
+                <>
+                  <input
+                    value={personNumber}
+                    onChange={(e) => setPersonNumber(e.target.value)}
+                    className={INPUT}
+                    style={INPUT_STYLE}
+                  />
+                  <p className="text-[11px] muted mt-1">
+                    Saved on the subject&apos;s record. This is where it is edited.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <LockedValue value={personNumber} />
+                  <p className="text-[11px] muted mt-1">
+                    Already on the record — this document attaches to it.
+                  </p>
+                </>
+              )}
             </>
           ) : (
             <>
@@ -940,16 +970,27 @@ export function DocumentModal({
               <label className="text-xs muted flex items-center gap-2 mb-1">
                 Expiry date<LinkPill />
               </label>
-              <input
-                type="date"
-                value={personExpiry}
-                onChange={(e) => setPersonExpiry(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-              />
-              <p className="text-[11px] muted mt-1">
-                The person&apos;s expiry — this document&apos;s red/yellow status reads it.
-              </p>
+              {isEdit ? (
+                <>
+                  <input
+                    type="date"
+                    value={personExpiry}
+                    onChange={(e) => setPersonExpiry(e.target.value)}
+                    className={INPUT}
+                    style={INPUT_STYLE}
+                  />
+                  <p className="text-[11px] muted mt-1">
+                    The subject&apos;s expiry — this document&apos;s status reads it.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <LockedValue value={personExpiry ? new Date(personExpiry + "T00:00:00").toLocaleDateString() : ""} />
+                  <p className="text-[11px] muted mt-1">
+                    Renew to move it forward.
+                  </p>
+                </>
+              )}
             </>
           ) : (
             <>
@@ -1019,16 +1060,31 @@ export function DocumentModal({
 // ---------------------------------------------------------------------------
 export function RenewModal({
   document: doc,
+  linked,
   onClose,
   onSaved,
 }: {
   document: ArchiveDocument;
+  // Present when this document's group type links to a subject field
+  // (0089/0091). RENEW IS THE WRITE PATH for a linked number and expiry —
+  // Add only attaches to what already exists, so this is where a new Iqama,
+  // licence or registration period actually lands on the subject's record.
+  linked?: {
+    field: PersonIdField;
+    subjectId: string;
+    subjectName: string;
+    label: string;
+    currentNumber: string | null;
+    currentExpiry: string | null;
+  };
   onClose: () => void;
   onSaved: () => void;
 }) {
   // Prefill from the current version — a renewal usually keeps the same
-  // reference number and shifts the dates forward.
-  const [referenceNo, setReferenceNo] = useState(doc.reference_no ?? "");
+  // reference number and shifts the dates forward. For a LINKED document the
+  // current values live on the SUBJECT, not on the document, so they are
+  // seeded from there instead.
+  const [referenceNo, setReferenceNo] = useState(linked ? (linked.currentNumber ?? "") : (doc.reference_no ?? ""));
   const [issueDate, setIssueDate] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
   const [note, setNote] = useState(doc.note ?? "");
@@ -1050,6 +1106,18 @@ export function RenewModal({
       issue_date: issueDate || null,
       expiry_date: expiryDate || null,
       note: note || null,
+      // For a linked document the new number/expiry go to the SUBJECT and
+      // the parent is written null for both — 0092 refuses a linked document
+      // that carries either. The action reads the OUTGOING pair server-side
+      // for the history snapshot before overwriting them.
+      linked: linked
+        ? {
+            field: linked.field,
+            subjectId: linked.subjectId,
+            number: referenceNo || null,
+            expiry: expiryDate || null,
+          }
+        : undefined,
     });
     if (res.error) {
       setSaving(false);
@@ -1097,11 +1165,20 @@ export function RenewModal({
 
       <div className="rounded-lg px-3 py-2 text-xs bg-brand-500/10 text-brand-700 dark:text-brand-300">
         The current version is kept as history — its details and files stay retrievable.
+        {linked && ` The outgoing ${linked.label.toLowerCase()} and expiry are recorded there too.`}
       </div>
 
       <div>
-        <label className="text-xs muted block mb-1">New reference / ID number</label>
+        <label className="text-xs muted flex items-center gap-2 mb-1">
+          {linked ? `New ${linked.label.toLowerCase()} — ${linked.subjectName}` : "New reference / ID number"}
+          {linked && <LinkPill />}
+        </label>
         <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+        {linked && (
+          <p className="text-[11px] muted mt-1">
+            Saved on the subject&apos;s record. The current value is kept in this document&apos;s history.
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -1110,8 +1187,15 @@ export function RenewModal({
           <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} className={INPUT} style={INPUT_STYLE} autoFocus />
         </div>
         <div>
-          <label className="text-xs muted block mb-1">New expiry date</label>
+          <label className="text-xs muted flex items-center gap-2 mb-1">
+            New expiry date{linked && <LinkPill />}
+          </label>
           <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+          {linked && (
+            <p className="text-[11px] muted mt-1">
+              Moves the subject&apos;s expiry forward — every status reading it follows.
+            </p>
+          )}
         </div>
       </div>
 

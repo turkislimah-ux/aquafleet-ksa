@@ -273,6 +273,31 @@ export default function ArchiveClient({
   const detailDoc = detailDocId ? documents.find((d) => d.id === detailDocId) ?? null : null;
   const detailGroup = detailDoc ? groupsById.get(detailDoc.group_id) ?? null : null;
 
+  // Renew's linked payload — resolved from the document's OWN subject, same
+  // rule as everywhere else, so a renewal can never write to the wrong
+  // subject column.
+  const renewLinked = (() => {
+    if (!renewingDoc) return null;
+    const g = groupsById.get(renewingDoc.group_id);
+    const type = g?.type_key ? typesByKey.get(g.type_key) : null;
+    const field = linkedFieldForDoc(type, renewingDoc);
+    if (!field) return null;
+    const subject = renewingDoc.driver_id
+      ? driversById.get(renewingDoc.driver_id)
+      : renewingDoc.staff_id ? staffById.get(renewingDoc.staff_id)
+      : renewingDoc.truck_id ? trucksById.get(renewingDoc.truck_id) : undefined;
+    if (!subject) return null;
+    const cur = readPersonLink(field, subject);
+    return {
+      field,
+      subjectId: subject.id,
+      subjectName: "name" in subject ? subject.name : subject.plate,
+      label: PERSON_ID_LABEL[field],
+      currentNumber: cur.number,
+      currentExpiry: cur.expiry,
+    };
+  })();
+
   // For a linked document the reference IS the person's own number (0088) —
   // resolved here, where both the document and the person lists are in hand.
   const detailLinkedId = (() => {
@@ -876,7 +901,12 @@ export default function ArchiveClient({
       )}
 
       {renewingDoc && (
-        <RenewModal document={renewingDoc} onClose={closeModals} onSaved={closeModals} />
+        <RenewModal
+          document={renewingDoc}
+          linked={renewLinked ?? undefined}
+          onClose={closeModals}
+          onSaved={closeModals}
+        />
       )}
 
       {/* READ-ONLY mount: no lifecycle actions, no add-charge, no period edit.
