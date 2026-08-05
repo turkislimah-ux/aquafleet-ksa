@@ -13,10 +13,15 @@
 // can't be counted "expiring" in the summary while rendering "valid" in its
 // row. Same rule as lib/driver-state.ts / lib/truck-status.ts.
 //
-// Tabs: Company is live; Staff/Truck/Customer are rendered as real tabs with
-// an honest "coming in a later phase" state rather than hidden — same
-// "render the real layout, empty state until it lands" convention
-// FleetDetailClient.tsx and the original Maintenance OS tab both used.
+// ALL FOUR TABS ARE NOW LIVE (Company, Staff, Truck, Customer). The
+// "coming in a later phase" placeholder each one used to fall through to is
+// gone — with every branch handled it had become unreachable, and a dead
+// branch that says "later phase" is exactly the kind of stale reassurance
+// someone trusts a year from now.
+//
+// Each tab owns its own leaf module (ArchiveStaffTab / ArchiveTruckTab /
+// ArchiveCustomerTab); this file owns the shell, the summary, and every
+// popup they reach through callbacks.
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -42,6 +47,8 @@ import type {
   ArchiveStaffRow,
   ArchiveSubjectKind,
   ArchiveTruckRow,
+  ArchiveCustomerRow,
+  ArchiveInvoiceRow,
 } from "@/lib/db-types";
 import type { CommPayout, DriverLite } from "@/lib/commission-rows";
 import { linkedFieldFor, linkedFieldForDoc, readPersonLink, PERSON_ID_LABEL } from "@/lib/archive";
@@ -57,6 +64,12 @@ import ArchiveTruckTab, {
   type ArchiveTruckTabWorkOrder,
   type ArchiveTruckTabOutsourcedJob,
 } from "./ArchiveTruckTab";
+import ArchiveCustomerTab, { CUSTOMER_SUB_TABS, type CustomerSubTab } from "./ArchiveCustomerTab";
+// The Finance tab's OWN invoice workspace, reused verbatim and mounted
+// READ-ONLY. Rebuilding a lookalike would mean two definitions of what a full
+// invoice looks like, and the archive's copy would drift the first time the
+// real one changed.
+import InvoiceDetailModal from "../trips/InvoiceDetailModal";
 // The Staff page's OWN History tab, reused verbatim for the Commission
 // History sub-tab. One-way import (archive -> drivers); HistoryTab imports
 // only lib/ and components/, so there is no cycle to create. Reusing it is
@@ -88,6 +101,8 @@ export default function ArchiveClient({
   trucks,
   workOrders,
   outsourcedJobs,
+  customers,
+  invoices,
   today,
   error,
 }: {
@@ -102,6 +117,8 @@ export default function ArchiveClient({
   trucks: ArchiveTruckRow[];
   workOrders: ArchiveTruckTabWorkOrder[];
   outsourcedJobs: ArchiveTruckTabOutsourcedJob[];
+  customers: ArchiveCustomerRow[];
+  invoices: ArchiveInvoiceRow[];
   today: string;
   error: string | null;
 }) {
@@ -126,6 +143,8 @@ export default function ArchiveClient({
   const [highlightPersonId, setHighlightPersonId] = useState<string | null>(null);
   const [newGroupKind, setNewGroupKind] = useState<ArchiveSubjectKind>("none");
   const [truckSubTab, setTruckSubTab] = useState<TruckSubTab>("documents");
+  const [customerSubTab, setCustomerSubTab] = useState<CustomerSubTab>("invoices");
+  const [openInvoice, setOpenInvoice] = useState<{ id: string; email: string | null } | null>(null);
   const [highlightTruckId, setHighlightTruckId] = useState<string | null>(null);
   // WHOSE document the open DocumentModal is for. Set from the matrix row
   // that was clicked, cleared for company documents.
@@ -588,12 +607,32 @@ export default function ArchiveClient({
             onRestoreTruck={onRestoreTruck}
           />
         </div>
-      ) : tab !== "company" ? (
-        <Card>
-          <p className="text-sm muted p-6 text-center">
-            {TABS.find((t) => t.key === tab)?.label} documents — coming in a later phase.
-          </p>
-        </Card>
+      ) : tab === "customer" ? (
+        <div className="space-y-4">
+          <div className="flex items-center gap-1 flex-wrap">
+            {CUSTOMER_SUB_TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setCustomerSubTab(t.key)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-sm font-medium transition border",
+                  customerSubTab === t.key
+                    ? "bg-brand-500/10 border-brand-600 text-brand-700 dark:text-brand-300"
+                    : "border-transparent muted hover:bg-black/5 dark:hover:bg-white/5",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <ArchiveCustomerTab
+            subTab={customerSubTab}
+            customers={customers}
+            invoices={invoices}
+            onOpenInvoice={(id, email) => setOpenInvoice({ id, email })}
+          />
+        </div>
       ) : companyGroups.length === 0 ? (
         <Card>
           <div className="p-8 text-center">
@@ -839,6 +878,19 @@ export default function ArchiveClient({
       {renewingDoc && (
         <RenewModal document={renewingDoc} onClose={closeModals} onSaved={closeModals} />
       )}
+
+      {/* READ-ONLY mount: no lifecycle actions, no add-charge, no period edit.
+          The archive records what exists; the Finance tab remains the only
+          place an invoice moves. */}
+      <InvoiceDetailModal
+        open={!!openInvoice}
+        invoiceId={openInvoice?.id ?? null}
+        customerEmail={openInvoice?.email ?? null}
+        readOnly
+        onClose={() => setOpenInvoice(null)}
+        onBack={() => setOpenInvoice(null)}
+        onMutated={() => {}}
+      />
 
       {detailDoc && detailGroup && (
         <DocumentDetailModal

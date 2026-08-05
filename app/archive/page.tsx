@@ -20,6 +20,8 @@ import type {
   ArchiveDriverRow,
   ArchiveStaffRow,
   ArchiveTruckRow,
+  ArchiveCustomerRow,
+  ArchiveInvoiceRow,
   ArchiveDocument,
   ArchiveDocumentFile,
   ArchiveDocumentRenewal,
@@ -41,6 +43,7 @@ export default async function ArchivePage() {
     groupsRes, documentsRes, filesRes, renewalsRes, typesRes,
     driversRes, staffRes, payoutsRes,
     trucksRes, workOrdersRes, outsourcedJobsRes,
+    customersRes, invoicesRes,
   ] = await Promise.all([
     supabase
       .from("archive_document_groups")
@@ -118,6 +121,21 @@ export default async function ArchivePage() {
       .from("outsourced_jobs")
       .select("id, os_number, truck_id, title, status, start_date, closed_at")
       .order("start_date", { ascending: false }),
+    // Customer tab — READ-ONLY over customers + invoices. archived_at is the
+    // soft-delete marker from 0019; active AND archived are fetched together
+    // so the Soft-deleted sub-tab needs no second query.
+    supabase
+      .from("customers")
+      .select("id, name, name_ar, email, phone, contact_name, active, archived_at, created_at")
+      .order("name", { ascending: true }),
+    // The invoice CARDS only. The full invoice is loaded by
+    // InvoiceDetailModal itself when a card is opened — reusing that
+    // component means its own fetch stays the single definition of what a
+    // full invoice is.
+    supabase
+      .from("invoices")
+      .select("id, customer_id, invoice_number, status, grand_total_sar, period_start, period_end, confirmed_at, created_at, paid_at, voided_at")
+      .order("created_at", { ascending: false }),
   ]);
 
   const groups = (groupsRes.data ?? []) as ArchiveDocumentGroup[];
@@ -133,6 +151,8 @@ export default async function ArchivePage() {
   // than the full row types (which claim far more columns than are selected).
   const workOrders = (workOrdersRes.data ?? []) as ArchiveTruckTabWorkOrder[];
   const outsourcedJobs = (outsourcedJobsRes.data ?? []) as ArchiveTruckTabOutsourcedJob[];
+  const customers = (customersRes.data ?? []) as ArchiveCustomerRow[];
+  const invoices = (invoicesRes.data ?? []) as ArchiveInvoiceRow[];
 
   // Scope documents to the fetched groups. Written tab-agnostically in Phase
   // 1 and it kept working unchanged when the group query widened — the only
@@ -152,6 +172,8 @@ export default async function ArchivePage() {
     trucksRes.error?.message ??
     workOrdersRes.error?.message ??
     outsourcedJobsRes.error?.message ??
+    customersRes.error?.message ??
+    invoicesRes.error?.message ??
     null;
 
   return (
@@ -167,6 +189,8 @@ export default async function ArchivePage() {
       trucks={trucks}
       workOrders={workOrders}
       outsourcedJobs={outsourcedJobs}
+      customers={customers}
+      invoices={invoices}
       today={today}
       error={error}
     />

@@ -1249,6 +1249,39 @@ export type ArchiveTruckRow = {
   released_date: string | null;
 };
 
+// Customers for the Archive's Customer tab. archived_at is the soft-delete
+// marker added by 0019 (archiving a project archives its 1:1 customer) — note
+// it is NOT on the main Customer type, which predates it.
+export type ArchiveCustomerRow = {
+  id: string;
+  name: string;
+  name_ar: string | null;
+  email: string | null;
+  phone: string | null;
+  contact_name: string | null;
+  active: boolean;
+  archived_at: string | null;
+  created_at: string;
+};
+
+// Narrow invoice shape for the Customer tab's cards. Everything here IS
+// selected by app/archive/page.tsx.
+export type ArchiveInvoiceRow = {
+  id: string;
+  customer_id: string;
+  invoice_number: string | null;
+  status: InvoiceStatus;
+  grand_total_sar: number;
+  period_start: string;
+  period_end: string;
+  // confirmed_at is the ISSUE date (what the legal invoice header prints);
+  // created_at is the fallback for a draft that has never been issued.
+  confirmed_at: string | null;
+  created_at: string;
+  paid_at: string | null;
+  voided_at: string | null;
+};
+
 export type ArchiveStaffRow = {
   id: string;
   name: string;

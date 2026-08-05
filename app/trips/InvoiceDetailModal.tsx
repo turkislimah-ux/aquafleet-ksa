@@ -145,6 +145,7 @@ export default function InvoiceDetailModal({
   onClose,
   onBack,
   onMutated,
+  readOnly = false,
 }: {
   open: boolean;
   invoiceId: string | null;
@@ -156,6 +157,13 @@ export default function InvoiceDetailModal({
   onClose: () => void;
   onBack: () => void;
   onMutated: () => void;
+  // VIEW-ONLY mount (the Archive's Customer tab). The archive records what
+  // already exists; it is not a second place to move an invoice through its
+  // lifecycle. Everything that READS stays identical — the whole point of
+  // reusing this component rather than rebuilding a lookalike is that the
+  // archive shows the same invoice, laid out the same way, including print
+  // and PDF. Only the WRITE affordances are withheld.
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -540,7 +548,11 @@ export default function InvoiceDetailModal({
   if (!open || !invoiceId || !mounted) return null;
 
   const status = raw?.status;
-  const editable = raw ? canEditSpecialCharges(raw.status) : false;
+  // readOnly folds in here rather than at each call site: `editable` already
+  // governs every special-charge mutation, so one AND covers the add form,
+  // the remove buttons and the image upload together, with no chance of a
+  // fourth write path being added later and missing the gate.
+  const editable = raw && !readOnly ? canEditSpecialCharges(raw.status) : false;
   const canEmail = !!(raw && view && customerEmail);
 
   const isPrepaid = view?.paymentMode === "prepaid";
@@ -647,7 +659,7 @@ export default function InvoiceDetailModal({
                 <h2 className="text-xl font-semibold">
                   {raw.invoice_number ? `Invoice #${raw.invoice_number}` : "Invoice (draft — not yet numbered)"}
                 </h2>
-                {status === "draft" && editingPeriod ? (
+                {status === "draft" && !readOnly && editingPeriod ? (
                   <form onSubmit={onSavePeriod} className="no-print flex items-end gap-2 flex-wrap mt-1">
                     <label className="flex flex-col gap-1 text-xs">
                       <span className="font-medium">Period start</span>
@@ -961,7 +973,9 @@ export default function InvoiceDetailModal({
             {actionError && <p className="text-sm text-rose-600 dark:text-rose-400 no-print">{actionError}</p>}
             {pdfError && <p className="text-sm text-rose-600 dark:text-rose-400 no-print">{pdfError}</p>}
 
-            {/* Actions — status-dependent, not printed. */}
+            {/* Actions — status-dependent, not printed, and absent entirely
+                on a read-only mount. */}
+            {!readOnly && (
             <div className="no-print border-t border-app pt-4 space-y-3">
               {status === "draft" && !deletingDraft && (
                 <div className="flex items-center gap-2">
@@ -1161,6 +1175,7 @@ export default function InvoiceDetailModal({
                 </div>
               )}
             </div>
+            )}
 
             <div className="border-t border-app pt-3 text-[11px] muted flex items-center justify-between">
               <span>Generated {new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</span>
