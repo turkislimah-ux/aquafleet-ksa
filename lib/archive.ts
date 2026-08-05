@@ -181,13 +181,30 @@ export function groupDot(color: string | null): string {
 
 // The three real link targets. Each names both halves of the pair, because
 // the number and the expiry always move together.
-export type PersonIdField = "driver_iqama" | "driver_license" | "staff_iqama";
+// Named PersonIdField for historical reasons — trucks joined in 0091 and a
+// truck is not a person. Renaming would touch every call site for a wart; the
+// labels and messages users actually read all say the right thing.
+export type PersonIdField =
+  | "driver_iqama"
+  | "driver_license"
+  | "staff_iqama"
+  | "truck_registration";
+
+// The three subject kinds that can carry a link. Trucks joined in 0091.
+export type LinkSubjectKind = "driver" | "staff" | "truck";
+
+// Just the linked_* columns — so a caller can pass a whole ArchiveDocumentType
+// or any narrower object carrying them.
+export type LinkedFieldSource = Pick<
+  ArchiveDocumentType,
+  "linked_driver_field" | "linked_staff_field" | "linked_truck_field"
+>;
 
 export type LinkTarget = {
   field: PersonIdField;
-  table: "drivers" | "staff";
-  numberColumn: "iqama_number" | "license_number";
-  expiryColumn: "iqama_expiry" | "license_expiry";
+  table: "drivers" | "staff" | "trucks";
+  numberColumn: "iqama_number" | "license_number" | "vehicle_registration";
+  expiryColumn: "iqama_expiry" | "license_expiry" | "registration_expiry";
   label: string;
 };
 
@@ -203,6 +220,11 @@ const LINK_TARGETS: Record<PersonIdField, LinkTarget> = {
   staff_iqama: {
     field: "staff_iqama", table: "staff",
     numberColumn: "iqama_number", expiryColumn: "iqama_expiry", label: "Iqama ID",
+  },
+  truck_registration: {
+    field: "truck_registration", table: "trucks",
+    numberColumn: "vehicle_registration", expiryColumn: "registration_expiry",
+    label: "Vehicle Registration",
   },
 };
 
@@ -222,18 +244,25 @@ export function linkTarget(field: PersonIdField): LinkTarget {
  * type whose column for this subject is null (e.g. license on staff).
  */
 export function linkedFieldFor(
-  type: Pick<ArchiveDocumentType, "linked_driver_field" | "linked_staff_field"> | null | undefined,
-  subjectKind: "driver" | "staff" | null | undefined,
+  type: LinkedFieldSource | null | undefined,
+  subjectKind: LinkSubjectKind | null | undefined,
 ): PersonIdField | null {
   if (!type || !subjectKind) return null;
-  const column = subjectKind === "driver" ? type.linked_driver_field : type.linked_staff_field;
+  const column =
+    subjectKind === "driver" ? type.linked_driver_field
+    : subjectKind === "staff" ? type.linked_staff_field
+    : type.linked_truck_field;
   if (!column) return null;
   if (subjectKind === "driver") {
     if (column === "iqama_number") return "driver_iqama";
     if (column === "license_number") return "driver_license";
     return null;
   }
-  if (column === "iqama_number") return "staff_iqama";
+  if (subjectKind === "staff") {
+    if (column === "iqama_number") return "staff_iqama";
+    return null;
+  }
+  if (column === "vehicle_registration") return "truck_registration";
   return null;
 }
 
@@ -254,11 +283,12 @@ export function linkedFieldFor(
  * license — exactly matching the observed symptom. The SUBJECT decides, always.
  */
 export function linkedFieldForDoc(
-  type: Pick<ArchiveDocumentType, "linked_driver_field" | "linked_staff_field"> | null | undefined,
-  doc: { driver_id?: string | null; staff_id?: string | null },
+  type: LinkedFieldSource | null | undefined,
+  doc: { driver_id?: string | null; staff_id?: string | null; truck_id?: string | null },
 ): PersonIdField | null {
   if (doc.driver_id) return linkedFieldFor(type, "driver");
   if (doc.staff_id) return linkedFieldFor(type, "staff");
+  if (doc.truck_id) return linkedFieldFor(type, "truck");
   return null;
 }
 
@@ -271,17 +301,22 @@ export function linkedFieldForDoc(
  * back to storing the number on the document.
  */
 export function groupExpectsLink(
-  type: Pick<ArchiveDocumentType, "linked_driver_field" | "linked_staff_field"> | null | undefined,
-  subjectKind: "driver" | "staff" | null | undefined,
+  type: LinkedFieldSource | null | undefined,
+  subjectKind: LinkSubjectKind | null | undefined,
 ): boolean {
   if (!type || !subjectKind) return false;
-  return !!(subjectKind === "driver" ? type.linked_driver_field : type.linked_staff_field);
+  return !!(
+    subjectKind === "driver" ? type.linked_driver_field
+    : subjectKind === "staff" ? type.linked_staff_field
+    : type.linked_truck_field
+  );
 }
 
 export const PERSON_ID_LABEL: Record<PersonIdField, string> = {
   driver_iqama: "Iqama ID",
   staff_iqama: "Iqama ID",
   driver_license: "License ID",
+  truck_registration: "Vehicle Registration",
 };
 
 // The person's own number + expiry for a linked field. ONE reader, so the
@@ -289,14 +324,21 @@ export const PERSON_ID_LABEL: Record<PersonIdField, string> = {
 // about which of the person's columns this document is showing.
 export function readPersonLink(
   field: PersonIdField,
-  person: {
+  subject: {
     iqama_number?: string | null; iqama_expiry?: string | null;
     license_number?: string | null; license_expiry?: string | null;
+    vehicle_registration?: string | null; registration_expiry?: string | null;
   } | null | undefined,
 ): { number: string | null; expiry: string | null } {
-  if (!person) return { number: null, expiry: null };
+  if (!subject) return { number: null, expiry: null };
   if (field === "driver_license") {
-    return { number: person.license_number ?? null, expiry: person.license_expiry ?? null };
+    return { number: subject.license_number ?? null, expiry: subject.license_expiry ?? null };
   }
-  return { number: person.iqama_number ?? null, expiry: person.iqama_expiry ?? null };
+  if (field === "truck_registration") {
+    return {
+      number: subject.vehicle_registration ?? null,
+      expiry: subject.registration_expiry ?? null,
+    };
+  }
+  return { number: subject.iqama_number ?? null, expiry: subject.iqama_expiry ?? null };
 }

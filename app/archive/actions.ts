@@ -576,7 +576,10 @@ export async function setPersonLinkedId(
   // Both pages read these columns, so both are revalidated — the Archive
   // shows the document row, the Staff page shows the profile field.
   revalidatePath("/archive");
+  // Both pages that show these read them: /drivers for a person, /fleet for a
+  // truck. Revalidating both is cheaper than deciding which one to skip.
   revalidatePath("/drivers");
+  revalidatePath("/fleet");
   return { error: null };
 }
 
@@ -606,6 +609,35 @@ export async function restoreDriver(driverId: string): Promise<{ error: string |
   return { error: null };
 }
 
+// RESTORE a soft-deleted TRUCK. Turki's call: clear all four termination
+// fields, not just the two that hide it.
+//
+// A truck that is back in service has no "sold for X, released on Y" — leaving
+// termination_reason / termination_price / released_date set would mean the
+// Fleet page can show a live, working truck still carrying a sale price, which
+// reads as a contradiction everywhere those fields appear, and a later
+// re-termination would overwrite them anyway. The cost is real and worth
+// stating: if the truck was genuinely sold and restored by mistake, the sale
+// price is gone and has to be re-entered.
+export async function restoreTruck(truckId: string): Promise<{ error: string | null }> {
+  if (!truckId) return { error: "Truck is required." };
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("trucks")
+    .update({
+      active: true,
+      terminated_at: null,
+      termination_reason: null,
+      termination_price: null,
+      released_date: null,
+    })
+    .eq("id", truckId);
+  if (error) return { error: error.message };
+  revalidatePath("/archive");
+  revalidatePath("/fleet");
+  return { error: null };
+}
+
 export async function restoreStaff(staffId: string): Promise<{ error: string | null }> {
   if (!staffId) return { error: "Staff member is required." };
   const supabase = createClient();
@@ -617,4 +649,196 @@ export async function restoreStaff(staffId: string): Promise<{ error: string | n
   revalidatePath("/archive");
   revalidatePath("/drivers");
   return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// MAINTENANCE JOB DETAIL — read-only, for the Truck tab's history sub-tab.
+//
+// Fetched ON DEMAND (when a row is clicked) rather than loaded with the page.
+// The archive would otherwise have to pull every work-order part line, every
+// FIFO consumption row and every workshop payment in the database on every
+// render, to populate a popup that is usually never opened. This is a read
+// with no writes, so lazily fetching it costs nothing but a round trip.
+//
+// DISPLAY ONLY. The archive shows this history; the Maintenance page remains
+// the only place a job is created or changed.
+// ---------------------------------------------------------------------------
+export type MaintenanceJobDetail = {
+  kind: "in_house" | "outsourced";
+  ref: string;
+  title: string;
+  status: string;
+  fields: { label: string; value: string }[];
+  // In-house: the parts lines with what was actually drawn from stock.
+  // Outsourced: the repairer payment lines.
+  lines: { label: string; sub: string | null; qty: string; amount: string }[];
+  linesTitle: string;
+  linesEmpty: string;
+  total: string | null;
+  note: string | null;
+  error: string | null;
+};
+
+function money(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  return `${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SAR`;
+}
+
+function dateOnly(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString();
+}
+
+export async function getMaintenanceJobDetail(
+  kind: "in_house" | "outsourced",
+  jobId: string,
+): Promise<MaintenanceJobDetail | { error: string }> {
+  if (!jobId) return { error: "Missing job." };
+  const supabase = createClient();
+
+  if (kind === "in_house") {
+    const { data: wo, error: woErr } = await supabase
+      .from("work_orders")
+      .select(
+        "id, wo_number, title, type, priority, status, opened_at, start_date, due_by, closed_at, assigned_mechanic_id, actual_cost_sar, labor_hours, labor_rate_sar, mechanic_notes, odometer_at_service, created_by, completed_by",
+      )
+      .eq("id", jobId)
+      .single();
+    if (woErr || !wo) return { error: woErr?.message ?? "Work order not found." };
+
+    const [{ data: mech }, { data: parts }] = await Promise.all([
+      supabase.from("staff").select("name").eq("id", wo.assigned_mechanic_id).maybeSingle(),
+      supabase
+        .from("work_order_parts")
+        .select("id, part_id, qty, unit_price_sar")
+        .eq("work_order_id", jobId),
+    ]);
+
+    const partIds = (parts ?? []).map((p) => p.part_id as string);
+    const wopIds = (parts ?? []).map((p) => p.id as string);
+
+    // The CONSUMPTION ledger (0065) keys off work_order_part_id, not the work
+    // order — and it records both directions, so a returned quantity has to be
+    // netted off rather than counted as a second draw.
+    const [{ data: partRows }, { data: cons }] = await Promise.all([
+      partIds.length
+        ? supabase.from("parts").select("id, name, sku, unit").in("id", partIds)
+        : Promise.resolve({ data: [] as { id: string; name: string; sku: string; unit: string | null }[] }),
+      wopIds.length
+        ? supabase
+            .from("work_order_part_consumptions")
+            .select("work_order_part_id, direction, qty, unit_price_sar")
+            .in("work_order_part_id", wopIds)
+        : Promise.resolve({ data: [] as { work_order_part_id: string; direction: string; qty: number; unit_price_sar: number }[] }),
+    ]);
+
+    const partById = new Map((partRows ?? []).map((p) => [p.id as string, p]));
+    const consumedByWop = new Map<string, { qty: number; value: number }>();
+    for (const c of cons ?? []) {
+      const sign = c.direction === "return" ? -1 : 1;
+      const cur = consumedByWop.get(c.work_order_part_id as string) ?? { qty: 0, value: 0 };
+      cur.qty += sign * Number(c.qty);
+      cur.value += sign * Number(c.qty) * Number(c.unit_price_sar);
+      consumedByWop.set(c.work_order_part_id as string, cur);
+    }
+
+    return {
+      kind: "in_house",
+      ref: wo.wo_number as string,
+      title: wo.title as string,
+      status: wo.status as string,
+      fields: [
+        { label: "Type", value: String(wo.type ?? "—") },
+        { label: "Priority", value: String(wo.priority ?? "—") },
+        { label: "Mechanic", value: mech?.name ?? "—" },
+        { label: "Opened", value: dateOnly(wo.opened_at as string) },
+        { label: "Started", value: dateOnly(wo.start_date as string | null) },
+        { label: "Due by", value: dateOnly(wo.due_by as string) },
+        { label: "Closed", value: dateOnly(wo.closed_at as string | null) },
+        { label: "Odometer", value: wo.odometer_at_service != null ? `${wo.odometer_at_service} km` : "—" },
+        { label: "Labor hours", value: String(wo.labor_hours ?? "—") },
+        { label: "Labor rate", value: money(wo.labor_rate_sar as number | null) },
+        { label: "Created by", value: (wo.created_by as string | null) ?? "—" },
+        { label: "Completed by", value: (wo.completed_by as string | null) ?? "—" },
+      ],
+      linesTitle: "Parts consumed",
+      linesEmpty: "No parts were consumed on this work order.",
+      lines: (parts ?? []).map((p) => {
+        const part = partById.get(p.part_id as string);
+        const drawn = consumedByWop.get(p.id as string);
+        return {
+          label: part?.name ?? "Unknown part",
+          sub: part?.sku ? `${part.sku}${part.unit ? ` · ${part.unit}` : ""}` : null,
+          // Planned quantity vs what the FIFO ledger actually drew. They
+          // normally match; showing both means a reversal or a partial draw
+          // is visible instead of hidden behind one number.
+          qty: drawn ? `${drawn.qty} of ${p.qty}` : `${p.qty} planned`,
+          amount: drawn ? money(drawn.value) : money(Number(p.qty) * Number(p.unit_price_sar)),
+        };
+      }),
+      // Parts-only, per 0079's boundary — labour is shown above as hours and
+      // rate and is deliberately NOT added into this figure.
+      total: `Parts total ${money(wo.actual_cost_sar as number | null)}`,
+      note: (wo.mechanic_notes as string | null) ?? null,
+      error: null,
+    };
+  }
+
+  const { data: job, error: jobErr } = await supabase
+    .from("outsourced_jobs")
+    .select(
+      "id, os_number, title, type, status, start_date, estimated_finish, closed_at, responsible_mechanic_id, notes, created_by, completed_by",
+    )
+    .eq("id", jobId)
+    .single();
+  if (jobErr || !job) return { error: jobErr?.message ?? "Outsourced job not found." };
+
+  const [{ data: mech }, { data: payments }] = await Promise.all([
+    supabase.from("staff").select("name").eq("id", job.responsible_mechanic_id).maybeSingle(),
+    supabase
+      .from("workshop_payments")
+      .select("id, repairer_id, invoice_number, invoice_date, subtotal_sar, vat_sar, discount_sar, grand_total_sar, note")
+      .eq("outsourced_job_id", jobId),
+  ]);
+
+  const repairerIds = [...new Set((payments ?? []).map((p) => p.repairer_id as string))];
+  const { data: repairers } = repairerIds.length
+    ? await supabase.from("repairers").select("id, name").in("id", repairerIds)
+    : { data: [] as { id: string; name: string }[] };
+  const repairerById = new Map((repairers ?? []).map((r) => [r.id as string, r.name as string]));
+
+  const grand = (payments ?? []).reduce((n, p) => n + Number(p.grand_total_sar), 0);
+
+  return {
+    kind: "outsourced",
+    ref: job.os_number as string,
+    title: job.title as string,
+    status: job.status as string,
+    fields: [
+      { label: "Type", value: String(job.type ?? "—") },
+      { label: "Responsible mechanic", value: mech?.name ?? "—" },
+      { label: "Started", value: dateOnly(job.start_date as string) },
+      { label: "Estimated finish", value: dateOnly(job.estimated_finish as string) },
+      { label: "Closed", value: dateOnly(job.closed_at as string | null) },
+      { label: "Created by", value: (job.created_by as string | null) ?? "—" },
+      { label: "Completed by", value: (job.completed_by as string | null) ?? "—" },
+    ],
+    linesTitle: "Workshop payments",
+    linesEmpty: "No workshop payment recorded for this job.",
+    lines: (payments ?? []).map((p) => ({
+      label: repairerById.get(p.repairer_id as string) ?? "Unknown repairer",
+      sub: [
+        p.invoice_number ? `Invoice ${p.invoice_number}` : null,
+        p.invoice_date ? dateOnly(p.invoice_date as string) : null,
+        Number(p.discount_sar) > 0 ? `Discount ${money(p.discount_sar as number)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || null,
+      qty: `${money(p.subtotal_sar as number)} + ${money(p.vat_sar as number)} VAT`,
+      amount: money(p.grand_total_sar as number),
+    })),
+    total: (payments ?? []).length > 0 ? `Total paid ${money(grand)}` : null,
+    note: (job.notes as string | null) ?? null,
+    error: null,
+  };
 }

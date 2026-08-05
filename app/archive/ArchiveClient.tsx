@@ -41,15 +41,22 @@ import type {
   ArchiveDriverRow,
   ArchiveStaffRow,
   ArchiveSubjectKind,
+  ArchiveTruckRow,
 } from "@/lib/db-types";
 import type { CommPayout, DriverLite } from "@/lib/commission-rows";
 import { linkedFieldFor, linkedFieldForDoc, readPersonLink, PERSON_ID_LABEL } from "@/lib/archive";
 import {
   deleteArchiveGroup, deleteArchiveDocument, getArchiveFileSignedUrls,
-  restoreDriver, restoreStaff,
+  restoreDriver, restoreStaff, restoreTruck,
 } from "./actions";
 import { GroupModal, DocumentModal, RenewModal, DocumentDetailModal } from "./ArchiveModals";
 import ArchiveStaffTab, { STAFF_SUB_TABS, type StaffSubTab } from "./ArchiveStaffTab";
+import ArchiveTruckTab, {
+  TRUCK_SUB_TABS,
+  type TruckSubTab,
+  type ArchiveTruckTabWorkOrder,
+  type ArchiveTruckTabOutsourcedJob,
+} from "./ArchiveTruckTab";
 // The Staff page's OWN History tab, reused verbatim for the Commission
 // History sub-tab. One-way import (archive -> drivers); HistoryTab imports
 // only lib/ and components/, so there is no cycle to create. Reusing it is
@@ -78,6 +85,9 @@ export default function ArchiveClient({
   drivers,
   staff,
   payouts,
+  trucks,
+  workOrders,
+  outsourcedJobs,
   today,
   error,
 }: {
@@ -89,6 +99,9 @@ export default function ArchiveClient({
   drivers: ArchiveDriverRow[];
   staff: ArchiveStaffRow[];
   payouts: CommPayout[];
+  trucks: ArchiveTruckRow[];
+  workOrders: ArchiveTruckTabWorkOrder[];
+  outsourcedJobs: ArchiveTruckTabOutsourcedJob[];
   today: string;
   error: string | null;
 }) {
@@ -112,9 +125,13 @@ export default function ArchiveClient({
   // source of truth for where you are now).
   const [highlightPersonId, setHighlightPersonId] = useState<string | null>(null);
   const [newGroupKind, setNewGroupKind] = useState<ArchiveSubjectKind>("none");
+  const [truckSubTab, setTruckSubTab] = useState<TruckSubTab>("documents");
+  const [highlightTruckId, setHighlightTruckId] = useState<string | null>(null);
   // WHOSE document the open DocumentModal is for. Set from the matrix row
   // that was clicked, cleared for company documents.
-  const [docSubject, setDocSubject] = useState<{ kind: "driver" | "staff"; id: string; name: string } | undefined>(undefined);
+  const [docSubject, setDocSubject] = useState<
+    { kind: "driver" | "staff" | "truck"; id: string; name: string; linkedNumber?: string | null; linkedExpiry?: string | null } | undefined
+  >(undefined);
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -124,6 +141,20 @@ export default function ArchiveClient({
     const sub = p.get("sub");
     if (sub === "drivers" || sub === "management" || sub === "commissions" || sub === "deleted") {
       setStaffSubTab(sub);
+    }
+    const truckSub = p.get("trucksub");
+    if (truckSub === "documents" || truckSub === "maintenance" || truckSub === "deleted") {
+      setTruckSubTab(truckSub);
+    }
+    const truck = p.get("truck");
+    if (truck) {
+      setHighlightTruckId(truck);
+      requestAnimationFrame(() => {
+        document.querySelector(`[data-truck="${truck}"]`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      });
     }
     const person = p.get("person");
     if (person) {
@@ -156,6 +187,8 @@ export default function ArchiveClient({
   // Groups arrive for every fetched tab; each tab renders its own slice.
   const companyGroups = useMemo(() => groups.filter((g) => g.tab === "company"), [groups]);
   const staffGroups = useMemo(() => groups.filter((g) => g.tab === "staff"), [groups]);
+  const truckGroups = useMemo(() => groups.filter((g) => g.tab === "truck"), [groups]);
+  const trucksById = useMemo(() => new Map(trucks.map((t) => [t.id, t])), [trucks]);
   const typesByKey = useMemo(() => new Map(types.map((t) => [t.key, t])), [types]);
 
   const docsByGroup = useMemo(() => {
@@ -199,17 +232,21 @@ export default function ArchiveClient({
         // counts just because the document itself stores no date.
         const g = groupsById.get(d.group_id);
         const kind =
-          g?.subject_kind === "driver" ? "driver" : g?.subject_kind === "staff" ? "staff" : null;
+          g?.subject_kind === "driver" ? "driver"
+          : g?.subject_kind === "staff" ? "staff"
+          : g?.subject_kind === "truck" ? "truck"
+          : null;
         // From the document's own subject — see linkedFieldForDoc's note on
         // the iqama both-set case.
         const field =
           linkedFieldForDoc(g?.type_key ? typesByKey.get(g.type_key) : null, d) ??
           linkedFieldFor(g?.type_key ? typesByKey.get(g.type_key) : null, kind);
         if (!field) return d.expiry_date;
-        const person = d.driver_id
+        const subject = d.driver_id
           ? driversById.get(d.driver_id)
-          : d.staff_id ? staffById.get(d.staff_id) : undefined;
-        return readPersonLink(field, person).expiry;
+          : d.staff_id ? staffById.get(d.staff_id)
+          : d.truck_id ? trucksById.get(d.truck_id) : undefined;
+        return readPersonLink(field, subject).expiry;
       }),
     [documents, groupsById, typesByKey, driversById, staffById, today],
   );
@@ -224,19 +261,21 @@ export default function ArchiveClient({
     const kind =
       detailGroup.subject_kind === "driver" ? "driver"
       : detailGroup.subject_kind === "staff" ? "staff"
+      : detailGroup.subject_kind === "truck" ? "truck"
       : null;
     const type = detailGroup.type_key ? typesByKey.get(detailGroup.type_key) : null;
     const field = linkedFieldForDoc(type, detailDoc) ?? linkedFieldFor(type, kind);
     if (!field) return null;
-    const person = detailDoc.driver_id
+    const subject = detailDoc.driver_id
       ? driversById.get(detailDoc.driver_id)
-      : detailDoc.staff_id ? staffById.get(detailDoc.staff_id) : undefined;
-    const linked = readPersonLink(field, person);
+      : detailDoc.staff_id ? staffById.get(detailDoc.staff_id)
+      : detailDoc.truck_id ? trucksById.get(detailDoc.truck_id) : undefined;
+    const linked = readPersonLink(field, subject);
     return {
       label: PERSON_ID_LABEL[field],
       value: linked.number,
       expiry: linked.expiry,
-      personName: person?.name ?? "",
+      personName: subject ? ("name" in subject ? subject.name : subject.plate) : "",
     };
   })();
 
@@ -293,6 +332,18 @@ export default function ArchiveClient({
     router.refresh();
   }
 
+  async function onRestoreTruck(t: ArchiveTruckRow) {
+    if (!confirm(
+      `Restore ${t.plate} to the active fleet? Its termination reason, price and released date will be cleared.`,
+    )) return;
+    const res = await restoreTruck(t.id);
+    if (res.error) {
+      setActionError(res.error);
+      return;
+    }
+    router.refresh();
+  }
+
   async function openFile(path: string) {
     const res = await getArchiveFileSignedUrls([path]);
     if (res.error || !res.urls?.[path]) {
@@ -315,6 +366,18 @@ export default function ArchiveClient({
       kind,
       id: personId,
       name,
+      linkedNumber: linked.number,
+      linkedExpiry: linked.expiry,
+    };
+  }
+
+  function makeTruckSubject(g: ArchiveDocumentGroup, truck: ArchiveTruckRow) {
+    const field = linkedFieldFor(g.type_key ? typesByKey.get(g.type_key) : null, "truck");
+    const linked = field ? readPersonLink(field, truck) : { number: null, expiry: null };
+    return {
+      kind: "truck" as const,
+      id: truck.id,
+      name: truck.plate,
       linkedNumber: linked.number,
       linkedExpiry: linked.expiry,
     };
@@ -346,6 +409,13 @@ export default function ArchiveClient({
               onClick={() => { setEditingGroup(null); setNewGroupKind("none"); setGroupModalOpen(true); }}
             >
               <Plus className="h-4 w-4" />Create Group
+            </Btn>
+          ) : tab === "truck" && truckSubTab === "documents" ? (
+            <Btn
+              variant="primary"
+              onClick={() => { setEditingGroup(null); setNewGroupKind("truck"); setGroupModalOpen(true); }}
+            >
+              <Plus className="h-4 w-4" />Create Truck Group
             </Btn>
           ) : tab === "staff" && (staffSubTab === "drivers" || staffSubTab === "management") ? (
             <Btn
@@ -466,6 +536,56 @@ export default function ArchiveClient({
             onDeleteGroup={onDeleteGroup}
             onRestoreDriver={onRestoreDriver}
             onRestoreStaff={onRestoreStaff}
+          />
+        </div>
+      ) : tab === "truck" ? (
+        <div className="space-y-4">
+          <div className="flex items-center gap-1 flex-wrap">
+            {TRUCK_SUB_TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTruckSubTab(t.key)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-sm font-medium transition border",
+                  truckSubTab === t.key
+                    ? "bg-brand-500/10 border-brand-600 text-brand-700 dark:text-brand-300"
+                    : "border-transparent muted hover:bg-black/5 dark:hover:bg-white/5",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <ArchiveTruckTab
+            subTab={truckSubTab}
+            groups={truckGroups}
+            documents={documents}
+            filesByDoc={filesByDoc}
+            renewalsByDoc={renewalsByDoc}
+            trucks={trucks}
+            types={types}
+            workOrders={workOrders}
+            outsourcedJobs={outsourcedJobs}
+            today={today}
+            highlightTruckId={highlightTruckId}
+            onAddDocument={(g, truck) => {
+              setEditingDoc(null);
+              setDocSubject(makeTruckSubject(g, truck));
+              setDocModalGroupId(g.id);
+            }}
+            onEditDocument={(d, g, truck) => {
+              setEditingDoc(d);
+              setDocSubject(makeTruckSubject(g, truck));
+              setDocModalGroupId(g.id);
+            }}
+            onRenewDocument={setRenewingDoc}
+            onDeleteDocument={onDeleteDocument}
+            onOpenDocument={(d) => setDetailDocId(d.id)}
+            onOpenFile={openFile}
+            onEditGroup={(g) => { setEditingGroup(g); setGroupModalOpen(true); }}
+            onDeleteGroup={onDeleteGroup}
+            onRestoreTruck={onRestoreTruck}
           />
         </div>
       ) : tab !== "company" ? (

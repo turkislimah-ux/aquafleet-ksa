@@ -254,6 +254,9 @@ export default function FleetClient({
             <tr>
               <TH>Plate</TH>
               <TH>Model</TH>
+              {/* Vehicle ID = trucks.vehicle_registration (0091). Sits beside
+                  Model because both answer "which vehicle is this". */}
+              <TH>Vehicle ID</TH>
               <TH>Station</TH>
               <TH>Status</TH>
               <TH>Driver</TH>
@@ -269,7 +272,7 @@ export default function FleetClient({
             {list.length === 0 && (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={12}
                   className="py-6 px-3 border-t text-center muted text-sm"
                   style={{ borderColor: "rgb(var(--border))" }}
                 >
@@ -291,6 +294,7 @@ export default function FleetClient({
                   {tr.model ?? "—"}
                   {tr.year ? <span className="muted"> · {tr.year}</span> : null}
                 </TD>
+                <TD className="font-mono text-xs">{tr.vehicle_registration || "—"}</TD>
                 <TD>{tr.home_station ? stationNameById.get(tr.home_station) ?? "—" : "—"}</TD>
                 <TD>
                   <StatusPill status={truckStatusById[tr.id] ?? "idle"} label={TRUCK_OPS_STATE_LABELS[truckStatusById[tr.id] ?? "idle"]} />

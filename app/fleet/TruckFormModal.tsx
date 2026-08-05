@@ -24,6 +24,7 @@ import { type OperationStation } from "@/lib/db-types";
 import type { TruckRow, DriverLite } from "./page";
 import { createTruck, updateTruck } from "./actions";
 import OperationStationField from "@/components/OperationStationField";
+import LinkedIdField from "@/components/LinkedIdField";
 import PlateInput from "@/components/PlateInput";
 
 const CAPACITY_OPTIONS_M3 = [33, 18, 6] as const;
@@ -141,6 +142,31 @@ export default function TruckFormModal({
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">VIN</span>
             <input name="vin" defaultValue={t?.vin ?? ""} className={INPUT} style={INPUT_STYLE} />
+          </label>
+
+          {/* LINKED IDENTITY FIELDS (0091) — editable ONLY when adding, as the
+              seed. After that the ARCHIVE is the single edit point: its
+              registration documents read and write these very columns, so a
+              second editor here would be a second way to change one fact.
+              Same treatment as the Staff page's Iqama/License fields. */}
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted">Vehicle Registration</span>
+            <LinkedIdField
+              name="vehicle_registration"
+              value={t?.vehicle_registration ?? ""}
+              locked={isEdit}
+              archiveHref={t?.id ? `/archive?tab=truck&trucksub=documents&truck=${t.id}` : null}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="muted">Registration expiry</span>
+            <LinkedIdField
+              name="registration_expiry"
+              type="date"
+              value={dateInputValue(t?.registration_expiry)}
+              locked={isEdit}
+              archiveHref={t?.id ? `/archive?tab=truck&trucksub=documents&truck=${t.id}` : null}
+            />
           </label>
 
           {!isEdit && (

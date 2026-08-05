@@ -55,6 +55,12 @@ export async function createTruck(formData: FormData): Promise<ActionResult> {
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
     vin: nullable(formData.get("vin")),
+    // 0091 — the TRUCK owns these; the archive's registration documents read
+    // and write these same columns rather than keeping a copy. Seeded here at
+    // create only; the edit form sends no key for them (disabled inputs don't
+    // submit), so an edit leaves the existing values untouched.
+    vehicle_registration: nullable(formData.get("vehicle_registration")),
+    registration_expiry: nullable(formData.get("registration_expiry")),
     assigned_driver_id: nullable(formData.get("assigned_driver_id")),
     // Phase-5 iteration B: Last Service is now a create-only field (the
     // pre-purchase fix/inspection date — no work order behind it). Wasn't
@@ -106,6 +112,14 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
     home_station: nullable(formData.get("home_station")),
     odometer_km: numOrNull(formData.get("odometer_km")),
     vin: nullable(formData.get("vin")),
+    // vehicle_registration / registration_expiry are DELIBERATELY ABSENT here.
+    //
+    // They are seeded on the Add form and read-only afterwards — the Archive
+    // is their single edit point (0091). The edit form renders them as
+    // DISABLED inputs, which submit nothing, so including the keys would read
+    // null and BLANK a truck's registration on every unrelated edit. Omitting
+    // them leaves the columns untouched. Same reasoning, and the same shape,
+    // as the note this file already carries above about last_service_date.
   };
 
   const supabase = createClient();

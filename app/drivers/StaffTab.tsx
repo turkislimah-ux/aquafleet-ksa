@@ -22,7 +22,7 @@ import LeaveSection from "./LeaveSection";
 import MechanicCommissionsSection from "./MechanicCommissionsSection";
 import OperationStationField from "@/components/OperationStationField";
 import PersonIdLink from "./PersonIdLink";
-import LinkedIdField from "./LinkedIdField";
+import LinkedIdField from "@/components/LinkedIdField";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -340,8 +340,7 @@ export default function StaffTab({
                   name="iqama_number"
                   value={editing?.iqama_number ?? ""}
                   locked={!!editing}
-                  personId={editing?.id}
-                  sub="management"
+                  archiveHref={editing?.id ? `/archive?tab=staff&sub=management&person=${editing.id}` : null}
                 />
               </Field>
               <Field label="Iqama expiry">
@@ -350,8 +349,7 @@ export default function StaffTab({
                   type="date"
                   value={editing?.iqama_expiry ?? ""}
                   locked={!!editing}
-                  personId={editing?.id}
-                  sub="management"
+                  archiveHref={editing?.id ? `/archive?tab=staff&sub=management&person=${editing.id}` : null}
                 />
               </Field>
               <label className="flex items-center gap-2 text-sm sm:col-span-2">

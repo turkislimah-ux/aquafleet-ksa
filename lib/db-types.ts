@@ -170,6 +170,10 @@ export type Truck = {
   odometer_km: number | null;
   engine_hours: number | null;
   vin: string | null;
+  // Added by 0091. The TRUCK owns these: a registration-type archive document
+  // reads them and stores neither its own number nor its own expiry.
+  vehicle_registration: string | null;
+  registration_expiry: string | null;
   assigned_driver_id: string | null;
   // Added in 0005 — all nullable, render "—" when absent (no fake values).
   last_service_date: string | null;
@@ -1224,6 +1228,27 @@ export type ArchiveDriverRow = {
   termination_date: string | null;
 };
 
+// Truck rows for the Archive's Truck matrix + its soft-deleted sub-tab. Same
+// narrow-select discipline as ArchiveDriverRow / ArchiveStaffRow: everything
+// listed here IS selected by app/archive/page.tsx.
+export type ArchiveTruckRow = {
+  id: string;
+  plate: string;
+  model: string | null;
+  year: number | null;
+  capacity_m3: number | null;
+  vin: string | null;
+  vehicle_registration: string | null;
+  registration_expiry: string | null;
+  home_station: string | null;
+  odometer_km: number | null;
+  active: boolean;
+  terminated_at: string | null;
+  termination_reason: "sold" | "total_loss" | null;
+  termination_price: number | null;
+  released_date: string | null;
+};
+
 export type ArchiveStaffRow = {
   id: string;
   name: string;
@@ -1329,4 +1354,7 @@ export type ArchiveDocumentType = {
   // it would point at).
   linked_driver_field: string | null;
   linked_staff_field: string | null;
+  // Added by 0091 — the truck counterpart. 'registration' maps here to
+  // trucks.vehicle_registration; no other type links for trucks today.
+  linked_truck_field: string | null;
 };

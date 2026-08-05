@@ -1,6 +1,11 @@
 "use client";
 
-// A LINKED identity field on the Staff page — editable once, at creation.
+// A LINKED identity field — editable once, at creation.
+//
+// Lives in components/ rather than beside one page because BOTH the Staff
+// page (driver iqama/licence) and the Fleet page (vehicle registration) need
+// identical behaviour. A shared leaf imported one-way by both beats a
+// cross-page import between two feature folders.
 //
 // WHY (0089's "store each fact once"): an Iqama/licence number and its expiry
 // live on the person's row, and the Archive's linked documents read and WRITE
@@ -32,15 +37,15 @@ export default function LinkedIdField({
   name,
   value,
   locked,
-  personId,
-  sub,
+  archiveHref,
   type = "text",
 }: {
   name: string;
   value: string;
   locked: boolean;
-  personId?: string;
-  sub: "drivers" | "management";
+  // Where this value IS edited. Null hides the link (e.g. a subject that has
+  // no archive row yet) rather than offering a dead end.
+  archiveHref?: string | null;
   type?: "text" | "date";
 }) {
   if (!locked) {
@@ -56,9 +61,9 @@ export default function LinkedIdField({
         <Lock className="h-3.5 w-3.5 shrink-0" />
         <span className="truncate">{value || "—"}</span>
       </div>
-      {personId && (
+      {archiveHref && (
         <Link
-          href={`/archive?tab=staff&sub=${sub}&person=${personId}`}
+          href={archiveHref}
           className="text-[11px] text-brand-600 dark:text-brand-300 hover:underline mt-1 inline-block"
         >
           Edit in the Archive

@@ -106,8 +106,26 @@ export async function createDriver(formData: FormData): Promise<ActionResult> {
 }
 
 export async function updateDriver(id: string, formData: FormData): Promise<ActionResult> {
-  const row = parse(formData);
-  if (!row.name) return { error: "Name is required." };
+  const parsed = parse(formData);
+  if (!parsed.name) return { error: "Name is required." };
+
+  // LINKED IDENTITY FIELDS ARE STRIPPED FROM THE UPDATE (0088/0089).
+  //
+  // These four are seeded on the CREATE form and are then read-only here —
+  // the Archive is their single edit point. The edit form renders them as
+  // DISABLED inputs, and a disabled input submits nothing, so
+  // nullable(formData.get(...)) reads null. Leaving the keys in the payload
+  // would therefore BLANK a driver's iqama and licence on every unrelated
+  // edit — silent compliance-data loss. Omitting the keys leaves the columns
+  // untouched, which is what "read-only here" has to mean at the write layer
+  // and not just in the form.
+  const {
+    iqama_number: _iqamaNumber,
+    iqama_expiry: _iqamaExpiry,
+    license_number: _licenseNumber,
+    license_expiry: _licenseExpiry,
+    ...row
+  } = parsed;
 
   const supabase = createClient();
   const { error } = await supabase.from("drivers").update(row).eq("id", id);
@@ -193,9 +211,12 @@ export async function createStaff(formData: FormData): Promise<ActionResult> {
 
 export async function updateStaff(id: string, formData: FormData): Promise<ActionResult> {
   if (!id) return { error: "Missing record." };
-  const row = parseStaff(formData);
-  if (!row.name) return { error: "Name is required." };
-  if (!row.role) return { error: "Pick a role." };
+  const parsed = parseStaff(formData);
+  if (!parsed.name) return { error: "Name is required." };
+  if (!parsed.role) return { error: "Pick a role." };
+
+  // Stripped for the same reason as updateDriver above — see its comment.
+  const { iqama_number: _iqamaNumber, iqama_expiry: _iqamaExpiry, ...row } = parsed;
 
   const supabase = createClient();
   const { error } = await supabase.from("staff").update(row).eq("id", id);

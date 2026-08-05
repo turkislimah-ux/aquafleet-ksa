@@ -13,12 +13,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Trash2, FileText, Upload, User, ChevronDown, Link as LinkIcon } from "lucide-react";
+import { X, Trash2, FileText, Upload, User, Truck as TruckIcon, ChevronDown, Link as LinkIcon } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
   ARCHIVE_GROUP_COLORS, ARCHIVE_STATUS_PILL, archiveStatusLabel, docStatus, groupDot,
-  linkedFieldFor, groupExpectsLink, PERSON_ID_LABEL, type PersonIdField,
+  linkedFieldFor, groupExpectsLink, PERSON_ID_LABEL,
+  type PersonIdField, type LinkSubjectKind,
 } from "@/lib/archive";
 import type {
   ArchiveTab,
@@ -64,7 +65,7 @@ function TypePicker({
 }: {
   types: ArchiveDocumentType[];
   value: string;
-  subjectKind: "driver" | "staff" | null;
+  subjectKind: LinkSubjectKind | null;
   onChange: (key: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -321,7 +322,10 @@ export function GroupModal({
 
   const selectedLinkField = linkedFieldFor(
     types.find((t) => t.key === groupTypeKey),
-    subjectKind === "driver" ? "driver" : subjectKind === "staff" ? "staff" : null,
+    subjectKind === "driver" ? "driver"
+    : subjectKind === "staff" ? "staff"
+    : subjectKind === "truck" ? "truck"
+    : null,
   );
 
   async function submit() {
@@ -422,7 +426,13 @@ export function GroupModal({
           {isEdit ? (
             <div className="px-3 py-2 rounded-lg border text-sm opacity-60 flex items-center gap-2" style={INPUT_STYLE}>
               {types.find((t) => t.key === groupTypeKey)?.label_en ?? "—"}
-              {linkedFieldFor(types.find((t) => t.key === groupTypeKey), subjectKind === "driver" ? "driver" : subjectKind === "staff" ? "staff" : null) && <LinkPill />}
+              {linkedFieldFor(
+                types.find((t) => t.key === groupTypeKey),
+                subjectKind === "driver" ? "driver"
+                : subjectKind === "staff" ? "staff"
+                : subjectKind === "truck" ? "truck"
+                : null,
+              ) && <LinkPill />}
             </div>
           ) : (
             <>
@@ -434,7 +444,12 @@ export function GroupModal({
               <TypePicker
                 types={types.filter((t) => t.active || t.key === groupTypeKey)}
                 value={groupTypeKey}
-                subjectKind={subjectKind === "driver" ? "driver" : subjectKind === "staff" ? "staff" : null}
+                subjectKind={
+                  subjectKind === "driver" ? "driver"
+                  : subjectKind === "staff" ? "staff"
+                  : subjectKind === "truck" ? "truck"
+                  : null
+                }
                 onChange={setGroupTypeKey}
               />
               {/* The pill itself now sits in the picker — on the selected
@@ -540,7 +555,7 @@ export function DocumentModal({
   //
   // Undefined = a company group (subject_kind 'none'), Phase 1's behaviour.
   subject?: {
-    kind: "driver" | "staff";
+    kind: "driver" | "staff" | "truck";
     id: string;
     name: string;
     // The person's CURRENT number AND expiry for whichever field this
@@ -730,6 +745,7 @@ export function DocumentModal({
       // mode not worth opening for a case nobody asked for.)
       driver_id: subject?.kind === "driver" ? subject.id : null,
       staff_id: subject?.kind === "staff" ? subject.id : null,
+      truck_id: subject?.kind === "truck" ? subject.id : null,
     };
 
     if (isEdit) {
@@ -795,8 +811,12 @@ export function DocumentModal({
       <div className="text-[11px] font-semibold uppercase tracking-wide muted">Identity</div>
       {subject && (
         <div className="rounded-lg border px-3 py-2 text-sm flex items-center gap-2" style={INPUT_STYLE}>
-          <User className="h-4 w-4 muted shrink-0" />
-          <span className="muted">{subject.kind === "driver" ? "Driver" : "Staff member"}:</span>
+          {subject.kind === "truck"
+            ? <TruckIcon className="h-4 w-4 muted shrink-0" />
+            : <User className="h-4 w-4 muted shrink-0" />}
+          <span className="muted">
+            {subject.kind === "driver" ? "Driver" : subject.kind === "staff" ? "Staff member" : "Truck"}:
+          </span>
           <span className="font-medium">{subject.name}</span>
         </div>
       )}

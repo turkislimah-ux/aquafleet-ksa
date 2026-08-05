@@ -69,6 +69,43 @@ type HistoryRow =
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
+// Read-only field for the General Info block. `href` turns the value into a
+// link — used for Vehicle Registration, whose single edit point is the
+// Archive (0091), so the value stays visible here without implying it can be
+// changed here.
+function InfoField({
+  label,
+  value,
+  mono,
+  href,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  href?: string;
+}) {
+  const body = (
+    <span className={cn("text-sm", mono && "font-mono text-xs")}>{value}</span>
+  );
+  return (
+    <div>
+      <div className="text-[11px] muted mb-0.5">{label}</div>
+      {href && value !== "—" ? (
+        <Link href={href} className="text-brand-600 dark:text-brand-300 hover:underline">
+          {body}
+        </Link>
+      ) : (
+        body
+      )}
+    </div>
+  );
+}
+
+function fmtDateOnly(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso + "T00:00:00").toLocaleDateString();
+}
+
 function lastServiceLabel(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -347,6 +384,46 @@ export default function FleetDetailClient({
         <Stat label="Odometer" value={truck.odometer_km != null ? `${formatNum(truck.odometer_km)} km` : "—"} />
         <Stat label="Last Service" value={lastServiceLabel(truck.last_service_date)} tone="ok" />
       </div>
+
+      {/* GENERAL INFO — the same fields the Add-Truck form collects, shown
+          read-only. The KPI row above is performance/condition; this is
+          identity, and previously there was nowhere on this page to see a
+          truck's VIN or its vehicle registration at all.
+
+          Vehicle Registration is the LINKED field (0091): it lives on the
+          truck and is edited only in the Archive, so it carries a link there
+          rather than pretending to be editable here. */}
+      <Card className="!p-0 overflow-hidden">
+        <div className="p-3 border-b" style={{ borderColor: "rgb(var(--border))" }}>
+          <h3 className="font-semibold text-sm">General Info</h3>
+        </div>
+        <div className="p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <InfoField label="Plate" value={truck.plate} mono />
+          <InfoField label="Model" value={truck.model ?? "—"} />
+          <InfoField label="Year" value={truck.year != null ? String(truck.year) : "—"} />
+          <InfoField
+            label="Capacity"
+            value={truck.capacity_m3 != null ? `${truck.capacity_m3} m³` : "—"}
+          />
+          <InfoField
+            label="Station"
+            value={truck.home_station ? stationNameById.get(truck.home_station) ?? "—" : "—"}
+          />
+          <InfoField
+            label="Odometer"
+            value={truck.odometer_km != null ? `${formatNum(truck.odometer_km)} km` : "—"}
+          />
+          <InfoField label="VIN" value={truck.vin || "—"} mono />
+          <InfoField
+            label="Vehicle Registration"
+            value={truck.vehicle_registration || "—"}
+            mono
+            href={`/archive?tab=truck&trucksub=documents&truck=${truck.id}`}
+          />
+          <InfoField label="Registration expiry" value={fmtDateOnly(truck.registration_expiry)} />
+          <InfoField label="Last Service" value={lastServiceLabel(truck.last_service_date)} />
+        </div>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Engine Component Health — honest-empty until IoT lands */}

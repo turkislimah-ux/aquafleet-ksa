@@ -57,7 +57,7 @@ import CommissionsTab, {
 } from "./CommissionsTab";
 import HistoryTab from "./HistoryTab";
 import PersonIdLink from "./PersonIdLink";
-import LinkedIdField from "./LinkedIdField";
+import LinkedIdField from "@/components/LinkedIdField";
 import StaffTab from "./StaffTab";
 import type { CommPayout } from "@/lib/commission-rows";
 
@@ -544,8 +544,7 @@ export default function DriversClient({
                   name="iqama_number"
                   value={editing?.iqama_number ?? ""}
                   locked={!!editing}
-                  personId={editing?.id}
-                  sub="drivers"
+                  archiveHref={editing?.id ? `/archive?tab=staff&sub=drivers&person=${editing.id}` : null}
                 />
               </Field>
               <Field label="Iqama expiry">
@@ -554,8 +553,7 @@ export default function DriversClient({
                   type="date"
                   value={editing?.iqama_expiry ?? ""}
                   locked={!!editing}
-                  personId={editing?.id}
-                  sub="drivers"
+                  archiveHref={editing?.id ? `/archive?tab=staff&sub=drivers&person=${editing.id}` : null}
                 />
               </Field>
               <Field label="License ID">
@@ -563,8 +561,7 @@ export default function DriversClient({
                   name="license_number"
                   value={editing?.license_number ?? ""}
                   locked={!!editing}
-                  personId={editing?.id}
-                  sub="drivers"
+                  archiveHref={editing?.id ? `/archive?tab=staff&sub=drivers&person=${editing.id}` : null}
                 />
               </Field>
               <Field label="License expiry">
@@ -573,8 +570,7 @@ export default function DriversClient({
                   type="date"
                   value={editing?.license_expiry ?? ""}
                   locked={!!editing}
-                  personId={editing?.id}
-                  sub="drivers"
+                  archiveHref={editing?.id ? `/archive?tab=staff&sub=drivers&person=${editing.id}` : null}
                 />
               </Field>
               <Field label="Hire date">

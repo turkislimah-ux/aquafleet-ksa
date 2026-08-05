@@ -19,12 +19,16 @@ import type {
   ArchiveDocumentGroup,
   ArchiveDriverRow,
   ArchiveStaffRow,
+  ArchiveTruckRow,
   ArchiveDocument,
   ArchiveDocumentFile,
   ArchiveDocumentRenewal,
   ArchiveDocumentType,
 } from "@/lib/db-types";
 import type { CommPayout } from "@/lib/commission-rows";
+import type {
+  ArchiveTruckTabWorkOrder, ArchiveTruckTabOutsourcedJob,
+} from "./ArchiveTruckTab";
 import ArchiveClient from "./ArchiveClient";
 
 export const dynamic = "force-dynamic";
@@ -36,11 +40,12 @@ export default async function ArchivePage() {
   const [
     groupsRes, documentsRes, filesRes, renewalsRes, typesRes,
     driversRes, staffRes, payoutsRes,
+    trucksRes, workOrdersRes, outsourcedJobsRes,
   ] = await Promise.all([
     supabase
       .from("archive_document_groups")
       .select("id, tab, subject_kind, type_key, title, description, color, warning_days, sort_order, created_by, created_at")
-      .in("tab", ["company", "staff"])
+      .in("tab", ["company", "staff", "truck"])
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true }),
     // Documents are fetched unfiltered by group and matched client-side —
@@ -69,7 +74,7 @@ export default async function ArchivePage() {
     // can also keep the current document's type in the list.
     supabase
       .from("archive_document_types")
-      .select("id, key, label_en, label_ar, active, created_at, linked_driver_field, linked_staff_field")
+      .select("id, key, label_en, label_ar, active, created_at, linked_driver_field, linked_staff_field, linked_truck_field")
       .order("label_en", { ascending: true }),
     // Subject lists for the Staff tab's matrices. Narrow selects, matched
     // exactly by ArchiveDriverRow / ArchiveStaffRow — the type says what was
@@ -93,6 +98,26 @@ export default async function ArchivePage() {
       .from("commission_payouts")
       .select("id, driver_id, paid_at, approved_by, period_label, base_sar, specials_sar, adjustments_sar, bonus_sar, total_sar, snapshot")
       .order("paid_at", { ascending: false }),
+    // Trucks — active AND terminated in one query, same reasoning as drivers/
+    // staff: the matrix needs the active ones, the Soft-deleted sub-tab needs
+    // the rest, and splitting would double the round-trips.
+    supabase
+      .from("trucks")
+      .select(
+        "id, plate, model, year, capacity_m3, vin, vehicle_registration, registration_expiry, home_station, odometer_km, active, terminated_at, termination_reason, termination_price, released_date",
+      )
+      .order("plate", { ascending: true }),
+    // Maintenance history — READ-ONLY. The archive displays work_orders and
+    // outsourced_jobs; it never copies them. Both already key off truck_id, so
+    // this needed no migration.
+    supabase
+      .from("work_orders")
+      .select("id, wo_number, truck_id, title, status, opened_at, closed_at, actual_cost_sar")
+      .order("opened_at", { ascending: false }),
+    supabase
+      .from("outsourced_jobs")
+      .select("id, os_number, truck_id, title, status, start_date, closed_at")
+      .order("start_date", { ascending: false }),
   ]);
 
   const groups = (groupsRes.data ?? []) as ArchiveDocumentGroup[];
@@ -103,6 +128,11 @@ export default async function ArchivePage() {
   const drivers = (driversRes.data ?? []) as ArchiveDriverRow[];
   const staff = (staffRes.data ?? []) as ArchiveStaffRow[];
   const payouts = (payoutsRes.data ?? []) as CommPayout[];
+  const trucks = (trucksRes.data ?? []) as ArchiveTruckRow[];
+  // Narrow selects, so these are cast to the fields actually fetched rather
+  // than the full row types (which claim far more columns than are selected).
+  const workOrders = (workOrdersRes.data ?? []) as ArchiveTruckTabWorkOrder[];
+  const outsourcedJobs = (outsourcedJobsRes.data ?? []) as ArchiveTruckTabOutsourcedJob[];
 
   // Scope documents to the fetched groups. Written tab-agnostically in Phase
   // 1 and it kept working unchanged when the group query widened — the only
@@ -119,6 +149,9 @@ export default async function ArchivePage() {
     driversRes.error?.message ??
     staffRes.error?.message ??
     payoutsRes.error?.message ??
+    trucksRes.error?.message ??
+    workOrdersRes.error?.message ??
+    outsourcedJobsRes.error?.message ??
     null;
 
   return (
@@ -131,6 +164,9 @@ export default async function ArchivePage() {
       drivers={drivers}
       staff={staff}
       payouts={payouts}
+      trucks={trucks}
+      workOrders={workOrders}
+      outsourcedJobs={outsourcedJobs}
       today={today}
       error={error}
     />
