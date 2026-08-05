@@ -671,7 +671,17 @@ export type MaintenanceJobDetail = {
   fields: { label: string; value: string }[];
   // In-house: the parts lines with what was actually drawn from stock.
   // Outsourced: the repairer payment lines.
-  lines: { label: string; sub: string | null; qty: string; amount: string }[];
+  lines: {
+    label: string;
+    sub: string | null;
+    qty: string;
+    amount: string;
+    // On-hand BEFORE and AFTER this work order's consumption. In-house only
+    // (outsourced jobs consume no inventory), and null when no matching
+    // stock movement was found — an honest blank beats a fabricated count.
+    onHandBefore: string | null;
+    onHandAfter: string | null;
+  }[];
   linesTitle: string;
   linesEmpty: string;
   total: string | null;
@@ -732,6 +742,37 @@ export async function getMaintenanceJobDetail(
         : Promise.resolve({ data: [] as { work_order_part_id: string; direction: string; qty: number; unit_price_sar: number }[] }),
     ]);
 
+    // ON-HAND BEFORE/AFTER comes from stock_movements, NOT from
+    // work_order_part_consumptions — that ledger records the per-lot draw and
+    // carries no running balance at all. stock_movements is where qty_after
+    // lives, so it is the only place this pair can be read from.
+    const { data: movements } = partIds.length
+      ? await supabase
+          .from("stock_movements")
+          .select("part_id, movement_type, qty_delta, qty_after, note, created_at")
+          .in("part_id", partIds)
+          .eq("movement_type", "consume")
+          .order("created_at", { ascending: true })
+      : { data: [] as { part_id: string; movement_type: string; qty_delta: number; qty_after: number; note: string | null; created_at: string }[] };
+
+    // Movements are tied to a work order only by a free-text note ("Work order
+    // WO-26-0007"). Matching is deliberately two-tier rather than one loose
+    // `includes`: the FULL number is tried first, and only if nothing matches
+    // does it fall back to the legacy short form ("WO-0007", one known row
+    // written before the year segment existed). A single loose match on the
+    // trailing digits alone would let WO-25-0007 and WO-26-0007 collide.
+    const woNumber = wo.wo_number as string;
+    const legacyRef = woNumber.replace(/^(WO)-\d+-(\d+)$/i, "$1-$2");
+    function movementsFor(partId: string) {
+      const mine = (movements ?? []).filter((m) => m.part_id === partId);
+      const exact = mine.filter((m) => (m.note ?? "").includes(woNumber));
+      if (exact.length > 0) return exact;
+      if (legacyRef !== woNumber) {
+        return mine.filter((m) => (m.note ?? "").includes(legacyRef));
+      }
+      return [];
+    }
+
     const partById = new Map((partRows ?? []).map((p) => [p.id as string, p]));
     const consumedByWop = new Map<string, { qty: number; value: number }>();
     for (const c of cons ?? []) {
@@ -766,6 +807,14 @@ export async function getMaintenanceJobDetail(
       lines: (parts ?? []).map((p) => {
         const part = partById.get(p.part_id as string);
         const drawn = consumedByWop.get(p.id as string);
+        // Staged consumption (an edit that drew more later) writes more than
+        // one movement, so BEFORE reads from the FIRST and AFTER from the
+        // LAST. For the ordinary single-movement case the two are the same
+        // row and this reduces to Turki's own formula:
+        //   AFTER = qty_after, BEFORE = qty_after - qty_delta.
+        const ms = movementsFor(p.part_id as string);
+        const first = ms[0];
+        const last = ms[ms.length - 1];
         return {
           label: part?.name ?? "Unknown part",
           sub: part?.sku ? `${part.sku}${part.unit ? ` · ${part.unit}` : ""}` : null,
@@ -774,6 +823,10 @@ export async function getMaintenanceJobDetail(
           // is visible instead of hidden behind one number.
           qty: drawn ? `${drawn.qty} of ${p.qty}` : `${p.qty} planned`,
           amount: drawn ? money(drawn.value) : money(Number(p.qty) * Number(p.unit_price_sar)),
+          // qty_delta is negative for a consume, so subtracting it adds the
+          // drawn quantity back to reach the pre-consumption count.
+          onHandBefore: first ? String(Number(first.qty_after) - Number(first.qty_delta)) : null,
+          onHandAfter: last ? String(Number(last.qty_after)) : null,
         };
       }),
       // Parts-only, per 0079's boundary — labour is shown above as hours and
@@ -836,6 +889,10 @@ export async function getMaintenanceJobDetail(
         .join(" · ") || null,
       qty: `${money(p.subtotal_sar as number)} + ${money(p.vat_sar as number)} VAT`,
       amount: money(p.grand_total_sar as number),
+      // Outsourced work consumes no inventory, so there is no on-hand pair to
+      // show — null rather than a zero that would read as "stock hit zero".
+      onHandBefore: null,
+      onHandAfter: null,
     })),
     total: (payments ?? []).length > 0 ? `Total paid ${money(grand)}` : null,
     note: (job.notes as string | null) ?? null,

@@ -24,7 +24,7 @@
 import { Fragment, useMemo, useState } from "react";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, FileText,
-  CornerDownRight, History, Eye, RotateCcw, X, Wrench,
+  CornerDownRight, History, Eye, RotateCcw, X, Wrench, ArrowRight,
 } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { LinkPill } from "./ArchiveModals";
@@ -989,6 +989,10 @@ function MaintenanceJobModal({
                 <tr>
                   <TH>{detail.kind === "in_house" ? "Part" : "Repairer"}</TH>
                   <TH>{detail.kind === "in_house" ? "Qty drawn" : "Subtotal + VAT"}</TH>
+                  {/* On-hand pair — in-house only; an outsourced job consumes
+                      no inventory, so the column would be empty for every row
+                      rather than merely blank for some. */}
+                  {detail.kind === "in_house" && <TH>On hand</TH>}
                   <TH>{detail.kind === "in_house" ? "Value" : "Total"}</TH>
                 </tr>
               </thead>
@@ -1000,6 +1004,19 @@ function MaintenanceJobModal({
                       {l.sub && <div className="text-[11px] muted">{l.sub}</div>}
                     </TD>
                     <TD className="text-xs tabular-nums">{l.qty}</TD>
+                    {detail.kind === "in_house" && (
+                      <TD className="text-xs tabular-nums">
+                        {l.onHandBefore !== null && l.onHandAfter !== null ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="muted">{l.onHandBefore}</span>
+                            <ArrowRight className="h-3 w-3 muted shrink-0" />
+                            <span className="font-medium">{l.onHandAfter}</span>
+                          </span>
+                        ) : (
+                          <span className="muted" title="No matching stock movement found for this work order">—</span>
+                        )}
+                      </TD>
+                    )}
                     <TD className="text-xs tabular-nums font-medium">{l.amount}</TD>
                   </tr>
                 ))}
