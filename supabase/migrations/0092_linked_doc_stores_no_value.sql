@@ -23,9 +23,11 @@
 -- ===========================================================================
 -- RECONCILED TO LIVE — applied and bite-tested by the architect
 -- ===========================================================================
--- The body below is the live definition, verbatim. The one-per-person
--- branches are BYTE-IDENTICAL to 0091's; only the v_is_linked declaration,
--- its computation, and the refusal block above them are new. Nothing that was
+-- The body below is the live definition, VERBATIM — verified byte-for-byte
+-- against pg_get_functiondef() (md5 a7d303bf7cf61a3e3cf12280243be4e6). The
+-- one-per-person branches are unchanged from 0091's; only the v_is_linked
+-- declaration, its computation, and the refusal block above them are new.
+-- Nothing that was
 -- already working was reworded, so nothing already verified needed
 -- re-verifying.
 --
@@ -45,10 +47,19 @@
 --
 -- `create or replace function` PRESERVES existing privileges, but the revoke
 -- is re-issued so this file states the end state outright rather than
--- depending on history. NO counter-grant to authenticated — matching 0087,
--- 0089 and 0091. A trigger function's EXECUTE is checked at CREATE TRIGGER
--- time, not at fire time, so the trigger keeps firing for every caller while
--- nobody can call the function directly.
+-- depending on history.
+--
+-- VERIFIED AGAINST LIVE. The ACL is:
+--     {postgres=X/postgres, authenticated=X/postgres, service_role=X/postgres}
+-- anon and PUBLIC are absent — that is what 0083 asks for, and a sweep
+-- confirms anon can execute ZERO functions in `public`. `authenticated` and
+-- `service_role` are present because Supabase's own `alter default
+-- privileges` grants EXECUTE on new functions to those roles at creation
+-- time; no migration here writes that grant, and the revoke below does not
+-- strip it. Earlier revisions of this note claimed there was no such grant —
+-- that claim was wrong and is corrected here. It is harmless either way:
+-- calling a trigger function directly raises "trigger functions can only be
+-- called as triggers".
 --
 -- THE TRIGGER IS NOT RECREATED. archive_linked_one_per_person_trg already
 -- points at this function by name, and `create or replace` swaps the body
@@ -82,41 +93,77 @@
 begin;
 
 CREATE OR REPLACE FUNCTION public.archive_linked_one_per_person()
- RETURNS trigger LANGUAGE plpgsql SET search_path TO 'public'
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
 AS $function$
-declare v_type text; v_linked_driver text; v_linked_staff text; v_linked_truck text; v_is_linked boolean;
+declare
+  v_type          text;
+  v_linked_driver text;
+  v_linked_staff  text;
+  v_linked_truck  text;
+  v_is_linked     boolean;
 begin
-  select g.type_key into v_type from public.archive_document_groups g where g.id = new.group_id;
-  if v_type is null then return new; end if;
+  select g.type_key into v_type
+    from public.archive_document_groups g
+   where g.id = new.group_id;
+
+  if v_type is null then
+    return new;
+  end if;
+
   select linked_driver_field, linked_staff_field, linked_truck_field
     into v_linked_driver, v_linked_staff, v_linked_truck
-    from public.archive_document_types where key = v_type;
+    from public.archive_document_types
+   where key = v_type;
+
   v_is_linked := (new.driver_id is not null and v_linked_driver is not null)
               or (new.staff_id  is not null and v_linked_staff  is not null)
               or (new.truck_id  is not null and v_linked_truck  is not null);
+
+  -- A linked document stores NEITHER its number nor its expiry — the subject owns both.
+  -- Refuse rather than silently null, so a stray value surfaces instead of vanishing.
   if v_is_linked then
     if new.reference_no is not null then
-      raise exception 'A linked "%" document must not store its own number — it lives on the subject''s record.', v_type using errcode = '23514';
+      raise exception 'A linked "%" document must not store its own number — it lives on the subject''s record.', v_type
+        using errcode = '23514';
     end if;
     if new.expiry_date is not null then
-      raise exception 'A linked "%" document must not store its own expiry — it lives on the subject''s record.', v_type using errcode = '23514';
+      raise exception 'A linked "%" document must not store its own expiry — it lives on the subject''s record.', v_type
+        using errcode = '23514';
     end if;
   end if;
+
   if new.driver_id is not null and v_linked_driver is not null then
-    if exists (select 1 from public.archive_documents d where d.group_id = new.group_id and d.driver_id = new.driver_id and d.id <> new.id) then
-      raise exception 'This driver already has a "%" document in this group (linked types allow one per person; renew instead).', v_type using errcode = '23505';
+    if exists (
+      select 1 from public.archive_documents d
+       where d.group_id = new.group_id and d.driver_id = new.driver_id and d.id <> new.id
+    ) then
+      raise exception 'This driver already has a "%" document in this group (linked types allow one per person; renew instead).', v_type
+        using errcode = '23505';
     end if;
   end if;
+
   if new.staff_id is not null and v_linked_staff is not null then
-    if exists (select 1 from public.archive_documents d where d.group_id = new.group_id and d.staff_id = new.staff_id and d.id <> new.id) then
-      raise exception 'This staff member already has a "%" document in this group (linked types allow one per person; renew instead).', v_type using errcode = '23505';
+    if exists (
+      select 1 from public.archive_documents d
+       where d.group_id = new.group_id and d.staff_id = new.staff_id and d.id <> new.id
+    ) then
+      raise exception 'This staff member already has a "%" document in this group (linked types allow one per person; renew instead).', v_type
+        using errcode = '23505';
     end if;
   end if;
+
   if new.truck_id is not null and v_linked_truck is not null then
-    if exists (select 1 from public.archive_documents d where d.group_id = new.group_id and d.truck_id = new.truck_id and d.id <> new.id) then
-      raise exception 'This truck already has a "%" document in this group (linked types allow one per truck; renew instead).', v_type using errcode = '23505';
+    if exists (
+      select 1 from public.archive_documents d
+       where d.group_id = new.group_id and d.truck_id = new.truck_id and d.id <> new.id
+    ) then
+      raise exception 'This truck already has a "%" document in this group (linked types allow one per truck; renew instead).', v_type
+        using errcode = '23505';
     end if;
   end if;
+
   return new;
 end;
 $function$;

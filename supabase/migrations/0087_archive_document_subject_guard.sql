@@ -84,10 +84,20 @@
 --    directly callable (its privileges are checked at CREATE TRIGGER time,
 --    not at fire time), so this is belt-and-braces — but 0083's whole point
 --    is that the surface stays at zero without anyone having to reason about
---    exceptions. Live carries NO counter-grant to `authenticated`, so no
---    role can call this directly at all — the strictest correct end state
---    for a trigger function, whose EXECUTE is checked at CREATE TRIGGER
---    time rather than at fire time.
+--    exceptions.
+--
+--    CORRECTED against live (an earlier revision of this comment claimed
+--    there was no counter-grant to `authenticated`; that was wrong). The
+--    live ACL is:
+--        {postgres=X/postgres, authenticated=X/postgres, service_role=X/postgres}
+--    anon and PUBLIC are absent, which is what 0083 asks for and what the
+--    revoke below achieves. `authenticated` and `service_role` are present
+--    because SUPABASE'S OWN `alter default privileges` grants EXECUTE on new
+--    functions to those roles at creation time — the grant is not written by
+--    any migration here, and the revoke below deliberately does not strip it.
+--    Harmless in practice: calling a trigger function directly raises
+--    "trigger functions can only be called as triggers", so the grant buys
+--    a caller nothing.
 --
 -- ===========================================================================
 -- SAFETY / SCOPE
@@ -145,30 +155,40 @@ begin
   select subject_kind into v_kind
     from public.archive_document_groups
    where id = new.group_id;
+
   if v_kind is null then
-    raise exception 'Archive document group % not found.', new.group_id using errcode = '23514';
+    raise exception 'Archive document group % not found.', new.group_id
+      using errcode = '23514';
   end if;
+
   if v_kind = 'none' then
     if new.driver_id is not null or new.staff_id is not null or new.truck_id is not null then
-      raise exception 'A company document (group %) must have no subject.', new.group_id using errcode = '23514';
+      raise exception 'A company document (group %) must have no subject.', new.group_id
+        using errcode = '23514';
     end if;
   elsif v_kind = 'driver' then
     if new.driver_id is null or new.staff_id is not null or new.truck_id is not null then
-      raise exception 'A document in a driver group must reference exactly one driver and nothing else.' using errcode = '23514';
+      raise exception 'A document in a driver group must reference exactly one driver and nothing else.'
+        using errcode = '23514';
     end if;
   elsif v_kind = 'staff' then
     if new.staff_id is null or new.driver_id is not null or new.truck_id is not null then
-      raise exception 'A document in a staff group must reference exactly one staff member and nothing else.' using errcode = '23514';
+      raise exception 'A document in a staff group must reference exactly one staff member and nothing else.'
+        using errcode = '23514';
     end if;
   elsif v_kind = 'truck' then
     if new.truck_id is null or new.driver_id is not null or new.staff_id is not null then
-      raise exception 'A document in a truck group must reference exactly one truck and nothing else.' using errcode = '23514';
+      raise exception 'A document in a truck group must reference exactly one truck and nothing else.'
+        using errcode = '23514';
     end if;
   elsif v_kind = 'customer' then
-    raise exception 'Customer groups do not hold documents (the customer tab is read-only).' using errcode = '23514';
+    raise exception 'Customer groups do not hold documents (the customer tab is read-only).'
+      using errcode = '23514';
   else
-    raise exception 'Unknown subject_kind "%" on group %.', v_kind, new.group_id using errcode = '23514';
+    raise exception 'Unknown subject_kind "%" on group %.', v_kind, new.group_id
+      using errcode = '23514';
   end if;
+
   return new;
 end;
 $function$;
