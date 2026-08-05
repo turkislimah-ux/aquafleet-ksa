@@ -93,12 +93,25 @@ body {
 @media print {
   body * { visibility: hidden !important; }
   #history-print, #history-print *,
-  #breakdown-print, #breakdown-print * { visibility: visible !important; }
+  #breakdown-print, #breakdown-print *,
+  #permit-print, #permit-print * { visibility: visible !important; }
   .no-print { display: none !important; }
 
   /* History payout — a single record. Absolute + inset:0 pins it edge-to-edge
      for a clean one-page printout (it fits a page). */
   #history-print {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 1rem;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Exit permit — a SINGLE-page gate pass, same treatment as the payout
+     record: pinned edge-to-edge so the printed sheet is just the permit. It
+     is signed at a gate, so it must not spill onto a second page. */
+  #permit-print {
     position: absolute;
     inset: 0;
     margin: 0;

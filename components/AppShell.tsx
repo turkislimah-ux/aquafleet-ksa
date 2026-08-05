@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Truck as TruckIcon, Users, Route, Wrench, Brain,
   Boxes, FileBarChart, Activity, Search, Bell, Sun, Moon, Globe, MapPin,
-  Archive, LogOut,
+  Archive, LogOut, PackageMinus,
 } from "lucide-react";
 import type { Lang } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
@@ -30,6 +30,7 @@ const NAV = [
   { href: "/predictive", key: "predictive", icon: Brain },
   { href: "/iot", key: "iot", icon: Activity },
   { href: "/inventory", key: "inventory", icon: Boxes },
+  { href: "/consumption", key: "consumption", icon: PackageMinus },
   { href: "/reports", key: "reports", icon: FileBarChart },
   { href: "/archive", key: "archive", icon: Archive },
 ] as { href: string; key?: string; label?: string; icon: typeof LayoutDashboard }[];

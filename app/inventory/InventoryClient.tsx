@@ -279,12 +279,33 @@ const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
+// Every movement_type the DB CHECK permits, verified live:
+//   CHECK (movement_type = ANY (ARRAY['receive','adjust','receive_lot','consume','return']))
+// Keyed on StockMovement["movement_type"], so once that union matches the
+// CHECK the compiler REFUSES an incomplete map — which is what should have
+// caught the missing 'return' before it reached the page.
 const MOVEMENT_LABEL: Record<StockMovement["movement_type"], { en: string; ar: string }> = {
   receive: { en: "Received", ar: "استلام" },
   adjust: { en: "Adjusted", ar: "تعديل" },
   receive_lot: { en: "Price lot", ar: "دفعة سعر" },
   consume: { en: "Consumed", ar: "استهلاك" },
+  // Written by the maintenance reversal path (return_to_lots) and by
+  // exit-permit returns and voids (return_exit_permit_line, 0093).
+  return: { en: "Return", ar: "إرجاع" },
 };
+
+// Never let an unlabeled movement type white-screen the page.
+//
+// The crash this replaces: MOVEMENT_LABEL[type].en on a type with no entry
+// threw "Cannot read properties of undefined (reading 'en')" and took the
+// whole Inventory page down — over a LABEL, while the ledger data itself was
+// perfectly correct. The typed Record above is the real guard; this is the
+// backstop for the case where the database gains a type before the app is
+// rebuilt, which no amount of compile-time checking can prevent.
+function movementLabel(type: string, lang: "en" | "ar"): string {
+  const entry = (MOVEMENT_LABEL as Record<string, { en: string; ar: string } | undefined>)[type];
+  return entry?.[lang] ?? type;
+}
 
 // preview/'s invInventoryView's own hardcoded CATS list, verbatim (its exact
 // order, "all" excluded here since the "All" chip is rendered separately).
@@ -1680,7 +1701,7 @@ function ViewPartModal({
                 !movementsError &&
                 movements.map((m) => (
                   <tr key={m.id}>
-                    <TD>{lang === "en" ? MOVEMENT_LABEL[m.movement_type].en : MOVEMENT_LABEL[m.movement_type].ar}</TD>
+                    <TD>{movementLabel(m.movement_type, lang)}</TD>
                     <TD
                       className={cn(
                         "tabular-nums font-medium",

@@ -43,7 +43,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { X, Save, ChevronDown } from "lucide-react";
+import { X, Save, ChevronDown, Plus } from "lucide-react";
 import { Btn, Card } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { Warehouse, Part, Supplier, Unit } from "@/lib/db-types";
@@ -405,6 +405,12 @@ function ComboInput({
   const filtered = q
     ? options.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
     : options;
+  // Offer "add new" only when something has been typed and it is not already
+  // an option — otherwise the row would either be meaningless (empty query)
+  // or duplicate an existing choice.
+  const canAddNew =
+    q.length > 0 &&
+    !options.some((o) => o.value.toLowerCase() === q || o.label.toLowerCase() === q);
 
   return (
     <div className="relative" ref={containerRef}>
@@ -440,11 +446,32 @@ function ComboInput({
           <ChevronDown className="h-4 w-4" />
         </button>
       </div>
-      {open && filtered.length > 0 && (
+      {open && (filtered.length > 0 || canAddNew) && (
         <div
           className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border shadow-lg"
-          style={INPUT_STYLE}
+          style={{ ...INPUT_STYLE, background: "rgb(var(--card))" }}
         >
+          {/* ADD-NEW row. The control always accepted a typed value, but when
+              the typed text matched no option the list rendered EMPTY and
+              vanished — so there was nothing on screen saying "your new
+              value is fine". This makes the capability visible, and sits
+              FIRST because if you have typed something unmatched, creating it
+              is what you meant. Same affordance as the archive's type
+              picker. */}
+          {canAddNew && (
+            <button
+              type="button"
+              onClick={() => {
+                onChange(query.trim());
+                setOpen(false);
+              }}
+              className="w-full text-start px-3 py-1.5 text-sm text-brand-600 dark:text-brand-300 hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-1.5 border-b"
+              style={{ borderColor: "rgb(var(--border))" }}
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              Use &ldquo;{query.trim()}&rdquo; as a new value
+            </button>
+          )}
           {filtered.map((o) => (
             <button
               key={o.value}

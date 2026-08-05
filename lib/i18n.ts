@@ -13,6 +13,7 @@ export const dict = {
     predictive: { en: "Predictive AI", ar: "الذكاء التنبؤي" },
     iot: { en: "IoT Monitoring", ar: "مراقبة المستشعرات" },
     inventory: { en: "Inventory", ar: "المخزون" },
+    consumption: { en: "Consumption", ar: "الاستهلاك" },
     reports: { en: "Reports", ar: "التقارير" },
     archive: { en: "Archive", ar: "الأرشيف" },
   },

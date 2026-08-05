@@ -652,14 +652,23 @@ export type Part = {
 };
 
 // stock_movements row (migration 0044, LIVE; movement_type CHECK extended by
-// 0046 — LIVE — to add 'receive_lot'/'consume' alongside the original
-// 'receive'/'adjust'). Append-only audit ledger — never inserted/updated
-// directly, only via receive_stock/adjust_stock/add_price_lot/
-// consume_from_lots.
+// 0046 to add 'receive_lot'/'consume' alongside the original
+// 'receive'/'adjust', and later 'return'). Append-only audit ledger — never
+// inserted/updated directly, only via receive_stock/adjust_stock/
+// add_price_lot/consume_from_lots, plus the two reversal paths that write
+// 'return': return_to_lots (maintenance) and return_exit_permit_line (exit
+// permits, 0093).
 export type StockMovement = {
   id: string;
   part_id: string;
-  movement_type: "receive" | "adjust" | "receive_lot" | "consume";
+  // MUST match stock_movements_movement_type_check exactly. Verified live:
+  //   CHECK (movement_type = ANY (ARRAY['receive','adjust','receive_lot','consume','return']))
+  // 'return' was missing here, which is what let the Inventory page ship a
+  // MOVEMENT_LABEL with no entry for it: the label map is keyed on THIS
+  // union, so an incomplete union made an incomplete map look exhaustive to
+  // the compiler. The type lying about the database is the real defect; the
+  // crash was the symptom.
+  movement_type: "receive" | "adjust" | "receive_lot" | "consume" | "return";
   qty_delta: number;
   qty_after: number;
   note: string | null;
@@ -1414,4 +1423,110 @@ export type ArchiveDocumentType = {
   // Added by 0091 — the truck counterpart. 'registration' maps here to
   // trucks.vehicle_registration; no other type links for trucks today.
   linked_truck_field: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// Consumption page, Phase 1 — EXIT PERMITS (migration 0093).
+//
+// A permit is a gate pass for parts leaving a warehouse for NON-maintenance
+// reasons. Two-step lifecycle: a draft is paperwork only (no stock moves,
+// no number); confirming the exit is the money moment (stock deducts through
+// the FIFO helpers, a per-lot ledger is written, the EP number is claimed).
+//
+// STATUS IS STORED here, unlike driver/truck/archive state — because it is
+// not derivable. "Has stock actually left the building" is an event that
+// happened, not a fact computable from other columns. What IS derived and
+// never stored: whether a returnable is OVERDUE (expected_return_on vs
+// today) and how much is outstanding (qty - qty_returned).
+// ---------------------------------------------------------------------------
+
+export type ExitPermitStatus = "draft" | "exited" | "voided";
+export type ExitPermitKind = "returnable" | "permanent";
+export type ExitPermitDestinationKind =
+  | "water_station" | "project" | "truck" | "customer" | "other";
+
+export const EXIT_PERMIT_KIND_LABELS: Record<ExitPermitKind, string> = {
+  returnable: "Returnable",
+  permanent: "Permanent",
+};
+
+export const EXIT_PERMIT_DESTINATION_LABELS: Record<ExitPermitDestinationKind, string> = {
+  water_station: "Water station",
+  project: "Project",
+  truck: "Truck",
+  customer: "Customer",
+  other: "Other",
+};
+
+export type ExitPermit = {
+  id: string;
+  // NULL on a draft — claimed only at confirm, so a deleted draft leaves no
+  // gap in the sequence.
+  ep_number: string | null;
+  status: ExitPermitStatus;
+  kind: ExitPermitKind;
+  expected_return_on: string | null;
+  warehouse_id: string;
+  destination_kind: ExitPermitDestinationKind;
+  destination_water_station_id: string | null;
+  destination_project_id: string | null;
+  destination_truck_id: string | null;
+  destination_customer_id: string | null;
+  destination_other_text: string | null;
+  receiver_staff_id: string | null;
+  receiver_name: string | null;
+  carrier_name: string | null;
+  note: string | null;
+  issued_by: string | null;
+  exited_at: string | null;
+  exited_by: string | null;
+  voided_at: string | null;
+  voided_by: string | null;
+  void_reason: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type ExitPermitLine = {
+  id: string;
+  exit_permit_id: string;
+  part_id: string;
+  qty: number;
+  // FIFO cost STAMPED at exit — the weighted average of this line's own
+  // per-lot ledger. 0 on a draft because nothing has been drawn yet; that is
+  // honest, not a placeholder.
+  unit_price_sar: number;
+  // Written ONLY by record_exit_permit_return. Never by the app — void reads
+  // it to decide what is still outstanding, so a stray write here would make
+  // a later void restore stock twice.
+  qty_returned: number;
+  note: string | null;
+  created_at: string;
+};
+
+export type ExitPermitReturn = {
+  id: string;
+  exit_permit_id: string;
+  returned_on: string;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type ExitPermitReturnLine = {
+  id: string;
+  exit_permit_return_id: string;
+  exit_permit_line_id: string;
+  qty: number;
+  created_at: string;
+};
+
+export type ExitPermitFile = {
+  id: string;
+  exit_permit_id: string;
+  storage_path: string;
+  file_name: string;
+  mime_type: string | null;
+  uploaded_by: string | null;
+  uploaded_at: string;
 };
