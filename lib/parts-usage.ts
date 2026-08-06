@@ -64,6 +64,9 @@ export type UsageRow = {
   valueSar: number;
   /** Exit permits only. */
   destinationKind: string | null;
+  /** Maintenance only — which truck the work was on, and which job. */
+  truckId: string | null;
+  workOrderId: string | null;
   /** Where the cost came from — see the header. */
   stamped: "ledger" | "line";
 };
@@ -83,7 +86,7 @@ function net(rows: LedgerRow[]): { qty: number; valueSar: number; lastAt: string
 
 export function buildUsageRows(input: {
   workOrders: Pick<WorkOrder,
-    "id" | "wo_number" | "title" | "status" | "closed_at" | "inventory_deducted_at">[];
+    "id" | "wo_number" | "title" | "status" | "closed_at" | "inventory_deducted_at" | "truck_id">[];
   workOrderParts: WorkOrderPart[];
   woLedger: WoLedgerRow[];
   permits: ExitPermit[];
@@ -141,6 +144,8 @@ export function buildUsageRows(input: {
       qty,
       valueSar,
       destinationKind: null,
+      truckId: wo.truck_id,
+      workOrderId: wo.id,
       stamped,
     });
   }
@@ -178,6 +183,8 @@ export function buildUsageRows(input: {
       qty: n.qty,
       valueSar: n.valueSar,
       destinationKind: p.destination_kind,
+      truckId: null,
+      workOrderId: null,
       stamped: "ledger",
     });
   }
@@ -207,6 +214,297 @@ function group(rows: UsageRow[], keyOf: (r: UsageRow) => string, labelOf: (k: st
     m.set(k, b);
   }
   return [...m.values()];
+}
+
+// ---------------------------------------------------------------------------
+// PERIODS.
+//
+// One granularity drives the whole tab: "this week vs last week", "this month
+// vs last month", and so on. Every reading is the CURRENT period with its
+// change against the one before, so the numbers on screen always answer the
+// same question at the same scale.
+//
+// Two views are exempt, on purpose:
+//   - the weekly summary, which is weekly by definition;
+//   - the combined trend chart, which is a history and carries its own
+//     coarser toggle.
+// A third is exempt for a different reason: "currently out and not back" is a
+// statement about RIGHT NOW, not about a window. Filtering it by period would
+// answer a question nobody asked.
+// ---------------------------------------------------------------------------
+export type PeriodKind = "week" | "month" | "quarter" | "year";
+
+export const PERIOD_LABELS: Record<PeriodKind, string> = {
+  week: "Week to week",
+  month: "Month to month",
+  quarter: "Quarter to quarter",
+  year: "Year to year",
+};
+
+export type PeriodWindow = {
+  kind: PeriodKind;
+  /** Inclusive ISO start, exclusive ISO end. */
+  start: string;
+  end: string;
+  label: string;
+  prevStart: string;
+  prevEnd: string;
+  prevLabel: string;
+};
+
+/** Monday-based week start, matching how the business reads a week. */
+function startOfWeek(d: Date): Date {
+  const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const dow = (x.getUTCDay() + 6) % 7; // Mon=0
+  x.setUTCDate(x.getUTCDate() - dow);
+  return x;
+}
+
+function fmtRange(kind: PeriodKind, start: Date): string {
+  const y = start.getUTCFullYear();
+  if (kind === "year") return String(y);
+  if (kind === "quarter") return `Q${Math.floor(start.getUTCMonth() / 3) + 1} ${y}`;
+  if (kind === "month") {
+    return start.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+  }
+  return `Week of ${start.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}`;
+}
+
+export function periodWindow(kind: PeriodKind, now: Date): PeriodWindow {
+  let start: Date, end: Date, prevStart: Date;
+  const y = now.getUTCFullYear(), m = now.getUTCMonth();
+
+  if (kind === "week") {
+    start = startOfWeek(now);
+    end = new Date(start); end.setUTCDate(end.getUTCDate() + 7);
+    prevStart = new Date(start); prevStart.setUTCDate(prevStart.getUTCDate() - 7);
+  } else if (kind === "month") {
+    start = new Date(Date.UTC(y, m, 1));
+    end = new Date(Date.UTC(y, m + 1, 1));
+    prevStart = new Date(Date.UTC(y, m - 1, 1));
+  } else if (kind === "quarter") {
+    const q = Math.floor(m / 3) * 3;
+    start = new Date(Date.UTC(y, q, 1));
+    end = new Date(Date.UTC(y, q + 3, 1));
+    prevStart = new Date(Date.UTC(y, q - 3, 1));
+  } else {
+    start = new Date(Date.UTC(y, 0, 1));
+    end = new Date(Date.UTC(y + 1, 0, 1));
+    prevStart = new Date(Date.UTC(y - 1, 0, 1));
+  }
+
+  return {
+    kind,
+    start: start.toISOString(),
+    end: end.toISOString(),
+    label: fmtRange(kind, start),
+    prevStart: prevStart.toISOString(),
+    prevEnd: start.toISOString(),
+    prevLabel: fmtRange(kind, prevStart),
+  };
+}
+
+export function inWindow(rows: UsageRow[], start: string, end: string): UsageRow[] {
+  return rows.filter((r) => r.occurredAt >= start && r.occurredAt < end);
+}
+
+/** Percentage change, or null when there is no base to compare against —
+ *  "up 100% from zero" is a sentence that means nothing. */
+export function pctChange(current: number, previous: number): number | null {
+  if (previous === 0) return null;
+  return ((current - previous) / previous) * 100;
+}
+
+// --- Trend-chart bucketing (its own granularity, coarser than the picker) ---
+export type TrendKind = "month" | "quarter" | "year";
+
+export const TREND_LABELS: Record<TrendKind, string> = {
+  month: "Monthly",
+  quarter: "Quarterly",
+  year: "Yearly",
+};
+
+function trendKey(kind: TrendKind, iso: string): string {
+  const y = iso.slice(0, 4);
+  if (kind === "year") return y;
+  const mo = Number(iso.slice(5, 7));
+  if (kind === "quarter") return `${y}-Q${Math.floor((mo - 1) / 3) + 1}`;
+  return iso.slice(0, 7);
+}
+
+function nextTrendKey(kind: TrendKind, key: string): string {
+  if (kind === "year") return String(Number(key) + 1);
+  if (kind === "quarter") {
+    const [y, q] = key.split("-Q").map(Number);
+    return q === 4 ? `${y + 1}-Q1` : `${y}-Q${q + 1}`;
+  }
+  const [y, m] = key.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+}
+
+export function trendLabel(kind: TrendKind, key: string): string {
+  if (kind === "year") return key;
+  if (kind === "quarter") return key.replace("-", " ");
+  return new Date(key + "-01T00:00:00Z").toLocaleDateString(undefined, {
+    month: "short", year: "2-digit", timeZone: "UTC",
+  });
+}
+
+/** The combined trend: EVERYTHING that left stock, bucketed, gaps filled. */
+export function trendSeries(rows: UsageRow[], kind: TrendKind): Bucket[] {
+  if (rows.length === 0) return [];
+  const m = new Map<string, Bucket>();
+  for (const r of rows) {
+    const k = trendKey(kind, r.occurredAt);
+    const b = m.get(k) ?? { key: k, label: trendLabel(kind, k), qty: 0, valueSar: 0 };
+    b.qty += r.qty;
+    b.valueSar += r.valueSar;
+    m.set(k, b);
+  }
+  const keys = [...m.keys()].sort();
+  const out: Bucket[] = [];
+  for (let k = keys[0]; ; k = nextTrendKey(kind, k)) {
+    out.push(m.get(k) ?? { key: k, label: trendLabel(kind, k), qty: 0, valueSar: 0 });
+    if (k === keys[keys.length - 1]) break;
+    if (out.length > 400) break; // guard against a bad date in the data
+  }
+  return out;
+}
+
+/** A simple moving average over the value series, for the overlaid line.
+ *  Window 3, or the whole series when it is shorter — a trend line that needs
+ *  more points than exist would just vanish. */
+export function movingAverage(series: Bucket[], window = 3): number[] {
+  return series.map((_, i) => {
+    const from = Math.max(0, i - window + 1);
+    const slice = series.slice(from, i + 1);
+    return slice.reduce((n, b) => n + b.valueSar, 0) / slice.length;
+  });
+}
+
+// --- Trucks ----------------------------------------------------------------
+export type TruckUsage = {
+  truckId: string;
+  plate: string;
+  /** How many separate work orders drew parts for this truck. */
+  visits: number;
+  qty: number;
+  valueSar: number;
+};
+
+/**
+ * Maintenance spend by truck.
+ *
+ * Value is the PARTS this truck's work orders consumed. It deliberately does
+ * NOT add work_orders.actual_cost_sar: checked live on all 13 deducted work
+ * orders, actual_cost_sar equals the parts value exactly, so adding it would
+ * double every figure. Labour (labor_hours × labor_rate_sar) is genuinely
+ * separate money but is not parts consumption, and this tab's axis is parts.
+ */
+export function byTruck(rows: UsageRow[], plate: (id: string) => string | null): TruckUsage[] {
+  const m = new Map<string, TruckUsage & { wos: Set<string> }>();
+  for (const r of rows) {
+    if (r.source !== "maintenance" || !r.truckId) continue;
+    const e = m.get(r.truckId) ?? {
+      truckId: r.truckId, plate: plate(r.truckId) ?? "Unknown truck",
+      visits: 0, qty: 0, valueSar: 0, wos: new Set<string>(),
+    };
+    e.qty += r.qty;
+    e.valueSar += r.valueSar;
+    if (r.workOrderId) e.wos.add(r.workOrderId);
+    m.set(r.truckId, e);
+  }
+  return [...m.values()]
+    .map(({ wos, ...t }) => ({ ...t, visits: wos.size }))
+    .sort((a, b) => b.valueSar - a.valueSar);
+}
+
+// --- Weekly narrative ------------------------------------------------------
+export type SummaryBullet = { tone: "up" | "down" | "flat" | "info"; text: string };
+
+/**
+ * The week in bullets, computed — never templated prose with numbers dropped
+ * in. Every line below is a comparison the reader could redo by hand from the
+ * tables on this page.
+ */
+export function weeklySummary(
+  allRows: UsageRow[],
+  now: Date,
+  partName: (id: string) => string | null,
+  plate: (id: string) => string | null,
+): { window: PeriodWindow; bullets: SummaryBullet[] } {
+  const w = periodWindow("week", now);
+  const cur = inWindow(allRows, w.start, w.end);
+  const prev = inWindow(allRows, w.prevStart, w.prevEnd);
+  const c = totals(cur), p = totals(prev);
+  const bullets: SummaryBullet[] = [];
+
+  if (cur.length === 0) {
+    bullets.push({
+      tone: "info",
+      text: p.valueSar > 0
+        ? `Nothing left stock this week — last week it was ${Math.round(p.valueSar).toLocaleString()} SAR across ${p.qty} units.`
+        : "Nothing left stock this week, and nothing last week either.",
+    });
+    return { window: w, bullets };
+  }
+
+  const delta = pctChange(c.valueSar, p.valueSar);
+  bullets.push({
+    tone: delta === null ? "info" : delta > 5 ? "up" : delta < -5 ? "down" : "flat",
+    text: delta === null
+      ? `${Math.round(c.valueSar).toLocaleString()} SAR of parts left stock across ${c.qty} units — nothing moved last week, so there is no comparison yet.`
+      : `${Math.round(c.valueSar).toLocaleString()} SAR of parts left stock across ${c.qty} units, ${
+          delta >= 0 ? "up" : "down"} ${Math.abs(Math.round(delta))}% in value against last week.`,
+  });
+
+  // Where it went.
+  const src = bySource(cur);
+  const maint = src.find((s) => s.key === "maintenance");
+  const exits = src.find((s) => s.key === "exit_permit");
+  if (maint && exits) {
+    const share = Math.round((maint.valueSar / (c.valueSar || 1)) * 100);
+    bullets.push({
+      tone: "info",
+      text: `Maintenance took ${share}% of the value (${Math.round(maint.valueSar).toLocaleString()} SAR); exit permits took the rest (${Math.round(exits.valueSar).toLocaleString()} SAR).`,
+    });
+  } else if (maint) {
+    bullets.push({ tone: "info", text: "Everything consumed this week went to in-house maintenance — no exit permits." });
+  } else if (exits) {
+    bullets.push({ tone: "info", text: "Everything consumed this week left on exit permits — no maintenance draws." });
+  }
+
+  // The single biggest part.
+  const [topPart] = topParts(cur, partName, 1).byValue;
+  if (topPart) {
+    const share = Math.round((topPart.valueSar / (c.valueSar || 1)) * 100);
+    bullets.push({
+      tone: share >= 50 ? "up" : "info",
+      text: `${topPart.label} was the biggest single item at ${Math.round(topPart.valueSar).toLocaleString()} SAR${
+        share >= 50 ? ` — over half the week's value on its own` : ""}.`,
+    });
+  }
+
+  // The truck that cost the most.
+  const [topTruck] = byTruck(cur, plate);
+  if (topTruck) {
+    bullets.push({
+      tone: "info",
+      text: `${topTruck.plate} drew the most maintenance parts — ${Math.round(topTruck.valueSar).toLocaleString()} SAR across ${topTruck.visits} job${topTruck.visits === 1 ? "" : "s"}.`,
+    });
+  }
+
+  // Quantity moving against value is worth saying out loud — it means the mix
+  // changed, not just the volume.
+  const qtyDelta = pctChange(c.qty, p.qty);
+  if (delta !== null && qtyDelta !== null && Math.sign(delta) !== Math.sign(qtyDelta)) {
+    bullets.push({
+      tone: "info",
+      text: `Value went ${delta >= 0 ? "up" : "down"} while quantity went ${qtyDelta >= 0 ? "up" : "down"} — the mix shifted toward ${delta >= 0 ? "more expensive" : "cheaper"} parts, not just more of them.`,
+    });
+  }
+
+  return { window: w, bullets };
 }
 
 /** Monthly, oldest first, with EMPTY months filled in — a gap in a trend line

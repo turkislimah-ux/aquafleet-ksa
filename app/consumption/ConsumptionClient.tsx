@@ -300,6 +300,7 @@ export default function ConsumptionClient({
           }))}
           parts={allParts}
           warehouses={warehouses}
+          trucks={allTrucks}
           // The SAME resolver every other tab uses, so one permit is never
           // described three different ways.
           destinationLabel={destinationLabel}
