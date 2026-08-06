@@ -9,8 +9,9 @@ import { createClient } from "@/lib/supabase/server";
 import { todayKey } from "@/lib/utils";
 import type {
   ExitPermit, ExitPermitLine, ExitPermitReturn, ExitPermitReturnLine, ExitPermitFile,
+  ConsumptionApproval, WorkOrder, WorkOrderPart, OutsourcedJob, WorkshopPayment,
 } from "@/lib/db-types";
-import type { LotLite } from "@/lib/exit-permits";
+import type { LotLite, ConsumptionLedgerRow } from "@/lib/exit-permits";
 import ConsumptionClient, {
   type PartLite, type WarehouseLite, type NamedLite, type StaffLite, type TruckLite,
 } from "./ConsumptionClient";
@@ -21,10 +22,18 @@ export default async function ConsumptionPage() {
   const supabase = createClient();
   const today = todayKey();
 
+  // Who is looking. The approvals tab keys its buttons on the viewer's own
+  // decision row (0095: one row per person per event), so it needs the same
+  // identity the server action stamps into decided_by.
+  const { data: auth } = await supabase.auth.getUser();
+  const viewer = auth?.user?.email ?? null;
+
   const [
     permitsRes, linesRes, returnsRes, returnLinesRes, filesRes,
     warehousesRes, partsRes, stationsRes, projectsRes, trucksRes, customersRes, staffRes,
-    lotsRes,
+    lotsRes, ledgerRes,
+    approvalsRes, workOrdersRes, workOrderPartsRes, osJobsRes, paymentsRes,
+    repairersRes, jobRepairersRes, allPartsRes, allTrucksRes,
   ] = await Promise.all([
     supabase.from("exit_permits").select("*").order("created_at", { ascending: false }),
     supabase.from("exit_permit_lines").select("*").order("created_at", { ascending: true }),
@@ -54,6 +63,41 @@ export default async function ConsumptionPage() {
       .gt("qty_remaining", 0)
       .order("received_on", { ascending: true })
       .order("created_at", { ascending: true }),
+    // The per-lot ledger. READ ONLY, and only so the return popup can preview
+    // the unit price the RPC will land on — return_exit_permit_line owns the
+    // actual recompute. Nothing here writes it.
+    supabase
+      .from("exit_permit_line_consumptions")
+      .select("exit_permit_line_id, price_lot_id, direction, qty, unit_price_sar, created_at")
+      .order("created_at", { ascending: true }),
+
+    // --- APPROVALS tab (Phase 2, migration 0094) ----------------------------
+    // The overlay. LEFT-JOINed in the client rather than embedded, because the
+    // three subject kinds live in three different tables and the tab has to
+    // show events that have NO row here at all.
+    supabase.from("consumption_approvals").select("*"),
+    // Completed in-house work orders and the parts they consumed.
+    // unit_price_sar on a work_order_parts row is the FIFO cost
+    // consume_work_order_line stamped at deduction — read, never recomputed.
+    supabase
+      .from("work_orders")
+      .select("*")
+      .eq("status", "completed")
+      .order("closed_at", { ascending: false }),
+    supabase.from("work_order_parts").select("*"),
+    // Outsourced jobs: NOT filtered by status. What is approved is the vendor
+    // spend, and a payment against a still-open job is still real money — the
+    // derive drops any job with no payment row.
+    supabase.from("outsourced_jobs").select("*").order("start_date", { ascending: false }),
+    supabase.from("workshop_payments").select("*"),
+    supabase.from("repairers").select("id, name"),
+    supabase.from("outsourced_job_repairers").select("outsourced_job_id, repairer_id"),
+    // Label lookups WITHOUT the active/terminated filters the pickers above
+    // use. A completed work order can reference a part that has since been
+    // deactivated, or a truck that has since been terminated — history must
+    // still render its name rather than "Unknown".
+    supabase.from("parts").select("id, name, sku, unit"),
+    supabase.from("trucks").select("id, plate"),
   ]);
 
   const error =
@@ -61,7 +105,12 @@ export default async function ConsumptionPage() {
     returnLinesRes.error?.message ?? filesRes.error?.message ?? warehousesRes.error?.message ??
     partsRes.error?.message ?? stationsRes.error?.message ?? projectsRes.error?.message ??
     trucksRes.error?.message ?? customersRes.error?.message ?? staffRes.error?.message ??
-    lotsRes.error?.message ?? null;
+    lotsRes.error?.message ?? ledgerRes.error?.message ??
+    approvalsRes.error?.message ?? workOrdersRes.error?.message ??
+    workOrderPartsRes.error?.message ?? osJobsRes.error?.message ??
+    paymentsRes.error?.message ?? repairersRes.error?.message ??
+    jobRepairersRes.error?.message ?? allPartsRes.error?.message ??
+    allTrucksRes.error?.message ?? null;
 
   return (
     <ConsumptionClient
@@ -78,6 +127,17 @@ export default async function ConsumptionPage() {
       customers={(customersRes.data ?? []) as NamedLite[]}
       staff={(staffRes.data ?? []) as StaffLite[]}
       lots={(lotsRes.data ?? []) as LotLite[]}
+      ledger={(ledgerRes.data ?? []) as ConsumptionLedgerRow[]}
+      approvals={(approvalsRes.data ?? []) as ConsumptionApproval[]}
+      workOrders={(workOrdersRes.data ?? []) as WorkOrder[]}
+      workOrderParts={(workOrderPartsRes.data ?? []) as WorkOrderPart[]}
+      outsourcedJobs={(osJobsRes.data ?? []) as OutsourcedJob[]}
+      workshopPayments={(paymentsRes.data ?? []) as WorkshopPayment[]}
+      repairers={(repairersRes.data ?? []) as NamedLite[]}
+      jobRepairers={(jobRepairersRes.data ?? []) as { outsourced_job_id: string; repairer_id: string }[]}
+      allParts={(allPartsRes.data ?? []) as { id: string; name: string; sku: string; unit: string | null }[]}
+      allTrucks={(allTrucksRes.data ?? []) as TruckLite[]}
+      viewer={viewer}
       today={today}
       error={error}
     />

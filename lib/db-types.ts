@@ -1530,3 +1530,38 @@ export type ExitPermitFile = {
   uploaded_by: string | null;
   uploaded_at: string;
 };
+
+// ---------------------------------------------------------------------------
+// Consumption — Phase 2 (migration 0094). The APPROVALS overlay.
+//
+// An OVERLAY, not a state machine: a row records what someone decided about
+// an event that has ALREADY happened. Exactly one of the three FKs is set (DB
+// CHECK num_nonnulls(...) = 1), and there is at most one row per event (three
+// partial unique indexes) — re-deciding UPDATES that row rather than adding a
+// second one.
+//
+// NOTHING in this table's path moves stock or changes the subject's own
+// status. 0094 creates no function and no trigger, so the database has no
+// mechanism for it, and the app keeps it that way: decideConsumptionApproval
+// writes this table and nothing else.
+//
+// decided_at moves on every flip; created_at records the FIRST decision.
+// ---------------------------------------------------------------------------
+export type ConsumptionApprovalDecision = "approved" | "rejected";
+
+export type ConsumptionApproval = {
+  id: string;
+  exit_permit_id: string | null;
+  work_order_id: string | null;
+  outsourced_job_id: string | null;
+  decision: ConsumptionApprovalDecision;
+  reason: string | null;
+  // NOT NULL as of migration 0095: the approver became part of the key
+  // (UNIQUE per (event, decided_by)), and a key column that can be NULL is
+  // not a key. Typed nullable when 0094 shipped; corrected here to match the
+  // live column rather than leaving the type claiming something the database
+  // no longer allows.
+  decided_by: string;
+  decided_at: string;
+  created_at: string;
+};

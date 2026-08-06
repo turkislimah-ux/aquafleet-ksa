@@ -21,17 +21,20 @@ import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import {
   outstandingQty, permitOutstanding, permitValueSar, isOverdue, daysOverdue,
-  lineUnitCost, EXIT_PERMIT_STATUS_PILL, type LotLite,
+  lineUnitCost, EXIT_PERMIT_STATUS_PILL, type LotLite, type ConsumptionLedgerRow,
 } from "@/lib/exit-permits";
 import {
   EXIT_PERMIT_KIND_LABELS, EXIT_PERMIT_DESTINATION_LABELS,
   type ExitPermit, type ExitPermitLine, type ExitPermitReturn,
   type ExitPermitReturnLine, type ExitPermitFile,
+  type ConsumptionApproval, type WorkOrder, type WorkOrderPart,
+  type OutsourcedJob, type WorkshopPayment,
 } from "@/lib/db-types";
 import { deleteExitPermitDraft, getExitPermitFileUrls } from "./actions";
 import {
   PermitFormModal, ConfirmExitModal, ReturnModal, VoidModal, PermitPrintView,
 } from "./ExitPermitModals";
+import ApprovalsTab from "./ApprovalsTab";
 
 export type WarehouseLite = { id: string; name: string };
 export type NamedLite = { id: string; name: string };
@@ -42,18 +45,22 @@ export type PartLite = {
   warehouse_id: string; qty_on_hand: number;
 };
 
-type Tab = "usage" | "permits" | "reports";
+type Tab = "usage" | "permits" | "approvals" | "reports";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "usage", label: "Parts Usage" },
   { key: "permits", label: "Exit Permits" },
+  { key: "approvals", label: "Approvals" },
   { key: "reports", label: "Reports" },
 ];
 
 export default function ConsumptionClient({
   permits, lines, returns, returnLines, files,
   warehouses, parts, stations, projects, trucks, customers, staff,
-  lots, today, error,
+  lots, ledger,
+  approvals, workOrders, workOrderParts, outsourcedJobs, workshopPayments,
+  repairers, jobRepairers, allParts, allTrucks, viewer,
+  today, error,
 }: {
   permits: ExitPermit[];
   lines: ExitPermitLine[];
@@ -68,6 +75,21 @@ export default function ConsumptionClient({
   customers: NamedLite[];
   staff: StaffLite[];
   lots: LotLite[];
+  ledger: ConsumptionLedgerRow[];
+  // --- Approvals tab (Phase 2) ---
+  approvals: ConsumptionApproval[];
+  workOrders: WorkOrder[];
+  workOrderParts: WorkOrderPart[];
+  outsourcedJobs: OutsourcedJob[];
+  workshopPayments: WorkshopPayment[];
+  repairers: NamedLite[];
+  jobRepairers: { outsourced_job_id: string; repairer_id: string }[];
+  // Unfiltered label lookups — history can reference a deactivated part or a
+  // terminated truck, and it must still render its name.
+  allParts: { id: string; name: string; sku: string; unit: string | null }[];
+  allTrucks: TruckLite[];
+  // Signed-in user's email — the approvals tab compares it to decided_by.
+  viewer: string | null;
   today: string;
   error: string | null;
 }) {
@@ -148,6 +170,21 @@ export default function ConsumptionClient({
     return (p: ExitPermit): string =>
       p.receiver_staff_id ? s.get(p.receiver_staff_id) ?? "—" : p.receiver_name ?? "—";
   }, [staff]);
+
+  const repairerNameById = useMemo(
+    () => new Map(repairers.map((r) => [r.id, r.name])),
+    [repairers],
+  );
+
+  const jobRepairerIds = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const row of jobRepairers) {
+      const a = m.get(row.outsourced_job_id) ?? [];
+      a.push(row.repairer_id);
+      m.set(row.outsourced_job_id, a);
+    }
+    return m;
+  }, [jobRepairers]);
 
   const overdueIds = useMemo(() => {
     const set = new Set<string>();
@@ -240,7 +277,7 @@ export default function ConsumptionClient({
         </div>
       )}
 
-      {tab !== "permits" ? (
+      {tab === "usage" || tab === "reports" ? (
         <Card>
           <div className="p-10 text-center">
             <PackageMinus className="h-6 w-6 mx-auto mb-2 opacity-40" />
@@ -254,6 +291,24 @@ export default function ConsumptionClient({
             </p>
           </div>
         </Card>
+      ) : tab === "approvals" ? (
+        <ApprovalsTab
+          permits={permits}
+          permitLines={lines}
+          workOrders={workOrders}
+          workOrderParts={workOrderParts}
+          outsourcedJobs={outsourcedJobs}
+          workshopPayments={workshopPayments}
+          repairerNameById={repairerNameById}
+          jobRepairerIds={jobRepairerIds}
+          approvals={approvals}
+          partNames={allParts}
+          trucks={allTrucks}
+          viewer={viewer}
+          // The SAME resolver the permits tab and the printable permit use, so
+          // one permit can never be described three different ways.
+          destinationLabel={destinationLabel}
+        />
       ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -318,7 +373,7 @@ export default function ConsumptionClient({
                     <TH>Destination</TH>
                     <TH>Receiver</TH>
                     <TH>Warehouse</TH>
-                    <TH>Lines</TH>
+                    <TH>Items</TH>
                     <TH>Value out</TH>
                     <TH>Status</TH>
                     <TH>{null}</TH>
@@ -447,7 +502,7 @@ export default function ConsumptionClient({
                           <tr>
                             <td colSpan={10} className="p-0 border-t" style={{ borderColor: "rgb(var(--border))" }}>
                               <div className="p-4 bg-black/[0.015] dark:bg-white/[0.02] space-y-3">
-                                <div className="text-[11px] font-semibold uppercase tracking-wide muted">Lines</div>
+                                <div className="text-[11px] font-semibold uppercase tracking-wide muted">Items</div>
                                 {p.note && (
                                   <p className="text-sm rounded-lg px-3 py-2 bg-black/[0.03] dark:bg-white/[0.04]">
                                     {p.note}
@@ -457,6 +512,12 @@ export default function ConsumptionClient({
                                   <thead>
                                     <tr>
                                       <TH>Part</TH>
+                                      {/* NOTE gets its own column beside the
+                                          part, capped at roughly two lines —
+                                          a long note should be readable at a
+                                          glance without stretching the row
+                                          into a paragraph. */}
+                                      <TH>Note</TH>
                                       <TH>Qty out</TH>
                                       <TH>Returned</TH>
                                       <TH>Outstanding</TH>
@@ -475,7 +536,11 @@ export default function ConsumptionClient({
                                             <div className="text-[11px] muted">
                                               {part?.sku}{part?.unit ? ` · ${part.unit}` : ""}
                                             </div>
-                                            {l.note && <div className="text-[11px] muted">{l.note}</div>}
+                                          </TD>
+                                          <TD className="whitespace-normal align-top max-w-[260px]">
+                                            {l.note
+                                              ? <span className="text-[11px] muted line-clamp-2" title={l.note}>{l.note}</span>
+                                              : <span className="text-[11px] muted">—</span>}
                                           </TD>
                                           <TD className="text-xs tabular-nums">{l.qty}</TD>
                                           <TD className="text-xs tabular-nums">{l.qty_returned || <span className="muted">—</span>}</TD>
@@ -483,7 +548,7 @@ export default function ConsumptionClient({
                                           <TD className="text-xs tabular-nums">
                                             {(() => {
                                               const u = lineUnitCost(p.status, l, lots);
-                                              if (u === null) return <span className="muted" title="Not enough stock in lots to price this line">—</span>;
+                                              if (u === null) return <span className="muted" title="Not enough stock in lots to price this item">—</span>;
                                               return (
                                                 <>
                                                   {formatSar(u)}
@@ -628,6 +693,7 @@ export default function ConsumptionClient({
           permit={returnPermit}
           lines={linesByPermit.get(returnPermit.id) ?? []}
           parts={parts}
+          ledger={ledger}
           today={today}
           onClose={closeAll}
         />

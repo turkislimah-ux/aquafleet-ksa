@@ -192,7 +192,7 @@ async function assertDraft(
     .eq("id", permitId)
     .single();
   if (!data) return "Permit not found.";
-  if (data.status !== "draft") return "Lines can only be changed while the permit is a draft.";
+  if (data.status !== "draft") return "Items can only be changed while the permit is a draft.";
   return null;
 }
 
@@ -290,7 +290,7 @@ export async function recordExitPermitReturn(
 ): Promise<{ error: string | null }> {
   if (!permitId) return { error: "Permit is required." };
   const usable = lines.filter((l) => Number.isFinite(l.qty) && l.qty > 0);
-  if (usable.length === 0) return { error: "Enter a quantity for at least one line." };
+  if (usable.length === 0) return { error: "Enter a quantity for at least one item." };
 
   const supabase = createClient();
   const { error } = await supabase.rpc("record_exit_permit_return", {
@@ -396,4 +396,135 @@ export async function getExitPermitFileUrls(
     if (row.signedUrl && row.path) urls[row.path] = row.signedUrl;
   }
   return { error: null, urls };
+}
+
+// ---------------------------------------------------------------------------
+// APPROVALS (migration 0094) — Phase 2.
+//
+// READ THIS BEFORE EDITING. This action writes exactly ONE table:
+// consumption_approvals. It does not update the permit, the work order or the
+// outsourced job; it does not call an RPC; it does not touch parts,
+// price_lots or stock_movements. The database has no mechanism to do any of
+// that from here (0094 creates no function and no trigger), and this file must
+// not become that mechanism. A rejection is INFORMATION — the parts already
+// left, the job already happened. Reversing a permit is void_exit_permit's
+// job, deliberately kept a separate, explicit action.
+//
+// The only other statements below are SELECTs used to check the subject is
+// eligible before recording an opinion about it.
+// ---------------------------------------------------------------------------
+
+type ApprovalKindArg = "exit_permit" | "work_order" | "outsourced_job";
+
+const SUBJECT_COLUMN: Record<ApprovalKindArg, "exit_permit_id" | "work_order_id" | "outsourced_job_id"> = {
+  exit_permit: "exit_permit_id",
+  work_order: "work_order_id",
+  outsourced_job: "outsourced_job_id",
+};
+
+// Mirrors the tab's own inclusion rules server-side, so a stray call cannot
+// record a decision about something the queue would never have offered — e.g.
+// a draft permit, or a work order that consumed nothing.
+async function subjectIsEligible(
+  supabase: ReturnType<typeof createClient>,
+  kind: ApprovalKindArg,
+  subjectId: string,
+): Promise<string | null> {
+  if (kind === "exit_permit") {
+    const { data } = await supabase
+      .from("exit_permits").select("status").eq("id", subjectId).maybeSingle();
+    if (!data) return "That permit no longer exists.";
+    if (data.status !== "exited") return "Only a permit whose parts have left can be approved.";
+    return null;
+  }
+  if (kind === "work_order") {
+    const { data } = await supabase
+      .from("work_orders").select("status").eq("id", subjectId).maybeSingle();
+    if (!data) return "That work order no longer exists.";
+    if (data.status !== "completed") return "Only a completed work order can be approved.";
+    const { count } = await supabase
+      .from("work_order_parts")
+      .select("id", { count: "exact", head: true })
+      .eq("work_order_id", subjectId);
+    if (!count) return "That work order consumed no parts, so there is nothing to approve.";
+    return null;
+  }
+  const { data } = await supabase
+    .from("outsourced_jobs").select("id").eq("id", subjectId).maybeSingle();
+  if (!data) return "That outsourced job no longer exists.";
+  const { count } = await supabase
+    .from("workshop_payments")
+    .select("id", { count: "exact", head: true })
+    .eq("outsourced_job_id", subjectId);
+  if (!count) return "That job has no vendor payment recorded, so there is nothing to approve.";
+  return null;
+}
+
+export async function decideConsumptionApproval(
+  kind: ApprovalKindArg,
+  subjectId: string,
+  decision: "approved" | "rejected",
+  reason: string | null,
+): Promise<{ error: string | null }> {
+  if (!subjectId) return { error: "Nothing selected." };
+  if (!(kind in SUBJECT_COLUMN)) return { error: "Unknown approval kind." };
+  if (decision !== "approved" && decision !== "rejected") {
+    return { error: "A decision must be approve or reject." };
+  }
+  const trimmed = reason?.trim() || null;
+  // Enforced here, not only in the form: a rejection nobody explained is a
+  // dead end for whoever reads it later. Approval stays free of the demand —
+  // "yes, as expected" needs no essay.
+  if (decision === "rejected" && !trimmed) {
+    return { error: "Give a reason for the rejection." };
+  }
+
+  const supabase = createClient();
+  const column = SUBJECT_COLUMN[kind];
+  const actor = await actorEmail(supabase);
+  // decided_by is NOT NULL as of 0095 — the approver is part of the key now,
+  // so an unattributable decision is refused here rather than at the database
+  // with a 23502 nobody can read.
+  if (!actor) return { error: "Sign in again — a decision has to be attributable." };
+
+  const bad = await subjectIsEligible(supabase, kind, subjectId);
+  if (bad) return { error: bad };
+
+  // ONE ROW PER (EVENT, PERSON) — 0095's key. A person CHANGES their own
+  // decision; they never add a second one, so two approvals always mean two
+  // people. supabase-js cannot express a partial-index conflict target for
+  // upsert, so this reads first and branches; the index is still the real
+  // guarantee — a race loses on 23505 rather than inflating the count.
+  const { data: existing } = await supabase
+    .from("consumption_approvals")
+    .select("id")
+    .eq(column, subjectId)
+    .eq("decided_by", actor)
+    .maybeSingle();
+
+  if (existing) {
+    // decided_at moves; created_at deliberately does not — it keeps saying
+    // when THIS PERSON first ruled on the event.
+    const { error } = await supabase
+      .from("consumption_approvals")
+      .update({
+        decision,
+        reason: trimmed,
+        decided_by: actor,
+        decided_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id);
+    if (error) return { error: error.message };
+  } else {
+    const { error } = await supabase.from("consumption_approvals").insert({
+      [column]: subjectId,
+      decision,
+      reason: trimmed,
+      decided_by: actor,
+    });
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath("/consumption");
+  return { error: null };
 }

@@ -117,6 +117,82 @@ export function fifoPreviewUnitCost(
   return value / qty;
 }
 
+// ---------------------------------------------------------------------------
+// RETURN VALUE PREVIEW — display only.
+//
+// return_exit_permit_line() ALREADY recomputes exit_permit_lines.unit_price_sar
+// when a return is recorded, and that write is the only authoritative one.
+// This exists so the number on screen moves as the quantity is typed, and it
+// mirrors the RPC's own walk rather than approximating it:
+//
+//   - group the line's ledger by lot: net = sum(consume) - sum(return)
+//   - keep only lots with a POSITIVE net (the RPC's `having`)
+//   - take from them in `last_touched desc` order (the RPC's `order by`)
+//   - the new unit price is the weighted average of what is STILL net-consumed
+//     across every lot, which is exactly the RPC's trailing update
+//
+// Returns null when the ledger cannot cover the quantity — precisely the case
+// where the RPC raises instead of writing.
+//
+// ONE HONEST LIMIT: when a line drew from two lots in the SAME statement their
+// ledger rows share a created_at, so `last_touched desc` has a tie the
+// database itself breaks arbitrarily. The preview keeps insertion order there.
+// A tie can therefore move the previewed unit price between the two lots'
+// prices; the figure written on submit is the RPC's, not this one's, which is
+// why this is display only.
+// ---------------------------------------------------------------------------
+export type ConsumptionLedgerRow = {
+  exit_permit_line_id: string;
+  price_lot_id: string;
+  direction: "consume" | "return";
+  qty: number;
+  unit_price_sar: number;
+  created_at: string;
+};
+
+export function returnedUnitPricePreview(
+  lineId: string,
+  returnQty: number,
+  ledger: ConsumptionLedgerRow[],
+  fallbackUnitPrice: number,
+): number | null {
+  type Group = { qty: number; price: number; lastTouched: string };
+  const byLot = new Map<string, Group>();
+  for (const r of ledger) {
+    if (r.exit_permit_line_id !== lineId) continue;
+    const g = byLot.get(r.price_lot_id) ?? { qty: 0, price: Number(r.unit_price_sar), lastTouched: r.created_at };
+    g.qty += r.direction === "consume" ? Number(r.qty) : -Number(r.qty);
+    if (r.created_at > g.lastTouched) g.lastTouched = r.created_at;
+    byLot.set(r.price_lot_id, g);
+  }
+  if (byLot.size === 0) return null;
+
+  if (returnQty > 0) {
+    const candidates = [...byLot.values()]
+      .filter((g) => g.qty > 0)
+      .sort((a, b) => b.lastTouched.localeCompare(a.lastTouched));
+    let remaining = returnQty;
+    for (const g of candidates) {
+      if (remaining <= 0) break;
+      const take = Math.min(g.qty, remaining);
+      g.qty -= take;
+      remaining -= take;
+    }
+    // The RPC refuses rather than partially returning.
+    if (remaining > 0) return null;
+  }
+
+  let netQty = 0, netValue = 0;
+  for (const g of byLot.values()) {
+    netQty += g.qty;
+    netValue += g.qty * g.price;
+  }
+  // `nullif(..., 0)` then `coalesce(..., unit_price_sar)` in the RPC: with
+  // nothing left net-consumed the old price is kept rather than zeroed.
+  if (netQty === 0) return fallbackUnitPrice;
+  return netValue / netQty;
+}
+
 // The unit cost to DISPLAY for a line: the stamped one once the permit has
 // exited, the FIFO preview while it is still a draft.
 export function lineUnitCost(

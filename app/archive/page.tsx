@@ -32,6 +32,13 @@ import type { CommPayout } from "@/lib/commission-rows";
 import type {
   ArchiveTruckTabWorkOrder, ArchiveTruckTabOutsourcedJob,
 } from "./ArchiveTruckTab";
+import type {
+  ConsumptionApproval, ExitPermit, ExitPermitLine, WorkOrderPart, WorkshopPayment,
+} from "@/lib/db-types";
+import type {
+  LedgerWorkOrder, LedgerOutsourcedJob, LedgerPurchaseOrder, LedgerStockReceipt,
+} from "@/lib/approvals-ledger";
+import type { PoApprovalLite, ReceiptApprovalLite } from "./ApprovalsLedgerTab";
 import ArchiveClient from "./ArchiveClient";
 
 export const dynamic = "force-dynamic";
@@ -39,12 +46,20 @@ export const dynamic = "force-dynamic";
 export default async function ArchivePage() {
   const supabase = createClient();
   const today = todayKey(); // Riyadh-local, same convention as every other page
+  // Who is looking — the ledger marks the viewer's own votes.
+  const { data: auth } = await supabase.auth.getUser();
+  const viewer = auth?.user?.email ?? null;
 
   const [
     groupsRes, documentsRes, filesRes, renewalsRes, typesRes,
     driversRes, staffRes, payoutsRes,
     trucksRes, workOrdersRes, outsourcedJobsRes,
     customersRes, invoicesRes, projectsRes,
+    // --- Approvals Ledger ---
+    consApprovalsRes, permitsRes, permitLinesRes,
+    ledgerWorkOrdersRes, workOrderPartsRes, ledgerJobsRes, paymentsRes,
+    poApprovalsRes, purchaseOrdersRes, receiptApprovalsRes, stockReceiptsRes,
+    suppliersRes,
   ] = await Promise.all([
     supabase
       .from("archive_document_groups")
@@ -144,6 +159,36 @@ export default async function ArchivePage() {
     supabase
       .from("projects")
       .select("id, customer_id, name, initials, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, payment_mode, water_type, default_station, start_date, end_date, status, location, description, created_at"),
+
+    // -----------------------------------------------------------------------
+    // APPROVALS LEDGER — reads only. The ledger is DERIVED from these tables;
+    // nothing about it is stored, so there is no ledger table to fetch.
+    //
+    // The Truck tab's workOrders/outsourcedJobs selects above are narrower
+    // than the ledger needs (different columns), so the ledger takes its own
+    // rather than widening a query another tab depends on.
+    // -----------------------------------------------------------------------
+    supabase.from("consumption_approvals").select("*"),
+    supabase.from("exit_permits").select("*").eq("status", "exited"),
+    supabase.from("exit_permit_lines").select("*"),
+    supabase.from("work_orders").select("id, wo_number, title, status").eq("status", "completed"),
+    supabase.from("work_order_parts").select("*"),
+    supabase.from("outsourced_jobs").select("id, os_number, title"),
+    supabase.from("workshop_payments").select("*"),
+    supabase
+      .from("purchase_order_approvals")
+      .select("purchase_order_id, approver_email, comment, approved_at"),
+    supabase
+      .from("purchase_orders")
+      .select("id, po_number, supplier_id, total_sar, received_total_sar"),
+    supabase
+      .from("stock_receipt_approvals")
+      .select("stock_receipt_id, approver_email, action, outcome, comment, approved_at"),
+    supabase
+      .from("stock_receipts")
+      .select("id, supplier_id, received_on, receipt_type, total_cost_sar, grand_total_sar, rejection_reason"),
+    // Neither purchase_orders nor stock_receipts stores a supplier NAME.
+    supabase.from("suppliers").select("id, name"),
   ]);
 
   const groups = (groupsRes.data ?? []) as ArchiveDocumentGroup[];
@@ -184,6 +229,18 @@ export default async function ArchivePage() {
     customersRes.error?.message ??
     invoicesRes.error?.message ??
     projectsRes.error?.message ??
+    consApprovalsRes.error?.message ??
+    permitsRes.error?.message ??
+    permitLinesRes.error?.message ??
+    ledgerWorkOrdersRes.error?.message ??
+    workOrderPartsRes.error?.message ??
+    ledgerJobsRes.error?.message ??
+    paymentsRes.error?.message ??
+    poApprovalsRes.error?.message ??
+    purchaseOrdersRes.error?.message ??
+    receiptApprovalsRes.error?.message ??
+    stockReceiptsRes.error?.message ??
+    suppliersRes.error?.message ??
     null;
 
   return (
@@ -202,6 +259,24 @@ export default async function ArchivePage() {
       customers={customers}
       invoices={invoices}
       projects={projects}
+      ledger={{
+        approvals: (consApprovalsRes.data ?? []) as ConsumptionApproval[],
+        permits: (permitsRes.data ?? []) as ExitPermit[],
+        permitLines: (permitLinesRes.data ?? []) as ExitPermitLine[],
+        workOrders: (ledgerWorkOrdersRes.data ?? []) as LedgerWorkOrder[],
+        workOrderParts: (workOrderPartsRes.data ?? []) as WorkOrderPart[],
+        outsourcedJobs: (ledgerJobsRes.data ?? []) as LedgerOutsourcedJob[],
+        workshopPayments: (paymentsRes.data ?? []) as WorkshopPayment[],
+        poApprovals: (poApprovalsRes.data ?? []) as PoApprovalLite[],
+        purchaseOrders: (purchaseOrdersRes.data ?? []) as LedgerPurchaseOrder[],
+        receiptApprovals: (receiptApprovalsRes.data ?? []) as ReceiptApprovalLite[],
+        stockReceipts: (stockReceiptsRes.data ?? []) as LedgerStockReceipt[],
+        suppliers: (suppliersRes.data ?? []) as { id: string; name: string }[],
+        viewer,
+        // ONE instant for the whole render — see buildLedger. Taken on the
+        // server so the lock boundary is not decided by the browser's clock.
+        nowMs: Date.now(),
+      }}
       today={today}
       error={error}
     />

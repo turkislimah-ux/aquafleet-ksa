@@ -50,7 +50,15 @@ import type {
   ArchiveCustomerRow,
   ArchiveInvoiceRow,
   ArchiveProjectRow,
+  ConsumptionApproval,
+  ExitPermit,
+  ExitPermitLine,
+  WorkOrderPart,
+  WorkshopPayment,
 } from "@/lib/db-types";
+import type {
+  LedgerWorkOrder, LedgerOutsourcedJob, LedgerPurchaseOrder, LedgerStockReceipt,
+} from "@/lib/approvals-ledger";
 import type { CommPayout, DriverLite } from "@/lib/commission-rows";
 import { linkedFieldFor, linkedFieldForDoc, readPersonLink, PERSON_ID_LABEL } from "@/lib/archive";
 import {
@@ -67,6 +75,9 @@ import ArchiveTruckTab, {
 } from "./ArchiveTruckTab";
 import ArchiveCustomerTab, { CUSTOMER_SUB_TABS, type CustomerSubTab } from "./ArchiveCustomerTab";
 import SubTabPicker from "./SubTabPicker";
+import ApprovalsLedgerTab, {
+  type PoApprovalLite, type ReceiptApprovalLite,
+} from "./ApprovalsLedgerTab";
 // The Finance tab's OWN invoice workspace, reused verbatim and mounted
 // READ-ONLY. Rebuilding a lookalike would mean two definitions of what a full
 // invoice looks like, and the archive's copy would drift the first time the
@@ -79,11 +90,38 @@ import InvoiceDetailModal from "../trips/InvoiceDetailModal";
 // a lookalike that drifts the first time that tab changes.
 import HistoryTab from "../drivers/HistoryTab";
 
-const TABS: { key: ArchiveTab; label: string }[] = [
+// PAGE tabs, which are NOT the same set as ArchiveTab. ArchiveTab is the
+// archive_document_groups.tab COLUMN — a DB-constrained value
+// (archive_document_groups_tab_check allows exactly company/staff/truck/
+// customer). The Approvals Ledger owns no groups and no documents; it is a
+// derived view over two other features entirely, so it is a UI tab only.
+// Widening ArchiveTab to fit it would put a value in the type that the
+// database would reject on write.
+type PageTab = ArchiveTab | "ledger";
+
+export type LedgerData = {
+  approvals: ConsumptionApproval[];
+  permits: ExitPermit[];
+  permitLines: ExitPermitLine[];
+  workOrders: LedgerWorkOrder[];
+  workOrderParts: WorkOrderPart[];
+  outsourcedJobs: LedgerOutsourcedJob[];
+  workshopPayments: WorkshopPayment[];
+  poApprovals: PoApprovalLite[];
+  purchaseOrders: LedgerPurchaseOrder[];
+  receiptApprovals: ReceiptApprovalLite[];
+  stockReceipts: LedgerStockReceipt[];
+  suppliers: { id: string; name: string }[];
+  viewer: string | null;
+  nowMs: number;
+};
+
+const TABS: { key: PageTab; label: string }[] = [
   { key: "company", label: "Company" },
   { key: "staff", label: "Staff" },
   { key: "truck", label: "Truck" },
   { key: "customer", label: "Customer" },
+  { key: "ledger", label: "Approvals Ledger" },
 ];
 
 function fmtDate(iso: string | null): string {
@@ -106,6 +144,7 @@ export default function ArchiveClient({
   customers,
   invoices,
   projects,
+  ledger,
   today,
   error,
 }: {
@@ -123,11 +162,14 @@ export default function ArchiveClient({
   customers: ArchiveCustomerRow[];
   invoices: ArchiveInvoiceRow[];
   projects: ArchiveProjectRow[];
+  // Everything the Approvals Ledger tab needs, kept in one bag rather than
+  // twelve more top-level props on a component that already has plenty.
+  ledger: LedgerData;
   today: string;
   error: string | null;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<ArchiveTab>("company");
+  const [tab, setTab] = useState<PageTab>("company");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<ArchiveDocumentGroup | null>(null);
@@ -208,6 +250,11 @@ export default function ArchiveClient({
     return historyDrivers.filter((d) => paid.has(d.id));
   }, [historyDrivers, payouts]);
   // Groups arrive for every fetched tab; each tab renders its own slice.
+  const supplierNames = useMemo(
+    () => new Map(ledger.suppliers.map((s) => [s.id, s.name])),
+    [ledger.suppliers],
+  );
+
   const companyGroups = useMemo(() => groups.filter((g) => g.tab === "company"), [groups]);
   const staffGroups = useMemo(() => groups.filter((g) => g.tab === "staff"), [groups]);
   const truckGroups = useMemo(() => groups.filter((g) => g.tab === "truck"), [groups]);
@@ -647,6 +694,23 @@ export default function ArchiveClient({
             onOpenInvoice={(id, email) => setOpenInvoice({ id, email })}
           />
         </div>
+      ) : tab === "ledger" ? (
+        <ApprovalsLedgerTab
+          approvals={ledger.approvals}
+          permits={ledger.permits}
+          permitLines={ledger.permitLines}
+          workOrders={ledger.workOrders}
+          workOrderParts={ledger.workOrderParts}
+          outsourcedJobs={ledger.outsourcedJobs}
+          workshopPayments={ledger.workshopPayments}
+          poApprovals={ledger.poApprovals}
+          purchaseOrders={ledger.purchaseOrders}
+          receiptApprovals={ledger.receiptApprovals}
+          stockReceipts={ledger.stockReceipts}
+          supplierNames={supplierNames}
+          viewer={ledger.viewer}
+          nowMs={ledger.nowMs}
+        />
       ) : companyGroups.length === 0 ? (
         <Card>
           <div className="p-8 text-center">
@@ -864,7 +928,12 @@ export default function ArchiveClient({
         <GroupModal
           types={types}
           typeUsage={typeUsage}
-          tab={editingGroup?.tab ?? tab}
+          // Narrowed deliberately: this value is WRITTEN to
+          // archive_document_groups.tab, whose CHECK rejects anything outside
+          // company/staff/truck/customer. The ledger has no Create Group
+          // button, so the fallback is unreachable — but the type is what
+          // guarantees a UI-only tab can never be persisted as a group's tab.
+          tab={editingGroup?.tab ?? (tab === "ledger" ? "company" : tab)}
           defaultSubjectKind={newGroupKind}
           editingGroup={editingGroup}
           onClose={closeModals}

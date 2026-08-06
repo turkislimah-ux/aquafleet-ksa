@@ -12,11 +12,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Plus, Trash2, Printer, Upload, FileText, AlertTriangle } from "lucide-react";
+import {
+  X, Plus, Trash2, Printer, Upload, FileText, AlertTriangle, Image as ImageIcon,
+} from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import {
-  outstandingQty, permitValueSar, fifoPreviewUnitCost, lineUnitCost, type LotLite,
+  outstandingQty, permitValueSar, fifoPreviewUnitCost, lineUnitCost,
+  returnedUnitPricePreview, type LotLite, type ConsumptionLedgerRow,
 } from "@/lib/exit-permits";
 import {
   EXIT_PERMIT_KIND_LABELS,
@@ -53,16 +56,26 @@ function Overlay({ onClick, children }: { onClick: () => void; children: React.R
   );
 }
 
+// Three widths, not two. A popup should be as wide as its widest row needs and
+// no wider: `md` for a plain confirmation, `lg` for a table that has been cut
+// down to the columns that matter, `xl` for the full editor and the printable.
+const SHELL_WIDTH = {
+  md: "max-w-[620px]",
+  lg: "max-w-[860px]",
+  xl: "max-w-[1080px]",
+} as const;
+
 function Shell({
-  title, subtitle, onClose, children, footer, wide,
+  title, subtitle, onClose, children, footer, size = "md",
 }: {
   title: string; subtitle?: string; onClose: () => void;
-  children: React.ReactNode; footer: React.ReactNode; wide?: boolean;
+  children: React.ReactNode; footer: React.ReactNode;
+  size?: keyof typeof SHELL_WIDTH;
 }) {
   return (
     <Overlay onClick={onClose}>
       <div
-        className={cn("card w-full max-h-[90vh] overflow-y-auto scrollbar-thin p-0", wide ? "max-w-[1080px]" : "max-w-[620px]")}
+        className={cn("card w-full max-h-[90vh] overflow-y-auto scrollbar-thin p-0", SHELL_WIDTH[size])}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
@@ -89,13 +102,33 @@ function ErrorBox({ msg }: { msg: string | null }) {
 }
 
 // ---------------------------------------------------------------------------
-// DRAFT form — header + lines + attachments.
+// DRAFT form — header + items + attachments.
 //
-// Lines are only editable once the header EXISTS, because a line needs a
-// permit id to hang off. On a new permit the form saves the header first and
-// then reveals the lines section, rather than holding lines in memory and
-// risking a half-saved permit if the second write fails.
+// ITEMS CAN BE ADDED BEFORE THE PERMIT ROW EXISTS. An item needs a permit id
+// to hang off, so items added during CREATION are held in memory and flushed
+// the moment the draft is created. If a flush fails part-way the permit still
+// exists, so the parent adopts it immediately and the unflushed remainder
+// stays on screen — nothing typed is silently dropped, and the UI never
+// claims a permit was not created when it was.
 // ---------------------------------------------------------------------------
+
+// An item captured before there is a row to attach it to. `flushed` marks one
+// that HAS been written but whose saved row has not arrived from the server
+// yet — it keeps showing until it does, so the table never blinks empty in the
+// gap between creating the draft and the refresh landing.
+type PendingItem = {
+  key: string; part_id: string; qty: number; note: string | null; flushed?: boolean;
+};
+
+// One shape for both saved and pending items, so the table is written once.
+type ItemRow = {
+  key: string;
+  part_id: string;
+  qty: number;
+  note: string | null;
+  saved: ExitPermitLine | null;
+};
+
 export function PermitFormModal({
   permit, lines, files, lots, warehouses, parts, stations, projects, trucks,
   customers, staff, onDraftCreated, onRefresh, onClose,
@@ -124,7 +157,10 @@ export function PermitFormModal({
   const isEdit = !!permit;
   // Derived from the prop, never owned here — see onDraftCreated.
   const permitId = permit?.id ?? null;
-  const [kind, setKind] = useState<"returnable" | "permanent">(permit?.kind ?? "returnable");
+  // PERMANENT is the default on a new permit: most things that leave do not
+  // come back, and a returnable permit carries an extra obligation (a due
+  // date, an overdue badge) that should be chosen, not inherited.
+  const [kind, setKind] = useState<"returnable" | "permanent">(permit?.kind ?? "permanent");
   const [expected, setExpected] = useState(permit?.expected_return_on ?? "");
   // Seeded once. Once a permit row exists its own warehouse_id is the truth,
   // and the effect below re-syncs if the parent adopts the created draft.
@@ -152,6 +188,11 @@ export function PermitFormModal({
   const [newQty, setNewQty] = useState("");
   const [newNote, setNewNote] = useState("");
   const [busyLine, setBusyLine] = useState(false);
+  // Items added before the draft row exists. Always empty once permitId is
+  // set — saveHeader flushes them at creation.
+  const [pending, setPending] = useState<PendingItem[]>([]);
+  // Files picked before the draft row exists, same deal.
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
 
   // The picker only offers parts from THIS permit's warehouse — the same rule
   // confirm_exit_permit enforces server-side, surfaced here so the user is
@@ -161,6 +202,34 @@ export function PermitFormModal({
     [parts, warehouseId],
   );
   const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+
+  // Saved items first, then the ones still waiting for a permit row. A flushed
+  // item is dropped the moment real rows arrive — derived here rather than in
+  // an effect, so there is never a frame showing it twice.
+  const visiblePending = lines.length > 0 ? pending.filter((p) => !p.flushed) : pending;
+  const itemRows: ItemRow[] = [
+    ...lines.map((l) => ({
+      key: l.id, part_id: l.part_id, qty: Number(l.qty), note: l.note, saved: l,
+    })),
+    ...visiblePending.map((p) => ({
+      key: p.key, part_id: p.part_id, qty: p.qty, note: p.note, saved: null,
+    })),
+  ];
+  // Housekeeping only — the render above already ignores them.
+  useEffect(() => {
+    if (lines.length > 0) setPending((s) => (s.some((p) => p.flushed) ? s.filter((p) => !p.flushed) : s));
+  }, [lines.length]);
+  // The warehouse is what every item was picked from, so it locks as soon as
+  // there is one — pending items count, since they were picked from it too.
+  const warehouseLocked = itemRows.length > 0;
+
+  const status = permit?.status ?? "draft";
+  function unitCostOf(row: ItemRow): number | null {
+    return lineUnitCost(status, {
+      part_id: row.part_id, qty: row.qty,
+      unit_price_sar: row.saved ? Number(row.saved.unit_price_sar) : 0,
+    }, lots);
+  }
 
   const destOptions: NamedLite[] =
     destKind === "water_station" ? stations
@@ -187,44 +256,119 @@ export function PermitFormModal({
     };
   }
 
+  // Write the in-memory items to a permit that now exists. Stops at the first
+  // failure and KEEPS the rest unflushed — a half-written list the user can
+  // retry beats one that quietly loses its tail. Runs on the update path too,
+  // so a remainder left by a partial flush is never stranded with no way back.
+  async function flushPending(id: string): Promise<string | null> {
+    const unflushed = pending.filter((p) => !p.flushed);
+    if (unflushed.length === 0) return null;
+    let failed: string | null = null;
+    const next: PendingItem[] = [];
+    for (const it of pending) {
+      if (it.flushed) { next.push(it); continue; }
+      if (failed) { next.push(it); continue; }
+      const r = await addExitPermitLine(id, it.part_id, it.qty, it.note);
+      if (r.error) { failed = r.error; next.push(it); }
+      else next.push({ ...it, flushed: true });
+    }
+    setPending(next);
+    return failed;
+  }
+
+  // Upload the files staged before the permit existed. Same stop-and-keep rule
+  // as the items: whatever has not been uploaded stays staged and visible.
+  async function flushFiles(id: string): Promise<string | null> {
+    if (stagedFiles.length === 0) return null;
+    const left: File[] = [];
+    let failed: string | null = null;
+    for (const file of stagedFiles) {
+      if (failed) { left.push(file); continue; }
+      const fd = new FormData();
+      fd.set("permitId", id);
+      fd.set("file", file);
+      const res = await uploadExitPermitFile(fd);
+      if (res.error) { failed = `${file.name}: ${res.error}`; left.push(file); }
+    }
+    setStagedFiles(left);
+    return failed;
+  }
+
   async function saveHeader() {
     setSaving(true); setError(null);
     const input = buildInput();
-    const res = permitId
-      ? await updateExitPermitDraft(permitId, input)
-      : await createExitPermitDraft(input);
-    setSaving(false);
-    if (res.error) { setError(res.error); return false; }
+
+    if (permitId) {
+      const res = await updateExitPermitDraft(permitId, input);
+      const failed = res.error
+        ? null
+        : (await flushPending(permitId)) ?? (await flushFiles(permitId));
+      setSaving(false);
+      if (res.error) { setError(res.error); return false; }
+      onRefresh();
+      if (failed) { setError(failed); return false; }
+      return true;
+    }
+
+    const res = await createExitPermitDraft(input);
     // createExitPermitDraft returns the new row; updateExitPermitDraft does
     // not. Narrow on the property rather than on which branch ran, so the
     // types stay honest about what each action actually returns.
     const created = (res as { permit?: ExitPermit }).permit;
-    if (!permitId && created) onDraftCreated(created);
-    else onRefresh();
+    if (res.error || !created) {
+      setSaving(false);
+      setError(res.error ?? "Could not create the draft.");
+      return false;
+    }
+
+    const failed = (await flushPending(created.id)) ?? (await flushFiles(created.id));
+    setSaving(false);
+    // The permit EXISTS regardless of what happened to the items, so the
+    // parent adopts it before any error is shown.
+    onDraftCreated(created);
+    if (failed) { setError(failed); return false; }
     return true;
   }
 
   async function onAddLine() {
-    if (!permitId) { setError("Save the permit details first."); return; }
-    setBusyLine(true); setError(null);
-    const res = await addExitPermitLine(permitId, newPartId, Number(newQty), newNote || null);
+    const qty = Number(newQty);
+    if (!newPartId || !(qty > 0)) return;
+    setError(null);
+
+    // No permit row yet — hold it. Same table, same totals; it just has not
+    // been written anywhere until the draft is created.
+    if (!permitId) {
+      setPending((s) => [
+        ...s,
+        { key: `pending-${Date.now()}-${s.length}`, part_id: newPartId, qty, note: newNote.trim() || null },
+      ]);
+      setNewPartId(""); setNewQty(""); setNewNote("");
+      return;
+    }
+
+    setBusyLine(true);
+    const res = await addExitPermitLine(permitId, newPartId, qty, newNote || null);
     setBusyLine(false);
     if (res.error) { setError(res.error); return; }
     setNewPartId(""); setNewQty(""); setNewNote("");
-    // Stay open — adding a line is not finishing with the permit.
+    // Stay open — adding an item is not finishing with the permit.
     onRefresh();
   }
 
   return (
     <Shell
-      wide
+      size="xl"
       title={isEdit ? "Edit draft permit" : "New exit permit"}
       subtitle="A draft moves no stock. Confirming the exit is what deducts it."
       onClose={onClose}
       footer={
         <>
           <Btn variant="outline" onClick={onClose}>Close</Btn>
-          <Btn variant="primary" onClick={() => void saveHeader()} disabled={saving}>
+          <Btn
+            variant="primary"
+            onClick={() => void saveHeader()}
+            disabled={saving || pending.some((p) => !(p.qty > 0))}
+          >
             {saving ? "Saving…" : permitId ? "Save details" : "Create draft"}
           </Btn>
         </>
@@ -272,14 +416,14 @@ export function PermitFormModal({
           <select
             value={warehouseId}
             onChange={(e) => setWarehouseId(e.target.value)}
-            disabled={lines.length > 0}
-            className={cn(INPUT, lines.length > 0 && "opacity-60 cursor-not-allowed")}
+            disabled={warehouseLocked}
+            className={cn(INPUT, warehouseLocked && "opacity-60 cursor-not-allowed")}
             style={INPUT_STYLE}
           >
             {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
           </select>
-          {lines.length > 0 && (
-            <p className="text-[11px] muted mt-1">Locked — lines already reference this warehouse.</p>
+          {warehouseLocked && (
+            <p className="text-[11px] muted mt-1">Locked — items were picked from this warehouse.</p>
           )}
         </div>
       </div>
@@ -346,168 +490,236 @@ export function PermitFormModal({
         <input value={note} onChange={(e) => setNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
       </div>
 
-      {permitId && (
-        <>
-          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Attachments</div>
-          <PermitFiles permitId={permitId} files={files} onChanged={onRefresh} onError={setError} />
-        </>
+      {/* ITEMS. The ENTRY row sits ABOVE the table: adding is the action, the
+          table is the record of what has been added. */}
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Items</div>
+
+      <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_2fr_auto] gap-2 items-end">
+        <div>
+          <label className="text-xs muted block mb-1">Part</label>
+          <select value={newPartId} onChange={(e) => setNewPartId(e.target.value)} className={INPUT} style={INPUT_STYLE}>
+            <option value="">Choose a part…</option>
+            {warehouseParts.map((p) => (
+              <option key={p.id} value={p.id}>{p.sku} · {p.name} ({p.qty_on_hand} on hand)</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs muted block mb-1">Qty</label>
+          <input type="number" min={0.01} step="0.01" value={newQty} onChange={(e) => setNewQty(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+        </div>
+        <div>
+          <label className="text-xs muted block mb-1">Item note</label>
+          <input value={newNote} onChange={(e) => setNewNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
+        </div>
+        <Btn variant="outline" onClick={onAddLine} disabled={busyLine || !newPartId || !newQty}>
+          <Plus className="h-3.5 w-3.5" />Add
+        </Btn>
+      </div>
+      {warehouseParts.length === 0 && (
+        <p className="text-[11px] muted">This warehouse has no active parts.</p>
+      )}
+      {!permitId && pending.length > 0 && (
+        <p className="text-[11px] muted">
+          {pending.length} item{pending.length === 1 ? "" : "s"} will be saved with the permit when
+          you press Create draft.
+        </p>
       )}
 
-      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Lines</div>
-      {!permitId ? (
-        <p className="text-sm muted">Create the draft first, then add the parts leaving on it.</p>
-      ) : (
-        <>
-          {lines.length > 0 && (
-            <Table>
-              <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-                <tr>
-                  <TH>Part</TH><TH>Qty</TH><TH>On hand</TH>
-                  <TH>FIFO unit value</TH><TH>Line value</TH><TH>{null}</TH>
+      {itemRows.length > 0 && (
+        <Table>
+          <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+            <tr>
+              <TH>Part</TH><TH>Qty</TH><TH>On hand</TH>
+              <TH>FIFO unit value</TH><TH>Item value</TH><TH>Note</TH><TH>{null}</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {itemRows.map((row) => {
+              const part = partsById.get(row.part_id);
+              const u = unitCostOf(row);
+              const saved = row.saved;
+              return (
+                <tr key={row.key}>
+                  <TD>
+                    <span className="text-sm font-medium">{part?.name ?? "Unknown"}</span>
+                    <div className="text-[11px] muted">{part?.sku}</div>
+                  </TD>
+                  <TD>
+                    {saved && permitId ? (
+                      <input
+                        type="number"
+                        min={0.01}
+                        step="0.01"
+                        defaultValue={saved.qty}
+                        onBlur={async (e) => {
+                          const q = Number(e.target.value);
+                          if (q === Number(saved.qty)) return;
+                          const res = await updateExitPermitLineQty(permitId, saved.id, q);
+                          if (res.error) setError(res.error); else onRefresh();
+                        }}
+                        className={cn(INPUT, "w-24")}
+                        style={INPUT_STYLE}
+                      />
+                    ) : (
+                      <input
+                        type="number"
+                        min={0.01}
+                        step="0.01"
+                        value={row.qty}
+                        onChange={(e) => {
+                          const q = Number(e.target.value);
+                          setPending((s) => s.map((x) => (x.key === row.key ? { ...x, qty: q } : x)));
+                        }}
+                        className={cn(INPUT, "w-24", !(row.qty > 0) && "border-rose-500")}
+                        style={row.qty > 0 ? INPUT_STYLE : undefined}
+                      />
+                    )}
+                  </TD>
+                  <TD className="text-xs tabular-nums muted">{part?.qty_on_hand ?? "—"}</TD>
+                  <TD className="text-xs tabular-nums">
+                    {u === null
+                      ? <span className="muted" title="Lots cannot cover this quantity">—</span>
+                      : <>{formatSar(u)}{status === "draft" && <span className="block text-[10px] muted">preview</span>}</>}
+                  </TD>
+                  <TD className="text-xs tabular-nums font-medium">
+                    {u === null ? <span className="muted">—</span> : formatSar(row.qty * u)}
+                  </TD>
+                  <TD className="whitespace-normal align-top max-w-[220px]">
+                    {row.note
+                      ? <span className="text-[11px] muted line-clamp-2" title={row.note}>{row.note}</span>
+                      : <span className="text-[11px] muted">—</span>}
+                  </TD>
+                  <TD>
+                    <div className="flex justify-end">
+                      <button
+                        onClick={async () => {
+                          if (!saved || !permitId) {
+                            setPending((s) => s.filter((x) => x.key !== row.key));
+                            return;
+                          }
+                          const res = await removeExitPermitLine(permitId, saved.id);
+                          if (res.error) setError(res.error); else onRefresh();
+                        }}
+                        className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                        title="Remove item"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </TD>
                 </tr>
-              </thead>
-              <tbody>
-                {lines.map((l) => {
-                  const part = partsById.get(l.part_id);
-                  return (
-                    <tr key={l.id}>
-                      <TD>
-                        <span className="text-sm font-medium">{part?.name ?? "Unknown"}</span>
-                        <div className="text-[11px] muted">{part?.sku}</div>
-                      </TD>
-                      <TD>
-                        <input
-                          type="number"
-                          min={0.01}
-                          step="0.01"
-                          defaultValue={l.qty}
-                          onBlur={async (e) => {
-                            const q = Number(e.target.value);
-                            if (q === Number(l.qty)) return;
-                            const res = await updateExitPermitLineQty(permitId, l.id, q);
-                            if (res.error) setError(res.error); else onRefresh();
-                          }}
-                          className={cn(INPUT, "w-24")}
-                          style={INPUT_STYLE}
-                        />
-                      </TD>
-                      <TD className="text-xs tabular-nums muted">{part?.qty_on_hand ?? "—"}</TD>
-                      <TD className="text-xs tabular-nums">
-                        {(() => {
-                          const u = lineUnitCost(permit?.status ?? "draft", l, lots);
-                          return u === null
-                            ? <span className="muted" title="Lots cannot cover this quantity">—</span>
-                            : <>{formatSar(u)}{(permit?.status ?? "draft") === "draft" && <span className="block text-[10px] muted">preview</span>}</>;
-                        })()}
-                      </TD>
-                      <TD className="text-xs tabular-nums font-medium">
-                        {(() => {
-                          const u = lineUnitCost(permit?.status ?? "draft", l, lots);
-                          return u === null ? <span className="muted">—</span> : formatSar(Number(l.qty) * u);
-                        })()}
-                      </TD>
-                      <TD>
-                        <div className="flex justify-end">
-                          <button
-                            onClick={async () => {
-                              const res = await removeExitPermitLine(permitId, l.id);
-                              if (res.error) setError(res.error); else onRefresh();
-                            }}
-                            className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                            title="Remove line"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </TD>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </Table>
-          )}
+              );
+            })}
+          </tbody>
+        </Table>
+      )}
 
-          {lines.length > 0 && (
-            <div className="flex items-baseline justify-end gap-2 text-sm">
-              <span className="muted">Total units value</span>
-              <span className="text-lg font-semibold tabular-nums">
-                {(() => {
-                  // Sum of qty x FIFO unit value. Any line the lots cannot
-                  // cover is EXCLUDED and called out, rather than silently
-                  // counted as zero — a total that quietly under-reports is
-                  // worse than one that says what it left out.
-                  let total = 0, missing = 0;
-                  for (const l of lines) {
-                    const u = lineUnitCost(permit?.status ?? "draft", l, lots);
-                    if (u === null) missing++; else total += Number(l.qty) * u;
-                  }
-                  return (
-                    <>
-                      {formatSar(total)}
-                      {missing > 0 && (
-                        <span className="ms-2 text-[11px] font-normal muted">
-                          ({missing} line{missing === 1 ? "" : "s"} not priceable)
-                        </span>
-                      )}
-                    </>
-                  );
-                })()}
-              </span>
-            </div>
-          )}
+      {itemRows.length > 0 && (
+        <div className="flex items-baseline justify-end gap-2 text-sm">
+          <span className="muted">Total units value</span>
+          <span className="text-lg font-semibold tabular-nums">
+            {(() => {
+              // Sum of qty x FIFO unit value. Any item the lots cannot cover
+              // is EXCLUDED and called out, rather than silently counted as
+              // zero — a total that quietly under-reports is worse than one
+              // that says what it left out.
+              let total = 0, missing = 0;
+              for (const row of itemRows) {
+                const u = unitCostOf(row);
+                if (u === null) missing++; else total += row.qty * u;
+              }
+              return (
+                <>
+                  {formatSar(total)}
+                  {missing > 0 && (
+                    <span className="ms-2 text-[11px] font-normal muted">
+                      ({missing} item{missing === 1 ? "" : "s"} not priceable)
+                    </span>
+                  )}
+                </>
+              );
+            })()}
+          </span>
+        </div>
+      )}
 
-          <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_2fr_auto] gap-2 items-end">
-            <div>
-              <label className="text-xs muted block mb-1">Part</label>
-              <select value={newPartId} onChange={(e) => setNewPartId(e.target.value)} className={INPUT} style={INPUT_STYLE}>
-                <option value="">Choose a part…</option>
-                {warehouseParts.map((p) => (
-                  <option key={p.id} value={p.id}>{p.sku} · {p.name} ({p.qty_on_hand} on hand)</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs muted block mb-1">Qty</label>
-              <input type="number" min={0.01} step="0.01" value={newQty} onChange={(e) => setNewQty(e.target.value)} className={INPUT} style={INPUT_STYLE} />
-            </div>
-            <div>
-              <label className="text-xs muted block mb-1">Line note</label>
-              <input value={newNote} onChange={(e) => setNewNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
-            </div>
-            <Btn variant="outline" onClick={onAddLine} disabled={busyLine || !newPartId || !newQty}>
-              <Plus className="h-3.5 w-3.5" />Add
-            </Btn>
-          </div>
-          {warehouseParts.length === 0 && (
-            <p className="text-[11px] muted">This warehouse has no active parts.</p>
-          )}
-
-        </>
+      {/* ATTACHMENTS LAST — paperwork about the permit, after the permit
+          itself. Available during creation too: files picked before the draft
+          exists are held and uploaded when it is created. */}
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Attachments</div>
+      <PermitFiles
+        permitId={permitId}
+        files={files}
+        staged={stagedFiles}
+        onStage={(picked) => setStagedFiles((s) => [...s, ...picked])}
+        onUnstage={(i) => setStagedFiles((s) => s.filter((_, x) => x !== i))}
+        onChanged={onRefresh}
+        onError={setError}
+      />
+      {!permitId && stagedFiles.length > 0 && (
+        <p className="text-[11px] muted">
+          {stagedFiles.length} file{stagedFiles.length === 1 ? "" : "s"} will upload when you press
+          Create draft.
+        </p>
       )}
     </Shell>
   );
 }
 
+// Attachments — photos and documents.
+//
+// REACHABLE DURING CREATION. An upload needs a permit id for its storage path
+// and its row's FK, so before the draft exists the picked files are STAGED in
+// memory and uploaded the moment the permit is created — the same treatment
+// items get, for the same reason: the person filling the form should not have
+// to save, wait, and come back to attach the photo they already have.
+//
+// The input is deliberately unrestricted: images are what this is mostly for
+// (a phone photo of the load at the gate) and they are accepted both by the
+// picker and by the bucket, which carries no mime allowlist — but a PDF
+// delivery note or a scan should not be refused either.
 function PermitFiles({
-  permitId, files, onChanged, onError,
+  permitId, files, staged, onStage, onUnstage, onChanged, onError,
 }: {
-  permitId: string; files: ExitPermitFile[];
+  permitId: string | null; files: ExitPermitFile[];
+  staged: File[];
+  onStage: (picked: File[]) => void;
+  onUnstage: (index: number) => void;
   onChanged: () => void; onError: (m: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   return (
     <div className="space-y-2">
-      {files.length > 0 && (
+      {(files.length > 0 || staged.length > 0) && (
         <ul className="space-y-1">
           {files.map((f) => (
             <li key={f.id} className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs" style={INPUT_STYLE}>
-              <FileText className="h-3.5 w-3.5 shrink-0 muted" />
+              {f.mime_type?.startsWith("image/")
+                ? <ImageIcon className="h-3.5 w-3.5 shrink-0 muted" />
+                : <FileText className="h-3.5 w-3.5 shrink-0 muted" />}
               <span className="truncate flex-1">{f.file_name}</span>
               <button
                 onClick={async () => {
                   const res = await removeExitPermitFile(f.id);
                   if (res.error) onError(res.error); else onChanged();
                 }}
+                className="p-1 rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                aria-label="Remove file"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+          {staged.map((f, i) => (
+            <li key={`staged-${i}-${f.name}`} className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs" style={INPUT_STYLE}>
+              {f.type.startsWith("image/")
+                ? <ImageIcon className="h-3.5 w-3.5 shrink-0 muted" />
+                : <FileText className="h-3.5 w-3.5 shrink-0 muted" />}
+              <span className="truncate flex-1">{f.name}</span>
+              <span className="shrink-0 muted">not uploaded yet</span>
+              <button
+                onClick={() => onUnstage(i)}
                 className="p-1 rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
                 aria-label="Remove file"
               >
@@ -528,6 +740,7 @@ function PermitFiles({
             const picked = Array.from(e.target.files ?? []);
             e.target.value = "";
             if (picked.length === 0) return;
+            if (!permitId) { onStage(picked); return; }
             setBusy(true);
             for (const file of picked) {
               const fd = new FormData();
@@ -603,7 +816,7 @@ export function ConfirmExitModal({
       )}
 
       <p className="text-sm">
-        {lines.length} line{lines.length === 1 ? "" : "s"} will leave the warehouse. Cost is stamped
+        {lines.length} item{lines.length === 1 ? "" : "s"} will leave the warehouse. Cost is stamped
         at FIFO from the oldest stock first.
       </p>
 
@@ -654,9 +867,20 @@ export function ConfirmExitModal({
 // EXITED, so every line carries its real stamped unit_price_sar — the FIFO
 // preview exists only for drafts, and using it here would show a number
 // derived from today's lots instead of what this permit actually cost.
+//
+// THREE COLUMNS, DOWN FROM SEVEN. The earlier table carried Out, Already
+// back, Outstanding now, Returning, Outstanding after and FIFO unit value —
+// five ways of saying the same two numbers, plus a cost figure nobody is
+// deciding on here. What a return actually needs is: which item, how many are
+// coming back, and what that leaves outstanding. "Already back" survives as a
+// caption under the item name (it is context, not a column), and the
+// before -> after pair lives in ONE cell so the change reads as a change.
 export function ReturnModal({
-  permit, lines, parts, today, onClose,
-}: { permit: ExitPermit; lines: ExitPermitLine[]; parts: PartLite[]; today: string; onClose: () => void }) {
+  permit, lines, parts, ledger, today, onClose,
+}: {
+  permit: ExitPermit; lines: ExitPermitLine[]; parts: PartLite[];
+  ledger: ConsumptionLedgerRow[]; today: string; onClose: () => void;
+}) {
   const [qtys, setQtys] = useState<Record<string, string>>({});
   const [returnedOn, setReturnedOn] = useState(today);
   const [note, setNote] = useState("");
@@ -672,6 +896,7 @@ export function ReturnModal({
 
   return (
     <Shell
+      size="lg"
       title="Record a return"
       subtitle={`Permit ${permit.ep_number ?? ""} — enter what came back. Partial returns are fine.`}
       onClose={onClose}
@@ -713,8 +938,7 @@ export function ReturnModal({
       <Table>
         <thead style={{ background: "rgba(0,0,0,0.02)" }}>
           <tr>
-            <TH>Part</TH><TH>FIFO unit value</TH><TH>Out</TH><TH>Already back</TH>
-            <TH>Outstanding now</TH><TH>Returning</TH><TH>Outstanding after</TH>
+            <TH>Item</TH><TH>Returning</TH><TH>Outstanding</TH><TH>Item value</TH>
           </tr>
         </thead>
         <tbody>
@@ -722,7 +946,7 @@ export function ReturnModal({
             const p = partsById.get(l.part_id);
             const out = outstandingQty(l);
             const entered = Number(qtys[l.id] ?? 0);
-            // A line is HIGHLIGHTED once a quantity is entered — the rows
+            // A row is HIGHLIGHTED once a quantity is entered — the rows
             // being acted on should be obvious at a glance before the button
             // is pressed, since this moves real stock.
             const active = entered > 0;
@@ -739,16 +963,11 @@ export function ReturnModal({
                   <span className={cn("text-sm", active ? "font-semibold" : "font-medium")}>
                     {p?.name ?? "Unknown"}
                   </span>
-                  <div className="text-[11px] muted">{p?.sku}</div>
+                  <div className="text-[11px] muted">
+                    {p?.sku}
+                    {Number(l.qty_returned) > 0 && ` · ${l.qty_returned} of ${l.qty} already back`}
+                  </div>
                 </TD>
-                <TD className="text-xs tabular-nums">
-                  {/* The STAMPED cost — this permit has exited, so the real
-                      figure exists and no preview is involved. */}
-                  {formatSar(Number(l.unit_price_sar))}
-                </TD>
-                <TD className="text-xs tabular-nums">{l.qty}</TD>
-                <TD className="text-xs tabular-nums">{l.qty_returned}</TD>
-                <TD className="text-xs tabular-nums font-medium">{out}</TD>
                 <TD>
                   <input
                     type="number"
@@ -762,8 +981,45 @@ export function ReturnModal({
                     style={over ? undefined : INPUT_STYLE}
                   />
                 </TD>
-                <TD className={cn("text-xs tabular-nums font-medium", over && "text-rose-600 dark:text-rose-400")}>
-                  {over ? "too many" : out - entered}
+                {/* ONE cell for before -> after. The arrow only appears once
+                    something has been entered, so a row nobody is touching
+                    reads as a single number rather than a fake change. */}
+                <TD className="text-sm tabular-nums">
+                  {!active ? (
+                    <span className="font-medium">{out}</span>
+                  ) : over ? (
+                    <span className="font-medium text-rose-600 dark:text-rose-400">
+                      only {out} out
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="muted">{out}</span>
+                      <span className="muted">→</span>
+                      <span className="font-semibold">{out - entered}</span>
+                    </span>
+                  )}
+                </TD>
+                {/* LIVE ITEM VALUE — display only. The figure is what will
+                    still be out after this return: the remaining quantity at
+                    the unit price return_exit_permit_line will land on, worked
+                    out by the same ledger walk it uses. The RPC does the real
+                    write on submit; nothing here writes anything. */}
+                <TD className="text-sm tabular-nums">
+                  {(() => {
+                    const stamped = Number(l.unit_price_sar);
+                    if (!active || over) {
+                      return <span className="font-medium">{formatSar(out * stamped)}</span>;
+                    }
+                    const preview = returnedUnitPricePreview(l.id, entered, ledger, stamped);
+                    if (preview === null) {
+                      return (
+                        <span className="muted" title="This line's lot history cannot cover that quantity">
+                          —
+                        </span>
+                      );
+                    }
+                    return <span className="font-semibold">{formatSar((out - entered) * preview)}</span>;
+                  })()}
                 </TD>
               </tr>
             );
@@ -843,7 +1099,7 @@ export function VoidModal({
 
       {alreadyBack.length > 0 && (
         <p className="text-[11px] muted">
-          {alreadyBack.length} line{alreadyBack.length === 1 ? " has" : "s have"} already been
+          {alreadyBack.length} item{alreadyBack.length === 1 ? " has" : "s have"} already been
           partly returned. Those quantities were restored by their own return event and are NOT
           restored again here.
         </p>
@@ -875,9 +1131,18 @@ export function PermitPrintView({
   const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
   const value = permitValueSar(lines);
 
+  // THE UNIT LIVES IN THE QTY HEADER when every item shares one — "Qty (pcs)"
+  // reads as a quantity, where a whole Unit column repeated the same word down
+  // the page. When units differ there is no single header answer, so the unit
+  // rides beside each number instead and the header stays plain.
+  const units = new Set(
+    lines.map((l) => partsById.get(l.part_id)?.unit ?? "").filter(Boolean),
+  );
+  const sharedUnit = units.size === 1 ? [...units][0] : null;
+
   return (
     <Shell
-      wide
+      size="xl"
       title={`Exit permit ${permit.ep_number ?? ""}`}
       subtitle="Print and send this with the carrier."
       onClose={onClose}
@@ -920,18 +1185,41 @@ export function PermitPrintView({
 
         <Table>
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-            <tr><TH>#</TH><TH>Part</TH><TH>SKU</TH><TH>Qty</TH><TH>Unit</TH></tr>
+            <tr>
+              <TH>#</TH><TH>Part</TH><TH>SKU</TH>
+              <TH>{sharedUnit ? `Qty (${sharedUnit})` : "Qty"}</TH>
+              <TH>Item value</TH>
+            </tr>
           </thead>
           <tbody>
             {lines.map((l, i) => {
               const p = partsById.get(l.part_id);
+              const out = outstandingQty(l);
+              const returned = Number(l.qty_returned) > 0;
               return (
                 <tr key={l.id}>
                   <TD className="text-xs tabular-nums">{i + 1}</TD>
                   <TD className="text-sm">{p?.name ?? "Unknown"}</TD>
                   <TD className="text-xs font-mono">{p?.sku ?? "—"}</TD>
-                  <TD className="text-sm tabular-nums font-medium">{l.qty}</TD>
-                  <TD className="text-xs">{p?.unit ?? "—"}</TD>
+                  <TD className="text-sm tabular-nums">
+                    {/* A RETURNED item shows what went out, faded, with an
+                        arrow to what is still out. The gate copy has to make
+                        sense against the original permit, so the pre-return
+                        figure cannot just disappear. */}
+                    {returned ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="muted opacity-60">{l.qty}</span>
+                        <span className="muted">→</span>
+                        <span className="font-medium">{out}</span>
+                      </span>
+                    ) : (
+                      <span className="font-medium">{l.qty}</span>
+                    )}
+                    {!sharedUnit && p?.unit && <span className="ms-1 text-[11px] muted">{p.unit}</span>}
+                  </TD>
+                  {/* Value of what is STILL OUT, so the column foots to the
+                      internal-value line below rather than contradicting it. */}
+                  <TD className="text-sm tabular-nums">{formatSar(out * Number(l.unit_price_sar))}</TD>
                 </tr>
               );
             })}
