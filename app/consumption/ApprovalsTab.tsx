@@ -37,6 +37,33 @@ import { decideConsumptionApproval } from "./actions";
 type PartNameLite = { id: string; name: string; sku: string; unit: string | null };
 type TruckLite = { id: string; plate: string };
 
+// The vote that is ALREADY on the event — the one a second voter has to match.
+// `approvals` is newest-first, so the last element is the first vote cast.
+function firstVote(e: ApprovalEvent): ConsumptionApproval | null {
+  return e.approvals.length > 0 ? e.approvals[e.approvals.length - 1] : null;
+}
+
+// Somebody else's vote. What matters in a conflict is the OTHER person's
+// decision, not the viewer's own.
+function otherVote(e: ApprovalEvent, viewer: string | null): ConsumptionApproval | null {
+  return e.approvals.find((a) => a.decided_by !== viewer) ?? null;
+}
+
+// THE CONFLICT MESSAGE IS COMPOSED HERE, not taken from the database.
+// 0097's raise names the standing decision but NOT who cast it — it cannot,
+// since a trigger writing an email into an error string would leak it to any
+// caller. The app already has the row, so it says the useful thing: who, and
+// what they decided.
+function conflictMessage(
+  e: ApprovalEvent,
+  viewer: string | null,
+  attempted: "approved" | "rejected",
+): string | null {
+  const other = otherVote(e, viewer);
+  if (!other || other.decision === attempted) return null;
+  return `Conflict — ${other.decided_by} already ${other.decision === "approved" ? "approved" : "rejected"} this. A second vote has to match theirs; a split decision is not allowed.`;
+}
+
 const KIND_FILTERS: { key: ApprovalKind | "all"; label: string }[] = [
   { key: "all", label: "All kinds" },
   { key: "exit_permit", label: "Exit permits" },
@@ -70,7 +97,10 @@ export default function ApprovalsTab({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [rejecting, setRejecting] = useState<ApprovalEvent | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Errors belong to the ROW they came from, not to a banner above the table.
+  // A refusal is about one event, and a message floating at the top makes the
+  // reader hunt for which one.
+  const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null);
 
   const partsById = useMemo(() => new Map(partNames.map((p) => [p.id, p])), [partNames]);
   const trucksById = useMemo(() => new Map(trucks.map((t) => [t.id, t])), [trucks]);
@@ -133,10 +163,18 @@ export default function ApprovalsTab({
 
   async function decide(e: ApprovalEvent, decision: "approved" | "rejected", reason: string | null) {
     setBusyKey(keyOf(e));
-    setError(null);
+    setRowError(null);
     const res = await decideConsumptionApproval(e.kind, e.subjectId, decision, reason);
     setBusyKey(null);
-    if (res.error) { setError(res.error); return false; }
+    if (res.error) {
+      // A conflict gets the message that names the other voter; anything else
+      // (eligibility, a vanished subject) surfaces the server's own words.
+      setRowError({
+        key: keyOf(e),
+        message: conflictMessage(e, viewer, decision) ?? res.error,
+      });
+      return false;
+    }
     router.refresh();
     return true;
   }
@@ -169,11 +207,9 @@ export default function ApprovalsTab({
         Archive &rarr; Approvals Ledger, where they stay changeable for {LEDGER_LOCK_DAYS} days.
       </div>
 
-      {error && (
-        <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">
-          {error}
-        </div>
-      )}
+      {/* No error banner here. A refusal belongs to the row it came from —
+          see rowError, rendered in that row's actions cell, and inside the
+          reject popup when the refusal happened there. */}
 
       {/* The STATUS filter is gone, not hidden. With decided events relocated
           to the Ledger this queue holds nothing but pending, so an
@@ -234,6 +270,9 @@ export default function ApprovalsTab({
                 const open = expanded.has(k);
                 const truck = e.truckId ? trucksById.get(e.truckId) : null;
                 const busy = busyKey === k;
+                // The vote already on the event, and this row's own error.
+                const standing = firstVote(e);
+                const err = rowError?.key === k ? rowError.message : null;
                 return (
                   <Fragment key={k}>
                     <tr>
@@ -304,12 +343,22 @@ export default function ApprovalsTab({
                         )}>
                           {APPROVAL_STATUS_LABELS[e.status]}
                         </span>
-                        {/* The count only appears while it still matters. An
-                            approved event has its two; a rejected one is over
-                            regardless of how many approvals it collected. */}
-                        {e.status === "pending" && (
-                          <div className="text-[11px] muted mt-0.5">
-                            {e.voteCount} of {APPROVALS_REQUIRED} votes
+                        {/* THE STANDING DECISION, colour-coded — what the
+                            first voter chose, which is what a second vote has
+                            to match. The vote COUNT used to sit here and has
+                            been dropped: the Votes column already carries it,
+                            dots and all. */}
+                        {standing && (
+                          <div
+                            className={cn(
+                              "text-[11px] mt-0.5 font-medium",
+                              standing.decision === "approved"
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-rose-600 dark:text-rose-400",
+                            )}
+                          >
+                            {APPROVAL_STATUS_LABELS[standing.decision]}
+                            <span className="muted font-normal"> by {standing.decided_by}</span>
                           </div>
                         )}
                       </TD>
@@ -350,6 +399,14 @@ export default function ApprovalsTab({
                         {e.mine && (
                           <div className="text-[11px] muted mt-0.5 text-end">
                             You {e.mine.decision === "approved" ? "approved" : "rejected"} this
+                          </div>
+                        )}
+                        {/* The refusal, in the row that produced it. A reject
+                            conflict shows inside the popup instead, where the
+                            person is still standing. */}
+                        {err && !rejecting && (
+                          <div className="mt-1 rounded-lg px-2.5 py-1.5 text-[11px] whitespace-normal bg-rose-500/10 text-rose-700 dark:text-rose-300 max-w-[320px] ms-auto text-start">
+                            {err}
                           </div>
                         )}
                       </TD>
@@ -437,17 +494,21 @@ export default function ApprovalsTab({
                               </p>
                             )}
 
-                            {/* THE SIGN-OFF SHEET. Coloured by the event's
-                                verdict — green approved, red rejected, neutral
-                                while it is still collecting — and it lists
-                                EVERY signatory, because with two approvers
-                                "who signed this" is the actual question. */}
+                            {/* THE SIGN-OFF SHEET. Coloured by the STANDING
+                                DECISION — green approved, red rejected — not
+                                by e.status. Status is "pending" until the
+                                second vote lands, so keying the colour off it
+                                left every row in this queue grey and lost the
+                                red/green entirely. What is on the event is
+                                already a decision; it just is not final yet.
+                                It lists EVERY signatory, because with two
+                                voters "who signed this" is the real question. */}
                             {e.approvals.length > 0 ? (
                               <div className={cn(
                                 "rounded-lg px-3 py-2 text-xs space-y-1.5",
-                                e.status === "approved" && "bg-emerald-500/10 text-emerald-800 dark:text-emerald-200",
-                                e.status === "rejected" && "bg-rose-500/10 text-rose-800 dark:text-rose-200",
-                                e.status === "pending" && "bg-black/[0.03] dark:bg-white/[0.04]",
+                                standing?.decision === "approved"
+                                  ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+                                  : "bg-rose-500/10 text-rose-800 dark:text-rose-200",
                               )}>
                                 <div className="font-medium">
                                   {e.voteCount} of {APPROVALS_REQUIRED} votes — needs a matching second to decide
@@ -498,7 +559,8 @@ export default function ApprovalsTab({
         <RejectModal
           event={rejecting}
           busy={busyKey === keyOf(rejecting)}
-          onCancel={() => setRejecting(null)}
+          error={rowError?.key === keyOf(rejecting) ? rowError.message : null}
+          onCancel={() => { setRowError(null); setRejecting(null); }}
           onConfirm={async (reason) => {
             const ok = await decide(rejecting, "rejected", reason);
             if (ok) setRejecting(null);
@@ -544,10 +606,14 @@ function FilterRow({
 
 // Reject needs a reason, so it gets a popup; approve does not, so it does not.
 function RejectModal({
-  event, busy, onCancel, onConfirm,
+  event, busy, error, onCancel, onConfirm,
 }: {
   event: ApprovalEvent;
   busy: boolean;
+  // The refusal, shown BELOW the reason box — the popup stays open on a
+  // conflict so the typed reason survives and the reader is told why right
+  // where they are, instead of behind a dismissed dialog.
+  error: string | null;
   onCancel: () => void;
   onConfirm: (reason: string) => void;
 }) {
@@ -583,6 +649,11 @@ function RejectModal({
             className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent"
             style={{ borderColor: "rgb(var(--border))" }}
           />
+          {error && (
+            <div className="rounded-lg px-3 py-2 text-xs bg-rose-500/10 text-rose-700 dark:text-rose-300">
+              {error}
+            </div>
+          )}
         </div>
         <div className="flex justify-end gap-2 p-4 border-t" style={{ borderColor: "rgb(var(--border))" }}>
           <Btn variant="outline" onClick={onCancel}>Cancel</Btn>
