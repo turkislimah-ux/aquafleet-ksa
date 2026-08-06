@@ -109,6 +109,21 @@ export default function PartsUsageTab({
   const destinations = useMemo(() => byDestination(rows), [rows]);
   const top = useMemo(() => topParts(rows, partName, 5), [rows, partName]);
   const topAll = useMemo(() => topParts(rows, partName, 9999), [rows, partName]);
+
+  // EVERY part in the catalogue, ranked — including the ones that consumed
+  // nothing this period. "Top 5" answers what moved; this answers what did
+  // NOT, which is the question a zero row exists to answer. Ties break on
+  // name so the two orderings are stable rather than arbitrary.
+  const allPartsRanked = useMemo(() => {
+    const consumed = new Map(topAll.byValue.map((b) => [b.key, b]));
+    const all: Bucket[] = parts.map(
+      (p) => consumed.get(p.id) ?? { key: p.id, label: p.name, qty: 0, valueSar: 0 },
+    );
+    return {
+      byValue: [...all].sort((a, b) => b.valueSar - a.valueSar || a.label.localeCompare(b.label)),
+      byQty: [...all].sort((a, b) => b.qty - a.qty || a.label.localeCompare(b.label)),
+    };
+  }, [topAll, parts]);
   const truckRows = useMemo(() => byTruck(rows, plateOf), [rows, plateOf]);
 
   // The trend charts are a HISTORY — they ignore the period picker on purpose,
@@ -185,8 +200,11 @@ export default function PartsUsageTab({
 
   return (
     <div className="space-y-5">
-      {/* ---- The global period picker ---- */}
-      <div className="flex items-center gap-3 flex-wrap">
+      {/* ---- The global period picker ----
+           The "showing X against Y" line sits UNDER the buttons, not beside
+           them: inline it competed with the tab row above it and pushed the
+           last button around as the label's width changed with the period. */}
+      <div className="space-y-1.5">
         <div className="flex items-center gap-1 flex-wrap">
           {(Object.keys(PERIOD_LABELS) as PeriodKind[]).map((k) => (
             <button
@@ -203,9 +221,9 @@ export default function PartsUsageTab({
             </button>
           ))}
         </div>
-        <span className="text-[11px] muted">
+        <p className="text-[11px] muted">
           Showing <span className="font-medium">{win.label}</span> against {win.prevLabel}
-        </span>
+        </p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -345,9 +363,11 @@ export default function PartsUsageTab({
           <SectionHead
             title="Top 5 parts by value"
             hint="What consumption is costing most this period"
-            action={topAll.byValue.length > 5
-              ? <button onClick={() => setModal("value")} className="text-xs text-brand-600 dark:text-brand-300 font-medium hover:underline">View full list</button>
-              : undefined}
+            action={
+              <button onClick={() => setModal("value")} className="text-xs text-brand-600 dark:text-brand-300 font-medium hover:underline">
+                View all parts
+              </button>
+            }
           />
           <TopPartsTable buckets={top.byValue} highlight="value" />
         </Card>
@@ -355,9 +375,11 @@ export default function PartsUsageTab({
           <SectionHead
             title="Top 5 parts by quantity"
             hint="What moves most often this period"
-            action={topAll.byQty.length > 5
-              ? <button onClick={() => setModal("qty")} className="text-xs text-brand-600 dark:text-brand-300 font-medium hover:underline">View full list</button>
-              : undefined}
+            action={
+              <button onClick={() => setModal("qty")} className="text-xs text-brand-600 dark:text-brand-300 font-medium hover:underline">
+                View all parts
+              </button>
+            }
           />
           <TopPartsTable buckets={top.byQty} highlight="qty" />
         </Card>
@@ -486,13 +508,21 @@ export default function PartsUsageTab({
         </ListModal>
       )}
       {modal === "value" && (
-        <ListModal title="All parts by value" subtitle={win.label} onClose={() => setModal(null)}>
-          <TopPartsTable buckets={topAll.byValue} highlight="value" />
+        <ListModal
+          title="All parts by value"
+          subtitle={`${win.label} — every part, including those that consumed nothing`}
+          onClose={() => setModal(null)}
+        >
+          <TopPartsTable buckets={allPartsRanked.byValue} highlight="value" showZero />
         </ListModal>
       )}
       {modal === "qty" && (
-        <ListModal title="All parts by quantity" subtitle={win.label} onClose={() => setModal(null)}>
-          <TopPartsTable buckets={topAll.byQty} highlight="qty" />
+        <ListModal
+          title="All parts by quantity"
+          subtitle={`${win.label} — every part, including those that consumed nothing`}
+          onClose={() => setModal(null)}
+        >
+          <TopPartsTable buckets={allPartsRanked.byQty} highlight="qty" showZero />
         </ListModal>
       )}
     </div>
@@ -845,7 +875,9 @@ function SplitBars({ buckets, emptyText }: { buckets: Bucket[]; emptyText: strin
   );
 }
 
-function TopPartsTable({ buckets, highlight }: { buckets: Bucket[]; highlight: "value" | "qty" }) {
+function TopPartsTable({
+  buckets, highlight, showZero,
+}: { buckets: Bucket[]; highlight: "value" | "qty"; showZero?: boolean }) {
   if (buckets.length === 0) return <p className="p-4 text-sm muted">Nothing consumed this period.</p>;
   return (
     <Table>
@@ -853,19 +885,25 @@ function TopPartsTable({ buckets, highlight }: { buckets: Bucket[]; highlight: "
         <tr><TH>Part</TH><TH>Qty</TH><TH>Value</TH></tr>
       </thead>
       <tbody>
-        {buckets.map((b) => (
-          <tr key={b.key}>
-            <TD className="whitespace-normal max-w-[240px]">
-              <span className="text-sm line-clamp-1" title={b.label}>{b.label}</span>
-            </TD>
-            <TD className={cn("text-xs tabular-nums", highlight === "qty" && "font-semibold")}>
-              {formatNum(b.qty, 2)}
-            </TD>
-            <TD className={cn("text-xs tabular-nums", highlight === "value" && "font-semibold")}>
-              {formatSar(b.valueSar)}
-            </TD>
-          </tr>
-        ))}
+        {buckets.map((b) => {
+          // A part that consumed nothing is greyed rather than hidden — the
+          // whole point of the full list is that it shows the quiet ones.
+          const idle = showZero && b.qty === 0 && b.valueSar === 0;
+          return (
+            <tr key={b.key} className={cn(idle && "opacity-55")}>
+              <TD className="whitespace-normal max-w-[240px]">
+                <span className="text-sm line-clamp-1" title={b.label}>{b.label}</span>
+                {idle && <span className="ms-1.5 text-[10px] muted">not used this period</span>}
+              </TD>
+              <TD className={cn("text-xs tabular-nums", highlight === "qty" && !idle && "font-semibold")}>
+                {formatNum(b.qty, 2)}
+              </TD>
+              <TD className={cn("text-xs tabular-nums", highlight === "value" && !idle && "font-semibold")}>
+                {formatSar(b.valueSar)}
+              </TD>
+            </tr>
+          );
+        })}
       </tbody>
     </Table>
   );

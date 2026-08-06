@@ -125,3 +125,36 @@ test("weekly summary covers maintenance, exit permits and what is still out", as
   await expect(card).toContainText("returnable stock is still out");
   await expect(card).toContainText("rolls over on its own every week");
 });
+
+test("full-parts view is always offered and lists parts that consumed nothing", async ({ page }) => {
+  await page.goto(URL);
+  await pick(page, "Year to year");
+
+  // 4 of the 6 catalogue parts moved this period, so the Top 5 cards do NOT
+  // show everything — the button must still be there.
+  const valueCard = page.locator(".card", { hasText: "Top 5 parts by value" });
+  await expect(valueCard.getByRole("button", { name: "View all parts" })).toBeVisible();
+
+  await valueCard.getByRole("button", { name: "View all parts" }).click();
+  const modal = page.locator(".card", { hasText: "All parts by value" });
+  await expect(modal).toContainText("including those that consumed nothing");
+  // every catalogue part is present, consumed or not
+  for (const p of ["Brake pad", "Oil filter", "Water pump", "Hose", "Gasket kit", "Wiper blade"]) {
+    await expect(modal).toContainText(p);
+  }
+  await expect(modal.getByText("not used this period").first()).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  // same on the quantity side
+  const qtyCard = page.locator(".card", { hasText: "Top 5 parts by quantity" });
+  await qtyCard.getByRole("button", { name: "View all parts" }).click();
+  await expect(page.locator(".card", { hasText: "All parts by quantity" })).toContainText("Wiper blade");
+});
+
+test("period description sits BELOW the period buttons", async ({ page }) => {
+  await page.goto(URL);
+  const btn = (await page.getByRole("button", { name: "Month to month", exact: true }).boundingBox())!;
+  const desc = (await page.getByText(/Showing .* against /).boundingBox())!;
+  expect(desc.y).toBeGreaterThan(btn.y + btn.height - 2); // starts at/below the row
+  expect(desc.x).toBeLessThan(btn.x + 40);                // left-aligned, not trailing the row
+});
