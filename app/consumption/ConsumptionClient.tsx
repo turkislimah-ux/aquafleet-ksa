@@ -54,7 +54,7 @@ export type PartLite = {
 type Tab = "usage" | "permits" | "approvals";
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: "usage", label: "Parts Usage" },
+  { key: "usage", label: "Consumptions" },
   { key: "permits", label: "Exit Permits" },
   { key: "approvals", label: "Approvals" },
 ];

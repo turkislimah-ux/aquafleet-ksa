@@ -31,20 +31,22 @@ test("combined chart: bars AND an overlaid trend line, with its own toggle", asy
   await page.goto(URL);
   const card = page.locator(".card", { hasText: "Total consumption over time" });
   // Bars are HTML (see ComboChart's own note); the overlay carries the line.
-  const bars = card.locator("div.bg-brand-500\\/60");
-  await expect(bars).not.toHaveCount(0);
+  const bars = card.locator("div.bg-brand-500\\/70");
+  await expect(bars).toHaveCount(12); // fixed 12-month window, gaps included
   await expect(card.locator("svg polyline")).toHaveCount(1);
   await expect(card.getByText("Trend (3-point average)")).toBeVisible();
+  // axes
+  await expect(card.getByText("SAR", { exact: true })).toBeVisible();
 
   // its own toggle, independent of the global picker
   await card.getByRole("button", { name: "Yearly" }).click();
-  await expect(bars).toHaveCount(1); // one year bucket
+  await expect(bars).toHaveCount(5); // fixed 5-year window
 });
 
 test("weekly summary is bullets and stays weekly", async ({ page }) => {
   await page.goto(URL);
   const card = page.locator(".card", { hasText: "This week in review" });
-  await expect(card).toContainText("always weekly");
+  await expect(card).toContainText("rolls over on its own every week");
   expect(await card.locator("li").count()).toBeGreaterThan(1);
 
   // changing the global picker must NOT change the weekly card's window label
@@ -72,13 +74,8 @@ test("top 5 costly trucks with plate, visits and value, and a View all", async (
 test("two parts lists side by side, each with its own full list", async ({ page }) => {
   await page.goto(URL);
   await pick(page, "Year to year");
-  const card = page.locator(".card", { hasText: "Parts consumption" });
-  await expect(card.getByText("Top 5 by value")).toBeVisible();
-  await expect(card.getByText("Top 5 by quantity")).toBeVisible();
-
-  // side by side: same row, different columns
-  const v = await card.getByText("Top 5 by value").boundingBox();
-  const q = await card.getByText("Top 5 by quantity").boundingBox();
+  const v = await page.getByText("Top 5 parts by value").boundingBox();
+  const q = await page.getByText("Top 5 parts by quantity").boundingBox();
   expect(Math.abs(v!.y - q!.y)).toBeLessThan(10);
   expect(q!.x).toBeGreaterThan(v!.x);
 });
@@ -86,7 +83,8 @@ test("two parts lists side by side, each with its own full list", async ({ page 
 test("layout: every new display sits ABOVE the work-order records table", async ({ page }) => {
   await page.goto(URL);
   const records = (await page.locator(".card", { hasText: "In-house maintenance consumption history" }).boundingBox())!.y;
-  for (const t of ["Total consumption over time", "This week in review", "Top 5 costly trucks", "Parts consumption"]) {
+  for (const t of ["Total consumption over time", "Monthly trend — value and quantity",
+                   "This week in review", "Top 5 costly trucks", "Top 5 parts by value"]) {
     const y = (await page.locator(".card", { hasText: t }).first().boundingBox())!.y;
     expect(y).toBeLessThan(records);
   }
@@ -106,4 +104,24 @@ test("outstanding stays current-state, not period-scoped", async ({ page }) => {
   await expect(kpi).toContainText("190 SAR");
   await pick(page, "Year to year");
   await expect(kpi).toContainText("190 SAR"); // unchanged by the picker
+});
+
+test("monthly trend chart: paired bars, dual axes, fixed 12-month window", async ({ page }) => {
+  await page.goto(URL);
+  const card = page.locator(".card", { hasText: "Monthly trend — value and quantity" });
+  await expect(card.locator("div.bg-brand-500\\/70")).toHaveCount(12);   // value bars
+  await expect(card.locator("div.bg-emerald-500\\/70")).toHaveCount(12); // quantity bars
+  await expect(card.getByText("SAR", { exact: true })).toBeVisible();    // left axis
+  await expect(card.getByText("units", { exact: true })).toBeVisible();  // right axis
+  // an empty month is still on the axis
+  await expect(card.getByText("Jan 26")).toBeVisible();
+});
+
+test("weekly summary covers maintenance, exit permits and what is still out", async ({ page }) => {
+  await page.goto(URL);
+  const card = page.locator(".card", { hasText: "This week in review" });
+  await expect(card).toContainText("work order");
+  await expect(card).toContainText("exit permit");
+  await expect(card).toContainText("returnable stock is still out");
+  await expect(card).toContainText("rolls over on its own every week");
 });

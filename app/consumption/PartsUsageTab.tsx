@@ -31,7 +31,7 @@ import { cn, formatSar, formatNum } from "@/lib/utils";
 import {
   buildUsageRows, totals, bySource, byWarehouse, byDestination,
   topParts, outstandingReturnable, byTruck, weeklySummary,
-  periodWindow, inWindow, pctChange, trendSeries, movingAverage,
+  periodWindow, inWindow, pctChange, movingAverage, timelineKeys, seriesOn,
   PERIOD_LABELS, TREND_LABELS,
   type UsageRow, type Bucket, type WoLedgerRow, type EpLedgerRow,
   type PeriodKind, type TrendKind, type TruckUsage, type SummaryBullet,
@@ -111,16 +111,20 @@ export default function PartsUsageTab({
   const topAll = useMemo(() => topParts(rows, partName, 9999), [rows, partName]);
   const truckRows = useMemo(() => byTruck(rows, plateOf), [rows, plateOf]);
 
-  // The trend chart is a HISTORY — it ignores the period picker on purpose.
-  const series = useMemo(() => trendSeries(pool, trend), [pool, trend]);
+  // The trend charts are a HISTORY — they ignore the period picker on purpose,
+  // and they run on a FIXED rolling window (12 months / 8 quarters / 5 years)
+  // so an empty stretch stays on the axis instead of disappearing from it.
+  const series = useMemo(() => {
+    const keys = timelineKeys(trend, new Date());
+    return seriesOn(pool, trend, keys);
+  }, [pool, trend]);
   const trendLine = useMemo(() => movingAverage(series), [series]);
 
-  // The weekly summary is weekly whatever the picker says, and it reads the
-  // UNFILTERED pool — a narrative about "the company's consumption" that
-  // silently obeyed a source filter would be misleading.
-  const weekly = useMemo(
-    () => weeklySummary(allRows, new Date(), partName, plateOf),
-    [allRows, partName, plateOf],
+  // The paired value/quantity chart is always MONTHLY over the last 12 months,
+  // whatever the combined chart's own toggle is set to.
+  const monthlySeries = useMemo(
+    () => seriesOn(pool, "month", timelineKeys("month", new Date())),
+    [pool],
   );
 
   // Outstanding is current state, never period-scoped.
@@ -128,12 +132,24 @@ export default function PartsUsageTab({
     () => outstandingReturnable({ permits, permitLines, destinationLabel }),
     [permits, permitLines, destinationLabel],
   );
-  const outstandingTotal = useMemo(
-    () => outstanding.reduce(
-      (a, r) => ({ qty: a.qty + r.qty, valueSar: a.valueSar + r.valueSar }),
-      { qty: 0, valueSar: 0 },
-    ),
-    [outstanding],
+  const outstandingTotal = useMemo(() => {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    return outstanding.reduce(
+      (a, r) => ({
+        qty: a.qty + r.qty,
+        valueSar: a.valueSar + r.valueSar,
+        overdue: a.overdue + (r.expectedReturnOn && r.expectedReturnOn < todayIso ? 1 : 0),
+      }),
+      { qty: 0, valueSar: 0, overdue: 0 },
+    );
+  }, [outstanding]);
+
+  // The weekly summary is weekly whatever the picker says, and it reads the
+  // UNFILTERED pool — a narrative about "the company's consumption" that
+  // silently obeyed a source filter would be misleading.
+  const weekly = useMemo(
+    () => weeklySummary(allRows, new Date(), partName, plateOf, outstandingTotal),
+    [allRows, partName, plateOf, outstandingTotal],
   );
 
   const maintenanceRecords = useMemo(() => {
@@ -280,11 +296,22 @@ export default function PartsUsageTab({
         </div>
       </Card>
 
+      {/* ---- Monthly trend: value AND quantity, always the last 12 months ---- */}
+      <Card className="!p-0 overflow-hidden">
+        <SectionHead
+          title="Monthly trend — value and quantity"
+          hint="Both measures side by side on their own axes, over the last 12 months. A month with nothing in it stays on the axis."
+        />
+        <div className="p-4 pt-0">
+          <PairedTrendChart series={monthlySeries} />
+        </div>
+      </Card>
+
       {/* ---- 3) Weekly feedback summary ---- */}
       <Card className="!p-0 overflow-hidden">
         <SectionHead
           title="This week in review"
-          hint={`${weekly.window.label} — always weekly, whatever the period picker says`}
+          hint={`${weekly.window.label} — rolls over on its own every week, whatever the period picker says`}
         />
         <ul className="px-4 pb-4 space-y-2">
           {weekly.bullets.map((b, i) => (
@@ -308,36 +335,33 @@ export default function PartsUsageTab({
         <TruckTable rows={truckRows.slice(0, 5)} />
       </Card>
 
-      {/* ---- 5) Parts consumption: two lists side by side ---- */}
-      <Card className="!p-0 overflow-hidden">
-        <SectionHead title="Parts consumption" hint="What is driving the numbers this period" />
-        <div className="grid grid-cols-1 lg:grid-cols-2">
-          <div>
-            <div className="px-4 pb-2 flex items-center justify-between gap-2">
-              <h4 className="text-xs font-semibold uppercase tracking-wide muted">Top 5 by value</h4>
-              {topAll.byValue.length > 5 && (
-                <button onClick={() => setModal("value")} className="text-xs text-brand-600 dark:text-brand-300 font-medium hover:underline">
-                  View full list
-                </button>
-              )}
-            </div>
-            <TopPartsTable buckets={top.byValue} highlight="value" />
-          </div>
-          {/* The separator: a vertical rule between the two lists on wide
-              screens, a horizontal one when they stack. */}
-          <div className="border-t lg:border-t-0 lg:border-s" style={{ borderColor: "rgb(var(--border))" }}>
-            <div className="px-4 pt-4 lg:pt-0 pb-2 flex items-center justify-between gap-2">
-              <h4 className="text-xs font-semibold uppercase tracking-wide muted">Top 5 by quantity</h4>
-              {topAll.byQty.length > 5 && (
-                <button onClick={() => setModal("qty")} className="text-xs text-brand-600 dark:text-brand-300 font-medium hover:underline">
-                  View full list
-                </button>
-              )}
-            </div>
-            <TopPartsTable buckets={top.byQty} highlight="qty" />
-          </div>
-        </div>
-      </Card>
+      {/* ---- 5) Parts consumption: two lists side by side ----
+           Two SEPARATE cards rather than one card split by a rule. The single
+           box with an internal divider read as a table that had been cut in
+           half; the gap between two cards is the separator, and each list
+           gets its own header and its own full-list link. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card className="!p-0 overflow-hidden">
+          <SectionHead
+            title="Top 5 parts by value"
+            hint="What consumption is costing most this period"
+            action={topAll.byValue.length > 5
+              ? <button onClick={() => setModal("value")} className="text-xs text-brand-600 dark:text-brand-300 font-medium hover:underline">View full list</button>
+              : undefined}
+          />
+          <TopPartsTable buckets={top.byValue} highlight="value" />
+        </Card>
+        <Card className="!p-0 overflow-hidden">
+          <SectionHead
+            title="Top 5 parts by quantity"
+            hint="What moves most often this period"
+            action={topAll.byQty.length > 5
+              ? <button onClick={() => setModal("qty")} className="text-xs text-brand-600 dark:text-brand-300 font-medium hover:underline">View full list</button>
+              : undefined}
+          />
+          <TopPartsTable buckets={top.byQty} highlight="qty" />
+        </Card>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="!p-0 overflow-hidden">
@@ -555,72 +579,202 @@ function Delta({ pct, label, small }: { pct: number; label?: string; small?: boo
  * ambiguous about which series it follows. Quantity per bucket is in the
  * tooltip and in every other view on the page.
  */
-function ComboChart({ series, trend }: { series: Bucket[]; trend: number[] }) {
-  if (series.length === 0) return <p className="text-sm muted">No consumption yet.</p>;
+// ---------------------------------------------------------------------------
+// CHART FRAME — one axis system, shared by both charts below.
+//
+// Real axes, because a bar with no scale beside it is decoration. Y ticks with
+// gridlines on the left, an X axis line under the bars, and a fixed timeline
+// so an empty month reads as an empty month instead of vanishing from the
+// axis entirely.
+// ---------------------------------------------------------------------------
+const PLOT_H = 190;
+const GUTTER = 52;   // room for the Y labels
+const RIGHT = 46;    // room for a second Y axis when there is one
 
-  // BARS ARE HTML, THE LINE IS SVG, and that split is deliberate. A pure-SVG
-  // chart stretched to the container needs preserveAspectRatio="none", which
-  // makes bars balloon when there are few buckets and turns every dot into an
-  // ellipse. Laying the bars out with flex keeps them a sane width at any
-  // bucket count, and the overlay only has to carry a polyline — whose stroke
-  // stays honest under the same stretch via vector-effect.
-  const H = 100;
-  const max = Math.max(...series.map((b) => b.valueSar), ...trend, 1);
-  const y = (v: number) => H - (v / max) * (H - 6);
+/** Round a max up to something a human would label an axis with. */
+function niceMax(v: number): number {
+  if (v <= 0) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / mag;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * mag;
+}
 
+function compact(n: number): string {
+  const a = Math.abs(n);
+  if (a >= 1_000_000) return `${(n / 1_000_000).toFixed(a >= 10_000_000 ? 0 : 1)}M`;
+  if (a >= 1_000) return `${(n / 1_000).toFixed(a >= 10_000 ? 0 : 1)}k`;
+  return formatNum(n, 0);
+}
+
+const TICKS = 4;
+
+function ChartFrame({
+  series, leftMax, rightMax, leftUnit, rightUnit, children,
+}: {
+  series: Bucket[];
+  leftMax: number;
+  rightMax?: number;
+  leftUnit: string;
+  rightUnit?: string;
+  /** Rendered inside the plot area, which is `relative`. */
+  children: React.ReactNode;
+}) {
+  const ticks = Array.from({ length: TICKS + 1 }, (_, i) => i / TICKS);
   return (
-    <div className="space-y-2">
-      <div className="overflow-x-auto">
-        <div style={{ minWidth: Math.max(series.length * 56, 260) }}>
-          <div className="relative" style={{ height: 160 }}>
-            <div className="absolute inset-0 flex items-end">
-              {series.map((b) => (
-                <div key={b.key} className="flex-1 flex justify-center items-end h-full">
-                  <div
-                    className="w-full max-w-[44px] rounded-t bg-brand-500/60"
-                    style={{ height: `${Math.max((b.valueSar / max) * 94, b.valueSar > 0 ? 1.5 : 0)}%` }}
-                    title={`${b.label}: ${formatSar(b.valueSar)} · ${formatNum(b.qty, 2)} units`}
-                  />
-                </div>
-              ))}
-            </div>
-            <svg
-              viewBox={`0 0 ${series.length} ${H}`}
-              preserveAspectRatio="none"
-              className="absolute inset-0 w-full h-full pointer-events-none"
-            >
-              <polyline
-                points={trend.map((v, i) => `${i + 0.5},${y(v)}`).join(" ")}
-                fill="none"
-                className="stroke-amber-500"
-                strokeWidth={2}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                vectorEffect="non-scaling-stroke"
-              />
-            </svg>
-          </div>
-          <div className="flex">
-            {series.map((b, i) => (
-              <div key={b.key} className="flex-1 text-center px-0.5">
-                <div className="text-[10px] muted whitespace-nowrap">{b.label}</div>
-                <div className="text-[10px] tabular-nums font-medium">{formatSar(b.valueSar)}</div>
-                <div className="text-[10px] tabular-nums muted">{formatNum(b.qty, 2)}u</div>
-                <div className="text-[10px] tabular-nums text-amber-600 dark:text-amber-400"
-                  title="3-point moving average">
-                  ~{formatSar(trend[i])}
-                </div>
+    // pt-2 so the topmost tick label, which is centred ON the top gridline,
+    // is not sliced in half by the card edge.
+    <div className="overflow-x-auto pt-2">
+      <div style={{ minWidth: Math.max(series.length * 46 + GUTTER + RIGHT, 320) }}>
+        <div className="flex">
+          {/* Y axis — left */}
+          <div className="shrink-0 relative" style={{ width: GUTTER, height: PLOT_H }}>
+            {ticks.map((t) => (
+              <div key={t} className="absolute right-1 -translate-y-1/2 text-[10px] muted tabular-nums"
+                style={{ top: `${(1 - t) * 100}%` }}>
+                {compact(leftMax * t)}
               </div>
             ))}
           </div>
+
+          {/* Plot */}
+          <div className="flex-1 relative border-s border-b"
+            style={{ height: PLOT_H, borderColor: "rgb(var(--border))" }}>
+            {ticks.map((t) => (
+              <div key={t} className="absolute inset-x-0 border-t"
+                style={{
+                  top: `${(1 - t) * 100}%`,
+                  borderColor: "rgb(var(--border))",
+                  opacity: t === 0 ? 0 : 0.45,
+                }}
+              />
+            ))}
+            {children}
+          </div>
+
+          {/* Y axis — right, only when a second scale exists */}
+          {rightMax !== undefined && (
+            <div className="shrink-0 relative" style={{ width: RIGHT, height: PLOT_H }}>
+              {ticks.map((t) => (
+                <div key={t} className="absolute left-1 -translate-y-1/2 text-[10px] tabular-nums text-emerald-600 dark:text-emerald-400"
+                  style={{ top: `${(1 - t) * 100}%` }}>
+                  {compact(rightMax * t)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* X axis labels, aligned to the plot area */}
+        <div className="flex">
+          <div className="shrink-0" style={{ width: GUTTER }} />
+          <div className="flex-1 flex">
+            {series.map((b) => (
+              <div key={b.key} className="flex-1 text-center pt-1">
+                <div className="text-[10px] muted whitespace-nowrap">{b.label}</div>
+              </div>
+            ))}
+          </div>
+          {rightMax !== undefined && <div className="shrink-0" style={{ width: RIGHT }} />}
+        </div>
+
+        <div className="flex">
+          <div className="shrink-0 text-[10px] muted text-end pe-1" style={{ width: GUTTER }}>{leftUnit}</div>
+          <div className="flex-1" />
+          {rightUnit && (
+            <div className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 ps-1" style={{ width: RIGHT }}>
+              {rightUnit}
+            </div>
+          )}
         </div>
       </div>
-      <div className="flex items-center gap-4 text-[11px] muted">
+    </div>
+  );
+}
+
+/**
+ * TOTAL CONSUMPTION — one bar per bucket plus the moving-average line.
+ *
+ * Bars are HTML and only the line is SVG. A pure-SVG chart stretched to its
+ * container needs preserveAspectRatio="none", which balloons bars at low
+ * bucket counts and turns every dot into an ellipse; flex bars stay a sane
+ * width at any count and the polyline survives the same stretch via
+ * vector-effect.
+ */
+function ComboChart({ series, trend }: { series: Bucket[]; trend: number[] }) {
+  if (series.length === 0) return <p className="text-sm muted">No consumption yet.</p>;
+  const max = niceMax(Math.max(...series.map((b) => b.valueSar), ...trend, 1));
+
+  return (
+    <div className="space-y-2">
+      <ChartFrame series={series} leftMax={max} leftUnit="SAR">
+        <div className="absolute inset-0 flex items-end">
+          {series.map((b) => (
+            <div key={b.key} className="flex-1 flex justify-center items-end h-full px-[3px]">
+              <div
+                className="w-full max-w-[26px] rounded-t bg-brand-500/70"
+                style={{ height: `${(b.valueSar / max) * 100}%` }}
+                title={`${b.label}: ${formatSar(b.valueSar)} · ${formatNum(b.qty, 2)} units`}
+              />
+            </div>
+          ))}
+        </div>
+        <svg viewBox={`0 0 ${series.length} 100`} preserveAspectRatio="none"
+          className="absolute inset-0 w-full h-full pointer-events-none">
+          <polyline
+            points={trend.map((v, i) => `${i + 0.5},${100 - (v / max) * 100}`).join(" ")}
+            fill="none" className="stroke-amber-500" strokeWidth={2}
+            strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      </ChartFrame>
+      <div className="flex items-center gap-4 text-[11px] muted ps-[52px]">
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-brand-500/60" />Total consumption (SAR)
+          <span className="h-2.5 w-2.5 rounded-sm bg-brand-500/70" />Total consumption (SAR)
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-0.5 w-4 rounded bg-amber-500" />Trend (3-point average)
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * MONTHLY TREND — value AND quantity, two bars per bucket, on their own
+ * scales with their own axes. SAR and units share no axis, and forcing them
+ * onto one would flatten whichever is smaller into nothing.
+ */
+function PairedTrendChart({ series }: { series: Bucket[] }) {
+  if (series.length === 0) return <p className="text-sm muted">No consumption yet.</p>;
+  const maxV = niceMax(Math.max(...series.map((b) => b.valueSar), 1));
+  const maxQ = niceMax(Math.max(...series.map((b) => b.qty), 1));
+
+  return (
+    <div className="space-y-2">
+      <ChartFrame series={series} leftMax={maxV} rightMax={maxQ} leftUnit="SAR" rightUnit="units">
+        <div className="absolute inset-0 flex items-end">
+          {series.map((b) => (
+            <div key={b.key} className="flex-1 flex justify-center items-end gap-[2px] h-full px-[3px]">
+              <div
+                className="w-full max-w-[12px] rounded-t bg-brand-500/70"
+                style={{ height: `${(b.valueSar / maxV) * 100}%` }}
+                title={`${b.label}: ${formatSar(b.valueSar)}`}
+              />
+              <div
+                className="w-full max-w-[12px] rounded-t bg-emerald-500/70"
+                style={{ height: `${(b.qty / maxQ) * 100}%` }}
+                title={`${b.label}: ${formatNum(b.qty, 2)} units`}
+              />
+            </div>
+          ))}
+        </div>
+      </ChartFrame>
+      <div className="flex items-center gap-4 text-[11px] muted ps-[52px]">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-brand-500/70" />Value (SAR)
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500/70" />Quantity (units)
         </span>
       </div>
     </div>

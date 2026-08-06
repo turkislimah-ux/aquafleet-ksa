@@ -350,6 +350,54 @@ export function trendLabel(kind: TrendKind, key: string): string {
   });
 }
 
+/**
+ * A FIXED timeline, independent of the data.
+ *
+ * The charts show a rolling window that always spans the same length whether
+ * anything happened in it or not — 12 months, 8 quarters, 5 years, ending at
+ * the current bucket. A chart whose axis silently shrinks to "the two months
+ * that had data" hides exactly the thing a trend is for: the quiet stretches.
+ */
+export function timelineKeys(kind: TrendKind, now: Date, count?: number): string[] {
+  const n = count ?? (kind === "month" ? 12 : kind === "quarter" ? 8 : 5);
+  const y = now.getUTCFullYear(), m = now.getUTCMonth() + 1;
+  const end =
+    kind === "year" ? String(y)
+    : kind === "quarter" ? `${y}-Q${Math.floor((m - 1) / 3) + 1}`
+    : `${y}-${String(m).padStart(2, "0")}`;
+
+  // Walk BACKWARDS from the current bucket so the window always ends on it.
+  const keys: string[] = [end];
+  for (let i = 1; i < n; i++) keys.unshift(prevTrendKey(kind, keys[0]));
+  return keys;
+}
+
+function prevTrendKey(kind: TrendKind, key: string): string {
+  if (kind === "year") return String(Number(key) - 1);
+  if (kind === "quarter") {
+    const [y, q] = key.split("-Q").map(Number);
+    return q === 1 ? `${y - 1}-Q4` : `${y}-Q${q - 1}`;
+  }
+  const [y, m] = key.split("-").map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+}
+
+/**
+ * Bucket rows onto a GIVEN set of keys. Anything outside the window is
+ * dropped, and every key in the window is present even at zero — which is
+ * what makes an empty month render as an empty month.
+ */
+export function seriesOn(rows: UsageRow[], kind: TrendKind, keys: string[]): Bucket[] {
+  const m = new Map(keys.map((k) => [k, { key: k, label: trendLabel(kind, k), qty: 0, valueSar: 0 }]));
+  for (const r of rows) {
+    const b = m.get(trendKey(kind, r.occurredAt));
+    if (!b) continue;
+    b.qty += r.qty;
+    b.valueSar += r.valueSar;
+  }
+  return keys.map((k) => m.get(k)!);
+}
+
 /** The combined trend: EVERYTHING that left stock, bucketed, gaps filled. */
 export function trendSeries(rows: UsageRow[], kind: TrendKind): Bucket[] {
   if (rows.length === 0) return [];
@@ -432,6 +480,8 @@ export function weeklySummary(
   now: Date,
   partName: (id: string) => string | null,
   plate: (id: string) => string | null,
+  /** Current outstanding state, so the week can say what is still out. */
+  outstanding?: { qty: number; valueSar: number; overdue: number },
 ): { window: PeriodWindow; bullets: SummaryBullet[] } {
   const w = periodWindow("week", now);
   const cur = inWindow(allRows, w.start, w.end);
@@ -446,6 +496,15 @@ export function weeklySummary(
         ? `Nothing left stock this week — last week it was ${Math.round(p.valueSar).toLocaleString()} SAR across ${p.qty} units.`
         : "Nothing left stock this week, and nothing last week either.",
     });
+    // A quiet week still has stock sitting outside, and that is worth saying.
+    if (outstanding && outstanding.qty > 0) {
+      bullets.push({
+        tone: outstanding.overdue > 0 ? "up" : "info",
+        text: `${Math.round(outstanding.valueSar).toLocaleString()} SAR of returnable stock is still out across ${outstanding.qty} units${
+          outstanding.overdue > 0 ? ` — ${outstanding.overdue} past its due-back date` : ""
+        }.`,
+      });
+    }
     return { window: w, bullets };
   }
 
@@ -485,12 +544,63 @@ export function weeklySummary(
     });
   }
 
-  // The truck that cost the most.
-  const [topTruck] = byTruck(cur, plate);
-  if (topTruck) {
+  // --- MAINTENANCE, in its own right ---------------------------------------
+  const maintRows = cur.filter((r) => r.source === "maintenance");
+  if (maintRows.length > 0) {
+    const jobs = new Set(maintRows.map((r) => r.workOrderId).filter(Boolean)).size;
+    const mPrev = totals(prev.filter((r) => r.source === "maintenance"));
+    const mDelta = pctChange(totals(maintRows).valueSar, mPrev.valueSar);
+    bullets.push({
+      tone: mDelta === null ? "info" : mDelta > 5 ? "up" : mDelta < -5 ? "down" : "flat",
+      text: `${jobs} work order${jobs === 1 ? "" : "s"} drew parts this week${
+        mDelta === null ? "" : `, ${mDelta >= 0 ? "up" : "down"} ${Math.abs(Math.round(mDelta))}% in value on last week`
+      }.`,
+    });
+
+    const [topTruck] = byTruck(cur, plate);
+    if (topTruck) {
+      bullets.push({
+        tone: "info",
+        text: `${topTruck.plate} drew the most maintenance parts — ${Math.round(topTruck.valueSar).toLocaleString()} SAR across ${topTruck.visits} job${topTruck.visits === 1 ? "" : "s"}.`,
+      });
+    }
+
+    // A truck coming back repeatedly in ONE week is the kind of fact this
+    // summary exists to surface.
+    const repeat = byTruck(cur, plate).filter((t) => t.visits > 1);
+    if (repeat.length > 0) {
+      bullets.push({
+        tone: "up",
+        text: `${repeat.map((t) => `${t.plate} (${t.visits})`).join(", ")} came back for parts more than once this week.`,
+      });
+    }
+  } else {
+    bullets.push({ tone: "info", text: "No work order drew parts this week." });
+  }
+
+  // --- EXIT PERMITS, in their own right ------------------------------------
+  const exitRows = cur.filter((r) => r.source === "exit_permit");
+  if (exitRows.length > 0) {
+    const permitCount = new Set(exitRows.map((r) => r.reference)).size;
+    const dest = byDestination(cur);
+    const top = dest[0];
     bullets.push({
       tone: "info",
-      text: `${topTruck.plate} drew the most maintenance parts — ${Math.round(topTruck.valueSar).toLocaleString()} SAR across ${topTruck.visits} job${topTruck.visits === 1 ? "" : "s"}.`,
+      text: `${permitCount} exit permit${permitCount === 1 ? "" : "s"} took stock out${
+        top ? `, mostly to ${top.label.toLowerCase()} (${Math.round(top.valueSar).toLocaleString()} SAR)` : ""
+      }.`,
+    });
+  } else {
+    bullets.push({ tone: "info", text: "No parts left on an exit permit this week." });
+  }
+
+  // --- Still out, and overdue ----------------------------------------------
+  if (outstanding && outstanding.qty > 0) {
+    bullets.push({
+      tone: outstanding.overdue > 0 ? "up" : "info",
+      text: `${Math.round(outstanding.valueSar).toLocaleString()} SAR of returnable stock is still out across ${outstanding.qty} units${
+        outstanding.overdue > 0 ? ` — ${outstanding.overdue} permit${outstanding.overdue === 1 ? " is" : "s are"} past the due-back date` : ""
+      }.`,
     });
   }
 
