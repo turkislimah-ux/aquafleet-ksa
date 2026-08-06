@@ -15,7 +15,7 @@ import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, Printer, Undo2, Ban,
-  PackageMinus, RotateCcw, AlertTriangle, FileText, Paperclip,
+  RotateCcw, AlertTriangle, FileText, Paperclip,
 } from "lucide-react";
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
@@ -35,6 +35,8 @@ import {
   PermitFormModal, ConfirmExitModal, ReturnModal, VoidModal, PermitPrintView,
 } from "./ExitPermitModals";
 import ApprovalsTab from "./ApprovalsTab";
+import PartsUsageTab from "./PartsUsageTab";
+import type { WoLedgerRow } from "@/lib/parts-usage";
 
 export type WarehouseLite = { id: string; name: string };
 export type NamedLite = { id: string; name: string };
@@ -45,13 +47,16 @@ export type PartLite = {
   warehouse_id: string; qty_on_hand: number;
 };
 
-type Tab = "usage" | "permits" | "approvals" | "reports";
+// THREE tabs. "Reports" used to sit here and has been removed: Reports is a
+// separate top-level page in the sidebar, and a second entry point with the
+// same name inside Consumption only invited the question of which one was
+// real. Nothing was built behind it.
+type Tab = "usage" | "permits" | "approvals";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "usage", label: "Parts Usage" },
   { key: "permits", label: "Exit Permits" },
   { key: "approvals", label: "Approvals" },
-  { key: "reports", label: "Reports" },
 ];
 
 export default function ConsumptionClient({
@@ -59,7 +64,7 @@ export default function ConsumptionClient({
   warehouses, parts, stations, projects, trucks, customers, staff,
   lots, ledger,
   approvals, workOrders, workOrderParts, outsourcedJobs, workshopPayments,
-  repairers, jobRepairers, allParts, allTrucks, viewer,
+  repairers, jobRepairers, allParts, allTrucks, viewer, woLedger,
   today, error,
 }: {
   permits: ExitPermit[];
@@ -86,10 +91,12 @@ export default function ConsumptionClient({
   jobRepairers: { outsourced_job_id: string; repairer_id: string }[];
   // Unfiltered label lookups — history can reference a deactivated part or a
   // terminated truck, and it must still render its name.
-  allParts: { id: string; name: string; sku: string; unit: string | null }[];
+  allParts: { id: string; name: string; sku: string; unit: string | null; warehouse_id: string }[];
   allTrucks: TruckLite[];
   // Signed-in user's email — the approvals tab compares it to decided_by.
   viewer: string | null;
+  // The MAINTENANCE per-lot ledger, for Parts Usage.
+  woLedger: WoLedgerRow[];
   today: string;
   error: string | null;
 }) {
@@ -277,20 +284,26 @@ export default function ConsumptionClient({
         </div>
       )}
 
-      {tab === "usage" || tab === "reports" ? (
-        <Card>
-          <div className="p-10 text-center">
-            <PackageMinus className="h-6 w-6 mx-auto mb-2 opacity-40" />
-            <p className="text-sm muted">
-              {tab === "usage" ? "Parts Usage" : "Reports"} — coming in a later phase.
-            </p>
-            <p className="text-xs muted mt-1">
-              {tab === "usage"
-                ? "Maintenance draws against work orders, in one place."
-                : "Cross-cutting consumption reporting across usage and exits."}
-            </p>
-          </div>
-        </Card>
+      {tab === "usage" ? (
+        <PartsUsageTab
+          workOrders={workOrders}
+          workOrderParts={workOrderParts}
+          woLedger={woLedger}
+          permits={permits}
+          permitLines={lines}
+          epLedger={ledger.map((r) => ({
+            exit_permit_line_id: r.exit_permit_line_id,
+            direction: r.direction,
+            qty: Number(r.qty),
+            unit_price_sar: Number(r.unit_price_sar),
+            created_at: r.created_at,
+          }))}
+          parts={allParts}
+          warehouses={warehouses}
+          // The SAME resolver every other tab uses, so one permit is never
+          // described three different ways.
+          destinationLabel={destinationLabel}
+        />
       ) : tab === "approvals" ? (
         <ApprovalsTab
           permits={permits}

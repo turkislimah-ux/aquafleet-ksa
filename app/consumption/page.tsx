@@ -12,6 +12,7 @@ import type {
   ConsumptionApproval, WorkOrder, WorkOrderPart, OutsourcedJob, WorkshopPayment,
 } from "@/lib/db-types";
 import type { LotLite, ConsumptionLedgerRow } from "@/lib/exit-permits";
+import type { WoLedgerRow } from "@/lib/parts-usage";
 import ConsumptionClient, {
   type PartLite, type WarehouseLite, type NamedLite, type StaffLite, type TruckLite,
 } from "./ConsumptionClient";
@@ -33,7 +34,7 @@ export default async function ConsumptionPage() {
     warehousesRes, partsRes, stationsRes, projectsRes, trucksRes, customersRes, staffRes,
     lotsRes, ledgerRes,
     approvalsRes, workOrdersRes, workOrderPartsRes, osJobsRes, paymentsRes,
-    repairersRes, jobRepairersRes, allPartsRes, allTrucksRes,
+    repairersRes, jobRepairersRes, allPartsRes, allTrucksRes, woLedgerRes,
   ] = await Promise.all([
     supabase.from("exit_permits").select("*").order("created_at", { ascending: false }),
     supabase.from("exit_permit_lines").select("*").order("created_at", { ascending: true }),
@@ -76,14 +77,16 @@ export default async function ConsumptionPage() {
     // three subject kinds live in three different tables and the tab has to
     // show events that have NO row here at all.
     supabase.from("consumption_approvals").select("*"),
-    // Completed in-house work orders and the parts they consumed.
-    // unit_price_sar on a work_order_parts row is the FIFO cost
-    // consume_work_order_line stamped at deduction — read, never recomputed.
-    supabase
-      .from("work_orders")
-      .select("*")
-      .eq("status", "completed")
-      .order("closed_at", { ascending: false }),
+    // In-house work orders and the parts they consumed. unit_price_sar on a
+    // work_order_parts row is the FIFO cost consume_work_order_line stamped
+    // at deduction — read, never recomputed.
+    //
+    // NOT filtered to 'completed' any more. Parts Usage measures stock that
+    // has LEFT, and a work order can be deducted while still in progress
+    // (two are, live) — filtering by status here would hide real consumption.
+    // The Approvals derive does its own `status !== "completed"` skip, so
+    // widening this changes nothing for that tab.
+    supabase.from("work_orders").select("*").order("closed_at", { ascending: false }),
     supabase.from("work_order_parts").select("*"),
     // Outsourced jobs: NOT filtered by status. What is approved is the vendor
     // spend, and a payment against a still-open job is still real money — the
@@ -96,8 +99,15 @@ export default async function ConsumptionPage() {
     // use. A completed work order can reference a part that has since been
     // deactivated, or a truck that has since been terminated — history must
     // still render its name rather than "Unknown".
-    supabase.from("parts").select("id, name, sku, unit"),
+    // warehouse_id rides along because Parts Usage attributes a MAINTENANCE
+    // draw to the part's own warehouse — a work order has none of its own.
+    supabase.from("parts").select("id, name, sku, unit, warehouse_id"),
     supabase.from("trucks").select("id, plate"),
+    // The MAINTENANCE per-lot ledger — the twin of exit_permit_line_consumptions
+    // fetched above. Read only; Parts Usage nets consume against return.
+    supabase
+      .from("work_order_part_consumptions")
+      .select("work_order_part_id, direction, qty, unit_price_sar, created_at"),
   ]);
 
   const error =
@@ -110,7 +120,7 @@ export default async function ConsumptionPage() {
     workOrderPartsRes.error?.message ?? osJobsRes.error?.message ??
     paymentsRes.error?.message ?? repairersRes.error?.message ??
     jobRepairersRes.error?.message ?? allPartsRes.error?.message ??
-    allTrucksRes.error?.message ?? null;
+    allTrucksRes.error?.message ?? woLedgerRes.error?.message ?? null;
 
   return (
     <ConsumptionClient
@@ -135,8 +145,9 @@ export default async function ConsumptionPage() {
       workshopPayments={(paymentsRes.data ?? []) as WorkshopPayment[]}
       repairers={(repairersRes.data ?? []) as NamedLite[]}
       jobRepairers={(jobRepairersRes.data ?? []) as { outsourced_job_id: string; repairer_id: string }[]}
-      allParts={(allPartsRes.data ?? []) as { id: string; name: string; sku: string; unit: string | null }[]}
+      allParts={(allPartsRes.data ?? []) as { id: string; name: string; sku: string; unit: string | null; warehouse_id: string }[]}
       allTrucks={(allTrucksRes.data ?? []) as TruckLite[]}
+      woLedger={(woLedgerRes.data ?? []) as WoLedgerRow[]}
       viewer={viewer}
       today={today}
       error={error}
