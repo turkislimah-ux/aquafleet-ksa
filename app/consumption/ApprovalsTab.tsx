@@ -97,10 +97,12 @@ export default function ApprovalsTab({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [rejecting, setRejecting] = useState<ApprovalEvent | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  // Errors belong to the ROW they came from, not to a banner above the table.
-  // A refusal is about one event, and a message floating at the top makes the
-  // reader hunt for which one.
-  const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null);
+  // A refusal from the APPROVE button has nowhere in the row to live without
+  // pushing every other column out of shape, so it gets a popup. A refusal
+  // from REJECT already has a natural home — under the reason box in the
+  // popup the user is standing in — so it stays there.
+  const [notice, setNotice] = useState<string | null>(null);
+  const [rejectError, setRejectError] = useState<string | null>(null);
 
   const partsById = useMemo(() => new Map(partNames.map((p) => [p.id, p])), [partNames]);
   const trucksById = useMemo(() => new Map(trucks.map((t) => [t.id, t])), [trucks]);
@@ -161,22 +163,26 @@ export default function ApprovalsTab({
     });
   }
 
-  async function decide(e: ApprovalEvent, decision: "approved" | "rejected", reason: string | null) {
+  /**
+   * Cast a vote. Returns the message to SHOW on failure, or null on success —
+   * the caller decides where it goes, because approve and reject have
+   * different right answers for that.
+   */
+  async function decide(
+    e: ApprovalEvent,
+    decision: "approved" | "rejected",
+    reason: string | null,
+  ): Promise<string | null> {
     setBusyKey(keyOf(e));
-    setRowError(null);
     const res = await decideConsumptionApproval(e.kind, e.subjectId, decision, reason);
     setBusyKey(null);
     if (res.error) {
       // A conflict gets the message that names the other voter; anything else
       // (eligibility, a vanished subject) surfaces the server's own words.
-      setRowError({
-        key: keyOf(e),
-        message: conflictMessage(e, viewer, decision) ?? res.error,
-      });
-      return false;
+      return conflictMessage(e, viewer, decision) ?? res.error;
     }
     router.refresh();
-    return true;
+    return null;
   }
 
   return (
@@ -207,9 +213,10 @@ export default function ApprovalsTab({
         Archive &rarr; Approvals Ledger, where they stay changeable for {LEDGER_LOCK_DAYS} days.
       </div>
 
-      {/* No error banner here. A refusal belongs to the row it came from —
-          see rowError, rendered in that row's actions cell, and inside the
-          reject popup when the refusal happened there. */}
+      {/* No error banner here, and no inline row message either — a refusal
+          in the row stretched every other column out of shape. Approve
+          failures go to ConflictModal; reject failures stay under the reason
+          box in the popup the user is already standing in. */}
 
       {/* The STATUS filter is gone, not hidden. With decided events relocated
           to the Ledger this queue holds nothing but pending, so an
@@ -270,9 +277,8 @@ export default function ApprovalsTab({
                 const open = expanded.has(k);
                 const truck = e.truckId ? trucksById.get(e.truckId) : null;
                 const busy = busyKey === k;
-                // The vote already on the event, and this row's own error.
+                // The vote already on the event — what a second vote must match.
                 const standing = firstVote(e);
-                const err = rowError?.key === k ? rowError.message : null;
                 return (
                   <Fragment key={k}>
                     <tr>
@@ -345,9 +351,10 @@ export default function ApprovalsTab({
                         </span>
                         {/* THE STANDING DECISION, colour-coded — what the
                             first voter chose, which is what a second vote has
-                            to match. The vote COUNT used to sit here and has
-                            been dropped: the Votes column already carries it,
-                            dots and all. */}
+                            to match. Just the action: the vote COUNT and the
+                            voter's NAME both already live in the Votes
+                            column, and repeating either here only crowds the
+                            cell. */}
                         {standing && (
                           <div
                             className={cn(
@@ -358,7 +365,6 @@ export default function ApprovalsTab({
                             )}
                           >
                             {APPROVAL_STATUS_LABELS[standing.decision]}
-                            <span className="muted font-normal"> by {standing.decided_by}</span>
                           </div>
                         )}
                       </TD>
@@ -377,7 +383,10 @@ export default function ApprovalsTab({
                                 <Btn
                                   variant="primary"
                                   disabled={busy}
-                                  onClick={() => void decide(e, "approved", null)}
+                                  onClick={async () => {
+                                    const msg = await decide(e, "approved", null);
+                                    if (msg) setNotice(msg);
+                                  }}
                                 >
                                   <Check className="h-3.5 w-3.5" />
                                   {e.mine ? "Approve instead" : "Approve"}
@@ -399,14 +408,6 @@ export default function ApprovalsTab({
                         {e.mine && (
                           <div className="text-[11px] muted mt-0.5 text-end">
                             You {e.mine.decision === "approved" ? "approved" : "rejected"} this
-                          </div>
-                        )}
-                        {/* The refusal, in the row that produced it. A reject
-                            conflict shows inside the popup instead, where the
-                            person is still standing. */}
-                        {err && !rejecting && (
-                          <div className="mt-1 rounded-lg px-2.5 py-1.5 text-[11px] whitespace-normal bg-rose-500/10 text-rose-700 dark:text-rose-300 max-w-[320px] ms-auto text-start">
-                            {err}
                           </div>
                         )}
                       </TD>
@@ -559,14 +560,17 @@ export default function ApprovalsTab({
         <RejectModal
           event={rejecting}
           busy={busyKey === keyOf(rejecting)}
-          error={rowError?.key === keyOf(rejecting) ? rowError.message : null}
-          onCancel={() => { setRowError(null); setRejecting(null); }}
+          error={rejectError}
+          onCancel={() => { setRejectError(null); setRejecting(null); }}
           onConfirm={async (reason) => {
-            const ok = await decide(rejecting, "rejected", reason);
-            if (ok) setRejecting(null);
+            const msg = await decide(rejecting, "rejected", reason);
+            setRejectError(msg);
+            if (!msg) setRejecting(null);
           }}
         />
       )}
+
+      {notice && <ConflictModal message={notice} onClose={() => setNotice(null)} />}
     </div>
   );
 }
@@ -601,6 +605,38 @@ function FilterRow({
         </button>
       ))}
     </div>
+  );
+}
+
+// The APPROVE refusal. Approving takes one click with no form behind it, so a
+// failure has nowhere to land in the row without stretching it — a popup says
+// it once, clearly, and leaves the table alone.
+function ConflictModal({ message, onClose }: { message: string; onClose: () => void }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div className="card w-full max-w-[440px] p-0" onClick={(ev) => ev.stopPropagation()}>
+        <div className="p-4 flex items-start gap-3">
+          <span className="h-8 w-8 shrink-0 rounded-full grid place-items-center bg-rose-500/10 text-rose-600 dark:text-rose-400">
+            <X className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="font-semibold">Vote not recorded</h2>
+            <p className="text-sm muted mt-0.5">{message}</p>
+          </div>
+        </div>
+        <div className="flex justify-end p-4 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+          <Btn variant="primary" onClick={onClose}>Got it</Btn>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
