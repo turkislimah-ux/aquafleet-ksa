@@ -191,15 +191,23 @@ export default function ApprovalsTab({
         <Card>
           <div className="p-10 text-center">
             <ClipboardCheck className="h-6 w-6 mx-auto mb-2 opacity-40" />
+            {/* THREE distinct empty states, because they mean different
+                things. Testing "events.length" here was wrong: with decided
+                events relocated to the Ledger, a fully-decided queue reported
+                "No events match these filters" — blaming a filter for a
+                relocation, when no filter was involved. */}
             <p className="text-sm muted">
-              {events.length === 0
-                ? "Nothing to approve yet."
-                : "No events match these filters."}
+              {pendingEvents.length > 0
+                ? "No events match these filters."
+                : events.length > 0
+                  ? "Everything has been decided."
+                  : "Nothing to approve yet."}
             </p>
-            {events.length === 0 && (
+            {pendingEvents.length === 0 && (
               <p className="text-xs muted mt-1">
-                Exited permits, completed in-house work orders that used parts, and outsourced jobs
-                with a vendor payment all show up here.
+                {events.length > 0
+                  ? "Decided events live in Archive → Approvals Ledger."
+                  : "Exited permits, completed in-house work orders that used parts, and outsourced jobs with a vendor payment all show up here."}
               </p>
             )}
           </div>
