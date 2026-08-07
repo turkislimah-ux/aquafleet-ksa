@@ -27,6 +27,10 @@ function deliveryTable(page: import("@playwright/test").Page) {
   // would ALSO match the summary's "Delivery completion rate" row.
   return july(page).locator("table").filter({ hasText: "Not delivered" }).first();
 }
+/** The row for one driver in a given table. */
+function driverRow(t: ReturnType<typeof deliveryTable>, name: string) {
+  return t.locator("tbody tr").filter({ hasText: name }).first();
+}
 function fleetTable(page: import("@playwright/test").Page) {
   return july(page).locator("table").filter({ hasText: "Share of scheduled trips" }).first();
 }
@@ -35,31 +39,29 @@ test("delivery is transposed: measures down, drivers across", async ({ page }) =
   const s = july(page);
   await expect(s.locator("h3", { hasText: "Delivery by driver" })).toBeVisible();
   const t = deliveryTable(page);
+  // Measures head the COLUMNS.
   for (const m of ["Trips scheduled", "Trips delivered", "Not delivered", "Completion rate"]) {
-    await expect(t.locator("tr").filter({ hasText: m }).first()).toBeVisible();
+    await expect(t.locator("thead th", { hasText: m }).first()).toBeVisible();
   }
-  // Drivers are COLUMN headers, not rows.
-  await expect(t.locator("th", { hasText: "Khalid 1" }).first()).toBeVisible();
-  await expect(t.locator("th", { hasText: "mohammed 1" }).first()).toBeVisible();
+  // Drivers are ROWS.
+  await expect(driverRow(t, "Khalid 1")).toBeVisible();
+  await expect(driverRow(t, "mohammed 1")).toBeVisible();
 });
 
 test("each driver column carries its plate underneath the name", async ({ page }) => {
-  const h = deliveryTable(page).locator("th", { hasText: "Khalid 1" }).first();
-  await expect(h).toContainText("AAA-5551");
+  await expect(driverRow(deliveryTable(page), "Khalid 1")).toContainText("AAA-5551");
 });
 
 test("a multi-truck driver is flagged, not silently shown as single-truck", async ({ page }) => {
-  const h = deliveryTable(page).locator("th", { hasText: "Fahad 2" }).first();
-  await expect(h).toContainText("drove 2 trucks");
+  await expect(driverRow(deliveryTable(page), "Fahad 2")).toContainText("drove 2 trucks");
 });
 
 test("completion rate is per driver, not the period figure repeated", async ({ page }) => {
   const t = deliveryTable(page);
-  const row = t.locator("tr").filter({ hasText: "Completion rate" }).first();
   // Khalid 1 is 21/31 = 67.7; mohammed 1 is 13/13 = 100.0. The PERIOD rate is
-  // 78.9% — if that appeared in every column the transpose would be a lie.
-  await expect(row).toContainText("67.7%");
-  await expect(row).toContainText("100.0%");
+  // 78.9% — if that appeared on every row the breakdown would be a lie.
+  await expect(driverRow(t, "Khalid 1")).toContainText("67.7%");
+  await expect(driverRow(t, "mohammed 1")).toContainText("100.0%");
 });
 
 test("fleet utilisation uses DRIVER-workload measures only", async ({ page }) => {
@@ -86,10 +88,8 @@ test("truck-level facts stay in the period summary above", async ({ page }) => {
 });
 
 test("shares are computed against period totals", async ({ page }) => {
-  const t = fleetTable(page);
-  const row = t.locator("tr").filter({ hasText: "Share of scheduled trips" }).first();
   // Khalid 1: 31 of 166 = 18.7%.
-  await expect(row).toContainText("18.7%");
+  await expect(driverRow(fleetTable(page), "Khalid 1")).toContainText("18.7%");
 });
 
 test("driver columns foot to the period total", async ({ page }) => {
@@ -102,8 +102,8 @@ test("driver columns foot to the period total", async ({ page }) => {
 test("the no-driver row renders as Unassigned rather than a blank column", async ({ page }) => {
   // June has one trip with no driver recorded.
   const june = page.locator("#ops-print").last();
-  await expect(june.locator("th", { hasText: "Unassigned" }).first()).toBeVisible();
-  await expect(june.getByText(/One column is/)).toBeVisible();
+  await expect(june.locator("tbody tr").filter({ hasText: "Unassigned" }).first()).toBeVisible();
+  await expect(june.getByText(/One row is/)).toBeVisible();
 });
 
 test("the driver/truck relationship is stated as display-only", async ({ page }) => {
@@ -113,14 +113,14 @@ test("the driver/truck relationship is stated as display-only", async ({ page })
 test("same-name drivers stay in separate columns", async ({ page }) => {
   // Two driver RECORDS share the name "Fahad 3", so it heads two columns —
   // scoped to one table, since the same header renders in both.
-  await expect(deliveryTable(page).locator("th", { hasText: "Fahad 3" })).toHaveCount(2);
-  await expect(july(page).getByText(/grouped by record, not by name/)).toBeVisible();
+  await expect(deliveryTable(page).locator("tbody tr").filter({ hasText: "Fahad 3" })).toHaveCount(2);
+  await expect(july(page).getByText(/stay on separate\s+rows/)).toBeVisible();
 });
 
 test("the notes say BELOW, matching where the summary now sits", async ({ page }) => {
   const s = july(page);
   await expect(s.getByText(/never inherited from the period figure below/)).toBeVisible();
-  await expect(s.getByText(/stay in the period summary below/)).toBeVisible();
+  await expect(s.getByText(/stay in\s+the period summary below/)).toBeVisible();
 });
 
 test("driver tables sit ABOVE the period summary", async ({ page }) => {
@@ -135,13 +135,14 @@ test("driver tables sit ABOVE the period summary", async ({ page }) => {
   expect(delivery!.y).toBeLessThan(fleet!.y);
 });
 
-test("measures are ROWS and drivers are COLUMNS in both driver tables", async ({ page }) => {
+test("drivers are ROWS and measures are COLUMNS in both driver tables", async ({ page }) => {
   for (const t of [deliveryTable(page), fleetTable(page)]) {
-    // A measure name sits in the first cell of a body row...
-    const firstCell = t.locator("tbody tr").first().locator("td").first();
-    await expect(firstCell).toHaveText(/Trips scheduled|Share of scheduled trips/);
-    // ...and driver names head the columns.
-    await expect(t.locator("thead th").nth(1)).toContainText("Khalid 1");
+    // The first header cell labels the driver column...
+    await expect(t.locator("thead th").first()).toHaveText("Driver");
+    // ...the second heads a MEASURE...
+    await expect(t.locator("thead th").nth(1)).toHaveText(/Trips scheduled|Share of scheduled trips/);
+    // ...and the first body row leads with a DRIVER, not a measure name.
+    await expect(t.locator("tbody tr").first().locator("td").first()).toContainText("Khalid 1");
   }
 });
 
