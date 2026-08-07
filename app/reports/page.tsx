@@ -1,177 +1,188 @@
-"use client";
+// Reports — server fetch, client island. Same split as every other page.
+//
+// EVERY NUMBER ON THIS PAGE COMES FROM A VIEW (migration 0098). That is the
+// contract, not a style preference: the semantic layer defines each metric
+// once in SQL so this page, the statements tab, and a future AI agent reading
+// the same views cannot disagree about what "revenue" means. Nothing here
+// selects a base table and adds it up.
+//
+// Which is also why this file fetches views and nothing else — if a number is
+// missing, the fix is a migration, not a join added here.
+//
+// PHASE 1 = the Overview tab. Tab 2 (printable statements) is rendered as a
+// real tab with an honest "coming in a later phase" state rather than hidden,
+// the same convention Consumption and the Archive used through their phases.
+//
+// ON THE EXPLICIT Number() COERCION BELOW — this is parsing, not deriving.
+// Postgres `numeric` is arbitrary-precision and has no exact JS equivalent, so
+// it can arrive over the wire as a STRING rather than a number. Left alone,
+// `a - b` on two such values yields NaN and `a + b` silently concatenates, and
+// both failure modes render as plausible-looking garbage rather than an error.
+// Every numeric column is coerced once, here at the boundary, so nothing
+// downstream has to wonder. Columns are listed explicitly rather than coerced
+// by pattern-matching, because invoice_number is a numeric-LOOKING string that
+// must stay a string.
 
-import { useApp } from "@/components/AppShell";
-import { PageHeader, Card, Stat, Section, Btn } from "@/components/ui";
-import { trips, trucks, fleetKpis } from "@/lib/mock-data";
-import { t } from "@/lib/i18n";
-import { formatNum, formatSar } from "@/lib/utils";
-import { Download, TrendingUp, TrendingDown } from "lucide-react";
-import {
-  BarChart, Bar, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-  PieChart, Pie, Cell,
-} from "recharts";
+import { createClient } from "@/lib/supabase/server";
+import type {
+  PnlRow, CollectionsRow, RevenueMonthRow, ReceivableRow, AgingRow,
+  PayrollRow, OperationsRow, RevenuePerTruckRow, TopupsRow, PurchasingRow,
+  MaintenancePerTruckRow,
+} from "@/lib/reports";
+import ReportsClient from "./ReportsClient";
 
-const monthly = [
-  { m: "Dec", revenue: 320000, cost: 215000, liters: 3120000, trips: 412 },
-  { m: "Jan", revenue: 358000, cost: 224000, liters: 3450000, trips: 438 },
-  { m: "Feb", revenue: 345000, cost: 218000, liters: 3290000, trips: 421 },
-  { m: "Mar", revenue: 392000, cost: 232000, liters: 3580000, trips: 467 },
-  { m: "Apr", revenue: 412000, cost: 241000, liters: 3720000, trips: 489 },
-  { m: "May", revenue: 428000, cost: 235000, liters: 3870000, trips: 502 },
-];
+export const dynamic = "force-dynamic";
 
-const depotPerf = [
-  { depot: "Riyadh", trips: 168, liters: 1240000, util: 78 },
-  { depot: "Jeddah", trips: 142, liters: 1080000, util: 71 },
-  { depot: "Dammam", trips: 118, liters: 920000, util: 68 },
-  { depot: "Madinah", trips: 74, liters: 630000, util: 62 },
-];
+/** numeric | null -> number. Null becomes 0; a genuinely absent figure is 0 here. */
+const n = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
+/** Nullable numeric that must STAY null — a null margin is not a zero margin. */
+const nOrNull = (v: unknown): number | null =>
+  v === null || v === undefined ? null : Number(v);
 
-const costMix = [
-  { name: "Fuel", value: 142000, color: "#0b7eea" },
-  { name: "Maintenance", value: 58000, color: "#f59e0b" },
-  { name: "Drivers", value: 96000, color: "#10b981" },
-  { name: "Parts", value: 31000, color: "#8b5cf6" },
-  { name: "Insurance", value: 14000, color: "#06b6d4" },
-  { name: "Other", value: 18000, color: "#94a3b8" },
-];
+type Row = Record<string, unknown>;
 
-export default function ReportsPage() {
-  const { lang } = useApp();
-  const kpis = fleetKpis();
-  const margin30 = kpis.revenue30d - kpis.opCost30d;
-  const marginPct = +((margin30 / kpis.revenue30d) * 100).toFixed(1);
-  const costPerLiter = +(kpis.opCost30d / Math.max(1, kpis.litersDelivered30d) * 1000).toFixed(2);
-  const revPerKm = +(monthly[5].revenue / 24500).toFixed(2);
+export default async function ReportsPage() {
+  const supabase = createClient();
+
+  const [
+    pnlRes, collectionsRes, revenueRes, receivablesRes, agingRes,
+    payrollRes, operationsRes, perTruckRes, topupsRes, purchasingRes,
+    maintPerTruckRes,
+  ] = await Promise.all([
+    supabase.from("v_pnl_monthly").select("*").order("month"),
+    supabase.from("v_collections_monthly").select("*").order("month"),
+    supabase.from("v_revenue_monthly").select("*").order("month"),
+    // Receivables are a STATE view — no month column, no ordering by month.
+    supabase.from("v_receivables_open").select("*").order("days_outstanding", { ascending: false }),
+    supabase.from("v_receivables_aging").select("*"),
+    supabase.from("v_payroll_monthly").select("*").order("month"),
+    supabase.from("v_operations_monthly").select("*").order("month"),
+    supabase.from("v_revenue_per_truck_monthly").select("*").order("month"),
+    supabase.from("v_topups_monthly").select("*").order("month"),
+    supabase.from("v_purchasing_spend_monthly").select("*").order("month"),
+    // Reshaped by 0099 to carry outsourced spend alongside parts. Ordered by
+    // total, since that is the ranking the card presents.
+    supabase.from("v_maintenance_cost_per_truck_monthly").select("*")
+      .order("total_maintenance_sar", { ascending: false }),
+  ]);
+
+  // One honest error line beats ten empty cards that look like real zeros.
+  const error =
+    pnlRes.error?.message ?? collectionsRes.error?.message ?? revenueRes.error?.message ??
+    receivablesRes.error?.message ?? agingRes.error?.message ?? payrollRes.error?.message ??
+    operationsRes.error?.message ?? perTruckRes.error?.message ?? topupsRes.error?.message ??
+    purchasingRes.error?.message ?? maintPerTruckRes.error?.message ?? null;
+
+  const pnl: PnlRow[] = ((pnlRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    revenue_sar: n(r.revenue_sar),
+    parts_cost_sar: n(r.parts_cost_sar),
+    os_cost_sar: n(r.os_cost_sar),
+    payroll_sar: n(r.payroll_sar),
+    commissions_sar: n(r.commissions_sar),
+    operating_cost_sar: n(r.operating_cost_sar),
+    operating_profit_sar: n(r.operating_profit_sar),
+    expenses_sar: n(r.expenses_sar),
+    net_profit_sar: n(r.net_profit_sar),
+    operating_margin_pct: nOrNull(r.operating_margin_pct),
+  }));
+
+  const collections: CollectionsRow[] = ((collectionsRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    collected_gross_sar: n(r.collected_gross_sar),
+    invoices_paid: n(r.invoices_paid),
+  }));
+
+  const revenue: RevenueMonthRow[] = ((revenueRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    revenue_sar: n(r.revenue_sar),
+    vat_sar: n(r.vat_sar),
+    invoice_count: n(r.invoice_count),
+    customer_count: n(r.customer_count),
+  }));
+
+  const receivables: ReceivableRow[] = ((receivablesRes.data ?? []) as Row[]).map((r) => ({
+    invoice_id: String(r.invoice_id),
+    invoice_number: r.invoice_number === null || r.invoice_number === undefined
+      ? null : String(r.invoice_number),
+    customer_id: String(r.customer_id),
+    customer_name: String(r.customer_name),
+    confirmed_at: String(r.confirmed_at),
+    period_end: r.period_end ? String(r.period_end) : null,
+    outstanding_sar: n(r.outstanding_sar),
+    days_outstanding: n(r.days_outstanding),
+    aging_bucket: r.aging_bucket as ReceivableRow["aging_bucket"],
+  }));
+
+  const aging: AgingRow[] = ((agingRes.data ?? []) as Row[]).map((r) => ({
+    aging_bucket: r.aging_bucket as AgingRow["aging_bucket"],
+    outstanding_sar: n(r.outstanding_sar),
+    invoice_count: n(r.invoice_count),
+  }));
+
+  const payroll: PayrollRow[] = ((payrollRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    staff_salary_sar: n(r.staff_salary_sar),
+    driver_salary_sar: n(r.driver_salary_sar),
+    people_missing_salary: n(r.people_missing_salary),
+    salary_is_current_snapshot: Boolean(r.salary_is_current_snapshot),
+  }));
+
+  const operations: OperationsRow[] = ((operationsRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    trips_total: n(r.trips_total),
+    trips_delivered: n(r.trips_delivered),
+    trucks_active: n(r.trucks_active),
+    work_orders: n(r.work_orders),
+    outsourced_jobs: n(r.outsourced_jobs),
+    exit_permits: n(r.exit_permits),
+  }));
+
+  const perTruck: RevenuePerTruckRow[] = ((perTruckRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    truck_id: String(r.truck_id),
+    plate: String(r.plate),
+    allocated_revenue_sar: n(r.allocated_revenue_sar),
+    trips: n(r.trips),
+  }));
+
+  const topups: TopupsRow[] = ((topupsRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    topups_sar: n(r.topups_sar),
+    topup_count: n(r.topup_count),
+  }));
+
+  const purchasing: PurchasingRow[] = ((purchasingRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    received_stock_value_sar: n(r.received_stock_value_sar),
+    receipt_count: n(r.receipt_count),
+  }));
+
+  const maintPerTruck: MaintenancePerTruckRow[] = ((maintPerTruckRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    truck_id: String(r.truck_id),
+    plate: String(r.plate),
+    maintenance_parts_sar: n(r.maintenance_parts_sar),
+    distinct_parts: n(r.distinct_parts),
+    os_payments_sar: n(r.os_payments_sar),
+    os_payment_count: n(r.os_payment_count),
+    total_maintenance_sar: n(r.total_maintenance_sar),
+  }));
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title={t("nav.reports", lang)}
-        subtitle={lang === "en" ? "Cost, revenue, efficiency · last 6 months" : "التكلفة والإيرادات والكفاءة · 6 أشهر"}
-        actions={<Btn variant="outline"><Download className="h-4 w-4" />{lang === "en" ? "Export PDF" : "تصدير PDF"}</Btn>}
-      />
-
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-        <Stat label={t("kpi.revenue", lang)} value={formatSar(kpis.revenue30d)} sub="+8.4%" tone="ok" />
-        <Stat label={t("kpi.opCost", lang)} value={formatSar(kpis.opCost30d)} sub="-4.8%" tone="ok" />
-        <Stat label={lang === "en" ? "Margin" : "الهامش"} value={formatSar(margin30)} sub={`${marginPct}%`} tone={marginPct > 25 ? "ok" : "warn"} />
-        <Stat label={lang === "en" ? "Cost / 1000 L" : "تكلفة / 1000 لتر"} value={`${costPerLiter} SAR`} tone="info" />
-        <Stat label={lang === "en" ? "Revenue / km" : "إيراد / كم"} value={`${revPerKm} SAR`} tone="info" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 card p-4">
-          <h3 className="font-semibold mb-3">{lang === "en" ? "Revenue vs Cost (6 months)" : "الإيرادات مقابل التكلفة (6 أشهر)"}</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={monthly}>
-                <defs>
-                  <linearGradient id="r" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.4}/><stop offset="100%" stopColor="#10b981" stopOpacity={0}/></linearGradient>
-                  <linearGradient id="c" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f59e0b" stopOpacity={0.35}/><stop offset="100%" stopColor="#f59e0b" stopOpacity={0}/></linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" />
-                <XAxis dataKey="m" stroke="rgb(var(--muted))" fontSize={11} />
-                <YAxis stroke="rgb(var(--muted))" fontSize={11} />
-                <Tooltip contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 8 }} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Area type="monotone" dataKey="revenue" stroke="#10b981" fill="url(#r)" strokeWidth={2} name={lang === "en" ? "Revenue" : "الإيرادات"} />
-                <Area type="monotone" dataKey="cost" stroke="#f59e0b" fill="url(#c)" strokeWidth={2} name={lang === "en" ? "Cost" : "التكلفة"} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="card p-4">
-          <h3 className="font-semibold mb-3">{lang === "en" ? "Cost Mix (30d)" : "توزيع التكلفة (30 يوم)"}</h3>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={costMix} dataKey="value" outerRadius={80} innerRadius={45} paddingAngle={2}>
-                  {costMix.map((e, i) => <Cell key={i} fill={e.color} />)}
-                </Pie>
-                <Tooltip contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 8 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="space-y-1 mt-2 text-xs">
-            {costMix.map(c => (
-              <div key={c.name} className="flex justify-between">
-                <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ background: c.color }} />{c.name}</span>
-                <span className="font-medium tabular-nums">{formatSar(c.value)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card p-4">
-          <h3 className="font-semibold mb-3">{lang === "en" ? "Liters Delivered (6 months)" : "اللترات الموردة (6 أشهر)"}</h3>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={monthly}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" />
-                <XAxis dataKey="m" stroke="rgb(var(--muted))" fontSize={11} />
-                <YAxis stroke="rgb(var(--muted))" fontSize={11} />
-                <Tooltip contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 8 }} />
-                <Line type="monotone" dataKey="liters" stroke="#0b7eea" strokeWidth={2.5} name={lang === "en" ? "Liters" : "لتر"} />
-                <Line type="monotone" dataKey="trips" stroke="#8b5cf6" strokeWidth={2} name={lang === "en" ? "Trips" : "رحلات"} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="card p-4">
-          <h3 className="font-semibold mb-3">{lang === "en" ? "Performance by Depot" : "الأداء حسب المستودع"}</h3>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={depotPerf}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" />
-                <XAxis dataKey="depot" stroke="rgb(var(--muted))" fontSize={11} />
-                <YAxis stroke="rgb(var(--muted))" fontSize={11} />
-                <Tooltip contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 8 }} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="trips" fill="#0b7eea" name={lang === "en" ? "Trips" : "رحلات"} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="util" fill="#10b981" name={lang === "en" ? "Util %" : "% استخدام"} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      <Section title={lang === "en" ? "Cost-Saving Opportunities" : "فرص تخفيض التكلفة"}>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Opportunity
-            title={lang === "en" ? "Route Optimization" : "تحسين المسارات"}
-            saving={28000}
-            desc={lang === "en" ? "Apply 2-opt routing across all 40 trucks — est. 12% fuel reduction." : "تطبيق خوارزمية 2-opt على 40 شاحنة — تقدير 12% خفض وقود."}
-          />
-          <Opportunity
-            title={lang === "en" ? "Predictive Maintenance" : "الصيانة التنبؤية"}
-            saving={42000}
-            desc={lang === "en" ? "Address 14 active alerts before they become breakdowns." : "معالجة 14 تنبيهًا قبل تحوله إلى عطل."}
-          />
-          <Opportunity
-            title={lang === "en" ? "Idle Truck Reallocation" : "إعادة توزيع الشاحنات المتوقفة"}
-            saving={18000}
-            desc={lang === "en" ? "8 idle trucks today — reassign to scheduled trips in Jeddah." : "8 شاحنات متوقفة اليوم — إعادة توزيعها على رحلات جدة."}
-          />
-        </div>
-      </Section>
-    </div>
-  );
-}
-
-function Opportunity({ title, saving, desc }: { title: string; saving: number; desc: string }) {
-  return (
-    <div className="rounded-lg border p-3" style={{ borderColor: "rgb(var(--border))" }}>
-      <div className="flex items-center gap-2 mb-1">
-        <TrendingDown className="h-4 w-4 text-emerald-500" />
-        <span className="font-medium text-sm">{title}</span>
-      </div>
-      <div className="text-2xl font-semibold tabular-nums text-emerald-600">{formatSar(saving)}</div>
-      <p className="text-xs muted mt-1">{desc}</p>
-    </div>
+    <ReportsClient
+      error={error}
+      pnl={pnl}
+      collections={collections}
+      revenue={revenue}
+      receivables={receivables}
+      aging={aging}
+      payroll={payroll}
+      operations={operations}
+      perTruck={perTruck}
+      topups={topups}
+      purchasing={purchasing}
+      maintPerTruck={maintPerTruck}
+    />
   );
 }
