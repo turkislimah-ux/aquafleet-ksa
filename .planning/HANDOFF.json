@@ -1,53 +1,42 @@
 {
   "version": "1.0",
-  "timestamp": "2026-08-07T00:45:00.000Z",
-  "source": "manual-handoff",
+  "timestamp": "2026-08-08T00:00:00.000Z",
+  "source": "claude-code-session",
   "partial": false,
   "phase": null,
-  "phase_name": "Consumption + Archive complete, cleaned and documented",
+  "phase_name": null,
   "phase_dir": null,
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "clean",
+  "status": "reports-complete",
   "completed_tasks": [
-    "Archive page: 5 tabs (Company / Staff / Truck / Customer / Approvals Ledger), migrations 0084-0092 applied",
-    "Consumption page: 3 tabs (Consumptions / Exit Permits / Approvals), migrations 0093-0097 applied",
-    "0093 exit permits: draft -> confirm exit -> returns -> void, own FIFO reversal + per-lot ledger",
-    "0094/0095/0097 approvals: inert overlay, one row per (event, approver), second vote must MATCH the first",
-    "0096 30-day lock: APPLIED, scoped to consumption_approvals only, DB-enforced not cosmetic",
-    "Approvals Ledger on Archive: derived view over BOTH approval systems, nothing copied",
-    "Consumptions tab: period picker, combined trend + paired monthly chart on a fixed 12-month window, weekly bullets, truck costs, full parts list",
-    "Cleanup pass on both pages: dead code removed, subject-column map deduped, no diagnostic scaffolding survives",
-    "CLAUDE.md section 7 updated with both pages"
+    "Reports page rebuilt wholesale from a mock-data placeholder - 2 tabs, migrations 0098-0101, through commit 6546597",
+    "0098 semantic layer: 24 views + report_metrics dictionary + expenses table, every view security_invoker=true",
+    "0099 per-truck maintenance: three separately named measures (parts / OS / total), never blended",
+    "0100 v_pnl_by_period: month/quarter/year in one view, margin recomputed per period not averaged",
+    "0101 v_operations_by_driver_monthly: driver grain, grouped before the driver join so rows foot to the period total",
+    "Overview tab: north-star KPIs with prior-period comparison, cost buckets, receivables aging, per-truck revenue and maintenance",
+    "Reports tab: P&L, Revenue, Receivables, Costs, Operations, computed Narrative, plus Custom once generated",
+    "Manual expenses entry (plain writes, no RPC) wired to the Other expenses stat",
+    "Custom report builder: pivot table fenced to the dictionary, with an inert natural-language seam beside it",
+    "Print fixed: shell removed from FLOW (visibility:hidden kept its layout and clipped the right column), A4 margins, repeating headers, paper-only ID band",
+    "Cleanup pass: 12 internal-only symbols un-exported, 3 stale comments corrected, zero dead code found"
   ],
-  "remaining_tasks": [
-    "Reports: still the thin top-level placeholder it has always been",
-    "Route Optimization (preview/map.js), Predictive, IoT - deferred",
-    "stored-status column cleanup migration - deferred",
-    "payment_mode / payment_model reconciliation - do it next time customer app code is touched",
-    "Open questions raised but not decided: customer_id on archive_documents; optional UNIQUE on drivers.iqama_number / staff.iqama_number / trucks.vehicle_registration"
-  ],
+  "remaining_tasks": [],
   "blockers": [],
-  "human_actions_pending": [
-    "PDFShift account + PDF_API_KEY in .env.local - PDF export code is complete but cannot be verified without it; Download PDF shows a graceful 'not configured' message until then"
-  ],
+  "human_actions_pending": [],
   "decisions": [
-    "Approvals are an OVERLAY, never a gate: approving/rejecting moves no stock and changes no source status. 0094 creates no function and no trigger, so the DB has no mechanism for it - keep it that way.",
-    "Completion = TWO MATCHING VOTES from distinct people. That is the only definition, shared by 0096's guard, 0097's trigger and the Ledger. 'One objection ends it' was tried and dropped because it could complete an event on a single vote.",
-    "0096 is scoped to consumption_approvals ONLY. The inventory approval tables are already locked at completion by their own RPCs (each gates on status='pending_approval'), so a trigger there would guard nothing while reaching into the stock-moving path.",
-    "0096's applied function bodies are byte-different from the migration file - inline comments were stripped in transit. Normalised (comments + whitespace) both hash identically, so the logic IS the file's. A future byte-comparison will trip on this; it is not drift.",
-    "Parts Usage falls back to work_order_parts.qty x unit_price_sar when a part has no per-lot ledger rows. Ledger-only aggregation silently dropped 57 of 78 consumed units (73%) because 2 completed work orders predate the ledger. The fallback is the SAME stamped figure from the other end of the same write.",
-    "work_orders.actual_cost_sar EQUALS the parts value exactly on all 13 deducted rows - never add it on top of parts consumption, it double-counts.",
-    "Archive linking: a linked document stores NEITHER its number nor its expiry; both live on the subject. 0092 moved that rule from the app into the database (raises 23514 rather than silently NULLing).",
-    "archive_linked_types and archive_one_linked_doc_per_person DO NOT EXIST - 0090 dropped that duplicate design. 0089/0091 on disk hold superseded versions and are EXPECTED to differ from live; do not 'fix' them to match.",
-    "Never let a linked identity column into an update payload from a form that renders it disabled - a disabled input submits nothing, which is how 04e3433 blanked iqama/licence on unrelated edits.",
-    "Customers get no Restore: 0019 archives a customer as a side effect of archiving its 1:1 project, so a solo restore would leave a half-restored state."
+    "EVERY NUMBER COMES FROM A VIEW. The page never re-derives a metric. If a number is missing the fix is a migration, not a join added to the page.",
+    "security_invoker=true on every view. These were the first views in this schema and a default view runs as OWNER, bypassing RLS on 68 tables. Verified 24/24 invoker, 0 anon-readable.",
+    "Revenue is accrual and 'confirmed' means confirmed_at is not null, NOT status='confirmed' - a status filter hid 26,550 of 70,650 (38%).",
+    "Purchases are NEVER a P&L line. Receipts are ~57x consumption over the same window; expensing both would overstate cost enormously.",
+    "Ratios recompute from period totals in SQL, never averaged. Q3 margin is -38.7% correct vs +20.5% averaged - it flips the sign.",
+    "people_missing_salary and trucks_active are NOT additive and are never summed. trucks_active currently sums to the right answer BY COINCIDENCE, which is worse than a visible error.",
+    "The driver is measured, the truck is display-only context. No truck-level figure appears in a driver row.",
+    "Migration files were RECONCILED to what actually ran (0099/0100/0101 each applied in modified form). Do not 'fix' them back toward the drafts."
   ],
-  "uncommitted_files": [
-    ".planning/HANDOFF.json",
-    "preview/.planning/HANDOFF.json"
-  ],
-  "next_action": "Await direction. Both pages are complete, verified and committed; nothing is in flight.",
-  "context_notes": "HEAD a5c19ad, 0 ahead / 0 behind origin/main, working tree clean apart from the two HANDOFF.json files (which stay unstaged by convention). Migrations 0093-0097 all applied and verified live; highest on disk is 0097. tsc --noEmit clean, production build clean, all 12 nav links resolve, zero console errors. Full detail for both pages is in CLAUDE.md section 7 - this file is the pointer, not the record. NOTE: preview/.planning/HANDOFF.json is deliberately NOT updated; preview/ is read-only per CLAUDE.md section 3, and its copy carries stale auto-tool content from the Inventory build."
+  "uncommitted_files": [],
+  "next_action": "Reports is done and every non-deferred page in the roadmap is built. Nothing is in flight. Open items are all deferred, not blocked - see CLAUDE.md section 7.",
+  "context_notes": "READ CLAUDE.md SECTION 7 FIRST - it is the durable record and this file is only a pointer to it. Working tree clean, 0 ahead / 0 behind origin/main at 6546597. TWO THINGS WORTH CARRYING FORWARD. (1) A db reset dropped v_operations_by_driver_monthly because the replay rebuilt from committed migrations; the rule is to commit a migration the moment it is confirmed applied - but note 0101 WAS committed in c561d5c before the drop, so the replay source may not be this repo's supabase/migrations/, and that is worth pinning down before the next reset. (2) Phases 2-3 plus three follow-up rounds landed as ONE commit because lib/reports.ts, StatementsTab.tsx and StatementViews.tsx each accumulated code from every round and each commit must be tsc-clean. That is the SAME trap already recorded under Inventory Phase 3 - commit each round as it verifies. KNOWN GAP: applied 0100 added one new dictionary key rather than amending the ten existing P&L entries, so those still read grain 'one month' and name only their monthly view even though each is available per quarter and year. Dictionary-only fix, documented in 0100's header. The six tests/reports-*.spec.ts specs depend on a deleted /reports-verify diagnostic route - documentation of what was verified, not a standing suite, unless that route is made permanent (Turki's call, undecided)."
 }
