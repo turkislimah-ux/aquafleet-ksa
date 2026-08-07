@@ -23,6 +23,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { ExitPermit, ExitPermitFile } from "@/lib/db-types";
+import { APPROVAL_SUBJECT_COLUMN, type ApprovalKind } from "@/lib/consumption-approvals";
 
 const BUCKET = "exit-permits";
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -414,13 +415,12 @@ export async function getExitPermitFileUrls(
 // eligible before recording an opinion about it.
 // ---------------------------------------------------------------------------
 
-type ApprovalKindArg = "exit_permit" | "work_order" | "outsourced_job";
-
-const SUBJECT_COLUMN: Record<ApprovalKindArg, "exit_permit_id" | "work_order_id" | "outsourced_job_id"> = {
-  exit_permit: "exit_permit_id",
-  work_order: "work_order_id",
-  outsourced_job: "outsourced_job_id",
-};
+// Kind and its FK column both come from lib/consumption-approvals — ONE
+// definition shared with the derive, so the tab and this action can never
+// disagree about which column carries which subject. A local copy lived here
+// briefly and was byte-identical, which is exactly how the two drift later.
+type ApprovalKindArg = ApprovalKind;
+const SUBJECT_COLUMN = APPROVAL_SUBJECT_COLUMN;
 
 // Mirrors the tab's own inclusion rules server-side, so a stray call cannot
 // record a decision about something the queue would never have offered — e.g.

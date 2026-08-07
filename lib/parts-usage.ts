@@ -398,26 +398,6 @@ export function seriesOn(rows: UsageRow[], kind: TrendKind, keys: string[]): Buc
   return keys.map((k) => m.get(k)!);
 }
 
-/** The combined trend: EVERYTHING that left stock, bucketed, gaps filled. */
-export function trendSeries(rows: UsageRow[], kind: TrendKind): Bucket[] {
-  if (rows.length === 0) return [];
-  const m = new Map<string, Bucket>();
-  for (const r of rows) {
-    const k = trendKey(kind, r.occurredAt);
-    const b = m.get(k) ?? { key: k, label: trendLabel(kind, k), qty: 0, valueSar: 0 };
-    b.qty += r.qty;
-    b.valueSar += r.valueSar;
-    m.set(k, b);
-  }
-  const keys = [...m.keys()].sort();
-  const out: Bucket[] = [];
-  for (let k = keys[0]; ; k = nextTrendKey(kind, k)) {
-    out.push(m.get(k) ?? { key: k, label: trendLabel(kind, k), qty: 0, valueSar: 0 });
-    if (k === keys[keys.length - 1]) break;
-    if (out.length > 400) break; // guard against a bad date in the data
-  }
-  return out;
-}
 
 /** A simple moving average over the value series, for the overlaid line.
  *  Window 3, or the whole series when it is shorter — a trend line that needs
@@ -617,23 +597,6 @@ export function weeklySummary(
   return { window: w, bullets };
 }
 
-/** Monthly, oldest first, with EMPTY months filled in — a gap in a trend line
- *  should read as a quiet month, not as the axis skipping ahead. */
-export function byMonth(rows: UsageRow[]): Bucket[] {
-  if (rows.length === 0) return [];
-  const buckets = group(rows, (r) => r.occurredAt.slice(0, 7), (k) => k)
-    .sort((a, b) => a.key.localeCompare(b.key));
-
-  const out: Bucket[] = [];
-  const [fy, fm] = buckets[0].key.split("-").map(Number);
-  const [ly, lm] = buckets[buckets.length - 1].key.split("-").map(Number);
-  const found = new Map(buckets.map((b) => [b.key, b]));
-  for (let y = fy, m = fm; y < ly || (y === ly && m <= lm); m === 12 ? (m = 1, y++) : m++) {
-    const k = `${y}-${String(m).padStart(2, "0")}`;
-    out.push(found.get(k) ?? { key: k, label: k, qty: 0, valueSar: 0 });
-  }
-  return out;
-}
 
 export function bySource(rows: UsageRow[]): Bucket[] {
   // Sorted by value like every other bar list here. Left on insertion order

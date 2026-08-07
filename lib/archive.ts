@@ -56,14 +56,6 @@ export function docStatus(
   return "valid";
 }
 
-// Convenience wrapper for the common "document + its group" pair.
-export function documentStatus(
-  doc: Pick<ArchiveDocument, "expiry_date">,
-  group: Pick<ArchiveDocumentGroup, "warning_days">,
-  today: string,
-): ArchiveDocStatus {
-  return docStatus(doc.expiry_date, group.warning_days, today);
-}
 
 /**
  * Expiring-documents summary (top of the Archive page). Counts expired and
