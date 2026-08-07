@@ -2,7 +2,9 @@
 
 **Read this file first, every session, before doing anything else.** It defines how
 we work on this project. It changes rarely. For *current state* (what's built, what's
-next), read `.planning/HANDOFF.json` and recent `git log`.
+next), read **§7 below** — that is the durable record — then `.planning/HANDOFF.json`
+and recent `git log` for the short version. If the JSON and §7 disagree, §7 wins: the
+JSON is auto-tool-owned and gets blanked periodically (see §5).
 
 ---
 
@@ -74,9 +76,12 @@ relevant skill(s) **when the task calls for it**:
   + **`vercel-composition-patterns`**.
 - **Verifying UI behavior in-browser** → **`webapp-testing`** (Playwright).
 - **Planning / phases / roadmap** → the **`gsd` suite**. NOTE: `.planning/HANDOFF.json`
-  already uses gsd's schema but it's currently unused (all null). **Before leaning on
-  gsd, report how it fits with this project's existing workflow (preview/-as-spec,
-  the commit discipline below, HANDOFF.json) so we adopt it deliberately, not blindly.**
+  uses gsd's schema and is now POPULATED by hand (it was all-null until 2026-08-07),
+  but gsd itself still is not driving this project — `phase`/`plan`/`task` stay null
+  deliberately, because we do not run gsd phases and inventing a phase number would
+  be fiction. **Before leaning on gsd, report how it fits with this project's existing
+  workflow (preview/-as-spec, the commit discipline below, HANDOFF.json) so we adopt
+  it deliberately, not blindly.**
 
 - **Domain rules (money, stock, RPCs, invariants)** → read
   `.claude/skills/aquafleet-domain/SKILL.md` at session start. This encodes
@@ -90,7 +95,24 @@ relevant skill(s) **when the task calls for it**:
 
 - **One logical unit per commit.** Each commit tsc-clean.
 - **Explicit-path `git add`** — list each file. **NEVER `git add .`**
-- **Both `.planning/HANDOFF.json` and `preview/.planning/HANDOFF.json` stay UNSTAGED.**
+- **HANDOFF.json — the root one IS committed; `preview/`'s stays UNSTAGED.**
+  `.planning/HANDOFF.json` is committed as a deliberate SNAPSHOT (Turki's call,
+  2026-08-07). `preview/.planning/HANDOFF.json` is never staged — it lives inside
+  the read-only `preview/` tree and carries stale auto-tool content.
+  **READ THIS BEFORE STAGING THE ROOT ONE.** That file is owned by an auto-tool
+  (`"source": "auto-postool"`) which rewrites it back to the EMPTY template after
+  tool calls — it did exactly that seconds after the snapshot was written, and the
+  committed copy survived only because it had been staged first. So:
+  - Write the content, then `git add` it **immediately**, then commit. A gap
+    between writing and staging is a window for the tool to blank it.
+  - **Never `git add .planning/HANDOFF.json` reflexively** — if the tool has run
+    since, you will commit the empty template straight over real content and lose
+    it silently. Check `git diff --cached` shows the rich version before committing.
+  - After committing, `git checkout -- .planning/HANDOFF.json` so the working tree
+    matches HEAD instead of showing a permanent phantom modification.
+  - It will drift again on the next tool run. That is expected, not a bug to fix.
+  - **§7 of this file is the durable record.** HANDOFF.json is a pointer to it,
+    never the other way round — do not let real knowledge live only in the JSON.
 - **Quote dynamic-route paths** with brackets in git commands, e.g.
   `git add 'app/fleet/[id]/page.tsx'` — zsh globs `[id]` and silently drops it otherwise.
 - **Avoid `!` in commit messages** (zsh history expansion).
@@ -131,7 +153,9 @@ relevant skill(s) **when the task calls for it**:
 
 ## 7. Current state & what's next
 
-- Read `.planning/HANDOFF.json` + `git log --oneline -20` for where things stand.
+- This section IS the record. `.planning/HANDOFF.json` + `git log --oneline -20`
+  give the short version, but the JSON is auto-tool-owned and periodically blanked
+  (§5) — anything that matters belongs here, not only there.
 
 - **IN PROGRESS — Kanban board redesign + refinements (UNCOMMITTED on disk, finish this
   first).** A previous session ran out of context mid-task. Uncommitted changes sit in
