@@ -117,6 +117,34 @@ test("same-name drivers stay in separate columns", async ({ page }) => {
   await expect(july(page).getByText(/grouped by record, not by name/)).toBeVisible();
 });
 
+test("the notes say BELOW, matching where the summary now sits", async ({ page }) => {
+  const s = july(page);
+  await expect(s.getByText(/never inherited from the period figure below/)).toBeVisible();
+  await expect(s.getByText(/stay in the period summary below/)).toBeVisible();
+});
+
+test("driver tables sit ABOVE the period summary", async ({ page }) => {
+  const s = july(page);
+  const delivery = await s.locator("h3", { hasText: "Delivery by driver" }).boundingBox();
+  const fleet = await s.locator("h3", { hasText: "Fleet utilisation by driver" }).boundingBox();
+  const summary = await s.locator("h3", { hasText: "Period summary" }).boundingBox();
+  // The driver is what this statement measures, so it leads; the fleet-level
+  // block is the context underneath it.
+  expect(delivery!.y).toBeLessThan(summary!.y);
+  expect(fleet!.y).toBeLessThan(summary!.y);
+  expect(delivery!.y).toBeLessThan(fleet!.y);
+});
+
+test("measures are ROWS and drivers are COLUMNS in both driver tables", async ({ page }) => {
+  for (const t of [deliveryTable(page), fleetTable(page)]) {
+    // A measure name sits in the first cell of a body row...
+    const firstCell = t.locator("tbody tr").first().locator("td").first();
+    await expect(firstCell).toHaveText(/Trips scheduled|Share of scheduled trips/);
+    // ...and driver names head the columns.
+    await expect(t.locator("thead th").nth(1)).toContainText("Khalid 1");
+  }
+});
+
 test("no NaN or undefined in either statement", async ({ page }) => {
   const body = await page.locator("body").innerText();
   expect(body).not.toContain("NaN");

@@ -648,9 +648,104 @@ export function OperationsStatement({
     <div id="ops-print" className="card p-6">
       <Head title="Operational performance" period={label} />
 
-      {/* --- Truck-level and fleet-level facts stay HERE, above the driver
-              tables. Nothing in this block is per-driver. --- */}
-      <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">Period summary</h3>
+      {drivers.length === 0 ? (
+        <Note>No trips were recorded in this period, so there is nothing to break down by driver.</Note>
+      ) : (
+        <>
+          {/* --- DELIVERY, transposed: measures down, drivers across --- */}
+          <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">
+            Delivery by driver
+          </h3>
+          <div className="overflow-x-auto">
+            <Table>
+              {header}
+              <tbody>
+                <tr>
+                  <TD>Trips scheduled</TD>
+                  {drivers.map((d) => (
+                    <TD key={d.key} className="text-right tabular-nums">{formatNum(d.scheduled)}</TD>
+                  ))}
+                </tr>
+                <tr>
+                  <TD>Trips delivered</TD>
+                  {drivers.map((d) => (
+                    <TD key={d.key} className="text-right tabular-nums">{formatNum(d.delivered)}</TD>
+                  ))}
+                </tr>
+                <tr>
+                  <TD>Not delivered</TD>
+                  {drivers.map((d) => (
+                    <TD key={d.key} className="text-right tabular-nums">
+                      {d.notDelivered === 0 ? <span className="muted">—</span> : formatNum(d.notDelivered)}
+                    </TD>
+                  ))}
+                </tr>
+                <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
+                  <TD>Completion rate</TD>
+                  {drivers.map((d) => (
+                    <TD key={d.key} className="text-right tabular-nums">{formatShare(d.completion)}</TD>
+                  ))}
+                </tr>
+              </tbody>
+            </Table>
+          </div>
+          <Note>
+            Each driver&apos;s completion rate is computed from that driver&apos;s own
+            scheduled and delivered counts — never averaged, and never inherited from
+            the period figure below. The plate under a name is the truck that driver was
+            in; it is context only and is never measured per driver. Drivers are grouped
+            by record, not by name, so two people sharing a first name stay in separate
+            columns — the plate is what tells them apart.
+          </Note>
+
+          {/* --- FLEET UTILISATION, transposed: DRIVER-WORKLOAD measures --- */}
+          <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
+            Fleet utilisation by driver
+          </h3>
+          <div className="overflow-x-auto">
+            <Table>
+              {header}
+              <tbody>
+                <tr>
+                  <TD>Share of scheduled trips</TD>
+                  {drivers.map((d) => (
+                    <TD key={d.key} className="text-right tabular-nums">
+                      {formatShare(driverScheduled > 0 ? (d.scheduled / driverScheduled) * 100 : null)}
+                    </TD>
+                  ))}
+                </tr>
+                <tr>
+                  <TD>Share of delivered trips</TD>
+                  {drivers.map((d) => (
+                    <TD key={d.key} className="text-right tabular-nums">
+                      {formatShare(driverDelivered > 0 ? (d.delivered / driverDelivered) * 100 : null)}
+                    </TD>
+                  ))}
+                </tr>
+              </tbody>
+            </Table>
+          </div>
+          <Note>
+            Workload shares, so they measure the DRIVER. A truck-level figure never
+            appears under a driver column — trucks that moved and maintenance activity
+            stay in the period summary below. Shares are computed against the period
+            totals and add to 100%.
+            {drivers.some((d) => d.key === "__unassigned__") && (
+              <> One column is <strong>Unassigned</strong>: trips recorded with no driver.
+              It is kept so the driver columns still add up to the period total rather
+              than quietly falling short.</>
+            )}
+          </Note>
+        </>
+      )}
+
+      {/* --- Truck-level and fleet-level facts live HERE, BELOW the driver
+              tables. Nothing in this block is per-driver: trucks that moved,
+              work orders and maintenance events are fleet facts, and putting
+              them under a driver column would change what they mean. The
+              driver tables lead because the driver is what this statement
+              measures; this block is the context they sit in. --- */}
+      <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">Period summary</h3>
       <Table>
         <thead>
           <tr><TH>Measure</TH><TH className="text-right">Value</TH></tr>
@@ -693,97 +788,6 @@ export function OperationsStatement({
           </tr>
         </tbody>
       </Table>
-
-      {drivers.length === 0 ? (
-        <Note>No trips were recorded in this period, so there is nothing to break down by driver.</Note>
-      ) : (
-        <>
-          {/* --- DELIVERY, transposed: measures down, drivers across --- */}
-          <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
-            Delivery by driver
-          </h3>
-          <div className="overflow-x-auto">
-            <Table>
-              {header}
-              <tbody>
-                <tr>
-                  <TD>Trips scheduled</TD>
-                  {drivers.map((d) => (
-                    <TD key={d.key} className="text-right tabular-nums">{formatNum(d.scheduled)}</TD>
-                  ))}
-                </tr>
-                <tr>
-                  <TD>Trips delivered</TD>
-                  {drivers.map((d) => (
-                    <TD key={d.key} className="text-right tabular-nums">{formatNum(d.delivered)}</TD>
-                  ))}
-                </tr>
-                <tr>
-                  <TD>Not delivered</TD>
-                  {drivers.map((d) => (
-                    <TD key={d.key} className="text-right tabular-nums">
-                      {d.notDelivered === 0 ? <span className="muted">—</span> : formatNum(d.notDelivered)}
-                    </TD>
-                  ))}
-                </tr>
-                <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
-                  <TD>Completion rate</TD>
-                  {drivers.map((d) => (
-                    <TD key={d.key} className="text-right tabular-nums">{formatShare(d.completion)}</TD>
-                  ))}
-                </tr>
-              </tbody>
-            </Table>
-          </div>
-          <Note>
-            Each driver&apos;s completion rate is computed from that driver&apos;s own
-            scheduled and delivered counts — never averaged, and never inherited from
-            the period figure above. The plate under a name is the truck that driver was
-            in; it is context only and is never measured per driver. Drivers are grouped
-            by record, not by name, so two people sharing a first name stay in separate
-            columns — the plate is what tells them apart.
-          </Note>
-
-          {/* --- FLEET UTILISATION, transposed: DRIVER-WORKLOAD measures --- */}
-          <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
-            Fleet utilisation by driver
-          </h3>
-          <div className="overflow-x-auto">
-            <Table>
-              {header}
-              <tbody>
-                <tr>
-                  <TD>Share of scheduled trips</TD>
-                  {drivers.map((d) => (
-                    <TD key={d.key} className="text-right tabular-nums">
-                      {formatShare(driverScheduled > 0 ? (d.scheduled / driverScheduled) * 100 : null)}
-                    </TD>
-                  ))}
-                </tr>
-                <tr>
-                  <TD>Share of delivered trips</TD>
-                  {drivers.map((d) => (
-                    <TD key={d.key} className="text-right tabular-nums">
-                      {formatShare(driverDelivered > 0 ? (d.delivered / driverDelivered) * 100 : null)}
-                    </TD>
-                  ))}
-                </tr>
-              </tbody>
-            </Table>
-          </div>
-          <Note>
-            Workload shares, so they measure the DRIVER. A truck-level figure never
-            appears under a driver column — trucks that moved and maintenance activity
-            stay in the period summary above. Shares are computed against the period
-            totals and add to 100%.
-            {drivers.some((d) => d.key === "__unassigned__") && (
-              <> One column is <strong>Unassigned</strong>: trips recorded with no driver.
-              It is kept so the driver columns still add up to the period total rather
-              than quietly falling short.</>
-            )}
-          </Note>
-        </>
-      )}
 
       {rows.length > 1 && (
         <>
