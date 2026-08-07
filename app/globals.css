@@ -87,6 +87,14 @@ body {
 }
 .animate-pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
 
+/* Screen default for the print-only statement band; @media print flips it. */
+.print-only { display: none; }
+
+/* A4 with real margins. Without this the browser applies its own default
+   margin box and adds URL/date furniture, which looks wrong on a statement
+   that is meant to be signed and filed. */
+@page { size: A4; margin: 14mm; }
+
 /* Print isolation — show only the report subtree (#history-print payout, or
    #breakdown-print project report). Everything else is hidden so the printout is
    just the record, edge-to-edge. */
@@ -94,8 +102,84 @@ body {
   body * { visibility: hidden !important; }
   #history-print, #history-print *,
   #breakdown-print, #breakdown-print *,
-  #permit-print, #permit-print * { visibility: visible !important; }
+  #permit-print, #permit-print *,
+  /* Reports tab 2 — one id per statement, so "print" means "print THIS
+     statement". Only one statement is mounted at a time, so exactly one of
+     these subtrees exists in the DOM on any given print. */
+  #pnl-print, #pnl-print *,
+  #revenue-print, #revenue-print *,
+  #receivables-print, #receivables-print *,
+  #cost-print, #cost-print *,
+  #ops-print, #ops-print *,
+  #narrative-print, #narrative-print *,
+  #custom-print, #custom-print * { visibility: visible !important; }
   .no-print { display: none !important; }
+
+  /* Shown ONLY on paper — the statement's own title/period band. */
+  .print-only { display: block !important; }
+
+  /* ===================================================================
+     REPORTS tab 2 — printable statements.
+     ===================================================================
+     These PAGINATE (a revenue statement can run several pages), so they
+     must stay in NORMAL STATIC FLOW. The absolute + inset:0 trick used by
+     #history-print and #permit-print pins a subtree to a single page and
+     clips everything after it — right for a one-page gate pass, wrong here.
+
+     What that leaves is a HORIZONTAL problem, and it is the actual cause of
+     the clipped PAID column on the revenue statement: `visibility: hidden`
+     hides the sidebar and topbar but KEEPS THEIR LAYOUT, so the statement
+     stayed indented by the 256px sidebar and overflowed the right edge of
+     the sheet. They have to leave the flow entirely, not just turn
+     invisible. Selectors are pinned to the shell's own unique classes —
+     `header.h-14` rather than `header`, because every statement renders its
+     own <header>, and a blanket rule would delete each statement's title. */
+  aside.w-64 { display: none !important; }
+  header.h-14 { display: none !important; }
+  main { padding: 0 !important; margin: 0 !important; }
+
+  #pnl-print, #revenue-print, #receivables-print,
+  #cost-print, #ops-print, #narrative-print, #custom-print {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 10pt;
+  }
+
+  /* Tables: full width, header row repeated on every page, and no row or
+     section split across a page break. Without table-header-group a
+     multi-page table loses its column headings after page one. */
+  #pnl-print table, #revenue-print table, #receivables-print table,
+  #cost-print table, #ops-print table, #narrative-print table, #custom-print table {
+    width: 100% !important;
+    border-collapse: collapse;
+  }
+  #pnl-print thead, #revenue-print thead, #receivables-print thead,
+  #cost-print thead, #ops-print thead, #narrative-print thead, #custom-print thead {
+    display: table-header-group;
+  }
+  #pnl-print tr, #revenue-print tr, #receivables-print tr,
+  #cost-print tr, #ops-print tr, #narrative-print tr, #custom-print tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* A section heading must never be the last thing on a page. */
+  #pnl-print h3, #revenue-print h3, #receivables-print h3,
+  #cost-print h3, #ops-print h3, #narrative-print h3, #custom-print h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+    margin-top: 14pt;
+  }
+  /* Keep each statement's closing note with the table it explains. */
+  #cost-print section, #revenue-print section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 
   /* History payout — a single record. Absolute + inset:0 pins it edge-to-edge
      for a clean one-page printout (it fits a page). */

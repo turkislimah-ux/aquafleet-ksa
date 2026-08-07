@@ -6,11 +6,16 @@
 // The tab bar is the same underline convention as Consumption/Trips/Inventory
 // — one pattern for tabs across the app, not a new one per page.
 //
-// The global period picker lives HERE, not inside a tab, because both tabs
-// answer questions about the same period and a picker that resets when you
-// switch tabs would be its own small bug.
+// The month period picker sits in the PAGE HEADER. It drives the Overview
+// only — tab 2's statements carry their own grain + period control (month /
+// quarter / year), which this month picker cannot express.
+//
+// It was moved below the tab bar in one round and moved back here in the next
+// (Turki's call, both times). Recorded so the next reader does not "fix" it
+// back down again: the header is the intended home.
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
@@ -18,8 +23,14 @@ import {
   type PnlRow, type CollectionsRow, type RevenueMonthRow, type ReceivableRow,
   type AgingRow, type PayrollRow, type OperationsRow, type RevenuePerTruckRow,
   type TopupsRow, type PurchasingRow, type MaintenancePerTruckRow,
+  type PnlPeriodRow, type ExpenseCategoryPeriodRow,
+  type RevenueInvoiceRow, type SalesReturnRow, type CommissionsRow,
+  type CommissionsPaidRow, type MetricDictionaryRow,
+  type OperationsByDriverRow,
 } from "@/lib/reports";
 import OverviewTab from "./OverviewTab";
+import StatementsTab from "./StatementsTab";
+import ExpensesModal, { type ExpenseRow } from "./ExpensesModal";
 
 type Tab = "overview" | "statements";
 
@@ -41,10 +52,26 @@ export type ReportsClientProps = {
   topups: TopupsRow[];
   purchasing: PurchasingRow[];
   maintPerTruck: MaintenancePerTruckRow[];
+  /** SOURCE ROWS for the expenses editor — not a metric. See page.tsx. */
+  expenses: ExpenseRow[];
+  /** Riyadh-local today, computed server-side to avoid UTC skew. */
+  today: string;
+  pnlPeriods: PnlPeriodRow[];
+  expenseCategories: ExpenseCategoryPeriodRow[];
+  invoices: RevenueInvoiceRow[];
+  salesReturns: SalesReturnRow[];
+  commissions: CommissionsRow[];
+  commissionsPaid: CommissionsPaidRow[];
+  /** The metrics dictionary — vocabulary for the custom-report seam. */
+  metrics: MetricDictionaryRow[];
+  /** Per-driver operations (0101) — the Operations statement transposes on it. */
+  opsByDriver: OperationsByDriverRow[];
 };
 
 export default function ReportsClient(props: ReportsClientProps) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("overview");
+  const [expensesOpen, setExpensesOpen] = useState(false);
 
   const months = useMemo(() => monthsDesc(props.pnl), [props.pnl]);
   // Default to the newest month the spine knows about. The spine always runs
@@ -59,7 +86,7 @@ export default function ReportsClient(props: ReportsClientProps) {
         title="Reports"
         subtitle="Revenue, cost and profit — every figure from one shared definition"
         actions={
-          months.length > 0 ? (
+          tab === "overview" && months.length > 0 ? (
             <label className="flex items-center gap-2 text-sm">
               <span className="muted">Period</span>
               <select
@@ -101,17 +128,46 @@ export default function ReportsClient(props: ReportsClientProps) {
       )}
 
       {tab === "overview" ? (
-        <OverviewTab {...props} months={months} month={active} />
+        <OverviewTab
+          {...props}
+          months={months}
+          month={active}
+          onManageExpenses={() => setExpensesOpen(true)}
+        />
       ) : (
-        <div className="card p-8 text-center">
-          <div className="text-sm font-medium">Printable statements</div>
-          <p className="text-sm muted mt-1 max-w-md mx-auto">
-            The management pack — P&amp;L, revenue and cost statements, receivables
-            aging and operational performance — arrives in the next phase. It reads
-            the same views this Overview does, so the two cannot disagree.
-          </p>
-        </div>
+        <StatementsTab
+          pnlPeriods={props.pnlPeriods}
+          expenseCategories={props.expenseCategories}
+          invoices={props.invoices}
+          salesReturns={props.salesReturns}
+          receivables={props.receivables}
+          aging={props.aging}
+          maintPerTruck={props.maintPerTruck}
+          purchasing={props.purchasing}
+          payroll={props.payroll}
+          commissions={props.commissions}
+          commissionsPaid={props.commissionsPaid}
+          operations={props.operations}
+          collections={props.collections}
+          metrics={props.metrics}
+          perTruck={props.perTruck}
+          opsByDriver={props.opsByDriver}
+          today={props.today}
+          onManageExpenses={() => setExpensesOpen(true)}
+        />
       )}
+
+      {/* router.refresh() rather than local state: the expense figures on this
+          page come from VIEWS, so after a write the server has to recompute
+          them. Mutating a local array would show an edited list beside a stale
+          total — exactly the drift the semantic layer exists to prevent. */}
+      <ExpensesModal
+        open={expensesOpen}
+        onClose={() => setExpensesOpen(false)}
+        expenses={props.expenses}
+        today={props.today}
+        onChanged={() => router.refresh()}
+      />
     </div>
   );
 }

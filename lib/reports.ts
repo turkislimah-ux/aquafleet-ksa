@@ -120,6 +120,218 @@ export type MaintenancePerTruckRow = {
   total_maintenance_sar: number;
 };
 
+// --- Period grains (migration 0100) ----------------------------------------
+
+export type PeriodType = "month" | "quarter" | "year";
+
+export const PERIOD_TYPES: { key: PeriodType; label: string }[] = [
+  { key: "month", label: "Monthly" },
+  { key: "quarter", label: "Quarterly" },
+  { key: "year", label: "Yearly" },
+];
+
+export type PnlPeriodRow = {
+  period_type: PeriodType;
+  period_start: string;
+  period_end: string;
+  label: string;
+  revenue_sar: number;
+  parts_cost_sar: number;
+  os_cost_sar: number;
+  payroll_sar: number;
+  commissions_sar: number;
+  operating_cost_sar: number;
+  operating_profit_sar: number;
+  expenses_sar: number;
+  net_profit_sar: number;
+  /** Recomputed from the period's own revenue — never an average of months. */
+  operating_margin_pct: number | null;
+};
+
+export type ExpenseCategoryPeriodRow = {
+  period_type: PeriodType;
+  period_start: string;
+  period_end: string;
+  label: string;
+  category: string;
+  expenses_sar: number;
+  entry_count: number;
+};
+
+/** Periods of one grain, newest first. */
+export function periodsOf<T extends { period_type: PeriodType; period_start: string }>(
+  rows: T[], type: PeriodType,
+): T[] {
+  return rows
+    .filter((r) => r.period_type === type)
+    .sort((a, b) => b.period_start.localeCompare(a.period_start));
+}
+
+/** The period immediately before `start` within the same grain. */
+export function priorPeriodStart(rows: PnlPeriodRow[], type: PeriodType, start: string): string | null {
+  const asc = periodsOf(rows, type).map((r) => r.period_start).reverse();
+  const i = asc.indexOf(start);
+  return i > 0 ? asc[i - 1] : null;
+}
+
+/**
+ * Is this period still running?
+ *
+ * Derived from dates, not from a stored column. The applied 0100 dropped the
+ * months_in_period count the draft carried, and this recovers the same fact
+ * honestly: a period whose end date has not passed cannot be complete. It
+ * matters because costs accrue daily while revenue is recognised at invoice
+ * confirmation, so an in-flight period always looks cost-heavy.
+ */
+export function isPeriodInProgress(periodEnd: string, today: string): boolean {
+  return periodEnd >= today;
+}
+
+// --- Statement sources -----------------------------------------------------
+
+export type RevenueInvoiceRow = {
+  invoice_id: string;
+  invoice_number: string | null;
+  customer_id: string;
+  customer_name: string;
+  month: string;
+  confirmed_at: string;
+  paid_at: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  status: string;
+  revenue_sar: number;
+  vat_sar: number;
+  gross_sar: number;
+  amount_due_sar: number;
+  is_paid: boolean;
+};
+
+/**
+ * Voided-after-confirmation invoices — "Sales Returns" in the UI.
+ *
+ * Note this view carries customer_id but NOT customer_name, and a voided
+ * invoice is by definition absent from v_revenue_invoices, so there is no
+ * reliable name to join to. The statement shows what the view actually has
+ * rather than guessing at a name.
+ */
+export type SalesReturnRow = {
+  invoice_id: string;
+  invoice_number: string | null;
+  customer_id: string;
+  month: string;
+  voided_at: string;
+  void_reason: string | null;
+  reversed_revenue_sar: number;
+};
+
+export type CommissionsRow = {
+  month: string;
+  trip_commission_sar: number;
+  specials_sar: number;
+  adjustments_sar: number;
+  bonus_sar: number;
+};
+
+export type CommissionsPaidRow = {
+  month: string;
+  commissions_paid_sar: number;
+  payout_count: number;
+};
+
+// --- Period aggregation: what TypeScript may and may not do ----------------
+//
+// Several views are month-grained only (per-truck maintenance, purchasing,
+// payroll, commissions, operations). The statements are period-based, so those
+// rows have to be combined when the reader picks a quarter or a year.
+//
+// THE RULE, and it is not a style preference:
+//
+//   ALLOWED  — selecting, filtering and SUMMING rows a view produced, when the
+//              measure is additive. Money adds. Counts of events add.
+//
+//   FORBIDDEN — recomputing a metric's formula, any RATIO, and any DISTINCT
+//              count. Ratios come from SQL (that is what 0100 exists for:
+//              averaging monthly margins turns -38.7% into +20.5%).
+//
+// Two live measures fail the additivity test and are handled explicitly rather
+// than summed, because summing them produces a number that looks plausible:
+//
+//   people_missing_salary — summing Jul+Aug gives 6; the truth is 3. It is a
+//     per-month state, not an event count.
+//
+//   trucks_active — a DISTINCT count. Summing double-counts any truck active
+//     in two months. Today Jul(10)+Aug(1) happens to equal the true distinct
+//     11, which is worse than a visible error: a test would pass on a
+//     coincidence. A true period-level distinct count cannot be recovered from
+//     monthly rows at all, so it is NOT faked — the statement reports the
+//     highest month and says so.
+
+/** Month-grain rows falling inside a period. */
+export function monthsIn<T extends { month: string }>(
+  rows: T[], periodStart: string, periodEnd: string,
+): T[] {
+  return rows.filter((r) => r.month >= periodStart && r.month <= periodEnd);
+}
+
+/** Sum one additive column across a period. See the rule above. */
+export function sumOver<T>(rows: T[], pick: (r: T) => number): number {
+  return rows.reduce((n, r) => n + pick(r), 0);
+}
+
+/** Highest monthly value — for measures that must never be summed. */
+export function peakOver<T>(rows: T[], pick: (r: T) => number): number {
+  return rows.reduce((n, r) => Math.max(n, pick(r)), 0);
+}
+
+/**
+ * A row of the METRICS DICTIONARY (report_metrics, migration 0098).
+ *
+ * This is the vocabulary half of the semantic layer — the part a human or an
+ * agent READS to learn what a metric means before using it. It is what makes a
+ * future custom-report generator safe: constrained to these keys and the views
+ * they name, it can only produce numbers that already agree with this page.
+ */
+export type MetricDictionaryRow = {
+  metric_key: string;
+  label: string;
+  meaning: string;
+  formula: string;
+  unit: string;
+  grain: string;
+  source_view: string;
+  basis: string;
+  caveat: string | null;
+};
+
+/**
+ * Per-driver operations (migration 0101).
+ *
+ * THE DRIVER IS THE UNIT MEASURED. The truck is context for reading the
+ * column, never a measure under it — `primary_plate` is that driver's
+ * most-used truck and `trucks_used` says when there was more than one.
+ *
+ * `driver_id` and `driver_name` are NULL for trips with no driver recorded.
+ * That row is kept deliberately (the view groups before joining drivers) so
+ * the driver figures always sum to the period total — the UI labels it
+ * "Unassigned" rather than dropping it.
+ *
+ * `completion_rate_pct` is recomputed by the VIEW from that driver's own
+ * scheduled/delivered counts. Never average it across drivers.
+ */
+export type OperationsByDriverRow = {
+  month: string;
+  driver_id: string | null;
+  driver_name: string | null;
+  primary_truck_id: string | null;
+  primary_plate: string | null;
+  trucks_used: number;
+  trips_scheduled: number;
+  trips_delivered: number;
+  trips_not_delivered: number;
+  completion_rate_pct: number | null;
+};
+
 export type TopupsRow = { month: string; topups_sar: number; topup_count: number };
 
 export type PurchasingRow = {
@@ -256,6 +468,144 @@ export function compactSar(n: number): string {
 }
 
 // --- Cost buckets ----------------------------------------------------------
+
+// --- The narrative ---------------------------------------------------------
+
+export type NarrativeBullet = {
+  tone: "up" | "down" | "flat" | "info" | "warn";
+  text: string;
+};
+
+const sar = (n: number) =>
+  new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n) + " SAR";
+
+/**
+ * The period in plain language — COMPUTED, never templated prose with numbers
+ * dropped in. Every line below is a comparison the reader could redo by hand
+ * from the statements on this page, which is the same standard the Parts Usage
+ * weekly review holds itself to.
+ *
+ * Where a figure cannot honestly be stated, the bullet says so instead of
+ * being omitted — a silent gap reads as "nothing happened".
+ */
+export function buildNarrative(args: {
+  current: PnlPeriodRow;
+  prior: PnlPeriodRow | null;
+  inProgress: boolean;
+  collected: number;
+  outstanding: number;
+  oldestDays: number | null;
+  trips: number;
+  delivered: number;
+  peakTrucks: number;
+  workOrders: number;
+  salesReturns: number;
+  topCustomer: { name: string; revenue: number } | null;
+}): NarrativeBullet[] {
+  const {
+    current: c, prior: p, inProgress, collected, outstanding, oldestDays,
+    trips, delivered, peakTrucks, workOrders, salesReturns, topCustomer,
+  } = args;
+  const out: NarrativeBullet[] = [];
+
+  if (inProgress) {
+    out.push({
+      tone: "info",
+      text: `${c.label} is still running. Costs accumulate daily while revenue is only recognised when an invoice is confirmed, so the figures below understate how the period will finish.`,
+    });
+  }
+
+  // Revenue
+  if (c.revenue_sar === 0) {
+    out.push({
+      tone: "warn",
+      text: `No revenue was recognised in ${c.label} — no invoice was confirmed. Costs of ${sar(c.operating_cost_sar)} still landed.`,
+    });
+  } else {
+    const d = p ? delta(c.revenue_sar, p.revenue_sar) : null;
+    out.push({
+      tone: d ? d.dir : "info",
+      text: d && d.pct !== null
+        ? `Revenue was ${sar(c.revenue_sar)}, ${d.dir === "up" ? "up" : d.dir === "down" ? "down" : "level"} ${formatPct(d.pct)} on ${p!.label}.`
+        : `Revenue was ${sar(c.revenue_sar)}${p ? `, against nothing in ${p.label}` : ""}.`,
+    });
+  }
+
+  // Profit and margin — margin quoted from the view, never recomputed.
+  const profitable = c.operating_profit_sar >= 0;
+  out.push({
+    tone: profitable ? "up" : "down",
+    text: profitable
+      ? `Operating profit was ${sar(c.operating_profit_sar)}${c.operating_margin_pct !== null ? ` — a ${formatShare(c.operating_margin_pct)} margin` : ""}, after ${sar(c.operating_cost_sar)} of operating cost.`
+      : `The period ran at a loss of ${sar(Math.abs(c.operating_profit_sar))}: ${sar(c.operating_cost_sar)} of cost against ${sar(c.revenue_sar)} of revenue.`,
+  });
+
+  // Largest cost bucket — a fact about composition, not a judgement.
+  const buckets = [
+    { label: "payroll", v: c.payroll_sar },
+    { label: "outsourced repairs", v: c.os_cost_sar },
+    { label: "parts", v: c.parts_cost_sar },
+    { label: "commissions", v: c.commissions_sar },
+  ].sort((a, b) => b.v - a.v);
+  if (buckets[0].v > 0) {
+    const share = c.operating_cost_sar > 0 ? (buckets[0].v / c.operating_cost_sar) * 100 : null;
+    out.push({
+      tone: "info",
+      text: `The largest cost was ${buckets[0].label} at ${sar(buckets[0].v)}${share !== null ? `, ${formatShare(share)} of operating cost` : ""}.`,
+    });
+  }
+
+  // Expenses — only worth a line when they exist, since their absence is
+  // already stated on the P&L itself.
+  if (c.expenses_sar > 0) {
+    out.push({
+      tone: "info",
+      text: `Manually recorded expenses of ${sar(c.expenses_sar)} bring net profit to ${sar(c.net_profit_sar)}. These are tracked separately from the four operational buckets.`,
+    });
+  }
+
+  // Cash
+  if (collected > 0) {
+    out.push({
+      tone: "info",
+      text: `${sar(collected)} of cash was collected in the period. Collections are VAT-inclusive and land when an invoice is paid, so they will not equal revenue.`,
+    });
+  } else {
+    out.push({ tone: "warn", text: "No cash was collected against invoices in this period." });
+  }
+
+  if (outstanding > 0) {
+    out.push({
+      tone: oldestDays !== null && oldestDays > 60 ? "warn" : "info",
+      text: `${sar(outstanding)} remains outstanding across all unpaid invoices${oldestDays !== null ? `, the oldest ${oldestDays} days since confirmation` : ""}. This is a position as of today, not a figure for the period.`,
+    });
+  }
+
+  if (salesReturns > 0) {
+    out.push({
+      tone: "warn",
+      text: `${sar(salesReturns)} of previously confirmed invoicing was reversed as sales returns. Revenue above already excludes it — the two are never netted silently.`,
+    });
+  }
+
+  // Operations
+  if (trips > 0) {
+    out.push({
+      tone: "info",
+      text: `${delivered} of ${trips} trips were delivered, across at most ${peakTrucks} truck${peakTrucks === 1 ? "" : "s"} in any single month${workOrders > 0 ? `, with ${workOrders} work order${workOrders === 1 ? "" : "s"} raised` : ""}.`,
+    });
+  }
+
+  if (topCustomer && topCustomer.revenue > 0) {
+    const share = c.revenue_sar > 0 ? (topCustomer.revenue / c.revenue_sar) * 100 : null;
+    out.push({
+      tone: share !== null && share > 50 ? "warn" : "info",
+      text: `${topCustomer.name} was the largest customer at ${sar(topCustomer.revenue)}${share !== null ? `, ${formatShare(share)} of revenue` : ""}.`,
+    });
+  }
+
+  return out;
+}
 
 export type CostBucket = { key: string; label: string; value: number; color: string };
 

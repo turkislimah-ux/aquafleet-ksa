@@ -24,10 +24,14 @@
 // must stay a string.
 
 import { createClient } from "@/lib/supabase/server";
+import { todayKey } from "@/lib/utils";
+import type { ExpenseRow } from "./ExpensesModal";
 import type {
   PnlRow, CollectionsRow, RevenueMonthRow, ReceivableRow, AgingRow,
   PayrollRow, OperationsRow, RevenuePerTruckRow, TopupsRow, PurchasingRow,
-  MaintenancePerTruckRow,
+  MaintenancePerTruckRow, PnlPeriodRow, ExpenseCategoryPeriodRow,
+  RevenueInvoiceRow, SalesReturnRow, CommissionsRow, CommissionsPaidRow,
+  MetricDictionaryRow, OperationsByDriverRow,
 } from "@/lib/reports";
 import ReportsClient from "./ReportsClient";
 
@@ -47,7 +51,9 @@ export default async function ReportsPage() {
   const [
     pnlRes, collectionsRes, revenueRes, receivablesRes, agingRes,
     payrollRes, operationsRes, perTruckRes, topupsRes, purchasingRes,
-    maintPerTruckRes,
+    maintPerTruckRes, expensesRes, pnlPeriodRes, expCatPeriodRes,
+    invoicesRes, returnsRes, commissionsRes, commissionsPaidRes, metricsRes,
+    opsByDriverRes,
   ] = await Promise.all([
     supabase.from("v_pnl_monthly").select("*").order("month"),
     supabase.from("v_collections_monthly").select("*").order("month"),
@@ -64,6 +70,28 @@ export default async function ReportsPage() {
     // total, since that is the ranking the card presents.
     supabase.from("v_maintenance_cost_per_truck_monthly").select("*")
       .order("total_maintenance_sar", { ascending: false }),
+    // The ONE base-table read on this page. These are the SOURCE ROWS the
+    // expenses editor manages, not a metric — every expense FIGURE shown still
+    // comes from v_expenses_monthly / v_expenses_by_category. Editing records
+    // and reporting totals stay separate paths on purpose.
+    supabase.from("expenses").select("id, expense_date, category, amount_sar, note, entered_by")
+      .order("expense_date", { ascending: false }),
+    // 0100 — the P&L at all three grains, and expenses by category at the same
+    // grains. The statement reads these two and nothing else.
+    supabase.from("v_pnl_by_period").select("*").order("period_start", { ascending: false }),
+    supabase.from("v_expenses_by_category_period").select("*"),
+    // Phase 3 statements.
+    supabase.from("v_revenue_invoices").select("*").order("confirmed_at", { ascending: false }),
+    supabase.from("v_revenue_sales_returns").select("*").order("voided_at", { ascending: false }),
+    supabase.from("v_commissions_monthly").select("*").order("month"),
+    supabase.from("v_commissions_paid_monthly").select("*").order("month"),
+    // The metrics DICTIONARY. Read as data, not as a metric: it is the
+    // vocabulary a future custom-report generator is bounded to, and showing it
+    // is what makes that constraint visible rather than merely claimed.
+    supabase.from("report_metrics").select("*"),
+    // 0101 — the driver grain for the Operations statement.
+    supabase.from("v_operations_by_driver_monthly").select("*")
+      .order("trips_scheduled", { ascending: false }),
   ]);
 
   // One honest error line beats ten empty cards that look like real zeros.
@@ -71,7 +99,12 @@ export default async function ReportsPage() {
     pnlRes.error?.message ?? collectionsRes.error?.message ?? revenueRes.error?.message ??
     receivablesRes.error?.message ?? agingRes.error?.message ?? payrollRes.error?.message ??
     operationsRes.error?.message ?? perTruckRes.error?.message ?? topupsRes.error?.message ??
-    purchasingRes.error?.message ?? maintPerTruckRes.error?.message ?? null;
+    purchasingRes.error?.message ?? maintPerTruckRes.error?.message ??
+    expensesRes.error?.message ?? pnlPeriodRes.error?.message ??
+    expCatPeriodRes.error?.message ?? invoicesRes.error?.message ??
+    returnsRes.error?.message ?? commissionsRes.error?.message ??
+    commissionsPaidRes.error?.message ?? metricsRes.error?.message ??
+    opsByDriverRes.error?.message ?? null;
 
   const pnl: PnlRow[] = ((pnlRes.data ?? []) as Row[]).map((r) => ({
     month: String(r.month),
@@ -169,9 +202,122 @@ export default async function ReportsPage() {
     total_maintenance_sar: n(r.total_maintenance_sar),
   }));
 
+  const expenses: ExpenseRow[] = ((expensesRes.data ?? []) as Row[]).map((r) => ({
+    id: String(r.id),
+    expense_date: String(r.expense_date),
+    category: String(r.category),
+    amount_sar: n(r.amount_sar),
+    note: r.note ? String(r.note) : null,
+    entered_by: r.entered_by ? String(r.entered_by) : null,
+  }));
+
+  const pnlPeriods: PnlPeriodRow[] = ((pnlPeriodRes.data ?? []) as Row[]).map((r) => ({
+    period_type: r.period_type as PnlPeriodRow["period_type"],
+    period_start: String(r.period_start),
+    period_end: String(r.period_end),
+    label: String(r.label),
+    revenue_sar: n(r.revenue_sar),
+    parts_cost_sar: n(r.parts_cost_sar),
+    os_cost_sar: n(r.os_cost_sar),
+    payroll_sar: n(r.payroll_sar),
+    commissions_sar: n(r.commissions_sar),
+    operating_cost_sar: n(r.operating_cost_sar),
+    operating_profit_sar: n(r.operating_profit_sar),
+    expenses_sar: n(r.expenses_sar),
+    net_profit_sar: n(r.net_profit_sar),
+    operating_margin_pct: nOrNull(r.operating_margin_pct),
+  }));
+
+  const expenseCategories: ExpenseCategoryPeriodRow[] = ((expCatPeriodRes.data ?? []) as Row[]).map((r) => ({
+    period_type: r.period_type as ExpenseCategoryPeriodRow["period_type"],
+    period_start: String(r.period_start),
+    period_end: String(r.period_end),
+    label: String(r.label),
+    category: String(r.category),
+    expenses_sar: n(r.expenses_sar),
+    entry_count: n(r.entry_count),
+  }));
+
+  const invoices: RevenueInvoiceRow[] = ((invoicesRes.data ?? []) as Row[]).map((r) => ({
+    invoice_id: String(r.invoice_id),
+    invoice_number: r.invoice_number ? String(r.invoice_number) : null,
+    customer_id: String(r.customer_id),
+    customer_name: String(r.customer_name),
+    month: String(r.month),
+    confirmed_at: String(r.confirmed_at),
+    paid_at: r.paid_at ? String(r.paid_at) : null,
+    period_start: r.period_start ? String(r.period_start) : null,
+    period_end: r.period_end ? String(r.period_end) : null,
+    status: String(r.status),
+    revenue_sar: n(r.revenue_sar),
+    vat_sar: n(r.vat_sar),
+    gross_sar: n(r.gross_sar),
+    amount_due_sar: n(r.amount_due_sar),
+    is_paid: Boolean(r.is_paid),
+  }));
+
+  const salesReturns: SalesReturnRow[] = ((returnsRes.data ?? []) as Row[]).map((r) => ({
+    invoice_id: String(r.invoice_id),
+    invoice_number: r.invoice_number ? String(r.invoice_number) : null,
+    customer_id: String(r.customer_id),
+    month: String(r.month),
+    voided_at: String(r.voided_at),
+    void_reason: r.void_reason ? String(r.void_reason) : null,
+    reversed_revenue_sar: n(r.reversed_revenue_sar),
+  }));
+
+  const commissions: CommissionsRow[] = ((commissionsRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    trip_commission_sar: n(r.trip_commission_sar),
+    specials_sar: n(r.specials_sar),
+    adjustments_sar: n(r.adjustments_sar),
+    bonus_sar: n(r.bonus_sar),
+  }));
+
+  const commissionsPaid: CommissionsPaidRow[] = ((commissionsPaidRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    commissions_paid_sar: n(r.commissions_paid_sar),
+    payout_count: n(r.payout_count),
+  }));
+
+  const metrics: MetricDictionaryRow[] = ((metricsRes.data ?? []) as Row[]).map((r) => ({
+    metric_key: String(r.metric_key),
+    label: String(r.label),
+    meaning: String(r.meaning),
+    formula: String(r.formula),
+    unit: String(r.unit),
+    grain: String(r.grain),
+    source_view: String(r.source_view),
+    basis: String(r.basis),
+    caveat: r.caveat ? String(r.caveat) : null,
+  }));
+
+  const opsByDriver: OperationsByDriverRow[] = ((opsByDriverRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    driver_id: r.driver_id ? String(r.driver_id) : null,
+    driver_name: r.driver_name ? String(r.driver_name) : null,
+    primary_truck_id: r.primary_truck_id ? String(r.primary_truck_id) : null,
+    primary_plate: r.primary_plate ? String(r.primary_plate) : null,
+    trucks_used: n(r.trucks_used),
+    trips_scheduled: n(r.trips_scheduled),
+    trips_delivered: n(r.trips_delivered),
+    trips_not_delivered: n(r.trips_not_delivered),
+    completion_rate_pct: nOrNull(r.completion_rate_pct),
+  }));
+
   return (
     <ReportsClient
       error={error}
+      metrics={metrics}
+      opsByDriver={opsByDriver}
+      invoices={invoices}
+      salesReturns={salesReturns}
+      commissions={commissions}
+      commissionsPaid={commissionsPaid}
+      expenses={expenses}
+      today={todayKey()}
+      pnlPeriods={pnlPeriods}
+      expenseCategories={expenseCategories}
       pnl={pnl}
       collections={collections}
       revenue={revenue}

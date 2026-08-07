@@ -52,11 +52,13 @@ type Props = {
   topups: TopupsRow[];
   purchasing: PurchasingRow[];
   maintPerTruck: MaintenancePerTruckRow[];
+  onManageExpenses: () => void;
 };
 
 export default function OverviewTab({
   months, month, pnl, collections, revenue, receivables, aging,
   payroll, operations, perTruck, topups, purchasing, maintPerTruck,
+  onManageExpenses,
 }: Props) {
   const prev = month ? priorMonth(months, month) : null;
 
@@ -207,8 +209,12 @@ export default function OverviewTab({
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <MiniStat label="Operating cost" value={formatSar(p.operating_cost_sar)}
           d={delta(p.operating_cost_sar, pPrev?.operating_cost_sar)} higherIsBetter={false} />
+        {/* The one clickable stat: click the number, edit what is behind it.
+            Until tab 2 ships this is also the only way in, which is why it is
+            a real affordance rather than a hidden menu item. */}
         <MiniStat label="Other expenses" value={formatSar(p.expenses_sar)}
-          sub={p.expenses_sar === 0 ? "none recorded" : undefined} />
+          sub={p.expenses_sar === 0 ? "none recorded — add" : "manage"}
+          onClick={onManageExpenses} />
         <MiniStat label="Net profit" value={formatSar(p.net_profit_sar)}
           d={delta(p.net_profit_sar, pPrev?.net_profit_sar)} higherIsBetter />
         <MiniStat label="Trips delivered" value={formatNum(ops?.trips_delivered ?? 0)}
@@ -506,11 +512,14 @@ function BigStat({
 }
 
 function MiniStat({
-  label, value, d, higherIsBetter = true, sub,
-}: { label: string; value: string; d?: Delta; higherIsBetter?: boolean; sub?: string }) {
+  label, value, d, higherIsBetter = true, sub, onClick,
+}: {
+  label: string; value: string; d?: Delta; higherIsBetter?: boolean;
+  sub?: string; onClick?: () => void;
+}) {
   const t = d ? deltaTone(d, higherIsBetter) : undefined;
-  return (
-    <Card className="p-3">
+  const body = (
+    <Card className={cn("p-3", onClick && "cursor-pointer hover:ring-1 hover:ring-brand-500/40 transition")}>
       <div className="text-[11px] muted uppercase tracking-wide">{label}</div>
       <div className="text-lg font-semibold mt-1 tabular-nums">{value}</div>
       {d && (
@@ -525,6 +534,12 @@ function MiniStat({
       {sub && <div className="text-[11px] muted mt-0.5">{sub}</div>}
     </Card>
   );
+
+  // A real <button> when it acts like one — keyboard focus and Enter come free,
+  // which a click handler on a div would silently not provide.
+  return onClick ? (
+    <button type="button" onClick={onClick} className="text-left w-full">{body}</button>
+  ) : body;
 }
 
 /**
