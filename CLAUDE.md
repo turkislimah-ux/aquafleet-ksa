@@ -1219,6 +1219,105 @@ relevant skill(s) **when the task calls for it**:
     direction before splitting a page across new files, not after hitting a
     blank page.
 
+- **ARCHIVE page is COMPLETE — 5 tabs, migrations `0084`–`0092`, through commit
+  `6e2b08a`.** Company / Staff / Truck / Customer, plus the cross-cutting Approvals
+  Ledger (see the Consumption entry below — it lives on Archive but is fed by both
+  approval systems).
+  - **The linking model, and the incident that shaped it.** For a LINKED (type +
+    subject) combination the number and its expiry live ONLY on the subject's own
+    record (`drivers.license_number`, `staff.iqama_number`,
+    `trucks.vehicle_registration`/`registration_expiry`) and the archive document
+    stores NEITHER. `0092` moved that rule from the app into the DATABASE —
+    `archive_linked_one_per_person()` raises `23514` if a linked document arrives
+    carrying its own number or expiry. It raises rather than silently NULLing,
+    because quietly discarding a typed value is how "I entered it and it vanished"
+    bugs happen.
+  - **`0090` dropped a duplicate design.** The linking migration was
+    double-applied by two concurrent sessions; the DB was cleaned to ONE design
+    (columns on `archive_document_types`: `linked_driver_field` /
+    `linked_staff_field` / `linked_truck_field`). **`archive_linked_types` (table)
+    and `archive_one_linked_doc_per_person` (function/trigger) do NOT exist — do
+    not reference them.** `0089`/`0091` on disk hold SUPERSEDED versions of the
+    guard and are EXPECTED to differ from live; do not "fix" them to match.
+  - **A real data-loss bug shipped and was fixed** (`04e3433`): `updateDriver`/
+    `updateStaff` included the linked identity columns in their update payload, and
+    a disabled input submits nothing — so `nullable(null)` blanked iqama/licence on
+    every unrelated edit. Fixed by destructuring those keys OUT of all three update
+    actions. A later scan confirmed no data was actually lost. **Never let a linked
+    identity column into an update payload from a form that renders it disabled.**
+  - Renew writes the new number/expiry to the SUBJECT and passes NULL to the
+    parent, and the renewal SNAPSHOT captures the subject's OUTGOING pair
+    server-side — without that capture a linked document's history would record
+    blanks (`archive_document_renewals` is history, so `0092`'s guard does not
+    apply to it).
+  - **Customers have NO Restore**, deliberately: `0019` archives a customer as a
+    side effect of archiving its 1:1 project, so a solo restore would leave a
+    half-restored state. Truck restore clears all four termination fields.
+  - Derived-never-stored throughout (`lib/archive.ts`): document status, expiry
+    tallies, group accents. "Missing" is deliberately NOT in `ArchiveDocStatus` so
+    `expirySummary` cannot tally gaps as expiries.
+
+- **CONSUMPTION page is COMPLETE — 3 tabs, migrations `0093`–`0097`, through commit
+  `6e2b08a`.** Tabs: **Consumptions** (analytics), **Exit Permits**, **Approvals**.
+  There is NO Reports tab — Reports is a separate top-level page; a second entry
+  point with the same name inside Consumption only invited "which one is real".
+  - **Exit Permits (`0093`).** Gate pass for parts leaving for a NON-maintenance
+    reason: draft (paperwork only) -> confirm exit (the money moment) -> returns ->
+    void. **TWO FINDINGS from reading the live money helpers changed the design and
+    must not be re-litigated:** (1) `return_to_lots` CANNOT be reused — it is
+    hard-wired to work orders (takes `work_order_part_id`, reads
+    `work_orders.wo_number`, writes `work_order_part_consumptions`), so `0093` adds
+    `return_exit_permit_line` with the same FIFO-reversal algorithm against its own
+    ledger; (2) `consume_from_lots` does NOT report which lots it drew from, so the
+    per-lot ledger cannot be built from its return value —
+    `consume_exit_permit_line` mirrors `consume_work_order_line`'s two-pass pattern
+    exactly (same ordering clause, so the passes cannot disagree).
+    Void restores ONLY the still-outstanding quantity; anything already returned
+    went back with its own return event, and the ledger makes that exact rather
+    than inferred.
+  - **Approvals (`0094`/`0095`/`0097`) — an OVERLAY, never a gate.** One table,
+    three nullable FKs + a CHECK that exactly one is set (the archive's subject
+    pattern). **Approving or rejecting moves NO stock and changes NO source status
+    — `0094` creates no function and no trigger, so the database has no mechanism
+    for it, and `decideConsumptionApproval` writes that one table and nothing
+    else. Keep it that way.** Voting is a verbatim port of
+    `approve_stock_receipt`'s rule: first voter votes either way, the SECOND must
+    MATCH, a differing vote raises (`0097`'s trigger). **Two matching votes from
+    distinct people complete an event — that is the ONLY completion definition,
+    shared by the guard, the trigger and the Ledger.** "One objection ends it" was
+    tried and dropped (it could complete an event on a single vote).
+  - **`0096` — the 30-day lock, applied.** A completed consumption approval is
+    re-votable for 30 days, then the DATABASE refuses insert/update/delete. Scoped
+    to `consumption_approvals` ONLY: the inventory approval tables are already
+    locked at completion by their own RPCs (every one gates on
+    `status = 'pending_approval'`), so a trigger there would guard nothing while
+    reaching into the stock-moving path. DELETE is guarded only at
+    `pg_trigger_depth() = 1` so an FK cascade from the subject still works.
+    **Known and accepted:** the applied bodies are byte-different from the file —
+    inline `--` comments were stripped in transit. Normalised (comments +
+    whitespace) both hash identically, so the logic is the file's; a future
+    byte-comparison will trip on this, and that is why.
+  - **Approvals Ledger (Archive tab 5).** A DERIVED view of completed approvals
+    across BOTH systems — nothing is copied, so nothing can drift. Consumption rows
+    are re-votable; **inventory rows arrive already locked**, because a completed
+    receipt REJECTION already applied its stock effect (it deletes `price_lots`
+    rows, and `stock_receipt_lines.price_lot_id` is ON DELETE SET NULL — there is
+    nothing left to restore). Both active Approvals queues show PENDING only;
+    decided events live in the Ledger.
+  - **Consumptions tab — analytics, and the hole it works around.** Reads the two
+    per-lot ledgers (`exit_permit_line_consumptions`,
+    `work_order_part_consumptions`); net consumed = consume − return, which makes
+    returns AND voids fall out for free. **BUT the maintenance ledger does not
+    cover its own history** — 2 completed work orders were deducted before it
+    existed, and ledger-only aggregation dropped 57 of 78 units (73%) silently. A
+    part with no ledger rows falls back to `work_order_parts.qty × unit_price_sar`,
+    which is the SAME stamped figure from the other end of the same write (verified
+    equal on all 11 rows that have both), and those rows are tagged "pre-ledger" in
+    the UI. Analytics count every DEDUCTED work order (including in-progress ones —
+    that stock has left); the records table stays completed-only.
+    **`work_orders.actual_cost_sar` EQUALS the parts value exactly on all 13
+    deducted rows — never add it on top of parts consumption, it double-counts.**
+
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
   touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`
@@ -1227,8 +1326,14 @@ relevant skill(s) **when the task calls for it**:
   Turki confirmed `pay_as_you_go` ≈ `prepaid` (same concept) — so reconciling the two
   is a clean concept-merge, not resolving two different things. Do this next time
   customer app code is touched.
-- **Deferred:** Archive page (restore UI for soft-deleted records — `preview/archive.js`
-  is the spec; rising priority), Maintenance page (+ truck-derived-state), Route
-  Optimization (`preview/map.js`), stored-status column cleanup migration.
-- **Roadmap order:** Trips (done) → Maintenance → Inventory → Reports → Archive →
-  Route Optimization → Predictive → IoT (last three deferred).
+- **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
+  migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
+  entries above; the old "Archive deferred / preview/archive.js is the spec" note
+  was stale and has been removed.)
+- **Deferred — Consumption:** Reports remains a separate top-level page and is still
+  the thin placeholder it always was; customer archive documents as a schema
+  question (`customer_id` on `archive_documents`) was raised at Archive Phase 3 and
+  not decided; an optional UNIQUE on `drivers.iqama_number` / `staff.iqama_number` /
+  `trucks.vehicle_registration` was discussed and deliberately not added.
+- **Roadmap order:** Trips → Maintenance → Inventory → Archive → Consumption (all
+  done) → Reports → Route Optimization → Predictive → IoT (last three deferred).
