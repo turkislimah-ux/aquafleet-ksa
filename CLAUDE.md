@@ -1342,6 +1342,125 @@ relevant skill(s) **when the task calls for it**:
     **`work_orders.actual_cost_sar` EQUALS the parts value exactly on all 13
     deducted rows — never add it on top of parts consumption, it double-counts.**
 
+- **REPORTS page is COMPLETE — 2 tabs, migrations `0098`–`0101`, through commit
+  `eaf7e2e`.** The app's last page, rebuilt wholesale from a mock-data placeholder.
+  Tabs: **Overview** (KPIs + charts) and **Reports** (the printable statement pack).
+  - **THE SEMANTIC LAYER IS THE POINT (`0098`).** Every metric is defined ONCE, in
+    SQL. The page reads views and NEVER re-derives a number, so this page, a future
+    statement, and an AI agent reading the same views cannot disagree about what
+    "revenue" means. 24 views + `report_metrics` (a dictionary: plain-language
+    meaning, formula, grain, basis, caveat per metric) + an `expenses` table.
+    **If a number is missing, the fix is a migration — not a join added to the page.**
+  - **EVERY VIEW IS `security_invoker = true`.** These were the FIRST views in this
+    schema. A default view runs as OWNER and bypasses RLS on 68 RLS-enabled tables,
+    so this is a security gate, not a style choice. SELECT granted to
+    `authenticated`, revoked from `anon`. Verified live: 24/24 invoker, 0 anon-
+    readable. **Every future view gets the same treatment.**
+  - **The money rules, each checked against live rows before being written:**
+    - Revenue is ACCRUAL and "confirmed" means `confirmed_at is not null`, NOT
+      `status='confirmed'` — paid invoices were confirmed first and keep the
+      timestamp. A status filter hid 26,550 of 70,650 (38%).
+    - Revenue is NET of VAT (`grand_subtotal_sar`). VAT is a collected liability.
+    - Voided invoices excluded, and kept visible in their own view (Sales Returns).
+    - **Parts cost is FIFO consumption ONLY. Purchases are NEVER a P&L line** — a
+      purchase is inventory until consumed. Live, receipts are ~57x consumption over
+      the same window; expensing both would overstate cost enormously. Purchasing
+      lives in a cash/procurement view, labelled as not-a-P&L-line.
+    - Parts cost INCLUDES the pre-ledger fallback, because the Consumption page does
+      and the two must agree. Ledger-only understates July by 72%.
+    - Commissions are ACCRUAL (earned). The cash view is separate; summing both
+      double-counts, since a payout's base IS the same trip commission.
+    - Manual expenses are their OWN P&L section — never merged into the four
+      operational buckets. Both `operating_profit` (before) and `net_profit` (after)
+      are exposed so their effect stays visible.
+  - **RATIOS ARE RECOMPUTED IN SQL, NEVER AVERAGED (`0100`).** Additive measures sum
+    across months; ratios do not. Live proof: Q3-to-date margin is **-38.7%** from
+    the period's own totals and **+20.5%** if the monthly margins are averaged — it
+    flips the sign. `v_pnl_by_period` carries month/quarter/year in one view with the
+    margin recomputed per period. Same rule one level up in the report builder.
+  - **TWO NON-ADDITIVE MEASURES, handled explicitly, never summed:**
+    `people_missing_salary` (summing Jul+Aug gives 6; truth is 3 — it is a per-month
+    state) and `trucks_active` (a DISTINCT count; summing double-counts a truck
+    working in two months — today it coincidentally matches, which is worse than a
+    visible error). Multi-month periods report the highest single month and say so.
+  - **`0099` — per-truck maintenance carries THREE separately named measures**
+    (`maintenance_parts_sar` / `os_payments_sar` / `total_maintenance_sar`), never
+    blended. "Maintenance cost per truck" previously meant two different things:
+    parts-only (what the Consumption page still shows) is the SMALLER half —
+    7,043.95 against 19,671.50 of outsourced. A dictionary caveat claiming OS is not
+    attributable per truck was FALSE and was corrected; `outsourced_jobs.truck_id` is
+    populated and every riyal traces to a truck.
+  - **`0101` — the driver grain for the Operations statement.** Grouped BEFORE the
+    join to drivers, so a trip with no `driver_id` keeps its own row and the driver
+    figures always sum to `v_operations_monthly` (June has 33 trips, 1 unattributed —
+    an inner join would have shown 32 beside a period total of 33). The UI labels
+    that row **"Unassigned"** — the applied view returns a NULL name, so the label is
+    the UI's job. Grouped by `driver_id`, not name: two driver records share a name,
+    and the plate is what distinguishes them.
+  - **THE DRIVER IS MEASURED, THE TRUCK IS DISPLAY-ONLY.** No truck-level figure
+    appears in a driver row; trucks-that-moved and maintenance activity stay in the
+    period summary. Driver tables lead the statement; drivers are ROWS and measures
+    are COLUMNS (asked for three times before the intended reading was clear — a
+    test now asserts the orientation so it cannot silently flip).
+  - **TWO LIMITATIONS, stated in the UI rather than hidden:** salaries have NO
+    history, so a past period is costed at each person's CURRENT salary (only the
+    employment window is historical); revenue per truck is an ALLOCATION, because
+    `trips.rate_sar` is NULL on all 203 rows, so invoice revenue is split across
+    linked trips. Both surfaced on screen, not just in comments.
+  - **Custom report builder — a pivot table FENCED to the semantic layer.** Pick
+    metrics, a grouping and a period; the result reads the same views. Enforcement
+    lives in `lib/report-builder.ts`: a block is only offered if its key is live in
+    `report_metrics` (`BUILDER_METRICS` is module-private so the fence cannot be
+    bypassed), groupings narrow to what the selected metrics support, ratios
+    recompute per row, and there is deliberately NO total across columns so accrual
+    and cash can never be added. The natural-language box beside it is a marked seam
+    with no model call — its only future job is to fill in the same builder.
+  - **Printing.** The clipped-column bug was NOT sizing: `visibility:hidden` hides
+    the sidebar but KEEPS ITS LAYOUT, so statements stayed indented 256px and
+    overflowed the sheet. Fixed by removing the shell from FLOW, pinned to unique
+    classes (`header.h-14`, never a bare `header` — every statement renders one of
+    its own). Plus A4 margins, repeating table headers, and a paper-only ID band.
+  - **`numeric` can arrive as a STRING.** Postgres `numeric` has no exact JS
+    equivalent, so `a - b` yields NaN and `a + b` concatenates — both rendering as
+    plausible garbage rather than erroring. Coerced once at the server boundary,
+    columns listed explicitly because `invoice_number` is a numeric-LOOKING string
+    that must stay text.
+  - **Migration files were RECONCILED to what actually ran.** `0099`/`0100`/`0101`
+    were each applied in a modified form; every file was rewritten to match live
+    (verified against `pg_get_viewdef`) with the differences recorded in its own
+    header. Do NOT "fix" them back toward the drafts.
+  - **Known dictionary gap:** applied `0100` added ONE new key rather than amending
+    the ten existing P&L entries, so `revenue`/`operating_cost`/`operating_margin`
+    etc. still read grain "one month" and name only their monthly view, even though
+    each IS available per quarter and year. The non-averaging warning survives on the
+    `pnl_by_period` entry. Dictionary-only fix, no view changes — documented in
+    `0100`'s header.
+  - **INCIDENT — a db reset dropped `v_operations_by_driver_monthly`** because the
+    replay rebuilt from committed migrations and `0101` was applied but not yet
+    committed. Everything else survived. Re-applied and committed. **A migration that
+    is applied but uncommitted is exactly what a reset drops** — commit the file the
+    moment it is confirmed applied. (Worth pinning down before the next reset:
+    `0101` WAS committed in `c561d5c` before the drop, so the replay source may not
+    be this repo's `supabase/migrations/`.)
+  - **PROCESS LESSON, REPEATED AND NOT LEARNED THE FIRST TIME:** Phases 2–3 plus
+    three follow-up rounds were committed as ONE commit because
+    `lib/reports.ts`/`StatementsTab.tsx`/`StatementViews.tsx` each accumulated code
+    from every round, and every commit must be tsc-clean. This is the SAME trap
+    already recorded under Inventory Phase 3. Commit each round the moment it
+    verifies; do not let five review rounds pile up first.
+  - **Deferred — Reports:** a driver status-change report (needs transition history;
+    `drivers.status` is current-only, so there is nothing to count) — parked with
+    RBAC and effective-dated salaries; **idle trucks** and **fleet availability** on
+    the Operations statement (need the fleet roster and distinct trucks-under-
+    maintenance respectively — deliberately NOT estimated); promoting cash-coverage
+    into the semantic layer if it becomes load-bearing; and switching the Consumption
+    page's top-costly-trucks to read `maintenance_parts_sar` from the view instead of
+    its own TS derivation.
+  - **The six `tests/reports-*.spec.ts` specs depend on a DELETED `/reports-verify`
+    diagnostic route** — same convention as every prior phase. They document what was
+    verified; they are not a standing regression suite unless that route is made
+    permanent (Turki's call, flagged, not decided).
+
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
   touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`
@@ -1354,10 +1473,12 @@ relevant skill(s) **when the task calls for it**:
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
   entries above; the old "Archive deferred / preview/archive.js is the spec" note
   was stale and has been removed.)
-- **Deferred — Consumption:** Reports remains a separate top-level page and is still
-  the thin placeholder it always was; customer archive documents as a schema
-  question (`customer_id` on `archive_documents`) was raised at Archive Phase 3 and
-  not decided; an optional UNIQUE on `drivers.iqama_number` / `staff.iqama_number` /
-  `trucks.vehicle_registration` was discussed and deliberately not added.
-- **Roadmap order:** Trips → Maintenance → Inventory → Archive → Consumption (all
-  done) → Reports → Route Optimization → Predictive → IoT (last three deferred).
+- **Deferred — Consumption:** customer archive documents as a schema question
+  (`customer_id` on `archive_documents`) was raised at Archive Phase 3 and not
+  decided; an optional UNIQUE on `drivers.iqama_number` / `staff.iqama_number` /
+  `trucks.vehicle_registration` was discussed and deliberately not added. (Reports is
+  a separate top-level page and is now BUILT — see its own entry above; the old
+  "still the thin placeholder it always was" note was stale and has been removed.)
+- **Roadmap order:** Trips → Maintenance → Inventory → Archive → Consumption →
+  Reports (all done) → Route Optimization → Predictive → IoT (last three deferred).
+  **Every page in the roadmap that is not deferred is now built.**
