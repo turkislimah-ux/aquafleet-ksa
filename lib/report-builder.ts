@@ -56,8 +56,8 @@ export const GROUPING_LABELS: Record<Grouping, string> = {
   truck: "By truck",
 };
 
-export type MetricBasis = "accrual" | "cash" | "operational";
-export type MetricUnit = "SAR" | "count" | "percent";
+type MetricBasis = "accrual" | "cash" | "operational";
+type MetricUnit = "SAR" | "count" | "percent";
 
 /**
  * One offerable building block.
@@ -65,7 +65,7 @@ export type MetricUnit = "SAR" | "count" | "percent";
  * `key` MUST match a report_metrics.metric_key. That is the fence: a block
  * whose key is not in the live dictionary is never offered.
  */
-export type BuilderMetric = {
+type BuilderMetric = {
   key: string;
   label: string;
   basis: MetricBasis;
@@ -78,8 +78,14 @@ export type BuilderMetric = {
   ratio?: { numerator: keyof Bucket; denominator: keyof Bucket };
 };
 
-/** Per-row accumulators. Every one is filled from view rows, never computed. */
-export type Bucket = {
+/**
+ * Per-row accumulators. Every one is filled from view rows, never computed.
+ *
+ * Module-private, and deliberately so despite the generic name: lib/parts-usage
+ * exports an unrelated `Bucket` for its charts, and two exported types sharing
+ * one name across the codebase is a genuine confusion waiting to happen.
+ */
+type Bucket = {
   revenue: number;
   parts: number;
   os: number;
@@ -112,13 +118,19 @@ const EMPTY: Bucket = {
  * The catalogue. Each entry names a dictionary key, where its number lives,
  * and the groupings it can honestly support.
  *
+ * MODULE-PRIVATE, and that is the point: availableMetrics() is the only way to
+ * reach it, and that function is what enforces the dictionary fence. Exporting
+ * the raw array would let a caller bypass the fence and offer a block whose
+ * metric_key is no longer in report_metrics — so keeping it unexported makes
+ * the constraint structural rather than a convention someone has to remember.
+ *
  * Note what is deliberately absent: receivables_outstanding is a STATE metric
  * ("as of today", per its dictionary grain) and cannot be placed in a period
  * column without lying about when it was true. Outstanding here is instead
  * measured on the period's own invoices, which is a different, honest thing —
  * and it is labelled as such.
  */
-export const BUILDER_METRICS: BuilderMetric[] = [
+const BUILDER_METRICS: BuilderMetric[] = [
   { key: "revenue", label: "Revenue", basis: "accrual", unit: "SAR",
     groupings: ["period", "customer"], kind: "sum", field: "revenue" },
   { key: "revenue", label: "Revenue (allocated)", basis: "accrual", unit: "SAR",
@@ -181,8 +193,8 @@ export function allowedGroupings(selected: BuilderMetric[]): Grouping[] {
   return all.filter((g) => selected.every((m) => m.groupings.includes(g)));
 }
 
-export type ReportRow = { label: string; bucket: Bucket };
-export type ReportColumn = { id: string; label: string; basis: MetricBasis; unit: MetricUnit };
+type ReportRow = { label: string; bucket: Bucket };
+type ReportColumn = { id: string; label: string; basis: MetricBasis; unit: MetricUnit };
 export type BuiltReport = {
   columns: ReportColumn[];
   rows: { label: string; values: (number | null)[] }[];
@@ -197,7 +209,7 @@ export type BuilderSelection = {
   periodStart: string | null;
 };
 
-export type BuilderData = {
+type BuilderData = {
   pnlPeriods: PnlPeriodRow[];
   collections: CollectionsRow[];
   purchasing: PurchasingRow[];

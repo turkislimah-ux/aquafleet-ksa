@@ -39,7 +39,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "statements", label: "Reports" },
 ];
 
-export type ReportsClientProps = {
+type ReportsClientProps = {
   error: string | null;
   pnl: PnlRow[];
   collections: CollectionsRow[];

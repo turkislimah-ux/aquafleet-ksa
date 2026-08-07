@@ -9,9 +9,9 @@
 // Which is also why this file fetches views and nothing else — if a number is
 // missing, the fix is a migration, not a join added here.
 //
-// PHASE 1 = the Overview tab. Tab 2 (printable statements) is rendered as a
-// real tab with an honest "coming in a later phase" state rather than hidden,
-// the same convention Consumption and the Archive used through their phases.
+// TWO TABS, both built: Overview (KPIs and charts) and Reports (the printable
+// statement pack). This file fetches every view both of them read, in one
+// round trip, and coerces the numerics once at the boundary.
 //
 // ON THE EXPLICIT Number() COERCION BELOW — this is parsing, not deriving.
 // Postgres `numeric` is arbitrary-precision and has no exact JS equivalent, so

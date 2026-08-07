@@ -5,10 +5,11 @@
 // TABLES, NOT CHARTS. These are statements you print, sign and file. Charts
 // belong on the Overview.
 //
-// Six statements, one visible at a time: P&L, Revenue, Receivables, Costs,
-// Operations and the computed Narrative. Showing one at a time is what makes
-// "Print" mean "print THIS statement" — each statement owns a print id, and
-// only the mounted one exists in the DOM when the print stylesheet runs.
+// Six statements plus a seventh that appears once the builder has generated
+// one: P&L, Revenue, Receivables, Costs, Operations, the computed Narrative,
+// and Custom. One is visible at a time, which is what makes "Print" mean
+// "print THIS statement" — each owns a print id, and only the mounted one
+// exists in the DOM when the print stylesheet runs.
 //
 // This file owns the P&L and the period controls; the other five live in
 // StatementViews.tsx, a leaf module it imports one-way.

@@ -30,7 +30,7 @@ export type ExpenseInput = {
   note: string | null;
 };
 
-export type ExpenseResult = { ok: true } | { ok: false; error: string };
+type ExpenseResult = { ok: true } | { ok: false; error: string };
 
 async function actorEmail(supabase: ReturnType<typeof createClient>): Promise<string | null> {
   const { data } = await supabase.auth.getUser();

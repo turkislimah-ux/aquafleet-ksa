@@ -10,7 +10,7 @@
 // The test for anything added here: if the number could disagree with what the
 // same view returns, it does not belong in this file — it belongs in a
 // migration. Composing two defined metrics into a ratio is allowed (see
-// collectionRate below); recomputing either side of that ratio is not.
+// cashCoverage below); recomputing either side of that ratio is not.
 
 // --- View row shapes -------------------------------------------------------
 // One type per view, columns verbatim. Names match the SQL exactly so a
@@ -63,7 +63,7 @@ export type AgingRow = {
   invoice_count: number;
 };
 
-export type AgingBucket = "0-30" | "31-60" | "61-90" | "90+";
+type AgingBucket = "0-30" | "31-60" | "61-90" | "90+";
 
 /** Fixed order — the view returns these grouped, not sorted meaningfully. */
 export const AGING_ORDER: AgingBucket[] = ["0-30", "31-60", "61-90", "90+"];
@@ -607,7 +607,7 @@ export function buildNarrative(args: {
   return out;
 }
 
-export type CostBucket = { key: string; label: string; value: number; color: string };
+type CostBucket = { key: string; label: string; value: number; color: string };
 
 /**
  * The four operational buckets, in a fixed order with fixed colours.

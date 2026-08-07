@@ -46,7 +46,7 @@ export function Note({ children }: { children: React.ReactNode }) {
  * printed sheet has none of that context and gets filed on its own, so it has
  * to carry its own identification or it becomes an anonymous table of numbers.
  */
-export function PrintBand({ title, period }: { title: string; period: string }) {
+function PrintBand({ title, period }: { title: string; period: string }) {
   return (
     <div className="print-only" style={{ marginBottom: "10pt", borderBottom: "1px solid #000", paddingBottom: "6pt" }}>
       <div style={{ fontSize: "8pt", letterSpacing: "0.08em", textTransform: "uppercase" }}>
