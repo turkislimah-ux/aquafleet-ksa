@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, Sun, Moon, Globe, LogOut, User } from "lucide-react";
+import { Bell, Sun, Moon, Globe, LogOut } from "lucide-react";
 import type { Lang } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ import { NAV } from "@/lib/nav";
 import { SearchDockProvider } from "@/components/SearchDock";
 import GlobalSearch from "@/components/GlobalSearch";
 import { searchRecords } from "@/lib/actions/search";
+import type { Viewer } from "@/lib/actions/identity";
 
 type AppCtx = { lang: Lang; setLang: (l: Lang) => void; theme: "light" | "dark"; setTheme: (m: "light" | "dark") => void };
 const Ctx = createContext<AppCtx>({ lang: "en", setLang: () => {}, theme: "light", setTheme: () => {} });
@@ -19,11 +20,11 @@ export const useApp = () => useContext(Ctx);
 
 export default function AppShell({
   children,
-  userEmail,
+  viewer,
 }: {
   children: React.ReactNode;
   /** Read server-side in app/layout.tsx. Null on /login and when signed out. */
-  userEmail?: string | null;
+  viewer?: Viewer | null;
 }) {
   const [lang, setLangState] = useState<Lang>("en");
   const [theme, setThemeState] = useState<"light" | "dark">("light");
@@ -64,6 +65,26 @@ export default function AppShell({
     document.documentElement.classList.toggle("dark", theme === "dark");
     if (hydrated) localStorage.setItem("theme", theme);
   }, [theme, hydrated]);
+
+  // Measure the control cluster so the centred search bar can reserve the
+  // same width on BOTH sides and therefore never reach it. CSS cannot read a
+  // sibling's width; this is the one measurement in the shell.
+  const headerRef = useRef<HTMLElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const header = headerRef.current;
+    const controls = controlsRef.current;
+    if (!header || !controls) return;
+    const apply = () => {
+      header.style.setProperty("--hdr-side", `${controls.offsetWidth}px`);
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(controls);
+    return () => ro.disconnect();
+    // Re-measures when the cluster's own content changes width — a longer
+    // name, a different language label, the account chip appearing at all.
+  }, [lang, viewer?.name, viewer?.roleLabel, viewer?.email]);
 
   const setLang = (l: Lang) => setLangState(l);
   const setTheme = (m: "light" | "dark") => setThemeState(m);
@@ -146,13 +167,53 @@ export default function AppShell({
                  pointer events on its own footprint.
             */}
             <header
-              className="h-14 border-b sticky top-0 z-30 relative flex items-center justify-end gap-2 px-4 overflow-visible"
-              style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--bg))" }}
+              ref={headerRef}
+              // GLOSSY, BORDERLESS. The hairline under the header is gone and
+              // the surface is translucent with a backdrop blur, so page
+              // content dissolves under it instead of stopping at a rule.
+              // -webkit- prefix included: Safari still needs it.
+              className="h-14 sticky top-0 z-30 relative flex items-center justify-end gap-2 px-4 overflow-visible"
+              style={{
+                background: "rgb(var(--bg) / 0.72)",
+                backdropFilter: "blur(14px) saturate(180%)",
+                WebkitBackdropFilter: "blur(14px) saturate(180%)",
+              }}
             >
               <div className="pointer-events-none absolute inset-x-0 top-0 h-14 flex items-center justify-center px-4">
-                {/* DOCKED FOOTPRINT only — the search inside is absolutely
-                    positioned, so growing to hero size reflows nothing. */}
-                <div className="pointer-events-auto relative h-9 w-[min(30rem,44vw)]">
+                {/*
+                  DOCKED FOOTPRINT only — the search inside is absolutely
+                  positioned, so growing to hero size reflows nothing.
+
+                  WIDTH IS CAPPED SO THE BAR CAN NEVER REACH THE CONTROLS.
+                  Centring alone was not enough: the bar is centred on the
+                  header, but the control cluster lives at one end, so a bar
+                  wide enough to look right at 1600px was overlapping the bell
+                  and the language button at narrower widths — and the new
+                  account chip (avatar + name + role) made the cluster much
+                  wider still.
+
+                  True centring requires reserving the SAME space on both
+                  sides, and only the right side has content — so the cap is
+                  `100% - 2 x (cluster width) - gutter`. CSS cannot read a
+                  sibling's width, so the cluster is measured once and
+                  published as --hdr-side (see the effect above). This is the
+                  one place JS measurement earns its keep; everything else
+                  here is plain layout.
+                */}
+                <div
+                  className="pointer-events-auto relative h-9"
+                  style={{
+                    // max() is a FLOOR, and it is load-bearing: at 1024px the
+                    // reservation `100% - 2 x cluster - gutter` goes NEGATIVE
+                    // and the bar collapsed to zero width — it vanished
+                    // entirely. Measured, not theorised. The floor keeps it
+                    // usable; the account chip's text yields first (see its
+                    // xl: breakpoint) so the cluster shrinks before this ever
+                    // binds on a normal desktop.
+                    width:
+                      "max(11rem, min(30rem, calc(100% - 2 * var(--hdr-side, 12rem) - 2rem)))",
+                  }}
+                >
                   {/* searchRecords is a server action (lib/actions/search.ts).
                       Passing it down means the record query runs on the
                       server under the caller's own session, so RLS decides
@@ -162,25 +223,28 @@ export default function AppShell({
                 </div>
               </div>
 
-              <div className="relative z-10 flex items-center justify-end gap-2">
+              {/* z-20 keeps the controls above the CLOSED search bar (z-0) and
+                  below its OPEN panel (z-40), so an overlap can never make a
+                  control unclickable while the panel still layers correctly. */}
+              <div ref={controlsRef} className="relative z-20 flex items-center justify-end gap-2">
                 <NotificationsMenu lang={lang} />
 
                 <button onClick={() => setLang(lang === "en" ? "ar" : "en")}
                   aria-label={lang === "en" ? "Switch to Arabic" : "Switch to English"}
-                  className="focus-ring transition-colors [touch-action:manipulation] h-9 px-3 rounded-lg border text-sm flex items-center gap-1.5 hover:bg-black/5 hover:border-brand-500/40 dark:hover:bg-white/5"
-                  style={{ borderColor: "rgb(var(--border))" }}>
-                  <Globe className="h-4 w-4" />
+                  className="focus-ring transition-colors [touch-action:manipulation] rounded-xl border backdrop-blur-md hover:border-brand-500/40 h-9 px-3 text-sm flex items-center gap-1.5"
+                  style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card) / 0.6)" }}>
+                  <Globe className="h-4 w-4" aria-hidden />
                   <span className="font-medium hidden lg:inline">{lang === "en" ? "العربية" : "English"}</span>
                 </button>
 
                 <button onClick={() => setTheme(theme === "light" ? "dark" : "light")}
                   aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-                  className="focus-ring transition-colors [touch-action:manipulation] h-9 w-9 rounded-lg border grid place-items-center hover:bg-black/5 hover:border-brand-500/40 dark:hover:bg-white/5"
-                  style={{ borderColor: "rgb(var(--border))" }}>
+                  className="focus-ring transition-colors [touch-action:manipulation] rounded-xl border backdrop-blur-md hover:border-brand-500/40 h-9 w-9 grid place-items-center"
+                  style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card) / 0.6)" }}>
                   {theme === "light" ? <Moon className="h-4 w-4" aria-hidden /> : <Sun className="h-4 w-4" aria-hidden />}
                 </button>
 
-                <AccountMenu userEmail={userEmail ?? null} />
+                <AccountMenu viewer={viewer ?? null} lang={lang} />
               </div>
             </header>
 
@@ -232,8 +296,8 @@ function NotificationsMenu({ lang }: { lang: Lang }) {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-label="Notifications"
-        className="focus-ring transition-colors [touch-action:manipulation] h-9 w-9 rounded-lg border grid place-items-center hover:bg-black/5 hover:border-brand-500/40 dark:hover:bg-white/5"
-        style={{ borderColor: "rgb(var(--border))" }}
+        className="focus-ring transition-colors [touch-action:manipulation] h-9 w-9 rounded-xl border backdrop-blur-md hover:border-brand-500/40 grid place-items-center"
+        style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card) / 0.6)" }}
       >
         <Bell className="h-4 w-4" aria-hidden />
       </button>
@@ -261,60 +325,79 @@ function NotificationsMenu({ lang }: { lang: Lang }) {
 }
 
 /**
- * Account control. Replaces the old bare "Log out" button — which showed no
- * identity at all, so there was no way to tell which login you were on. That
- * mattered concretely once already: migration 0054 had to be redrafted
- * because the session email was assumed rather than checked (CLAUDE.md §7).
+ * Account control — avatar, name, job title, and a separate sign-out button.
+ *
+ * Matches the design Turki attached: a single pill holding a circular
+ * initials avatar, the person's name in bold with their role beneath it, and
+ * a distinct log-out control at the trailing edge.
+ *
+ * TWO DELIBERATE CHOICES:
+ *
+ * 1. Sign-out is its OWN button, not a menu item, exactly as drawn — so it is
+ *    one click. It is therefore also one click from a mis-click, which is why
+ *    it stays visually quiet (muted until hover, where it turns rose) and
+ *    sits behind its own accessible name rather than sharing the pill's.
+ *    Nested <button> is invalid HTML, so the pill is a flex row containing
+ *    two siblings rather than a button wrapping a button.
+ *
+ * 2. The name comes from public.staff via lib/actions/identity.ts, and falls
+ *    back to the email's local part when the signed-in user has no staff row.
+ *    Inventing a display name from an email would be a guess presented as
+ *    fact; showing the raw email is honest about what is actually known.
  */
-function AccountMenu({ userEmail }: { userEmail: string | null }) {
-  const [open, setOpen] = useState(false);
-  const ref = useDismissable<HTMLDivElement>(open, () => setOpen(false));
-  const initial = (userEmail?.trim()?.[0] ?? "?").toUpperCase();
+function AccountMenu({ viewer, lang }: { viewer: Viewer | null; lang: Lang }) {
+  const emailLocal = viewer?.email?.split("@")[0] ?? null;
+  const displayName =
+    (lang === "ar" ? viewer?.nameAr || viewer?.name : viewer?.name) || emailLocal || "—";
+  const subtitle = viewer?.roleLabel ?? viewer?.email ?? null;
+
+  // Initials from the display name: two words -> two letters, one word -> one.
+  const initials =
+    displayName === "—"
+      ? "?"
+      : displayName
+          .trim()
+          .split(/\s+/)
+          .slice(0, 2)
+          .map((w) => w[0])
+          .join("")
+          .toUpperCase();
 
   return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        // Below xl the email is hidden and this is an avatar initial only —
-        // an icon-only control with no accessible name without this.
-        aria-label={userEmail ? `Account: ${userEmail}` : "Account"}
-        className="focus-ring transition-colors [touch-action:manipulation] h-9 rounded-lg border flex items-center gap-2 ps-1.5 pe-2 hover:bg-black/5 hover:border-brand-500/40 dark:hover:bg-white/5"
-        style={{ borderColor: "rgb(var(--border))" }}
+    <div
+      className="flex items-center gap-2 rounded-full border ps-1 pe-1 py-1 backdrop-blur-md"
+      style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card) / 0.6)" }}
+    >
+      <span
+        aria-hidden
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-600 text-[12px] font-semibold text-white"
       >
-        <span className="grid h-6 w-6 place-items-center rounded-md bg-brand-600 text-[11px] font-semibold text-white">
-          {initial}
-        </span>
-        <span className="hidden xl:block max-w-[10rem] truncate text-sm">
-          {userEmail ?? "—"}
-        </span>
-      </button>
+        {initials}
+      </span>
 
-      {open && (
-        <div
-          className="card absolute end-0 top-full mt-2 w-[min(16rem,90vw)] p-0 shadow-lg"
-          style={{ zIndex: 50 }}
+      {/* min-w-0 + truncate: a long name must shorten, not widen the header
+          and shove the centred search bar off centre. */}
+      {/* Hidden below xl on purpose: the name+role is the widest thing in the
+          header, and the centred search bar reserves the cluster's width on
+          BOTH sides. Letting this text persist on a 1024px screen squeezed
+          the bar to nothing. Avatar and sign-out remain at every size. */}
+      <span className="hidden min-w-0 max-w-[12rem] flex-col leading-tight xl:flex">
+        <span className="truncate text-sm font-semibold">{displayName}</span>
+        {subtitle && (
+          <span className="truncate text-[11px] muted">{subtitle}</span>
+        )}
+      </span>
+
+      <form action={signOut} className="shrink-0">
+        <button
+          type="submit"
+          aria-label={lang === "ar" ? "تسجيل الخروج" : "Log out"}
+          title={lang === "ar" ? "تسجيل الخروج" : "Log out"}
+          className="focus-ring grid h-8 w-8 place-items-center rounded-full transition-colors [touch-action:manipulation] muted hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400"
         >
-          <div
-            className="border-b px-3 py-2.5"
-            style={{ borderColor: "rgb(var(--border))" }}
-          >
-            <div className="flex items-center gap-2">
-              <User className="h-4 w-4 shrink-0 muted" />
-              <span className="min-w-0 truncate text-sm">{userEmail ?? "Signed out"}</span>
-            </div>
-          </div>
-          <form action={signOut}>
-            <button
-              type="submit"
-              className="focus-ring flex w-full items-center gap-2 px-3 py-2.5 text-start text-sm transition-colors [touch-action:manipulation] hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              <LogOut className="h-4 w-4" />
-              Log out
-            </button>
-          </form>
-        </div>
-      )}
+          <LogOut className="h-4 w-4" aria-hidden />
+        </button>
+      </form>
     </div>
   );
 }

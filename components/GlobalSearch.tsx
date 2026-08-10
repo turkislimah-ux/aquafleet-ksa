@@ -397,7 +397,13 @@ export default function GlobalSearch({
       // progress value the translation uses, so the bar grows into its hero
       // size and shrinks back with no second source of truth. Absolutely
       // positioned so growing it never reflows the header's grid.
-      className="absolute top-0 left-1/2 z-40"
+      // Z-INDEX IS STATEFUL, AND THAT IS THE FIX FOR "it covers the language
+      // and bell buttons". Closed, the bar is just a field and must lose to
+      // the header controls — otherwise, any overlap makes the bell
+      // unclickable (verified: elementFromPoint returned the INPUT over the
+      // bell). Open, the results panel must win over everything in the
+      // header. One value cannot satisfy both, so it follows `open`.
+      className={cn("absolute top-0 left-1/2", open ? "z-40" : "z-0")}
       style={{
         transform:
           "translateX(-50%) translateY(calc((1 - var(--dock-progress, 1)) * var(--dock-distance, 0px)))",
@@ -467,27 +473,37 @@ export default function GlobalSearch({
           }}
         />
         {isMac !== null && (
-          <kbd
-            // dir="ltr" so the shortcut is not bidi-reordered under an RTL
-            // page — without it "⌘K" renders as "K⌘" in Arabic, and
-            // "Ctrl K" fares worse. A key combination is a literal, not
-            // prose, so it reads left-to-right in every locale.
-            dir="ltr"
-            className="pointer-events-none absolute top-1/2 -translate-y-1/2 end-3 hidden sm:inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium muted transition-opacity"
-            style={{
-              borderColor: "rgb(var(--border))",
-              background: "rgb(var(--bg))",
-              // The hint is an invitation to open the bar. Once it is open
-              // it has done its job and would only compete with the caret.
-              opacity: open ? 0 : 1,
-            }}
+          // POSITIONING AND TEXT DIRECTION ARE DELIBERATELY ON DIFFERENT
+          // ELEMENTS. `end-3` is a logical inset — it resolves against the
+          // element's OWN direction. Putting dir="ltr" on the same node that
+          // carries end-3 made "end" mean RIGHT even under RTL, so the hint
+          // jumped to the start side and collided with the search icon.
+          // Measured, not guessed: the kbd sat at x=751 inside an input
+          // spanning 389-795 in Arabic.
+          //
+          // So: the wrapper positions (inheriting the page's direction), and
+          // the inner <kbd> only fixes glyph ORDER, which must stay
+          // left-to-right in every locale because a key combination is a
+          // literal, not prose.
+          <span
+            className="pointer-events-none absolute top-1/2 -translate-y-1/2 end-3 hidden sm:flex items-center transition-opacity"
+            style={{ opacity: open ? 0 : 1 }}
           >
-            {/* U+00A0 written as an explicit escape, not a literal space:
-                a key combination must never wrap, and a literal nbsp in
-                source is invisible to the next reader and trivially
-                "tidied" away by a formatter. */}
-            {isMac ? "\u2318\u00a0K" : "Ctrl\u00a0K"}
-          </kbd>
+            <kbd dir="ltr" className="inline-flex items-center gap-1 text-[10px] font-medium muted">
+              <span
+                className="rounded-[3px] px-1 py-px"
+                style={{ background: "rgb(var(--fg) / 0.08)" }}
+              >
+                {isMac ? "\u2318" : "Ctrl"}
+              </span>
+              <span
+                className="rounded-[3px] px-1 py-px"
+                style={{ background: "rgb(var(--fg) / 0.08)" }}
+              >
+                K
+              </span>
+            </kbd>
+          </span>
         )}
       </div>
 

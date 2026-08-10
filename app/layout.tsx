@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import AppShell from "@/components/AppShell";
-import { createClient } from "@/lib/supabase/server";
+import { getViewer } from "@/lib/actions/identity";
 
 export const metadata: Metadata = {
   title: "Bousla — Bin Slimah Group Operations",
@@ -9,17 +9,15 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // The header's account menu shows which login you are actually on. Read
-  // here rather than in the client shell because the session lives in
-  // httpOnly cookies. getUser() (not getSession()) so the token is verified
-  // against the auth server rather than trusted from the cookie.
-  const supabase = createClient();
-  const { data } = await supabase.auth.getUser();
+  // The header's account control shows who is signed in — name and job title,
+  // not just an email. Read here because the session lives in httpOnly
+  // cookies; see lib/actions/identity.ts for where the name comes from.
+  const viewer = await getViewer();
 
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <AppShell userEmail={data.user?.email ?? null}>{children}</AppShell>
+        <AppShell viewer={viewer}>{children}</AppShell>
       </body>
     </html>
   );

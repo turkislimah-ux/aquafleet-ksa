@@ -438,15 +438,15 @@ export default function DashboardClient({
         this space. This div's only jobs are to reserve that room and to be
         the thing SearchDock measures.
 
-        Height: 48vh. It was 62vh, which technically left the content
-        "partially visible" but in practice showed a sliver at the very
-        bottom edge — Turki's screenshot had nothing readable under the bar.
-        48vh still reads as a centred hero while leaving roughly a third of
-        the viewport for real KPIs and charts underneath.
+        Height: 34vh — third setting, each one from a real observation.
+        62vh showed only a sliver of content; 48vh read better but still left
+        a large dead gap between the bar and the first KPI row. 34vh puts the
+        charts just under the bar with breathing room and no void, which is
+        what Turki asked for, while the bar still sits clear of the title.
       */}
       <div
         ref={heroRef}
-        className={cn("relative", reducedMotion ? "h-0" : "h-[48vh]")}
+        className={cn("relative", reducedMotion ? "h-0" : "h-[34vh]")}
         aria-hidden
       >
         {/* A soft brand glow sitting behind the resting search bar, fading
