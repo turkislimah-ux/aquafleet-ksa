@@ -98,7 +98,13 @@ export default function GlobalSearch({
   searchRecords?: (query: string) => Promise<SearchHit[]>;
 }) {
   const router = useRouter();
-  const panelId = useId();
+  // React's useId() returns ids wrapped in colons (":r0:"). Those are legal
+  // HTML ids and getElementById handles them, but they are INVALID in a CSS
+  // selector — querySelector("#:r0:") throws. Since these ids are now
+  // referenced by aria-controls / aria-activedescendant / aria-labelledby,
+  // anything that later tries to select one (a test, a scroll helper, a
+  // devtools query) would break on the punctuation. Strip it once, here.
+  const panelId = `gs-${useId().replace(/:/g, "")}`;
 
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("search");
@@ -258,9 +264,53 @@ export default function GlobalSearch({
 
   const flat = useMemo(() => groups.flatMap(([, hits]) => hits), [groups]);
 
+  const showRecents = query.trim().length < SEARCH_MIN_CHARS;
+
+  // ---- the option model behind aria-activedescendant ----------------------
+  // ONE list of navigable options, whichever content the panel is showing.
+  // Before this, recent searches were clickable but NOT arrow-reachable,
+  // while results were both — so "the thing the arrow keys move through" and
+  // "the thing that looks like a list" were two different sets. Unifying them
+  // is what makes a single listbox honest: every row you can see, you can
+  // reach, and every row you can reach has a real option id to point at.
+  type NavOption =
+    | { kind: "hit"; id: string; hit: SearchHit }
+    | { kind: "recent"; id: string; value: string };
+
+  const navOptions = useMemo<NavOption[]>(() => {
+    if (showRecents) {
+      return recents.map((value, i) => ({
+        kind: "recent" as const,
+        id: `${panelId}-opt-r${i}`,
+        value,
+      }));
+    }
+    return flat.map((hit, i) => ({
+      kind: "hit" as const,
+      id: `${panelId}-opt-h${i}`,
+      hit,
+    }));
+  }, [showRecents, recents, flat, panelId]);
+
+  const listboxId = `${panelId}-listbox`;
+  const activeOption = navOptions[active];
+  // Only advertise an active descendant when the listbox is actually on
+  // screen — pointing at an id that is not rendered is worse than pointing
+  // at nothing, because AT will try to resolve it.
+  const activeOptionId =
+    open && mode === "search" && activeOption ? activeOption.id : undefined;
+
   useEffect(() => {
     setActive(0);
   }, [query, mode]);
+
+  // Keep the active option in view. Without this, arrowing past the visible
+  // window moved the selection somewhere the user could not see — the
+  // selection was correct and invisible, which reads as the keys not working.
+  useEffect(() => {
+    if (!activeOptionId) return;
+    document.getElementById(activeOptionId)?.scrollIntoView({ block: "nearest" });
+  }, [activeOptionId]);
 
   // ---- open / close -------------------------------------------------------
   const close = useCallback(() => {
@@ -311,23 +361,34 @@ export default function GlobalSearch({
       return;
     }
     if (mode !== "search") return;
+
+    const n = navOptions.length;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setOpen(true);
-      setActive((i) => (flat.length ? (i + 1) % flat.length : 0));
+      setActive((i) => (n ? (i + 1) % n : 0));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActive((i) => (flat.length ? (i - 1 + flat.length) % flat.length : 0));
+      setActive((i) => (n ? (i - 1 + n) % n : 0));
+    } else if (e.key === "Home" && n) {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === "End" && n) {
+      e.preventDefault();
+      setActive(n - 1);
     } else if (e.key === "Enter") {
-      const hit = flat[active];
-      if (hit) {
-        e.preventDefault();
-        go(hit);
+      const opt = navOptions[active];
+      if (!opt) return;
+      e.preventDefault();
+      if (opt.kind === "hit") go(opt.hit);
+      else {
+        // A recent search is a query, not a destination: choosing it fills
+        // the box and re-runs the search rather than navigating anywhere.
+        setQuery(opt.value);
+        inputRef.current?.focus();
       }
     }
   };
-
-  const showRecents = query.trim().length < SEARCH_MIN_CHARS;
 
   return (
     <div
@@ -362,8 +423,18 @@ export default function GlobalSearch({
           // the-panel handling.
           type="text"
           role="combobox"
-          aria-expanded={open}
-          aria-controls={panelId}
+          // The full ARIA 1.2 combobox contract. Previously this element
+          // claimed role="combobox" while controlling a plain <div> that
+          // contained no options at all, and the rows carried aria-selected
+          // on a role that has no such state — so keyboard navigation was
+          // visible on screen and completely invisible to assistive tech.
+          //
+          // aria-expanded tracks the LISTBOX, not merely the panel: in Ask
+          // mode the panel is open but there is no listbox to expand into.
+          aria-expanded={open && mode === "search"}
+          aria-controls={open && mode === "search" ? listboxId : undefined}
+          aria-activedescendant={activeOptionId}
+          aria-autocomplete="list"
           aria-label={t("search.ariaLabel", lang)}
           placeholder={t("search.placeholder", lang)}
           value={query}
@@ -489,6 +560,10 @@ export default function GlobalSearch({
                 <RecentList
                   lang={lang}
                   recents={recents}
+                  listboxId={listboxId}
+                  optionIds={navOptions.map((o) => o.id)}
+                  activeIndex={active}
+                  onHover={setActive}
                   onPick={(r) => {
                     setQuery(r);
                     inputRef.current?.focus();
@@ -497,9 +572,24 @@ export default function GlobalSearch({
                 />
               ) : (
                 <>
-                  {groups.map(([group, hits]) => (
-                    <div key={group}>
-                      <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider muted">
+                  {/* The listbox wraps ONLY options and groups. The loading
+                      line, the empty state and the recents header/footer are
+                      deliberately outside it — a listbox whose children are
+                      not options is invalid, and AT counts those strays as
+                      items. */}
+                  <div id={listboxId} role="listbox" aria-label={t("search.ariaLabel", lang)}>
+                  {groups.map(([group, hits]) => {
+                    // role="group" is a valid child of a listbox and is what
+                    // lets AT announce "Trucks, 2 items" instead of reading
+                    // one undifferentiated run of options. The heading is
+                    // referenced rather than duplicated into a label.
+                    const headingId = `${panelId}-grp-${group}`;
+                    return (
+                    <div key={group} role="group" aria-labelledby={headingId}>
+                      <div
+                        id={headingId}
+                        className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider muted"
+                      >
                         {t(`search.g_${group}`, lang)}
                       </div>
                       {hits.map((hit) => {
@@ -509,6 +599,7 @@ export default function GlobalSearch({
                             key={hit.id}
                             hit={hit}
                             lang={lang}
+                            optionId={`${panelId}-opt-h${idx}`}
                             selected={idx === active}
                             onHover={() => setActive(idx)}
                             onSelect={() => go(hit)}
@@ -516,7 +607,9 @@ export default function GlobalSearch({
                         );
                       })}
                     </div>
-                  ))}
+                    );
+                  })}
+                  </div>
 
                   {loadingRecords && (
                     <div className="px-3 py-3 text-xs muted">
@@ -607,13 +700,15 @@ function ModeBtn({
 const INACTIVE_BADGES = new Set(["terminated", "archived", "inactive", "void"]);
 
 function ResultRow({
-  hit, selected, onHover, onSelect, lang,
+  hit, selected, onHover, onSelect, lang, optionId,
 }: {
   hit: SearchHit;
   selected: boolean;
   onHover: () => void;
   onSelect: () => void;
   lang: Lang;
+  /** Target of the input's aria-activedescendant. */
+  optionId: string;
 }) {
   const Icon = hit.icon ?? ENTITY_ICON[hit.group];
   const inactive = hit.badge ? INACTIVE_BADGES.has(hit.badge) : false;
@@ -624,6 +719,13 @@ function ResultRow({
   return (
     <button
       type="button"
+      id={optionId}
+      // A <button> carrying role="option": keeps native click and pointer
+      // semantics, exposes the correct role to AT. tabIndex -1 is required —
+      // in an activedescendant listbox, focus stays on the input, and leaving
+      // these natively focusable would put every result in the Tab order.
+      role="option"
+      tabIndex={-1}
       onMouseEnter={onHover}
       onClick={onSelect}
       aria-selected={selected}
@@ -678,12 +780,17 @@ function ResultRow({
 }
 
 function RecentList({
-  lang, recents, onPick, onClear,
+  lang, recents, onPick, onClear, listboxId, optionIds, activeIndex, onHover,
 }: {
   lang: Lang;
   recents: string[];
   onPick: (q: string) => void;
   onClear: () => void;
+  listboxId: string;
+  /** One id per recent, in order — the activedescendant targets. */
+  optionIds: string[];
+  activeIndex: number;
+  onHover: (index: number) => void;
 }) {
   return (
     <div className="py-1">
@@ -705,18 +812,35 @@ function RecentList({
       {recents.length === 0 ? (
         <div className="px-3 py-4 text-sm muted">{t("search.noRecent", lang)}</div>
       ) : (
-        recents.map((r) => (
-          <button
-            key={r}
-            type="button"
-            onClick={() => onPick(r)}
-            className="focus-ring flex w-full items-center gap-3 px-3 py-2 text-start transition-colors [touch-action:manipulation] hover:bg-black/5 dark:hover:bg-white/5"
-          >
-            <Clock className="h-4 w-4 shrink-0 muted" />
-            <span className="min-w-0 flex-1 truncate text-sm">{r}</span>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0 muted" />
-          </button>
-        ))
+        // Recents are real options in the same listbox the results use, so
+        // the arrow keys reach them. Previously they were clickable only —
+        // visible rows the keyboard could not get to.
+        <div id={listboxId} role="listbox" aria-label={t("search.recent", lang)}>
+          {recents.map((r, i) => (
+            <button
+              key={r}
+              id={optionIds[i]}
+              role="option"
+              tabIndex={-1}
+              aria-selected={i === activeIndex}
+              type="button"
+              onMouseEnter={() => onHover(i)}
+              onClick={() => onPick(r)}
+              className={cn(
+                "focus-ring relative flex w-full items-center gap-3 px-3 py-2 text-start",
+                "transition-colors [touch-action:manipulation]",
+                "before:absolute before:inset-y-0 before:start-0 before:w-0.5 before:rounded-full",
+                i === activeIndex
+                  ? "bg-brand-500/10 before:bg-brand-500"
+                  : "before:bg-transparent hover:bg-black/5 dark:hover:bg-white/5"
+              )}
+            >
+              <Clock className="h-4 w-4 shrink-0 muted" aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-sm">{r}</span>
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 muted" aria-hidden />
+            </button>
+          ))}
+        </div>
       )}
 
       <div
