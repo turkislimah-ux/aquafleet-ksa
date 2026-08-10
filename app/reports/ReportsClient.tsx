@@ -15,6 +15,7 @@
 // back down again: the header is the intended home.
 
 import { useMemo, useState } from "react";
+import { useTabParam } from "@/lib/useTabParam";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,8 @@ import {
 import OverviewTab from "./OverviewTab";
 import StatementsTab from "./StatementsTab";
 import ExpensesModal, { type ExpenseRow } from "./ExpensesModal";
+
+const REPORT_TABS = ["overview", "statements"] as const;
 
 type Tab = "overview" | "statements";
 
@@ -70,7 +73,8 @@ type ReportsClientProps = {
 
 export default function ReportsClient(props: ReportsClientProps) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("overview");
+  // Tab lives in the URL so global search can deep-link a sub-page.
+  const [tab, setTab] = useTabParam<Tab>(REPORT_TABS, "overview");
   const [expensesOpen, setExpensesOpen] = useState(false);
 
   const months = useMemo(() => monthsDesc(props.pnl), [props.pnl]);

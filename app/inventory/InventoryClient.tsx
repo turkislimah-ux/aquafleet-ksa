@@ -186,6 +186,7 @@
 //     component so the new inline trigger works; its fields are untouched.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTabParam } from "@/lib/useTabParam";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -215,6 +216,9 @@ import { cn, formatSar, formatNum } from "@/lib/utils";
 // VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
 // NOT lib/vat.ts (see lib/inventory-vat.ts's own header).
 import { lineVat, calculateInventoryVatDocument, formatSarVat } from "@/lib/inventory-vat";
+
+type InvTab = "inventory" | "approvals" | "analysis";
+const INVENTORY_TABS = ["inventory", "approvals", "analysis"] as const;
 import type {
   Warehouse,
   Part,
@@ -352,7 +356,8 @@ export default function InventoryClient({
   // pages-2.js ~3012-3016). Header action buttons (New PO/Add Parts) and
   // the ProcStrip/search+filter/parts table only ever show on "inventory" —
   // matches preview's own headerActions gate exactly.
-  const [invTab, setInvTab] = useState<"inventory" | "approvals" | "analysis">("inventory");
+  // Tab lives in the URL so global search can deep-link a sub-page.
+  const [invTab, setInvTab] = useTabParam<InvTab>(INVENTORY_TABS, "inventory");
   // Per-warehouse scoping (Turki's explicit call, deviates from preview —
   // preview's own per-warehouse control is a dropdown with an "All
   // warehouses" option; this app has no combined view at all, one tab per

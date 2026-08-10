@@ -10,7 +10,7 @@
 // / _widgetHtml). Datasets are precomputed server-side (page.tsx) and rendered
 // here; datasets whose tables don't exist yet carry noData → "No data yet".
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
@@ -21,7 +21,8 @@ import {
   useSortable, sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PageHeader, Stat, Btn, Section, StatusPill } from "@/components/ui";
+import { Stat, Btn, Section, StatusPill } from "@/components/ui";
+import { useHeroDock, useSearchDock } from "@/components/SearchDock";
 import { PieChart, AreaChart, BarChart } from "@/components/Charts";
 import { Activity, Plus, TrendingUp, TrendingDown, Droplets, Zap, X, GripVertical } from "lucide-react";
 import { formatSar, cn } from "@/lib/utils";
@@ -138,6 +139,37 @@ const PERIOD_LABEL: Record<PeriodKey, string> = { daily: "Daily", weekly: "Weekl
 // chart card plots at this granularity. They intentionally differ per the spec.
 const PERIOD_SUB: Record<PeriodKey, string> = { daily: "today", weekly: "last 7 days", monthly: "last 30 days" };
 const CHART_SPAN: Record<PeriodKey, string> = { daily: "last 30 days", weekly: "last 12 weeks", monthly: "last 12 months" };
+
+/**
+ * Dashboard-intro reveal band.
+ *
+ * NO OPACITY FADE — and that is the second version of this function, on
+ * Turki's correction.
+ *
+ * The first version faded each band in on its own slice of the dock travel
+ * (period picker from 15%, KPIs from 35%). It read as broken: at rest both
+ * bands were fully transparent, so the content "partially visible below the
+ * bar" was a tall EMPTY GAP with a chart stranded underneath it, rather than
+ * a glimpse of the dashboard. Hiding the first things you are supposed to
+ * glimpse defeats the point of the glimpse.
+ *
+ * Now the bands are always visible and the BOTTOM FADE (see the gradient in
+ * the component) is the only veil — content is legible, softens into the
+ * page edge, and clears as you scroll. That is the behaviour Turki asked
+ * for, and it needs exactly one mechanism instead of two fighting.
+ *
+ * What survives here is a small upward settle, still keyed to the same
+ * --dock-progress as the bar's travel so the two can never disagree on a
+ * fast scroll. `start` is retained in the signature to keep the call sites
+ * expressive about ordering, and is applied as a tiny stagger on the lift
+ * distance only.
+ */
+function revealStyle(start: number): React.CSSProperties {
+  const lift = 8 + start * 16; // later bands settle from slightly further
+  return {
+    transform: `translateY(calc((1 - var(--dock-progress, 1)) * ${lift.toFixed(0)}px))`,
+  };
+}
 
 // _widgetHtml() port: renders a widget card (stat grid / table / chart). noData
 // datasets show "No data yet" regardless of display, until their pages land.
@@ -341,23 +373,111 @@ export default function DashboardClient({
     });
   }
 
+  // ---- Dashboard intro (Polish Batch 1 item 4) ---------------------------
+  // The hero spacer is registered with SearchDock, which measures it and
+  // publishes --dock-progress / --dock-distance on <html>. Registration is
+  // scoped to this component's lifetime, so navigating away re-pins the
+  // search bar docked with no per-page special-casing anywhere.
+  const heroRef = useRef<HTMLDivElement>(null);
+  const { reducedMotion } = useSearchDock();
+  useHeroDock(heroRef);
+
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Dashboard"
-        // Q6 deliberate deviation: real op is Riyadh / 3 stations, live truck count.
-        subtitle={`Operations overview · ${fleet.total} trucks · Riyadh · 3 stations`}
-        actions={
-          <>
+      {/*
+        DASHBOARD INTRO (Polish Batch 1 item 4).
+
+        The title and description are STICKY, not part of the scroll — they
+        "stay fixed in place on top throughout" per the spec. They sit at
+        top-14, directly under the 56px app header.
+
+        The separator underneath them is the spec's "separator bar returns
+        under the title as the bar docks": its opacity is the dock progress,
+        so the rule draws itself in exactly as the search bar arrives. It is
+        a border on a pseudo-free wrapper rather than a <hr>, so it cannot
+        add layout height as it fades.
+
+        The negative horizontal margins + matching padding let the sticky
+        background span the full content width; without them, content would
+        scroll visibly through the gutters of main's own p-6.
+      */}
+      <div
+        className="sticky top-14 z-20 -mx-4 md:-mx-6 px-4 md:px-6 pt-4 md:pt-6 -mt-4 md:-mt-6"
+        style={{ background: "rgb(var(--bg))" }}
+      >
+        <div className="flex items-start justify-between gap-4 flex-wrap pb-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+            {/* Q6 deliberate deviation: real op is Riyadh / 3 stations, live truck count. */}
+            <p className="muted text-sm mt-1">
+              {`Operations overview · ${fleet.total} trucks · Riyadh · 3 stations`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
             <Btn variant="outline">
               <Activity className="h-4 w-4" /> Live IoT
             </Btn>
             <Btn variant="primary" onClick={() => setModalOpen(true)}>
               <Plus className="h-4 w-4" /> Add summary
             </Btn>
-          </>
-        }
+          </div>
+        </div>
+        <div
+          className="h-px w-full"
+          style={{
+            background: "rgb(var(--border))",
+            opacity: "var(--dock-progress, 1)",
+          }}
+        />
+      </div>
+
+      {/*
+        The hero. An EMPTY spacer on purpose — the search bar itself is the
+        single instance mounted in the header (see components/SearchDock.tsx
+        for why there is only ever one), translated down into the middle of
+        this space. This div's only jobs are to reserve that room and to be
+        the thing SearchDock measures.
+
+        Height: 48vh. It was 62vh, which technically left the content
+        "partially visible" but in practice showed a sliver at the very
+        bottom edge — Turki's screenshot had nothing readable under the bar.
+        48vh still reads as a centred hero while leaving roughly a third of
+        the viewport for real KPIs and charts underneath.
+      */}
+      <div
+        ref={heroRef}
+        className={reducedMotion ? "h-0" : "h-[48vh]"}
+        aria-hidden
       />
+
+      {/*
+        The bottom fade. The peeking content is a TEASE, not a reading
+        surface — so it dissolves into the page background at the bottom
+        edge, and the fade lifts as the bar docks (opacity is 1 - progress,
+        the exact inverse of the dock). By the time the bar is home the
+        content is fully legible with nothing over it.
+
+        Fixed to the viewport, but inset to the CONTENT area: `start-0
+        md:start-64` clears the 256px sidebar, and the logical `start`/`end`
+        properties mean it mirrors correctly under RTL instead of fading the
+        wrong edge. Below the header (z-30) and the sticky title (z-20),
+        above page content. pointer-events-none throughout, so it never
+        intercepts a click on a chart it is sitting over.
+
+        Suppressed entirely under reduced motion, where there is no dock
+        travel for it to track.
+      */}
+      {!reducedMotion && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed bottom-0 start-0 end-0 md:start-64 z-10 h-44"
+          style={{
+            opacity: "calc(1 - var(--dock-progress, 1))",
+            background:
+              "linear-gradient(to top, rgb(var(--bg)) 12%, rgb(var(--bg) / 0.82) 45%, rgb(var(--bg) / 0) 100%)",
+          }}
+        />
+      )}
 
       {errorMsg && (
         <p className="text-sm text-rose-600 dark:text-rose-400">
@@ -365,8 +485,11 @@ export default function DashboardClient({
         </p>
       )}
 
-      {/* Global period selector — controls every time-based tile & chart. */}
-      <div className="flex items-center gap-2">
+      {/* Global period selector — controls every time-based tile & chart.
+          First reveal band: fades in from ~15% of the dock travel. Opacity
+          is left to clamp itself (CSS clamps out-of-range opacity to 0..1),
+          which is why there is no clamp() wrapper here. */}
+      <div className="flex items-center gap-2" style={revealStyle(0.15)}>
         <span className="text-xs muted">Period</span>
         <div className="inline-flex rounded-lg border p-0.5" style={{ borderColor: "rgb(var(--border))" }}>
           {PERIODS.map((p) => (
@@ -409,7 +532,10 @@ export default function DashboardClient({
       {/* 10 KPI tiles in one 5-col grid (2 rows). REAL: Active Trucks, Avg Fleet
           Health, Trips Today, Drivers On Duty, Revenue (30d). PLACEHOLDER ("—"):
           Utilization, On-Time, Open Work Orders, Critical Alerts, Fuel Cost. */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div
+        className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3"
+        style={revealStyle(0.35)}
+      >
         <Stat label="Active Trucks" value={`${fleet.active}/${fleet.total}`} sub={`${fleet.maint} Maintenance`} tone="ok" />
         <Stat label="Utilization" value="—" sub="30-day avg" tone="info" />
         <Stat label="Avg Fleet Health" value={fleet.avgHealth} sub="out of 100" tone={fleet.avgHealth > 75 ? "ok" : "warn"} />

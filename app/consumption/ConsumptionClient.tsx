@@ -12,6 +12,7 @@
 // columns.
 
 import { Fragment, useMemo, useState } from "react";
+import { useTabParam } from "@/lib/useTabParam";
 import { useRouter } from "next/navigation";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, Printer, Undo2, Ban,
@@ -37,6 +38,8 @@ import {
 import ApprovalsTab from "./ApprovalsTab";
 import PartsUsageTab from "./PartsUsageTab";
 import type { WoLedgerRow } from "@/lib/parts-usage";
+
+const CONSUMPTION_TABS = ["usage", "permits", "approvals"] as const;
 
 export type WarehouseLite = { id: string; name: string };
 export type NamedLite = { id: string; name: string };
@@ -101,7 +104,8 @@ export default function ConsumptionClient({
   error: string | null;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("permits");
+  // Tab lives in the URL so global search can deep-link a sub-page.
+  const [tab, setTab] = useTabParam<Tab>(CONSUMPTION_TABS, "permits");
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "exited" | "voided" | "overdue">("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<string | null>(null);

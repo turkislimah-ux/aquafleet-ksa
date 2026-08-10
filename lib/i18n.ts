@@ -223,6 +223,61 @@ export const dict = {
     uploadInvoice: { en: "Upload invoice", ar: "رفع فاتورة" },
     changeInvoice: { en: "Change file", ar: "تغيير الملف" },
   },
+  // Global search (Polish Batch 1). `common.search` above stays as-is — it
+  // is the generic per-page filter placeholder used by Fleet/Inventory/etc.
+  // and is a different control from the header's global bar.
+  search: {
+    placeholder: {
+      en: "Search trucks, drivers, invoices, parts…",
+      ar: "ابحث في الشاحنات والسائقين والفواتير وقطع الغيار...",
+    },
+    ariaLabel: { en: "Search everything", ar: "البحث في كل شيء" },
+    modeSearch: { en: "Search", ar: "بحث" },
+    modeAsk: { en: "Ask", ar: "اسأل" },
+    comingSoon: { en: "Coming soon", ar: "قريباً" },
+    recent: { en: "Recent searches", ar: "عمليات البحث الأخيرة" },
+    clearRecent: { en: "Clear", ar: "مسح" },
+    noRecent: { en: "No recent searches yet.", ar: "لا توجد عمليات بحث سابقة." },
+    recentAreLocal: {
+      en: "Recent searches are kept in this browser only.",
+      ar: "عمليات البحث الأخيرة محفوظة في هذا المتصفح فقط.",
+    },
+    typeToSearch: { en: "Type at least 2 characters.", ar: "اكتب حرفين على الأقل." },
+    searchedAcross: {
+      en: "Searched pages, trucks, drivers, staff, customers, invoices, trips, parts, orders, permits and documents.",
+      ar: "تم البحث في الصفحات والشاحنات والسائقين والموظفين والعملاء والفواتير والرحلات وقطع الغيار والطلبات والتصاريح والوثائق.",
+    },
+    searching: { en: "Searching…", ar: "جارٍ البحث..." },
+    pages: { en: "Pages", ar: "الصفحات" },
+    askTitle: { en: "Ask about your operation", ar: "اسأل عن عملياتك" },
+    askBody: {
+      en: "A chat assistant that answers from this app's own data will live here. It is not built yet — nothing you type is sent anywhere, and no answer is generated.",
+      ar: "سيكون هنا مساعد محادثة يجيب من بيانات هذا التطبيق. لم يُبنَ بعد — لا يُرسل ما تكتبه إلى أي مكان، ولا تُولَّد أي إجابة.",
+    },
+    askPlaceholder: {
+      en: "Chat is not available yet",
+      ar: "المحادثة غير متاحة بعد",
+    },
+    // Entity group headings.
+    g_page: { en: "Pages", ar: "الصفحات" },
+    g_truck: { en: "Trucks", ar: "الشاحنات" },
+    g_driver: { en: "Drivers", ar: "السائقون" },
+    g_staff: { en: "Staff", ar: "الموظفون" },
+    g_customer: { en: "Customers", ar: "العملاء" },
+    g_project: { en: "Projects", ar: "المشاريع" },
+    g_invoice: { en: "Invoices", ar: "الفواتير" },
+    g_trip: { en: "Trips", ar: "الرحلات" },
+    g_part: { en: "Parts", ar: "قطع الغيار" },
+    g_work_order: { en: "Work Orders", ar: "أوامر العمل" },
+    g_outsourced_job: { en: "Outsourced Jobs", ar: "الأعمال الخارجية" },
+    g_exit_permit: { en: "Exit Permits", ar: "تصاريح الخروج" },
+    g_purchase_order: { en: "Purchase Orders", ar: "أوامر الشراء" },
+    g_archive_document: { en: "Archive Documents", ar: "وثائق الأرشيف" },
+    g_expense: { en: "Expenses", ar: "المصروفات" },
+    g_supplier: { en: "Suppliers", ar: "الموردون" },
+    g_warehouse: { en: "Warehouses", ar: "المستودعات" },
+    g_repairer: { en: "Repairers", ar: "الورش" },
+  },
 } as const;
 
 export function t(path: string, lang: Lang): string {

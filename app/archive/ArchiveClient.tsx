@@ -24,6 +24,7 @@
 // popup they reach through callbacks.
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { useTabParam } from "@/lib/useTabParam";
 import { useRouter } from "next/navigation";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw,
@@ -89,6 +90,8 @@ import InvoiceDetailModal from "../trips/InvoiceDetailModal";
 // what makes "same data, same view button, same KPIs" structural instead of
 // a lookalike that drifts the first time that tab changes.
 import HistoryTab from "../drivers/HistoryTab";
+
+const ARCHIVE_PAGE_TABS = ["company", "staff", "truck", "customer", "ledger"] as const;
 
 // PAGE tabs, which are NOT the same set as ArchiveTab. ArchiveTab is the
 // archive_document_groups.tab COLUMN — a DB-constrained value
@@ -169,7 +172,8 @@ export default function ArchiveClient({
   error: string | null;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<PageTab>("company");
+  // Tab lives in the URL so global search can deep-link a sub-page.
+  const [tab, setTab] = useTabParam<PageTab>(ARCHIVE_PAGE_TABS, "company");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<ArchiveDocumentGroup | null>(null);

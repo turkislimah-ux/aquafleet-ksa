@@ -13,6 +13,7 @@
 // and an Edit button in the Driver Detail modal — drivers must be manageable.
 
 import { useMemo, useState } from "react";
+import { useTabParam } from "@/lib/useTabParam";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Pencil, Eye, Star, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon, AlertTriangle, Trash2 } from "lucide-react";
@@ -60,6 +61,8 @@ import PersonIdLink from "./PersonIdLink";
 import LinkedIdField from "@/components/LinkedIdField";
 import StaffTab from "./StaffTab";
 import type { CommPayout } from "@/lib/commission-rows";
+
+const DRIVER_TABS = ["drivers", "commissions", "history", "staff"] as const;
 
 export type TruckLite = {
   id: string;
@@ -165,7 +168,8 @@ export default function DriversClient({
   error: string | null;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("drivers");
+  // Tab lives in the URL so global search can deep-link a sub-page.
+  const [tab, setTab] = useTabParam<Tab>(DRIVER_TABS, "drivers");
   const [detail, setDetail] = useState<Driver | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Driver | null>(null);
