@@ -387,24 +387,24 @@ export default function DashboardClient({
       {/*
         DASHBOARD INTRO (Polish Batch 1 item 4).
 
-        The title and description are STICKY, not part of the scroll — they
-        "stay fixed in place on top throughout" per the spec. They sit at
-        top-14, directly under the 56px app header.
+        THE TITLE SCROLLS. It used to be `sticky top-14`, because the original
+        spec said the title and description "stay fixed in place on top
+        throughout". Turki reversed that after seeing it: the app header is
+        already pinned, and a second pinned bar directly under it read as two
+        competing headers. This is a deliberate reversal of that line of the
+        spec, not drift — do not re-pin it.
 
-        The separator underneath them is the spec's "separator bar returns
-        under the title as the bar docks": its opacity is the dock progress,
-        so the rule draws itself in exactly as the search bar arrives. It is
-        a border on a pseudo-free wrapper rather than a <hr>, so it cannot
-        add layout height as it fades.
+        Everything the sticky version needed is gone with it: the background
+        fill, the z-index, and the negative-margin/padding pair that existed
+        only so the pinned bar's background could span the gutters of main's
+        own p-6. That pair cancelled out, so removing it changes no spacing.
 
-        The negative horizontal margins + matching padding let the sticky
-        background span the full content width; without them, content would
-        scroll visibly through the gutters of main's own p-6.
+        The separator underneath survives unchanged — it is still the spec's
+        "separator bar returns under the title as the bar docks", with its
+        opacity driven by dock progress, so the rule still draws itself in as
+        the search bar arrives. It simply scrolls away with the title now.
       */}
-      <div
-        className="sticky top-14 z-20 -mx-4 md:-mx-6 px-4 md:px-6 pt-4 md:pt-6 -mt-4 md:-mt-6"
-        style={{ background: "rgb(var(--bg))" }}
-      >
+      <div>
         <div className="flex items-start justify-between gap-4 flex-wrap pb-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
@@ -476,9 +476,10 @@ export default function DashboardClient({
         Fixed to the viewport, but inset to the CONTENT area: `start-0
         md:start-64` clears the 256px sidebar, and the logical `start`/`end`
         properties mean it mirrors correctly under RTL instead of fading the
-        wrong edge. Below the header (z-30) and the sticky title (z-20),
-        above page content. pointer-events-none throughout, so it never
-        intercepts a click on a chart it is sitting over.
+        wrong edge. Below the app header (z-30), above page content. (It used
+        to also sit below a sticky title at z-20; the title scrolls now, so
+        there is nothing between the two layers any more.) pointer-events-none
+        throughout, so it never intercepts a click on a chart it sits over.
 
         Suppressed entirely under reduced motion, where there is no dock
         travel for it to track.
