@@ -14,6 +14,7 @@
 
 import { useMemo, useState } from "react";
 import { useTabParam } from "@/lib/useTabParam";
+import { useRecordFocus } from "@/lib/useRecordFocus";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Pencil, Eye, Star, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon, AlertTriangle, Trash2 } from "lucide-react";
@@ -171,6 +172,13 @@ export default function DriversClient({
   // Tab lives in the URL so global search can deep-link a sub-page.
   const [tab, setTab] = useTabParam<Tab>(DRIVER_TABS, "drivers");
   const [detail, setDetail] = useState<Driver | null>(null);
+
+  // Global-search record focus (?focus=driver:<id>). Opens the driver's own
+  // detail modal — the same one a row click opens, not a parallel view.
+  useRecordFocus(["driver"], (_e, id) => {
+    const d = drivers.find((x) => x.id === id);
+    if (d) setDetail(d);
+  });
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Driver | null>(null);
   const [formError, setFormError] = useState<string | null>(null);

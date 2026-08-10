@@ -13,6 +13,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 import { useTabParam } from "@/lib/useTabParam";
+import { useRecordFocus } from "@/lib/useRecordFocus";
 import { useRouter } from "next/navigation";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, Printer, Undo2, Ban,
@@ -108,6 +109,15 @@ export default function ConsumptionClient({
   const [tab, setTab] = useTabParam<Tab>(CONSUMPTION_TABS, "permits");
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "exited" | "voided" | "overdue">("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  // Global-search record focus (?focus=exit_permit:<id>). A permit has no
+  // detail modal — its row expansion IS the detail view — so arriving means
+  // expanding that row and clearing any status filter that would hide it.
+  useRecordFocus(["exit_permit"], (_e, id) => {
+    if (!permits.some((x) => x.id === id)) return;
+    setStatusFilter("all");
+    setExpanded((prev) => new Set(prev).add(id));
+  });
   const [actionError, setActionError] = useState<string | null>(null);
 
   // THE FORM'S OPEN PERMIT.

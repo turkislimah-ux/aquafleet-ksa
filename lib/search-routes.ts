@@ -97,19 +97,42 @@ const ROUTES: Record<SearchEntity, RouteSpec> = {
       `/trips?tab=projects&${TRIP_HIGHLIGHT_PARAM}=${encodeURIComponent(id)}`,
   },
 
-  // --- page/tab precision until phase C wires each ?focus= consumer ---
-  driver: { base: "/drivers", precision: "page" },
-  staff: { base: "/drivers?tab=staff", precision: "tab" },
+  // --- record precision via ?focus=, wired in phase C -------------------
+  // Each of these has a real opener on its page, called by useRecordFocus:
+  //   driver / staff     -> their own detail modal (setDetail)
+  //   part               -> the part drawer, after switching to its warehouse
+  //   purchase_order     -> the PO detail modal
+  //   warehouse          -> its per-warehouse tab, which IS the warehouse view
+  //   archive_document   -> the document detail modal
+  //   exit_permit        -> its row expansion, which IS the permit detail
+  driver: { base: "/drivers", precision: "record" },
+  staff: { base: "/drivers?tab=staff", precision: "record" },
+  part: { base: "/inventory", precision: "record" },
+  purchase_order: { base: "/inventory", precision: "record" },
+  warehouse: { base: "/inventory", precision: "record" },
+  archive_document: { base: "/archive", precision: "record" },
+  exit_permit: { base: "/consumption?tab=permits", precision: "record" },
+
+  // --- still tab/page precision, each for a concrete reason -------------
+  // These are NOT oversights and NOT a "todo later" left to rot. Each one
+  // lacks something specific, and claiming record precision without it would
+  // reintroduce the navigates-but-does-not-arrive link this file exists to
+  // prevent. They still land on the right page and tab, and their rows say
+  // "opens page" so the click's outcome matches its promise.
+  //
+  //   customer / project — Trips has no per-record modal reachable from
+  //     outside; the openers are bound to row state inside the tab.
+  //   invoice — the blocker is data, not UI: InvoicesModal is keyed by
+  //     CUSTOMER, and search_everything returns only the invoice id. Opening
+  //     one invoice needs its customer_id, which means amending 0102's
+  //     invoice block — a migration, not an app edit.
+  //   expense — the Reports expenses modal is a list with no per-row target.
+  //   supplier / repairer — neither has a detail view anywhere in the app.
   customer: { base: "/trips?tab=customers", precision: "tab" },
   project: { base: "/trips?tab=projects", precision: "tab" },
   invoice: { base: "/trips?tab=finance", precision: "tab" },
-  part: { base: "/inventory", precision: "page" },
-  purchase_order: { base: "/inventory", precision: "page" },
-  supplier: { base: "/inventory", precision: "page" },
-  warehouse: { base: "/inventory", precision: "page" },
-  exit_permit: { base: "/consumption?tab=permits", precision: "tab" },
-  archive_document: { base: "/archive", precision: "page" },
   expense: { base: "/reports?tab=statements", precision: "tab" },
+  supplier: { base: "/inventory", precision: "page" },
   repairer: { base: "/maintenance", precision: "page" },
 };
 

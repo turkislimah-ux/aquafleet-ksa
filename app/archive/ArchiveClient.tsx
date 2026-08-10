@@ -25,6 +25,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useTabParam } from "@/lib/useTabParam";
+import { useRecordFocus } from "@/lib/useRecordFocus";
 import { useRouter } from "next/navigation";
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw,
@@ -182,6 +183,13 @@ export default function ArchiveClient({
   const [renewingDoc, setRenewingDoc] = useState<ArchiveDocument | null>(null);
   const [historyDocId, setHistoryDocId] = useState<string | null>(null);
   const [detailDocId, setDetailDocId] = useState<string | null>(null);
+
+  // Global-search record focus (?focus=archive_document:<id>). Opens the
+  // document's own detail modal. Guarded on the document actually being in
+  // the loaded set, so a stale link opens nothing rather than an empty modal.
+  useRecordFocus(["archive_document"], (_e, id) => {
+    if (documents.some((d) => d.id === id)) setDetailDocId(id);
+  });
   // Lifted OUT of ArchiveStaffTab on purpose: the page-header "Create Group"
   // button needs to know which sub-tab you're standing in, because that is
   // what decides the new group's subject_kind (0086 refuses 'none' here).

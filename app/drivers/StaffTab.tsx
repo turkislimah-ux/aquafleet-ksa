@@ -23,6 +23,7 @@ import MechanicCommissionsSection from "./MechanicCommissionsSection";
 import OperationStationField from "@/components/OperationStationField";
 import PersonIdLink from "./PersonIdLink";
 import LinkedIdField from "@/components/LinkedIdField";
+import { useRecordFocus } from "@/lib/useRecordFocus";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -59,6 +60,14 @@ export default function StaffTab({
 }) {
   const router = useRouter();
   const [detail, setDetail] = useState<Staff | null>(null);
+
+  // Global-search record focus (?focus=staff:<id>). Lives here rather than
+  // in DriversClient because this component owns the staff detail modal —
+  // and the href already carries ?tab=staff, so this tab is mounted.
+  useRecordFocus(["staff"], (_e, id) => {
+    const st = staff.find((x) => x.id === id);
+    if (st) setDetail(st);
+  });
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Staff | null>(null);
   const [saving, setSaving] = useState(false);

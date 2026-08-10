@@ -187,6 +187,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTabParam } from "@/lib/useTabParam";
+import { useRecordFocus } from "@/lib/useRecordFocus";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -388,6 +389,29 @@ export default function InventoryClient({
   const [newPOOpen, setNewPOOpen] = useState(false);
   const [poListOpen, setPoListOpen] = useState(false);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
+
+  // Global-search record focus. Three entities land on this page, each with
+  // an opener that already existed:
+  //   part            -> the part drawer (setViewPart)
+  //   purchase_order  -> the PO detail modal (setViewPO)
+  //   warehouse       -> the per-warehouse tab IS the warehouse view here,
+  //                      so switching to it is arriving, not approximating.
+  // A part also switches the warehouse tab first: this page is warehouse-
+  // scoped, so opening a part's drawer while a different warehouse tab is
+  // active would leave the user staring at a table the part is not in.
+  useRecordFocus(["part", "purchase_order", "warehouse"], (entity, id) => {
+    if (entity === "part") {
+      const part = parts.find((x) => x.id === id);
+      if (!part) return;
+      if (part.warehouse_id) setWarehouseTab(part.warehouse_id);
+      setViewPart(part);
+    } else if (entity === "purchase_order") {
+      const po = purchaseOrders.find((x) => x.id === id);
+      if (po) setViewPO(po);
+    } else if (entity === "warehouse") {
+      if (warehouses.some((w) => w.id === id)) setWarehouseTab(id);
+    }
+  });
   // Phase 5 — PO receiving (migration 0051).
   const [receiveListOpen, setReceiveListOpen] = useState(false);
   const [receivePO, setReceivePO] = useState<PurchaseOrder | null>(null);
