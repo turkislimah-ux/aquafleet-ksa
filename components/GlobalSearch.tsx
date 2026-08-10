@@ -346,11 +346,15 @@ export default function GlobalSearch({
     >
       <div className="relative">
         <Search
-          className="pointer-events-none absolute top-1/2 -translate-y-1/2 start-3 h-4 w-4 muted"
+          className="pointer-events-none absolute top-1/2 -translate-y-1/2 start-3 h-4 w-4 muted transition-colors"
           aria-hidden
         />
         <input
           ref={inputRef}
+          autoComplete="off"
+          // Plates, SKUs and invoice numbers are not words. Red squiggles
+          // under every query were noise.
+          spellCheck={false}
           // type="text", NOT type="search". A search input renders a native
           // clear affordance that collides with the ⌘K hint (and lands on
           // the wrong side under RTL), and WebKit makes Escape clear the
@@ -369,11 +373,26 @@ export default function GlobalSearch({
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onInputKeyDown}
-          className="w-full rounded-lg border ps-9 pe-16 text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
+          className={cn(
+            "w-full border ps-9 pe-16 outline-none transition-[box-shadow,border-color] duration-150",
+            // Radius and type size interpolate with the dock too. At rest
+            // this is the page's primary object and should read like one; by
+            // the time it docks it is a quiet toolbar control. Before, only
+            // width and height moved, which made the hero state look like a
+            // stretched toolbar input rather than a deliberate moment.
+            open ? "border-brand-500/60" : "hover:border-brand-500/40"
+          )}
           style={{
-            borderColor: "rgb(var(--border))",
+            borderColor: open ? undefined : "rgb(var(--border))",
             background: "rgb(var(--card))",
-            height: "calc(2.25rem + (1 - var(--dock-progress, 1)) * 0.75rem)",
+            height: "calc(2.25rem + (1 - var(--dock-progress, 1)) * 0.875rem)",
+            borderRadius: "calc(0.5rem + (1 - var(--dock-progress, 1)) * 0.375rem)",
+            fontSize: "calc(0.875rem + (1 - var(--dock-progress, 1)) * 0.0625rem)",
+            // Depth interpolates as well: a soft lifted shadow at hero rest,
+            // flattening to nothing once docked so the header stays calm.
+            boxShadow: open
+              ? "0 0 0 3px rgb(var(--accent) / 0.16), 0 8px 24px -8px rgb(var(--accent) / 0.28)"
+              : "0 calc((1 - var(--dock-progress, 1)) * 10px) calc((1 - var(--dock-progress, 1)) * 28px) calc((1 - var(--dock-progress, 1)) * -12px) rgb(0 0 0 / 0.18)",
           }}
         />
         {isMac !== null && (
@@ -383,10 +402,20 @@ export default function GlobalSearch({
             // "Ctrl K" fares worse. A key combination is a literal, not
             // prose, so it reads left-to-right in every locale.
             dir="ltr"
-            className="pointer-events-none absolute top-1/2 -translate-y-1/2 end-3 hidden sm:inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] muted"
-            style={{ borderColor: "rgb(var(--border))" }}
+            className="pointer-events-none absolute top-1/2 -translate-y-1/2 end-3 hidden sm:inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium muted transition-opacity"
+            style={{
+              borderColor: "rgb(var(--border))",
+              background: "rgb(var(--bg))",
+              // The hint is an invitation to open the bar. Once it is open
+              // it has done its job and would only compete with the caret.
+              opacity: open ? 0 : 1,
+            }}
           >
-            {isMac ? "⌘K" : "Ctrl K"}
+            {/* U+00A0 written as an explicit escape, not a literal space:
+                a key combination must never wrap, and a literal nbsp in
+                source is invisible to the next reader and trivially
+                "tidied" away by a formatter. */}
+            {isMac ? "\u2318\u00a0K" : "Ctrl\u00a0K"}
           </kbd>
         )}
       </div>
@@ -394,8 +423,20 @@ export default function GlobalSearch({
       {open && (
         <div
           id={panelId}
-          className="card absolute top-full mt-2 w-full overflow-hidden p-0 shadow-lg"
-          style={{ zIndex: 50 }}
+          className="card absolute top-full mt-2 w-full overflow-hidden p-0"
+          style={{
+            zIndex: 50,
+            // Radius tracks the input's, so the panel reads as the same
+            // object continuing downward rather than a separate card that
+            // happens to sit nearby.
+            borderRadius: "calc(0.5rem + (1 - var(--dock-progress, 1)) * 0.375rem)",
+            // A flat `shadow-lg` barely registers on a dark background, so
+            // depth is carried by a brand-tinted edge plus a wide ambient
+            // shadow — legible in both themes rather than tuned for light.
+            borderColor: "rgb(var(--accent) / 0.35)",
+            boxShadow:
+              "0 16px 40px -12px rgb(0 0 0 / 0.32), 0 0 0 1px rgb(var(--accent) / 0.08)",
+          }}
         >
           {/* Mode switch — search is live, ask is a marked seam. */}
           <div
@@ -419,10 +460,31 @@ export default function GlobalSearch({
             />
           </div>
 
+          {/* Results arrive asynchronously and silently — a sighted user sees
+              the list repaint, a screen-reader user got nothing at all. This
+              announces the outcome without interrupting typing. */}
+          <p aria-live="polite" className="sr-only">
+            {loadingRecords
+              ? t("search.searching", lang)
+              : showRecents
+                ? ""
+                : flat.length === 0
+                  ? t("search.noResultsShort", lang)
+                  : t("search.resultsCount", lang).replace("{n}", String(flat.length))}
+          </p>
+
           {mode === "ask" ? (
             <AskSeam lang={lang} />
           ) : (
-            <div className="max-h-[min(60vh,28rem)] overflow-y-auto scrollbar-thin">
+            <div
+              className="max-h-[min(60vh,28rem)] overflow-y-auto scrollbar-thin"
+              // REAL BUG, not polish: without overscroll containment, reaching
+              // the end of this list hands the scroll to the page behind it —
+              // and on the dashboard that page scroll drives the search bar's
+              // own dock animation. Scrolling results would have yanked the
+              // bar you are typing into up to the header underneath you.
+              style={{ overscrollBehavior: "contain" }}
+            >
               {showRecents ? (
                 <RecentList
                   lang={lang}
@@ -437,7 +499,7 @@ export default function GlobalSearch({
                 <>
                   {groups.map(([group, hits]) => (
                     <div key={group}>
-                      <div className="px-3 pt-2.5 pb-1 text-[11px] font-medium uppercase tracking-wide muted">
+                      <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider muted">
                         {t(`search.g_${group}`, lang)}
                       </div>
                       {hits.map((hit) => {
@@ -507,8 +569,14 @@ function ModeBtn({
       onClick={() => onSelect(value)}
       aria-pressed={on}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition",
-        on ? "bg-brand-600 text-white" : "muted hover:bg-black/5 dark:hover:bg-white/5"
+        "focus-ring inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium",
+        "transition-colors [touch-action:manipulation]",
+        // A filled brand pill here competed with the results below it for
+        // attention, in a row that is only a mode switch. A tinted, brand-
+        // texted segment reads as selected without shouting.
+        on
+          ? "bg-brand-500/12 text-brand-700 dark:text-brand-300"
+          : "muted hover:bg-black/5 dark:hover:bg-white/5"
       )}
     >
       <Icon className="h-3.5 w-3.5" />
@@ -517,7 +585,7 @@ function ModeBtn({
         <span
           className={cn(
             "rounded-full px-1.5 py-0.5 text-[9px] uppercase tracking-wide",
-            on ? "bg-white/20" : "bg-black/5 dark:bg-white/10"
+            on ? "bg-brand-500/20" : "bg-black/5 dark:bg-white/10"
           )}
         >
           {tag}
@@ -560,8 +628,16 @@ function ResultRow({
       onClick={onSelect}
       aria-selected={selected}
       className={cn(
-        "flex w-full items-center gap-3 px-3 py-2 text-start transition",
-        selected ? "bg-brand-500/10" : "hover:bg-black/5 dark:hover:bg-white/5"
+        "focus-ring relative flex w-full items-center gap-3 py-2 pe-3 text-start",
+        "transition-colors [touch-action:manipulation]",
+        // A leading accent bar, not only a background tint. On a dark
+        // background a 10%-opacity tint is nearly invisible, so keyboard
+        // users lost track of where they were in the list; the bar reads at
+        // any theme and any contrast setting.
+        "ps-3 before:absolute before:inset-y-0 before:start-0 before:w-0.5 before:rounded-full",
+        selected
+          ? "bg-brand-500/10 before:bg-brand-500"
+          : "before:bg-transparent hover:bg-black/5 dark:hover:bg-white/5"
       )}
     >
       {Icon ? (
@@ -619,7 +695,7 @@ function RecentList({
           <button
             type="button"
             onClick={onClear}
-            className="text-[11px] muted hover:underline"
+            className="focus-ring rounded text-[11px] muted transition-colors hover:text-[rgb(var(--fg))] hover:underline"
           >
             {t("search.clearRecent", lang)}
           </button>
@@ -634,7 +710,7 @@ function RecentList({
             key={r}
             type="button"
             onClick={() => onPick(r)}
-            className="flex w-full items-center gap-3 px-3 py-2 text-start hover:bg-black/5 dark:hover:bg-white/5"
+            className="focus-ring flex w-full items-center gap-3 px-3 py-2 text-start transition-colors [touch-action:manipulation] hover:bg-black/5 dark:hover:bg-white/5"
           >
             <Clock className="h-4 w-4 shrink-0 muted" />
             <span className="min-w-0 flex-1 truncate text-sm">{r}</span>

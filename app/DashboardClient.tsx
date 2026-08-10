@@ -446,9 +446,25 @@ export default function DashboardClient({
       */}
       <div
         ref={heroRef}
-        className={reducedMotion ? "h-0" : "h-[48vh]"}
+        className={cn("relative", reducedMotion ? "h-0" : "h-[48vh]")}
         aria-hidden
-      />
+      >
+        {/* A soft brand glow sitting behind the resting search bar, fading
+            out exactly as the bar docks. Purely decorative: it gives the
+            hero a centre of gravity so the bar reads as the page's subject
+            rather than a control that happens to be floating mid-page.
+            Suppressed under reduced motion along with the hero itself. */}
+        {!reducedMotion && (
+          <div
+            className="pointer-events-none absolute left-1/2 top-1/2 h-[26rem] w-[46rem] max-w-[92vw] -translate-x-1/2 -translate-y-1/2"
+            style={{
+              opacity: "calc((1 - var(--dock-progress, 1)) * 0.9)",
+              background:
+                "radial-gradient(ellipse at center, rgb(var(--accent) / 0.10), rgb(var(--accent) / 0.04) 45%, transparent 70%)",
+            }}
+          />
+        )}
+      </div>
 
       {/*
         The bottom fade. The peeking content is a TEASE, not a reading

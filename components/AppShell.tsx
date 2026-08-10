@@ -91,7 +91,7 @@ export default function AppShell({
                 return (
                   <Link key={item.href} href={item.href}
                     className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition",
+                      "focus-ring flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
                       active ? "bg-brand-600 text-white shadow-soft" : "hover:bg-black/5 dark:hover:bg-white/5"
                     )}>
                     <Icon className="h-4 w-4 shrink-0" />
@@ -166,7 +166,8 @@ export default function AppShell({
                 <NotificationsMenu lang={lang} />
 
                 <button onClick={() => setLang(lang === "en" ? "ar" : "en")}
-                  className="h-9 px-3 rounded-lg border text-sm flex items-center gap-1.5 hover:bg-black/5 dark:hover:bg-white/5"
+                  aria-label={lang === "en" ? "Switch to Arabic" : "Switch to English"}
+                  className="focus-ring transition-colors [touch-action:manipulation] h-9 px-3 rounded-lg border text-sm flex items-center gap-1.5 hover:bg-black/5 hover:border-brand-500/40 dark:hover:bg-white/5"
                   style={{ borderColor: "rgb(var(--border))" }}>
                   <Globe className="h-4 w-4" />
                   <span className="font-medium hidden lg:inline">{lang === "en" ? "العربية" : "English"}</span>
@@ -174,9 +175,9 @@ export default function AppShell({
 
                 <button onClick={() => setTheme(theme === "light" ? "dark" : "light")}
                   aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-                  className="h-9 w-9 rounded-lg border grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
+                  className="focus-ring transition-colors [touch-action:manipulation] h-9 w-9 rounded-lg border grid place-items-center hover:bg-black/5 hover:border-brand-500/40 dark:hover:bg-white/5"
                   style={{ borderColor: "rgb(var(--border))" }}>
-                  {theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+                  {theme === "light" ? <Moon className="h-4 w-4" aria-hidden /> : <Sun className="h-4 w-4" aria-hidden />}
                 </button>
 
                 <AccountMenu userEmail={userEmail ?? null} />
@@ -231,10 +232,10 @@ function NotificationsMenu({ lang }: { lang: Lang }) {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-label="Notifications"
-        className="h-9 w-9 rounded-lg border grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
+        className="focus-ring transition-colors [touch-action:manipulation] h-9 w-9 rounded-lg border grid place-items-center hover:bg-black/5 hover:border-brand-500/40 dark:hover:bg-white/5"
         style={{ borderColor: "rgb(var(--border))" }}
       >
-        <Bell className="h-4 w-4" />
+        <Bell className="h-4 w-4" aria-hidden />
       </button>
 
       {open && (
@@ -275,7 +276,10 @@ function AccountMenu({ userEmail }: { userEmail: string | null }) {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="h-9 rounded-lg border flex items-center gap-2 ps-1.5 pe-2 hover:bg-black/5 dark:hover:bg-white/5"
+        // Below xl the email is hidden and this is an avatar initial only —
+        // an icon-only control with no accessible name without this.
+        aria-label={userEmail ? `Account: ${userEmail}` : "Account"}
+        className="focus-ring transition-colors [touch-action:manipulation] h-9 rounded-lg border flex items-center gap-2 ps-1.5 pe-2 hover:bg-black/5 hover:border-brand-500/40 dark:hover:bg-white/5"
         style={{ borderColor: "rgb(var(--border))" }}
       >
         <span className="grid h-6 w-6 place-items-center rounded-md bg-brand-600 text-[11px] font-semibold text-white">
@@ -303,7 +307,7 @@ function AccountMenu({ userEmail }: { userEmail: string | null }) {
           <form action={signOut}>
             <button
               type="submit"
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-start text-sm hover:bg-black/5 dark:hover:bg-white/5"
+              className="focus-ring flex w-full items-center gap-2 px-3 py-2.5 text-start text-sm transition-colors [touch-action:manipulation] hover:bg-black/5 dark:hover:bg-white/5"
             >
               <LogOut className="h-4 w-4" />
               Log out

@@ -247,7 +247,12 @@ export const dict = {
       en: "Searched pages, trucks, drivers, staff, customers, invoices, trips, parts, orders, permits and documents.",
       ar: "تم البحث في الصفحات والشاحنات والسائقين والموظفين والعملاء والفواتير والرحلات وقطع الغيار والطلبات والتصاريح والوثائق.",
     },
-    searching: { en: "Searching…", ar: "جارٍ البحث..." },
+    searching: { en: "Searching\u2026", ar: "\u062c\u0627\u0631\u064d \u0627\u0644\u0628\u062d\u062b\u2026" },
+    // Announced to screen readers only (aria-live). "{n}" is replaced
+    // at the call site; kept as a token so the Arabic word order can
+    // differ from the English without a code change.
+    resultsCount: { en: "{n} results", ar: "{n} \u0646\u062a\u064a\u062c\u0629" },
+    noResultsShort: { en: "No results", ar: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0646\u062a\u0627\u0626\u062c" },
     pages: { en: "Pages", ar: "الصفحات" },
     askTitle: { en: "Ask about your operation", ar: "اسأل عن عملياتك" },
     askBody: {
