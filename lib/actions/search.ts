@@ -21,6 +21,58 @@ import {
 } from "@/lib/search-routes";
 import { SEARCH_MIN_CHARS } from "@/lib/search-match";
 
+/**
+ * Invoice deep-link resolution — NAVIGATION, resolved in the app.
+ *
+ * The Finance tab opens invoices through InvoicesModal, which is keyed by
+ * CUSTOMER, while `search_everything` returns only the invoice id. Rather
+ * than widen 0102's return shape (a drop-and-recreate migration, since a
+ * function's OUT columns cannot change under create-or-replace), the
+ * customer is looked up here at click time. That keeps route/navigation
+ * concerns in the app, which is 0102's own stated design — "the DB knows
+ * what a record IS; the app knows where it LIVES".
+ *
+ * Also worth noting: FinanceTab's own `paidInvoices` prop could NOT have
+ * served here. It is paid invoices only, and a search hit can be a draft,
+ * confirmed, unpaid or void invoice — resolving locally would have silently
+ * failed on every invoice that is not already paid.
+ *
+ * Runs on the caller's session, so RLS decides. An invoice the user cannot
+ * read resolves to null and the click lands on the Finance tab instead of
+ * revealing a customer name through the back door.
+ */
+export type InvoiceTarget = { customerId: string; customerName: string; customerEmail: string | null };
+
+export async function resolveInvoiceCustomer(invoiceId: string): Promise<InvoiceTarget | null> {
+  if (!invoiceId) return null;
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("customer_id, customers(id, name, email)")
+    .eq("id", invoiceId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[resolveInvoiceCustomer] failed:", error.message);
+    return null;
+  }
+  if (!data?.customer_id) return null;
+
+  // PostgREST types an embedded to-one relation as an array in some
+  // configurations and an object in others; normalise rather than assume.
+  const rawCustomer = (data as { customers?: unknown }).customers;
+  const customer = (Array.isArray(rawCustomer) ? rawCustomer[0] : rawCustomer) as
+    | { id: string; name: string | null; email: string | null }
+    | undefined;
+
+  return {
+    customerId: data.customer_id as string,
+    customerName: customer?.name ?? "—",
+    customerEmail: customer?.email ?? null,
+  };
+}
+
 export type RecordHit = {
   id: string;            // "<entity>:<uuid>" — unique across groups
   entity: SearchEntity;

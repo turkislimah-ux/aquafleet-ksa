@@ -31,6 +31,8 @@ import type { SpecialChargeRow, PaidInvoiceRow } from "./page";
 import AddBalanceModal, { type AddBalanceCustomerOption } from "./AddBalanceModal";
 import StatementModal, { type TripMeta } from "./StatementModal";
 import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
+import { useRecordFocus } from "@/lib/useRecordFocus";
+import { resolveInvoiceCustomer } from "@/lib/actions/search";
 import CompanySettingsModal from "./CompanySettingsModal";
 
 type CustomerLite = { id: string; name: string; email: string | null };
@@ -103,6 +105,34 @@ export default function FinanceTab({ customers, projects, trips, topups, special
   const [topupTarget, setTopupTarget] = useState<AddBalanceCustomerOption | null | "global">(null);
   const [statementFor, setStatementFor] = useState<{ customerId: string; customerName: string } | null>(null);
   const [invoicesFor, setInvoicesFor] = useState<InvoiceCustomer | null>(null);
+  const [focusInvoiceId, setFocusInvoiceId] = useState<string | null>(null);
+
+  // Global-search record focus (?focus=invoice:<id>).
+  //
+  // Resolved HERE, on click-through, rather than carried in the search
+  // result row. InvoicesModal is keyed by CUSTOMER and search_everything
+  // returns only the invoice id, so something has to bridge the two; the
+  // architect's ruling was to do it app-side rather than widen 0102's return
+  // shape (which would need a drop-and-recreate, since a function's OUT
+  // columns cannot change under create-or-replace).
+  //
+  // The local `paidInvoices` prop could NOT have answered this — it is paid
+  // invoices only, and a search hit can be a draft, confirmed, unpaid or
+  // void invoice. One RLS-gated lookup covers every status.
+  useRecordFocus(["invoice"], (_e, id) => {
+    void (async () => {
+      const target = await resolveInvoiceCustomer(id);
+      // Unresolvable (deleted, or not visible to this user under RLS) — stay
+      // on the Finance tab rather than opening an empty modal.
+      if (!target) return;
+      setFocusInvoiceId(id);
+      setInvoicesFor({
+        id: target.customerId,
+        name: target.customerName,
+        email: target.customerEmail,
+      });
+    })();
+  });
   const [companySettingsOpen, setCompanySettingsOpen] = useState(false);
 
   const projectByCustomer = useMemo(() => {
@@ -500,7 +530,15 @@ export default function FinanceTab({ customers, projects, trips, topups, special
         payments={activeStatementRow?.customerPaidInvoices ?? []}
       />
 
-      <InvoicesModal open={invoicesFor !== null} onClose={() => setInvoicesFor(null)} customer={invoicesFor} />
+      <InvoicesModal
+        open={invoicesFor !== null}
+        onClose={() => {
+          setInvoicesFor(null);
+          setFocusInvoiceId(null);
+        }}
+        customer={invoicesFor}
+        initialInvoiceId={focusInvoiceId}
+      />
 
       <CompanySettingsModal open={companySettingsOpen} onClose={() => setCompanySettingsOpen(false)} />
     </div>

@@ -25,7 +25,8 @@
 // figures the view produced, which is what lib/reports.ts delta() does
 // everywhere else on this page.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useTabParam } from "@/lib/useTabParam";
 import { Printer, Pencil, Info, Sparkles } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
@@ -60,6 +61,12 @@ const STATEMENTS: { key: Statement; label: string }[] = [
   { key: "narrative", label: "Narrative" },
 ];
 
+// Every value `?statement=` accepts. "custom" is included even though it is
+// not a tab in STATEMENTS above: the tab only appears once a spec has been
+// generated, but the URL must still accept it so search can point at the
+// builder (see the effect in the component).
+const STATEMENT_KEYS = ["pnl", "revenue", "receivables", "cost", "operations", "narrative", "custom"] as const;
+
 type Props = {
   pnlPeriods: PnlPeriodRow[];
   expenseCategories: ExpenseCategoryPeriodRow[];
@@ -87,11 +94,24 @@ export default function StatementsTab({
   collections, metrics, perTruck, opsByDriver, today, onManageExpenses,
 }: Props) {
   const [periodType, setPeriodType] = useState<PeriodType>("month");
-  const [statement, setStatement] = useState<Statement>("pnl");
+  // Which statement is showing lives in the URL, so global search can open
+  // one directly ("P&L", "Receivables", "قائمة الإيرادات" are all real
+  // destinations). The param is `statement`, NOT `tab` — one level up,
+  // ReportsClient already owns `?tab=statements` for the pack as a whole,
+  // and reusing that name here would collide.
+  const [statement, setStatement] = useTabParam<Statement>(STATEMENT_KEYS, "pnl", "statement");
   const [customOpen, setCustomOpen] = useState(false);
   // The builder's output lives here, not in the modal: the result is a
   // statement like any other, so it gets its own print id and print button.
   const [customSpec, setCustomSpec] = useState<BuilderSelection | null>(null);
+
+  // A custom report is not a stored object, so there is nothing to deep-link
+  // to — arriving at ?statement=custom means "open the builder". Once a spec
+  // exists the generated statement renders normally and this does not fire,
+  // so re-opening the builder over a finished report cannot happen.
+  useEffect(() => {
+    if (statement === "custom" && !customSpec) setCustomOpen(true);
+  }, [statement, customSpec]);
 
   const periods = useMemo(() => periodsOf(pnlPeriods, periodType), [pnlPeriods, periodType]);
   const [start, setStart] = useState<string | null>(null);

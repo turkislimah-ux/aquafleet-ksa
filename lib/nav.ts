@@ -105,4 +105,27 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   { href: "/archive?tab=truck", en: "Truck documents", ar: "وثائق الشاحنات", parentKey: "archive", icon: Archive },
   { href: "/archive?tab=customer", en: "Customer documents", ar: "وثائق العملاء", parentKey: "archive", icon: Archive },
   { href: "/archive?tab=ledger", en: "Approvals ledger", ar: "سجل الموافقات", parentKey: "archive", icon: Archive },
+
+  // --- REPORT TYPES ------------------------------------------------------
+  // Each statement in the Reports pack is its own destination: "P&L" or
+  // "الأرباح والخسائر" opens that statement directly, not the Reports page
+  // with P&L merely selected by default.
+  //
+  // They ride `?statement=` (StatementsTab's own reader), NOT `?tab=` —
+  // `?tab=statements` already means "the Reports pack" one level up in
+  // ReportsClient, so reusing it here would collide. Two levels, two params.
+  //
+  // Arabic labels are NEW here: STATEMENTS in StatementsTab.tsx is
+  // English-only, and adding an `ar` there would have meant restyling that
+  // tab strip mid-batch. The search index carries both languages; the tab
+  // strip's own labels are untouched.
+  { href: "/reports?tab=statements&statement=pnl", en: "P&L statement", ar: "قائمة الأرباح والخسائر", parentKey: "reports", icon: FileBarChart },
+  { href: "/reports?tab=statements&statement=revenue", en: "Revenue statement", ar: "قائمة الإيرادات", parentKey: "reports", icon: FileBarChart },
+  { href: "/reports?tab=statements&statement=receivables", en: "Receivables statement", ar: "قائمة الذمم المدينة", parentKey: "reports", icon: FileBarChart },
+  { href: "/reports?tab=statements&statement=cost", en: "Costs statement", ar: "قائمة التكاليف", parentKey: "reports", icon: FileBarChart },
+  { href: "/reports?tab=statements&statement=operations", en: "Operations statement", ar: "قائمة العمليات", parentKey: "reports", icon: FileBarChart },
+  { href: "/reports?tab=statements&statement=narrative", en: "Narrative statement", ar: "التقرير السردي", parentKey: "reports", icon: FileBarChart },
+  // A custom report is not a stored object — there is nothing to deep-link
+  // TO — so the builder itself is the destination, per Turki's own framing.
+  { href: "/reports?tab=statements&statement=custom", en: "Custom report builder", ar: "منشئ التقارير المخصصة", parentKey: "reports", icon: FileBarChart },
 ];

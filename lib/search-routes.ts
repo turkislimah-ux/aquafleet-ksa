@@ -112,6 +112,11 @@ const ROUTES: Record<SearchEntity, RouteSpec> = {
   warehouse: { base: "/inventory", precision: "record" },
   archive_document: { base: "/archive", precision: "record" },
   exit_permit: { base: "/consumption?tab=permits", precision: "record" },
+  // Record-precise WITHOUT a schema change: FinanceTab resolves the
+  // invoice's customer at click-through (lib/actions/search.ts,
+  // resolveInvoiceCustomer) and opens InvoicesModal focused on this invoice.
+  // Navigation resolution belongs in the app, per this file's own header.
+  invoice: { base: "/trips?tab=finance", precision: "record" },
 
   // --- still tab/page precision, each for a concrete reason -------------
   // These are NOT oversights and NOT a "todo later" left to rot. Each one
@@ -122,15 +127,10 @@ const ROUTES: Record<SearchEntity, RouteSpec> = {
   //
   //   customer / project — Trips has no per-record modal reachable from
   //     outside; the openers are bound to row state inside the tab.
-  //   invoice — the blocker is data, not UI: InvoicesModal is keyed by
-  //     CUSTOMER, and search_everything returns only the invoice id. Opening
-  //     one invoice needs its customer_id, which means amending 0102's
-  //     invoice block — a migration, not an app edit.
   //   expense — the Reports expenses modal is a list with no per-row target.
   //   supplier / repairer — neither has a detail view anywhere in the app.
   customer: { base: "/trips?tab=customers", precision: "tab" },
   project: { base: "/trips?tab=projects", precision: "tab" },
-  invoice: { base: "/trips?tab=finance", precision: "tab" },
   expense: { base: "/reports?tab=statements", precision: "tab" },
   supplier: { base: "/inventory", precision: "page" },
   repairer: { base: "/maintenance", precision: "page" },

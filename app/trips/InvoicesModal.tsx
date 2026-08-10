@@ -8,7 +8,7 @@
 // Drills into InvoiceDetailModal (the actual lifecycle workspace) for both
 // a freshly-created draft and any existing invoice in the list.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, Plus } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
@@ -30,10 +30,17 @@ export default function InvoicesModal({
   open,
   onClose,
   customer,
+  initialInvoiceId = null,
 }: {
   open: boolean;
   onClose: () => void;
   customer: InvoiceCustomer | null;
+  /**
+   * Global search deep link (?focus=invoice:<id>): open straight into this
+   * invoice's detail rather than the customer's invoice list. Applied ONCE
+   * per open — see the consumed ref below for why that matters.
+   */
+  initialInvoiceId?: string | null;
 }) {
   const router = useRouter();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -47,6 +54,26 @@ export default function InvoicesModal({
   const [saving, setSaving] = useState(false);
 
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+
+  // Deep-link focus, applied once per open. A plain effect on
+  // (invoices, initialInvoiceId) would re-select the invoice the instant the
+  // user closed its detail — selectedInvoiceId goes back to null, the deps
+  // have not changed, so the effect fires again and the modal reopens itself.
+  // The ref records that this arrival has already been honoured.
+  const focusConsumedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) {
+      focusConsumedRef.current = null;
+      return;
+    }
+    if (!initialInvoiceId || focusConsumedRef.current === initialInvoiceId) return;
+    // Only after the list has actually loaded, and only if the invoice is
+    // really in it — a stale link should land on the list, not on an empty
+    // detail modal.
+    if (!invoices.some((i) => i.id === initialInvoiceId)) return;
+    focusConsumedRef.current = initialInvoiceId;
+    setSelectedInvoiceId(initialInvoiceId);
+  }, [open, initialInvoiceId, invoices]);
 
   async function load() {
     if (!customer) return;
