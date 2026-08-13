@@ -1,371 +1,278 @@
 import { createClient } from "@/lib/supabase/server";
-import { formatSar, todayKey } from "@/lib/utils";
-import { TRIP_STAGE_LABELS } from "@/lib/db-types";
-import { type LeavePeriod } from "@/lib/leave";
-import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
-import { buildTruckStatusMap } from "@/lib/truck-status";
-import DashboardClient, { type Datasets, type DashboardCharts } from "./DashboardClient";
+import { formatSar } from "@/lib/utils";
+import { availableWidgets, type WidgetDef } from "@/lib/dashboard-widgets";
+import type {
+  ActionItemRow, FeedRow, FleetStateNow, Headline, DashCharts, LiveTrip,
+  DailyOps, DeliveryDay, MonthlyOnlyCost,
+} from "@/lib/dashboard";
+import DashboardClient from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
 
-// Dashboard route (/). Server component: fetches the tables that exist today
-// (trucks, trips, drivers), computes the KPIs the demo derives from real data,
-// and hands them to the client island. KPIs whose source columns/tables don't
-// exist yet (utilization, on-time, work orders, predictive alerts, fuel cost)
-// are rendered as placeholders in DashboardClient and wired when their pages land.
+// Dashboard route (/). THE CATCH-UP PAGE.
+//
+// EVERY NUMBER COMES FROM A VIEW. Nothing is re-derived here. That rule is
+// why the rebuild happened: the previous page summed trips.rate_sar in
+// TypeScript for "Revenue (30d)" and showed 0 while Reports showed 70,650,
+// because rate_sar is NULL on all 203 rows.
+//
+// Sources: v_dashboard_action_items / v_activity_feed / v_fleet_state_now
+// (0103) + the 0098 semantic layer (v_pnl_monthly, v_operations_monthly,
+// v_revenue_monthly, v_collections_monthly, v_receivables_open/_aging)
+// + the 0104 day grain (v_daily_operations, v_monthly_only_costs).
+//
+// The ONE base-table read is the live-trips list, and it is a LIST OF
+// RECORDS, not a figure — no aggregate, no arithmetic. Charting it would
+// have needed a view; naming five trucks currently on the road does not.
+
+const FEED_LIMIT = 40;   // the panel shows 6; the rest open in a popup
+const CHART_MONTHS = 12;
+// Days pulled for the daily charts. ~6 months of history, so the month
+// stepper on the daily chart has somewhere to step back to. A bound on how
+// many ROWS are fetched, not arithmetic on any figure.
+const DAILY_DAYS = 190;
+
+/**
+ * Postgres `numeric` arrives over PostgREST as a STRING; `a - b` yields NaN
+ * and `a + b` concatenates, both rendering as plausible garbage. Coerced once
+ * at the boundary, as the Reports page does (CLAUDE.md §7).
+ */
+function num(v: unknown): number {
+  if (v == null) return 0;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** "2026-08-01" -> "Aug". Labels only; no date math. */
+const MONTH_LBL = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function monthLabel(iso: unknown): string {
+  const s = String(iso ?? "");
+  const m = Number(s.slice(5, 7));
+  return m >= 1 && m <= 12 ? MONTH_LBL[m - 1] : s.slice(0, 7);
+}
 
 export default async function DashboardPage() {
   const supabase = createClient();
-  const today = todayKey(); // local (matches trip day-math), not UTC
 
-  const [trucksRes, tripsRes, driversRes, leavePeriodsRes, archivedProjectsRes, projectDriversRes, activeWorkOrdersRes, activeOutsourcedJobsRes] = await Promise.all([
-    // Terminated trucks must never reach the KPI strip / driver-state facts —
-    // filtered at the fetch (frees their driver to off_duty via the missing row).
-    supabase.from("trucks").select("id, health_score, assigned_driver_id").is("terminated_at", null),
+  const [
+    actionsRes, feedRes, stateRes, pnlRes, opsRes, revenueRes,
+    collectionsRes, receivablesRes, agingRes, liveTripsRes, dictRes,
+    dailyRes, monthlyOnlyRes, deliveryRes,
+  ] = await Promise.all([
+    supabase.from("v_dashboard_action_items").select("*"),
+    supabase.from("v_activity_feed").select("*").order("occurred_at", { ascending: false }).limit(FEED_LIMIT),
+    supabase.from("v_fleet_state_now").select("*").maybeSingle(),
+    supabase.from("v_pnl_monthly").select("*").order("month", { ascending: false }).limit(CHART_MONTHS),
+    supabase.from("v_operations_monthly").select("*").order("month", { ascending: false }).limit(CHART_MONTHS),
+    supabase.from("v_revenue_monthly").select("*").order("month", { ascending: false }).limit(1),
+    supabase.from("v_collections_monthly").select("*").order("month", { ascending: false }).limit(1),
+    supabase.from("v_receivables_open").select("outstanding_sar"),
+    supabase.from("v_receivables_aging").select("*"),
+    // Records, not a metric — the only base-table read on this page.
     supabase
       .from("trips")
-      .select(
-        "id, ref, stage, trip_date, rate_sar, delivered_at, truck_id, project_id, water_station, water_type, tank_size_m3, truck:trucks(plate)"
-      )
-      .order("created_at", { ascending: false }),
-    // Terminated drivers must never reach buildDriverStateMap (no pill, no
-    // appearance) — filtered at the fetch.
-    supabase.from("drivers").select("id, status, active").is("terminated_at", null),
-    // On-leave-today only (DB does the date filter — no inline range check). Feeds
-    // lib/leave so the donut/on-duty reflect computed availability, not stored status.
-    supabase
-      .from("leave_periods")
-      .select("driver_id, staff_id, start_date, end_date")
-      .lte("start_date", today)
-      .gte("end_date", today),
-    // Archived project ids — live KPIs exclude their trips (trips with no project
-    // are kept). History/fleet views are unaffected; this is dashboard-only.
-    supabase.from("projects").select("id").not("archived_at", "is", null),
-    // Project↔driver membership — feeds the derived hasActiveProject fact (a driver
-    // with a truck but no NON-archived project is "idle", not "active").
-    supabase.from("project_drivers").select("project_id, driver_id"),
-    // Auto Truck-Status Phase 2a — the two facts behind the derived truck
-    // status (lib/truck-status.ts), same as app/fleet/page.tsx.
-    supabase.from("work_orders").select("truck_id").eq("status", "in_progress"),
-    supabase.from("outsourced_jobs").select("truck_id").eq("status", "in_progress"),
+      .select("id, ref, stage, trip_date, truck:trucks(plate), project:projects(name)")
+      .in("stage", ["loading", "in_transit"])
+      .order("trip_date", { ascending: false })
+      .limit(6),
+    supabase.from("report_metrics").select("metric_key"),
+    // 0104 — the day grain. Newest-first for the limit; reversed below.
+    supabase.from("v_daily_operations").select("*")
+      .order("day", { ascending: false }).limit(DAILY_DAYS),
+    supabase.from("v_monthly_only_costs").select("*")
+      .order("month", { ascending: false }).limit(CHART_MONTHS),
+    // 0105 — Delivery Output. Same spine and same DAILY_DAYS window as
+    // v_daily_operations so both charts step through identical months.
+    supabase.from("v_delivery_output_daily").select("*")
+      .order("day", { ascending: false }).limit(DAILY_DAYS),
   ]);
 
-  type JoinedTrip = {
-    id: string;
-    ref: string | null;
-    stage: string;
-    trip_date: string;
-    rate_sar: number | null;
-    delivered_at: string | null;
-    truck_id: string | null;
-    project_id: string | null;
-    water_station: string;
-    water_type: "potable" | "non_potable";
-    tank_size_m3: number | null;
-    truck: { plate: string } | null;
+  const actionItems = (actionsRes.data ?? []) as ActionItemRow[];
+  const feed = (feedRes.data ?? []) as FeedRow[];
+  const state = (stateRes.data ?? null) as FleetStateNow | null;
+
+  // Views come back newest-first for the `limit`; charts read oldest-first.
+  const pnl = [...((pnlRes.data ?? []) as Record<string, unknown>[])].reverse();
+  const ops = [...((opsRes.data ?? []) as Record<string, unknown>[])].reverse();
+  const aging = (agingRes.data ?? []) as Record<string, unknown>[];
+
+  const latestPnl = pnl[pnl.length - 1];
+  const revenueRow = (revenueRes.data ?? [])[0] as Record<string, unknown> | undefined;
+  const collectionsRow = (collectionsRes.data ?? [])[0] as Record<string, unknown> | undefined;
+  const opsRow = ops[ops.length - 1];
+  const outstanding = ((receivablesRes.data ?? []) as { outstanding_sar: unknown }[])
+    .reduce((s, r) => s + num(r.outstanding_sar), 0);
+
+  const liveTrips: LiveTrip[] = (
+    (liveTripsRes.data ?? []) as unknown as {
+      id: string; ref: string | null; stage: string; trip_date: string;
+      truck: { plate: string } | null; project: { name: string } | null;
+    }[]
+  ).map((t) => ({
+    id: t.id,
+    ref: t.ref,
+    stage: t.stage === "in_transit" ? "in_transit" : "loading",
+    truckLabel: t.truck?.plate ?? "—",
+    // Null is a real state: an ad-hoc trip has no project (0101 hit the same
+    // thing and labels it "Unassigned"). The UI says so rather than blanking.
+    project: t.project?.name ?? null,
+    tripDate: t.trip_date,
+  }));
+
+  // ---- the day grain (0104) ---------------------------------------------
+  // `month` comes from the view, not from parsing `day` here — the view's own
+  // bucket is what v_pnl_monthly reconciles against, and re-deriving it in TS
+  // is exactly how a chart drifts from the statement it links to.
+  const dailyOps: DailyOps[] = [
+    ...((dailyRes.data ?? []) as Record<string, unknown>[]),
+  ].reverse().map((r) => ({
+    day: String(r.day ?? ""),
+    month: String(r.month ?? ""),
+    revenue: num(r.revenue_sar),
+    directCost: num(r.direct_cost_sar),
+  }));
+
+  const delivery: DeliveryDay[] = [
+    ...((deliveryRes.data ?? []) as Record<string, unknown>[]),
+  ].reverse().map((r) => ({
+    day: String(r.day ?? ""),
+    month: String(r.month ?? ""),
+    capacityM3: num(r.capacity_m3),
+    tripsDelivered: num(r.trips_delivered),
+    tripsNoTruck: num(r.trips_delivered_no_truck),
+  }));
+
+  const monthlyOnly: MonthlyOnlyCost[] = (
+    (monthlyOnlyRes.data ?? []) as Record<string, unknown>[]
+  ).map((r) => ({
+    month: String(r.month ?? ""),
+    payroll: num(r.payroll_sar),
+    commissionNonTrip: num(r.commission_non_trip_sar),
+    total: num(r.monthly_only_cost_sar),
+  }));
+
+  // ---- charts: every series is a column read straight off a view --------
+  const charts: DashCharts = {
+    months: pnl.map((r) => monthLabel(r.month)),
+    marginPct: pnl.map((r) => num(r.operating_margin_pct)),
+    // The four operational cost buckets, current month. Manual expenses are
+    // deliberately NOT folded in — 0098 keeps them a separate P&L section.
+    costMix: latestPnl
+      ? [
+          { label: "Parts", value: num(latestPnl.parts_cost_sar), color: "#0b7eea" },
+          { label: "Outsourced", value: num(latestPnl.os_cost_sar), color: "#f59e0b" },
+          { label: "Payroll", value: num(latestPnl.payroll_sar), color: "#8b5cf6" },
+          { label: "Commissions", value: num(latestPnl.commissions_sar), color: "#10b981" },
+        ]
+      : [],
+    agingLabels: aging.map((r) => String(r.aging_bucket ?? "")),
+    agingValues: aging.map((r) => num(r.outstanding_sar)),
+    hasPnl: pnl.length > 0,
+    hasAging: aging.length > 0,
   };
 
-  const trucks = trucksRes.data ?? [];
-  // Live KPIs exclude trips of archived projects; ad-hoc trips (no project) stay.
-  const archivedProjectIds = new Set(
-    ((archivedProjectsRes.data ?? []) as { id: string }[]).map((p) => p.id)
-  );
-  const trips = ((tripsRes.data ?? []) as unknown as JoinedTrip[]).filter(
-    (t) => t.project_id == null || !archivedProjectIds.has(t.project_id)
-  );
-  const drivers = driversRes.data ?? [];
-  // Raw leave periods feed the derived-state map below (onLeave fact per driver);
-  // stored drivers.status is no longer read for display.
-  const leavePeriods = (leavePeriodsRes.data ?? []) as unknown as LeavePeriod[];
+  // ---- KPI row: headline figures, all dictionary-backed -----------------
+  const openActions = actionItems.reduce((s, r) => s + (r.item_count ?? 0), 0);
 
-  // ---- Derived driver state (single source of truth, lib/driver-state) ----
-  // Resolve the three membership facts here; buildDriverStateMap folds in onLeave.
-  const truckDriverIds = new Set(
-    (trucks as { assigned_driver_id: string | null }[])
-      .map((t) => t.assigned_driver_id)
-      .filter((id): id is string => id != null)
-  );
-  const activeProjectDriverIds = new Set(
-    ((projectDriversRes.data ?? []) as { project_id: string; driver_id: string }[])
-      .filter((r) => r.project_id != null && !archivedProjectIds.has(r.project_id))
-      .map((r) => r.driver_id)
-  );
-  const driverStateById = buildDriverStateMap(
-    drivers as { id: string; active: boolean }[],
-    truckDriverIds,
-    activeProjectDriverIds,
-    leavePeriods,
-    today,
+  // Tone thresholds. DISPLAY ONLY — each reads a figure that already came
+  // from a view and picks a CSS class; none of this changes a number, and
+  // none of it is a metric definition. Figures with no good/bad direction
+  // stay neutral rather than being forced into a colour they do not earn.
+  const marginPct = num(latestPnl?.operating_margin_pct);
+  const netProfit = num(latestPnl?.net_profit_sar);
+  const highSeverityOpen = actionItems.some(
+    (r) => r.severity === "high" && (r.item_count ?? 0) > 0
   );
 
-  // ---- Fleet KPIs (Auto Truck-Status Phase 2a: derived, not stored) ----
-  const activeJobTruckIds = new Set<string>([
-    ...((activeWorkOrdersRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
-    ...((activeOutsourcedJobsRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
-  ]);
-  const truckStatusById = buildTruckStatusMap(
-    trucks as { id: string; assigned_driver_id: string | null }[],
-    activeJobTruckIds,
+  const headlines: Headline[] = [
+    { key: "revenue", en: "Revenue", ar: "الإيرادات",
+      value: formatSar(num(revenueRow?.revenue_sar)),
+      subEn: "this month, net of VAT", subAr: "هذا الشهر، بدون الضريبة",
+      href: "/reports?tab=statements&statement=revenue",
+      hasData: !!revenueRow,
+      // Revenue existing at all is the good reading. Zero is not "bad" — it
+      // is nothing yet — so it stays neutral rather than alarming.
+      tone: num(revenueRow?.revenue_sar) > 0 ? "good" : "neutral" },
+
+    { key: "operating_margin", en: "Operating margin", ar: "هامش التشغيل",
+      value: `${marginPct.toFixed(1)}%`,
+      subEn: "this month", subAr: "هذا الشهر",
+      href: "/reports?tab=statements&statement=pnl",
+      hasData: !!latestPnl,
+      // The most critical figure on the page: a negative margin means the
+      // month is losing money. Thin (<10%) is worth attention, not alarm.
+      tone: !latestPnl ? "neutral" : marginPct < 0 ? "bad" : marginPct < 10 ? "warn" : "good" },
+
+    { key: "net_profit", en: "Net profit", ar: "صافي الربح",
+      value: formatSar(netProfit),
+      subEn: "after manual expenses", subAr: "بعد المصروفات اليدوية",
+      href: "/reports?tab=statements&statement=pnl",
+      hasData: !!latestPnl,
+      tone: !latestPnl ? "neutral" : netProfit < 0 ? "bad" : "good" },
+
+    { key: "collections", en: "Collected", ar: "المحصّل",
+      value: formatSar(num(collectionsRow?.collected_gross_sar)),
+      subEn: "cash in, this month", subAr: "نقد وارد هذا الشهر",
+      href: "/reports?tab=statements&statement=receivables",
+      hasData: !!collectionsRow,
+      tone: num(collectionsRow?.collected_gross_sar) > 0 ? "good" : "neutral" },
+
+    { key: "receivables_outstanding", en: "Outstanding", ar: "مستحقات",
+      value: formatSar(outstanding),
+      subEn: "owed right now", subAr: "مستحق الآن",
+      href: "/reports?tab=statements&statement=receivables",
+      hasData: !receivablesRes.error,
+      // Money owed always deserves attention; nothing owed is genuinely good.
+      tone: outstanding > 0 ? "warn" : "good" },
+
+    { key: "operations", en: "Trips delivered", ar: "الرحلات المسلَّمة",
+      value: String(num(opsRow?.trips_delivered)),
+      subEn: "this month", subAr: "هذا الشهر",
+      href: "/reports?tab=statements&statement=operations",
+      hasData: !!opsRow,
+      // A throughput count with no good/bad direction — an active reading.
+      tone: "neutral" },
+
+    { key: "trips_in_flight", en: "Trips in flight", ar: "رحلات جارية",
+      value: String(state?.trips_in_flight ?? 0),
+      subEn: "right now", subAr: "الآن",
+      href: "/trips?tab=projects",
+      hasData: !!state,
+      tone: "neutral" },
+
+    { key: "open_actions", en: "Needs action", ar: "يحتاج إجراء",
+      value: String(openActions),
+      subEn: "items waiting", subAr: "عنصر بالانتظار",
+      href: "#dash-actions",
+      hasData: !actionsRes.error,
+      // Red ONLY when something high-severity is actually waiting. A queue of
+      // low-priority items is amber; an empty queue is green.
+      tone: openActions === 0 ? "good" : highSeverityOpen ? "bad" : "warn" },
+  ];
+
+  const widgetOptions: WidgetDef[] = availableWidgets(
+    (dictRes.data ?? []) as { metric_key: string }[]
   );
-  const total = trucks.length;
-  const active = trucks.filter((t) => truckStatusById[t.id] === "active").length;
-  const idle = trucks.filter((t) => truckStatusById[t.id] === "idle").length;
-  const maint = trucks.filter((t) => truckStatusById[t.id] === "maintenance").length;
-  const healthVals = trucks
-    .map((t) => t.health_score)
-    .filter((h): h is number => h != null);
-  const avgHealth = healthVals.length
-    ? +(healthVals.reduce((s, h) => s + h, 0) / healthVals.length).toFixed(1)
-    : 0;
-
-  // ---- Snapshot KPI: drivers on duty. REAL. ----
-  // "On duty" = derived state 'active' (has truck AND a non-archived project, not on
-  // leave). Idle/off_duty/on_leave are NOT on duty.
-  const onDuty = drivers.filter((d) => driverStateById[d.id] === "active").length;
-
-  // Q4: Revenue (30d) = Σ rate_sar for delivered trips in the last 30 days. REAL.
-  const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-  const revenue30d = trips
-    .filter((t) => t.stage === "delivered" && (t.delivered_at ?? "").slice(0, 10) >= cutoff)
-    .reduce((s, t) => s + (t.rate_sar ?? 0), 0);
-
-  // Live Trips (REAL: stage in loading/in_transit, newest first, top 5).
-  // destination/liters/distance fields don't exist in schema; we surface the
-  // real substitutes water_station + tank_size_m3 + water_type instead.
-  const liveTrips = trips
-    .filter((t) => t.stage === "loading" || t.stage === "in_transit")
-    .slice(0, 5)
-    .map((t) => ({
-      id: t.id,
-      ref: t.ref,
-      stage: t.stage as "loading" | "in_transit",
-      truckLabel: t.truck?.plate ?? t.truck_id ?? "—",
-      station: t.water_station,
-      waterType: t.water_type,
-      tankM3: t.tank_size_m3,
-    }));
-
-  // ---- Period data (REAL) for the global selector ----
-  // KPI TILES follow the window TOTAL: daily = today, weekly = last 7d, monthly =
-  // last 30d. CHARTS use GRANULARITY for a readable trend span: daily mode = last
-  // 30 days (per-day), weekly = last 12 weeks (per-week), monthly = last 12 months
-  // (per-month). Volume = Σ tank_size_m3 by trip_date; trips = count by trip_date;
-  // revenue = Σ rate_sar for delivered trips by delivered_at; fuel honest-empty (no
-  // schema source). hasData drives empty states; changing period never invents data.
-  const isoDay = (offset: number) => new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10);
-  const dayLabel = (iso: string) => { const [, m, d] = iso.split("-"); return `${+m}/${+d}`; };
-  const MONTH_LBL = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-  // Monday-anchored ISO week start (UTC), consistent with the rest of the file.
-  const weekStart = (iso: string) => {
-    const d = new Date(iso + "T00:00:00Z");
-    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-    return d.toISOString().slice(0, 10);
-  };
-
-  // KPI tile totals over the last `windowDays` (trip count, revenue Σ).
-  function tileTotals(windowDays: number) {
-    const keySet = new Set<string>();
-    for (let i = windowDays - 1; i >= 0; i--) keySet.add(isoDay(i));
-    let tripCount = 0, revenue = 0, revHas = false;
-    trips.forEach((t) => {
-      const td = (t.trip_date ?? "").slice(0, 10);
-      if (keySet.has(td)) tripCount += 1;
-      if (t.stage === "delivered") {
-        const dd = (t.delivered_at ?? "").slice(0, 10);
-        if (keySet.has(dd)) { revenue += t.rate_sar ?? 0; revHas = true; }
-      }
-    });
-    return { trips: tripCount, revenue: Math.round(revenue), revenueHasData: revHas };
-  }
-
-  // Chart trend over `labels`/`bucketOf` buckets. Volume Σ tank & trip count keyed
-  // on trip_date; revenue Σ rate keyed on delivered_at; fuel honest-empty. Volume
-  // badge = most-recent bucket vs the previous one (real point-over-point change).
-  function chartTrend(labels: string[], bucketOf: (iso: string) => number) {
-    const n = labels.length;
-    const vol = new Array<number>(n).fill(0); let volHas = false;
-    const cnt = new Array<number>(n).fill(0);
-    const rev = new Array<number>(n).fill(0); let revHas = false;
-    trips.forEach((t) => {
-      const td = (t.trip_date ?? "").slice(0, 10);
-      const bi = td ? bucketOf(td) : -1;
-      if (bi >= 0) {
-        cnt[bi] += 1;
-        if (t.tank_size_m3 != null) { vol[bi] += t.tank_size_m3; volHas = true; }
-      }
-      if (t.stage === "delivered") {
-        const dd = (t.delivered_at ?? "").slice(0, 10);
-        const ri = dd ? bucketOf(dd) : -1;
-        if (ri >= 0) { rev[ri] += t.rate_sar ?? 0; revHas = true; }
-      }
-    });
-    const last = vol[n - 1] ?? 0, prev = vol[n - 2] ?? 0;
-    const volPct = volHas && prev > 0 ? +(((last - prev) / prev) * 100).toFixed(1) : null;
-    return {
-      volume: { labels, values: vol.map((v) => +v.toFixed(2)), hasData: volHas, pct: volPct },
-      trips: { labels, counts: cnt },
-      revenue: { labels, values: rev.map((v) => Math.round(v)), hasData: revHas },
-      fuel: { labels, values: labels.map(() => 0), hasData: false },
-    };
-  }
-
-  // daily mode → last 30 days, per day
-  const dDays: string[] = [];
-  for (let i = 29; i >= 0; i--) dDays.push(isoDay(i));
-  const dIndex = new Map(dDays.map((k, i) => [k, i] as const));
-  const dailyTrend = chartTrend(dDays.map(dayLabel), (iso) => dIndex.get(iso) ?? -1);
-
-  // weekly mode → last 12 weeks, per Monday-anchored week
-  const wStarts: string[] = [];
-  const curWeek = weekStart(isoDay(0));
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(curWeek + "T00:00:00Z");
-    d.setUTCDate(d.getUTCDate() - i * 7);
-    wStarts.push(d.toISOString().slice(0, 10));
-  }
-  const wIndex = new Map(wStarts.map((k, i) => [k, i] as const));
-  const weeklyTrend = chartTrend(wStarts.map(dayLabel), (iso) => wIndex.get(weekStart(iso)) ?? -1);
-
-  // monthly mode → last 12 months, per calendar month
-  const mKeys: string[] = [];
-  const nowM = new Date();
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(Date.UTC(nowM.getUTCFullYear(), nowM.getUTCMonth() - i, 1));
-    mKeys.push(d.toISOString().slice(0, 7));
-  }
-  const mIndex = new Map(mKeys.map((k, i) => [k, i] as const));
-  const monthlyTrend = chartTrend(mKeys.map((m) => MONTH_LBL[+m.slice(5, 7) - 1]), (iso) => mIndex.get(iso.slice(0, 7)) ?? -1);
-
-  const charts: DashboardCharts = {
-    daily: { windowDays: 1, tile: tileTotals(1), ...dailyTrend },
-    weekly: { windowDays: 7, tile: tileTotals(7), ...weeklyTrend },
-    monthly: { windowDays: 30, tile: tileTotals(30), ...monthlyTrend },
-  };
-
-  // ---- AI summary widget datasets (mirrors demo dashCompute, preview/pages-1.js:2240) ----
-  // REAL datasets are computed from live tables. Datasets whose tables/columns
-  // don't exist yet (fuel, water, cost, maintenance, inventory, alerts,
-  // commissions, depots) carry noData → the widget renders "No data yet".
-  // NOTE: demo's "cost" dataset is REAL there but its source columns (op cost,
-  // fuel cost) aren't in our schema (Q4 keeps them placeholders) → noData here.
-  // "drivers" is grouped by status (the real dimension we have) rather than the
-  // demo's homeDepot, which our schema doesn't carry.
-
-  // trips by stage
-  const stageColors: Record<string, string> = { scheduled: "#3b82f6", loading: "#f59e0b", in_transit: "#0b7eea", delivered: "#10b981" };
-  const stageOrder = ["scheduled", "loading", "in_transit", "delivered"] as const;
-  const tripBy: Record<string, number> = {};
-  trips.forEach((t) => { tripBy[t.stage] = (tripBy[t.stage] ?? 0) + 1; });
-
-  // drivers by DERIVED state — 4 mutually-exclusive buckets (sum to total).
-  const driverStatusLabel: Record<string, string> = {
-    active: "Active", idle: "Idle", off_duty: "Off duty", on_leave: "On leave",
-  };
-  const driverStatusColor: Record<string, string> = {
-    active: "#10b981", idle: "#3b82f6", off_duty: "#0b7eea", on_leave: "#f59e0b",
-  };
-  const driverBy: Record<string, number> = {};
-  drivers.forEach((d) => {
-    const s = driverStateById[d.id];
-    driverBy[s] = (driverBy[s] ?? 0) + 1;
-  });
-
-  // revenue daily series (14d) — Σ rate_sar by trip_date
-  const revMap: Record<string, number> = {};
-  trips.forEach((t) => { const kk = (t.trip_date ?? "").slice(0, 10); if (kk) revMap[kk] = (revMap[kk] ?? 0) + (t.rate_sar ?? 0); });
-  const revLabels: string[] = [];
-  const revValues: number[] = [];
-  for (let i = 13; i >= 0; i--) {
-    const key = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
-    revLabels.push(key.slice(5));
-    revValues.push(Math.round(revMap[key] ?? 0));
-  }
-
-  const datasets: Datasets = {
-    fleet: {
-      title: "Fleet status", defaultDisplay: "chart", chartKind: "pie",
-      stats: [
-        { label: "Active Trucks", value: `${active}/${total}`, tone: "ok" },
-        { label: "Maintenance", value: maint, tone: "warn" },
-        { label: "Idle", value: idle, tone: "info" },
-      ],
-      items: [
-        { label: "Active", value: active, color: "#10b981" },
-        { label: "Idle", value: idle, color: "#3b82f6" },
-        { label: "Maintenance", value: maint, color: "#f59e0b" },
-      ],
-    },
-    drivers: {
-      title: "Drivers by status", defaultDisplay: "chart", chartKind: "bars",
-      stats: [
-        { label: "Drivers On Duty", value: `${onDuty}/${drivers.length}`, tone: "ok" },
-        { label: "Drivers", value: drivers.length, tone: "info" },
-      ],
-      items: Object.keys(driverBy).map((s) => ({ label: driverStatusLabel[s] ?? s, value: driverBy[s], color: driverStatusColor[s] ?? "#94a3b8" })),
-    },
-    trips: {
-      title: "Trips by status", defaultDisplay: "chart", chartKind: "pie",
-      stats: [
-        { label: "Trips", value: trips.length, tone: "info" },
-        { label: "In Transit", value: tripBy.in_transit ?? 0, tone: "ok" },
-        { label: "Delivered", value: tripBy.delivered ?? 0, tone: "ok" },
-      ],
-      items: stageOrder.filter((s) => tripBy[s]).map((s) => ({ label: TRIP_STAGE_LABELS[s], value: tripBy[s], color: stageColors[s] })),
-    },
-    revenue: {
-      title: "Revenue · 14 days", defaultDisplay: "chart", chartKind: "line",
-      line: { labels: revLabels, values: revValues, color: "#10b981" },
-      stats: [{ label: "Revenue (30d)", value: formatSar(revenue30d), tone: "ok" }],
-      items: revLabels.map((l, i) => ({ label: l, value: revValues[i], color: "#10b981" })),
-    },
-    utilization: {
-      title: "Utilization & health", defaultDisplay: "stat", chartKind: "bars",
-      stats: [
-        { label: "Utilization", value: "—", tone: "info" },
-        { label: "Avg Fleet Health", value: avgHealth, tone: avgHealth > 75 ? "ok" : "warn" },
-        { label: "On-Time Delivery", value: "—", tone: "ok" },
-      ],
-      items: [{ label: "Avg Fleet Health", value: avgHealth, color: "#10b981" }],
-    },
-    overview: {
-      title: "Operations overview", defaultDisplay: "stat", chartKind: "bars",
-      stats: [
-        { label: "Active Trucks", value: `${active}/${total}`, tone: "ok" },
-        { label: "Utilization", value: "—", tone: "info" },
-        { label: "Open Work Orders", value: "—", tone: "warn" },
-        { label: "Critical Alerts", value: "—", tone: "bad" },
-        { label: "Revenue (30d)", value: formatSar(revenue30d), tone: "ok" },
-        { label: "Fuel Cost (30d)", value: "—", tone: "warn" },
-      ],
-      items: [
-        { label: "Active", value: active, color: "#10b981" },
-        { label: "Maintenance", value: maint, color: "#f59e0b" },
-        { label: "Idle", value: idle, color: "#3b82f6" },
-      ],
-    },
-    // schema not present yet → "No data yet" (wired when their pages land)
-    fuel: { title: "Fuel consumption by depot", defaultDisplay: "chart", chartKind: "bars", noData: true },
-    water: { title: "Water delivered (m³) · 14 days", defaultDisplay: "chart", chartKind: "line", noData: true },
-    cost: { title: "Revenue vs cost · 30 days", defaultDisplay: "chart", chartKind: "bars", noData: true },
-    maintenance: { title: "Work orders by status", defaultDisplay: "chart", chartKind: "bars", noData: true },
-    inventory: { title: "Low-stock parts", defaultDisplay: "table", chartKind: "bars", noData: true },
-    alerts: { title: "Predictive alerts by severity", defaultDisplay: "chart", chartKind: "pie", noData: true },
-    commissions: { title: "Commissions this month", defaultDisplay: "stat", chartKind: "bars", noData: true },
-    depots: { title: "Trucks by depot", defaultDisplay: "chart", chartKind: "bars", noData: true },
-  };
 
   const error =
-    trucksRes.error || tripsRes.error || driversRes.error || leavePeriodsRes.error || archivedProjectsRes.error;
+    actionsRes.error?.message ?? feedRes.error?.message ?? stateRes.error?.message ??
+    pnlRes.error?.message ?? opsRes.error?.message ?? revenueRes.error?.message ??
+    receivablesRes.error?.message ?? dailyRes.error?.message ??
+    monthlyOnlyRes.error?.message ?? deliveryRes.error?.message ?? null;
 
   return (
     <DashboardClient
-      fleet={{ total, active, idle, maint, avgHealth }}
-      bottom={{ onDuty, driversTotal: drivers.length }}
-      liveTrips={liveTrips}
+      actionItems={actionItems}
+      feed={feed}
+      state={state}
+      headlines={headlines}
       charts={charts}
-      datasets={datasets}
-      errorMsg={error?.message ?? null}
+      dailyOps={dailyOps}
+      delivery={delivery}
+      monthlyOnly={monthlyOnly}
+      liveTrips={liveTrips}
+      widgetOptions={widgetOptions}
+      errorMsg={error}
     />
   );
 }
