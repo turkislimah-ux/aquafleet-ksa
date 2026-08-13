@@ -294,23 +294,16 @@ export type Headline = {
 // recording tank size; the proxy retires then.
 // ---------------------------------------------------------------------------
 export type DashCharts = {
-  months: string[];
-  // NOTE: monthly revenue/operating-cost/net-profit SERIES are deliberately
-  // absent. The revenue-vs-cost card is now the DAILY chart (DailyOps, 0104),
-  // and carrying an unrendered monthly copy of the same measures is how two
-  // versions of one figure start to drift.
-  marginPct: number[];
+  // WHAT IS LEFT, AND WHY IT SHRANK. This type once carried five series. Each
+  // one left when the chart reading it was replaced by a view-backed one:
+  //   · trips series  -> Delivery Output, at DAY grain (0105)
+  //   · margin series -> dropped with the Operating margin chart
+  //   · aging series  -> dropped with Receivables aging, replaced by
+  //                      Drivers Ops (v_drivers_ops_now, 0106)
+  // Each was deleted rather than left unrendered: an unused copy of a figure
+  // is how two versions of one number start to drift.
   costMix: { label: string; value: number; color: string }[];
-  // NOTE: the monthly trips series are gone too. The Trips-delivered area
-  // chart was replaced by Delivery Output (DeliveryDay, 0105), which plots the
-  // same count at DAY grain — keeping an unrendered monthly copy alongside it
-  // is how two versions of one figure start to drift. v_operations_monthly is
-  // still read for the "Trips delivered" headline tile, which is a different
-  // thing: one figure for the month, not a series.
-  agingLabels: string[];
-  agingValues: number[];
   hasPnl: boolean;
-  hasAging: boolean;
 };
 
 /**
@@ -367,6 +360,117 @@ export type DeliveryDay = {
   tripsDelivered: number;
   tripsNoTruck: number;
 };
+
+// ---------------------------------------------------------------------------
+// PROJECTS — trips per active project, split by stage (v_project_trip_stages).
+//
+// The project set and the counts are the Kanban's own, so the two cannot
+// disagree. One difference is deliberate and is stated on screen: the Kanban is
+// DAY-SCOPED (its single filter point is `trip_date === selectedDay`) while
+// this is the project's whole history, because a per-project stage bar limited
+// to one day would be nearly empty.
+// ---------------------------------------------------------------------------
+export type ProjectStages = {
+  projectId: string;
+  projectName: string;
+  scheduled: number;
+  loading: number;
+  inTransit: number;
+  delivered: number;
+  total: number;
+  inFlight: number;
+};
+
+/** Stage colours are the Kanban's own (STAGE_STYLES, lib/db-types.ts) so a
+ *  stage means the same colour on both screens. */
+export const STAGE_BAR: { key: keyof Pick<ProjectStages,
+  "scheduled" | "loading" | "inTransit" | "delivered">;
+  en: string; ar: string; color: string }[] = [
+  { key: "scheduled",  en: "Scheduled",  ar: "مجدولة",   color: "#3b82f6" },
+  { key: "loading",    en: "Loading",    ar: "تحميل",    color: "#f59e0b" },
+  { key: "inTransit",  en: "In transit", ar: "في الطريق", color: "#ea580c" },
+  { key: "delivered",  en: "Delivered",  ar: "مسلَّمة",   color: "#10b981" },
+];
+
+// ---------------------------------------------------------------------------
+// COST COMPOSITION — each cost type as a share of the month's total
+// (v_cost_composition_monthly). Shares are computed in SQL, per month, from
+// the P&L's own published figures; nothing here recomputes a cost or a share.
+//
+// A share can be NULL — a month with no cost at all. That renders as EMPTY,
+// never as 0%, because "no cost recorded" and "0% of the cost" are different
+// claims and only one of them is true.
+// ---------------------------------------------------------------------------
+export type CostComposition = {
+  month: string;
+  total: number;
+  parts: { sar: number; pct: number | null };
+  outsourced: { sar: number; pct: number | null };
+  payroll: { sar: number; pct: number | null };
+  commissions: { sar: number; pct: number | null };
+  other: { sar: number; pct: number | null };
+};
+
+export const COST_TYPE: { key: keyof Omit<CostComposition, "month" | "total">;
+  en: string; ar: string; color: string }[] = [
+  { key: "parts",       en: "Parts",          ar: "قطع الغيار",   color: "#0b7eea" },
+  { key: "outsourced",  en: "Outsourced",     ar: "أعمال خارجية", color: "#f59e0b" },
+  { key: "payroll",     en: "Payroll",        ar: "الرواتب",      color: "#8b5cf6" },
+  { key: "commissions", en: "Commissions",    ar: "العمولات",     color: "#10b981" },
+  { key: "other",       en: "Other expenses", ar: "مصروفات أخرى", color: "#64748b" },
+];
+
+// ---------------------------------------------------------------------------
+// DRIVERS OPS — the live per-driver board (v_drivers_ops_now).
+//
+// TWO THINGS THIS TYPE REFUSES TO SIMPLIFY, both because the data is genuinely
+// not simple:
+//
+//  1. `state` and `tripStage` are SEPARATE and may contradict. `active` means
+//     ASSIGNED — a truck and a live project — not currently driving. A driver
+//     with no truck is off_duty by the canonical rule yet can hold in-flight
+//     trips; live, three do. `conflicts` marks those rows. Forcing the two
+//     columns to agree would mean printing a falsehood in one of them.
+//
+//  2. `compliance` has FOUR values, not three. `not_recorded` is its own
+//     state, never folded into `ok` — five of eleven live drivers have no
+//     iqama expiry on file, and rendering a missing date as a passing check is
+//     a fabricated all-clear.
+// ---------------------------------------------------------------------------
+export type DriverOpsState = "active" | "idle" | "off_duty" | "on_leave";
+export type ComplianceStatus = "expired" | "expiring_soon" | "not_recorded" | "ok";
+
+export type DriverOps = {
+  driverId: string;
+  name: string;
+  state: DriverOpsState;
+  truckPlate: string | null;
+  tripStage: "scheduled" | "loading" | "in_transit" | null;
+  inFlightTrips: number;
+  compliance: ComplianceStatus;
+  licenseStatus: ComplianceStatus;
+  iqamaStatus: ComplianceStatus;
+  conflicts: boolean;
+};
+
+/** Risk first, then who is actually working. Ordering only — no figure moves. */
+const COMPLIANCE_RANK: Record<ComplianceStatus, number> = {
+  expired: 0, expiring_soon: 1, not_recorded: 2, ok: 3,
+};
+const STATE_RANK: Record<DriverOpsState, number> = {
+  active: 0, idle: 1, off_duty: 2, on_leave: 3,
+};
+
+export function sortDriverOps(rows: DriverOps[]): DriverOps[] {
+  return [...rows].sort((a, b) =>
+    COMPLIANCE_RANK[a.compliance] - COMPLIANCE_RANK[b.compliance] ||
+    STATE_RANK[a.state] - STATE_RANK[b.state] ||
+    // A contradicting row outranks a quiet one at the same state — it is the
+    // thing most worth looking at on this board.
+    Number(b.conflicts) - Number(a.conflicts) ||
+    a.name.localeCompare(b.name)
+  );
+}
 
 /** "2026-08-01" -> "August 2026". Formatting only; the value is the view's. */
 export function monthTitle(iso: string, ar: boolean): string {

@@ -3,8 +3,10 @@ import { formatSar } from "@/lib/utils";
 import { availableWidgets, type WidgetDef } from "@/lib/dashboard-widgets";
 import type {
   ActionItemRow, FeedRow, FleetStateNow, Headline, DashCharts, LiveTrip,
-  DailyOps, DeliveryDay, MonthlyOnlyCost,
+  DailyOps, DeliveryDay, MonthlyOnlyCost, ProjectStages, CostComposition,
+  DriverOps, DriverOpsState, ComplianceStatus,
 } from "@/lib/dashboard";
+import { checkDriverStateDrift } from "@/lib/actions/driver-state-drift";
 import DashboardClient from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
@@ -43,21 +45,14 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** "2026-08-01" -> "Aug". Labels only; no date math. */
-const MONTH_LBL = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-function monthLabel(iso: unknown): string {
-  const s = String(iso ?? "");
-  const m = Number(s.slice(5, 7));
-  return m >= 1 && m <= 12 ? MONTH_LBL[m - 1] : s.slice(0, 7);
-}
-
 export default async function DashboardPage() {
   const supabase = createClient();
 
   const [
     actionsRes, feedRes, stateRes, pnlRes, opsRes, revenueRes,
-    collectionsRes, receivablesRes, agingRes, liveTripsRes, dictRes,
+    collectionsRes, receivablesRes, liveTripsRes, dictRes,
     dailyRes, monthlyOnlyRes, deliveryRes,
+    projectsRes, costCompRes, driverOpsRes, drift,
   ] = await Promise.all([
     supabase.from("v_dashboard_action_items").select("*"),
     supabase.from("v_activity_feed").select("*").order("occurred_at", { ascending: false }).limit(FEED_LIMIT),
@@ -67,7 +62,6 @@ export default async function DashboardPage() {
     supabase.from("v_revenue_monthly").select("*").order("month", { ascending: false }).limit(1),
     supabase.from("v_collections_monthly").select("*").order("month", { ascending: false }).limit(1),
     supabase.from("v_receivables_open").select("outstanding_sar"),
-    supabase.from("v_receivables_aging").select("*"),
     // Records, not a metric — the only base-table read on this page.
     supabase
       .from("trips")
@@ -85,6 +79,14 @@ export default async function DashboardPage() {
     // v_daily_operations so both charts step through identical months.
     supabase.from("v_delivery_output_daily").select("*")
       .order("day", { ascending: false }).limit(DAILY_DAYS),
+    // 0106 — projects by stage, cost composition, and the drivers board.
+    supabase.from("v_project_trip_stages").select("*").order("project_name"),
+    supabase.from("v_cost_composition_monthly").select("*")
+      .order("month", { ascending: false }).limit(CHART_MONTHS),
+    supabase.from("v_drivers_ops_now").select("*"),
+    // The drift guard runs with the rest rather than after, so a page that
+    // already makes a dozen round trips does not grow a serial one.
+    checkDriverStateDrift(),
   ]);
 
   const actionItems = (actionsRes.data ?? []) as ActionItemRow[];
@@ -94,7 +96,6 @@ export default async function DashboardPage() {
   // Views come back newest-first for the `limit`; charts read oldest-first.
   const pnl = [...((pnlRes.data ?? []) as Record<string, unknown>[])].reverse();
   const ops = [...((opsRes.data ?? []) as Record<string, unknown>[])].reverse();
-  const aging = (agingRes.data ?? []) as Record<string, unknown>[];
 
   const latestPnl = pnl[pnl.length - 1];
   const revenueRow = (revenueRes.data ?? [])[0] as Record<string, unknown> | undefined;
@@ -151,10 +152,57 @@ export default async function DashboardPage() {
     total: num(r.monthly_only_cost_sar),
   }));
 
+  // ---- 0106: projects, cost composition, drivers ------------------------
+  const projectStages: ProjectStages[] = (
+    (projectsRes.data ?? []) as Record<string, unknown>[]
+  ).map((r) => ({
+    projectId: String(r.project_id ?? ""),
+    projectName: String(r.project_name ?? ""),
+    scheduled: num(r.scheduled),
+    loading: num(r.loading),
+    inTransit: num(r.in_transit),
+    delivered: num(r.delivered),
+    total: num(r.total_trips),
+    inFlight: num(r.in_flight_trips),
+  }));
+
+  // `pct` stays NULL when the view returns NULL — a month with no cost at all.
+  // Coercing it to 0 here would turn "no cost recorded" into "0% of the cost",
+  // which is a different and false claim.
+  const pct = (v: unknown): number | null =>
+    v == null ? null : Number.isFinite(Number(v)) ? Number(v) : null;
+
+  const costComposition: CostComposition[] = [
+    ...((costCompRes.data ?? []) as Record<string, unknown>[]),
+  ].reverse().map((r) => ({
+    month: String(r.month ?? ""),
+    total: num(r.total_cost_sar),
+    parts:       { sar: num(r.parts_sar),          pct: pct(r.parts_pct) },
+    outsourced:  { sar: num(r.outsourced_sar),     pct: pct(r.outsourced_pct) },
+    payroll:     { sar: num(r.payroll_sar),        pct: pct(r.payroll_pct) },
+    commissions: { sar: num(r.commissions_sar),    pct: pct(r.commissions_pct) },
+    other:       { sar: num(r.other_expenses_sar), pct: pct(r.other_expenses_pct) },
+  }));
+
+  const driverOps: DriverOps[] = (
+    (driverOpsRes.data ?? []) as Record<string, unknown>[]
+  ).map((r) => ({
+    driverId: String(r.driver_id ?? ""),
+    name: String(r.name ?? ""),
+    state: String(r.state ?? "off_duty") as DriverOpsState,
+    truckPlate: r.truck_plate == null ? null : String(r.truck_plate),
+    tripStage: r.trip_stage == null
+      ? null
+      : (String(r.trip_stage) as "scheduled" | "loading" | "in_transit"),
+    inFlightTrips: num(r.in_flight_trips),
+    compliance: String(r.compliance_status ?? "not_recorded") as ComplianceStatus,
+    licenseStatus: String(r.license_status ?? "not_recorded") as ComplianceStatus,
+    iqamaStatus: String(r.iqama_status ?? "not_recorded") as ComplianceStatus,
+    conflicts: r.state_conflicts_with_trips === true,
+  }));
+
   // ---- charts: every series is a column read straight off a view --------
   const charts: DashCharts = {
-    months: pnl.map((r) => monthLabel(r.month)),
-    marginPct: pnl.map((r) => num(r.operating_margin_pct)),
     // The four operational cost buckets, current month. Manual expenses are
     // deliberately NOT folded in — 0098 keeps them a separate P&L section.
     costMix: latestPnl
@@ -165,10 +213,7 @@ export default async function DashboardPage() {
           { label: "Commissions", value: num(latestPnl.commissions_sar), color: "#10b981" },
         ]
       : [],
-    agingLabels: aging.map((r) => String(r.aging_bucket ?? "")),
-    agingValues: aging.map((r) => num(r.outstanding_sar)),
     hasPnl: pnl.length > 0,
-    hasAging: aging.length > 0,
   };
 
   // ---- KPI row: headline figures, all dictionary-backed -----------------
@@ -258,7 +303,9 @@ export default async function DashboardPage() {
     actionsRes.error?.message ?? feedRes.error?.message ?? stateRes.error?.message ??
     pnlRes.error?.message ?? opsRes.error?.message ?? revenueRes.error?.message ??
     receivablesRes.error?.message ?? dailyRes.error?.message ??
-    monthlyOnlyRes.error?.message ?? deliveryRes.error?.message ?? null;
+    monthlyOnlyRes.error?.message ?? deliveryRes.error?.message ??
+    projectsRes.error?.message ?? costCompRes.error?.message ??
+    driverOpsRes.error?.message ?? null;
 
   return (
     <DashboardClient
@@ -270,6 +317,10 @@ export default async function DashboardPage() {
       dailyOps={dailyOps}
       delivery={delivery}
       monthlyOnly={monthlyOnly}
+      projectStages={projectStages}
+      costComposition={costComposition}
+      driverOps={driverOps}
+      drift={drift}
       liveTrips={liveTrips}
       widgetOptions={widgetOptions}
       errorMsg={error}

@@ -7,9 +7,10 @@
 //   [ hero space the header search bar docks out of ]
 //   KPI row              — headline figures, always above the content
 //   Charts               — revenue vs direct cost (2/3) beside cost mix (1/3),
-//                          then Delivery Output and operating margin full width
-//   Active Trips + aging — the two "right now" snapshots, side by side
-//   Live trips           — what is on the road right now
+//                          then Delivery Output, the per-project stage cards,
+//                          and monthly cost composition
+//   Active Trips +
+//     Drivers Ops        — the two "right now" boards, side by side
 //   Needs action         — 6, with the rest in a popup
 //   Right now + Activity — 6 events, with the rest in a popup
 //   My summaries         — anything added via the header button
@@ -33,15 +34,19 @@ import {
 import { Card, Btn } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { useHeroDock, useSearchDock } from "@/components/SearchDock";
-import { AreaChart, BarChart, ComboChart, PieChart } from "@/components/Charts";
+import { ComboChart, PieChart } from "@/components/Charts";
 import { cn, formatSar } from "@/lib/utils";
+import type { TripStage } from "@/lib/db-types";
 import {
   actionHint, actionHref, actionLabel, dayTick, feedLabel, feedTone,
   monthTitle, relativeTime, sortActionItems,
-  type ActionItemRow, type DailyOps, type DashCharts, type DeliveryDay,
-  type FeedRow, type FleetStateNow, type Headline, type LiveTrip,
-  type MonthlyOnlyCost,
+  sortDriverOps, COST_TYPE, STAGE_BAR,
+  type ActionItemRow, type CostComposition, type ComplianceStatus,
+  type DailyOps, type DashCharts, type DeliveryDay, type DriverOps,
+  type DriverOpsState, type FeedRow, type FleetStateNow, type Headline,
+  type LiveTrip, type MonthlyOnlyCost, type ProjectStages,
 } from "@/lib/dashboard";
+import type { DriverStateDrift } from "@/lib/actions/driver-state-drift";
 import {
   parseStoredWidgets, widgetDef, WIDGETS_MAX, WIDGETS_STORAGE_KEY,
   type PlacedWidget, type WidgetDef, type WidgetDisplay,
@@ -84,6 +89,7 @@ const TONE_TEXT: Record<string, string> = {
 
 export default function DashboardClient({
   actionItems, feed, state, headlines, charts, dailyOps, delivery, monthlyOnly,
+  projectStages, costComposition, driverOps, drift,
   liveTrips, widgetOptions, errorMsg,
 }: {
   actionItems: ActionItemRow[];
@@ -94,6 +100,10 @@ export default function DashboardClient({
   dailyOps: DailyOps[];
   delivery: DeliveryDay[];
   monthlyOnly: MonthlyOnlyCost[];
+  projectStages: ProjectStages[];
+  costComposition: CostComposition[];
+  driverOps: DriverOps[];
+  drift: DriverStateDrift;
   liveTrips: LiveTrip[];
   widgetOptions: WidgetDef[];
   errorMsg: string | null;
@@ -231,6 +241,9 @@ export default function DashboardClient({
           {ar ? "تعذّر تحميل اللوحة: " : "Failed to load the dashboard: "}{errorMsg}
         </p>
       )}
+
+      {/* Renders NOTHING unless the two definitions of driver state disagree. */}
+      <DriftBanner ar={ar} drift={drift} />
 
       {/* ---- KPI ROW — always above the charts ------------------------- */}
       <section aria-labelledby="dash-kpi">
@@ -389,12 +402,66 @@ export default function DashboardClient({
             ar={ar} noTruckTrips={noTruckTrips} deliveredTrips={deliveredTrips} />
         </ChartCard>
 
+        {/* PROJECTS — one compact card per active project, each a single
+            stacked bar across the four stages.
+
+            The project set and the counts are the Kanban's own
+            (v_project_trip_stages, 0106), so the two cannot disagree. One
+            difference is deliberate and is said on the card: the Kanban is
+            DAY-SCOPED and this is the project's whole history, because a
+            per-project bar limited to one day would be nearly empty.
+
+            Delivered dominates every bar. That is the intended full picture,
+            not a scaling bug — a project that has run for months SHOULD read
+            as mostly delivered. */}
+        <section aria-labelledby="dash-projects" className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h3 id="dash-projects" className="text-sm font-semibold">
+                {ar ? "المشاريع" : "Projects"}
+              </h3>
+              <p className="text-[11px] muted">
+                {ar
+                  ? "كل الرحلات لكل مشروع نشط، حسب المرحلة — لا يقتصر على يوم واحد كلوحة كانبان"
+                  : "every trip per active project, by stage — not one day like the Kanban board"}
+              </p>
+            </div>
+            <Link href="/trips?tab=projects"
+              className="focus-ring shrink-0 rounded text-xs text-brand-600 hover:underline dark:text-brand-300">
+              {ar ? "لوحة الرحلات ←" : "Trips board →"}
+            </Link>
+          </div>
+
+          <StageLegend ar={ar} />
+
+          {projectStages.length === 0 ? (
+            <Card>
+              <p className="text-sm muted">
+                {failed
+                  ? (ar ? "تعذّرت قراءة المشاريع." : "Could not read projects.")
+                  : (ar ? "لا توجد مشاريع نشطة." : "No active projects.")}
+              </p>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {projectStages.map((p) => (
+                <ProjectStageCard key={p.projectId} ar={ar} project={p} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* COST COMPOSITION — which cost type dominates each month.
+            MONTHLY by necessity: payroll and non-trip commission have no daily
+            source at all (0104), so only this grain can show true composition.
+            Shares come from v_cost_composition_monthly, computed per month off
+            the P&L's own published figures. */}
         <ChartCard
-          title={ar ? "هامش التشغيل" : "Operating margin"}
-          sub={ar ? "٪ شهرياً — يُحتسب لكل فترة" : "% per month, recomputed per period"}
-          href="/reports?tab=statements&statement=pnl"
-          empty={!charts.hasPnl} failed={failed} ar={ar}>
-          <AreaChart labels={charts.months} data={charts.marginPct} color="#8b5cf6" className="h-56" />
+          title={ar ? "تركيبة التكلفة" : "Cost composition"}
+          sub={ar ? "حصة كل نوع من تكلفة الشهر" : "each type's share of the month's cost"}
+          href="/reports?tab=statements&statement=cost"
+          empty={costComposition.length === 0} failed={failed} ar={ar}>
+          <CostCompositionChart ar={ar} months={costComposition} />
         </ChartCard>
 
       </section>
@@ -450,34 +517,20 @@ export default function DashboardClient({
           </Card>
         </section>
 
-        {/* Deliberately NOT a ChartCard here. Every other section on this page
-            is an h2 above a bare Card, and a ChartCard would have put a second
-            "Receivables aging" title inside the card under the first one. */}
-        <section aria-labelledby="dash-aging" className="space-y-3">
+        {/* DRIVERS OPS — the live board, replacing Receivables aging.
+            Reads v_drivers_ops_now (0106). See the DriversOpsTable comment for
+            why state and stage are allowed to contradict each other. */}
+        <section aria-labelledby="dash-drivers" className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <h2 id="dash-aging" className="text-sm font-semibold">
-              {ar ? "أعمار الذمم" : "Receivables aging"}
+            <h2 id="dash-drivers" className="text-sm font-semibold">
+              {ar ? "حالة السائقين" : "Drivers Ops"}
             </h2>
-            <Link href="/reports?tab=statements&statement=receivables"
+            <Link href="/drivers"
               className="focus-ring rounded text-xs text-brand-600 hover:underline dark:text-brand-300">
-              {ar ? "المستحق حسب المدة ←" : "Outstanding by age →"}
+              {ar ? "كل السائقين ←" : "All drivers →"}
             </Link>
           </div>
-          <Card>
-            {!charts.hasAging ? (
-              <div className="grid h-56 place-items-center text-sm muted">
-                {failed
-                  ? (ar ? "تعذّرت قراءة هذا الرسم." : "Could not read this chart.")
-                  : (ar ? "لا توجد بيانات بعد." : "No data yet.")}
-              </div>
-            ) : (
-              <BarChart labels={charts.agingLabels} data={charts.agingValues}
-                colors={["#10b981", "#3b82f6", "#f59e0b", "#e11d48"]} className="h-56"
-                // Bucket names are painted onto the canvas, so this is the
-                // only place they exist as text.
-                ariaLabel={`${ar ? "المستحق حسب المدة" : "Outstanding by age"}: ${charts.agingLabels.join(", ")}`} />
-            )}
-          </Card>
+          <DriversOpsTable ar={ar} rows={driverOps} failed={failed} />
         </section>
       </div>
 
@@ -738,6 +791,290 @@ function DailyCostDisclosure({
 }
 
 /**
+ * The driver-state drift guard, on screen.
+ *
+ * SILENT WHEN HEALTHY — returns null, so a working system costs the reader
+ * nothing. That is what makes it affordable to run permanently, and permanent
+ * is the point: the previous guard lived behind a throwaway route, became
+ * unreachable when the route was deleted, and existed for exactly as long as
+ * nobody needed it.
+ *
+ * It also stays silent when UNREACHABLE. With no session RLS returns zero rows
+ * on both sides, and shouting "drift" at a reader who is merely logged out
+ * would train everyone to dismiss this banner — which costs more than the bug
+ * it watches for.
+ */
+function DriftBanner({ ar, drift }: { ar: boolean; drift: DriverStateDrift }) {
+  if (drift.ok || !drift.reachable) return null;
+  return (
+    <div role="alert"
+      className="rounded-lg border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-xs">
+      <p className="flex items-start gap-2 font-medium text-rose-700 dark:text-rose-300">
+        <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+        {ar
+          ? `تعارض في حالة السائقين: ${drift.mismatches.length} من ${drift.checked} لا تتطابق بين قاعدة البيانات وحساب التطبيق.`
+          : `Driver state disagrees: ${drift.mismatches.length} of ${drift.checked} differ between the database view and the app's own rule.`}
+      </p>
+      <ul className="mt-1 space-y-0.5 ps-5 muted">
+        {drift.mismatches.map((m) => (
+          <li key={m.driverId}>
+            <span className="font-medium">{m.name}</span>
+            {" — "}
+            {ar ? "العرض" : "view"}: {m.sql} · {ar ? "التطبيق" : "app"}: {m.ts}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 muted">
+        {ar
+          ? "v_driver_state_now و lib/driver-state.ts يجب أن يتطابقا — أصلح القاعدة في الاثنين معاً."
+          : "v_driver_state_now and lib/driver-state.ts must match — fix the rule in both."}
+      </p>
+    </div>
+  );
+}
+
+/** One legend for all six project cards — repeating it per card would be six
+ *  copies of the same four words in a grid meant to read compactly. */
+function StageLegend({ ar }: { ar: boolean }) {
+  return (
+    <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+      {STAGE_BAR.map((s) => (
+        <li key={s.key} className="flex items-center gap-1.5 text-[11px] muted">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-sm" aria-hidden
+            style={{ background: s.color }} />
+          {ar ? s.ar : s.en}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * One project, one horizontal stacked bar across the four stages.
+ *
+ * WIDTHS ARE PROPORTIONS OF THAT PROJECT'S OWN TOTAL, so every bar fills its
+ * card and projects are compared by SHAPE. A shared scale would squeeze the
+ * smallest project into a sliver and make its composition unreadable, which is
+ * the one thing this card exists to show. The absolute total sits beside the
+ * name so size is never lost.
+ *
+ * Delivered dominates every bar by design — a project running for months
+ * SHOULD read as mostly delivered. The in-flight count is called out
+ * separately because it is the part that can still be acted on.
+ */
+function ProjectStageCard({ ar, project }: { ar: boolean; project: ProjectStages }) {
+  const segments = STAGE_BAR
+    .map((s) => ({ ...s, value: project[s.key] }))
+    .filter((s) => s.value > 0);
+
+  return (
+    <Card className="p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="min-w-0 truncate text-sm font-medium">{project.projectName}</span>
+        <span className="shrink-0 text-xs tabular-nums muted">
+          {project.total} {ar ? "رحلة" : project.total === 1 ? "trip" : "trips"}
+        </span>
+      </div>
+
+      {project.total === 0 ? (
+        <p className="mt-2 text-[11px] muted">{ar ? "لا توجد رحلات بعد." : "No trips yet."}</p>
+      ) : (
+        <>
+          <div className="mt-2 flex h-2.5 w-full overflow-hidden rounded-full"
+            role="img"
+            aria-label={segments.map((s) => `${ar ? s.ar : s.en}: ${s.value}`).join(", ")}>
+            {segments.map((s) => (
+              <span key={s.key} title={`${ar ? s.ar : s.en}: ${s.value}`}
+                style={{ width: `${(s.value / project.total) * 100}%`, background: s.color }} />
+            ))}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] tabular-nums">
+            {STAGE_BAR.map((s) => (
+              <span key={s.key}
+                className={cn("flex items-center gap-1", project[s.key] === 0 && "opacity-40")}>
+                <span className="h-1.5 w-1.5 rounded-full" aria-hidden style={{ background: s.color }} />
+                {project[s.key]}
+              </span>
+            ))}
+            {project.inFlight > 0 && (
+              <span className="ms-auto text-brand-600 dark:text-brand-300">
+                {project.inFlight} {ar ? "قيد التنفيذ" : "in flight"}
+              </span>
+            )}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Cost composition — one 100%-wide stacked bar per month, newest last.
+ *
+ * Not a Chart.js chart: five stacked shares with readable labels is what CSS
+ * flex does natively, and it keeps every figure as real TEXT rather than
+ * pixels on a canvas (the same reason ComboChart carries an aria-label).
+ *
+ * A NULL share renders as EMPTY, never 0%. `pct == null` means the month had
+ * no cost at all — "no cost recorded" and "0% of the cost" are different
+ * claims, and printing the second when the first is true is the class of lie
+ * this whole layer exists to prevent.
+ */
+function CostCompositionChart({ ar, months }: { ar: boolean; months: CostComposition[] }) {
+  return (
+    <div className="space-y-3">
+      <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        {COST_TYPE.map((t) => (
+          <li key={t.key} className="flex items-center gap-1.5 text-[11px] muted">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-sm" aria-hidden
+              style={{ background: t.color }} />
+            {ar ? t.ar : t.en}
+          </li>
+        ))}
+      </ul>
+
+      <div className="space-y-2.5">
+        {months.map((m) => {
+          const parts = COST_TYPE
+            .map((t) => ({ ...t, ...m[t.key] }))
+            .filter((t) => t.pct != null && t.pct > 0);
+          const noCost = m.total === 0 || parts.length === 0;
+          return (
+            <div key={m.month}>
+              <div className="mb-1 flex items-baseline justify-between gap-2 text-[11px]">
+                <span className="font-medium">{monthTitle(m.month, ar)}</span>
+                <span className="tabular-nums muted">{formatSar(m.total)}</span>
+              </div>
+              {noCost ? (
+                <div className="flex h-4 items-center rounded-md border border-dashed px-2 text-[10px] muted"
+                  style={{ borderColor: "rgb(var(--border))" }}>
+                  {ar ? "لا تكلفة مسجَّلة" : "No cost recorded"}
+                </div>
+              ) : (
+                <div className="flex h-4 w-full overflow-hidden rounded-md"
+                  role="img"
+                  aria-label={parts.map((t) => `${ar ? t.ar : t.en} ${t.pct}%`).join(", ")}>
+                  {parts.map((t) => (
+                    <span key={t.key}
+                      className="flex items-center justify-center overflow-hidden text-[9px] font-medium text-white"
+                      title={`${ar ? t.ar : t.en}: ${t.pct}% · ${formatSar(t.sar)}`}
+                      style={{ width: `${t.pct}%`, background: t.color }}>
+                      {/* Only label a slice wide enough to hold the text — a
+                          clipped "1%" is noise, and the title carries it. */}
+                      {(t.pct ?? 0) >= 12 ? `${t.pct}%` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const COMPLIANCE_PILL: Record<ComplianceStatus, string> = {
+  expired: "bg-rose-500/10 text-rose-700 ring-rose-500/20 dark:text-rose-300",
+  expiring_soon: "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300",
+  // Slate, not green: an unknown expiry is a gap to close, and colouring it
+  // like a pass is exactly the fabricated all-clear 0106 refuses to emit.
+  not_recorded: "bg-slate-500/10 text-slate-600 ring-slate-500/20 dark:text-slate-300",
+  ok: "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300",
+};
+const COMPLIANCE_LABEL: Record<ComplianceStatus, { en: string; ar: string }> = {
+  expired: { en: "Expired", ar: "منتهية" },
+  expiring_soon: { en: "Expiring", ar: "تنتهي قريباً" },
+  not_recorded: { en: "Not recorded", ar: "غير مسجَّلة" },
+  ok: { en: "Valid", ar: "سارية" },
+};
+const DRIVER_STATE_LABEL: Record<DriverOpsState, { en: string; ar: string; dot: string }> = {
+  active:   { en: "Active",   ar: "نشط",         dot: "bg-emerald-500" },
+  idle:     { en: "Idle",     ar: "خامل",        dot: "bg-brand-500" },
+  off_duty: { en: "Off duty", ar: "خارج الدوام", dot: "bg-slate-400" },
+  on_leave: { en: "On leave", ar: "في إجازة",    dot: "bg-amber-500" },
+};
+
+/**
+ * The live drivers board.
+ *
+ * STATE AND STAGE ARE ALLOWED TO CONTRADICT EACH OTHER — that is the whole
+ * point of the row. `active` means ASSIGNED (a truck and a live project), not
+ * currently driving. A driver with no truck is `off_duty` by the canonical
+ * rule (lib/driver-state.ts, mirrored by v_driver_state_now) yet can still
+ * hold in-flight trips; live, three do. Forcing the two columns to agree would
+ * mean printing a falsehood in one of them, so both are shown as they are and
+ * the PAIRING is flagged — the same signal the Kanban already gives by
+ * blurring those cards.
+ */
+function DriversOpsTable({
+  ar, rows, failed,
+}: {
+  ar: boolean; rows: DriverOps[]; failed: boolean;
+}) {
+  const sorted = useMemo(() => sortDriverOps(rows), [rows]);
+
+  if (sorted.length === 0) {
+    return (
+      <Card>
+        <p className="text-sm muted">
+          {failed
+            ? (ar ? "تعذّرت قراءة السائقين." : "Could not read drivers.")
+            : (ar ? "لا يوجد سائقون." : "No drivers.")}
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-0">
+      <ul className="divide-y" style={{ borderColor: "rgb(var(--border))" }}>
+        {sorted.map((d) => {
+          const st = DRIVER_STATE_LABEL[d.state];
+          return (
+            <li key={d.driverId} className="px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className={cn("h-2 w-2 shrink-0 rounded-full", st.dot)} aria-hidden />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{d.name}</span>
+                <span className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                  COMPLIANCE_PILL[d.compliance]
+                )}>
+                  {ar ? COMPLIANCE_LABEL[d.compliance].ar : COMPLIANCE_LABEL[d.compliance].en}
+                </span>
+              </div>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs muted">
+                <span>{ar ? st.ar : st.en}</span>
+                <span aria-hidden>·</span>
+                <span className="flex items-center gap-1">
+                  <TruckIcon className="h-3 w-3 shrink-0" aria-hidden />
+                  {d.truckPlate ?? (ar ? "بلا شاحنة" : "No truck")}
+                </span>
+                {d.tripStage && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <PhasePill stage={d.tripStage} ar={ar} />
+                    {d.inFlightTrips > 1 && <span className="tabular-nums">×{d.inFlightTrips}</span>}
+                  </>
+                )}
+              </div>
+              {d.conflicts && (
+                <p className="mt-1 flex items-start gap-1 text-[10px] text-amber-700 dark:text-amber-300">
+                  <AlertTriangle className="mt-px h-3 w-3 shrink-0" aria-hidden />
+                  {ar
+                    ? "بلا شاحنة مُسندة رغم وجود رحلات جارية — الحالة والرحلات لا تتفقان."
+                    : "Holds in-flight trips with no assigned truck — state and trips disagree."}
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+/**
  * Names the doughnut's slices, with the figure each one is.
  *
  * The chart had no legend at all before — Chart.js paints one onto the canvas
@@ -839,16 +1176,27 @@ function DeliveryOutputNote({
 
 /** The trip's phase, as a pill. Colours match the Kanban's own phase
  *  mapping (loading = amber, in_transit = orange) so the two agree. */
-function PhasePill({ stage, ar }: { stage: "loading" | "in_transit"; ar: boolean }) {
-  const inTransit = stage === "in_transit";
+// All four stages, because Drivers Ops can report a driver whose most-advanced
+// in-flight trip is still `scheduled` — Active Trips only ever sees the middle
+// two. One pill for both, so a stage cannot end up two colours on one page.
+const PHASE_PILL: Record<TripStage, { en: string; ar: string; cls: string }> = {
+  scheduled:  { en: "Scheduled",  ar: "مجدولة",
+    cls: "bg-blue-500/10 text-blue-700 ring-blue-500/20 dark:text-blue-300" },
+  loading:    { en: "Loading",    ar: "تحميل",
+    cls: "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300" },
+  in_transit: { en: "In transit", ar: "في الطريق",
+    cls: "bg-orange-500/10 text-orange-700 ring-orange-500/20 dark:text-orange-300" },
+  delivered:  { en: "Delivered",  ar: "مسلَّمة",
+    cls: "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300" },
+};
+
+function PhasePill({ stage, ar }: { stage: TripStage; ar: boolean }) {
+  const p = PHASE_PILL[stage];
   return (
     <span className={cn(
-      "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset",
-      inTransit
-        ? "bg-orange-500/10 text-orange-700 ring-orange-500/20 dark:text-orange-300"
-        : "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300"
+      "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", p.cls
     )}>
-      {inTransit ? (ar ? "في الطريق" : "In transit") : (ar ? "تحميل" : "Loading")}
+      {ar ? p.ar : p.en}
     </span>
   );
 }
