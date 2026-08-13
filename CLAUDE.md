@@ -164,28 +164,48 @@ relevant skill(s) **when the task calls for it**:
   give the short version, but the JSON is auto-tool-owned and periodically blanked
   (§5) — anything that matters belongs here, not only there.
 
-- **IN PROGRESS — Kanban board redesign + refinements (UNCOMMITTED on disk, finish this
-  first).** A previous session ran out of context mid-task. Uncommitted changes sit in
-  the working tree — DO NOT discard them; the good redesign is in there.
-  - Files: `app/trips/ProjectsBoard.tsx`, `lib/db-types.ts` (STAGE_STYLES rebuilt,
-    demo-matched), `tailwind.config.ts` (safelist). tsc passes.
-  - The redesign matches `preview/` (pages-1.js kanban + app.css). Phase color mapping:
-    scheduled=blue, loading=amber/yellow, **in_transit=orange**, delivered=green.
-  - **Suspected bug:** STAGE_STYLES tokens may have been restructured in `db-types.ts`
-    without `ProjectsBoard.tsx` fully rewired to consume them — which may explain the
-    board rendering unchanged. Diagnose/verify the tokens are actually used before adding.
-  - **Remaining refinement items to finish (check which are already done — don't redo):**
-    1. Action buttons colored for DESTINATION phase (Start trip=blue, Mark in transit=
-       **orange**, Mark delivered=green).
-    2. Unique phase icons per action button (play=Start; a transit icon=Mark in transit;
-       a delivery icon=Mark delivered).
-    3. Summary table "Drivers operating this project" restyled to match `preview/` (keep
-       current data/columns: Driver, Truck, Status, Trips·Month, Commission·Month, Last Trip).
-    4. In-transit column accent → orange (color only, same pattern as others).
-    5. Route icon on loading/in-transit cards: small icon-only, **disabled/muted** (no
-       destination decided yet — must NOT navigate or look like a working link; must not
-       eat the card's own phase-picker click).
-  - Turki verifies against the demo image before commit.
+- **KANBAN board redesign — DONE and committed** (`11edf4f`, plus `92779b0` for the
+  driver summary table and `180332b` for day-scoping). This entry sat at the top of §7
+  for weeks reading "IN PROGRESS — UNCOMMITTED on disk, finish this first". **That was
+  stale.** Verified against the real code before rewriting, item by item; two of its
+  claims were not merely out of date but WRONG, and both are corrected below.
+  - Files: `app/trips/ProjectsBoard.tsx`, `lib/db-types.ts` (`STAGE_STYLES`),
+    `tailwind.config.ts` (safelist). Nothing uncommitted; the working tree is clean.
+  - **Phase colour mapping (still the lock):** scheduled=blue, loading=amber/yellow,
+    **in_transit=orange**, delivered=green. `STAGE_STYLES` is the one source and the
+    Dashboard's own stage colours read the same mapping, so a stage means the same
+    colour on both screens.
+  - **CORRECTION 1 — the "suspected bug" was FALSE.** §7 suspected `STAGE_STYLES` tokens
+    had been restructured without `ProjectsBoard.tsx` being rewired, and blamed it for
+    "the board rendering unchanged". The tokens ARE consumed: `s.columnBorder` and
+    `s.headerText` on the column, `s.chip` on the delivered badge, all off
+    `STAGE_STYLES[stage]`. There is no unwired token. **Do not go hunting for it.**
+  - **CORRECTION 2 — item 1 was SUPERSEDED, not left undone.** §7 recorded the rule as
+    "action buttons coloured for the DESTINATION phase". Turki later replaced that with
+    the opposite: **every action button is solid-filled in the card's OWN CURRENT-stage
+    colour**, never the destination's, so the column accent and its button always agree.
+    Start trip (on a scheduled card) = solid blue, Mark in transit (on a loading card) =
+    solid amber, Mark delivered (on an in_transit card) = solid orange. This is also a
+    deliberate deviation from `preview/app.css`'s `.kanban-action-*`, which uses one
+    outline treatment plus a "turns green when done" success button. The reasoning is
+    written into `ProjectsBoard.tsx` above the `ACTION_*` constants. **A future
+    "match the demo" pass must not revert either decision.**
+  - The other four items are done as specified: unique phase icons (Play / Truck /
+    Check); the "Drivers operating this project" summary table; in-transit column accent
+    orange (`border-t-orange-600`); and the route hint on loading/in-transit cards,
+    pixel-matched to preview's `.kanban-hint` but **muted and DISABLED** — no route
+    destination exists yet, so it must never navigate, never look like a working link,
+    and never eat the card's own phase-picker click.
+  - **The summary table's columns are DAY-scoped, not month** — Trips (day) / Commission
+    (day). §7 asked for `Trips·Month`/`Commission·Month`, which predates `180332b`
+    making the whole Projects tab day-scoped behind a week-calendar strip. The columns
+    follow the board's own window; that is a consequence of a later decision, not a miss.
+  - **Board scope, load-bearing for anything that reconciles against it:** the Kanban is
+    DAY-SCOPED — its single filter point is `dayTrips` (`trip_date === selectedDay`) —
+    and it renders a card per project where `status === 'active'` over a query already
+    filtered by `archived_at is null`, plus a separate "Direct customer trips" card for
+    trips with no project. The Dashboard's Projects section shares that predicate and
+    differs only in window (current month); see the Dashboard entry below.
 
 - **Finance/Invoice PRD** is committed at `.planning/finance-invoice-spec.md` —
   **COMPLETE end-to-end, through commit `0562d2a`.** Data model (migration `0025`),
