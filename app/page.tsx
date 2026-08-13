@@ -191,6 +191,10 @@ export default async function DashboardPage() {
     name: String(r.name ?? ""),
     state: String(r.state ?? "off_duty") as DriverOpsState,
     truckPlate: r.truck_plate == null ? null : String(r.truck_plate),
+    truckSource: r.truck_source == null
+      ? null
+      : (String(r.truck_source) as "assigned" | "trip"),
+    truckInMaintenance: r.truck_in_maintenance === true,
     tripStage: r.trip_stage == null
       ? null
       : (String(r.trip_stage) as "scheduled" | "loading" | "in_transit"),

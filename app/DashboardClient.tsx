@@ -420,10 +420,14 @@ export default function DashboardClient({
               <h3 id="dash-projects" className="text-sm font-semibold">
                 {ar ? "المشاريع" : "Projects"}
               </h3>
+              {/* The window is the view's (0107), not this file's — it moves
+                  to the new month on the 1st with nothing to update here. Said
+                  out loud because the same cards used to mean all-time, and a
+                  reader has no way to tell the two apart from the bars. */}
               <p className="text-[11px] muted">
                 {ar
-                  ? "كل الرحلات لكل مشروع نشط، حسب المرحلة — لا يقتصر على يوم واحد كلوحة كانبان"
-                  : "every trip per active project, by stage — not one day like the Kanban board"}
+                  ? "هذا الشهر فقط، حسب المرحلة — لوحة كانبان تعرض يوماً واحداً"
+                  : "this month only, by stage — the Kanban board shows a single day"}
               </p>
             </div>
             <Link href="/trips?tab=projects"
@@ -833,6 +837,52 @@ function DriftBanner({ ar, drift }: { ar: boolean; drift: DriverStateDrift }) {
   );
 }
 
+/**
+ * The truck cell on a Drivers Ops row (0107).
+ *
+ * Resolves in the view, not here: assigned truck first, else the truck of the
+ * driver's latest in-flight trip, with `truckSource` saying which. The UI's
+ * only job is to not pass an inference off as an assignment, and to say WHY a
+ * driver has no truck available when the reason is knowable.
+ *
+ * THE MAINTENANCE FLAG IS NOT KEYED OFF THE STATE, deliberately. Khalid 2 has
+ * an ASSIGNED truck that is in the workshop and is `active`, because
+ * assignment is what the state rule reads. Anything that only showed this for
+ * off_duty rows would get that row wrong.
+ *
+ * "No truck" now means genuinely none — not "none, and we did not look".
+ */
+function DriverTruckCell({ ar, driver }: { ar: boolean; driver: DriverOps }) {
+  if (!driver.truckPlate) {
+    return (
+      <span className="flex items-center gap-1">
+        <TruckIcon className="h-3 w-3 shrink-0" aria-hidden />
+        {ar ? "بلا شاحنة" : "No truck"}
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1">
+      {driver.truckInMaintenance
+        ? <Wrench className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+        : <TruckIcon className="h-3 w-3 shrink-0" aria-hidden />}
+      <span className="truncate">{driver.truckPlate}</span>
+      {driver.truckInMaintenance && (
+        <span className="shrink-0 text-amber-700 dark:text-amber-300">
+          {ar ? "— في الصيانة" : "— in maintenance"}
+        </span>
+      )}
+      {/* An inferred plate is labelled as such. Without this the row would
+          read as an assignment the driver does not have. */}
+      {driver.truckSource === "trip" && (
+        <span className="shrink-0 opacity-70">
+          {ar ? "(من رحلته)" : "(from his trip)"}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** One legend for all six project cards — repeating it per card would be six
  *  copies of the same four words in a grid meant to read compactly. */
 function StageLegend({ ar }: { ar: boolean }) {
@@ -1046,10 +1096,7 @@ function DriversOpsTable({
               <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs muted">
                 <span>{ar ? st.ar : st.en}</span>
                 <span aria-hidden>·</span>
-                <span className="flex items-center gap-1">
-                  <TruckIcon className="h-3 w-3 shrink-0" aria-hidden />
-                  {d.truckPlate ?? (ar ? "بلا شاحنة" : "No truck")}
-                </span>
+                <DriverTruckCell ar={ar} driver={d} />
                 {d.tripStage && (
                   <>
                     <span aria-hidden>·</span>

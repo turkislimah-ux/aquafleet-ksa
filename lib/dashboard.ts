@@ -365,10 +365,15 @@ export type DeliveryDay = {
 // PROJECTS — trips per active project, split by stage (v_project_trip_stages).
 //
 // The project set and the counts are the Kanban's own, so the two cannot
-// disagree. One difference is deliberate and is stated on screen: the Kanban is
-// DAY-SCOPED (its single filter point is `trip_date === selectedDay`) while
-// this is the project's whole history, because a per-project stage bar limited
-// to one day would be nearly empty.
+// disagree. The window differs by one step, deliberately, and the section says
+// so on screen: the Kanban is DAY-SCOPED (its single filter point is
+// `trip_date === selectedDay`) while this is the CURRENT RIYADH MONTH (0107).
+// A per-project stage bar limited to one day would be nearly empty; the whole
+// history (0106's first cut) was ~90% delivered and said nothing about how a
+// project is running now.
+//
+// The month lives in the VIEW, not here — it resets on the 1st with no job, no
+// cache and no stored "current period" for this file to get wrong.
 // ---------------------------------------------------------------------------
 export type ProjectStages = {
   projectId: string;
@@ -445,6 +450,29 @@ export type DriverOps = {
   name: string;
   state: DriverOpsState;
   truckPlate: string | null;
+  /**
+   * WHERE THE PLATE CAME FROM (0107). `assigned` is a real assignment;
+   * `trip` means the driver has none and this is the truck of his latest
+   * in-flight trip. The UI shows the difference rather than passing an
+   * inference off as an assignment.
+   */
+  truckSource: "assigned" | "trip" | null;
+  /**
+   * That truck is in the workshop — an in-progress work order or outsourced
+   * job, the same busy-truck definition v_fleet_state_now uses.
+   *
+   * NOT EXCLUSIVE TO off_duty ROWS. Khalid 2 has an ASSIGNED truck that is in
+   * maintenance and is `active`, because assignment is what the state rule
+   * reads. Anything keying this off the state would get that row wrong.
+   */
+  truckInMaintenance: boolean;
+  /**
+   * The stage of the driver's MOST RECENT in-flight trip (0107) — not the
+   * most advanced. 0106 reported the furthest-along stage, which answered
+   * "what is the best this driver has going" rather than "what is he doing
+   * now": a driver whose newest trip was `scheduled` read as `in_transit`
+   * because an older trip was still running.
+   */
   tripStage: "scheduled" | "loading" | "in_transit" | null;
   inFlightTrips: number;
   compliance: ComplianceStatus;
