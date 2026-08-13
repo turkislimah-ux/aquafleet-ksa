@@ -190,13 +190,26 @@ export function ComboChart({
   labels,
   bar,
   line,
+  extraLine,
   lineAxis = "y",
   y1Label,
   className,
 }: {
   labels: string[];
-  bar: { label: string; data: number[]; color?: string };
+  /**
+   * Optional. Omitted by the revenue chart, which became two lines when the
+   * invoiced series was dropped — there is no volume measure left to sit
+   * behind them, and an empty bar dataset would put a dead entry in the legend.
+   */
+  bar?: { label: string; data: number[]; color?: string };
   line: { label: string; data: number[]; color?: string };
+  /**
+   * An optional SECOND line on the left axis. Added for the revenue chart,
+   * which plots two differently-timed revenue measures against one cost
+   * series — the pair has to be comparable, so both ride the same scale.
+   * Omitted everywhere else, so existing callers are unchanged.
+   */
+  extraLine?: { label: string; data: number[]; color?: string };
   lineAxis?: "y" | "y1";
   y1Label?: string;
   className?: string;
@@ -213,16 +226,18 @@ export function ComboChart({
       data: {
         labels,
         datasets: [
-          {
-            type: "bar" as const,
-            label: bar.label,
-            data: bar.data,
-            backgroundColor: bar.color ?? "#0b7eea",
-            borderRadius: 4,
-            maxBarThickness: 22,
-            order: 2,
-            yAxisID: "y",
-          },
+          ...(bar
+            ? [{
+                type: "bar" as const,
+                label: bar.label,
+                data: bar.data,
+                backgroundColor: bar.color ?? "#0b7eea",
+                borderRadius: 4,
+                maxBarThickness: 22,
+                order: 2,
+                yAxisID: "y" as const,
+              }]
+            : []),
           {
             type: "line" as const,
             label: line.label,
@@ -246,6 +261,22 @@ export function ComboChart({
             order: 1,
             yAxisID: lineAxis,
           },
+          ...(extraLine
+            ? [{
+                type: "line" as const,
+                label: extraLine.label,
+                data: extraLine.data,
+                borderColor: extraLine.color ?? "#10b981",
+                backgroundColor: extraLine.color ?? "#10b981",
+                borderWidth: 2,
+                tension: 0,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                fill: false,
+                order: 0,
+                yAxisID: "y" as const,
+              }]
+            : []),
         ],
       },
       options: {
@@ -287,7 +318,7 @@ export function ComboChart({
       chartRef.current?.destroy();
       chartRef.current = null;
     };
-  }, [labels, bar, line, lineAxis, y1Label]);
+  }, [labels, bar, line, extraLine, lineAxis, y1Label]);
 
   // Chart.js paints the legend ONTO the canvas, so the series names exist
   // only as pixels — a screen reader gets nothing, and neither does any test
@@ -295,7 +326,8 @@ export function ComboChart({
   // alternative below is the only place those names exist as text.
   return (
     <div className={className}>
-      <canvas ref={canvasRef} role="img" aria-label={`${bar.label} — ${line.label}`} />
+      <canvas ref={canvasRef} role="img"
+        aria-label={[bar?.label, line.label, extraLine?.label].filter(Boolean).join(" — ")} />
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { formatSar } from "@/lib/utils";
 import { availableWidgets, type WidgetDef } from "@/lib/dashboard-widgets";
 import type {
   ActionItemRow, FeedRow, FleetStateNow, Headline, DashCharts, LiveTrip,
-  DailyOps, DeliveryDay, MonthlyOnlyCost, ProjectStages, CostComposition,
+  DailyOps, DeliveredRevenueDay, DeliveryDay, MonthlyOnlyCost, ProjectStages, CostComposition,
   DriverOps, DriverOpsState, ComplianceStatus,
 } from "@/lib/dashboard";
 import { checkDriverStateDrift } from "@/lib/actions/driver-state-drift";
@@ -52,7 +52,7 @@ export default async function DashboardPage() {
     actionsRes, feedRes, stateRes, pnlRes, opsRes, revenueRes,
     collectionsRes, receivablesRes, liveTripsRes, dictRes,
     dailyRes, monthlyOnlyRes, deliveryRes,
-    projectsRes, costCompRes, driverOpsRes, drift,
+    projectsRes, costCompRes, driverOpsRes, deliveredRevRes, drift,
   ] = await Promise.all([
     supabase.from("v_dashboard_action_items").select("*"),
     supabase.from("v_activity_feed").select("*").order("occurred_at", { ascending: false }).limit(FEED_LIMIT),
@@ -84,6 +84,10 @@ export default async function DashboardPage() {
     supabase.from("v_cost_composition_monthly").select("*")
       .order("month", { ascending: false }).limit(CHART_MONTHS),
     supabase.from("v_drivers_ops_now").select("*"),
+    // 0108 — earned (delivered) revenue. Same spine as v_daily_operations by
+    // construction, so the two zip by day without inventing or dropping one.
+    supabase.from("v_delivered_revenue_daily").select("*")
+      .order("day", { ascending: false }).limit(DAILY_DAYS),
     // The drift guard runs with the rest rather than after, so a page that
     // already makes a dozen round trips does not grow a serial one.
     checkDriverStateDrift(),
@@ -141,6 +145,16 @@ export default async function DashboardPage() {
     capacityM3: num(r.capacity_m3),
     tripsDelivered: num(r.trips_delivered),
     tripsNoTruck: num(r.trips_delivered_no_truck),
+  }));
+
+  const deliveredRevenue: DeliveredRevenueDay[] = [
+    ...((deliveredRevRes.data ?? []) as Record<string, unknown>[]),
+  ].reverse().map((r) => ({
+    day: String(r.day ?? ""),
+    month: String(r.month ?? ""),
+    revenue: num(r.delivered_revenue_sar),
+    pricedTrips: num(r.delivered_trips_priced),
+    unpricedTrips: num(r.delivered_trips_unpriced),
   }));
 
   const monthlyOnly: MonthlyOnlyCost[] = (
@@ -309,7 +323,7 @@ export default async function DashboardPage() {
     receivablesRes.error?.message ?? dailyRes.error?.message ??
     monthlyOnlyRes.error?.message ?? deliveryRes.error?.message ??
     projectsRes.error?.message ?? costCompRes.error?.message ??
-    driverOpsRes.error?.message ?? null;
+    driverOpsRes.error?.message ?? deliveredRevRes.error?.message ?? null;
 
   return (
     <DashboardClient
@@ -319,6 +333,7 @@ export default async function DashboardPage() {
       headlines={headlines}
       charts={charts}
       dailyOps={dailyOps}
+      deliveredRevenue={deliveredRevenue}
       delivery={delivery}
       monthlyOnly={monthlyOnly}
       projectStages={projectStages}

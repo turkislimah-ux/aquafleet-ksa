@@ -320,8 +320,44 @@ export type DailyOps = {
   day: string;
   /** First of the day's own month, straight from the view — no TS date math. */
   month: string;
+  /**
+   * BILLED revenue — the measure Reports uses, bucketed by the day the invoice
+   * was CONFIRMED (in UTC, so days sum to v_revenue_monthly exactly). Lumpy by
+   * nature: one live invoice puts 40,800 SAR on a single day.
+   */
   revenue: number;
   directCost: number;
+};
+
+/**
+ * One day of v_delivered_revenue_daily (0108) — DASHBOARD-ONLY earned revenue.
+ *
+ * THIS IS NOT BILLED REVENUE AND MUST NEVER BE LABELLED AS IT. It is what the
+ * day's DELIVERED work was worth (each delivered trip at its project's
+ * rate_per_trip_sar), whether or not it has been invoiced. It differs from
+ * billed revenue by TIMING (delivered now, invoiced later) and by COVERAGE
+ * (delivered work not yet invoiced at all) — live, June and August show
+ * delivered revenue against zero billed, while July shows billed HIGHER than
+ * delivered, because an invoice can cover earlier periods and special charges.
+ * **Never add the two together, and never feed this into a margin.**
+ *
+ * `unpricedTrips` is the honesty column: a delivered trip with no project has
+ * no rate, contributes 0 to `revenue`, and is counted here so the figure can
+ * be qualified on screen rather than silently running short.
+ *
+ * BUCKETED BY delivered_at IN RIYADH — deliberately a different calendar from
+ * DailyOps.revenue's UTC confirmed_at bucket (0104 needs that one in UTC to
+ * keep summing to v_revenue_monthly). 38% of trips change day between the two
+ * zones, so this is not cosmetic. `pricedTrips` is likewise NOT
+ * DeliveryDay.tripsDelivered, which buckets by trip_date — 86% of delivered
+ * trips land on different days under the two rules. Do not reconcile them.
+ */
+export type DeliveredRevenueDay = {
+  day: string;
+  month: string;
+  revenue: number;
+  pricedTrips: number;
+  unpricedTrips: number;
 };
 
 /**

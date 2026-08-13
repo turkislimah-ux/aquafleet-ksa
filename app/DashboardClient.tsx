@@ -42,7 +42,8 @@ import {
   monthTitle, relativeTime, sortActionItems,
   sortDriverOps, COST_TYPE, STAGE_BAR,
   type ActionItemRow, type CostComposition, type ComplianceStatus,
-  type DailyOps, type DashCharts, type DeliveryDay, type DriverOps,
+  type DailyOps, type DashCharts, type DeliveredRevenueDay,
+  type DeliveryDay, type DriverOps,
   type DriverOpsState, type FeedRow, type FleetStateNow, type Headline,
   type LiveTrip, type MonthlyOnlyCost, type ProjectStages,
 } from "@/lib/dashboard";
@@ -88,7 +89,8 @@ const TONE_TEXT: Record<string, string> = {
 };
 
 export default function DashboardClient({
-  actionItems, feed, state, headlines, charts, dailyOps, delivery, monthlyOnly,
+  actionItems, feed, state, headlines, charts, dailyOps, deliveredRevenue,
+  delivery, monthlyOnly,
   projectStages, costComposition, driverOps, drift,
   liveTrips, widgetOptions, errorMsg,
 }: {
@@ -98,6 +100,7 @@ export default function DashboardClient({
   headlines: Headline[];
   charts: DashCharts;
   dailyOps: DailyOps[];
+  deliveredRevenue: DeliveredRevenueDay[];
   delivery: DeliveryDay[];
   monthlyOnly: MonthlyOnlyCost[];
   projectStages: ProjectStages[];
@@ -157,6 +160,27 @@ export default function DashboardClient({
   const monthExcluded = useMemo(
     () => monthlyOnly.find((m) => m.month === activeMonth) ?? null,
     [monthlyOnly, activeMonth]
+  );
+
+  // ---- earned revenue (0108) — zipped onto the SAME days ----------------
+  // The view shares v_daily_operations' spine by construction, so a lookup by
+  // day is exact: no invented days, no dropped ones. Keyed rather than
+  // index-matched, because relying on two arrays staying in the same order is
+  // how an off-by-one silently misdates a whole series.
+  const deliveredByDay = useMemo(() => {
+    const m = new Map<string, DeliveredRevenueDay>();
+    for (const d of deliveredRevenue) m.set(d.day, d);
+    return m;
+  }, [deliveredRevenue]);
+
+  // Unpriced DELIVERED trips in the month on screen. A delivered trip with no
+  // project has no rate, so it contributes 0 to the delivered figure — the
+  // count is surfaced to qualify that figure rather than let it run silently
+  // short. Summed across days of one view, which is the roll-up that view
+  // already buckets by; no metric is defined here.
+  const unpricedInMonth = useMemo(
+    () => monthDays.reduce((s, d) => s + (deliveredByDay.get(d.day)?.unpricedTrips ?? 0), 0),
+    [monthDays, deliveredByDay]
   );
 
   // ---- Delivery Output (0105) — SAME month as the chart above ------------
@@ -300,7 +324,7 @@ export default function DashboardClient({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ChartCard
           className="lg:col-span-2"
-          title={ar ? "الإيرادات مقابل التكلفة المباشرة" : "Revenue vs direct cost"}
+          title={ar ? "الإيراد المُسلَّم مقابل التكلفة المباشرة" : "Delivered revenue vs direct cost"}
           sub={activeMonth
             ? `${ar ? "يومياً — " : "daily — "}${monthTitle(activeMonth, ar)}`
             : (ar ? "يومياً" : "daily")}
@@ -317,20 +341,29 @@ export default function DashboardClient({
               />
             ) : null
           }>
+          {/* TWO series. The invoiced line was dropped at Turki's call — he
+              does not need it here, and the KPI "Revenue" tile remains the
+              Reports anchor for billed revenue.
+
+              THE LABEL IS NEVER PLAIN "REVENUE". What is plotted is EARNED
+              work (delivered trips at their project's rate), which does not
+              match Reports and is not supposed to. Calling it "Revenue" would
+              invite exactly the comparison it fails. */}
           <ComboChart
             labels={monthDays.map((d) => dayTick(d.day))}
-            bar={{
-              label: ar ? "الإيرادات" : "Revenue",
-              data: monthDays.map((d) => d.revenue),
+            line={{
+              label: ar ? "إيرادات مُسلَّمة" : "Delivered revenue",
+              data: monthDays.map((d) => deliveredByDay.get(d.day)?.revenue ?? 0),
               color: "#10b981",
             }}
-            line={{
+            extraLine={{
               label: ar ? "التكلفة المباشرة" : "Direct cost",
               data: monthDays.map((d) => d.directCost),
               color: "#f59e0b",
             }}
             className="h-72"
           />
+          <DeliveredRevenueNote ar={ar} unpricedTrips={unpricedInMonth} />
           <DailyCostDisclosure ar={ar} excluded={monthExcluded} failed={failed} />
         </ChartCard>
 
@@ -767,8 +800,7 @@ function DailyCostDisclosure({
               {excluded.commissionNonTrip !== 0
                 ? `، وعمولات خاصة وتسويات ومكافآت ${formatSar(excluded.commissionNonTrip)}`
                 : ""}
-              ) — لا يوجد لأيٍّ منها مصدر يومي، فكلاهما رقم شهري. والإيرادات مُسجَّلة بتاريخ
-              اعتماد الفاتورة، لا بتواريخ رحلاتها.
+              ) — لا يوجد لأيٍّ منها مصدر يومي، فكلاهما رقم شهري.
             </>
           ) : (
             <>
@@ -778,8 +810,7 @@ function DailyCostDisclosure({
               {excluded.commissionNonTrip !== 0
                 ? `, ${formatSar(excluded.commissionNonTrip)} commission specials, adjustments and bonus`
                 : ""}
-              ) — neither has a daily source; both are monthly figures. Revenue lands on the day
-              an invoice was confirmed, not the days its trips ran.
+              ) — neither has a daily source; both are monthly figures.
             </>
           )
         ) : failed ? (
@@ -1154,6 +1185,70 @@ function CostMixLegend({
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * Says what this line IS, and qualifies it when some of the day's work could
+ * not be priced.
+ *
+ * WHY IT STAYS NOW THAT THERE IS ONLY ONE REVENUE SERIES. The chart no longer
+ * has two lines to tell apart, but it still plots a number that deliberately
+ * does NOT match Reports — earned work, on the day the trip ran, invoiced or
+ * not. Unlabelled, that is a figure someone will one day compare against the
+ * P&L and file as a bug. The note names it as earned-not-billed, points at
+ * where billed revenue actually lives, and states that it feeds no margin.
+ *
+ * THE UNPRICED NOTE IS CONDITIONAL on purpose. An unconditional disclaimer is
+ * noise that trains the reader to skip it, so it appears only when a delivered
+ * trip in the month on screen genuinely had no project and therefore no rate.
+ * That trip contributes 0 rather than a guessed price, which is why the figure
+ * needs qualifying rather than correcting.
+ */
+function DeliveredRevenueNote({ ar, unpricedTrips }: { ar: boolean; unpricedTrips: number }) {
+  return (
+    <div className="mt-3 flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-[11px] leading-relaxed">
+      <Info className="mt-px h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
+      <p className="muted">
+        {ar ? (
+          <>
+            <span className="font-medium">إيراد مُكتسَب، لا مفوتر.</span>{" "}
+            قيمة العمل المنفَّذ في يومه بسعر مشروعه، سواء فُوتر أم لا — يُسجَّل بتاريخ الرحلة.
+            لا يطابق التقارير ولا يدخل في أي هامش؛ الإيراد المفوتر يبقى في التقارير وفي بطاقة
+            «الإيرادات» أعلى الصفحة.
+            {unpricedTrips > 0 && (
+              <>
+                {" "}
+                <span className="font-medium">
+                  {unpricedTrips} رحلة مُسلَّمة هذا الشهر بلا مشروع،
+                </span>{" "}
+                فلا سعر لها ولم تُحتسب هنا — ولم يُفترض لها سعر.
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="font-medium">Earned, not billed.</span>{" "}
+            What the day&apos;s completed work was worth at its project&apos;s rate, invoiced or
+            not, recorded on the day the trip ran. It does not match Reports and feeds no margin —
+            billed revenue stays in Reports and in the &quot;Revenue&quot; tile at the top of this
+            page.
+            {unpricedTrips > 0 && (
+              <>
+                {" "}
+                <span className="font-medium">
+                  {unpricedTrips} delivered {unpricedTrips === 1 ? "trip" : "trips"} this month{" "}
+                  {unpricedTrips === 1 ? "has" : "have"} no project,
+                </span>{" "}
+                so {unpricedTrips === 1 ? "it has" : "they have"} no rate and{" "}
+                {unpricedTrips === 1 ? "is" : "are"} not counted here — no price was assumed for{" "}
+                {unpricedTrips === 1 ? "it" : "them"}.
+              </>
+            )}
+          </>
+        )}
+      </p>
+    </div>
   );
 }
 
