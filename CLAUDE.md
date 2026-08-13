@@ -142,6 +142,13 @@ relevant skill(s) **when the task calls for it**:
   Records persist (commission history, incidents, etc. survive termination).
 - **Derived driver state** (`lib/driver-state.ts`): 4 states (on_leave > off_duty >
   idle > active), server-computed per page. Never a stored status.
+  **EXACTLY TWO EXPRESSIONS OF THIS RULE MAY EXIST** — that TS helper and
+  `v_driver_state_now` (0106), which mirrors its precedence. `v_fleet_state_now` and
+  `v_drivers_ops_now` COMPOSE on the view rather than restating it, and
+  `lib/actions/driver-state-drift.ts` asserts the two remaining copies agree on live
+  data at every Dashboard load. **Do not add a third.** Note `active` means ASSIGNED
+  (a truck and a live project), NOT currently driving — a driver with no truck can
+  still hold in-flight trips, and the two facts are shown separately.
 - **Water stations vs Operation stations are SEPARATE** (migration 0014's "do NOT
   unify" rule). Water = fill stations (trips). Operation = driver/truck/staff base.
 - **`lib/project-colors.ts`** = shared id-hashed project color palette (one source,
@@ -1461,6 +1468,141 @@ relevant skill(s) **when the task calls for it**:
     verified; they are not a standing regression suite unless that route is made
     permanent (Turki's call, flagged, not decided).
 
+- **DASHBOARD rebuilt as the CATCH-UP page — migrations `0103`–`0107` (12 views),
+  through commit `f2fe408`.** The old page was a mock-data leftover. It answers four
+  questions and deliberately does NOT restate Reports Overview: what needs action,
+  what happened since you last looked, where things stand right now, and a small
+  headline set that links into Reports.
+  - **WHY IT WAS REBUILT, in one number.** The old page summed `trips.rate_sar` in
+    TypeScript for "Revenue (30d)" and rendered **0** while Reports rendered
+    **70,650** — `rate_sar` is NULL on all 203 rows. A figure that disagrees with the
+    statement it links to is worse than no figure. **Every number now reads a view;
+    nothing is re-derived in TS.** If a number is missing the fix is a migration.
+  - **`0103` — the queue, the feed, the fleet snapshot.**
+    - The activity feed needed **NO new table and NO triggers.** Timestamp coverage was
+      MEASURED first: nine state-vs-stamp checks, zero gaps, 320 events across 19
+      kinds, no null timestamps. An event-log table would have duplicated data the
+      schema already carries.
+    - `invoice_unpaid` **composes on `v_receivables_open`** rather than restating its
+      predicate. The first version restated it "closely" and read 5 where Reports read
+      2 — the applied view also carries an inner join to customers. **Composing on the
+      view makes the two incapable of disagreeing; do not "simplify" it back.**
+    - `trip_overdue` uses an **allowlist** (`stage in (scheduled, loading,
+      in_transit)`), not `stage <> 'delivered'` — a denylist silently adopts every
+      future stage.
+    - Dates are Asia/Riyadh, matching `todayKey()`, so the queue cannot disagree with
+      the module pages for three hours every night.
+  - **`0104` — the DAY grain, and the limit it refuses to fake.**
+    - **A full daily P&L IS NOT POSSIBLE from this data.** Payroll has no daily source
+      (`staff.monthly_salary_sar` / `drivers.salary_sar`) and was **98.9% / 67.3% /
+      74.9%** of operating cost in Jun/Jul/Aug; commission specials, adjustments and
+      bonuses are keyed by a text `month_key`. So the view measures **`direct_cost_sar`**
+      (parts + outsourced + trip commissions — the three sources with a real per-day
+      stamp) and never calls it "cost". `v_monthly_only_costs` reports the excluded
+      riyals per month so a chart states its blind spot as a NUMBER.
+      **Never label `direct_margin` as profit; never present direct cost as cost.**
+    - Revenue is NOT redefined — it reads `v_revenue_invoices`, the same rows the
+      monthly view reads, one bucket finer, so days sum to the month by construction.
+      Consequence, accepted: revenue lands on the day an invoice was **CONFIRMED**, not
+      the days its trips ran, so the series is lumpy and a month can read zero.
+    - **`v_parts_consumption`'s definition MOVED DOWN a level** rather than being
+      restated: `v_parts_consumption_daily` is the base and the monthly view rolls it
+      up. Proven byte-identical before drafting (18 rows in, 18 out) and re-proven
+      after apply by full symmetric difference, so `v_parts_cost_monthly`,
+      `v_maintenance_cost_per_truck_monthly` and `v_pnl_monthly` are untouched.
+  - **`0105` — Delivery Output. The bar is a PROXY and the card says so.**
+    Measured volume does not exist (`trips.tank_size_m3` empty on every trip), so the
+    bars are the delivering truck's **capacity DISPATCHED** — the full tank of every
+    truck that ran, full or not — which is real entered data on 15/15 trucks.
+    `trips_delivered_no_truck` is the honesty column: a delivered trip with no truck
+    counts on the line and contributes nothing to the bars, so the UI names the
+    shortfall instead of leaving the two series quietly disagreeing.
+  - **`0106` — projects, cost composition, drivers ops, and ONE FEWER COPY OF DRIVER
+    STATE.**
+    - `0103` had embedded the driver-state rule as a CTE inside `v_fleet_state_now` and
+      flagged it as accepted duplication. A drivers board would have made a **third**
+      copy, so the CTE was lifted into **`v_driver_state_now`** and both other views
+      read it. Two expressions remain (this view + `lib/driver-state.ts`) and
+      `lib/actions/driver-state-drift.ts` compares them. `v_fleet_state_now`'s output
+      is unchanged — same 13 columns/order/types, proven 11/6/1/4/0 both ways.
+    - **Trap disarmed:** `0103` used `d.id not in (select driver_id from …)`. `NOT IN`
+      against a subquery containing one NULL evaluates to NULL, so every driver would
+      fall through to `active`. Zero NULLs today, so output was identical; rewritten as
+      `not exists`.
+    - **`active` means ASSIGNED, not driving.** Three drivers hold in-flight trips with
+      no assigned truck, so their canonical state is `off_duty` while work is in
+      progress (the Kanban already blurs those cards). State and trip stage are
+      SEPARATE columns and `state_conflicts_with_trips` surfaces the pairing —
+      **forcing them to agree would print a falsehood in one of them.**
+    - **Compliance is four-valued** — `expired | expiring_soon | not_recorded | ok`.
+      Five of eleven live drivers have no `iqama_expiry`; a missing date is not a
+      passing check and `not_recorded` never collapses into `ok` (grey, never green).
+    - Cost composition reads **`v_pnl_monthly` only** (it already publishes all five
+      types including manual expenses), so "other" cannot differ from the P&L's own.
+      Monthly by necessity, not preference. Shares recompute per month (0100), the
+      denominator is stated as `operating_cost + expenses` because manual expenses are
+      their own P&L section, and a month with no cost returns **NULL shares** — the UI
+      renders that EMPTY, never five 0% slices.
+  - **`0107` — current month, and a truck cell that says why.**
+    - Projects scope to the current Riyadh month, auto-resetting on the 1st. **The
+      month filter lives in the LEFT JOIN's ON clause, never in WHERE** — in WHERE it
+      evaluates after the join and `NULL >= date` is not true, so a project with no
+      trips this month vanishes instead of rendering an empty card. Measured on a quiet
+      month: **join = 6 rows, WHERE = 0 rows.** On the 1st of a slow month the WHERE
+      form would blank the whole section and look like an outage.
+    - The drivers board's truck resolves assigned-first, else the truck of the latest
+      in-flight trip (`truck_source` says which), and flags maintenance using **the
+      same `busy_trucks` definition `v_fleet_state_now` uses** — two spellings of "in
+      maintenance" would drift. **The flag is NOT exclusive to off_duty rows:** Khalid 2
+      has an ASSIGNED truck in the workshop and is `active`, because assignment is what
+      the state rule reads. The STATE is unchanged by 0107 — a truck in the workshop is
+      still no truck available.
+    - `trip_stage` is the **most RECENT** in-flight trip, not the most advanced (0106
+      answered "the best this driver has going" rather than "what is he doing now").
+      Tiebreak, written into the file: `trip_date DESC`, then most-advanced stage that
+      day, then `id DESC` — the last key exists so the result cannot flip between two
+      identical rows, which is the instability that gets blamed on the UI.
+  - **THE HERO SPACER IN `app/DashboardClient.tsx` IS LOAD-BEARING, NOT DECORATION.**
+    The header's search bar translates down into that empty region and rises back on
+    scroll (`components/SearchDock.tsx`). The first rebuild dropped `useHeroDock` and
+    the spacer, which silently killed the whole intro — with no hero to measure,
+    dock-distance stayed 0. Removing the spacer removes the feature.
+  - **A FAILED READ MUST NEVER CLAIM AN EMPTY QUEUE.** A shipped-and-fixed bug: the
+    page rendered "Every queue is clear right now" while the fetch had errored. Every
+    section now distinguishes "nothing there" from "could not read", and a headline
+    with no period renders an em dash rather than a confident zero. Tone colours follow
+    the same rule — a figure we do not have gets no colour.
+  - **THE DRIFT GUARD'S SHAPE IS THE LESSON.** The first one lived behind a throwaway
+    `/dash-drift` route, became unreachable when that route was deleted at teardown,
+    and was deleted with it — it existed for exactly as long as nobody needed it. The
+    replacement runs on the Dashboard itself every load, renders NOTHING when healthy
+    (which is what makes it affordable to leave permanent), tracks `reachable`
+    separately from `ok` (with no session RLS returns zero rows on BOTH sides, which a
+    naive comparison would score as agreement), and can never take the page down.
+    **Do not move it back behind a diagnostic route.**
+  - **CANVAS TEXT IS INVISIBLE TEXT.** Chart.js paints its legend onto the canvas, so
+    series names are pixels — nothing for a screen reader, nothing for a test.
+    `ComboChart` carries an `aria-label`; `BarChart` gained an optional `ariaLabel`
+    (unset by default, so every Reports/Inventory caller is unchanged). Two test bugs
+    came from this: an unscoped `getByRole("alert")` is never 0 in dev (Next mounts its
+    own empty alert root outside the page tree), and one negative assertion filtered
+    `<div>` by text and took `.first()`, silently resolving to the whole page wrapper —
+    **a negative assertion on an unscoped locator proves nothing.**
+  - **Add Summary is fenced to the semantic layer**, mirroring `lib/report-builder.ts`'s
+    `BUILDER_METRICS`: the catalogue is module-private, a widget is only offered if its
+    key is live in `report_metrics`, and the fence is re-checked server-side so it
+    cannot be bypassed by a crafted request. The natural-language box beside it is a
+    marked seam with no model call.
+  - **Deferred — Dashboard:** per-trip measured volume (retires 0105's capacity proxy
+    the day `trips.tank_size_m3` starts being recorded); a daily payroll source (would
+    let `direct_cost` become real cost); the `0100` dictionary gap is unchanged.
+  - **The `tests/dashboard-*.spec.ts` specs depend on DELETED throwaway routes**
+    (`/dash-drift`, `/dash-daily-check`, `/dash-0106-check`, `/dash-0107-check`) — same
+    convention as every prior phase. They document what was verified. Each fixture
+    carried LIVE figures pulled via the Supabase MCP plus a few rows real data does not
+    have (a zero-cost month, an expired licence, a project with no trips this month),
+    because **a branch that never renders is a branch that ships unchecked.**
+
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
   touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`
@@ -1481,4 +1623,6 @@ relevant skill(s) **when the task calls for it**:
   "still the thin placeholder it always was" note was stale and has been removed.)
 - **Roadmap order:** Trips → Maintenance → Inventory → Archive → Consumption →
   Reports (all done) → Route Optimization → Predictive → IoT (last three deferred).
-  **Every page in the roadmap that is not deferred is now built.**
+  **Every page in the roadmap that is not deferred is now built.** The Dashboard was
+  never on this list — it was a mock-data placeholder that survived every phase — and
+  was rebuilt last, on top of the Reports semantic layer (see its own entry above).
