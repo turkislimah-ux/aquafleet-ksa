@@ -7,6 +7,7 @@
 // mutable fields but never touches stage (that goes through setTripStage).
 
 import { revalidatePath } from "next/cache";
+import { stationPriceFor } from "@/lib/station-pricing";
 import { createClient } from "@/lib/supabase/server";
 import { STAGE_ORDER, STAGE_TIMESTAMP, MAX_BATCH_TRIPS, type TripStage, type WaterType } from "@/lib/db-types";
 import { commissionForDelivery, commissionForNthTrip } from "@/lib/commission";
@@ -57,14 +58,43 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
   if (count < 1) count = 1;
   if (count > MAX_BATCH_TRIPS) return { error: `Max ${MAX_BATCH_TRIPS} trips at once.` };
 
-  // No money on creation: trips.rate_sar stays NULL (nullable). Project trips
-  // take their price from the project (rate_per_trip_sar); driver commission is
-  // computed + stamped by the engine on delivery (setTripStage → priceDelivery).
+  const supabase = createClient();
+
+  // FILLING COST — the one money figure captured at CREATION (0110).
+  //
+  // Read the chosen station's price for the chosen water type and FREEZE it on
+  // the trip. Frozen so a later price edit cannot reprice history, exactly as a
+  // confirmed invoice's totals are frozen. This mirrors commission_sar's
+  // FREEZING only — commission is priced at delivery and re-derived across a
+  // driver+project+day ramp; this is captured once and never recomputed.
+  //
+  // NULL IS A REAL OUTCOME AND IS NOT AN ERROR. A legacy station with no
+  // prices yet, or a station that does not price this type, yields null, and
+  // null on the trip means NOT COSTED — never 0.00, which is a real free fill.
+  // Blocking the pick is the UI's job (selectableWaterTypes); this path records
+  // what is true rather than inventing a number to avoid a null.
+  //
+  // Server-side read, not a client-supplied amount: a price posted from the
+  // browser would be a money figure the user could edit.
+  const { data: stationRow, error: stationErr } = await supabase
+    .from("water_stations")
+    .select("fill_cost_potable_sar, fill_cost_non_potable_sar")
+    .eq("key", water_station)
+    .maybeSingle();
+  if (stationErr) return { error: stationErr.message };
+
+  const filling_cost_sar = stationPriceFor(stationRow, water_type);
+
+  // No other money on creation: trips.rate_sar stays NULL (nullable). Project
+  // trips take their price from the project (rate_per_trip_sar); driver
+  // commission is computed + stamped by the engine on delivery (setTripStage →
+  // priceDelivery). Neither is touched here.
   const base: Record<string, unknown> = {
     project_id,
     customer_id,
     water_station,
     water_type,
+    filling_cost_sar,
     truck_id: nullable(formData.get("truck_id")),
     driver_id: nullable(formData.get("driver_id")),
   };
@@ -74,7 +104,6 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
 
   const rows = Array.from({ length: count }, () => ({ ...base }));
 
-  const supabase = createClient();
   const { error } = await supabase.from("trips").insert(rows);
   if (error) return { error: error.message };
 
@@ -730,8 +759,34 @@ export type WaterStationInput = {
   city: string | null;
   latitude: number | null;
   longitude: number | null;
-  fill_cost: number | null;
+  /**
+   * PER-WATER-TYPE FILL PRICING (0110). null = this station does not offer
+   * that type; a number (including 0) = offered at that price. 0 is real —
+   * company-owned stations fill free — so it is never coerced to null and
+   * null is never coerced to 0.
+   *
+   * The deprecated flat `fill_cost` is NOT written by this path any more. It
+   * stays on the table until its own retirement migration, holding the
+   * pre-0110 figures; writing to it now would create a second, diverging
+   * price of record.
+   */
+  fill_cost_potable_sar: number | null;
+  fill_cost_non_potable_sar: number | null;
 };
+
+/** At least one type must be offered — mirrors 0110's CHECK so the user gets
+ *  a sentence instead of a constraint-violation string. */
+function pricingError(input: WaterStationInput): string | null {
+  const p = input.fill_cost_potable_sar;
+  const n = input.fill_cost_non_potable_sar;
+  if (p === null && n === null) {
+    return "Pick at least one water type and give it a price.";
+  }
+  if ((p !== null && p < 0) || (n !== null && n < 0)) {
+    return "A fill price cannot be negative.";
+  }
+  return null;
+}
 
 export async function createWaterStation(
   input: WaterStationInput,
@@ -750,12 +805,16 @@ export async function createWaterStation(
     .maybeSingle();
   if (lookupErr) return { error: lookupErr.message };
 
+  const priceProblem = pricingError(input);
+  if (priceProblem) return { error: priceProblem };
+
   const fields = {
     name: clean,
     city: input.city?.trim() || null,
     latitude: input.latitude,
     longitude: input.longitude,
-    fill_cost: input.fill_cost,
+    fill_cost_potable_sar: input.fill_cost_potable_sar,
+    fill_cost_non_potable_sar: input.fill_cost_non_potable_sar,
   };
 
   if (existing) {
@@ -787,6 +846,9 @@ export async function updateWaterStation(key: string, input: WaterStationInput):
   if (!clean) return { error: "Station name is required." };
 
   const supabase = createClient();
+  const priceProblem = pricingError(input);
+  if (priceProblem) return { error: priceProblem };
+
   const { error } = await supabase
     .from("water_stations")
     .update({
@@ -794,7 +856,8 @@ export async function updateWaterStation(key: string, input: WaterStationInput):
       city: input.city?.trim() || null,
       latitude: input.latitude,
       longitude: input.longitude,
-      fill_cost: input.fill_cost,
+      fill_cost_potable_sar: input.fill_cost_potable_sar,
+      fill_cost_non_potable_sar: input.fill_cost_non_potable_sar,
     })
     .eq("key", key);
   if (error) return { error: error.message };

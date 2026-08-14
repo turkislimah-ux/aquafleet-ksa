@@ -6,6 +6,7 @@
 // update via RPC 0017). "View breakdown" opens the per-project monthly report.
 
 import { useMemo, useState } from "react";
+import { type StationOption } from "@/lib/station-pricing";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
@@ -69,7 +70,7 @@ type TruckLite = {
   assigned_driver_id: string | null;
   last_service_date: string | null;
 };
-type Station = { key: string; name: string; is_default?: boolean };
+type Station = StationOption & { is_default?: boolean };
 
 export type CustomersTabProps = {
   customers: CustomerLite[];

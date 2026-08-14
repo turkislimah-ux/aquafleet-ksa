@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
+import { type StationOption } from "@/lib/station-pricing";
 import {
   type Trip,
   type TripStage,
@@ -133,7 +134,8 @@ type WaterStationRow = {
   city: string | null;
   latitude: number | null;
   longitude: number | null;
-  fill_cost: number | null;
+  fill_cost_potable_sar: number | null;
+  fill_cost_non_potable_sar: number | null;
   is_default: boolean;
   active: boolean;
 };
@@ -248,7 +250,7 @@ function TripCard({
   // Inline fill-station edit (loading stage only) — options mirror Add-Trip's
   // water_station select; onStationChange fires setTripStation (station-only,
   // no stage move, no commission side effect).
-  stations: { key: string; name: string }[];
+  stations: StationOption[];
   onStationChange: (station: string) => void;
   // Commit 2 — click the whole card to open the any-stage phase picker. The
   // per-stage advance button and the loading chip's <select> both call
@@ -514,7 +516,7 @@ function StageColumn({
   advancingId: string | null;
   activeTruckIds: Set<string>;
   driverIdsWithTruck: Set<string>;
-  stations: { key: string; name: string }[];
+  stations: StationOption[];
   onAdvance: (tripId: string, to: TripStage) => void;
   onStationChange: (tripId: string, station: string) => void;
   onOpenPicker: (trip: TripRow) => void;
@@ -610,7 +612,7 @@ function PhasePickerModal({
   onClose,
 }: {
   trip: TripRow;
-  stations: { key: string; name: string }[];
+  stations: StationOption[];
   stationsByKey: Record<string, string>;
   busy: boolean;
   onApply: (tripId: string, target: TripStage, station?: string) => Promise<boolean>;
@@ -934,7 +936,7 @@ function ProjectCard({
   onAdd: (projectId: string) => void;
   activeTruckIds: Set<string>;
   driverIdsWithTruck: Set<string>;
-  stations: { key: string; name: string }[];
+  stations: StationOption[];
   onStationChange: (tripId: string, station: string) => void;
   onOpenPicker: (trip: TripRow) => void;
   // Clickable-ref-from-invoice highlight (Finance polish batch A).
@@ -1147,7 +1149,7 @@ export type ProjectsBoardProps = {
   drivers: DriverOption[];
   assignmentsByProject: Record<string, string[]>;
   stationsByKey: Record<string, string>;
-  stations: { key: string; name: string }[];
+  stations: StationOption[];
   // Full rows (active + inactive) — "Manage stations" popup only.
   allStations: WaterStationRow[];
   driverStateById: Record<string, DriverState>;

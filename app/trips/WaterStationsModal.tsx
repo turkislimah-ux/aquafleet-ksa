@@ -9,7 +9,8 @@
 //
 // key immutability: generated once on Add (slug of the name, lib/slug — same
 // helper + pattern as staff_roles/leave_types), never shown, never editable.
-// Edit only ever sends name/city/latitude/longitude/fill_cost.
+// Edit only ever sends name/city/latitude/longitude + the two per-type fill
+// prices (0110). The deprecated flat fill_cost is no longer read or written.
 //
 // Soft-delete only: "Deactivate" sets active=false (no hard delete). If the
 // station is an ACTIVE project's default, deactivateWaterStation refuses and
@@ -17,7 +18,7 @@
 // replacement default for EVERY one before the deactivation is applied. Nothing
 // is ever auto/randomly reassigned.
 //
-// fill_cost is cost-side only (what the station charges US per fill) — stored
+// Fill price is cost-side only (what the station charges US per fill) — stored
 // for future reporting, never read by any rate/commission/invoice calculation.
 
 import { useMemo, useState } from "react";
@@ -25,6 +26,8 @@ import { useRouter } from "next/navigation";
 import { X, Plus, Pencil, Droplet, AlertTriangle } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
+import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
+import { stationPriceFor } from "@/lib/station-pricing";
 import {
   createWaterStation,
   updateWaterStation,
@@ -43,7 +46,8 @@ type StationRow = {
   city: string | null;
   latitude: number | null;
   longitude: number | null;
-  fill_cost: number | null;
+  fill_cost_potable_sar: number | null;
+  fill_cost_non_potable_sar: number | null;
   is_default: boolean;
   active: boolean;
 };
@@ -182,7 +186,7 @@ export default function WaterStationsModal({
                   <TH>Name</TH>
                   <TH>City</TH>
                   <TH>Coordinates</TH>
-                  <TH>Fill cost (internal)</TH>
+                  <TH>Water types &amp; fill cost (internal)</TH>
                   <TH className="text-right">Actions</TH>
                 </tr>
               </thead>
@@ -349,7 +353,25 @@ function StationRowView({
       </TD>
       <TD>{s.city ?? "—"}</TD>
       <TD className="tabular-nums text-xs">{coords}</TD>
-      <TD className="tabular-nums">{s.fill_cost != null ? formatSar(s.fill_cost) : "—"}</TD>
+      {/* One line per type. A type with no price is NOT OFFERED, which is a
+          different statement from costing 0 — the row says which. */}
+      <TD className="text-xs">
+        <div className="flex flex-col gap-0.5">
+          {(["potable", "non_potable"] as WaterType[]).map((wt) => {
+            const price = stationPriceFor(s, wt);
+            return (
+              <span key={wt} className="flex items-center gap-1.5 whitespace-nowrap">
+                <span className="muted">{WATER_TYPE_LABELS[wt]}</span>
+                {price === null ? (
+                  <span className="muted italic">not offered</span>
+                ) : (
+                  <span className="tabular-nums font-medium">{formatSar(price)}</span>
+                )}
+              </span>
+            );
+          })}
+        </div>
+      </TD>
       <TD className="text-right">
         <div className="inline-flex gap-1">
           <button
@@ -389,24 +411,61 @@ function StationForm({
   const [city, setCity] = useState(editing?.city ?? "");
   const [latitude, setLatitude] = useState(editing?.latitude != null ? String(editing.latitude) : "");
   const [longitude, setLongitude] = useState(editing?.longitude != null ? String(editing.longitude) : "");
-  const [fillCost, setFillCost] = useState(editing?.fill_cost != null ? String(editing.fill_cost) : "");
+  // A checkbox per water type drives whether that type is OFFERED; the price
+  // box beside it carries the amount. Checked with an empty box is not a
+  // price — it is an incomplete row, and submit says so rather than silently
+  // storing 0, which would mean "free" and be a different claim entirely.
+  const [potableOn, setPotableOn] = useState(editing?.fill_cost_potable_sar != null);
+  const [potablePrice, setPotablePrice] = useState(
+    editing?.fill_cost_potable_sar != null ? String(editing.fill_cost_potable_sar) : ""
+  );
+  const [nonPotableOn, setNonPotableOn] = useState(editing?.fill_cost_non_potable_sar != null);
+  const [nonPotablePrice, setNonPotablePrice] = useState(
+    editing?.fill_cost_non_potable_sar != null ? String(editing.fill_cost_non_potable_sar) : ""
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = name.trim() !== "";
+  const canSubmit = name.trim() !== "" && (potableOn || nonPotableOn);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canSubmit) {
+    if (name.trim() === "") {
       setError("Station name is required.");
       return;
     }
+    if (!potableOn && !nonPotableOn) {
+      setError("Pick at least one water type and give it a price.");
+      return;
+    }
+    // A ticked type with a blank or non-numeric box is incomplete. Coercing it
+    // to 0 would record "this station fills free", which is a real and very
+    // different claim.
+    for (const [on, raw, label] of [
+      [potableOn, potablePrice, WATER_TYPE_LABELS.potable],
+      [nonPotableOn, nonPotablePrice, WATER_TYPE_LABELS.non_potable],
+    ] as [boolean, string, string][]) {
+      if (!on) continue;
+      if (raw.trim() === "" || !Number.isFinite(Number(raw))) {
+        setError(`Enter a price for ${label} — use 0 if this station fills free.`);
+        return;
+      }
+      if (Number(raw) < 0) {
+        setError(`${label} price cannot be negative.`);
+        return;
+      }
+    }
+    // An unticked type sends null — NOT OFFERED. A ticked type sends its
+    // number, and 0 is allowed and meaningful (company-owned, fills free).
+    // Number("") is 0, so an empty ticked box would post a silent free fill;
+    // that case is rejected above rather than coerced here.
     const input: WaterStationInput = {
       name: name.trim(),
       city: city.trim() || null,
       latitude: latitude.trim() === "" ? null : Number(latitude),
       longitude: longitude.trim() === "" ? null : Number(longitude),
-      fill_cost: fillCost.trim() === "" ? null : Number(fillCost),
+      fill_cost_potable_sar: potableOn ? Number(potablePrice) : null,
+      fill_cost_non_potable_sar: nonPotableOn ? Number(nonPotablePrice) : null,
     };
     setSaving(true);
     setError(null);
@@ -463,17 +522,49 @@ function StationForm({
             />
           </label>
         </div>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="muted">Fill cost — internal, SAR per fill (cost only; never affects rates, commission, or invoices)</span>
-          <input
-            value={fillCost}
-            onChange={(e) => setFillCost(e.target.value)}
-            className={INPUT}
-            style={INPUT_STYLE}
-            inputMode="decimal"
-            placeholder="e.g. 45"
-          />
-        </label>
+        {/* PER-WATER-TYPE PRICING. The types are fixed and pre-exist, so the
+            user only ticks what this station sells and fills in a price. An
+            unticked type is stored as NULL — not offered — and trip-add will
+            block it for this station. */}
+        <div className="flex flex-col gap-2 text-sm">
+          <span className="muted">
+            Water types and fill cost — internal, SAR per fill (cost only; never affects rates,
+            commission, or invoices). Tick each type this station sells. Enter 0 if it fills free.
+          </span>
+          {([
+            ["potable", potableOn, setPotableOn, potablePrice, setPotablePrice],
+            ["non_potable", nonPotableOn, setNonPotableOn, nonPotablePrice, setNonPotablePrice],
+          ] as [WaterType, boolean, (v: boolean) => void, string, (v: string) => void][]).map(
+            ([wt, on, setOn, price, setPrice]) => (
+              <div key={wt} className="flex items-center gap-3">
+                <label className="flex items-center gap-2 w-40 shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={(e) => setOn(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 accent-brand-600"
+                  />
+                  <span>{WATER_TYPE_LABELS[wt]}</span>
+                </label>
+                <input
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  disabled={!on}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                  inputMode="decimal"
+                  placeholder={on ? "e.g. 45 — or 0 if free" : "not offered"}
+                  aria-label={`${WATER_TYPE_LABELS[wt]} fill price`}
+                />
+              </div>
+            )
+          )}
+          {!potableOn && !nonPotableOn && (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              A station must offer at least one water type.
+            </p>
+          )}
+        </div>
         {editing && (
           <p className="text-xs muted">
             Renaming only changes the display name — every trip/project already pointing at this

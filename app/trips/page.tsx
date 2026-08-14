@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { type StationOption } from "@/lib/station-pricing";
 import type { Trip, WaterType, CommissionMode, ProjectStatus, DriverStatus, ProjectDriver, PaymentMode } from "@/lib/db-types";
 import type { LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
@@ -143,13 +144,17 @@ export default async function TripsPage() {
       // Pickers (Add Trip, phase picker, Manage Project, loading chip) — ACTIVE
       // stations only, so a deactivated station naturally disappears from every
       // selection surface without touching any of that UI directly.
-      supabase.from("water_stations").select("key, name, is_default").eq("active", true).order("name", { ascending: true }),
+      // Prices travel with the option: trip-add blocks a water type this
+        // station does not offer, which it cannot do without them (0110).
+        supabase.from("water_stations")
+          .select("key, name, is_default, fill_cost_potable_sar, fill_cost_non_potable_sar")
+          .eq("active", true).order("name", { ascending: true }),
       // Every station row (active + inactive), full columns — feeds the "Manage
       // stations" popup AND stationsByKey (name resolution must still work for
       // old trips pointing at a since-deactivated station's key).
       supabase
         .from("water_stations")
-        .select("id, key, name, city, latitude, longitude, fill_cost, is_default, active")
+        .select("id, key, name, city, latitude, longitude, fill_cost_potable_sar, fill_cost_non_potable_sar, is_default, active")
         .order("name", { ascending: true }),
       // FULL leave periods (NOT today-prefiltered): the pill still resolves "today"
       // via buildDriverStateMap, but Add Trip also needs on-leave for an ARBITRARY
@@ -213,7 +218,7 @@ export default async function TripsPage() {
   // `stationsByKey` resolves the trip card's "Fill at:" line and must cover
   // inactive stations too — an old trip pointing at a deactivated key still
   // needs to show its name.
-  const stations = (stationsRes.data ?? []) as { key: string; name: string; is_default: boolean }[];
+  const stations = (stationsRes.data ?? []) as (StationOption & { is_default: boolean })[];
   type WaterStationRow = {
     id: string;
     key: string;
@@ -221,7 +226,8 @@ export default async function TripsPage() {
     city: string | null;
     latitude: number | null;
     longitude: number | null;
-    fill_cost: number | null;
+    fill_cost_potable_sar: number | null;
+    fill_cost_non_potable_sar: number | null;
     is_default: boolean;
     active: boolean;
   };

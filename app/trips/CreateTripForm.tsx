@@ -15,6 +15,7 @@ import {
   MAX_BATCH_TRIPS,
 } from "@/lib/db-types";
 import { createTrip } from "./actions";
+import { selectableWaterTypes, type StationOption } from "@/lib/station-pricing";
 import { type DriverState, resolveOnLeave } from "@/lib/driver-state";
 import { type LeavePeriod } from "@/lib/leave";
 import DriverDutyTable from "./DriverDutyTable";
@@ -26,7 +27,6 @@ type ProjectOption = {
   default_water_station: string;
 };
 type CustomerOption = { id: string; name: string; default_station: string | null };
-type StationOption = { key: string; name: string };
 type TruckOption = { id: string; plate: string; assigned_driver_id: string | null };
 type DriverOption = { id: string; name: string };
 // Trip rows needed for the per-driver duty figures. on-duty is day-scoped
@@ -109,6 +109,19 @@ export default function CreateTripForm({
   // explicitly (direct-customer trips have no project to inherit from).
   const [waterType, setWaterType] = useState<WaterType | "">("");
   const [station, setStation] = useState<string>(stations[0]?.key ?? "");
+
+  // What the CHOSEN station offers. Derived, never stored — the station's
+  // prices are the single source and this recomputes from them.
+  const pickedStation = useMemo(
+    () => stations.find((s) => s.key === station) ?? null,
+    [stations, station]
+  );
+  const allowedTypes = useMemo(() => selectableWaterTypes(pickedStation), [pickedStation]);
+  // Set when the CURRENT pick is no longer offered — i.e. the user changed
+  // station after choosing a type. The select drops the option, so without
+  // this the field would silently blank and look like a glitch.
+  const blockedType = waterType !== "" && !allowedTypes.includes(waterType) ? waterType : null;
+  const stationName = pickedStation?.name ?? "This station";
   // Single-select operational driver (null = unassigned). Truck is DERIVED from
   // this driver (one truck per driver) — there is no separate truck selector.
   const [driverId, setDriverId] = useState<string | null>(null);
@@ -364,12 +377,25 @@ export default function CreateTripForm({
                   <option value="" disabled>
                     Select…
                   </option>
-                  {Object.entries(WATER_TYPE_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>
-                      {l}
-                    </option>
-                  ))}
+                  {/* Only what THIS station offers. A type it does not price
+                      is not selectable here — pick another station to get it.
+                      An unpriced legacy station offers both, so trip creation
+                      never freezes while prices are still being entered
+                      (selectableWaterTypes carries that rule). */}
+                  {(Object.keys(WATER_TYPE_LABELS) as WaterType[])
+                    .filter((v) => allowedTypes.includes(v))
+                    .map((v) => (
+                      <option key={v} value={v}>
+                        {WATER_TYPE_LABELS[v]}
+                      </option>
+                    ))}
                 </select>
+                {blockedType && (
+                  <span className="text-xs text-amber-700 dark:text-amber-300">
+                    {stationName} does not offer {WATER_TYPE_LABELS[blockedType]}. Pick another
+                    station, or add that type to this station under Manage stations.
+                  </span>
+                )}
               </label>
 
               {/* Driver + truck — one operational pick. The driver's assigned truck
