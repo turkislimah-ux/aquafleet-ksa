@@ -1,0 +1,215 @@
+-- 0111_backfill_trip_filling_cost.sql
+-- Lock the ≥1-type guarantee, then cost historical trips from the real prices
+-- Turki entered.
+--
+-- ===========================================================================
+-- THIS STILL DOES NOT MOVE THE P&L
+-- ===========================================================================
+-- No view is created, replaced or dropped, and nothing on Reports or the
+-- Dashboard reads trips.filling_cost_sar yet. v_pnl_monthly,
+-- v_daily_operations and v_cost_composition_monthly must be byte-identical
+-- before and after — asserted in the verification block, because "the money
+-- migration that was supposed to be invisible" is exactly the one worth
+-- proving rather than assuming.
+--
+-- This writes ONE column on ONE table. No other column, no view, no RPC, and
+-- the money core (lib/prepaid.ts, lib/vat.ts, FIFO ledgers, invoice RPCs) is
+-- neither read nor written.
+--
+-- ===========================================================================
+-- 1) VALIDATE THE ≥1-TYPE CONSTRAINT, BEFORE COSTING ANYTHING
+-- ===========================================================================
+-- 0110 added water_stations_offers_at_least_one_type as NOT VALID, because
+-- every station had both prices NULL at the time. All five now comply, so this
+-- validates it — and the ORDER matters: validating first means history is
+-- costed against a table that is guaranteed to have no price-less station, and
+-- the guarantee is locked before anything depends on it rather than after.
+--
+-- Live state going in (checked, not assumed):
+--     furaian_station        potable  0.00   non_potable  0.00
+--     manfuhah_station       potable 15.00   non_potable 10.00
+--     olaya_filling_point    potable  NULL   non_potable 80.00
+--     shas_water_station     potable 80.00   non_potable 50.00
+--     umm_al_hamam_station   potable  NULL   non_potable 10.00
+-- Two stations deliberately do NOT offer potable. That is a real business fact
+-- Turki entered, not missing data, and section 2 protects it.
+--
+-- ===========================================================================
+-- 2) THE BACKFILL, AND THE 13 TRIPS IT MUST REFUSE TO COST
+-- ===========================================================================
+-- Each historical trip is costed at its own station's price for its own water
+-- type. Measured before drafting, on 739 trips:
+--
+--     already costed (leave alone)                     23
+--     costed by this migration                        703   = 6,150.00 SAR
+--     LEFT NULL, deliberately                          13
+--
+-- ALL 13 ARE umm_al_hamam_station × potable. That station does not offer
+-- potable — Turki left the price unset on purpose — yet 13 trips in June/July
+-- were filled there as potable before the type-level model existed. There is
+-- no honest price for them:
+--
+--   · 0.00 would claim the fill was FREE and understate cost
+--   · the non-potable price (10.00) would invent a number for a different product
+--   · the old flat fill_cost (0.00) is the same free claim by another route
+--
+-- So they stay NULL, which is the true record: NOT COSTED. This is the exact
+-- case that killed the earlier seed migration — it would have filled that gap
+-- from the flat cost and silently turned "we do not know" into "it was free"
+-- on 13 rows. Whatever eventually reads this column must COUNT the NULLs and
+-- disclose them, the way the Dashboard already discloses its unpriceable
+-- delivered trip.
+--
+-- If Turki later decides Umm Al Hamam does sell potable and enters a price,
+-- RE-APPLYING THIS FILE costs those 13 and touches nothing else.
+--
+-- ===========================================================================
+-- RE-RUNNABLE BY CONSTRUCTION
+-- ===========================================================================
+-- The update is guarded by `filling_cost_sar is null`, so:
+--   · already-costed trips are never re-priced — the 23 snapshots Turki's own
+--     trips carry are untouchable here, and so is every row a previous run set
+--   · a second run is a no-op unless new prices have appeared
+--   · a station price edited later does NOT reprice history, which is the
+--     whole point of the snapshot being frozen
+-- ===========================================================================
+
+begin;
+
+-- ---------------------------------------------------------------------
+-- 1) Lock the guarantee first.
+-- ---------------------------------------------------------------------
+alter table public.water_stations
+  validate constraint water_stations_offers_at_least_one_type;
+
+-- ---------------------------------------------------------------------
+-- 2) Cost history from the station's price for the trip's own water type.
+-- ---------------------------------------------------------------------
+-- The join is trips.water_station -> water_stations.key (the immutable lookup
+-- key, per CLAUDE.md §6 — never the display name, which can be renamed).
+update public.trips t
+   set filling_cost_sar = case t.water_type
+                            when 'potable'     then w.fill_cost_potable_sar
+                            when 'non_potable' then w.fill_cost_non_potable_sar
+                          end
+  from public.water_stations w
+ where w.key = t.water_station
+   -- NEVER touch an already-costed trip. This is what makes the file
+   -- re-runnable and what protects the snapshots taken at creation.
+   and t.filling_cost_sar is null
+   -- Only write where a real price exists for THAT type. Without this the
+   -- CASE would assign NULL to NULL — harmless, but it would also make the
+   -- row count meaningless and hide which trips were genuinely skipped.
+   and (case t.water_type
+          when 'potable'     then w.fill_cost_potable_sar
+          when 'non_potable' then w.fill_cost_non_potable_sar
+        end) is not null;
+
+commit;
+
+-- ===========================================================================
+-- POST-APPLY VERIFICATION — run these; do not assume.
+-- ===========================================================================
+--
+-- A) THE CONSTRAINT IS NOW VALID:
+--      select conname, convalidated
+--        from pg_constraint
+--       where conrelid = 'public.water_stations'::regclass
+--         and conname = 'water_stations_offers_at_least_one_type';
+--      -- expect convalidated = true.
+--
+-- B) COSTED VS NULL, BEFORE AND AFTER. Capture this BEFORE applying:
+--      select count(*) filter (where filling_cost_sar is not null) as costed,
+--             count(*) filter (where filling_cost_sar is null)     as not_costed,
+--             count(*)                                             as trips,
+--             round(sum(filling_cost_sar), 2)                      as total_sar
+--        from public.trips;
+--      -- BEFORE: 23 costed / 716 null / 739 trips
+--      -- AFTER : 726 costed / 13 null / 739 trips, total 6,150.00 + whatever
+--      --         the 23 pre-existing snapshots already carried.
+--
+-- C) THE NULLS ARE EXPLAINED, NOT MYSTERIOUS. Every remaining NULL must be a
+--    station that does not price that type — expect exactly one row,
+--    umm_al_hamam_station / potable / 13:
+--      select t.water_station, t.water_type, count(*) as trips_left_null,
+--             case t.water_type
+--               when 'potable'     then w.fill_cost_potable_sar
+--               when 'non_potable' then w.fill_cost_non_potable_sar
+--             end as price_for_type
+--        from public.trips t
+--        left join public.water_stations w on w.key = t.water_station
+--       where t.filling_cost_sar is null
+--       group by 1, 2, 4
+--       order by 3 desc;
+--      -- price_for_type MUST be null on every row here. A NULL trip whose
+--      -- station DOES price that type would mean the update missed rows.
+--
+--    And nothing was skipped for a missing station — expect 0:
+--      select count(*) from public.trips t
+--       where not exists (select 1 from public.water_stations w
+--                          where w.key = t.water_station);
+--
+-- D) NO ALREADY-COSTED TRIP CHANGED. Capture the 23 BEFORE applying:
+--      select id, filling_cost_sar from public.trips
+--       where filling_cost_sar is not null order by id;   -- run BEFORE
+--    then after applying, re-run for those same ids and diff. Or, in one shot
+--    if the before-list was saved to a temp table `pre_costed(id, amt)`:
+--      select t.id, p.amt as before_amt, t.filling_cost_sar as after_amt
+--        from public.trips t join pre_costed p on p.id = t.id
+--       where t.filling_cost_sar is distinct from p.amt;
+--      -- expect 0 rows.
+--
+-- E1) EVERY TRIP COSTED *BY THIS MIGRATION* MATCHES ITS STATION'S PRICE FOR
+--     ITS OWN TYPE. This catches a potable trip costed at the non-potable
+--     price. Scoped to rows this file wrote — see E2 for why that scoping is
+--     essential rather than fussy. Expect 0 rows:
+--       select t.id, t.water_station, t.water_type, t.filling_cost_sar
+--         from public.trips t
+--         join public.water_stations w on w.key = t.water_station
+--        where t.filling_cost_sar is not null
+--          and t.id not in (select id from pre_costed)   -- the BEFORE list, D
+--          and t.filling_cost_sar <> (case t.water_type
+--                when 'potable'     then w.fill_cost_potable_sar
+--                when 'non_potable' then w.fill_cost_non_potable_sar end);
+--
+-- E2) PRE-EXISTING SNAPSHOTS MAY LEGITIMATELY DISAGREE WITH TODAY'S PRICES,
+--     AND MUST NOT BE "REPAIRED". Measured before drafting: 8 of the 23
+--     already-costed trips are frozen at 0.00 for umm_al_hamam_station /
+--     non_potable while that station now prices it at 10.00. They were created
+--     on 2026-08-14 when the price WAS 0.00, and Turki raised it afterwards.
+--
+--     THAT IS THE FREEZE WORKING, ON LIVE DATA — the whole reason
+--     filling_cost_sar is a snapshot instead of a join. A naive
+--     "costed trip == current price" check reports those 8 as failures, and
+--     the tempting fix — updating them to 10.00 — would silently rewrite
+--     history and destroy the guarantee.
+--
+--     So this query is a REPORT, not an assertion. Rows are expected:
+--       select t.water_station, t.water_type,
+--              t.filling_cost_sar as frozen_at_creation,
+--              case t.water_type
+--                when 'potable'     then w.fill_cost_potable_sar
+--                when 'non_potable' then w.fill_cost_non_potable_sar
+--              end as price_now,
+--              count(*) as trips, min(t.created_at)::date as created
+--         from public.trips t
+--         join public.water_stations w on w.key = t.water_station
+--        where t.filling_cost_sar is not null
+--          and t.filling_cost_sar <> (case t.water_type
+--                when 'potable'     then w.fill_cost_potable_sar
+--                when 'non_potable' then w.fill_cost_non_potable_sar end)
+--        group by 1, 2, 3, 4 order by 1, 2;
+--       -- expect the 8 umm_al_hamam non_potable rows at 0.00 vs 10.00.
+--       -- Each row should correspond to a price edit AFTER those trips were
+--       -- created. If one does not, investigate the trip — never the figure.
+--
+-- G) SCALE, FOR CONTEXT WHEN THE REPORTING PHASE LANDS:
+--      select date_trunc('month', trip_date)::date as month,
+--             count(*) filter (where filling_cost_sar is not null) as costed_trips,
+--             count(*) filter (where filling_cost_sar is null)     as uncosted_trips,
+--             round(sum(filling_cost_sar), 2)                      as filling_sar
+--        from public.trips group by 1 order by 1;
+--      -- ~6,150 SAR total against operating cost around 50,000/month, so
+--      -- single-digit percent. Real, and small enough that a sign error would
+--      -- be easy to miss — which is why check E exists.
+-- ===========================================================================
