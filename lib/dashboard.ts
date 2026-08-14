@@ -303,6 +303,14 @@ export type DashCharts = {
   // Each was deleted rather than left unrendered: an unused copy of a figure
   // is how two versions of one number start to drift.
   costMix: { label: string; value: number; color: string }[];
+  /**
+   * Filled trips in the cost-mix month with no price for their water type
+   * (v_pnl_monthly.filling_uncosted_trips). The Station fill slice is summed
+   * with sum(), which SKIPS NULLS — so whenever this is above zero that slice
+   * is short by an unknown amount, and the count has to travel with the money
+   * rather than leaving a quietly understated wedge on screen.
+   */
+  costMixUncosted: number;
   hasPnl: boolean;
 };
 
@@ -329,6 +337,13 @@ export type DailyOps = {
    * "Revenue" tile in app/page.tsx, which is where its invariant now lives.
    */
   directCost: number;
+  /**
+   * The filling slice OF directCost (0112) — not additional to it. Exposed so
+   * the disclosure can name it without re-deriving anything.
+   */
+  filling: number;
+  /** Filled trips that day with no price for their water type. */
+  fillingUncosted: number;
 };
 
 /**
@@ -451,15 +466,29 @@ export type CostComposition = {
   outsourced: { sar: number; pct: number | null };
   payroll: { sar: number; pct: number | null };
   commissions: { sar: number; pct: number | null };
+  /** Station fill (0112) — the sixth slice. */
+  filling: { sar: number; pct: number | null };
   other: { sar: number; pct: number | null };
+  /**
+   * Filled trips with no price for their water type. Their cost is UNKNOWN,
+   * not zero, so `filling.sar` is short by an unknown amount whenever this is
+   * above zero — and the count must be shown wherever the money is.
+   */
+  fillingUncosted: number;
 };
 
-export const COST_TYPE: { key: keyof Omit<CostComposition, "month" | "total">;
+/** Only the SLICE keys — `fillingUncosted` is a scalar count, not a slice, and
+ *  including it here made the spread in the chart fail to type. */
+export type CostSliceKey =
+  "parts" | "outsourced" | "payroll" | "commissions" | "filling" | "other";
+
+export const COST_TYPE: { key: CostSliceKey;
   en: string; ar: string; color: string }[] = [
   { key: "parts",       en: "Parts",          ar: "قطع الغيار",   color: "#0b7eea" },
   { key: "outsourced",  en: "Outsourced",     ar: "أعمال خارجية", color: "#f59e0b" },
   { key: "payroll",     en: "Payroll",        ar: "الرواتب",      color: "#8b5cf6" },
   { key: "commissions", en: "Commissions",    ar: "العمولات",     color: "#10b981" },
+  { key: "filling",     en: "Station fill",   ar: "تعبئة المحطة", color: "#06b6d4" },
   { key: "other",       en: "Other expenses", ar: "مصروفات أخرى", color: "#64748b" },
 ];
 

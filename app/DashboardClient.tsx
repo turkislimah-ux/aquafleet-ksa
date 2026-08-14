@@ -178,6 +178,14 @@ export default function DashboardClient({
   // count is surfaced to qualify that figure rather than let it run silently
   // short. Summed across days of one view, which is the roll-up that view
   // already buckets by; no metric is defined here.
+  // Fills in the month on screen whose station has no price for their water
+  // type. Their cost is UNKNOWN, so direct cost is short by an unknown amount
+  // and the chart must say so — sum() skipped them in the view.
+  const uncostedFillsInMonth = useMemo(
+    () => monthDays.reduce((s, d) => s + d.fillingUncosted, 0),
+    [monthDays]
+  );
+
   const unpricedInMonth = useMemo(
     () => monthDays.reduce((s, d) => s + (deliveredByDay.get(d.day)?.unpricedTrips ?? 0), 0),
     [monthDays, deliveredByDay]
@@ -364,6 +372,7 @@ export default function DashboardClient({
             className="h-72"
           />
           <DeliveredRevenueNote ar={ar} unpricedTrips={unpricedInMonth} />
+          <UncostedFillsNote ar={ar} uncosted={uncostedFillsInMonth} />
           <DailyCostDisclosure ar={ar} excluded={monthExcluded} failed={failed} />
         </ChartCard>
 
@@ -381,6 +390,11 @@ export default function DashboardClient({
           <PieChart className="h-48"
             items={charts.costMix.map((c) => ({ label: c.label, value: c.value, color: c.color }))} />
           <CostMixLegend ar={ar} items={charts.costMix} />
+          {/* Station fill is one of the slices, so its unknown-cost count
+              belongs on this card too — a wedge summed with sum() over a column
+              that can be NULL is short by an unknown amount, and the doughnut
+              cannot show that by itself. */}
+          <UncostedFillsNote ar={ar} uncosted={charts.costMixUncosted} shortOf="fillSlice" />
         </ChartCard>
         </div>
 
@@ -782,6 +796,12 @@ function MonthStepper({
  * real cost. Without this line a reader compares a full revenue bar against a
  * fraction of cost and concludes the month is hugely profitable. The
  * `daily_direct_cost` dictionary caveat requires this disclosure.
+ *
+ * IT ALSO NAMES WHAT THE LINE DOES INCLUDE. Station fill (0112) is a direct
+ * cost with a real per-day source, and it is inside `direct_cost_sar` — live
+ * August, 4,390 of 26,085.42. A disclosure that only ever lists exclusions
+ * invites the reader to assume anything unmentioned is out, which would make
+ * this line look smaller than it is rather than larger.
  */
 function DailyCostDisclosure({
   ar, excluded, failed,
@@ -800,7 +820,8 @@ function DailyCostDisclosure({
               {excluded.commissionNonTrip !== 0
                 ? `، وعمولات خاصة وتسويات ومكافآت ${formatSar(excluded.commissionNonTrip)}`
                 : ""}
-              ) — لا يوجد لأيٍّ منها مصدر يومي، فكلاهما رقم شهري.
+              ) — لا يوجد لأيٍّ منها مصدر يومي، فكلاهما رقم شهري. والتكلفة المباشرة تشمل
+              تعبئة المحطة.
             </>
           ) : (
             <>
@@ -810,15 +831,20 @@ function DailyCostDisclosure({
               {excluded.commissionNonTrip !== 0
                 ? `, ${formatSar(excluded.commissionNonTrip)} commission specials, adjustments and bonus`
                 : ""}
-              ) — neither has a daily source; both are monthly figures.
+              ) — neither has a daily source; both are monthly figures. Direct cost DOES
+              include station fill.
             </>
           )
         ) : failed ? (
           ar ? "تعذّرت قراءة التكلفة الشهرية المستثناة." : "Could not read the excluded monthly cost."
         ) : (
+          // Same two claims as the branch above, minus the figure it could not
+          // read. What direct cost DOES include is not conditional on that read
+          // succeeding, so it is stated here as well rather than silently
+          // disappearing in the month with nothing excluded.
           ar
-            ? "التكلفة المباشرة تستثني الرواتب والعمولات غير المرتبطة برحلة — لا يوجد لها مصدر يومي."
-            : "Direct cost excludes payroll and non-trip commission — neither has a daily source."
+            ? "التكلفة المباشرة تشمل تعبئة المحطة، وتستثني الرواتب والعمولات غير المرتبطة برحلة — لا يوجد لها مصدر يومي."
+            : "Direct cost includes station fill, and excludes payroll and non-trip commission — neither has a daily source."
         )}
       </p>
     </div>
@@ -1024,7 +1050,19 @@ function CostCompositionChart({ ar, months }: { ar: boolean; months: CostComposi
             <div key={m.month}>
               <div className="mb-1 flex items-baseline justify-between gap-2 text-[11px]">
                 <span className="font-medium">{monthTitle(m.month, ar)}</span>
-                <span className="tabular-nums muted">{formatSar(m.total)}</span>
+                <span className="flex items-baseline gap-2">
+                  {/* The filling slice is money, so its unknown-cost count has
+                      to be reachable here too, not only on the daily chart. */}
+                  {m.fillingUncosted > 0 && (
+                    <span className="text-amber-700 dark:text-amber-300"
+                      title={ar
+                        ? `${m.fillingUncosted} تعبئة بلا سعر لنوع مياهها — تكلفتها غير معروفة وغير محتسبة`
+                        : `${m.fillingUncosted} fill${m.fillingUncosted === 1 ? "" : "s"} with no price for their water type — cost unknown, not counted`}>
+                      {ar ? `${m.fillingUncosted} بلا سعر` : `${m.fillingUncosted} unpriced`}
+                    </span>
+                  )}
+                  <span className="tabular-nums muted">{formatSar(m.total)}</span>
+                </span>
               </div>
               {noCost ? (
                 <div className="flex h-4 items-center rounded-md border border-dashed px-2 text-[10px] muted"
@@ -1170,10 +1208,13 @@ function CostMixLegend({
 }: {
   ar: boolean; items: { label: string; value: number; color: string }[];
 }) {
-  const LABEL_AR: Record<string, string> = {
-    Parts: "قطع الغيار", Outsourced: "أعمال خارجية",
-    Payroll: "الرواتب", Commissions: "العمولات",
-  };
+  // Built FROM COST_TYPE rather than hand-listed. The slices themselves are
+  // built from the same source in app/page.tsx, so adding a bucket there can no
+  // longer leave it rendering its English label inside the Arabic legend — the
+  // exact drift the previous hand-written map would have produced for the
+  // Station fill slice (0112).
+  const LABEL_AR: Record<string, string> =
+    Object.fromEntries(COST_TYPE.map((t) => [t.en, t.ar]));
   return (
     <ul className="mt-3 space-y-1.5">
       {items.map((c) => (
@@ -1185,6 +1226,63 @@ function CostMixLegend({
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * Says that some fills in the month on screen have no price, so direct cost is
+ * short by an unknown amount.
+ *
+ * CONDITIONAL, like every other disclosure here — it appears only in a month
+ * that actually has one. Live that is June (10) and July (3); August has none.
+ * An unconditional warning is noise that trains the reader to skip it.
+ *
+ * The count is not decoration. sum() skips NULLs in the view, so the filling
+ * figure inside direct cost is the total of what is KNOWN. Showing the money
+ * without the count would show a total that is quietly wrong — the same
+ * failure as rendering an unread figure as zero.
+ */
+function UncostedFillsNote({
+  ar, uncosted, shortOf = "directCost",
+}: {
+  ar: boolean;
+  uncosted: number;
+  /**
+   * WHICH FIGURE ON THIS CARD IS SHORT. The count is the same fact either way,
+   * but naming the wrong figure would be a false statement about which number
+   * the reader should distrust — so the caller says, rather than the note
+   * assuming it is always the daily chart.
+   */
+  shortOf?: "directCost" | "fillSlice";
+}) {
+  if (uncosted <= 0) return null;
+  const missingFrom = ar
+    ? (shortOf === "directCost" ? "ضمن التكلفة المباشرة أعلاه" : "ضمن شريحة تعبئة المحطة أعلاه")
+    : (shortOf === "directCost" ? "the direct-cost line above" : "the Station fill slice above");
+  return (
+    <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed">
+      <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+      <p className="muted">
+        {ar ? (
+          <>
+            <span className="font-medium">
+              {uncosted} تعبئة هذا الشهر بلا سعر لنوع مياهها،
+            </span>{" "}
+            فتكلفتها غير معروفة — وليست صفراً — ولم تُحتسب {missingFrom}.
+          </>
+        ) : (
+          <>
+            <span className="font-medium">
+              {uncosted} {uncosted === 1 ? "fill" : "fills"} this month{" "}
+              {uncosted === 1 ? "has" : "have"} no price for{" "}
+              {uncosted === 1 ? "its" : "their"} water type,
+            </span>{" "}
+            so {uncosted === 1 ? "its" : "their"} cost is unknown — not zero — and is not in{" "}
+            {missingFrom}.
+          </>
+        )}
+      </p>
+    </div>
   );
 }
 

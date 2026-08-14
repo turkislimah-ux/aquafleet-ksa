@@ -1,10 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatSar } from "@/lib/utils";
 import { availableWidgets, type WidgetDef } from "@/lib/dashboard-widgets";
+import { COST_TYPE } from "@/lib/dashboard";
 import type {
   ActionItemRow, FeedRow, FleetStateNow, Headline, DashCharts, LiveTrip,
   DailyOps, DeliveredRevenueDay, DeliveryDay, MonthlyOnlyCost, ProjectStages, CostComposition,
-  DriverOps, DriverOpsState, ComplianceStatus,
+  CostSliceKey, DriverOps, DriverOpsState, ComplianceStatus,
 } from "@/lib/dashboard";
 import { checkDriverStateDrift } from "@/lib/actions/driver-state-drift";
 import DashboardClient from "./DashboardClient";
@@ -135,6 +136,8 @@ export default async function DashboardPage() {
     month: String(r.month ?? ""),
     // revenue_sar is intentionally not mapped — see DailyOps.
     directCost: num(r.direct_cost_sar),
+    filling: num(r.filling_cost_sar),
+    fillingUncosted: num(r.filling_uncosted_trips),
   }));
 
   const delivery: DeliveryDay[] = [
@@ -195,7 +198,9 @@ export default async function DashboardPage() {
     outsourced:  { sar: num(r.outsourced_sar),     pct: pct(r.outsourced_pct) },
     payroll:     { sar: num(r.payroll_sar),        pct: pct(r.payroll_pct) },
     commissions: { sar: num(r.commissions_sar),    pct: pct(r.commissions_pct) },
+    filling:     { sar: num(r.filling_sar),        pct: pct(r.filling_pct) },
     other:       { sar: num(r.other_expenses_sar), pct: pct(r.other_expenses_pct) },
+    fillingUncosted: num(r.filling_uncosted_trips),
   }));
 
   const driverOps: DriverOps[] = (
@@ -220,17 +225,34 @@ export default async function DashboardPage() {
   }));
 
   // ---- charts: every series is a column read straight off a view --------
+  //
+  // THE FIVE OPERATIONAL COST BUCKETS, current month. Station fill (0112) is
+  // one of them: operating_cost_sar has INCLUDED it since that migration, so a
+  // four-slice doughnut no longer added up to the total it claimed to break
+  // down — live August, it was short by the whole 4,390.
+  //
+  // Manual expenses are still deliberately NOT folded in — 0098 keeps them a
+  // separate P&L section, and this card's subtitle says "operating cost".
+  //
+  // Label and colour come from COST_TYPE, the SAME source the monthly Cost
+  // composition bar reads, so a bucket cannot be cyan on one card and some
+  // other colour on the one beside it. (The four pre-existing hexes were
+  // identical to COST_TYPE's already — this changes no existing slice.)
+  const slice = (key: CostSliceKey, value: number) => {
+    const t = COST_TYPE.find((c) => c.key === key);
+    return { label: t?.en ?? key, value, color: t?.color ?? "#64748b" };
+  };
   const charts: DashCharts = {
-    // The four operational cost buckets, current month. Manual expenses are
-    // deliberately NOT folded in — 0098 keeps them a separate P&L section.
     costMix: latestPnl
       ? [
-          { label: "Parts", value: num(latestPnl.parts_cost_sar), color: "#0b7eea" },
-          { label: "Outsourced", value: num(latestPnl.os_cost_sar), color: "#f59e0b" },
-          { label: "Payroll", value: num(latestPnl.payroll_sar), color: "#8b5cf6" },
-          { label: "Commissions", value: num(latestPnl.commissions_sar), color: "#10b981" },
+          slice("parts", num(latestPnl.parts_cost_sar)),
+          slice("outsourced", num(latestPnl.os_cost_sar)),
+          slice("payroll", num(latestPnl.payroll_sar)),
+          slice("commissions", num(latestPnl.commissions_sar)),
+          slice("filling", num(latestPnl.filling_cost_sar)),
         ]
       : [],
+    costMixUncosted: num(latestPnl?.filling_uncosted_trips),
     hasPnl: pnl.length > 0,
   };
 
