@@ -133,7 +133,7 @@ export default async function DashboardPage() {
   ].reverse().map((r) => ({
     day: String(r.day ?? ""),
     month: String(r.month ?? ""),
-    revenue: num(r.revenue_sar),
+    // revenue_sar is intentionally not mapped — see DailyOps.
     directCost: num(r.direct_cost_sar),
   }));
 
@@ -248,6 +248,17 @@ export default async function DashboardPage() {
   );
 
   const headlines: Headline[] = [
+    // THIS TILE IS THE REPORTS ANCHOR FOR REVENUE, and that is load-bearing.
+    // It shows BILLED revenue — confirmed, non-voided invoices, net of VAT —
+    // read from v_revenue_monthly, the same view the P&L reads. Invoices are
+    // bucketed by the day they were CONFIRMED, in UTC, so daily figures sum to
+    // the month exactly and this figure can never disagree with Reports.
+    //
+    // It is deliberately NOT the number on the revenue CHART below, which
+    // plots DELIVERED (earned) revenue by trip_date — a different measure on a
+    // different calendar (0108/0109). The two are not reconcilable and are
+    // never added; this tile is where anyone checking against the P&L should
+    // land, which is why its href goes straight to the Revenue statement.
     { key: "revenue", en: "Revenue", ar: "الإيرادات",
       value: formatSar(num(revenueRow?.revenue_sar)),
       subEn: "this month, net of VAT", subAr: "هذا الشهر، بدون الضريبة",

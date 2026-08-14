@@ -321,11 +321,13 @@ export type DailyOps = {
   /** First of the day's own month, straight from the view — no TS date math. */
   month: string;
   /**
-   * BILLED revenue — the measure Reports uses, bucketed by the day the invoice
-   * was CONFIRMED (in UTC, so days sum to v_revenue_monthly exactly). Lumpy by
-   * nature: one live invoice puts 40,800 SAR on a single day.
+   * NO BILLED-REVENUE FIELD HERE, deliberately. v_daily_operations publishes
+   * revenue_sar and the fetch still reads it (select("*")), but nothing
+   * renders it since the invoiced series was dropped from the chart, and
+   * threading a fetched-but-unrendered figure is how two versions of one
+   * number start to drift. Billed revenue reaches the screen through the KPI
+   * "Revenue" tile in app/page.tsx, which is where its invariant now lives.
    */
-  revenue: number;
   directCost: number;
 };
 
