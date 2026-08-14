@@ -93,7 +93,12 @@ relevant skill(s) **when the task calls for it**:
 
 ## 5. Workflow discipline (non-negotiable)
 
-- **One logical unit per commit.** Each commit tsc-clean.
+- **One logical unit per commit.** Each commit tsc-clean — and since `6506f2e`
+  that means MORE than it used to: `tsconfig.json` carries `noUnusedLocals` and
+  `noUnusedParameters`, so an unused import, local or parameter now FAILS the
+  build rather than accumulating until someone sweeps. **A parameter genuinely
+  required by a signature, interface or callback shape gets an `_` prefix — never
+  delete it, that changes the shape the caller depends on.**
 - **Explicit-path `git add`** — list each file. **NEVER `git add .`**
 - **HANDOFF.json — the root one IS committed; `preview/`'s stays UNSTAGED.**
   `.planning/HANDOFF.json` is committed as a deliberate SNAPSHOT (Turki's call,
@@ -1681,6 +1686,55 @@ relevant skill(s) **when the task calls for it**:
     `tests/dashboard-delivered-revenue.spec.ts`. A spec asserting the opposite of
     intent is worse than no spec, because someone eventually "fixes" the code to
     match it.
+
+- **DEAD-CODE HYGIENE PASS — repo-wide, five commits, through `3819188`.** All
+  behaviour-neutral: no route added or removed, no rendered output changed, no DB
+  object touched. Recorded because two of the INSTRUMENTS were wrong first time,
+  and those cost more than the findings did.
+  - **Removed as unreachable** (`b3b591e`): `AreaChart`, `BarChart` and
+    `DualBarChart` from `components/Charts.tsx` — their last callers were Operating
+    margin, Receivables aging and the original Revenue-vs-cost pairing, all replaced
+    during the Dashboard rebuild. `ScriptableContext` went with `AreaChart`. The
+    export surface of `lib/dashboard.ts` and `lib/dashboard-widgets.ts` was narrowed
+    to what actually crosses a module boundary (same cleanup the Reports pass did).
+    **`preview/`'s own `drawAreaChart`/`drawBars`/`drawDualBar` remain the spec if
+    any is ever rebuilt** — nothing was lost, only the unused port.
+  - **`DailyOps.revenue` stopped being threaded** (`3638707`): billed revenue was
+    fetched, mapped and passed to the client but rendered nowhere once the invoiced
+    series left the chart. **Carrying a figure nothing renders is how two versions of
+    one number start to drift** — the next person needing billed revenue finds it
+    already in scope, uses it, and now there are two paths nobody reconciles. The
+    field went; its invariant (billed revenue is bucketed by `confirmed_at` in UTC so
+    days sum to `v_revenue_monthly` exactly) moved onto the KPI "Revenue" tile in
+    `app/page.tsx`, where the number is actually shown. `DailyOps` carries a note
+    saying the omission is deliberate, so it does not get "fixed" back.
+  - **Ten compiler-confirmed unused locals cleared** (`cdcb62a`) across
+    `drivers`/`iot`/`predictive`/`routes`/`InvoiceDetailModal`/`mock-data`/
+    `parts-usage`, then `noUnusedLocals` + `noUnusedParameters` enabled (`6506f2e`)
+    — **in that order, so the flip was green rather than turning the build red.**
+    Finally the write-only `chargeImageFile` prop and its two call sites (`3819188`):
+    the child owns the file input and reports upward via the setter, so passing the
+    value back down was never needed. The parent's state stays — it is read at submit.
+  - **INSTRUMENT #1 — A NAME GREP LIES ABOUT `components/Charts.tsx`.** It reported
+    three genuinely dead ports as LIVE, because `app/reports` and `app/trips` import
+    same-named `BarChart`/`PieChart`/`ComposedChart` from **recharts**, and
+    `app/consumption` defines its own local `ComboChart`. **Exactly ONE file imports
+    that module** — `app/DashboardClient.tsx`, taking `ComboChart` and `PieChart`.
+    Check real import sites, not names. The file header now says so.
+  - **INSTRUMENT #2 — BYTE-COMPARING `.next/app-path-routes-manifest.json` IS NOT AN
+    IDENTITY TEST.** A byte diff "failed" on a behaviour-neutral change; rebuilding
+    the SAME unchanged tree twice also produces byte-different output, because Next
+    emits that file with non-deterministic key order. **Parse it and compare the route
+    set and mappings** (17 routes, identical values). Verified that way in every
+    commit of this pass.
+  - **The right verification for a dead-code change is BUILD + IDENTITY, not a
+    browser click-through:** `tsc` clean, `next build` compiles, route set and
+    mappings unchanged, auth gate intact (`/login` 200, everything else 307). A
+    behaviour checklist for removing code nothing calls is theatre.
+  - **Pre-existing build warning, not caused by this pass:** `@supabase/supabase-js`
+    touches a Node API (`process.version`) under the Edge Runtime. Confirmed present
+    on `HEAD` before the change by rebuilding the stashed tree — do not go hunting it
+    after a future cleanup.
 
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
