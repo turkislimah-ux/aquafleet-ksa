@@ -43,7 +43,6 @@ import {
   createDriverIncident,
   updateDriverIncident,
   deleteDriverIncident,
-  type DriverIncidentInput,
 } from "./actions";
 // Reused, not duplicated — the same unassign action the Fleet table's "Change
 // driver"/unassign flow already calls (app/fleet/actions.ts). One place clears

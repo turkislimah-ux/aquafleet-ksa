@@ -332,16 +332,6 @@ function trendKey(kind: TrendKind, iso: string): string {
   return iso.slice(0, 7);
 }
 
-function nextTrendKey(kind: TrendKind, key: string): string {
-  if (kind === "year") return String(Number(key) + 1);
-  if (kind === "quarter") {
-    const [y, q] = key.split("-Q").map(Number);
-    return q === 4 ? `${y + 1}-Q1` : `${y}-Q${q + 1}`;
-  }
-  const [y, m] = key.split("-").map(Number);
-  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
-}
-
 export function trendLabel(kind: TrendKind, key: string): string {
   if (kind === "year") return key;
   if (kind === "quarter") return key.replace("-", " ");

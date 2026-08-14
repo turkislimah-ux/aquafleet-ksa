@@ -13,13 +13,9 @@ function mulberry32(seed: number) {
 }
 const rnd = mulberry32(20260510);
 const pick = <T,>(arr: readonly T[]) => arr[Math.floor(rnd() * arr.length)];
-const between = (min: number, max: number) => +(min + rnd() * (max - min)).toFixed(2);
 const intBetween = (min: number, max: number) => Math.floor(min + rnd() * (max - min + 1));
 
 const DEPOTS = ["Riyadh", "Jeddah", "Dammam", "Madinah"] as const;
-const DEPOT_AR: Record<string, string> = {
-  Riyadh: "الرياض", Jeddah: "جدة", Dammam: "الدمام", Madinah: "المدينة",
-};
 const DEPOT_COORDS: Record<string, [number, number]> = {
   Riyadh: [24.7136, 46.6753], Jeddah: [21.4858, 39.1925],
   Dammam: [26.4207, 50.0888], Madinah: [24.5247, 39.5692],

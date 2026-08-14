@@ -1,7 +1,7 @@
 "use client";
 
 import { useApp } from "@/components/AppShell";
-import { PageHeader, Card, Stat, Section, Btn } from "@/components/ui";
+import { PageHeader, Stat, Section, Btn } from "@/components/ui";
 import { trucks } from "@/lib/mock-data";
 import { t } from "@/lib/i18n";
 import { Activity, Wifi, Thermometer, Droplet, Gauge, Zap, Battery } from "lucide-react";

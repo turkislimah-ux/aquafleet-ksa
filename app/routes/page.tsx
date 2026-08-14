@@ -1,7 +1,7 @@
 "use client";
 
 import { useApp } from "@/components/AppShell";
-import { PageHeader, Card, Stat, Section, Btn, StatusPill } from "@/components/ui";
+import { PageHeader, Stat, Section, Btn, StatusPill } from "@/components/ui";
 import SaudiMap, { type MapPoint, type MapRoute } from "@/components/SaudiMap";
 import { trips, trucks } from "@/lib/mock-data";
 import { t } from "@/lib/i18n";

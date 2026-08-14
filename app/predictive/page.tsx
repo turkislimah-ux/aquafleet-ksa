@@ -1,11 +1,11 @@
 "use client";
 
 import { useApp } from "@/components/AppShell";
-import { PageHeader, Card, Stat, StatusPill, Btn, Section, Bar } from "@/components/ui";
+import { PageHeader, Stat, StatusPill, Btn, Section, Bar } from "@/components/ui";
 import { predictiveAlerts, findTruck, trucks } from "@/lib/mock-data";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { Brain, AlertTriangle, CheckCircle2, Sparkles, TrendingUp, Cpu } from "lucide-react";
+import { Brain, AlertTriangle, Sparkles, Cpu } from "lucide-react";
 import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 export default function PredictivePage() {

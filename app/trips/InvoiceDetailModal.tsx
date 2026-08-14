@@ -1498,7 +1498,6 @@ function SpecialChargesSection({
   chargePrice,
   setChargePrice,
   chargeAmountPreview,
-  chargeImageFile,
   setChargeImageFile,
   chargeImageInputKey,
 }: {
