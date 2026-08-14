@@ -1488,15 +1488,15 @@ relevant skill(s) **when the task calls for it**:
     verified; they are not a standing regression suite unless that route is made
     permanent (Turki's call, flagged, not decided).
 
-- **DASHBOARD rebuilt as the CATCH-UP page — migrations `0103`–`0107` (12 views),
-  through commit `f2fe408`.** The old page was a mock-data leftover. It answers four
+- **DASHBOARD rebuilt as the CATCH-UP page — migrations `0103`–`0109` (13 views),
+  through commit `d77eddb`.** The old page was a mock-data leftover. It answers four
   questions and deliberately does NOT restate Reports Overview: what needs action,
   what happened since you last looked, where things stand right now, and a small
   headline set that links into Reports.
   - **WHY IT WAS REBUILT, in one number.** The old page summed `trips.rate_sar` in
     TypeScript for "Revenue (30d)" and rendered **0** while Reports rendered
-    **70,650** — `rate_sar` is NULL on all 203 rows. A figure that disagrees with the
-    statement it links to is worse than no figure. **Every number now reads a view;
+    **70,650** — `rate_sar` is NULL on every row (203 then, 676 now). A figure that
+    disagrees with the statement it links to is worse than no figure. **Every number now reads a view;
     nothing is re-derived in TS.** If a number is missing the fix is a migration.
   - **`0103` — the queue, the feed, the fleet snapshot.**
     - The activity feed needed **NO new table and NO triggers.** Timestamp coverage was
@@ -1582,6 +1582,43 @@ relevant skill(s) **when the task calls for it**:
       Tiebreak, written into the file: `trip_date DESC`, then most-advanced stage that
       day, then `id DESC` — the last key exists so the result cannot flip between two
       identical rows, which is the instability that gets blamed on the UI.
+  - **`0108`/`0109` — DELIVERED (earned) revenue, and the bucket that had to be
+    corrected.** `v_delivered_revenue_daily`: each delivered trip priced at its
+    project's `rate_per_trip_sar`, per day. **DASHBOARD-ONLY — Reports,
+    `v_revenue_monthly` and `v_pnl_monthly` are untouched and remain the only revenue
+    the P&L knows.**
+    - **IT IS NOT BILLED REVENUE AND MUST NEVER BE LABELLED "Revenue".** The two differ
+      by TIMING (delivered now, invoiced later) and COVERAGE (delivered work never
+      invoiced), and **billed can EXCEED delivered** when an invoice covers earlier
+      periods and special charges — live, July does exactly that. Never add them,
+      never feed delivered into a margin. The KPI "Revenue" tile stays the Reports
+      anchor, and the card says so on screen.
+    - The price is `projects.rate_per_trip_sar` reached through `trips.project_id`.
+      It is NOT `trips.rate_sar` (NULL on every row) and there is no customer-level
+      rate column. One delivered trip has no project: it contributes **0.00**, is
+      counted in `delivered_trips_unpriced`, and the UI qualifies the figure only in
+      months that actually have one. **Never guess a price.**
+    - **`0109` IS A CORRECTION AND IS ON RECORD AS ONE.** `0108` bucketed by
+      `delivered_at` — which records **when the stage button was pressed**, not when
+      the water was delivered. This fleet advances trips on the Kanban in bulk, so
+      five weeks of work collapsed onto three afternoons, one holding **310 trips**;
+      all-time, 22 distinct days by `delivered_at` against **35** by `trip_date`.
+      Turki caught it from the chart shape alone. `0109` re-buckets onto
+      `trips.trip_date` — the operational day, the Kanban's own day filter, and the
+      bucket `v_delivery_output_daily` already used, so those two now agree by
+      construction and `0108`'s "do not reconcile these" warning is obsolete. The
+      total does not move: 631 trips / 202,260 SAR before and after.
+      **Both migrations are committed** (`f27229b`, `ad2b6e0`) rather than squashed —
+      same precedent as `0038` and `0090`.
+    - `trip_date` is a DATE column, so `0108`'s Riyadh-vs-UTC caveat disappeared with
+      it. `delivered_at` is untouched on the table and `v_activity_feed` still reads
+      it correctly — "trip delivered" as an EVENT did happen when the button was
+      pressed.
+    - The chart briefly carried BOTH revenue lines so they could be compared; the
+      invoiced series was then dropped at Turki's call. The card is titled
+      **"Delivered revenue vs direct cost"** and its note names the measure as
+      earned-not-billed and points at where billed revenue lives.
+
   - **THE HERO SPACER IN `app/DashboardClient.tsx` IS LOAD-BEARING, NOT DECORATION.**
     The header's search bar translates down into that empty region and rises back on
     scroll (`components/SearchDock.tsx`). The first rebuild dropped `useHeroDock` and
@@ -1615,13 +1652,35 @@ relevant skill(s) **when the task calls for it**:
     marked seam with no model call.
   - **Deferred — Dashboard:** per-trip measured volume (retires 0105's capacity proxy
     the day `trips.tank_size_m3` starts being recorded); a daily payroll source (would
-    let `direct_cost` become real cost); the `0100` dictionary gap is unchanged.
+    let `direct_cost` become real cost); a per-trip or effective-dated RATE, which
+    would let delivered revenue price a trip at what it was actually worth on the day
+    rather than at its project's CURRENT rate — the same effective-dated-rate
+    mechanism already deferred under Finance items 3 and 4; the `0100` dictionary gap
+    is unchanged.
   - **The `tests/dashboard-*.spec.ts` specs depend on DELETED throwaway routes**
-    (`/dash-drift`, `/dash-daily-check`, `/dash-0106-check`, `/dash-0107-check`) — same
-    convention as every prior phase. They document what was verified. Each fixture
-    carried LIVE figures pulled via the Supabase MCP plus a few rows real data does not
-    have (a zero-cost month, an expired licence, a project with no trips this month),
-    because **a branch that never renders is a branch that ships unchecked.**
+    (`/dash-drift`, `/dash-daily-check`, `/dash-0106-check`, `/dash-0107-check`,
+    `/dash-0108-check`, `/dash-0109-check`) — same convention as every prior phase.
+    They document what was verified. Each fixture carried LIVE figures pulled via the
+    Supabase MCP plus a few rows real data does not have (a zero-cost month, an
+    expired licence, a project with no trips this month), because **a branch that
+    never renders is a branch that ships unchecked.**
+  - **NUMERIC assertions belong in the migration verification blocks, not in
+    Playwright.** Chart.js is a MODULE import, so `page.evaluate` cannot reach
+    `Chart.getChart` to read plotted values — a test that appears to check a series'
+    numbers is checking nothing. The specs cover labelling, disclosure and conditional
+    notes; the figures are proven in SQL. Three test bugs came from this area and are
+    worth not repeating: an unscoped `getByRole("alert")` is never 0 in dev (Next
+    mounts its own empty alert root outside the page tree); a negative assertion that
+    filtered `<div>` by text and took `.first()` silently resolved to the whole page
+    wrapper, so it passed for the wrong reason until unrelated copy exposed it; and a
+    KPI selector expected `"REVENUE"` when the uppercase is CSS-only. **A negative
+    assertion on an unscoped locator proves nothing.**
+  - **A SPEC THAT CONTRADICTS SHIPPED DESIGN GETS DELETED, NOT LEFT TO FAIL.**
+    `tests/dashboard-0108.spec.ts` asserted an "Invoiced revenue" series that was
+    later dropped at Turki's call; it was replaced by
+    `tests/dashboard-delivered-revenue.spec.ts`. A spec asserting the opposite of
+    intent is worse than no spec, because someone eventually "fixes" the code to
+    match it.
 
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
