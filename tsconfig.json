@@ -5,6 +5,13 @@
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
+    /* Dead-code rot fails the build instead of needing a periodic sweep. Turned
+       on only after the ten findings it would have flagged were cleared, so the
+       flip itself was green. A parameter that is genuinely required by a
+       signature, interface or callback shape should be prefixed with _ rather
+       than deleted. */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
