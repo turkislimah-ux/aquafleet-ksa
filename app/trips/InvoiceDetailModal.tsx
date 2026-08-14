@@ -821,7 +821,6 @@ export default function InvoiceDetailModal({
                     chargePrice={chargePrice}
                     setChargePrice={setChargePrice}
                     chargeAmountPreview={chargeAmountPreview}
-                    chargeImageFile={chargeImageFile}
                     setChargeImageFile={setChargeImageFile}
                     chargeImageInputKey={chargeImageInputKey}
                   />
@@ -908,7 +907,6 @@ export default function InvoiceDetailModal({
                     chargePrice={chargePrice}
                     setChargePrice={setChargePrice}
                     chargeAmountPreview={chargeAmountPreview}
-                    chargeImageFile={chargeImageFile}
                     setChargeImageFile={setChargeImageFile}
                     chargeImageInputKey={chargeImageInputKey}
                   />
@@ -1520,7 +1518,6 @@ function SpecialChargesSection({
   chargePrice: string;
   setChargePrice: (v: string) => void;
   chargeAmountPreview: number;
-  chargeImageFile: File | null;
   setChargeImageFile: (f: File | null) => void;
   chargeImageInputKey: number;
 }) {
