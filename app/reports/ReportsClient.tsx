@@ -24,6 +24,7 @@ import {
   type PnlRow, type CollectionsRow, type RevenueMonthRow, type ReceivableRow,
   type AgingRow, type PayrollRow, type OperationsRow, type RevenuePerTruckRow,
   type TopupsRow, type PurchasingRow, type MaintenancePerTruckRow,
+  type FillingMonthRow, type FillingByStationRow,
   type PnlPeriodRow, type ExpenseCategoryPeriodRow,
   type RevenueInvoiceRow, type SalesReturnRow, type CommissionsRow,
   type CommissionsPaidRow, type MetricDictionaryRow,
@@ -55,6 +56,8 @@ type ReportsClientProps = {
   topups: TopupsRow[];
   purchasing: PurchasingRow[];
   maintPerTruck: MaintenancePerTruckRow[];
+  filling: FillingMonthRow[];
+  fillingByStation: FillingByStationRow[];
   /** SOURCE ROWS for the expenses editor — not a metric. See page.tsx. */
   expenses: ExpenseRow[];
   /** Riyadh-local today, computed server-side to avoid UTC skew. */
@@ -147,6 +150,8 @@ export default function ReportsClient(props: ReportsClientProps) {
           receivables={props.receivables}
           aging={props.aging}
           maintPerTruck={props.maintPerTruck}
+          filling={props.filling}
+          fillingByStation={props.fillingByStation}
           purchasing={props.purchasing}
           payroll={props.payroll}
           commissions={props.commissions}

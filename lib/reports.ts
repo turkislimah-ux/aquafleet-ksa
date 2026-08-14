@@ -29,6 +29,14 @@ export type PnlRow = {
   net_profit_sar: number;
   /** Null in a month with no revenue — a margin on nothing is not a number. */
   operating_margin_pct: number | null;
+  /** Station fill cost (0112). The FIFTH operating-cost bucket. */
+  filling_cost_sar: number;
+  /**
+   * Filled trips whose station has no price for their water type. Their cost
+   * is UNKNOWN, not zero — sum() skipped them, so filling_cost_sar is short by
+   * an unknown amount. Must be shown wherever the money is.
+   */
+  filling_uncosted_trips: number;
 };
 
 export type CollectionsRow = {
@@ -146,6 +154,14 @@ export type PnlPeriodRow = {
   net_profit_sar: number;
   /** Recomputed from the period's own revenue — never an average of months. */
   operating_margin_pct: number | null;
+  /** Station fill cost (0113). Summed across the period's months. */
+  filling_cost_sar: number;
+  /**
+   * Uncosted fills in the period. A trip COUNT, so it is genuinely additive
+   * across months — unlike people_missing_salary and trucks_active, which are
+   * per-month states and must never be summed (0098).
+   */
+  filling_uncosted_trips: number;
 };
 
 export type ExpenseCategoryPeriodRow = {
@@ -615,11 +631,39 @@ type CostBucket = { key: string; label: string; value: number; color: string };
  * Manual expenses are NOT here: 0098 rule 8 keeps them a separate section, and
  * folding them into this list would undo that at the display layer.
  */
+/**
+ * Station fill cost per month (v_filling_cost_monthly, 0112).
+ *
+ * uncosted_trips travels WITH the money on purpose: sum() skips NULLs, so
+ * filling_cost_sar is the total of what is KNOWN and is short by an unknown
+ * amount whenever uncosted_trips > 0. Showing the money without the count
+ * shows a total that is quietly wrong.
+ */
+export type FillingMonthRow = {
+  month: string;
+  filling_cost_sar: number;
+  costed_trips: number;
+  uncosted_trips: number;
+};
+
+/** The same figure at station x water-type grain (0112). */
+export type FillingByStationRow = {
+  month: string;
+  station_key: string;
+  /** NULL when the station key no longer exists; the cost still counts. */
+  station_name: string | null;
+  water_type: string;
+  filling_cost_sar: number;
+  costed_trips: number;
+  uncosted_trips: number;
+};
+
 export function costBuckets(row: PnlRow): CostBucket[] {
   return [
     { key: "parts", label: "Parts", value: row.parts_cost_sar, color: "#0b7eea" },
     { key: "os", label: "Outsourced", value: row.os_cost_sar, color: "#8b5cf6" },
     { key: "payroll", label: "Payroll", value: row.payroll_sar, color: "#f59e0b" },
     { key: "commissions", label: "Commissions", value: row.commissions_sar, color: "#10b981" },
+    { key: "filling", label: "Station fill", value: row.filling_cost_sar, color: "#06b6d4" },
   ];
 }

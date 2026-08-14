@@ -36,6 +36,7 @@ import {
   type PeriodType, type PnlPeriodRow, type ExpenseCategoryPeriodRow, type Delta,
   type RevenueInvoiceRow, type SalesReturnRow, type ReceivableRow, type AgingRow,
   type MaintenancePerTruckRow, type PurchasingRow, type PayrollRow,
+  type FillingMonthRow, type FillingByStationRow,
   type CommissionsRow, type CommissionsPaidRow, type OperationsRow,
   type CollectionsRow, type MetricDictionaryRow, type RevenuePerTruckRow,
   type OperationsByDriverRow,
@@ -75,6 +76,8 @@ type Props = {
   receivables: ReceivableRow[];
   aging: AgingRow[];
   maintPerTruck: MaintenancePerTruckRow[];
+  filling: FillingMonthRow[];
+  fillingByStation: FillingByStationRow[];
   purchasing: PurchasingRow[];
   payroll: PayrollRow[];
   commissions: CommissionsRow[];
@@ -91,6 +94,7 @@ type Props = {
 export default function StatementsTab({
   pnlPeriods, expenseCategories, invoices, salesReturns, receivables, aging,
   maintPerTruck, purchasing, payroll, commissions, commissionsPaid, operations,
+  filling, fillingByStation,
   collections, metrics, perTruck, opsByDriver, today, onManageExpenses,
 }: Props) {
   const [periodType, setPeriodType] = useState<PeriodType>("month");
@@ -290,8 +294,21 @@ export default function StatementsTab({
             <Line label="Outsourced repairs" cur={current.os_cost_sar} pri={prior?.os_cost_sar} indent />
             <Line label="Payroll" cur={current.payroll_sar} pri={prior?.payroll_sar} indent />
             <Line label="Commissions" cur={current.commissions_sar} pri={prior?.commissions_sar} indent />
+            {/* The FIFTH bucket (0112/0113). Without it the four above do not
+                add up to the total below — the gap was exactly this. */}
+            <Line label="Station fill" cur={current.filling_cost_sar} pri={prior?.filling_cost_sar} indent />
             <Line label="Total operating cost" cur={current.operating_cost_sar}
               pri={prior?.operating_cost_sar} bold rule />
+            {current.filling_uncosted_trips > 0 && (
+              <tr>
+                <td colSpan={4} className="pb-2 pl-4 text-[11px] text-amber-700 dark:text-amber-300">
+                  {current.filling_uncosted_trips}{" "}
+                  {current.filling_uncosted_trips === 1 ? "fill has" : "fills have"} no price for
+                  {" "}{current.filling_uncosted_trips === 1 ? "its" : "their"} water type in this
+                  period — that cost is unknown, not zero, and is not in the figures above.
+                </td>
+              </tr>
+            )}
 
             <Line label="Operating profit" cur={current.operating_profit_sar}
               pri={prior?.operating_profit_sar} higherIsBetter bold rule signed />
@@ -356,6 +373,7 @@ export default function StatementsTab({
         <CostStatement
           maintPerTruck={maintPerTruck} purchasing={purchasing} payroll={payroll}
           commissions={commissions} commissionsPaid={commissionsPaid}
+          filling={filling} fillingByStation={fillingByStation}
           periodStart={current.period_start} periodEnd={current.period_end}
           label={current.label}
         />

@@ -19,6 +19,7 @@ import { useMemo } from "react";
 import { Info } from "lucide-react";
 import { Table, TH, TD } from "@/components/ui";
 import { cn, formatSar, formatNum } from "@/lib/utils";
+import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
 import type { BuiltReport } from "@/lib/report-builder";
 import {
   monthsIn, sumOver, peakOver, formatShare, AGING_ORDER,
@@ -27,6 +28,7 @@ import {
   type PurchasingRow, type PayrollRow, type CommissionsRow,
   type CommissionsPaidRow, type OperationsRow, type NarrativeBullet,
   type OperationsByDriverRow,
+  type FillingMonthRow, type FillingByStationRow,
 } from "@/lib/reports";
 
 export function Note({ children }: { children: React.ReactNode }) {
@@ -309,6 +311,7 @@ export function ReceivablesStatement({
 // ---------------------------------------------------------------------------
 export function CostStatement({
   maintPerTruck, purchasing, payroll, commissions, commissionsPaid,
+  filling, fillingByStation,
   periodStart, periodEnd, label,
 }: {
   maintPerTruck: MaintenancePerTruckRow[];
@@ -316,6 +319,8 @@ export function CostStatement({
   payroll: PayrollRow[];
   commissions: CommissionsRow[];
   commissionsPaid: CommissionsPaidRow[];
+  filling: FillingMonthRow[];
+  fillingByStation: FillingByStationRow[];
   periodStart: string; periodEnd: string; label: string;
 }) {
   // Per truck: sum the three named measures across the period's months. All
@@ -347,9 +352,158 @@ export function CostStatement({
   const partsTotal = sumOver(trucks, (t) => t.parts);
   const osTotal = sumOver(trucks, (t) => t.os);
 
+  // ---- station fill (0112) ----------------------------------------------
+  // Summed across the period's months from the view's own output — no new
+  // definition. The uncosted count is summed the same way and travels with
+  // the money everywhere below; it is a trip COUNT and genuinely additive.
+  const fillMonths = monthsIn(filling, periodStart, periodEnd);
+  const fillTotal = sumOver(fillMonths, (r) => r.filling_cost_sar);
+  const fillUncosted = sumOver(fillMonths, (r) => r.uncosted_trips);
+  const fillCosted = sumOver(fillMonths, (r) => r.costed_trips);
+
+  const fillRows = useMemo(
+    () => fillingByStation.filter((r) => r.month >= periodStart && r.month <= periodEnd),
+    [fillingByStation, periodStart, periodEnd]
+  );
+
+  // BY WATER TYPE. Grouped from the same rows the station table uses, so the
+  // two tables and the total are three views of one number and cannot drift.
+  const byType = useMemo(() => {
+    const m = new Map<string, { sar: number; costed: number; uncosted: number }>();
+    for (const r of fillRows) {
+      const e = m.get(r.water_type) ?? { sar: 0, costed: 0, uncosted: 0 };
+      e.sar += r.filling_cost_sar;
+      e.costed += r.costed_trips;
+      e.uncosted += r.uncosted_trips;
+      m.set(r.water_type, e);
+    }
+    return [...m.entries()].sort((a, b) => b[1].sar - a[1].sar);
+  }, [fillRows]);
+
+  // BY STATION, keyed on station_key rather than the display name — a renamed
+  // station keeps resolving, and two stations could share a name.
+  const byStation = useMemo(() => {
+    const m = new Map<string, { name: string; sar: number; costed: number; uncosted: number }>();
+    for (const r of fillRows) {
+      const e = m.get(r.station_key) ?? {
+        // A null name means the station key no longer exists. The cost still
+        // counts, so the row is labelled rather than dropped from the total.
+        name: r.station_name ?? `${r.station_key} (removed)`,
+        sar: 0, costed: 0, uncosted: 0,
+      };
+      e.sar += r.filling_cost_sar;
+      e.costed += r.costed_trips;
+      e.uncosted += r.uncosted_trips;
+      m.set(r.station_key, e);
+    }
+    return [...m.values()].sort((a, b) => b.sar - a.sar);
+  }, [fillRows]);
+
   return (
     <div id="cost-print" className="card p-6">
       <Head title="Cost statements" period={label} />
+
+      {/* --- Station fill cost (0112) ------------------------------------
+          THE UNCOSTED COUNT IS NOT OPTIONAL DECORATION. sum() skips NULLs,
+          so every figure here is the total of what is KNOWN and is short by
+          an unknown amount whenever a fill has no price for its water type.
+          Showing the money alone would be showing a total that is quietly
+          wrong, so the count sits beside every total and in both tables. */}
+      <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">
+        Station fill cost
+      </h3>
+      {/* An explicit separator, not just the flex gap. Two adjacent spans have
+          NO whitespace between them in JSX, so if the gap ever fails to apply —
+          print stylesheet, or CSS not yet loaded — they run together as
+          "4,390 SAR520 fills costed". The middot also matches the separator
+          convention used elsewhere in the app. */}
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-lg font-semibold tabular-nums">{formatSar(fillTotal)}</span>
+        <span className="text-xs muted" aria-hidden>·</span>
+        <span className="text-xs muted">{fillCosted} fills costed</span>
+        {fillUncosted > 0 && (
+          <>
+            <span className="text-xs muted" aria-hidden>·</span>
+            <span className="text-xs text-amber-700 dark:text-amber-300">
+            {fillUncosted} {fillUncosted === 1 ? "fill has" : "fills have"} no price for
+            {" "}{fillUncosted === 1 ? "its" : "their"} water type — cost unknown, not zero, and
+            not included above
+            </span>
+          </>
+        )}
+      </div>
+
+      {fillRows.length === 0 ? (
+        <p className="text-sm muted mb-6">No fills in this period.</p>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <div>
+            <h4 className="text-[11px] uppercase tracking-wide muted mb-1">By water type</h4>
+            <Table>
+              <thead>
+                <tr>
+                  <TH>Water type</TH>
+                  <TH className="text-right">Fills</TH>
+                  <TH className="text-right">Uncosted</TH>
+                  <TH className="text-right">Cost</TH>
+                </tr>
+              </thead>
+              <tbody>
+                {byType.map(([wt, v]) => (
+                  <tr key={wt}>
+                    <TD>{WATER_TYPE_LABELS[wt as WaterType] ?? wt}</TD>
+                    <TD className="text-right tabular-nums">{v.costed}</TD>
+                    <TD className={cn("text-right tabular-nums",
+                      v.uncosted > 0 && "text-amber-700 dark:text-amber-300")}>
+                      {v.uncosted || "—"}
+                    </TD>
+                    <TD className="text-right tabular-nums">{formatSar(v.sar)}</TD>
+                  </tr>
+                ))}
+                <tr className="font-semibold border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                  <TD>Total</TD>
+                  <TD className="text-right tabular-nums">{fillCosted}</TD>
+                  <TD className="text-right tabular-nums">{fillUncosted || "—"}</TD>
+                  <TD className="text-right tabular-nums">{formatSar(fillTotal)}</TD>
+                </tr>
+              </tbody>
+            </Table>
+          </div>
+
+          <div>
+            <h4 className="text-[11px] uppercase tracking-wide muted mb-1">By station</h4>
+            <Table>
+              <thead>
+                <tr>
+                  <TH>Station</TH>
+                  <TH className="text-right">Fills</TH>
+                  <TH className="text-right">Uncosted</TH>
+                  <TH className="text-right">Cost</TH>
+                </tr>
+              </thead>
+              <tbody>
+                {byStation.map((v) => (
+                  <tr key={v.name}>
+                    <TD>{v.name}</TD>
+                    <TD className="text-right tabular-nums">{v.costed}</TD>
+                    <TD className={cn("text-right tabular-nums",
+                      v.uncosted > 0 && "text-amber-700 dark:text-amber-300")}>
+                      {v.uncosted || "—"}
+                    </TD>
+                    <TD className="text-right tabular-nums">{formatSar(v.sar)}</TD>
+                  </tr>
+                ))}
+                <tr className="font-semibold border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                  <TD>Total</TD>
+                  <TD className="text-right tabular-nums">{fillCosted}</TD>
+                  <TD className="text-right tabular-nums">{fillUncosted || "—"}</TD>
+                  <TD className="text-right tabular-nums">{formatSar(fillTotal)}</TD>
+                </tr>
+              </tbody>
+            </Table>
+          </div>
+        </div>
+      )}
 
       {/* --- Maintenance per truck --- */}
       <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">

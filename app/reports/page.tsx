@@ -29,6 +29,7 @@ import type { ExpenseRow } from "./ExpensesModal";
 import type {
   PnlRow, CollectionsRow, RevenueMonthRow, ReceivableRow, AgingRow,
   PayrollRow, OperationsRow, RevenuePerTruckRow, TopupsRow, PurchasingRow,
+  FillingMonthRow, FillingByStationRow,
   MaintenancePerTruckRow, PnlPeriodRow, ExpenseCategoryPeriodRow,
   RevenueInvoiceRow, SalesReturnRow, CommissionsRow, CommissionsPaidRow,
   MetricDictionaryRow, OperationsByDriverRow,
@@ -51,6 +52,7 @@ export default async function ReportsPage() {
   const [
     pnlRes, collectionsRes, revenueRes, receivablesRes, agingRes,
     payrollRes, operationsRes, perTruckRes, topupsRes, purchasingRes,
+    fillingRes, fillingByStationRes,
     maintPerTruckRes, expensesRes, pnlPeriodRes, expCatPeriodRes,
     invoicesRes, returnsRes, commissionsRes, commissionsPaidRes, metricsRes,
     opsByDriverRes,
@@ -66,6 +68,9 @@ export default async function ReportsPage() {
     supabase.from("v_revenue_per_truck_monthly").select("*").order("month"),
     supabase.from("v_topups_monthly").select("*").order("month"),
     supabase.from("v_purchasing_spend_monthly").select("*").order("month"),
+    // 0112 — station fill cost, for the Costs statement.
+    supabase.from("v_filling_cost_monthly").select("*").order("month"),
+    supabase.from("v_filling_cost_by_station_monthly").select("*").order("month"),
     // Reshaped by 0099 to carry outsourced spend alongside parts. Ordered by
     // total, since that is the ranking the card presents.
     supabase.from("v_maintenance_cost_per_truck_monthly").select("*")
@@ -99,7 +104,8 @@ export default async function ReportsPage() {
     pnlRes.error?.message ?? collectionsRes.error?.message ?? revenueRes.error?.message ??
     receivablesRes.error?.message ?? agingRes.error?.message ?? payrollRes.error?.message ??
     operationsRes.error?.message ?? perTruckRes.error?.message ?? topupsRes.error?.message ??
-    purchasingRes.error?.message ?? maintPerTruckRes.error?.message ??
+    purchasingRes.error?.message ?? fillingRes.error?.message ??
+    fillingByStationRes.error?.message ?? maintPerTruckRes.error?.message ??
     expensesRes.error?.message ?? pnlPeriodRes.error?.message ??
     expCatPeriodRes.error?.message ?? invoicesRes.error?.message ??
     returnsRes.error?.message ?? commissionsRes.error?.message ??
@@ -118,6 +124,8 @@ export default async function ReportsPage() {
     expenses_sar: n(r.expenses_sar),
     net_profit_sar: n(r.net_profit_sar),
     operating_margin_pct: nOrNull(r.operating_margin_pct),
+    filling_cost_sar: n(r.filling_cost_sar),
+    filling_uncosted_trips: n(r.filling_uncosted_trips),
   }));
 
   const collections: CollectionsRow[] = ((collectionsRes.data ?? []) as Row[]).map((r) => ({
@@ -185,6 +193,23 @@ export default async function ReportsPage() {
     topup_count: n(r.topup_count),
   }));
 
+  const filling: FillingMonthRow[] = ((fillingRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    filling_cost_sar: n(r.filling_cost_sar),
+    costed_trips: n(r.costed_trips),
+    uncosted_trips: n(r.uncosted_trips),
+  }));
+
+  const fillingByStation: FillingByStationRow[] = ((fillingByStationRes.data ?? []) as Row[]).map((r) => ({
+    month: String(r.month),
+    station_key: String(r.station_key),
+    station_name: r.station_name == null ? null : String(r.station_name),
+    water_type: String(r.water_type),
+    filling_cost_sar: n(r.filling_cost_sar),
+    costed_trips: n(r.costed_trips),
+    uncosted_trips: n(r.uncosted_trips),
+  }));
+
   const purchasing: PurchasingRow[] = ((purchasingRes.data ?? []) as Row[]).map((r) => ({
     month: String(r.month),
     received_stock_value_sar: n(r.received_stock_value_sar),
@@ -226,6 +251,8 @@ export default async function ReportsPage() {
     expenses_sar: n(r.expenses_sar),
     net_profit_sar: n(r.net_profit_sar),
     operating_margin_pct: nOrNull(r.operating_margin_pct),
+    filling_cost_sar: n(r.filling_cost_sar),
+    filling_uncosted_trips: n(r.filling_uncosted_trips),
   }));
 
   const expenseCategories: ExpenseCategoryPeriodRow[] = ((expCatPeriodRes.data ?? []) as Row[]).map((r) => ({
@@ -329,6 +356,8 @@ export default async function ReportsPage() {
       topups={topups}
       purchasing={purchasing}
       maintPerTruck={maintPerTruck}
+      filling={filling}
+      fillingByStation={fillingByStation}
     />
   );
 }
