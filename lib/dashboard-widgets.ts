@@ -29,7 +29,7 @@
 // NOTHING HERE COMPUTES. Every value arrives from a view via the server
 // action; this file only decides what may be offered and how it is labelled.
 
-export type WidgetFamily = "metric" | "state";
+type WidgetFamily = "metric" | "state";
 export type WidgetDisplay = "stat" | "bars";
 
 export type WidgetDef = {

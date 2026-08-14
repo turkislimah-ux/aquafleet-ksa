@@ -18,7 +18,7 @@ import type { Lang } from "@/lib/i18n";
 // a link that navigates but lands on the wrong tab is the exact failure
 // lib/nav.ts documents, and it is not repeated here.
 // ---------------------------------------------------------------------------
-export type ActionSeverity = "high" | "medium" | "low";
+type ActionSeverity = "high" | "medium" | "low";
 
 export type ActionItemRow = {
   kind: string;
@@ -27,7 +27,7 @@ export type ActionItemRow = {
   oldest_at: string | null;
 };
 
-export type ActionMeta = {
+type ActionMeta = {
   en: string;
   ar: string;
   href: string;
@@ -36,7 +36,7 @@ export type ActionMeta = {
   hintAr: string;
 };
 
-export const ACTION_META: Record<string, ActionMeta> = {
+const ACTION_META: Record<string, ActionMeta> = {
   po_pending_approval: {
     en: "Purchase orders awaiting approval",
     ar: "أوامر شراء بانتظار الموافقة",
@@ -163,9 +163,9 @@ export type FeedRow = {
   actor: string | null;
 };
 
-export type FeedTone = "ok" | "warn" | "bad" | "info";
+type FeedTone = "ok" | "warn" | "bad" | "info";
 
-export const FEED_META: Record<string, { en: string; ar: string; tone: FeedTone }> = {
+const FEED_META: Record<string, { en: string; ar: string; tone: FeedTone }> = {
   trip_delivered:       { en: "Trip delivered",        ar: "تم تسليم رحلة",        tone: "ok" },
   invoice_confirmed:    { en: "Invoice confirmed",     ar: "تم تأكيد فاتورة",      tone: "info" },
   invoice_paid:         { en: "Invoice paid",          ar: "تم دفع فاتورة",        tone: "ok" },
@@ -247,7 +247,7 @@ export type FleetStateNow = {
 // the analysis, it does not become the analysis. Deep numbers stay in
 // Reports, which is why every tile here carries a link rather than a chart.
 // ---------------------------------------------------------------------------
-export type HeadlineTone = "good" | "warn" | "bad" | "neutral";
+type HeadlineTone = "good" | "warn" | "bad" | "neutral";
 
 export type Headline = {
   key: string;

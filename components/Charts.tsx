@@ -1,13 +1,24 @@
 "use client";
 
-// Chart.js wrappers ported 1:1 from the demo (preview/pages-1.js drawAreaChart /
-// drawPie / drawDualBar). The demo loads chart.js@4.4.4 via CDN; here we import
-// it as a dep and replicate the exact same Chart() configs for visual parity.
-// recharts is deliberately NOT used (would not match the demo pixel-for-pixel).
+// Chart.js wrappers for the Dashboard. PieChart is still a 1:1 port of the
+// demo's drawPie (preview/pages-1.js); ComboChart has no demo equivalent and
+// was written for the daily charts. The demo loads chart.js@4.4.4 via CDN;
+// here it is a dep, with the same Chart() configs for visual parity.
+//
+// THIS MODULE IS DASHBOARD-ONLY. Reports and Trips draw with recharts instead
+// (app/reports/OverviewTab.tsx, app/trips/BreakdownReport.tsx) — same component
+// NAMES, different library, so a grep for "BarChart" finds recharts hits that
+// have nothing to do with this file.
+//
+// THREE PORTS WERE REMOVED when their last callers went, rather than left
+// unreachable (CLAUDE.md's no-dead-code rule): AreaChart (drawAreaChart) with
+// the Operating margin chart, BarChart (drawBars) with Receivables aging, and
+// DualBarChart (drawDualBar) when ComboChart replaced the original
+// Revenue-vs-cost pairing. preview/'s own drawAreaChart / drawBars /
+// drawDualBar remain the spec if any of them is ever rebuilt.
 
 import { useEffect, useRef } from "react";
 import Chart from "chart.js/auto";
-import type { ScriptableContext } from "chart.js";
 
 type PieItem = { label: string; value: number; color: string };
 
@@ -48,128 +59,6 @@ export function PieChart({ items, className }: { items: PieItem[]; className?: s
   return (
     <div className={className}>
       <canvas ref={canvasRef} />
-    </div>
-  );
-}
-
-// Mirrors drawAreaChart(): line, filled, tension .35, no points, 2px stroke,
-// vertical gradient fill (color70 → color00), no legend, slate gridlines.
-export function AreaChart({
-  labels,
-  data,
-  color = "#0b7eea",
-  className,
-}: {
-  labels: string[];
-  data: number[];
-  color?: string;
-  className?: string;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const chartRef = useRef<Chart<"line", number[], string> | null>(null);
-
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    chartRef.current?.destroy();
-    chartRef.current = new Chart(el, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [
-          {
-            data,
-            borderColor: color,
-            fill: true,
-            tension: 0.35,
-            pointRadius: 0,
-            borderWidth: 2,
-            backgroundColor: (ctx: ScriptableContext<"line">) => {
-              const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, 280);
-              g.addColorStop(0, color + "70");
-              g.addColorStop(1, color + "00");
-              return g;
-            },
-          },
-        ],
-      },
-      options: {
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { color: "#eef2f7" }, ticks: { font: { size: 11 }, color: "#64748b" } },
-          y: { grid: { color: "#eef2f7" }, ticks: { font: { size: 11 }, color: "#64748b" } },
-        },
-      },
-    });
-    return () => {
-      chartRef.current?.destroy();
-      chartRef.current = null;
-    };
-  }, [labels, data, color]);
-
-  return (
-    <div className={className}>
-      <canvas ref={canvasRef} />
-    </div>
-  );
-}
-
-// Mirrors drawBars(): single bar dataset, per-bar colors, 4px radius, 36px max
-// thickness, no legend, no x gridlines, slate y gridlines, beginAtZero. Used by
-// the AI summary widgets (DASH._drawAll → drawBars branch).
-export function BarChart({
-  labels,
-  data,
-  colors,
-  className,
-  ariaLabel,
-}: {
-  labels: string[];
-  data: number[];
-  colors?: string[];
-  className?: string;
-  /**
-   * Text alternative for the canvas. Optional and unset by default, so every
-   * existing caller is unchanged — but a bar chart's category names are
-   * painted pixels, invisible to a screen reader and to any test, so pass one
-   * wherever the labels carry meaning on their own.
-   */
-  ariaLabel?: string;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const chartRef = useRef<Chart<"bar", number[], string> | null>(null);
-
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    chartRef.current?.destroy();
-    chartRef.current = new Chart(el, {
-      type: "bar",
-      data: {
-        labels,
-        datasets: [
-          { data, backgroundColor: colors ?? "#0b7eea", borderRadius: 4, maxBarThickness: 36 },
-        ],
-      },
-      options: {
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { display: false }, ticks: { font: { size: 11 }, color: "#64748b" } },
-          y: { grid: { color: "#eef2f7" }, ticks: { font: { size: 11 }, color: "#64748b" }, beginAtZero: true },
-        },
-      },
-    });
-    return () => {
-      chartRef.current?.destroy();
-      chartRef.current = null;
-    };
-  }, [labels, data, colors]);
-
-  return (
-    <div className={className}>
-      <canvas ref={canvasRef} {...(ariaLabel ? { role: "img", "aria-label": ariaLabel } : {})} />
     </div>
   );
 }
@@ -328,65 +217,6 @@ export function ComboChart({
     <div className={className}>
       <canvas ref={canvasRef} role="img"
         aria-label={[bar?.label, line.label, extraLine?.label].filter(Boolean).join(" — ")} />
-    </div>
-  );
-}
-
-// Mirrors drawDualBar(): two bar datasets, 4px radius, 14px max thickness,
-// top-end legend, no x gridlines, slate y gridlines.
-export function DualBarChart({
-  labels,
-  d1,
-  d2,
-  c1 = "#0b7eea",
-  c2 = "#f59e0b",
-  l1,
-  l2,
-  className,
-}: {
-  labels: string[];
-  d1: number[];
-  d2: number[];
-  c1?: string;
-  c2?: string;
-  l1: string;
-  l2: string;
-  className?: string;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const chartRef = useRef<Chart<"bar", number[], string> | null>(null);
-
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    chartRef.current?.destroy();
-    chartRef.current = new Chart(el, {
-      type: "bar",
-      data: {
-        labels,
-        datasets: [
-          { label: l1, data: d1, backgroundColor: c1, borderRadius: 4, maxBarThickness: 14 },
-          { label: l2, data: d2, backgroundColor: c2, borderRadius: 4, maxBarThickness: 14 },
-        ],
-      },
-      options: {
-        maintainAspectRatio: false,
-        plugins: { legend: { position: "top", align: "end", labels: { font: { size: 11 }, boxWidth: 12 } } },
-        scales: {
-          x: { grid: { display: false }, ticks: { font: { size: 11 }, color: "#64748b" } },
-          y: { grid: { color: "#eef2f7" }, ticks: { font: { size: 11 }, color: "#64748b" } },
-        },
-      },
-    });
-    return () => {
-      chartRef.current?.destroy();
-      chartRef.current = null;
-    };
-  }, [labels, d1, d2, c1, c2, l1, l2]);
-
-  return (
-    <div className={className}>
-      <canvas ref={canvasRef} />
     </div>
   );
 }
