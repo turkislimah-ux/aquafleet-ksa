@@ -7,9 +7,16 @@
 // mutable fields but never touches stage (that goes through setTripStage).
 
 import { revalidatePath } from "next/cache";
-import { stationPriceFor } from "@/lib/station-pricing";
+import { decideStationChange, stationPriceFor } from "@/lib/station-pricing";
 import { createClient } from "@/lib/supabase/server";
-import { STAGE_ORDER, STAGE_TIMESTAMP, MAX_BATCH_TRIPS, type TripStage, type WaterType } from "@/lib/db-types";
+import {
+  STAGE_ORDER,
+  STAGE_TIMESTAMP,
+  MAX_BATCH_TRIPS,
+  WATER_TYPE_LABELS,
+  type TripStage,
+  type WaterType,
+} from "@/lib/db-types";
 import { commissionForDelivery, commissionForNthTrip } from "@/lib/commission";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
 import { derivedBalanceItems, type ConsumingTrip, type ConsumingCharge, type TopupLite } from "@/lib/prepaid";
@@ -234,6 +241,19 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
 
   if (waterStation !== undefined) {
     row.water_station = waterStation;
+    // A station change here (the loading-stage fill-station edit) means the
+    // truck filled somewhere else, so the frozen cost is from a station it
+    // never visited. `stage` is the TARGET stage — a move TO delivered leaves
+    // the cost alone, since the fill already happened at the old station and
+    // delivering does not change where it was filled.
+    //
+    // This also GATES the move: a station that does not fill this trip's water
+    // type refuses the whole call. Returning before the update matters — the
+    // stage change and the station change arrive together here, so falling
+    // through would advance the stage while rejecting the station.
+    const change = await stationChangePatch(supabase, id, waterStation, stage);
+    if (change.error) return { error: change.error };
+    Object.assign(row, change.patch);
   }
 
   // Only (re)price unpaid trips. Paid trips keep their frozen commission_sar.
@@ -274,11 +294,116 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
 // EVERY call — none of which a pure station edit should trigger. This action
 // writes water_station alone, no stage, no timestamps, no commission. Empty
 // string is allowed (direct-customer trips are never required to have one).
+
+/**
+ * The station-change path: GATE first, then re-snapshot.
+ *
+ * ===========================================================================
+ * THE GATE — a station may only receive a trip whose water type it FILLS.
+ * ===========================================================================
+ * This is the same rule trip creation enforces through `selectableWaterTypes`,
+ * applied from the other direction: there the station is fixed and the type is
+ * narrowed; here the type is fixed and the STATION is narrowed. Without it the
+ * two surfaces disagreed, and a real trip proved it — KI-026-0062 (potable,
+ * in_transit) was moved to Umm Al Hamam, which does not fill potable at all.
+ * Its cost correctly re-snapshotted to NULL, and the trip was left parked at a
+ * station physically incapable of filling it. NULL was the honest record of a
+ * state that should never have been reachable.
+ *
+ * IT IS A GATE ON THE CHANGE, NOT A CONSTRAINT ON THE DATA. There is
+ * deliberately no CHECK constraint and no trigger behind this: 13 historical
+ * Umm Al Hamam potable trips predate per-type pricing and are legitimately
+ * grandfathered. A database rule would either reject them or force them to be
+ * rewritten. Blocking the ACTION stops new invalid rows without touching a
+ * single existing one.
+ *
+ * IT APPLIES AT EVERY STAGE, INCLUDING DELIVERED. The freeze below protects a
+ * delivered trip's COST from moving; it does not license parking a delivered
+ * trip at a station that could not have filled it. Grandfathering means the
+ * existing rows stay, not that more may be created.
+ *
+ * AN UNPRICED STATION ALLOWS EVERYTHING, exactly as `selectableWaterTypes`
+ * does. A station with no prices at all is a pre-0110 row, and blocking on it
+ * would freeze legitimate edits on the entire legacy set. The gate closes by
+ * itself the moment a price is entered — no flag, nothing to remember.
+ *
+ * ===========================================================================
+ * THE RE-SNAPSHOT — the freeze is against PRICE EDITS, not against changing
+ * which station filled.
+ * ===========================================================================
+ * trips.filling_cost_sar is frozen so that editing a station's price later
+ * cannot reprice history. But if the truck actually filled somewhere else, the
+ * frozen figure is a price from a station it never visited — that is a wrong
+ * record, not a protected one, so it is re-taken from the new station.
+ *
+ * DELIVERED TRIPS ARE NEVER RE-SNAPSHOTTED. Once delivered the trip is history,
+ * its cost has been reported, and moving it would silently restate a closed
+ * period. Callers pass the trip's CURRENT stage and this refuses.
+ *
+ * Returns an `error` to REFUSE the whole write (the caller must not fall
+ * through and save the station anyway), or a patch to merge — `{}` when there
+ * is nothing to change but the change is allowed.
+ */
+type StationChange =
+  | { error: string; patch?: undefined }
+  | { error?: undefined; patch: { filling_cost_sar?: number | null } };
+
+async function stationChangePatch(
+  supabase: ReturnType<typeof createClient>,
+  tripId: string,
+  waterStation: string,
+  stage: TripStage,
+): Promise<StationChange> {
+  // Clearing the station (direct-customer trips are never required to have
+  // one) has no station to gate against. The cost still goes to NULL below —
+  // no station means nothing is known about what the fill cost.
+  const { data: trip } = await supabase
+    .from("trips")
+    .select("water_type")
+    .eq("id", tripId)
+    .maybeSingle();
+  if (!trip?.water_type || !validWaterType(trip.water_type)) return { patch: {} };
+
+  const { data: station } = await supabase
+    .from("water_stations")
+    .select("name, fill_cost_potable_sar, fill_cost_non_potable_sar")
+    .eq("key", waterStation)
+    .maybeSingle();
+
+  // ONE pure decision (lib/station-pricing.ts) — gate and re-snapshot together,
+  // so the rule cannot be half-applied here and half-applied in the picker.
+  const decision = decideStationChange(station, trip.water_type, stage === "delivered");
+  if (decision.blocked) {
+    return {
+      error:
+        `${station?.name ?? "That station"} does not fill ` +
+        `${WATER_TYPE_LABELS[trip.water_type].toLowerCase()} water. ` +
+        `Pick a station that does, or add that type to this station under Manage stations.`,
+    };
+  }
+  // `costPatch: null` = leave the frozen cost alone (delivered). An empty patch
+  // is the right merge for that; it is NOT the same as writing null.
+  return { patch: decision.costPatch ?? {} };
+}
+
 export async function setTripStation(id: string, waterStation: string): Promise<ActionResult> {
   if (!id) return { error: "Missing trip." };
 
   const supabase = createClient();
-  const { error } = await supabase.from("trips").update({ water_station: waterStation }).eq("id", id);
+
+  // The trip filled somewhere else, so its frozen cost is from a station it
+  // never visited. Re-take it — unless the trip is already delivered, in which
+  // case it is closed history (see stationChangePatch). The same call GATES the
+  // move: a station that does not fill this trip's water type is refused here,
+  // before anything is written.
+  const { data: cur } = await supabase.from("trips").select("stage").eq("id", id).maybeSingle();
+  const stage = (cur?.stage ?? "scheduled") as TripStage;
+  const change = await stationChangePatch(supabase, id, waterStation, stage);
+  if (change.error) return { error: change.error };
+
+  const patch: Record<string, unknown> = { water_station: waterStation, ...change.patch };
+
+  const { error } = await supabase.from("trips").update(patch).eq("id", id);
   if (error) return { error: error.message };
 
   revalidatePath("/trips");

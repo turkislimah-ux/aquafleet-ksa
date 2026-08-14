@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
-import { type StationOption } from "@/lib/station-pricing";
+import { stationBlockedForType, type StationOption } from "@/lib/station-pricing";
 import {
   type Trip,
   type TripStage,
@@ -36,6 +36,7 @@ import {
   STAGE_ORDER,
   STAGE_STYLES,
   TRIP_STAGE_LABELS,
+  WATER_TYPE_LABELS,
 } from "@/lib/db-types";
 import { type DriverState, DRIVER_STATE_LABELS } from "@/lib/driver-state";
 import { type LeavePeriod } from "@/lib/leave";
@@ -47,6 +48,15 @@ import CreateTripForm from "./CreateTripForm";
 import NewProjectModal from "./NewProjectModal";
 import WaterStationsModal from "./WaterStationsModal";
 import ManageDriversModal from "../projects/ManageDriversModal";
+
+// Mid-sentence wording for a water type, off the ONE label map — the same map
+// CreateTripForm's own gate message reads, so the two halves of the gate say
+// the same words rather than one saying "Non-potable" and the other "non
+// potable". A trip with no type is not gated at all, so this fallback only
+// ever appears defensively.
+function waterTypeWord(t: WaterType | null | undefined): string {
+  return t ? WATER_TYPE_LABELS[t].toLowerCase() : "this water type";
+}
 
 type TripRow = Trip & {
   linkedName: string;
@@ -315,11 +325,20 @@ function TripCard({
             >
               <option value="">Set station</option>
               {!hasCurrentOption && <option value={trip.water_station}>{stationName}</option>}
-              {stations.map((st) => (
-                <option key={st.key} value={st.key}>
-                  {st.name}
-                </option>
-              ))}
+              {/* A station that does not fill this trip's water type is
+                  DISABLED, not hidden — the list stays the full list, and the
+                  reason travels with the row instead of a station silently
+                  going missing. setTripStation re-checks server-side; this is
+                  the friendlier half of the same gate, never the enforcement. */}
+              {stations.map((st) => {
+                const blocked = stationBlockedForType(st, trip.water_type);
+                return (
+                  <option key={st.key} value={st.key} disabled={blocked}>
+                    {st.name}
+                    {blocked ? ` — no ${waterTypeWord(trip.water_type)}` : ""}
+                  </option>
+                );
+              })}
             </select>
             <ChevronDown className="h-3 w-3 absolute end-0 pointer-events-none opacity-60" />
           </span>
@@ -754,12 +773,23 @@ function PhasePickerModal({
               >
                 <option value="">Set station</option>
                 {!hasCurrentOption && <option value={trip.water_station}>{currentStationName}</option>}
-                {stations.map((st) => (
-                  <option key={st.key} value={st.key}>
-                    {st.name}
-                  </option>
-                ))}
+                {/* Same gate as the loading chip — disabled, labelled, and
+                    re-checked server-side by setTripStage. */}
+                {stations.map((st) => {
+                  const blocked = stationBlockedForType(st, trip.water_type);
+                  return (
+                    <option key={st.key} value={st.key} disabled={blocked}>
+                      {st.name}
+                      {blocked ? ` — no ${waterTypeWord(trip.water_type)}` : ""}
+                    </option>
+                  );
+                })}
               </select>
+              {trip.water_type && (
+                <span className="text-[11px] muted">
+                  This trip is {waterTypeWord(trip.water_type)}. Stations that don&apos;t fill it can&apos;t be picked.
+                </span>
+              )}
             </label>
 
             {err && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{err}</p>}
