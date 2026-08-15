@@ -33,7 +33,10 @@ import {
   type DriverCommissionByProjectRow,
 } from "@/lib/reports";
 
-export function Note({ children }: { children: React.ReactNode }) {
+// MODULE-PRIVATE. Used by 17 call sites in this file and imported by none —
+// StatementsTab takes only the statement components. It was exported from the
+// start and never consumed, so the export was surface with no reader.
+function Note({ children }: { children: React.ReactNode }) {
   return (
     <div className="mt-3 flex gap-2 text-[11px] muted leading-relaxed">
       <Info className="h-3.5 w-3.5 shrink-0 mt-px" />
