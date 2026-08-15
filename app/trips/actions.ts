@@ -3,8 +3,16 @@
 // Server actions for trips. createTrip handles single + batch (up to
 // MAX_BATCH_TRIPS) inserts. setTripStage is the SINGLE funnel for stage
 // changes — it sets stage and stamps the matching *_at column so future GPS
-// automation can drive the board through the same path. updateTrip edits the
-// mutable fields but never touches stage (that goes through setTripStage).
+// automation can drive the board through the same path. setTripStation is the
+// station-only edit.
+//
+// THERE IS NO GENERAL updateTrip, DELIBERATELY. One existed, unused, and wrote
+// water_station and water_type with neither the station/water-type gate nor the
+// filling_cost_sar re-snapshot — so a station change through it would have
+// stranded a frozen cost pointing at a station the truck never visited, which
+// 0114's trigger does not catch because it writes no money. A future trip-edit
+// UI belongs on stationChangePatch (below), which carries both. Do not
+// reintroduce a direct-write edit path.
 
 import { revalidatePath } from "next/cache";
 import { decideStationChange, stationPriceFor } from "@/lib/station-pricing";
@@ -34,12 +42,8 @@ function num(v: FormDataEntryValue | null) {
   const n = Number(str(v));
   return Number.isFinite(n) ? n : 0;
 }
-function numOrNull(v: FormDataEntryValue | null) {
-  const s = str(v);
-  if (s === "") return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
-}
+// numOrNull lived here for updateTrip's rate_sar only, and went with it. Every
+// other actions file keeps its own copy; nothing in this one needs it.
 
 function validWaterType(s: string): s is WaterType {
   return s === "potable" || s === "non_potable";
@@ -133,65 +137,6 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
   const rows = Array.from({ length: count }, () => ({ ...base }));
 
   const { error } = await supabase.from("trips").insert(rows);
-  if (error) return { error: error.message };
-
-  revalidatePath("/trips");
-  return { error: null };
-}
-
-// No live caller today (re-checked — nothing in app/trips/*.tsx invokes this;
-// setTripStage/setTripStation cover every current edit surface). It carries the
-// PAID lock, so a future edit UI inherits that much for free.
-//
-// IT DOES NOT INHERIT THE FILLING RULES, and the previous version of this
-// comment implied it inherited everything. It writes water_station AND
-// water_type directly with:
-//   · NO station/water-type gate — no decideStationChange call, so it does not
-//     refuse a station that cannot fill the chosen type. Since 0114 the
-//     database catches that combination itself, so this cannot corrupt data —
-//     but the user would get a raw 23514 instead of the sentence the other two
-//     paths produce.
-//   · NO filling_cost_sar re-snapshot — a station change through here would
-//     leave the frozen cost pointing at a station the truck never visited,
-//     which the trigger does NOT catch, because it is a money question and the
-//     trigger deliberately writes nothing.
-//
-// Being exported from a "use server" file makes it a live endpoint whether or
-// not any component calls it. Decide it deliberately — delete it, or route it
-// through stationChangePatch like the other two — rather than letting the next
-// edit UI wire it up and inherit a gap.
-export async function updateTrip(id: string, formData: FormData): Promise<ActionResult> {
-  const water_station = str(formData.get("water_station"));
-  if (!water_station) return { error: "Water station is required." };
-
-  const water_type = str(formData.get("water_type"));
-  if (!water_type) return { error: "Water type is required." };
-  if (!validWaterType(water_type)) return { error: "Invalid water type." };
-
-  const supabase = createClient();
-
-  const { data: trip, error: tripErr } = await supabase
-    .from("trips")
-    .select("payout_id, invoice_id")
-    .eq("id", id)
-    .maybeSingle();
-  if (tripErr) return { error: tripErr.message };
-  if (!trip) return { error: "Trip not found." };
-  if (await isTripLocked(supabase, trip)) {
-    return { error: "This trip is locked (paid) and can no longer be edited." };
-  }
-
-  const row: Record<string, unknown> = {
-    water_station,
-    water_type,
-    truck_id: nullable(formData.get("truck_id")),
-    driver_id: nullable(formData.get("driver_id")),
-    rate_sar: numOrNull(formData.get("rate_sar")),
-  };
-  const trip_date = nullable(formData.get("trip_date"));
-  if (trip_date) row.trip_date = trip_date;
-
-  const { error } = await supabase.from("trips").update(row).eq("id", id);
   if (error) return { error: error.message };
 
   revalidatePath("/trips");
