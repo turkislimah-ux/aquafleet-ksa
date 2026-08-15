@@ -158,6 +158,22 @@ relevant skill(s) **when the task calls for it**:
   unify" rule). Water = fill stations (trips). Operation = driver/truck/staff base.
 - **`lib/project-colors.ts`** = shared id-hashed project color palette (one source,
   used across Trips/Kanban/pills).
+- **EVERY VIEW REPLACEMENT RESTATES ITS SECURITY FOOTER.** `create or replace
+  view` does **NOT** preserve reloptions, so a replaced view silently reverts to
+  owner-run and bypasses RLS on 68 RLS-enabled tables. Every `create or replace
+  view` must be followed by:
+  ```sql
+  alter view public.X set (security_invoker = true);
+  revoke all on public.X from anon;
+  grant select on public.X to authenticated;
+  ```
+  This is not per-feature style — it is the standing rule for every view, and
+  the failure is invisible: the view keeps returning rows, just with the wrong
+  privileges. Live count to check against: **40 views, 40 security_invoker, 0
+  anon-readable.**
+- **`create or replace view` can only APPEND a column** — it cannot insert,
+  reorder or rename one (error **42P16**, which cost 0112 an apply cycle). If a
+  new column belongs in the middle, it still goes at the end.
 - **Immutable keys** on lookup tables (water_stations.key) — rename updates name only.
 - **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew in date logic.
 
@@ -1907,6 +1923,86 @@ relevant skill(s) **when the task calls for it**:
     the code's empty/NULL guards are unreachable today; `StationPricing` is hand-rolled
     in three places (`WaterStationsModal`, `ProjectsBoard`, `app/trips/page.tsx`)
     instead of imported — a consolidation, not dead code.
+
+- **DRIVER PAYSLIPS — migrations `0115`–`0118`, through commit `5476b24`.** A
+  numbered, frozen settlement document per driver per month, plus a commission
+  review table beside it. Built on the Reports statement pack: `?statement=payslips`.
+  Commits: `186143a` (0115), `81e682c` (confirm + bold), `3209f4b` (0116),
+  `e67b2d1` (terminated label + review table), `be33162` (0117), `5476b24` (sweep).
+  **`0118` is DRAFTED, NOT APPLIED** — see the drift note below.
+  - **SNAPSHOT AT ISSUE, NOT EFFECTIVE-DATED SALARY.** A payslip is a DOCUMENT;
+    its defining property is that it does not change after you hand it over.
+    Issuing freezes every figure and assigns a gap-free number
+    (`PS-2026-000001`, counter-table pattern, `FOR UPDATE`). An UNISSUED month is
+    a live preview computed at TODAY's salary and the register says so.
+    Effective-dated salary stays deferred — that is one mechanism with three
+    consumers (driver salary, commission rates, customer rates) and half-building
+    it inside a payslip feature would have got it wrong for all three.
+  - **TWO BASES ON ONE SCREEN, DELIBERATELY.** The payslip register is
+    **SETTLEMENT month** — commission attributed by `paid_at` (Riyadh). The
+    review table below it is **WORK month** — what the driver earned from the
+    trips he drove, paid out or not. **The same driver legitimately shows two
+    different totals**, and live, two July drivers do. Both tables label the
+    basis explicitly on screen; left implied it reads as a bug in one of them.
+  - **WHY `paid_at` AND NOT `period_label`.** `period_label` is a payout-RUN
+    label, not the work period, and the live data proves it: a payout labelled
+    "Jul 2026" paid for work done entirely in **June**, another spanned **two
+    months**, one driver had **two payouts in one label** (178 + 26, summed —
+    taking "the latest" would have silently dropped 26.00), and two payouts
+    locked **zero trips** (specials only). Attributing by trips would split one
+    paid total across two documents; parsing the label puts June's work on a July
+    slip anyway, by parsing free text. `paid_at` is typed and keeps a payout
+    whole.
+  - **THE COMMISSION BLOCK COMPOSES ON `commission_payouts`, never recomputes.**
+    Where a payout settled in the month, the block IS that payout by id. Only
+    where none exists does it fall back to accrual — and that fallback counts
+    only trips with `payout_id IS NULL`, which is what stops one trip's
+    commission reaching two payslips.
+  - **TERMINATED IS A LABEL RULE, NOT A GATE.** Status priority: issued number →
+    **Terminated** → No hire date → month in progress → Not issued. A terminated
+    driver's final month is a legitimate payslip and stays issuable. **A driver
+    with no hire date is SHOWN but CANNOT be issued** — enforced in the RPC
+    (23514), not just in the button.
+  - **THE DEFECT 0116 CAUGHT, AND HOW.** 0115's first draft claimed "all 11 live
+    drivers have a hire date". That 11 came from a query filtered to
+    `terminated_at is null`, written up as if it described every driver. There
+    are **16**; the **5** with no hire date are the 5 terminated ones, at 1,300
+    each, and the old `coalesce(hire_date, m.month)` read them as employed — ten
+    permanent 1,300 SAR documents issuable to people who had left. **Every
+    verification block missed it because they inherited the wrong premise from
+    the prose above them.** Check the set your claim is about, not the set your
+    query returned.
+  - **`0117` — THE SAME DEFECT, LIVE IN THE P&L.** `v_payroll_monthly` gated
+    employment with `COALESCE(hire_date,'1900-01-01')`, billing people for every
+    historical month. **The suggested fix — exclude NULL-hire people — was
+    overridden with data:** 0 of 5 such drivers have a June trip but 4 of 5 have
+    July trips, and the sixth is an **active fleet_manager on 4,500/month**.
+    Excluding would have dropped August payroll 31,300 → 26,800 for someone who
+    works there today. The floor moved to `COALESCE(hire_date, created_at::date)`
+    — a real date, claiming only that **nothing earlier is defensible**. June
+    payroll 36,000 → **25,000**; July and August unmoved. It degrades to nothing
+    once real hire dates are entered.
+  - **KNOWN DRIFT, GATED: net pay is expressed twice** — in
+    `issue_driver_payslip`'s INSERT and in `payslipPreviewNet` (TypeScript, for
+    the unissued preview). They agree today and nothing keeps them agreeing.
+    **`0118` closes it** by appending `net_sar` to the basis view AND making the
+    RPC read it instead of re-adding the components — adding the column alone
+    would give three expressions, not one. **Drafted, not applied; the TS helper
+    must not be deleted until it is, or the preview breaks.**
+  - **PRINT: the payslips surface is the ONE place two print subtrees coexist.**
+    Every other statement mounts alone, so "one visible id" sufficed until now.
+    `#payslips-print` and `#commission-review-print` are both in all six
+    `globals.css` rule groups, and `body.printing-review` picks which survives —
+    without it, printing either emits both.
+  - **Live data to reconcile against:** 2 issued payslips (`PS-2026-000001`,
+    `PS-2026-000002`, counter at 2 — **keep both, intentional test data**); the
+    review table reconciles to `v_commissions_monthly` to the riyal (Jun 428.00 /
+    Jul 2,226.02 / Aug 12,912.52); two distinct drivers are both named
+    **"Fahad 4"**, disambiguated in the UI by a short id only where the name is
+    ambiguous.
+  - **Deferred — payslips:** a deductions data source (`deductions_sar` ships at
+    0 so the arithmetic is complete and adding one changes no issued slip); an
+    approval step before issue (parked with RBAC); effective-dated salary.
 
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
