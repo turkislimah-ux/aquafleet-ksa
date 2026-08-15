@@ -8,6 +8,7 @@
 // comes from a view (0103 + the 0098 semantic layer); this is only how each
 // row is named and where clicking it goes.
 
+import { COST_COLOR, type CostBucketKey } from "@/lib/cost-colors";
 import type { Lang } from "@/lib/i18n";
 
 // ---------------------------------------------------------------------------
@@ -477,19 +478,30 @@ export type CostComposition = {
   fillingUncosted: number;
 };
 
-/** Only the SLICE keys — `fillingUncosted` is a scalar count, not a slice, and
- *  including it here made the spread in the chart fail to type. */
-export type CostSliceKey =
-  "parts" | "outsourced" | "payroll" | "commissions" | "filling" | "other";
+/**
+ * Only the SLICE keys — `fillingUncosted` is a scalar count, not a slice, and
+ * including it here made the spread in the chart fail to type.
+ *
+ * An ALIAS of the shared key set, not a second list: adding a bucket in
+ * lib/cost-colors.ts must not leave this one silently behind.
+ */
+export type CostSliceKey = CostBucketKey;
 
+/**
+ * THE LABELS LIVE HERE, THE COLOURS DO NOT. Every hex is read from
+ * lib/cost-colors.ts, which Reports' own `costBuckets` reads too — so a bucket
+ * is the same colour on the Dashboard's Cost mix and on Reports Overview. They
+ * used to disagree, with Payroll and Outsourced actually swapped between the
+ * two pages; that file's header has the detail.
+ */
 export const COST_TYPE: { key: CostSliceKey;
   en: string; ar: string; color: string }[] = [
-  { key: "parts",       en: "Parts",          ar: "قطع الغيار",   color: "#0b7eea" },
-  { key: "outsourced",  en: "Outsourced",     ar: "أعمال خارجية", color: "#f59e0b" },
-  { key: "payroll",     en: "Payroll",        ar: "الرواتب",      color: "#8b5cf6" },
-  { key: "commissions", en: "Commissions",    ar: "العمولات",     color: "#10b981" },
-  { key: "filling",     en: "Station fill",   ar: "تعبئة المحطة", color: "#06b6d4" },
-  { key: "other",       en: "Other expenses", ar: "مصروفات أخرى", color: "#64748b" },
+  { key: "parts",       en: "Parts",          ar: "قطع الغيار",   color: COST_COLOR.parts },
+  { key: "outsourced",  en: "Outsourced",     ar: "أعمال خارجية", color: COST_COLOR.outsourced },
+  { key: "payroll",     en: "Payroll",        ar: "الرواتب",      color: COST_COLOR.payroll },
+  { key: "commissions", en: "Commissions",    ar: "العمولات",     color: COST_COLOR.commissions },
+  { key: "filling",     en: "Station fill",   ar: "تعبئة المحطة", color: COST_COLOR.filling },
+  { key: "other",       en: "Other expenses", ar: "مصروفات أخرى", color: COST_COLOR.other },
 ];
 
 // ---------------------------------------------------------------------------

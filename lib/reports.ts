@@ -12,6 +12,8 @@
 // migration. Composing two defined metrics into a ratio is allowed (see
 // cashCoverage below); recomputing either side of that ratio is not.
 
+import { COST_COLOR } from "@/lib/cost-colors";
+
 // --- View row shapes -------------------------------------------------------
 // One type per view, columns verbatim. Names match the SQL exactly so a
 // mismatch is a compile error rather than a silent undefined.
@@ -658,12 +660,23 @@ export type FillingByStationRow = {
   uncosted_trips: number;
 };
 
+/**
+ * COLOURS COME FROM lib/cost-colors.ts, the same record the Dashboard's Cost
+ * mix reads. They were hardcoded here and had drifted into something worse than
+ * a mismatch — Payroll and Outsourced were SWAPPED against the Dashboard, so
+ * the amber wedge meant payroll on this page and outsourced work on that one.
+ * Both now read one source; that file's header carries the full note.
+ *
+ * `key` is deliberately left as it was — "os", not "outsourced". It is this
+ * list's own identity and the Overview bars use it as a React key; renaming it
+ * would be churn no reader benefits from. The colour lookup maps it across.
+ */
 export function costBuckets(row: PnlRow): CostBucket[] {
   return [
-    { key: "parts", label: "Parts", value: row.parts_cost_sar, color: "#0b7eea" },
-    { key: "os", label: "Outsourced", value: row.os_cost_sar, color: "#8b5cf6" },
-    { key: "payroll", label: "Payroll", value: row.payroll_sar, color: "#f59e0b" },
-    { key: "commissions", label: "Commissions", value: row.commissions_sar, color: "#10b981" },
-    { key: "filling", label: "Station fill", value: row.filling_cost_sar, color: "#06b6d4" },
+    { key: "parts", label: "Parts", value: row.parts_cost_sar, color: COST_COLOR.parts },
+    { key: "os", label: "Outsourced", value: row.os_cost_sar, color: COST_COLOR.outsourced },
+    { key: "payroll", label: "Payroll", value: row.payroll_sar, color: COST_COLOR.payroll },
+    { key: "commissions", label: "Commissions", value: row.commissions_sar, color: COST_COLOR.commissions },
+    { key: "filling", label: "Station fill", value: row.filling_cost_sar, color: COST_COLOR.filling },
   ];
 }
