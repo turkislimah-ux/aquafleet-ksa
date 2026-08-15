@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Driver, Staff, StaffRole, OperationStation, DriverIncident, StaffCommission, StaffCommissionType } from "@/lib/db-types";
 import type { LeavePeriod, LeaveType } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
-import { buildTruckStatusMap } from "@/lib/truck-status";
+import { buildActiveJobTruckIds, buildTruckStatusMap } from "@/lib/truck-status";
 import { todayKey } from "@/lib/utils";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
 import {
@@ -157,10 +157,10 @@ export default async function DriversPage() {
   const activeDrivers = allDrivers.filter((d) => !d.terminated_at);
   const trucks = (trucksRes.data ?? []) as TruckLite[];
   // Auto Truck-Status Phase 2a — derived, single source of truth.
-  const activeJobTruckIds = new Set<string>([
-    ...((activeWorkOrdersRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
-    ...((activeOutsourcedJobsRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
-  ]);
+  const activeJobTruckIds = buildActiveJobTruckIds(
+    activeWorkOrdersRes.data as { truck_id: string }[] | null,
+    activeOutsourcedJobsRes.data as { truck_id: string }[] | null,
+  );
   const truckStatusById = buildTruckStatusMap(trucks, activeJobTruckIds);
   const trips = (tripsRes.data ?? []) as TripJoin[];
   const commTrips = (commTripsRes.data ?? []) as CommTripRow[];

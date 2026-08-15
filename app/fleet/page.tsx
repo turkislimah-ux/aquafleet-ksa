@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Truck, OperationStation } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
-import { buildTruckStatusMap, type TruckOpsState } from "@/lib/truck-status";
+import { buildActiveJobTruckIds, buildTruckStatusMap, type TruckOpsState } from "@/lib/truck-status";
 import { todayKey } from "@/lib/utils";
 import FleetClient from "./FleetClient";
 
@@ -149,10 +149,10 @@ export default async function FleetPage() {
   // ---- Derived truck status (lib/truck-status) — Auto Truck-Status Phase
   // 2a. REPLACES the demo's stored/health-score-based trucks.status for
   // every display below (table pills, filters, KPI counts). ----
-  const activeJobTruckIds = new Set<string>([
-    ...((activeWorkOrdersRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
-    ...((activeOutsourcedJobsRes.data ?? []) as { truck_id: string }[]).map((r) => r.truck_id),
-  ]);
+  const activeJobTruckIds = buildActiveJobTruckIds(
+    activeWorkOrdersRes.data as { truck_id: string }[] | null,
+    activeOutsourcedJobsRes.data as { truck_id: string }[] | null,
+  );
   const truckStatusById: Record<string, TruckOpsState> = buildTruckStatusMap(trucks, activeJobTruckIds);
 
   // ---- KPI strip (6) — all REAL, nulls skipped, no division-by-zero ----

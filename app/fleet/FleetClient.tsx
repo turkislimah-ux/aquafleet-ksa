@@ -197,10 +197,16 @@ export default function FleetClient({
           value={kpis.capHasData ? `${formatNum(kpis.totalCap)} m³` : "—"}
           tone="info"
         />
+        {/* A FIGURE WE DO NOT HAVE GETS NO COLOUR. health_score is null on
+            every truck and nothing writes it, so this read "—" in amber on
+            every load — a permanent warning about missing data rather than
+            about the fleet. tone is optional; undefined means no colour class,
+            which is exactly how Total Capacity beside it already handles the
+            same case via capHasData. */}
         <Stat
           label="Avg Fleet Health"
           value={kpis.avgHealth ?? "—"}
-          tone={kpis.avgHealth != null && kpis.avgHealth > 75 ? "ok" : "warn"}
+          tone={kpis.avgHealth == null ? undefined : kpis.avgHealth > 75 ? "ok" : "warn"}
         />
       </div>
 

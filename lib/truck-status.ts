@@ -50,6 +50,35 @@ export const TRUCK_OPS_STATE_LABELS: Record<TruckOpsState, string> = {
   idle: "Idle",
 };
 
+/**
+ * The `hasActiveJob` FACT, resolved once — the set of truck ids with any
+ * in_progress job across BOTH maintenance tracks.
+ *
+ * This lived as four identical lines in app/fleet/page.tsx and
+ * app/drivers/page.tsx, both feeding buildTruckStatusMap below. The status
+ * RULE was extracted to this file; its INPUT was left copied, which is the
+ * half that actually decides what the rule sees — two pages could have started
+ * resolving "busy" differently while both still calling the same helper and
+ * looking consistent.
+ *
+ * BOTH TRACKS, ALWAYS. Work orders and outsourced jobs each put a truck in
+ * maintenance on their own; checking one is a truck that reads as idle while
+ * it sits in a workshop. `v_fleet_state_now`'s own `busy_trucks` CTE unions
+ * exactly these two, which is what keeps the SQL and TypeScript answers equal.
+ *
+ * truck_id is NOT NULL on both tables (verified), so no null filtering is
+ * needed and the Set<string> type is honest.
+ */
+export function buildActiveJobTruckIds(
+  workOrders: { truck_id: string }[] | null | undefined,
+  outsourcedJobs: { truck_id: string }[] | null | undefined,
+): Set<string> {
+  return new Set<string>([
+    ...(workOrders ?? []).map((r) => r.truck_id),
+    ...(outsourcedJobs ?? []).map((r) => r.truck_id),
+  ]);
+}
+
 // Build a truck_id -> TruckOpsState map. Callers pass the truck rows
 // (id + assigned_driver_id) and the pre-built set of truck ids with any
 // in_progress job across BOTH tracks — resolved once per page, same

@@ -122,8 +122,12 @@ function initials(name: string): string {
     .join("");
 }
 
-function healthTone(v: number | null): "ok" | "warn" | "bad" {
-  if (v == null) return "warn";
+// A FIGURE WE DO NOT HAVE GETS NO COLOUR. A null health score returned "warn",
+// so a truck with no data was styled as a truck with a problem — and health_score
+// is null on every truck in the fleet, so that was every truck, always.
+// undefined = no tone = neutral, which is what "we don't know" should look like.
+function healthTone(v: number | null): "ok" | "warn" | "bad" | undefined {
+  if (v == null) return undefined;
   return v > 75 ? "ok" : v > 55 ? "warn" : "bad";
 }
 
@@ -612,8 +616,12 @@ export default function FleetDetailClient({
       {/* Danger zone — soft-delete termination. Terminated trucks vanish from
           every active surface; trip history keeps resolving. Restorable later
           from Archive. */}
-      {!truck.terminated_at && (
-        <section className="space-y-3 border-t border-rose-500/30 pt-4">
+      {/* The page filters `terminated_at is null` at fetch, so a terminated
+          truck resolves to null here and renders "Truck not found" instead.
+          This section therefore only ever sees a live truck — it used to be
+          wrapped in {!truck.terminated_at && …}, a condition that could never
+          be false and implied terminated trucks render here. */}
+      <section className="space-y-3 border-t border-rose-500/30 pt-4">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
             Danger zone
           </h3>
@@ -714,8 +722,7 @@ export default function FleetDetailClient({
               </div>
             </div>
           )}
-        </section>
-      )}
+      </section>
 
       {errorMsg && <p className="text-sm text-rose-600 dark:text-rose-400">{errorMsg}</p>}
 
