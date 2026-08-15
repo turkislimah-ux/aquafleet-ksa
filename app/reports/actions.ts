@@ -110,3 +110,59 @@ export async function deleteExpense(id: string): Promise<ExpenseResult> {
   revalidatePath("/reports");
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// DRIVER PAYSLIPS (0115)
+//
+// UNLIKE THE EXPENSE WRITES ABOVE, THIS GOES THROUGH AN RPC — and the contrast
+// is the point. An expense is ordinary bookkeeping with no invariant to
+// protect. A payslip claims a gap-free number, freezes a money snapshot, and
+// becomes a document handed to a person. Every one of those needs the write to
+// be atomic with the number it consumes, which is what the RPC guarantees and
+// what a sequence of client-side writes could not.
+//
+// THIS FUNCTION VALIDATES NOTHING ITSELF, DELIBERATELY. The three refusals —
+// month still running, driver has no hire date, payslip already exists — are
+// enforced inside issue_driver_payslip. Re-checking them here would create a
+// second copy of each rule that could drift from the database's, and the UI
+// already disables the button for the states it can see. What this adds is the
+// actor (the session email, the app's audit convention) and a sentence in place
+// of a raw Postgres error string.
+// ---------------------------------------------------------------------------
+
+type IssuePayslipResult =
+  | { ok: true; payslipNumber: string }
+  | { ok: false; error: string };
+
+export async function issueDriverPayslip(
+  driverId: string,
+  periodStart: string,
+): Promise<IssuePayslipResult> {
+  const supabase = createClient();
+
+  const actor = await actorEmail(supabase);
+  if (!actor) {
+    return { ok: false, error: "You must be signed in to issue a payslip." };
+  }
+
+  const { data, error } = await supabase.rpc("issue_driver_payslip", {
+    p_driver_id: driverId,
+    p_period_start: periodStart,
+    p_actor: actor,
+  });
+
+  if (error) {
+    // The RPC raises with 23514/23505 and a written sentence; supabase-js puts
+    // that sentence in error.message, so it reaches the user as written rather
+    // than as a constraint code. dbError keeps the fallback for anything else.
+    return { ok: false, error: error.message || dbError(error) };
+  }
+
+  // Returns the inserted row (returns public.driver_payslips), so the number is
+  // available without a second read.
+  const row = Array.isArray(data) ? data[0] : data;
+  const payslipNumber = (row as { payslip_number?: string } | null)?.payslip_number;
+
+  revalidatePath("/reports");
+  return { ok: true, payslipNumber: payslipNumber ?? "" };
+}
