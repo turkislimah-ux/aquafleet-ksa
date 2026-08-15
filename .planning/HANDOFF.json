@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-08-15T23:55:00.000Z",
+  "timestamp": "2026-08-16T00:20:00.000Z",
   "source": "claude-code-session",
   "partial": false,
   "phase": null,
@@ -9,7 +9,7 @@
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "driver-payslips-complete-0118-pending",
+  "status": "driver-payslips-complete",
   "completed_tasks": [
     "DRIVER PAYSLIPS - migrations 0115-0118, through commit 9136526. CLAUDE.md section 7 carries the full entry.",
     "0115 driver_payslips + payslip_number_counter + next_payslip_number + issue_driver_payslip + v_driver_payslip_basis - commit 186143a",
@@ -21,14 +21,15 @@
     "scripts/safe-build.sh - the stop-dev-before-build guard now EXITS instead of warning - commit 60602c9",
     "ts-prune sweep: Note made module-private; PayslipSnapshot kept as public surface - commit 5476b24",
     "CLAUDE.md section 6 gains the view-security standing lock (create-or-replace drops reloptions; append-only or 42P16) and section 7 gains the payslips entry - commit b378c35",
-    "HANDOFF.md refreshed to the payslips head - commit 9136526"
+    "HANDOFF.md refreshed to the payslips head - commit 9136526",
+    "0118 v_driver_payslip_basis gains net_sar (col 18) AND issue_driver_payslip reads it instead of re-adding the components - one definition of net pay - commit a7cf066",
+    "payslipPreviewNet DELETED and the three call sites point at the view's net_sar - the drift is closed, not merely superseded - commit eea57ec",
+    "HANDOFF.md refreshed to the cleanup head - commit (this batch)"
   ],
-  "remaining_tasks": [
-    "0118_payslip_basis_net.sql - DRAFTED TO DISK, NOT APPLIED, NOT COMMITTED. Architect reviews and applies. Only after that: delete payslipPreviewNet from lib/reports.ts and read net_sar from the view instead."
-  ],
+  "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [
-    "Turki: fill in the missing hire dates (5 drivers, 1 staff). 0117 stops the view inventing one, but a real hire_date is still better than a created_at floor."
+    "Turki: fill in the missing hire dates (5 drivers, 1 staff). 0117 stops the views inventing one, but a real hire_date beats a created_at floor - and a NULL-hire driver still cannot be issued a payslip."
   ],
   "decisions": [
     "SNAPSHOT AT ISSUE, NOT EFFECTIVE-DATED SALARY. A payslip is a DOCUMENT and must not change after it is handed over. Issuing freezes every figure and assigns a gap-free number via the counter-table pattern. An unissued month is a live preview at TODAY's salary and the register says so. Effective-dated salary stays deferred - one mechanism, three consumers, and half-building it inside a payslip feature would get it wrong for all three.",
@@ -42,11 +43,10 @@
     "create-or-replace can only APPEND a column - never insert, reorder or rename (42P16, which cost 0112 an apply cycle).",
     "A GUARD THAT WARNS AND CONTINUES IS WORSE THAN NO GUARD. The old stop-dev check printed 'STILL RUNNING - abort' and let the build run under a live dev server anyway, so the transcript read as protected. scripts/safe-build.sh now exits non-zero before touching .next.",
     "THE PAYSLIPS SURFACE IS THE FIRST PLACE TWO PRINT SUBTREES COEXIST. Every other statement mounts alone, so 'one visible print id' was sufficient until now. Both ids are in all six globals.css rule groups and body.printing-review picks which survives - without it, printing either emits both.",
-    "noUnusedLocals + noUnusedParameters are ON. A parameter required by a signature gets an _ prefix; never delete it."
+    "noUnusedLocals + noUnusedParameters are ON. A parameter required by a signature gets an _ prefix; never delete it.",
+    "SUPERSEDING A DUPLICATE IS NOT REMOVING IT. 0118 gave the view net_sar and made the RPC read it, but payslipPreviewNet still compiled and was still exported - so the second expression still existed and the next person needing a net figure would have found it in scope. The drift closed only when the TypeScript sum was deleted. Applies to any 'one definition' fix: check the old one is gone, not just unused."
   ],
-  "uncommitted_files": [
-    "supabase/migrations/0118_payslip_basis_net.sql (drafted, awaiting architect apply)"
-  ],
-  "next_action": "Architect reviews and applies 0118_payslip_basis_net.sql. It appends net_sar to v_driver_payslip_basis AND makes issue_driver_payslip read it instead of re-adding the components, so net pay has exactly one definition. ONLY AFTER it is applied: commit the migration, then delete payslipPreviewNet from lib/reports.ts and read net_sar from the view in StatementViews. Deleting the helper first breaks the unissued-row preview.",
-  "context_notes": "READ CLAUDE.md SECTION 7 FIRST - it is the durable record and this file is only a pointer to it; the payslips entry sits just before the deferred tail. Working tree clean apart from this file's own expected auto-tool drift, and one untracked drafted migration. HEAD 9136526, 0 ahead / 0 behind origin/main. Highest APPLIED migration is 0117. FIVE THINGS WORTH CARRYING FORWARD. (1) TWO REAL PAYSLIPS EXIST AND MUST BE KEPT - PS-2026-000001 and PS-2026-000002, counter at 2. They are intentional test data. There is NO delete path by design; removing one means deleting the row AND resetting the counter, or the next document silently skips a number. (2) THE TWO-BASIS DISTINCTION IS THE THING A NEW READER GETS WRONG. Settlement month above, work month below, on one screen, and the totals for one driver differ legitimately. Khalid 2 earned 520.30 across 25 trips and 3 projects in the July WORK month, which is not his July settlement figure. Both tables say which they are; do not 'fix' one to match the other. (3) THE SAME FABRICATED-DATE DEFECT APPEARED TWICE - once in the payslip view (0116) and once in the P&L (0117), both from COALESCE(hire_date, <invented date>). If a third view gates on employment, check it before trusting it. (4) VERIFICATION BLOCKS INHERIT THE PREMISE OF THE PROSE ABOVE THEM. 0115's blocks A-J all passed while missing a ten-document defect, because the header had asserted the wrong driver count and every block reasoned about that set. State the set, then check the set. (5) BUILD ONLY VIA ./scripts/safe-build.sh. It exits non-zero if dev is live. next build also REWRITES tsconfig.json (reformats it and injects the dist path into include), so git checkout -- tsconfig.json afterwards."
+  "uncommitted_files": [],
+  "next_action": "Nothing outstanding on payslips. The feature is complete, browser-verified, and its cleanup is done: 0117 (payroll NULL-hire floor) and 0118 (net-pay drift) are applied and verified, the duplicate TypeScript sum is deleted, docs are current, and the dead-export sweep is clean. Next work is whatever the architect scopes; the deferred tail in CLAUDE.md section 7 and HANDOFF.md section 6 is unchanged.",
+  "context_notes": "READ CLAUDE.md SECTION 7 FIRST - it is the durable record and this file is only a pointer to it; the payslips entry sits just before the deferred tail. Working tree clean apart from this file's own expected auto-tool drift. Highest migration is 0118, applied. Net pay now has exactly ONE definition, in v_driver_payslip_basis.net_sar, read by both the preview and the freeze. FIVE THINGS WORTH CARRYING FORWARD. (1) TWO REAL PAYSLIPS EXIST AND MUST BE KEPT - PS-2026-000001 and PS-2026-000002, counter at 2. They are intentional test data. There is NO delete path by design; removing one means deleting the row AND resetting the counter, or the next document silently skips a number. (2) THE TWO-BASIS DISTINCTION IS THE THING A NEW READER GETS WRONG. Settlement month above, work month below, on one screen, and the totals for one driver differ legitimately. Khalid 2 earned 520.30 across 25 trips and 3 projects in the July WORK month, which is not his July settlement figure. Both tables say which they are; do not 'fix' one to match the other. (3) THE SAME FABRICATED-DATE DEFECT APPEARED TWICE - once in the payslip view (0116) and once in the P&L (0117), both from COALESCE(hire_date, <invented date>). If a third view gates on employment, check it before trusting it. (4) VERIFICATION BLOCKS INHERIT THE PREMISE OF THE PROSE ABOVE THEM. 0115's blocks A-J all passed while missing a ten-document defect, because the header had asserted the wrong driver count and every block reasoned about that set. State the set, then check the set. (5) BUILD ONLY VIA ./scripts/safe-build.sh. It exits non-zero if dev is live. next build also REWRITES tsconfig.json (reformats it and injects the dist path into include), so git checkout -- tsconfig.json afterwards."
 }
