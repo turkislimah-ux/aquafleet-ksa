@@ -4,7 +4,8 @@
 record. This file is a *snapshot of where things stand right now*. If the two
 disagree, `CLAUDE.md` §7 wins.
 
-Rewritten 2026-08-15 at the close of the driver-payslips feature. Every fact
+Rewritten 2026-08-15 at the close of the driver-payslips feature and its
+cleanup pass. Every fact
 below was verified live at write time — git, `supabase/migrations/`, and the
 Supabase MCP — not recalled.
 
@@ -51,24 +52,21 @@ payslips issued (`PS-2026-000001`, `PS-2026-000002` — **keep both**).
 the polish target; it was rebuilt rather than tidied.
 
 No app code is half-finished. Open items are deferred by choice, not blocked —
-each is listed with its blocking reason in §6 and in `CLAUDE.md` §7 — with ONE
-exception, immediately below.
+each is listed with its blocking reason in §6 and in `CLAUDE.md` §7.
 
-**ONE MIGRATION IS DRAFTED AND WAITING: `0118`.** It closes a real drift — net
-pay is currently expressed twice, in `issue_driver_payslip`'s INSERT and in
-`payslipPreviewNet` (TypeScript). They agree today and nothing keeps them
-agreeing. `0118` appends `net_sar` to `v_driver_payslip_basis` AND makes the RPC
-read it instead of re-adding the components. **Do not delete the TypeScript
-helper before it is applied — the unissued-row preview breaks.**
+**Nothing is in flight and nothing is half-finished on disk.** `0118` — the last
+outstanding item — is applied, verified and committed, and the TypeScript sum it
+superseded has been deleted, so net pay now has exactly one definition (in
+`v_driver_payslip_basis`, read by both the preview and the freeze).
 
 ---
 
 ## 2. Exact git state
 
 ```
-HEAD          b378c35
-              b378c35  CLAUDE.md: the payslips feature, and the view-security
-                       rule as a standing lock
+HEAD          eea57ec
+              eea57ec  Delete the TypeScript net sum - the drift is closed,
+                       not just superseded
 branch        main
 origin/main   0 ahead / 0 behind
 ```
@@ -102,26 +100,23 @@ explicitly rather than a single rule covering both files.
 Recent history, for orientation:
 
 ```
+eea57ec  Delete the TypeScript net sum - drift closed, not superseded
+a7cf066  Migration 0118 - one definition of net pay, in the view
+54cd342  HANDOFF.json: point at the payslips head
+9136526  HANDOFF.md: refresh to the payslips head
 b378c35  CLAUDE.md: payslips + the view-security standing lock
 5476b24  Sweep: Note was an export with no reader
-be33162  Migration 0117 - payroll stops billing for months before they existed
+be33162  Migration 0117 - payroll stops billing for months before existing
 e67b2d1  Terminated label priority, and the commission review table
-3209f4b  Migration 0116 - commission review grain and the terminated flag
-60602c9  Make the stop-dev-before-build guard actually stop the build
-81e682c  Payslips: confirm before issuing, and bold what identifies a document
-186143a  Migration 0115 - driver payslips (applied and verified)
+3209f4b  Migration 0116 - commission review grain + terminated flag
 ```
 
 ---
 
 ## 3. Database state
 
-**Highest migration APPLIED: `0117_payroll_null_hire_date.sql`. Git matches
-live for everything applied.**
-
-**`0118_payslip_basis_net.sql` is on disk, DRAFTED, NOT APPLIED, and NOT
-COMMITTED** — migrations are committed only after apply, per the reset incident
-below. It is the one outstanding piece of work in the repo.
+**Highest migration: `0118_payslip_basis_net.sql`, applied. Git matches live —
+nothing uncommitted and nothing undrafted in `supabase/migrations/`.**
 
 Full diagnostic, run fresh at write time:
 
@@ -138,6 +133,7 @@ Full diagnostic, run fresh at write time:
 | Q3 2026 operating margin, recomputed | **−66.1%** |
 | Q3 2026 if monthly margins were averaged | **+18.7%** |
 | Payslips issued (`driver_payslips`) | **2**, counter at 2 |
+| Net pay definitions (was 2: SQL + TypeScript) | **1**, in the view |
 | Review table vs `v_commissions_monthly` | **0 diff** at every month |
 
 The two Q3 margin rows are the non-averaging rule, re-measured on today's data.
@@ -276,7 +272,6 @@ Not blocked, not forgotten — each needs a decision or data we do not capture.
 
 | Item | Why it is parked |
 |---|---|
-| **`0118` awaiting apply** | Drafted to disk, reviewed by nobody yet. Closes the net-pay double-expression. The TypeScript helper `payslipPreviewNet` cannot be deleted until it lands. |
 | **DB reset replay source** | See §3. No resets until established. |
 | **RBAC** | No role model beyond the approver-role check on POs. Needs a deliberate design pass, not an incremental patch. |
 | **Effective-dated salaries** | `staff.monthly_salary_sar` / `drivers.salary_sar` are current-only, so a past period is costed at today's salary and a raise rewrites history. Reports discloses this on screen. Same mechanism the deferred commission-rate and project-rate histories need — likely one feature. **Payslips deliberately do NOT solve this**: they freeze a snapshot at issue instead, which is the right model for a document but leaves the reporting problem untouched. |
