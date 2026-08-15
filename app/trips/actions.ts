@@ -75,11 +75,32 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
   // FREEZING only — commission is priced at delivery and re-derived across a
   // driver+project+day ramp; this is captured once and never recomputed.
   //
-  // NULL IS A REAL OUTCOME AND IS NOT AN ERROR. A legacy station with no
-  // prices yet, or a station that does not price this type, yields null, and
-  // null on the trip means NOT COSTED — never 0.00, which is a real free fill.
-  // Blocking the pick is the UI's job (selectableWaterTypes); this path records
-  // what is true rather than inventing a number to avoid a null.
+  // NULL IS NOT 0.00. Null on the trip means NOT COSTED; 0.00 is a real free
+  // fill at a company-owned station. Nothing here ever collapses one into the
+  // other.
+  //
+  // THE "NOT PRICED FOR THIS TYPE" CASE IS NO LONGER REACHABLE (0114). It used
+  // to be: this path deliberately recorded a null rather than inventing a
+  // number, and blocking the pick was left to the UI. Since 0114 the DATABASE
+  // refuses that combination outright — `trips_station_type_guard_ins` raises
+  // 23514 before the row lands — so an insert either carries a real price or
+  // never happens. stationPriceFor can still return null in principle, and the
+  // column stays nullable, because a legacy station with NO prices at all would
+  // yield one; `water_stations_offers_at_least_one_type` makes even that
+  // impossible today.
+  //
+  // CONSEQUENCE FOR ANYONE READING THE FILLING FIGURES:
+  // `filling_uncosted_trips` is HISTORICAL-ONLY from 0114 onward. It counts 13
+  // trips, all June–July, created before per-type pricing existed and
+  // legitimately grandfathered. That count cannot grow. It is still shown
+  // wherever filling money is shown, because those 13 rows do make the
+  // historical filling total short by an unknown amount — sum() skips nulls —
+  // but a NEW uncosted trip appearing would mean the guard was dropped, not
+  // that the data changed.
+  //
+  // The app gate (selectableWaterTypes in the picker) stays FIRST regardless:
+  // it refuses before the round trip and can disable the option, so the mistake
+  // is not reachable rather than merely rejected.
   //
   // Server-side read, not a client-supplied amount: a price posted from the
   // browser would be a money figure the user could edit.
