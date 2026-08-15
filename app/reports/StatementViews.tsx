@@ -15,7 +15,7 @@
 // Each statement carries its own print id so "print" means "print this
 // statement", not the whole tab. The ids are whitelisted in globals.css.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Info } from "lucide-react";
 import { Table, TH, TD } from "@/components/ui";
 import { cn, formatSar, formatNum } from "@/lib/utils";
@@ -49,7 +49,7 @@ export function Note({ children }: { children: React.ReactNode }) {
  * printed sheet has none of that context and gets filed on its own, so it has
  * to carry its own identification or it becomes an anonymous table of numbers.
  */
-function PrintBand({ title, period }: { title: string; period: string }) {
+function PrintBand({ title, period }: { title: React.ReactNode; period: string }) {
   return (
     <div className="print-only" style={{ marginBottom: "10pt", borderBottom: "1px solid #000", paddingBottom: "6pt" }}>
       <div style={{ fontSize: "8pt", letterSpacing: "0.08em", textTransform: "uppercase" }}>
@@ -64,7 +64,7 @@ function PrintBand({ title, period }: { title: string; period: string }) {
   );
 }
 
-function Head({ title, period }: { title: string; period: string }) {
+function Head({ title, period }: { title: React.ReactNode; period: string }) {
   return (
     <>
       <PrintBand title={title} period={period} />
@@ -1281,15 +1281,15 @@ export function PayslipsStatement({
                     <TD className="text-right tabular-nums font-semibold">{formatSar(net)}</TD>
                     <TD>
                       {doc ? (
-                        <span className="font-mono text-[11px]">{doc.payslip_number}</span>
+                        <span className="font-mono text-[11px] font-bold">{doc.payslip_number}</span>
                       ) : r.hire_date_missing ? (
-                        <span className="text-[11px] text-rose-700 dark:text-rose-300">
+                        <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300">
                           No hire date
                         </span>
                       ) : isRunning(r.period_start) ? (
-                        <span className="text-[11px] muted">Month in progress</span>
+                        <span className="text-[11px] font-bold muted">Month in progress</span>
                       ) : (
-                        <span className="text-[11px] muted">Not issued</span>
+                        <span className="text-[11px] font-bold muted">Not issued</span>
                       )}
                     </TD>
                   </tr>
@@ -1345,6 +1345,16 @@ function PayslipDocument({
   const payouts = doc?.snapshot?.payouts ?? [];
   const blocked = row.hire_date_missing || running;
 
+  // ISSUING IS IRREVERSIBLE AND NUMBERED, so it asks first. There is no delete
+  // path for a payslip by design — undoing one means an architect deleting the
+  // row AND resetting the counter, or the next document silently skips a
+  // number. A single misclick must not be able to start that.
+  //
+  // An inline panel rather than window.confirm: the browser dialog cannot show
+  // the figures, and the whole point of confirming is seeing WHAT is about to
+  // be frozen. It is dismissable and Cancel is the resting position.
+  const [confirming, setConfirming] = useState(false);
+
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2 no-print">
@@ -1363,7 +1373,7 @@ function PayslipDocument({
           <button
             type="button"
             disabled={blocked || issuing}
-            onClick={() => onIssue(row.driver_id, row.period_start)}
+            onClick={() => setConfirming(true)}
             title={
               row.hire_date_missing
                 ? "This driver has no hire date, so a payslip period cannot be established. Set the hire date on the driver first."
@@ -1379,7 +1389,9 @@ function PayslipDocument({
       </div>
 
       <Head
-        title={doc ? `Payslip ${doc.payslip_number}` : "Payslip (not issued)"}
+        title={doc
+          ? <>Payslip <b className="font-mono font-bold">{doc.payslip_number}</b></>
+          : "Payslip (not issued)"}
         period={`${row.driver_name} · ${monthLabelOf(row.period_start)}`}
       />
 
@@ -1393,10 +1405,45 @@ function PayslipDocument({
         </div>
       )}
 
-      {!doc && !blocked && (
+      {!doc && !blocked && !confirming && (
         <div className="mb-4 rounded-lg border border-brand-500/25 bg-brand-500/5 px-3 py-2 text-[12px] leading-relaxed">
           Not issued yet. Salary is shown at <b>today&apos;s</b> rate — issuing freezes
           these figures and assigns the payslip number.
+        </div>
+      )}
+
+      {!doc && confirming && (
+        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 no-print">
+          <div className="text-sm font-semibold">Issue this payslip?</div>
+          <p className="mt-1 text-[12px] leading-relaxed">
+            This freezes <b>{row.driver_name}</b>&apos;s pay for{" "}
+            <b>{monthLabelOf(row.period_start)}</b> at{" "}
+            <b className="tabular-nums">{formatSar(f.net)}</b> net and gives it a
+            permanent payslip number.
+          </p>
+          <p className="mt-1.5 text-[12px] leading-relaxed">
+            <b>It cannot be undone from here.</b> The figures stop following the
+            driver&apos;s salary from this moment — that is the point of issuing, and it
+            is why there is no edit or delete afterwards.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              disabled={issuing}
+              onClick={() => { setConfirming(false); onIssue(row.driver_id, row.period_start); }}
+              className="h-9 px-4 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white transition disabled:opacity-50"
+            >
+              {issuing ? "Issuing…" : "Yes, issue it"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="h-9 px-4 rounded-lg text-sm font-medium ring-1 ring-inset transition hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+              style={{ borderColor: "rgb(var(--border))" }}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
