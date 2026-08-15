@@ -121,11 +121,18 @@ export function stationBlockedForType(
  * across a server action and a form is how they came apart last time.
  *
  * `costPatch: null` means DO NOT TOUCH the cost, which is not the same as
- * setting it to null. A delivered trip is closed history: its fill already
- * happened, its cost has been reported, and re-taking it would silently restate
- * a period. `{ filling_cost_sar: null }` is the opposite claim — the trip DID
- * move and the new station does not price this type, so the honest record is
- * "not costed" rather than a stale carry-over from a station it never visited.
+ * setting it to null. A CLOSED trip's fill already happened and its cost has
+ * been reported, so re-taking it would silently restate a period.
+ * `{ filling_cost_sar: null }` is the opposite claim — the trip DID move and
+ * the new station does not price this type, so the honest record is "not
+ * costed" rather than a stale carry-over from a station it never visited.
+ *
+ * `closedHistory` IS NOT "IS DELIVERED", and the difference cost a real figure.
+ * The caller must pass delivered-at-BOTH-ENDS of the write. A trip BECOMING
+ * delivered is still live — the fill has just been asserted to have happened at
+ * a different station — and reading that as closed wrote the new station while
+ * keeping the old station's price. See stationChangePatch in
+ * app/trips/actions.ts for the table of cases.
  *
  * Pure and IO-free on purpose: the caller does the two reads, this makes the
  * call, and the rule stays testable without a session (the harness has none).
@@ -137,10 +144,10 @@ export type StationChangeDecision =
 export function decideStationChange(
   station: StationPricing | null | undefined,
   waterType: WaterType | null | undefined,
-  isDelivered: boolean,
+  closedHistory: boolean,
 ): StationChangeDecision {
   if (stationBlockedForType(station, waterType)) return { blocked: true };
-  if (isDelivered) return { blocked: false, costPatch: null };
+  if (closedHistory) return { blocked: false, costPatch: null };
   // A trip with no readable water type cannot be repriced against a per-type
   // price list — leave the frozen figure alone rather than guessing at one.
   if (!waterType) return { blocked: false, costPatch: null };

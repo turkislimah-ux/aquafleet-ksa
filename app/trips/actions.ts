@@ -198,7 +198,11 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
   // there's no "old" vs "new" day the way delivered_at used to have.
   const { data: trip, error: tripErr } = await supabase
     .from("trips")
-    .select("driver_id, project_id, payout_id, trip_date, invoice_id")
+    // `stage` is selected for the filling re-snapshot, not for the stage move
+    // itself. Without the CURRENT stage this action cannot tell "already
+    // closed history" from "becoming delivered right now", and those are
+    // different situations — see the station block below.
+    .select("stage, driver_id, project_id, payout_id, trip_date, invoice_id")
     .eq("id", id)
     .maybeSingle();
   if (tripErr) return { error: tripErr.message };
@@ -224,17 +228,27 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
 
   if (waterStation !== undefined) {
     row.water_station = waterStation;
-    // A station change here (the loading-stage fill-station edit) means the
-    // truck filled somewhere else, so the frozen cost is from a station it
-    // never visited. `stage` is the TARGET stage — a move TO delivered leaves
-    // the cost alone, since the fill already happened at the old station and
-    // delivering does not change where it was filled.
+    // A station change here means the truck filled somewhere else, so the
+    // frozen cost is a price from a station it never visited — re-take it.
+    //
+    // BOTH STAGES ARE PASSED, and the earlier version passing only the TARGET
+    // was a real bug that reached live data. It read a move TO delivered as
+    // "closed history, do not touch the cost", so changing the station and
+    // marking the trip delivered in one modal apply wrote the new station and
+    // kept the OLD station's price. KI-026-0062 ended up at Shas (potable
+    // 80.00) holding 15.00, which was Manfuhah's potable price before Turki
+    // edited it — a figure that was never a Shas price at all.
+    //
+    // A trip is closed history only when it is delivered at BOTH ends. Becoming
+    // delivered right now is not closed history: the fill has just been
+    // asserted to have happened somewhere else. See stationChangePatch.
     //
     // This also GATES the move: a station that does not fill this trip's water
     // type refuses the whole call. Returning before the update matters — the
     // stage change and the station change arrive together here, so falling
     // through would advance the stage while rejecting the station.
-    const change = await stationChangePatch(supabase, id, waterStation, stage);
+    const fromStage = (trip.stage ?? "scheduled") as TripStage;
+    const change = await stationChangePatch(supabase, id, waterStation, fromStage, stage);
     if (change.error) return { error: change.error };
     Object.assign(row, change.patch);
   }
@@ -334,9 +348,24 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
  * frozen figure is a price from a station it never visited — that is a wrong
  * record, not a protected one, so it is re-taken from the new station.
  *
- * DELIVERED TRIPS ARE NEVER RE-SNAPSHOTTED. Once delivered the trip is history,
- * its cost has been reported, and moving it would silently restate a closed
- * period. Callers pass the trip's CURRENT stage and this refuses.
+ * A CLOSED TRIP IS NEVER RE-SNAPSHOTTED — and "closed" means delivered at BOTH
+ * ENDS of this write. Once delivered, a trip's cost has been reported and
+ * re-taking it would silently restate a period, so a pure station edit on a
+ * delivered trip leaves the money alone.
+ *
+ * BECOMING DELIVERED IS NOT CLOSED HISTORY. That distinction is the whole
+ * reason both stages are parameters, and getting it wrong reached live data:
+ * the first version took only the TARGET stage, so a station change that rode
+ * along with "mark delivered" was read as closed and skipped the re-snapshot —
+ * writing the new station while keeping the old station's price. Leaving
+ * delivered is not closed either: a reopened trip is live again, and its cost
+ * should follow its station.
+ *
+ *   from        to           station changed  ->  cost
+ *   in_transit  delivered    yes              ->  RE-TAKEN (the bug)
+ *   delivered   delivered    yes              ->  frozen (closed history)
+ *   delivered   in_transit   yes              ->  RE-TAKEN (reopened)
+ *   loading     loading      yes              ->  RE-TAKEN
  *
  * Returns an `error` to REFUSE the whole write (the caller must not fall
  * through and save the station anyway), or a patch to merge — `{}` when there
@@ -350,8 +379,11 @@ async function stationChangePatch(
   supabase: ReturnType<typeof createClient>,
   tripId: string,
   waterStation: string,
-  stage: TripStage,
+  fromStage: TripStage,
+  toStage: TripStage,
 ): Promise<StationChange> {
+  // Closed history at BOTH ends — the one place this rule is written down.
+  const closedHistory = fromStage === "delivered" && toStage === "delivered";
   // A trip with no readable water type cannot be judged against a per-type
   // price list, so it is passed through with the frozen cost untouched rather
   // than guessed at. Unreachable in practice — trips.water_type is NOT NULL
@@ -372,7 +404,7 @@ async function stationChangePatch(
 
   // ONE pure decision (lib/station-pricing.ts) — gate and re-snapshot together,
   // so the rule cannot be half-applied here and half-applied in the picker.
-  const decision = decideStationChange(station, trip.water_type, stage === "delivered");
+  const decision = decideStationChange(station, trip.water_type, closedHistory);
   if (decision.blocked) {
     return {
       error:
@@ -398,7 +430,10 @@ export async function setTripStation(id: string, waterStation: string): Promise<
   // before anything is written.
   const { data: cur } = await supabase.from("trips").select("stage").eq("id", id).maybeSingle();
   const stage = (cur?.stage ?? "scheduled") as TripStage;
-  const change = await stationChangePatch(supabase, id, waterStation, stage);
+  // This action changes NO stage, so both ends are the same stage. A delivered
+  // trip is therefore closed history here and keeps its cost, which is the
+  // behaviour this path always had.
+  const change = await stationChangePatch(supabase, id, waterStation, stage, stage);
   if (change.error) return { error: change.error };
 
   const patch: Record<string, unknown> = { water_station: waterStation, ...change.patch };

@@ -23,6 +23,7 @@
 // thing.
 
 import { test, expect } from "@playwright/test";
+import type { TripStage } from "../lib/db-types";
 import {
   decideStationChange,
   stationBlockedForType,
@@ -38,6 +39,15 @@ const FURAIAN = { fill_cost_potable_sar: 0, fill_cost_non_potable_sar: 0 };
 // the code and still has to behave — a pre-0110 row must not freeze edits.
 const LEGACY_UNPRICED = { fill_cost_potable_sar: null, fill_cost_non_potable_sar: null };
 
+// The production rule, mirrored once (app/trips/actions.ts's stationChangePatch):
+// a trip is closed history only when it is delivered at BOTH ENDS of the write.
+// A function, not two consts — annotated consts still narrow to their literal
+// type, so `from === "delivered"` reads as a constant and tsc rejects the
+// comparison (TS2367), hiding the very expression under test.
+function isClosedHistory(from: TripStage, to: TripStage): boolean {
+  return from === "delivered" && to === "delivered";
+}
+
 test("4a — an in-transit trip moving to a station that offers its type re-snapshots to the NEW price", () => {
   // AI-026-0021: in_transit, non_potable, at Manfuhah, frozen at 10.00.
   // Moving it to Shas (non-potable 50.00) must re-take the cost, because the
@@ -48,10 +58,43 @@ test("4a — an in-transit trip moving to a station that offers its type re-snap
   expect(d.costPatch).toEqual({ filling_cost_sar: 50 });
 });
 
+test("REGRESSION — becoming delivered is NOT closed history; the cost is re-taken", () => {
+  // THIS ONE REACHED LIVE DATA. KI-026-0062 was moved to Shas and marked
+  // delivered in a single Move-trip apply. setTripStage passed only the TARGET
+  // stage, so `delivered` read as "closed history, leave the cost alone" — the
+  // new station was written and the OLD station's price kept. The trip sat at
+  // Shas (potable 80.00) holding 15.00, which was Manfuhah's potable price
+  // before it was edited to 5.00, and had never been a Shas price at all.
+  // Reports showed "Shas Water Station · 1 fill · 15 SAR" and Turki caught it.
+  //
+  // The rule is delivered at BOTH ENDS. from=in_transit, to=delivered is a trip
+  // becoming delivered right now: the fill has just been asserted to have
+  // happened somewhere else, so the cost must follow the station.
+  const closedHistory = isClosedHistory("in_transit", "delivered");
+  expect(closedHistory).toBe(false);
+
+  const d = decideStationChange(SHAS, "potable", closedHistory);
+  expect(d.blocked).toBe(false);
+  expect(d.costPatch).toEqual({ filling_cost_sar: 80 });
+});
+
+test("REGRESSION — leaving delivered re-takes the cost too; the trip is reopened", () => {
+  // The mirror case. A trip pushed back out of delivered is live again, so its
+  // cost should follow its station rather than staying frozen at whatever the
+  // closed period recorded. Keying on the CURRENT stage alone would have got
+  // this one wrong in the other direction.
+  const closedHistory = isClosedHistory("delivered", "in_transit");
+  expect(closedHistory).toBe(false);
+  expect(decideStationChange(SHAS, "potable", closedHistory).costPatch)
+    .toEqual({ filling_cost_sar: 80 });
+});
+
 test("4b — a DELIVERED trip's cost does not move, whatever station it is given", () => {
-  // AI-026-0001: delivered, non_potable, frozen at 10.00. Delivered is closed
-  // history; its cost has been reported, and re-taking it would silently
-  // restate a period.
+  // AI-026-0001: delivered, non_potable, frozen at 10.00, staying delivered —
+  // delivered at BOTH ends, so it is closed history: its cost has been reported
+  // and re-taking it would silently restate a period. This is the pure
+  // station-edit case (setTripStation changes no stage, so it passes the same
+  // stage twice); the two REGRESSION tests above cover the ends differing.
   //
   // `costPatch === null` means DO NOT TOUCH — deliberately distinct from
   // `{ filling_cost_sar: null }`, which would WRITE a null and wipe the figure.
