@@ -29,7 +29,7 @@ import {
   type CommissionsPaidRow, type OperationsRow, type NarrativeBullet,
   type OperationsByDriverRow,
   type FillingMonthRow, type FillingByStationRow,
-  type PayslipBasisRow, type IssuedPayslipRow, payslipPreviewNet,
+  type PayslipBasisRow, type IssuedPayslipRow,
   type DriverCommissionByProjectRow,
 } from "@/lib/reports";
 
@@ -1221,7 +1221,7 @@ export function PayslipsStatement({
       const d = issued.find((i) => i.driver_id === r.driver_id && i.period_start === r.period_start);
       return {
         salary: acc.salary + (d ? d.base_salary_sar : r.base_salary_sar),
-        net: acc.net + (d ? d.net_sar : payslipPreviewNet(r)),
+        net: acc.net + (d ? d.net_sar : r.net_sar),
         issued: acc.issued + (d ? 1 : 0),
       };
     },
@@ -1268,7 +1268,10 @@ export function PayslipsStatement({
                 const commission = doc
                   ? doc.commission_sar + doc.specials_sar + doc.adjustments_sar + doc.bonus_sar
                   : r.commission_sar + r.specials_sar + r.adjustments_sar + r.bonus_sar;
-                const net = doc ? doc.net_sar : payslipPreviewNet(r);
+                // An issued slip's frozen net, else the view's net_sar. Both
+                // come from the SAME expression since 0118 — the freeze reads
+                // this column too, so a preview and its document cannot differ.
+                const net = doc ? doc.net_sar : r.net_sar;
                 return (
                   <tr
                     key={`${r.driver_id}-${r.period_start}`}
@@ -1368,7 +1371,7 @@ function PayslipDocument({
     : {
         salary: row.base_salary_sar, commission: row.commission_sar,
         specials: row.specials_sar, adjustments: row.adjustments_sar,
-        bonus: row.bonus_sar, deductions: 0, net: payslipPreviewNet(row),
+        bonus: row.bonus_sar, deductions: 0, net: row.net_sar,
         basis: row.commission_basis, settled: row.commission_settled,
       };
 

@@ -708,6 +708,16 @@ export type PayslipBasisRow = {
    */
   terminated: boolean;
   termination_date: string | null;
+  /**
+   * NET PAY, BEFORE DEDUCTIONS — the ONE definition (0118), computed in the
+   * view. issue_driver_payslip freezes `net_sar - deductions_sar` from this
+   * same column, so a preview and the document it becomes cannot disagree.
+   *
+   * Deductions are not here because they are a property of the DOCUMENT, not of
+   * the basis: they exist only once a payslip is issued. They are 0 today (no
+   * data source), which is why an unissued row's net_sar is its net pay.
+   */
+  net_sar: number;
 };
 
 /**
@@ -768,30 +778,6 @@ export type PayslipSnapshot = {
   }[];
   covered_trips?: { count: number; first_trip?: string | null; last_trip?: string | null };
 };
-
-/**
- * Net pay for an UNISSUED month — the preview figure only.
- *
- * WHY THIS IS A SUM AND NOT A RE-DERIVATION: every input is a column of
- * v_driver_payslip_basis, added exactly as issue_driver_payslip adds them. It
- * defines no metric the view does not already publish; it totals a row, the
- * same way the statements sum an additive measure across a period.
- *
- * An ISSUED payslip NEVER uses this — it reads `net_sar`, frozen at issue.
- * That is the figure of record; this is what the register shows before one
- * exists.
- *
- * FLAGGED FOR THE ARCHITECT: the drift-proof version of this is a `net_sar`
- * column on the view, so preview and document share one expression in SQL
- * rather than one in SQL and one here. That is a schema change, which is not
- * mine to apply mid-build, so it is written down instead of done quietly.
- * Deductions are 0 today (no data source) and are in the arithmetic so adding
- * them later changes no issued slip.
- */
-export function payslipPreviewNet(row: PayslipBasisRow): number {
-  return row.base_salary_sar + row.commission_sar + row.specials_sar
-    + row.adjustments_sar + row.bonus_sar;
-}
 
 /**
  * COLOURS COME FROM lib/cost-colors.ts, the same record the Dashboard's Cost

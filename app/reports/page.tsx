@@ -372,6 +372,7 @@ export default async function ReportsPage() {
     bonus_sar: n(r.bonus_sar),
     issued_payslip_id: r.issued_payslip_id ? String(r.issued_payslip_id) : null,
     issued_payslip_number: r.issued_payslip_number ? String(r.issued_payslip_number) : null,
+    net_sar: n(r.net_sar),
   }));
 
   // The frozen documents. These figures are NEVER recomputed — they are read
