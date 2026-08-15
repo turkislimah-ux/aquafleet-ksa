@@ -660,6 +660,106 @@ export type FillingByStationRow = {
   uncosted_trips: number;
 };
 
+// ---------------------------------------------------------------------------
+// DRIVER PAYSLIPS (0115)
+//
+// v_driver_payslip_basis is the ONE definition of what a payslip would carry.
+// The page reads it and re-derives none of its figures — issue_driver_payslip
+// freezes from the same view, so a preview and the document it becomes cannot
+// disagree.
+// ---------------------------------------------------------------------------
+
+/** One driver's payslip basis for one month, straight off the view. */
+export type PayslipBasisRow = {
+  period_start: string;
+  driver_id: string;
+  driver_name: string;
+  base_salary_sar: number;
+  /** No salary recorded. Does NOT block issue — a zero-salary slip is honest. */
+  salary_missing: boolean;
+  /**
+   * No hire date, so the employment window cannot be established. This DOES
+   * block issue, and the database enforces it (23514) — the flag exists so the
+   * UI can say why before the user clicks, not so the UI can be the rule.
+   */
+  hire_date_missing: boolean;
+  /**
+   * 'paid'   — a commission payout was SETTLED in this month; the block IS that
+   *            payout (or the sum of several), referenced by id.
+   * 'earned' — nothing settled yet; the block is the accrual for work not yet
+   *            locked to any payout. It will reappear as 'paid' in the month it
+   *            is settled, which is why the document says so out loud.
+   */
+  commission_basis: "paid" | "earned" | "none";
+  commission_settled: boolean;
+  payout_count: number;
+  commission_sar: number;
+  specials_sar: number;
+  adjustments_sar: number;
+  bonus_sar: number;
+  /** Set once a payslip exists for this driver+month — the frozen document. */
+  issued_payslip_id: string | null;
+  issued_payslip_number: string | null;
+};
+
+/** An issued, frozen payslip. Every money column is what it was at issue. */
+export type IssuedPayslipRow = {
+  id: string;
+  payslip_number: string;
+  driver_id: string;
+  period_start: string;
+  issued_at: string;
+  issued_by: string;
+  commission_basis: "paid" | "earned" | "none";
+  commission_settled: boolean;
+  base_salary_sar: number;
+  commission_sar: number;
+  specials_sar: number;
+  adjustments_sar: number;
+  bonus_sar: number;
+  deductions_sar: number;
+  net_sar: number;
+  /** Driver name, salary at issue, the payouts settled, the trips covered. */
+  snapshot: PayslipSnapshot | null;
+};
+
+export type PayslipSnapshot = {
+  driver_name?: string;
+  salary_at_issue?: number;
+  commission_basis?: string;
+  payout_count?: number;
+  payouts?: {
+    id: string; period_label: string | null; paid_at: string | null;
+    base_sar: number; specials_sar: number; adjustments_sar: number;
+    bonus_sar: number; total_sar: number;
+  }[];
+  covered_trips?: { count: number; first_trip?: string | null; last_trip?: string | null };
+};
+
+/**
+ * Net pay for an UNISSUED month — the preview figure only.
+ *
+ * WHY THIS IS A SUM AND NOT A RE-DERIVATION: every input is a column of
+ * v_driver_payslip_basis, added exactly as issue_driver_payslip adds them. It
+ * defines no metric the view does not already publish; it totals a row, the
+ * same way the statements sum an additive measure across a period.
+ *
+ * An ISSUED payslip NEVER uses this — it reads `net_sar`, frozen at issue.
+ * That is the figure of record; this is what the register shows before one
+ * exists.
+ *
+ * FLAGGED FOR THE ARCHITECT: the drift-proof version of this is a `net_sar`
+ * column on the view, so preview and document share one expression in SQL
+ * rather than one in SQL and one here. That is a schema change, which is not
+ * mine to apply mid-build, so it is written down instead of done quietly.
+ * Deductions are 0 today (no data source) and are in the arithmetic so adding
+ * them later changes no issued slip.
+ */
+export function payslipPreviewNet(row: PayslipBasisRow): number {
+  return row.base_salary_sar + row.commission_sar + row.specials_sar
+    + row.adjustments_sar + row.bonus_sar;
+}
+
 /**
  * COLOURS COME FROM lib/cost-colors.ts, the same record the Dashboard's Cost
  * mix reads. They were hardcoded here and had drifted into something worse than
