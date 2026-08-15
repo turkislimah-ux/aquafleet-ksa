@@ -1736,6 +1736,134 @@ relevant skill(s) **when the task calls for it**:
     on `HEAD` before the change by rebuilding the stashed tree — do not go hunting it
     after a future cleanup.
 
+- **WATER STATION COST — a deliberate P&L change, migrations `0110`–`0114`, through
+  commit `98dbfea`.** Filling water costs money and the P&L did not know it. The
+  feature ran in phases, each committed the moment it verified: `76f0957` (0110,
+  per-type pricing + the trip snapshot column), `35c3798` (capture UI), `119814b`
+  (0111 backfill), `5499c20` (0112, into the P&L), `6f9a445` (0113, the period
+  grain), `f574a4c` (Reports cost statement), `7f462af` (the station-change gate),
+  `4494b54` (Dashboard), `4564419` (test 4), `08d9580` (0114, the DB guarantee),
+  `441123b` + `1a783f7` (follow-ups), `19080c0` + `da924a8` + `98dbfea` (the sweep).
+  - **NULL IS NOT 0.00, AND THAT DISTINCTION IS THE WHOLE MODEL.** A station prices
+    each water type separately (`fill_cost_potable_sar` / `fill_cost_non_potable_sar`):
+    a price SET — **including 0** — means the station OFFERS that type; NULL means it
+    does not. **0 is real** (company-owned stations fill free), so it can never be
+    collapsed into "no price". Every helper in `lib/station-pricing.ts` preserves
+    that, and `?? 0`, `Number(x) || 0` or any truthiness check reintroduces the bug
+    the schema was shaped to prevent. The flat `water_stations.fill_cost` it replaced
+    is still on the table, deliberately unwritten, holding pre-0110 figures until its
+    own retirement migration — writing to it now would create a second, diverging
+    price of record.
+  - **`trips.filling_cost_sar` IS A FROZEN SNAPSHOT, AND THE FREEZE IS AGAINST PRICE
+    EDITS — NOT AGAINST CHANGING WHICH STATION FILLED.** Editing a station's price
+    later must not reprice history. But if the truck actually filled somewhere else,
+    the frozen figure is a price from a station it never visited — a wrong record,
+    not a protected one — so a station change RE-TAKES it. **A DELIVERED trip is the
+    exception and is never re-snapshotted:** its cost has been reported, and moving it
+    would silently restate a closed period. `decideStationChange` returns
+    `costPatch: null` (do not touch) as a distinct outcome from
+    `{ filling_cost_sar: null }` (moved, new station does not price this type) — two
+    different claims, kept apart by the type.
+  - **THE GATE IS ONE RULE READ FROM TWO DIRECTIONS.** Trip creation fixes the station
+    and narrows the TYPE (`selectableWaterTypes`); a station change fixes the type and
+    narrows the STATION (`stationBlockedForType`). Only the first existed at capture
+    time, and the second surface had nothing — proven live by **KI-026-0062**, a
+    potable in-transit trip moved to Umm Al Hamam, which does not fill potable at all.
+    Its cost correctly re-snapshotted to NULL and the trip sat at a station physically
+    incapable of filling it; NULL was the honest record of a state that should have
+    been unreachable. Both directions now live in `lib/station-pricing.ts`, and the
+    server actions call ONE pure `decideStationChange` rather than restating either.
+    KI-026-0062 was corrected to Manfuhah on evidence, not preference — 3 potable
+    siblings the same day, 107 project-wide.
+  - **`0114` PUTS THE RULE IN THE DATABASE, AND IT IS A TRIGGER FOR A REASON.** A CHECK
+    constraint is retroactive: **13 potable trips at Umm Al Hamam predate per-type
+    pricing and are legitimately grandfathered**, and `NOT VALID` only defers the
+    problem — a later `VALIDATE`, or a `pg_restore` (which re-checks everything), would
+    reject the dump. A BEFORE trigger inspects only the NEW row, so history is
+    structurally out of reach. **It applies at every stage including delivered** —
+    grandfathering means the existing rows stay, not that more may be made. Three
+    details that are load-bearing:
+    - **TWO triggers, not one.** `OLD` cannot be referenced in an INSERT trigger's
+      `WHEN` clause, so a single `INSERT OR UPDATE` would bury the IS-DISTINCT-FROM
+      test in the body — every stage move, commission recompute and invoice stamp
+      entering the function to be told to leave. Split, the UPDATE trigger's `WHEN`
+      is evaluated without calling the function at all.
+    - **`pg_trigger_depth() > 1` on UPDATE.** `trips_water_station_fkey` is `ON UPDATE
+      CASCADE`, so renaming a station KEY rewrites `water_station` on every trip
+      pointing at it — indistinguishable from a station change, and it would
+      re-validate the 13 grandfathered rows and refuse a legitimate admin rename.
+      Same technique and reason as `0096`'s 30-day lock.
+    - **SECURITY DEFINER, because the failure mode matters.** `water_stations` RLS is
+      `authenticated/ALL/USING(true)` today so INVOKER would work — but if that policy
+      is ever narrowed, an invoker lookup returns no row, `not found` allows, and the
+      guard **fails OPEN, silently, exactly when someone tightened security.**
+      Enforcement must fail closed. No revoke footer: Postgres refuses to invoke a
+      trigger function directly, and EXECUTE is checked at CREATE TRIGGER time.
+    - **It writes NOTHING.** The re-snapshot stays in the app, where the freeze rule
+      lives. Splitting the money rule across SQL and TypeScript is how the gate came
+      apart the first time.
+  - **CONSEQUENCE OF 0114, worth knowing before reading any filling figure:**
+    `filling_uncosted_trips` is **HISTORICAL-ONLY**. New trips can no longer be
+    uncosted — the insert raises instead — so the count is fixed at 13 (June–July).
+    **A new uncosted trip appearing means the guard was dropped, not that the data
+    changed.** The count still travels wherever the money is shown, because `sum()`
+    skips NULLs and those 13 do make the historical total short by an unknown amount.
+  - **`0112` FAILED ITS FIRST APPLY WITH `42P16`** — a column was inserted mid-list.
+    `create or replace view` can only APPEND. It could not be dropped and recreated
+    either, because `v_pnl_by_period` depends on `v_pnl_monthly` and 0112 does not
+    recreate it. Redrafted append-only; `0113` follows the same discipline even though
+    nothing depends on it, because "nothing depends on it today" is a fact with a
+    shelf life. **Every view in this feature restates `security_invoker` + revoke anon
+    + grant authenticated after the create** — `create or replace view` does not
+    preserve reloptions.
+  - **A SEED MIGRATION WAS DRAFTED AND DELETED BEFORE IT RAN.** It would have turned
+    Umm Al Hamam's deliberate "no potable" into "potable at 0" — undoing a real
+    business decision under the guise of a backfill. Exactly one deliberate NULL was at
+    risk. **Do not seed a column whose NULL carries meaning.**
+  - **THE COST MIX DOUGHNUT HAD STOPPED FOOTING and nobody noticed for three months.**
+    It rendered four hardcoded slices while `operating_cost_sar` had included filling
+    since 0112 — short by 210 / 1,285 / **4,390** in Jun/Jul/Aug. Now five slices,
+    gap 0.00 every month. The **direct-cost line needed no change**: it reads
+    `v_daily_operations.direct_cost_sar` as-is (`app/page.tsx` → `directCost`), which
+    has carried filling since 0112 — a display refresh, not a re-summed series. **Never
+    re-derive a bucket list at a call site; that is what let it drift.**
+  - **`updateTrip` WAS DELETED (`da924a8`), and the reason generalises.** No callers,
+    but it wrote `water_station`/`water_type` with neither the gate nor the
+    re-snapshot — so a station change through it would have stranded a frozen cost, a
+    failure 0114 deliberately does NOT catch because the trigger writes no money.
+    **Exported from a `"use server"` file, it was a live endpoint whether or not a
+    component called it — "unused" is not "unreachable".** A future trip-edit UI
+    belongs on `stationChangePatch`; the file header says so.
+  - **TWO COST DOUGHNUTS HAD SWAPPED COLOURS** (`98dbfea`). Reports and the Dashboard
+    each hardcoded their own hexes, and Payroll/Outsourced were reversed between them —
+    the amber wedge meant payroll on one page and outsourced work on the other. Worse
+    than two arbitrary palettes, because it looks consistent while meaning opposite
+    things. **`lib/cost-colors.ts` is now the one source** (a leaf module — the two
+    libs are siblings, neither is the other's parent), and `CostSliceKey` is an alias
+    of its key set rather than a second hand-written union.
+  - **`tests/trip-station-gate.spec.ts` and `tests/cost-colors.spec.ts` are the FIRST
+    specs in this repo that need no diagnostic route and no auth bypass** — both drive
+    pure functions, so they do not rot at teardown like every earlier suite. The gate
+    spec states its own limit up front: with no Supabase session a server action cannot
+    be exercised end to end, because RLS returns zero stations and the gate then fails
+    to fire **for the wrong reason** while the test still goes green. It drives
+    `decideStationChange` instead, which is the whole decision; the DB half ran against
+    real rows through the MCP and was reverted (fingerprint `b8e4cdb…`, P&L unmoved).
+  - **PROCESS INCIDENT, not a code defect:** the whole Reports page rendered unstyled
+    and was misdiagnosed as a UI-phase regression. Cause: `rm -rf .next && npx next
+    build` **while the dev server was running** — HTML 200, every `/_next/static/*`
+    404, `.next/BUILD_ID` present where dev output belonged. **Never delete `.next`
+    under a running dev server.** To verify a production build without stopping it,
+    point `distDir` elsewhere — and note `next build` **rewrites `tsconfig.json`**
+    (reformats it and injects the dist path into `include`); revert it afterwards.
+  - **Deferred — Water Station Cost:** retire the flat `water_stations.fill_cost`
+    column (its own migration; app code already ignores it); there is **no supported
+    clear-the-station path** — `trips.water_station` is NOT NULL with an FK and the
+    slug CHECK forbids `""`, so `setTripStation(id, "")` fails on the foreign key, and
+    the code's empty/NULL guards are unreachable today; `StationPricing` is hand-rolled
+    in three places (`WaterStationsModal`, `ProjectsBoard`, `app/trips/page.tsx`)
+    instead of imported — a consolidation, not dead code.
+
 - **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
   `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
   touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`
