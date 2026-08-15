@@ -139,10 +139,27 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
   return { error: null };
 }
 
-// No live caller today (checked — nothing in app/trips/*.tsx invokes this;
-// setTripStage/setTripStation cover every current edit surface). Guarded
-// anyway per the lock rule ("no edit" while locked) so a future edit UI
-// inherits the freeze for free instead of re-discovering this the hard way.
+// No live caller today (re-checked — nothing in app/trips/*.tsx invokes this;
+// setTripStage/setTripStation cover every current edit surface). It carries the
+// PAID lock, so a future edit UI inherits that much for free.
+//
+// IT DOES NOT INHERIT THE FILLING RULES, and the previous version of this
+// comment implied it inherited everything. It writes water_station AND
+// water_type directly with:
+//   · NO station/water-type gate — no decideStationChange call, so it does not
+//     refuse a station that cannot fill the chosen type. Since 0114 the
+//     database catches that combination itself, so this cannot corrupt data —
+//     but the user would get a raw 23514 instead of the sentence the other two
+//     paths produce.
+//   · NO filling_cost_sar re-snapshot — a station change through here would
+//     leave the frozen cost pointing at a station the truck never visited,
+//     which the trigger does NOT catch, because it is a money question and the
+//     trigger deliberately writes nothing.
+//
+// Being exported from a "use server" file makes it a live endpoint whether or
+// not any component calls it. Decide it deliberately — delete it, or route it
+// through stationChangePatch like the other two — rather than letting the next
+// edit UI wire it up and inherit a gap.
 export async function updateTrip(id: string, formData: FormData): Promise<ActionResult> {
   const water_station = str(formData.get("water_station"));
   if (!water_station) return { error: "Water station is required." };
@@ -313,8 +330,15 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
 // BYPASSES setTripStage: that function always re-stamps the current stage's
 // *_at, nulls every later-stage *_at, and recomputes/nulls commission_sar on
 // EVERY call — none of which a pure station edit should trigger. This action
-// writes water_station alone, no stage, no timestamps, no commission. Empty
-// string is allowed (direct-customer trips are never required to have one).
+// writes water_station (plus a re-taken filling cost, see below), no stage, no
+// timestamps, no commission.
+//
+// AN EMPTY STRING IS NOT A WAY TO CLEAR THE STATION, despite what this comment
+// used to claim. trips.water_station is NOT NULL and carries an FK to
+// water_stations(key), and `water_stations_key_slug` (^[a-z][a-z0-9_]*$)
+// forbids an empty key — so "" fails on the foreign key, and always has. There
+// is no supported clear-the-station path today. Nothing calls this with "",
+// which is why it was never noticed.
 
 /**
  * The station-change path: GATE first, then re-snapshot.
@@ -331,12 +355,20 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
  * station physically incapable of filling it. NULL was the honest record of a
  * state that should never have been reachable.
  *
- * IT IS A GATE ON THE CHANGE, NOT A CONSTRAINT ON THE DATA. There is
- * deliberately no CHECK constraint and no trigger behind this: 13 historical
- * Umm Al Hamam potable trips predate per-type pricing and are legitimately
- * grandfathered. A database rule would either reject them or force them to be
- * rewritten. Blocking the ACTION stops new invalid rows without touching a
- * single existing one.
+ * IT IS A GATE ON THE CHANGE, NOT A CONSTRAINT ON THE DATA. 13 historical Umm
+ * Al Hamam potable trips predate per-type pricing and are legitimately
+ * grandfathered, so there is deliberately no CHECK constraint: a constraint is
+ * retroactive and would either reject them or force them to be rewritten.
+ * Blocking the ACTION stops new invalid rows without touching a single
+ * existing one.
+ *
+ * SINCE 0114 THERE IS ALSO A TRIGGER, and it does not change the above — a
+ * BEFORE trigger only inspects the NEW row, so it grandfathers by construction
+ * exactly as this does. `trips_station_type_guard_ins`/`_upd` raise 23514 with
+ * the SAME sentence built below, so the two layers cannot contradict each
+ * other. This layer stays FIRST because it refuses before the round trip and
+ * the picker can disable the option outright; the trigger is what covers psql,
+ * an importer, or a server action nobody has written yet.
  *
  * IT APPLIES AT EVERY STAGE, INCLUDING DELIVERED. The freeze below protects a
  * delivered trip's COST from moving; it does not license parking a delivered
@@ -375,9 +407,11 @@ async function stationChangePatch(
   waterStation: string,
   stage: TripStage,
 ): Promise<StationChange> {
-  // Clearing the station (direct-customer trips are never required to have
-  // one) has no station to gate against. The cost still goes to NULL below —
-  // no station means nothing is known about what the fill cost.
+  // A trip with no readable water type cannot be judged against a per-type
+  // price list, so it is passed through with the frozen cost untouched rather
+  // than guessed at. Unreachable in practice — trips.water_type is NOT NULL
+  // with a CHECK limiting it to the two values — which is why it returns an
+  // empty patch instead of trying to be clever.
   const { data: trip } = await supabase
     .from("trips")
     .select("water_type")

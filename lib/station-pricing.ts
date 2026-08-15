@@ -50,8 +50,17 @@ export function stationPriceFor(
   return v === null || v === undefined ? null : Number(v);
 }
 
-/** Does this station offer that type at all? */
-export function stationOffers(
+/**
+ * Does this station offer that type at all?
+ *
+ * MODULE-PRIVATE. It was exported through the 0110 capture phase and no file
+ * outside this one ever imported it — the callers that needed the rule all
+ * ended up wanting the two composed predicates below instead
+ * (`stationBlockedForType`, `selectableWaterTypes`), which is the better shape:
+ * a caller asking "does this station offer X" is one `!` away from
+ * reimplementing the legacy-unpriced allowance and getting it wrong.
+ */
+function stationOffers(
   station: StationPricing | null | undefined,
   waterType: WaterType,
 ): boolean {
@@ -68,8 +77,13 @@ export function stationOffers(
  *
  * It exists so the trip-add blocking can degrade gracefully instead of making
  * trip creation impossible the moment the rule ships — see selectableWaterTypes.
+ *
+ * MODULE-PRIVATE, same reason as stationOffers above: exported through the
+ * capture phase, never imported anywhere. The legacy allowance it encodes is
+ * only ever correct as part of one of the two composed predicates below; a
+ * caller checking it on its own would be rebuilding the gate by hand.
  */
-export function stationIsUnpriced(station: StationPricing | null | undefined): boolean {
+function stationIsUnpriced(station: StationPricing | null | undefined): boolean {
   return !stationOffers(station, "potable") && !stationOffers(station, "non_potable");
 }
 
