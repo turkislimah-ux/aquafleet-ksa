@@ -634,9 +634,27 @@ function PhasePickerModal({
   stations: StationOption[];
   stationsByKey: Record<string, string>;
   busy: boolean;
-  onApply: (tripId: string, target: TripStage, station?: string) => Promise<boolean>;
-  // Hard delete (Commit 3) — permanent, non-delivered trips only. Returns
-  // success same as onApply.
+  // Returns the REASON on failure, not just a boolean.
+  //
+  // A boolean here cost the user the only sentence that could help them. Both
+  // gates on this path — the app's decideStationChange and the database's
+  // trips_station_type_guard (0114) — refuse with a specific message naming the
+  // station and the water type it does not fill, and the modal threw all of it
+  // away for "Could not move this trip. Try again." Retrying does not help; the
+  // station will not start filling potable on the second click.
+  //
+  // The loading chip has always shown the real message (changeStation ->
+  // setError). This brings the picker to parity.
+  onApply: (
+    tripId: string,
+    target: TripStage,
+    station?: string,
+  ) => Promise<{ ok: boolean; error: string | null }>;
+  // Hard delete (Commit 3) — permanent, non-delivered trips only. Still a
+  // boolean: deleteTrip's only refusal is the delivered-stage gate, which this
+  // modal already enforces by hiding the control, so there is no server-side
+  // reason a user could act on. If that ever gains a real reason, give it the
+  // same treatment as onApply above.
   onDelete: (tripId: string) => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -672,9 +690,14 @@ function PhasePickerModal({
 
   async function apply() {
     setErr(null);
-    const ok = await onApply(trip.id, target, stationChanged ? station : undefined);
-    if (ok) onClose();
-    else setErr("Could not move this trip. Try again.");
+    const res = await onApply(trip.id, target, stationChanged ? station : undefined);
+    if (res.ok) {
+      onClose();
+      return;
+    }
+    // The server's own sentence, or the generic line only when there genuinely
+    // is no reason to show — never instead of one.
+    setErr(res.error ?? "Could not move this trip. Try again.");
   }
 
   function handleApplyClick() {
@@ -1466,19 +1489,31 @@ export default function ProjectsBoard({
 
   // Any-direction phase move (Commit 2's picker) — same setTripStage funnel as
   // advance(), just with an arbitrary target instead of "the next stage", and
-  // an optional station riding along. Returns success so the modal knows
-  // whether to close itself or stay open and show the error.
-  async function movePhase(tripId: string, target: TripStage, station?: string) {
+  // an optional station riding along.
+  //
+  // Returns the REASON, not a boolean, so the modal can show what the server
+  // actually said — a station/water-type refusal from either gate names the
+  // station and the type it does not fill, and that sentence is the only thing
+  // that tells the user what to do next.
+  //
+  // It deliberately does NOT call setError. The board's banner sits BEHIND the
+  // picker's own `fixed inset-0 z-50` overlay, so setting it here printed the
+  // message somewhere the user could not see until they closed the modal — and
+  // then printed it twice. The modal is the surface that is actually on screen;
+  // it owns the message. advance() still uses setError, because a card button
+  // has no modal of its own.
+  async function movePhase(
+    tripId: string,
+    target: TripStage,
+    station?: string,
+  ): Promise<{ ok: boolean; error: string | null }> {
     setAdvancingId(tripId);
     setError(null);
     const res = await setTripStage(tripId, target, station);
     setAdvancingId(null);
-    if (res.error) {
-      setError(res.error);
-      return false;
-    }
+    if (res.error) return { ok: false, error: res.error };
     router.refresh();
-    return true;
+    return { ok: true, error: null };
   }
 
   // Hard delete (Commit 3) — permanent, non-delivered trips only. The picker
