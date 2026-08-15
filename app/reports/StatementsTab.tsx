@@ -26,6 +26,7 @@
 // everywhere else on this page.
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTabParam } from "@/lib/useTabParam";
 import { Printer, Pencil, Info, Sparkles } from "lucide-react";
 import { Btn } from "@/components/ui";
@@ -40,18 +41,20 @@ import {
   type CommissionsRow, type CommissionsPaidRow, type OperationsRow,
   type CollectionsRow, type MetricDictionaryRow, type RevenuePerTruckRow,
   type OperationsByDriverRow,
+  type PayslipBasisRow, type IssuedPayslipRow,
 } from "@/lib/reports";
 import {
   RevenueStatement, ReceivablesStatement, CostStatement,
-  OperationsStatement, NarrativeStatement, CustomStatement,
+  OperationsStatement, PayslipsStatement, NarrativeStatement, CustomStatement,
 } from "./StatementViews";
+import { issueDriverPayslip } from "./actions";
 import { buildReport, GROUPING_LABELS, type BuilderSelection } from "@/lib/report-builder";
 import CustomReportModal from "./CustomReportModal";
 
 // One statement at a time. That keeps each print id the ONLY print subtree in
 // the DOM, so "Print" prints the statement you are looking at rather than the
 // whole pack — and it keeps a long tab from becoming a scroll marathon.
-type Statement = "pnl" | "revenue" | "receivables" | "cost" | "operations" | "narrative" | "custom";
+type Statement = "pnl" | "revenue" | "receivables" | "cost" | "operations" | "payslips" | "narrative" | "custom";
 
 const STATEMENTS: { key: Statement; label: string }[] = [
   { key: "pnl", label: "P&L" },
@@ -59,6 +62,7 @@ const STATEMENTS: { key: Statement; label: string }[] = [
   { key: "receivables", label: "Receivables" },
   { key: "cost", label: "Costs" },
   { key: "operations", label: "Operations" },
+  { key: "payslips", label: "Payslips" },
   { key: "narrative", label: "Narrative" },
 ];
 
@@ -66,7 +70,7 @@ const STATEMENTS: { key: Statement; label: string }[] = [
 // not a tab in STATEMENTS above: the tab only appears once a spec has been
 // generated, but the URL must still accept it so search can point at the
 // builder (see the effect in the component).
-const STATEMENT_KEYS = ["pnl", "revenue", "receivables", "cost", "operations", "narrative", "custom"] as const;
+const STATEMENT_KEYS = ["pnl", "revenue", "receivables", "cost", "operations", "payslips", "narrative", "custom"] as const;
 
 type Props = {
   pnlPeriods: PnlPeriodRow[];
@@ -87,6 +91,8 @@ type Props = {
   metrics: MetricDictionaryRow[];
   perTruck: RevenuePerTruckRow[];
   opsByDriver: OperationsByDriverRow[];
+  payslipBasis: PayslipBasisRow[];
+  issuedPayslips: IssuedPayslipRow[];
   today: string;
   onManageExpenses: () => void;
 };
@@ -95,7 +101,7 @@ export default function StatementsTab({
   pnlPeriods, expenseCategories, invoices, salesReturns, receivables, aging,
   maintPerTruck, purchasing, payroll, commissions, commissionsPaid, operations,
   filling, fillingByStation,
-  collections, metrics, perTruck, opsByDriver, today, onManageExpenses,
+  collections, metrics, perTruck, opsByDriver, payslipBasis, issuedPayslips, today, onManageExpenses,
 }: Props) {
   const [periodType, setPeriodType] = useState<PeriodType>("month");
   // Which statement is showing lives in the URL, so global search can open
@@ -105,6 +111,32 @@ export default function StatementsTab({
   // and reusing that name here would collide.
   const [statement, setStatement] = useTabParam<Statement>(STATEMENT_KEYS, "pnl", "statement");
   const [customOpen, setCustomOpen] = useState(false);
+  // Which driver's payslip document is open. Deliberately NOT in the URL: the
+  // statement is deep-linkable, one driver's slip is not a destination anyone
+  // searches for, and putting a person's pay in a shareable address is a worse
+  // default than a click.
+  const [payslipDriver, setPayslipDriver] = useState<string | null>(null);
+  const [issuingPayslip, setIssuingPayslip] = useState<string | null>(null);
+  const [payslipError, setPayslipError] = useState<string | null>(null);
+  const router = useRouter();
+
+  // Issue is a single action that freezes a numbered document, so the button
+  // stays disabled for the whole round trip — a double click must not be able
+  // to attempt two. The RPC's unique constraint is the real backstop; this
+  // stops the user ever seeing it.
+  async function handleIssuePayslip(driverId: string, periodStart: string) {
+    setPayslipError(null);
+    setIssuingPayslip(driverId);
+    const res = await issueDriverPayslip(driverId, periodStart);
+    setIssuingPayslip(null);
+    if (!res.ok) {
+      // The database's own sentence, shown as written. Every refusal here
+      // (running month, no hire date, already issued) is enforced in the RPC.
+      setPayslipError(res.error);
+      return;
+    }
+    router.refresh();
+  }
   // The builder's output lives here, not in the modal: the result is a
   // statement like any other, so it gets its own print id and print button.
   const [customSpec, setCustomSpec] = useState<BuilderSelection | null>(null);
@@ -386,6 +418,30 @@ export default function StatementsTab({
           periodStart={current.period_start} periodEnd={current.period_end}
           label={current.label} multiMonth={multiMonth}
         />
+      )}
+
+      {statement === "payslips" && (
+        <>
+        {/* The database's refusal, shown as written. Sits above the statement
+            rather than inside it because a failed issue must be visible from
+            wherever in the list the click happened. */}
+        {payslipError && (
+          <div className="mb-4 rounded-lg border border-rose-500/25 bg-rose-500/5 px-3 py-2 text-sm text-rose-700 dark:text-rose-300 no-print">
+            {payslipError}
+          </div>
+        )}
+        <PayslipsStatement
+          basis={payslipBasis}
+          issued={issuedPayslips}
+          periodStart={current.period_start} periodEnd={current.period_end}
+          label={current.label}
+          today={today}
+          selectedDriverId={payslipDriver}
+          onSelectDriver={setPayslipDriver}
+          onIssue={handleIssuePayslip}
+          issuingId={issuingPayslip}
+        />
+        </>
       )}
 
       {statement === "narrative" && (

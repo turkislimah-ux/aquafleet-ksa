@@ -33,6 +33,7 @@ import type {
   MaintenancePerTruckRow, PnlPeriodRow, ExpenseCategoryPeriodRow,
   RevenueInvoiceRow, SalesReturnRow, CommissionsRow, CommissionsPaidRow,
   MetricDictionaryRow, OperationsByDriverRow,
+  PayslipBasisRow, IssuedPayslipRow,
 } from "@/lib/reports";
 import ReportsClient from "./ReportsClient";
 
@@ -56,6 +57,8 @@ export default async function ReportsPage() {
     maintPerTruckRes, expensesRes, pnlPeriodRes, expCatPeriodRes,
     invoicesRes, returnsRes, commissionsRes, commissionsPaidRes, metricsRes,
     opsByDriverRes,
+    payslipBasisRes,
+    issuedPayslipsRes,
   ] = await Promise.all([
     supabase.from("v_pnl_monthly").select("*").order("month"),
     supabase.from("v_collections_monthly").select("*").order("month"),
@@ -97,6 +100,15 @@ export default async function ReportsPage() {
     // 0101 — the driver grain for the Operations statement.
     supabase.from("v_operations_by_driver_monthly").select("*")
       .order("trips_scheduled", { ascending: false }),
+    // 0115 — what a payslip would carry, per driver per month. Covers ALL
+    // drivers including terminated ones, so history does not vanish.
+    supabase.from("v_driver_payslip_basis").select("*")
+      .order("period_start", { ascending: false }).order("driver_name"),
+    // The frozen documents themselves. Read separately from the basis view
+    // because an issued slip is the figure of record and must NOT be
+    // recomputed from today's data.
+    supabase.from("driver_payslips").select("*")
+      .order("period_start", { ascending: false }),
   ]);
 
   // One honest error line beats ten empty cards that look like real zeros.
@@ -110,7 +122,8 @@ export default async function ReportsPage() {
     expCatPeriodRes.error?.message ?? invoicesRes.error?.message ??
     returnsRes.error?.message ?? commissionsRes.error?.message ??
     commissionsPaidRes.error?.message ?? metricsRes.error?.message ??
-    opsByDriverRes.error?.message ?? null;
+    opsByDriverRes.error?.message ?? payslipBasisRes.error?.message ??
+    issuedPayslipsRes.error?.message ?? null;
 
   const pnl: PnlRow[] = ((pnlRes.data ?? []) as Row[]).map((r) => ({
     month: String(r.month),
@@ -332,10 +345,58 @@ export default async function ReportsPage() {
     completion_rate_pct: nOrNull(r.completion_rate_pct),
   }));
 
+  // 0115 — payslip basis. commission_basis is a TEXT enum from the view, not a
+  // number, so it is cast rather than coerced; every money column goes through
+  // n() like the rest of this file.
+  const payslipBasis: PayslipBasisRow[] = ((payslipBasisRes.data ?? []) as Row[]).map((r) => ({
+    period_start: String(r.period_start),
+    driver_id: String(r.driver_id),
+    driver_name: String(r.driver_name ?? ""),
+    base_salary_sar: n(r.base_salary_sar),
+    salary_missing: r.salary_missing === true,
+    hire_date_missing: r.hire_date_missing === true,
+    commission_basis: String(r.commission_basis) as PayslipBasisRow["commission_basis"],
+    commission_settled: r.commission_settled === true,
+    payout_count: n(r.payout_count),
+    commission_sar: n(r.commission_sar),
+    specials_sar: n(r.specials_sar),
+    adjustments_sar: n(r.adjustments_sar),
+    bonus_sar: n(r.bonus_sar),
+    issued_payslip_id: r.issued_payslip_id ? String(r.issued_payslip_id) : null,
+    issued_payslip_number: r.issued_payslip_number ? String(r.issued_payslip_number) : null,
+  }));
+
+  // The frozen documents. These figures are NEVER recomputed — they are read
+  // exactly as issue_driver_payslip wrote them, which is the whole point of a
+  // snapshot-at-issue design.
+  const issuedPayslips: IssuedPayslipRow[] = ((issuedPayslipsRes.data ?? []) as Row[]).map((r) => ({
+    id: String(r.id),
+    payslip_number: String(r.payslip_number),
+    driver_id: String(r.driver_id),
+    period_start: String(r.period_start),
+    issued_at: String(r.issued_at),
+    issued_by: String(r.issued_by ?? ""),
+    commission_basis: String(r.commission_basis) as IssuedPayslipRow["commission_basis"],
+    commission_settled: r.commission_settled === true,
+    base_salary_sar: n(r.base_salary_sar),
+    commission_sar: n(r.commission_sar),
+    specials_sar: n(r.specials_sar),
+    adjustments_sar: n(r.adjustments_sar),
+    bonus_sar: n(r.bonus_sar),
+    deductions_sar: n(r.deductions_sar),
+    net_sar: n(r.net_sar),
+    // jsonb arrives parsed; the money inside it is display-only detail the
+    // document quotes (payout totals, covered trip range), never re-summed
+    // into a figure of record.
+    snapshot: (r.snapshot ?? null) as IssuedPayslipRow["snapshot"],
+  }));
+
   return (
     <ReportsClient
       error={error}
       metrics={metrics}
+      payslipBasis={payslipBasis}
+      issuedPayslips={issuedPayslips}
       opsByDriver={opsByDriver}
       invoices={invoices}
       salesReturns={salesReturns}

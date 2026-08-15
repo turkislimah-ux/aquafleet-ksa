@@ -29,6 +29,7 @@ import {
   type RevenueInvoiceRow, type SalesReturnRow, type CommissionsRow,
   type CommissionsPaidRow, type MetricDictionaryRow,
   type OperationsByDriverRow,
+  type PayslipBasisRow, type IssuedPayslipRow,
 } from "@/lib/reports";
 import OverviewTab from "./OverviewTab";
 import StatementsTab from "./StatementsTab";
@@ -70,6 +71,9 @@ type ReportsClientProps = {
   commissionsPaid: CommissionsPaidRow[];
   /** The metrics dictionary — vocabulary for the custom-report seam. */
   metrics: MetricDictionaryRow[];
+  /** 0115 — payslip basis per driver per month, and the frozen documents. */
+  payslipBasis: PayslipBasisRow[];
+  issuedPayslips: IssuedPayslipRow[];
   /** Per-driver operations (0101) — the Operations statement transposes on it. */
   opsByDriver: OperationsByDriverRow[];
 };
@@ -161,6 +165,8 @@ export default function ReportsClient(props: ReportsClientProps) {
           metrics={props.metrics}
           perTruck={props.perTruck}
           opsByDriver={props.opsByDriver}
+          payslipBasis={props.payslipBasis}
+          issuedPayslips={props.issuedPayslips}
           today={props.today}
           onManageExpenses={() => setExpensesOpen(true)}
         />

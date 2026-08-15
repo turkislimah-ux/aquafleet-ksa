@@ -146,6 +146,7 @@ body {
   #cost-print, #cost-print *,
   #ops-print, #ops-print *,
   #narrative-print, #narrative-print *,
+  #payslips-print, #payslips-print *,
   #custom-print, #custom-print * { visibility: visible !important; }
   .no-print { display: none !important; }
 
@@ -173,7 +174,7 @@ body {
   main { padding: 0 !important; margin: 0 !important; }
 
   #pnl-print, #revenue-print, #receivables-print,
-  #cost-print, #ops-print, #narrative-print, #custom-print {
+  #cost-print, #ops-print, #narrative-print, #payslips-print, #custom-print {
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
@@ -189,22 +190,26 @@ body {
      section split across a page break. Without table-header-group a
      multi-page table loses its column headings after page one. */
   #pnl-print table, #revenue-print table, #receivables-print table,
-  #cost-print table, #ops-print table, #narrative-print table, #custom-print table {
+  #cost-print table, #ops-print table, #narrative-print table,
+  #payslips-print table, #custom-print table {
     width: 100% !important;
     border-collapse: collapse;
   }
   #pnl-print thead, #revenue-print thead, #receivables-print thead,
-  #cost-print thead, #ops-print thead, #narrative-print thead, #custom-print thead {
+  #cost-print thead, #ops-print thead, #narrative-print thead,
+  #payslips-print thead, #custom-print thead {
     display: table-header-group;
   }
   #pnl-print tr, #revenue-print tr, #receivables-print tr,
-  #cost-print tr, #ops-print tr, #narrative-print tr, #custom-print tr {
+  #cost-print tr, #ops-print tr, #narrative-print tr,
+  #payslips-print tr, #custom-print tr {
     break-inside: avoid;
     page-break-inside: avoid;
   }
   /* A section heading must never be the last thing on a page. */
   #pnl-print h3, #revenue-print h3, #receivables-print h3,
-  #cost-print h3, #ops-print h3, #narrative-print h3, #custom-print h3 {
+  #cost-print h3, #ops-print h3, #narrative-print h3,
+  #payslips-print h3, #custom-print h3 {
     break-after: avoid;
     page-break-after: avoid;
     margin-top: 14pt;

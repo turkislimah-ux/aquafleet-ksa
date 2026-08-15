@@ -29,6 +29,7 @@ import {
   type CommissionsPaidRow, type OperationsRow, type NarrativeBullet,
   type OperationsByDriverRow,
   type FillingMonthRow, type FillingByStationRow,
+  type PayslipBasisRow, type IssuedPayslipRow, payslipPreviewNet,
 } from "@/lib/reports";
 
 export function Note({ children }: { children: React.ReactNode }) {
@@ -1107,5 +1108,373 @@ export function CustomStatement({
         </button>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PAYSLIPS (0115) — a REGISTER, and the DOCUMENT it opens.
+//
+// preview/ has no payslip surface at all (checked across the whole tree), so
+// unlike every other statement here this one has no demo to match. The shape
+// below is chosen to mirror the statements it sits beside rather than to
+// invent a fifth visual language on the same page.
+//
+// TWO VIEWS, ONE PRINT SUBTREE. The register lists a month's drivers; picking
+// one replaces the body with that driver's document. They never render at the
+// same time, which keeps the existing "one print id in the DOM" invariant —
+// pressing Print on the document prints the document, not the register behind
+// it.
+//
+// THE DOCUMENT IS THE POINT. A register row is a preview that recomputes every
+// time the page loads; an issued payslip is frozen and is the figure of record.
+// The two are visually distinct on purpose, because confusing them is how
+// someone hands out a number that later changes.
+// ---------------------------------------------------------------------------
+
+/** Paid vs earned, said in words rather than left to a colour. */
+function BasisChip({ basis, settled }: { basis: string; settled: boolean }) {
+  const paid = basis === "paid" && settled;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset whitespace-nowrap",
+        paid
+          ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300"
+          : "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300",
+      )}
+      title={paid
+        ? "Settled — this commission was actually paid out in this month"
+        : "Earned but not yet paid. It will appear again as PAID on the payslip for the month it is settled in."}
+    >
+      {paid ? "Paid" : "Earned"}
+    </span>
+  );
+}
+
+function monthLabelOf(iso: string) {
+  const [y, m] = iso.split("-");
+  return new Date(Number(y), Number(m) - 1, 1)
+    .toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+}
+
+export function PayslipsStatement({
+  basis, issued, periodStart, periodEnd, label, today,
+  selectedDriverId, onSelectDriver, onIssue, issuingId,
+}: {
+  basis: PayslipBasisRow[];
+  issued: IssuedPayslipRow[];
+  periodStart: string; periodEnd: string; label: string;
+  /** Riyadh today, from the server — never new Date() in the client. */
+  today: string;
+  selectedDriverId: string | null;
+  onSelectDriver: (driverId: string | null) => void;
+  onIssue: (driverId: string, periodStart: string) => void;
+  issuingId: string | null;
+}) {
+  const rows = useMemo(
+    () => basis
+      .filter((r) => r.period_start >= periodStart && r.period_start <= periodEnd)
+      .sort((a, b) =>
+        b.period_start.localeCompare(a.period_start) ||
+        a.driver_name.localeCompare(b.driver_name)),
+    [basis, periodStart, periodEnd],
+  );
+
+  // A month can only be issued once it has finished. The database refuses it
+  // (23514) and this is the same rule said early, so the button is never a
+  // trap — but the RPC stays the enforcement, not this.
+  const currentMonthStart = today.slice(0, 8) + "01";
+  const isRunning = (p: string) => p >= currentMonthStart;
+
+  const selected = selectedDriverId
+    ? rows.find((r) => r.driver_id === selectedDriverId) ?? null
+    : null;
+
+  if (selected) {
+    const doc = issued.find(
+      (i) => i.driver_id === selected.driver_id && i.period_start === selected.period_start,
+    ) ?? null;
+    return (
+      // SAME print id as the register, because they are never both mounted —
+      // that is what keeps "Print" meaning "print what I am looking at".
+      <div id="payslips-print" className="card p-6">
+        <PayslipDocument
+          row={selected}
+          doc={doc}
+          running={isRunning(selected.period_start)}
+          onBack={() => onSelectDriver(null)}
+          onIssue={onIssue}
+          issuing={issuingId === selected.driver_id}
+        />
+      </div>
+    );
+  }
+
+  const totals = rows.reduce(
+    (acc, r) => {
+      const d = issued.find((i) => i.driver_id === r.driver_id && i.period_start === r.period_start);
+      return {
+        salary: acc.salary + (d ? d.base_salary_sar : r.base_salary_sar),
+        net: acc.net + (d ? d.net_sar : payslipPreviewNet(r)),
+        issued: acc.issued + (d ? 1 : 0),
+      };
+    },
+    { salary: 0, net: 0, issued: 0 },
+  );
+
+  return (
+    <div id="payslips-print" className="card p-6">
+      <Head title="Payslips" period={label} />
+
+      {rows.length === 0 ? (
+        <Empty>No drivers on the payroll for this period.</Empty>
+      ) : (
+        <>
+          <div className="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
+            <span className="muted">{rows.length} {rows.length === 1 ? "payslip" : "payslips"}</span>
+            <span className="muted" aria-hidden>·</span>
+            <span className="muted">{totals.issued} issued</span>
+            <span className="muted" aria-hidden>·</span>
+            <span>Total net <b className="tabular-nums">{formatSar(totals.net)}</b></span>
+          </div>
+
+          <Table>
+            <thead>
+              <tr>
+                <TH>Driver</TH>
+                <TH>Month</TH>
+                <TH className="text-right">Salary</TH>
+                <TH className="text-right">Commission</TH>
+                <TH>Basis</TH>
+                <TH className="text-right">Net</TH>
+                <TH>Status</TH>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const doc = issued.find(
+                  (i) => i.driver_id === r.driver_id && i.period_start === r.period_start,
+                );
+                // An issued slip shows its FROZEN figures, never a fresh
+                // preview — that is what "snapshot at issue" means on screen.
+                const salary = doc ? doc.base_salary_sar : r.base_salary_sar;
+                const commission = doc
+                  ? doc.commission_sar + doc.specials_sar + doc.adjustments_sar + doc.bonus_sar
+                  : r.commission_sar + r.specials_sar + r.adjustments_sar + r.bonus_sar;
+                const net = doc ? doc.net_sar : payslipPreviewNet(r);
+                return (
+                  <tr
+                    key={`${r.driver_id}-${r.period_start}`}
+                    onClick={() => onSelectDriver(r.driver_id)}
+                    className="cursor-pointer hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+                  >
+                    <TD className="font-medium">{r.driver_name}</TD>
+                    <TD className="muted">{monthLabelOf(r.period_start)}</TD>
+                    <TD className="text-right tabular-nums">{formatSar(salary)}</TD>
+                    <TD className="text-right tabular-nums">{formatSar(commission)}</TD>
+                    <TD>
+                      <BasisChip
+                        basis={doc ? doc.commission_basis : r.commission_basis}
+                        settled={doc ? doc.commission_settled : r.commission_settled}
+                      />
+                    </TD>
+                    <TD className="text-right tabular-nums font-semibold">{formatSar(net)}</TD>
+                    <TD>
+                      {doc ? (
+                        <span className="font-mono text-[11px]">{doc.payslip_number}</span>
+                      ) : r.hire_date_missing ? (
+                        <span className="text-[11px] text-rose-700 dark:text-rose-300">
+                          No hire date
+                        </span>
+                      ) : isRunning(r.period_start) ? (
+                        <span className="text-[11px] muted">Month in progress</span>
+                      ) : (
+                        <span className="text-[11px] muted">Not issued</span>
+                      )}
+                    </TD>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+
+          <Note>
+            An unissued row is a PREVIEW: its salary is today&apos;s salary, and it will
+            change if the salary changes. Issuing freezes the figures and numbers the
+            document — from then on the payslip shows what it showed on the day it was
+            issued, whatever happens to the salary afterwards.
+          </Note>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ONE DRIVER, ONE MONTH — the thing you print and hand over.
+ *
+ * Renders the FROZEN document when one exists and the live preview when it does
+ * not, and never blends them: an issued slip reads every figure off
+ * driver_payslips, a preview reads every figure off the basis view.
+ */
+function PayslipDocument({
+  row, doc, running, onBack, onIssue, issuing,
+}: {
+  row: PayslipBasisRow;
+  doc: IssuedPayslipRow | null;
+  running: boolean;
+  onBack: () => void;
+  onIssue: (driverId: string, periodStart: string) => void;
+  issuing: boolean;
+}) {
+  const f = doc
+    ? {
+        salary: doc.base_salary_sar, commission: doc.commission_sar,
+        specials: doc.specials_sar, adjustments: doc.adjustments_sar,
+        bonus: doc.bonus_sar, deductions: doc.deductions_sar, net: doc.net_sar,
+        basis: doc.commission_basis, settled: doc.commission_settled,
+      }
+    : {
+        salary: row.base_salary_sar, commission: row.commission_sar,
+        specials: row.specials_sar, adjustments: row.adjustments_sar,
+        bonus: row.bonus_sar, deductions: 0, net: payslipPreviewNet(row),
+        basis: row.commission_basis, settled: row.commission_settled,
+      };
+
+  const covered = doc?.snapshot?.covered_trips;
+  const payouts = doc?.snapshot?.payouts ?? [];
+  const blocked = row.hire_date_missing || running;
+
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 no-print">
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-sm muted hover:text-[rgb(var(--fg))] focus-ring rounded px-1"
+        >
+          ← All payslips
+        </button>
+        {doc ? (
+          <span className="text-xs muted">
+            Issued {doc.issued_at.slice(0, 10)} by {doc.issued_by}
+          </span>
+        ) : (
+          <button
+            type="button"
+            disabled={blocked || issuing}
+            onClick={() => onIssue(row.driver_id, row.period_start)}
+            title={
+              row.hire_date_missing
+                ? "This driver has no hire date, so a payslip period cannot be established. Set the hire date on the driver first."
+                : running
+                  ? "This month has not finished yet. A payslip can only be issued for a completed month."
+                  : undefined
+            }
+            className="h-9 px-4 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {issuing ? "Issuing…" : "Issue payslip"}
+          </button>
+        )}
+      </div>
+
+      <Head
+        title={doc ? `Payslip ${doc.payslip_number}` : "Payslip (not issued)"}
+        period={`${row.driver_name} · ${monthLabelOf(row.period_start)}`}
+      />
+
+      {/* WHY THE ACTION IS UNAVAILABLE, said where the button is — a disabled
+          control with no reason is indistinguishable from a broken one. */}
+      {!doc && blocked && (
+        <div className="mb-4 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[12px] leading-relaxed">
+          {row.hire_date_missing
+            ? "This driver has no hire date recorded, so there is no employment period a payslip could cover. Set the hire date on the driver, then issue. The figures below are shown for reference only."
+            : "This month is still running. A payslip can only be issued once the month has finished, so the figures below are not final."}
+        </div>
+      )}
+
+      {!doc && !blocked && (
+        <div className="mb-4 rounded-lg border border-brand-500/25 bg-brand-500/5 px-3 py-2 text-[12px] leading-relaxed">
+          Not issued yet. Salary is shown at <b>today&apos;s</b> rate — issuing freezes
+          these figures and assigns the payslip number.
+        </div>
+      )}
+
+      <Table>
+        <tbody>
+          <tr>
+            <TD className="font-medium">Basic salary</TD>
+            <TD className="text-right tabular-nums">{formatSar(f.salary)}</TD>
+          </tr>
+          <tr>
+            <TD>
+              <span className="font-medium">Commission</span>{" "}
+              <BasisChip basis={f.basis} settled={f.settled} />
+            </TD>
+            <TD className="text-right tabular-nums">{formatSar(f.commission)}</TD>
+          </tr>
+          <tr>
+            <TD>Special payments</TD>
+            <TD className="text-right tabular-nums">{formatSar(f.specials)}</TD>
+          </tr>
+          <tr>
+            <TD>Adjustments</TD>
+            <TD className="text-right tabular-nums">{formatSar(f.adjustments)}</TD>
+          </tr>
+          <tr>
+            <TD>Bonus</TD>
+            <TD className="text-right tabular-nums">{formatSar(f.bonus)}</TD>
+          </tr>
+          <tr>
+            <TD className="muted">Deductions</TD>
+            <TD className="text-right tabular-nums muted">{formatSar(f.deductions)}</TD>
+          </tr>
+          <tr className="border-t-2">
+            <TD className="font-semibold">Net pay</TD>
+            <TD className="text-right tabular-nums font-semibold text-base">{formatSar(f.net)}</TD>
+          </tr>
+        </tbody>
+      </Table>
+
+      {/* WHAT THE COMMISSION ACTUALLY IS. A number with no provenance on a
+          document someone is paid against is worth less than no number. */}
+      {f.basis === "paid" && payouts.length > 0 && (
+        <div className="mt-4 text-[12px]">
+          <div className="font-medium mb-1">
+            Settled by {payouts.length === 1 ? "payout" : `${payouts.length} payouts`}
+          </div>
+          <ul className="space-y-0.5 muted">
+            {payouts.map((p) => (
+              <li key={p.id} className="tabular-nums">
+                {p.paid_at ? p.paid_at.slice(0, 10) : "—"} · {p.period_label ?? "—"} ·{" "}
+                {formatSar(p.total_sar)}
+              </li>
+            ))}
+          </ul>
+          {covered && covered.count > 0 && covered.first_trip && (
+            <p className="mt-1 muted">
+              Covers {covered.count} {covered.count === 1 ? "trip" : "trips"} worked{" "}
+              {covered.first_trip} – {covered.last_trip}.{" "}
+              {covered.first_trip.slice(0, 7) !== row.period_start.slice(0, 7) && (
+                <b>Some of that work was done in an earlier month; it is paid here because
+                that is when it was settled.</b>
+              )}
+            </p>
+          )}
+        </div>
+      )}
+
+      {f.basis !== "paid" && (
+        <Note>
+          This commission is <b>earned but not yet paid</b>. When it is settled it will
+          appear again, as PAID, on the payslip for the month it is paid in — that is a
+          record of two different events, not the same money counted twice.
+        </Note>
+      )}
+
+      {row.salary_missing && (
+        <Note>No salary is recorded for this driver, so basic salary reads 0.</Note>
+      )}
+    </>
   );
 }
