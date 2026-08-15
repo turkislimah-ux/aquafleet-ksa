@@ -4,14 +4,16 @@
 record. This file is a *snapshot of where things stand right now*. If the two
 disagree, `CLAUDE.md` §7 wins.
 
-Written 2026-08-08 at the close of the Reports build. Every fact below was
-verified live at write time — git, `supabase/migrations/`, and the Supabase MCP
-— not recalled.
+Rewritten 2026-08-15 at the close of the Water Station Cost feature. Every fact
+below was verified live at write time — git, `supabase/migrations/`, and the
+Supabase MCP — not recalled.
 
-*(This file replaces a 2026-07-27 version written during the Inventory phase.
-That one was stale by four whole modules and, more dangerously, still said both
-HANDOFF.json files were unused scaffolding to leave unstaged — which is no
-longer true. See §2.)*
+*(This replaces the 2026-08-08 version written at the close of the Reports
+build. That one was stale by two whole features: it still pointed at the
+Dashboard as "the next phase" after the Dashboard had been rebuilt, and named
+`0101` as the highest migration when `0114` was applied. Its predecessor was
+retired for the same reason. **A handoff that is not rewritten at the close of
+each feature becomes actively misleading — it does not merely age.**)*
 
 ---
 
@@ -22,24 +24,40 @@ longer true. See §2.)*
 Trips → Maintenance → Inventory → Archive → Consumption → Reports — all done.
 Route Optimization, Predictive and IoT stay deliberately deferred.
 
-**The next phase is POLISH, beginning with the Dashboard.**
+Two features have landed since the last handoff, both complete and verified
+in-browser by Turki:
+
+- **Dashboard rebuilt as the CATCH-UP page** — migrations `0103`–`0109`, 13
+  views. It was the last mock-data placeholder in the app; it now reads views
+  for every figure and re-derives nothing in TypeScript. See `CLAUDE.md` §7 for
+  the full entry, including why `0109` re-bucketed delivered revenue onto
+  `trip_date`.
+- **Water Station Cost** — migrations `0110`–`0114`. Per-water-type station
+  pricing, a frozen per-trip cost snapshot, backfill, entry into the P&L as a
+  daily-sourced direct cost, and a station/water-type gate enforced in BOTH the
+  app and the database. Also verified in-browser end to end.
+
+**The phase is POLISH — delivering the final MVP.** The Dashboard is no longer
+the polish target; it was rebuilt rather than tidied.
 
 Nothing is in flight. Nothing is half-finished on disk. Open items are deferred
 by choice, not blocked — each is listed with its blocking reason in §6 and in
 `CLAUDE.md` §7.
 
-The Dashboard has barely been touched since early in the project and still
-leans on `lib/mock-data`. Assume none of the app's later conventions were
-applied to it; treat it as a fresh surface rather than a tidy-up.
+**Next up: driver payslips.** A per-driver, per-month settlement document
+(base salary + commission + specials + adjustments + bonus). The plan is agreed
+in outline — snapshot-at-issue rather than effective-dated salary history,
+composing on the existing `commission_payouts` rather than recomputing
+commission — and the build has not started.
 
 ---
 
 ## 2. Exact git state
 
 ```
-HEAD          af14c5feb51fac8098d72625ed4de9043e5769e8
-              af14c5f  HANDOFF.json: Reports complete, roadmap non-deferred
-                       pages all built
+HEAD          c3f417d37120d449b4ad093bc35f377ab949107c
+              c3f417d  Docs: the freeze rule is delivered at BOTH ENDS, and
+                       scheduled trips are not costs yet
 branch        main
 origin/main   0 ahead / 0 behind
 ```
@@ -47,12 +65,11 @@ origin/main   0 ahead / 0 behind
 Working tree is clean **apart from one expected file**:
 
 ```
- M preview/.planning/HANDOFF.json
+ M .planning/HANDOFF.json
 ```
 
 **That permanent "modified" state is correct — do not fix it.** The two
-HANDOFF.json files are governed differently, and this is the part the previous
-handoff got wrong:
+HANDOFF.json files are governed differently:
 
 - **`.planning/HANDOFF.json` — IS committed**, as a deliberate snapshot
   (Turki's call, 2026-08-07). It is owned by an auto-tool
@@ -66,45 +83,48 @@ handoff got wrong:
 - **`preview/.planning/HANDOFF.json` — NEVER staged.** It lives inside the
   read-only `preview/` tree and carries stale auto-tool content.
 
+**`.claude/skills/aquafleet-domain` currently contradicts this** — it says to
+keep *both* files unstaged. `CLAUDE.md` §5 stands; the skill is wrong and is
+being corrected separately.
+
 Recent history, for orientation:
 
 ```
-af14c5f  HANDOFF.json: Reports complete
-6546597  CLAUDE.md: record the Reports state
-eaf7e2e  Reports cleanup: tighten module surface, correct stale comments
-d24d8d8  Reports: driver tables put drivers down the left, measures across
-e80e883  Reports: driver tables lead the Operations statement
-07bf569  Reports Phases 2-3: statements, expenses, builder, driver transpose
-c561d5c  Reports: migrations 0100 and 0101 (applied, reconciled to live)
-52075c9  Reports Phase 1: semantic layer + Overview tab
+c3f417d  Docs: the freeze rule is delivered at BOTH ENDS
+c76e731  Becoming delivered is not closed history - re-take the filling cost
+9f0a682  HANDOFF.json: point at the Water Station Cost entry in section 7
+180a27e  CLAUDE.md: record the Water Station Cost feature in section 7
+98dbfea  One colour per cost bucket, shared by both doughnuts
+da924a8  Delete updateTrip - dead, and unsafe if it were not
+19080c0  Dead-code sweep of the Water Station Cost feature
+08d9580  Guarantee the station/water-type rule in the database
 ```
 
 ---
 
 ## 3. Database state
 
-**Highest migration: `0101_operations_by_driver.sql`, applied. Git matches
-live.**
-
-All four Reports migrations (`0098`–`0101`) are committed, and their files were
-**reconciled to what actually ran**. `0099`, `0100` and `0101` were each applied
-in a modified form; every file was rewritten to match live (verified against
-`pg_get_viewdef`) with the differences recorded in its own header.
-**Do not "fix" them back toward their drafts.**
+**Highest migration: `0114_trips_station_water_type_guard.sql`, applied. Git
+matches live — nothing uncommitted in `supabase/migrations/`.**
 
 Full diagnostic, run fresh at write time:
 
 | Check | Result |
 |---|---|
-| Views in `public` | **24** |
-| Views with `security_invoker = true` | **24 / 24** |
+| Views in `public` | **38** |
+| Views with `security_invoker = true` | **38 / 38** |
 | Views readable by `anon` | **0** |
-| `report_metrics` dictionary rows | **23** |
+| `report_metrics` dictionary rows | **29** |
 | FIFO invariant breaks (`qty_on_hand` vs lot sum) | **0** |
 | Driver rows vs `v_operations_monthly` | **0 gaps** |
 | `v_pnl_by_period` month grain vs `v_pnl_monthly` | **0 gaps** |
 | Revenue total (confirmed-or-paid, not void, net VAT) | **70,650.00** |
-| Q3 2026 operating margin (the sign-flip case) | **−38.7%** |
+| Q3 2026 operating margin, recomputed | **−66.1%** |
+| Q3 2026 if monthly margins were averaged | **+18.7%** |
+
+That last pair is the non-averaging rule, re-measured on today's data. It still
+flips the sign — and the gap has widened since the last handoff recorded it as
+−38.7% vs +20.5%.
 
 ### OPEN ITEM — pin this down before running another reset
 
@@ -119,6 +139,9 @@ drop. So either the replay ran against a snapshot predating that commit, or
 Until that is established, "commit the migration immediately" is necessary but
 possibly not sufficient. **Find out what the reset actually replays from before
 running another one.** The view has been re-applied and verified since.
+
+**Status: still unresolved, and now formally parked — no resets are planned or
+permitted until the replay source is established.**
 
 ---
 
@@ -137,18 +160,28 @@ and say what a change *means*, not what it does mechanically.
   hand it over.
 - **No dependent app code until a migration is confirmed applied.**
 - **Commit + push after each tested change.** Do not let rounds accumulate —
-  see §5's process note, which is a repeat offence.
+  see §7. The Water Station Cost feature followed this and produced fifteen
+  clean, separable commits; it is the first phase where the lesson actually
+  held.
 - **Explicit-path `git add`, never `git add .`** Stage in a single-line command,
   then `git status` to confirm the exact set before committing.
 - **NEVER run `next build` while `next dev` is live.** It clobbers `.next` and
   every asset 404s, CSS and JS alike, which reads as "the whole app lost its
-  styling". Stop dev first. **Dev runs on port 3002**, not 3000.
+  styling". This has already cost one session to misdiagnosis. Stop dev first.
+  **Dev runs on port 3002**, not 3000. If a production build must be verified
+  while dev keeps running, point `distDir` elsewhere — and note that
+  `next build` **rewrites `tsconfig.json`** (reformats it and injects the dist
+  path into `include`), so revert it afterwards.
 - Avoid `!` in commit messages (zsh history expansion). Quote paths with
   brackets — zsh globs `[id]` and silently drops the argument.
 - **Verification convention:** throwaway `app/<name>-verify/page.tsx` +
   temporary `lib/supabase/middleware.ts` auth bypass + Playwright, then
   **delete the route and revert the bypass, confirming `git diff` is empty**
   before reporting done.
+- **`tsc` is stricter than it used to be.** `noUnusedLocals` and
+  `noUnusedParameters` are on, so an unused import, local or parameter fails the
+  build. A parameter genuinely required by a signature gets an `_` prefix —
+  never delete it, that changes the shape the caller depends on.
 
 ---
 
@@ -173,8 +206,8 @@ not a polish change and needs the same rigour as the original build.
   page **reads views and never re-derives a number.** If a figure is missing,
   the fix is a migration — *not* a join added to the page. Corollaries that
   have already bitten and are now guarded by tests:
-  - Ratios recompute from period totals, never averaged. Averaging monthly
-    margins flips Q3 from −38.7% to **+20.5%**.
+  - Ratios recompute from period totals, never averaged. See §3 — averaging
+    still flips the sign of a real quarter.
   - `trucks_active` and `people_missing_salary` are **not additive**.
     `trucks_active` currently sums to the right answer *by coincidence* —
     worse than a visible error, because a test can pass on it.
@@ -183,11 +216,18 @@ not a polish change and needs the same rigour as the original build.
     OWNER and bypasses RLS on 68 RLS-enabled tables.
   - Money-core boundary: inventory cost must never flow into `lib/prepaid.ts` /
     `vat.ts` / `invoice.ts`.
+- **Frozen snapshots are frozen against the right thing.** `trips.filling_cost_sar`
+  is frozen so a later price edit cannot reprice history — but a trip whose
+  STATION changes is re-snapshotted, because the old figure came from a station
+  it never visited. The cost is held only when the trip is closed history, which
+  means **delivered at both ends of the write**. Reading that as "the target
+  stage is delivered" shipped a real bug (`c76e731`). The same shape will apply
+  to payslips: issue freezes, and nothing re-derives an issued document.
 
 ### Dormant-by-design DB objects — do NOT delete in a cleanup pass
 
-This is the single biggest risk of a polish phase. All verified live at write
-time, exactly one signature each:
+This is the single biggest risk of a polish phase. All verified live, exactly
+one signature each:
 
 - **`receive_stock`** — superseded by the lot-based `receive_loose_parts`. Its
   app-code wrapper was already removed as genuine dead code; **the RPC stays.**
@@ -199,7 +239,10 @@ time, exactly one signature each:
   both drive it now.
 
 A grep for "unused" will mislead you on all three. Check `pg_proc` and the raw
-`supabase.rpc(...)` call sites, not just typed wrappers.
+`supabase.rpc(...)` call sites, not just typed wrappers. The same lesson has a
+second form: an exported function in a `"use server"` file is a live endpoint
+whether or not any component calls it — **"unused" is not "unreachable"**
+(this is why `updateTrip` was deleted rather than left in place).
 
 ---
 
@@ -209,29 +252,44 @@ Not blocked, not forgotten — each needs a decision or data we do not capture.
 
 | Item | Why it is parked |
 |---|---|
+| **DB reset replay source** | See §3. No resets until established. |
 | **RBAC** | No role model beyond the approver-role check on POs. Needs a deliberate design pass, not an incremental patch. |
-| **Effective-dated salaries** | `staff.monthly_salary_sar` / `drivers.salary_sar` are current-only, so a past period is costed at today's salary and a raise rewrites history. Reports discloses this on screen. Same mechanism the deferred commission-rate and project-rate histories need — likely one feature. |
+| **Effective-dated salaries** | `staff.monthly_salary_sar` / `drivers.salary_sar` are current-only, so a past period is costed at today's salary and a raise rewrites history. Reports discloses this on screen. Same mechanism the deferred commission-rate and project-rate histories need — likely one feature. **Payslips deliberately do NOT solve this**: they freeze a snapshot at issue instead, which is the right model for a document but leaves the reporting problem untouched. |
 | **Driver status-transition history** | `drivers.status` is current-only; there is no transition log, so a status-change report has nothing to count. Requested, and deliberately not faked. |
-| **Standing test suite** | The Playwright specs (`tests/reports-*.spec.ts`, `tests/inventory-*.spec.ts`) depend on diagnostic routes deleted by convention. They document what was verified; they are **not** a regression suite and will fail if run as-is. Making them one means keeping those routes permanently — Turki's call, undecided. |
+| **Standing test suite** | Improving. 29 spec files exist; **23 still depend on the dev server and, in most cases, diagnostic routes deleted by convention** — they document what was verified and will fail if run as-is. Two are genuinely standing because they drive pure functions and need no route, no bypass and no browser: `tests/trip-station-gate.spec.ts` (10) and `tests/cost-colors.spec.ts` (3). **That is the shape to copy** — logic extracted to a pure module can be tested permanently; logic reachable only through a page cannot. Whether to make the rest permanent by keeping their routes is still Turki's call. |
 | **Docs refresh** | `CLAUDE.md` §7 is accurate but very long, and its Finance/Inventory sections predate conventions that later became global. Worth a consolidation pass; not urgent. |
+| **3 malformed `commission_periods` rows** | `month_key` is NULL on all three (created Jun–Jul, all `pending`, bonus 0.00). Any month-grained grouping of that table has to handle them. Flagged, never deleted — test data is not deleted without Turki's explicit approval. |
 
 Smaller, also open: idle-trucks and fleet-availability on the Operations
 statement (need the fleet roster and distinct-trucks-under-maintenance — both
 deliberately **not** estimated); the `0100` dictionary gap (ten P&L metric
 entries still name only their monthly view, though each is available per
 quarter and year); `projects.payment_mode` vs `customers.payment_model`
-reconciliation; and switching the Consumption page's top-costly-trucks to read
-`maintenance_parts_sar` from the view instead of its own TS derivation.
+reconciliation; switching the Consumption page's top-costly-trucks to read
+`maintenance_parts_sar` from the view instead of its own TS derivation; and
+retiring the deprecated flat `water_stations.fill_cost` column, which app code
+already ignores.
 
 ---
 
-## 7. One process note, because it is a repeat
+## 7. Process notes, because they are repeats
 
-Reports Phases 2–3 plus three follow-up rounds landed as **one commit**, because
-`lib/reports.ts`, `StatementsTab.tsx` and `StatementViews.tsx` each accumulated
-code from every round and every commit must be tsc-clean — so no subset could
-be staged on its own.
+**Commit each round as it verifies.** Reports Phases 2–3 plus three follow-up
+rounds landed as **one commit**, because `lib/reports.ts`, `StatementsTab.tsx`
+and `StatementViews.tsx` each accumulated code from every round and every commit
+must be tsc-clean — so no subset could be staged on its own. That was the same
+trap already recorded under Inventory Phase 3. **Knowing the lesson did not
+prevent it twice; only doing it does.** Water Station Cost finally did, across
+fifteen commits — keep that going.
 
-That is the **same trap already recorded under Inventory Phase 3** in
-`CLAUDE.md` §7. Knowing the lesson did not prevent it; only committing each
-round *as it verifies* does. Do that during polish.
+**Sums agreeing does not mean the figures are right.** The filling-cost bug that
+shipped reconciled perfectly at every grain — the statement faithfully reported
+a stored snapshot that was simply wrong. It was caught by a human who knew what
+one station charged, not by a total that failed to foot. Reconciliation proves
+consistency, not correctness.
+
+**Reconcile against a view's own predicate, never a raw table sum.**
+`v_filling_cost_monthly` only counts trips at `loading` or later, because a
+scheduled trip has not filled yet. Summing `trips.filling_cost_sar` raw
+therefore exceeds the statement and looks like the view is understating. It is
+not.
