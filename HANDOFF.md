@@ -4,16 +4,18 @@
 record. This file is a *snapshot of where things stand right now*. If the two
 disagree, `CLAUDE.md` §7 wins.
 
-Rewritten 2026-08-15 at the close of the Water Station Cost feature. Every fact
+Rewritten 2026-08-15 at the close of the driver-payslips feature. Every fact
 below was verified live at write time — git, `supabase/migrations/`, and the
 Supabase MCP — not recalled.
 
-*(This replaces the 2026-08-08 version written at the close of the Reports
-build. That one was stale by two whole features: it still pointed at the
-Dashboard as "the next phase" after the Dashboard had been rebuilt, and named
-`0101` as the highest migration when `0114` was applied. Its predecessor was
-retired for the same reason. **A handoff that is not rewritten at the close of
-each feature becomes actively misleading — it does not merely age.**)*
+*(This replaces the version written hours earlier at the close of Water Station
+Cost — refreshed at the close of the NEXT feature, which is the cadence this
+file needs. The version before that was stale by two whole features — it still
+pointed at the Dashboard as "the next phase" after the Dashboard had been
+rebuilt, and named `0101` as the highest migration when `0114` was applied — and
+its own predecessor was retired for the same reason. **A handoff that is not
+rewritten at the close of each feature becomes actively misleading; it does not
+merely age.**)*
 
 ---
 
@@ -24,8 +26,8 @@ each feature becomes actively misleading — it does not merely age.**)*
 Trips → Maintenance → Inventory → Archive → Consumption → Reports — all done.
 Route Optimization, Predictive and IoT stay deliberately deferred.
 
-Two features have landed since the last handoff, both complete and verified
-in-browser by Turki:
+Three features have landed recently, all complete and verified in-browser by
+Turki:
 
 - **Dashboard rebuilt as the CATCH-UP page** — migrations `0103`–`0109`, 13
   views. It was the last mock-data placeholder in the app; it now reads views
@@ -37,27 +39,36 @@ in-browser by Turki:
   daily-sourced direct cost, and a station/water-type gate enforced in BOTH the
   app and the database. Also verified in-browser end to end.
 
+**Driver payslips** — migrations `0115`–`0118`. A numbered, frozen settlement
+document per driver per month, on the Reports statement pack
+(`?statement=payslips`), plus a commission review table beside it showing the
+WORK month against the register's SETTLEMENT month. Browser-verified; two real
+payslips issued (`PS-2026-000001`, `PS-2026-000002` — **keep both**).
+`0117` fixed the same fabricated-hire-date defect live in the P&L: June payroll
+36,000 → 25,000.
+
 **The phase is POLISH — delivering the final MVP.** The Dashboard is no longer
 the polish target; it was rebuilt rather than tidied.
 
-Nothing is in flight. Nothing is half-finished on disk. Open items are deferred
-by choice, not blocked — each is listed with its blocking reason in §6 and in
-`CLAUDE.md` §7.
+No app code is half-finished. Open items are deferred by choice, not blocked —
+each is listed with its blocking reason in §6 and in `CLAUDE.md` §7 — with ONE
+exception, immediately below.
 
-**Next up: driver payslips.** A per-driver, per-month settlement document
-(base salary + commission + specials + adjustments + bonus). The plan is agreed
-in outline — snapshot-at-issue rather than effective-dated salary history,
-composing on the existing `commission_payouts` rather than recomputing
-commission — and the build has not started.
+**ONE MIGRATION IS DRAFTED AND WAITING: `0118`.** It closes a real drift — net
+pay is currently expressed twice, in `issue_driver_payslip`'s INSERT and in
+`payslipPreviewNet` (TypeScript). They agree today and nothing keeps them
+agreeing. `0118` appends `net_sar` to `v_driver_payslip_basis` AND makes the RPC
+read it instead of re-adding the components. **Do not delete the TypeScript
+helper before it is applied — the unissued-row preview breaks.**
 
 ---
 
 ## 2. Exact git state
 
 ```
-HEAD          c3f417d37120d449b4ad093bc35f377ab949107c
-              c3f417d  Docs: the freeze rule is delivered at BOTH ENDS, and
-                       scheduled trips are not costs yet
+HEAD          b378c35
+              b378c35  CLAUDE.md: the payslips feature, and the view-security
+                       rule as a standing lock
 branch        main
 origin/main   0 ahead / 0 behind
 ```
@@ -91,29 +102,33 @@ explicitly rather than a single rule covering both files.
 Recent history, for orientation:
 
 ```
-c3f417d  Docs: the freeze rule is delivered at BOTH ENDS
-c76e731  Becoming delivered is not closed history - re-take the filling cost
-9f0a682  HANDOFF.json: point at the Water Station Cost entry in section 7
-180a27e  CLAUDE.md: record the Water Station Cost feature in section 7
-98dbfea  One colour per cost bucket, shared by both doughnuts
-da924a8  Delete updateTrip - dead, and unsafe if it were not
-19080c0  Dead-code sweep of the Water Station Cost feature
-08d9580  Guarantee the station/water-type rule in the database
+b378c35  CLAUDE.md: payslips + the view-security standing lock
+5476b24  Sweep: Note was an export with no reader
+be33162  Migration 0117 - payroll stops billing for months before they existed
+e67b2d1  Terminated label priority, and the commission review table
+3209f4b  Migration 0116 - commission review grain and the terminated flag
+60602c9  Make the stop-dev-before-build guard actually stop the build
+81e682c  Payslips: confirm before issuing, and bold what identifies a document
+186143a  Migration 0115 - driver payslips (applied and verified)
 ```
 
 ---
 
 ## 3. Database state
 
-**Highest migration: `0114_trips_station_water_type_guard.sql`, applied. Git
-matches live — nothing uncommitted in `supabase/migrations/`.**
+**Highest migration APPLIED: `0117_payroll_null_hire_date.sql`. Git matches
+live for everything applied.**
+
+**`0118_payslip_basis_net.sql` is on disk, DRAFTED, NOT APPLIED, and NOT
+COMMITTED** — migrations are committed only after apply, per the reset incident
+below. It is the one outstanding piece of work in the repo.
 
 Full diagnostic, run fresh at write time:
 
 | Check | Result |
 |---|---|
-| Views in `public` | **38** |
-| Views with `security_invoker = true` | **38 / 38** |
+| Views in `public` | **40** |
+| Views with `security_invoker = true` | **40 / 40** |
 | Views readable by `anon` | **0** |
 | `report_metrics` dictionary rows | **29** |
 | FIFO invariant breaks (`qty_on_hand` vs lot sum) | **0** |
@@ -122,10 +137,12 @@ Full diagnostic, run fresh at write time:
 | Revenue total (confirmed-or-paid, not void, net VAT) | **70,650.00** |
 | Q3 2026 operating margin, recomputed | **−66.1%** |
 | Q3 2026 if monthly margins were averaged | **+18.7%** |
+| Payslips issued (`driver_payslips`) | **2**, counter at 2 |
+| Review table vs `v_commissions_monthly` | **0 diff** at every month |
 
-That last pair is the non-averaging rule, re-measured on today's data. It still
-flips the sign — and the gap has widened since the last handoff recorded it as
-−38.7% vs +20.5%.
+The two Q3 margin rows are the non-averaging rule, re-measured on today's data.
+It still flips the sign — and the gap has widened since an earlier handoff
+recorded it as −38.7% vs +20.5%.
 
 ### OPEN ITEM — pin this down before running another reset
 
@@ -166,6 +183,12 @@ and say what a change *means*, not what it does mechanically.
   held.
 - **Explicit-path `git add`, never `git add .`** Stage in a single-line command,
   then `git status` to confirm the exact set before committing.
+- **USE `./scripts/safe-build.sh`.** It refuses, with a non-zero exit, if
+  anything is listening on the dev port. It exists because a guard that merely
+  WARNED let a build run under a live dev server anyway — a warning that does
+  not stop the command is worse than no guard, since the transcript reads as
+  protected. `--dist-dir X` builds elsewhere and leaves dev alone (next.config.js
+  honours `NEXT_DIST_DIR` for exactly this).
 - **NEVER run `next build` while `next dev` is live.** It clobbers `.next` and
   every asset 404s, CSS and JS alike, which reads as "the whole app lost its
   styling". This has already cost one session to misdiagnosis. Stop dev first.
@@ -253,11 +276,14 @@ Not blocked, not forgotten — each needs a decision or data we do not capture.
 
 | Item | Why it is parked |
 |---|---|
+| **`0118` awaiting apply** | Drafted to disk, reviewed by nobody yet. Closes the net-pay double-expression. The TypeScript helper `payslipPreviewNet` cannot be deleted until it lands. |
 | **DB reset replay source** | See §3. No resets until established. |
 | **RBAC** | No role model beyond the approver-role check on POs. Needs a deliberate design pass, not an incremental patch. |
 | **Effective-dated salaries** | `staff.monthly_salary_sar` / `drivers.salary_sar` are current-only, so a past period is costed at today's salary and a raise rewrites history. Reports discloses this on screen. Same mechanism the deferred commission-rate and project-rate histories need — likely one feature. **Payslips deliberately do NOT solve this**: they freeze a snapshot at issue instead, which is the right model for a document but leaves the reporting problem untouched. |
 | **Driver status-transition history** | `drivers.status` is current-only; there is no transition log, so a status-change report has nothing to count. Requested, and deliberately not faked. |
 | **Standing test suite** | Improving. 29 spec files exist; **23 still depend on the dev server and, in most cases, diagnostic routes deleted by convention** — they document what was verified and will fail if run as-is. Two are genuinely standing because they drive pure functions and need no route, no bypass and no browser: `tests/trip-station-gate.spec.ts` (10) and `tests/cost-colors.spec.ts` (3). **That is the shape to copy** — logic extracted to a pure module can be tested permanently; logic reachable only through a page cannot. Whether to make the rest permanent by keeping their routes is still Turki's call. |
+| **Payslip deductions** | `driver_payslips.deductions_sar` exists and is always 0 — there is no data source for absences, advances or fines. The column ships so the document's arithmetic is complete and adding a source later changes no issued slip. |
+| **Payslip approval step** | Issue is a single action by ruling. An approve-before-issue flow is parked with RBAC, not designed. |
 | **Docs refresh** | `CLAUDE.md` §7 is accurate but very long, and its Finance/Inventory sections predate conventions that later became global. Worth a consolidation pass; not urgent. |
 | **3 malformed `commission_periods` rows** | `month_key` is NULL on all three (created Jun–Jul, all `pending`, bonus 0.00). Any month-grained grouping of that table has to handle them. Flagged, never deleted — test data is not deleted without Turki's explicit approval. |
 
