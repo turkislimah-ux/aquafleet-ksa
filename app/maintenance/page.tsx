@@ -52,7 +52,7 @@ export default async function MaintenancePage() {
   ] = await Promise.all([
     supabase
       .from("trucks")
-      .select("id, plate, model, year, capacity_m3, status, health_score, home_station, odometer_km, engine_hours, vin, assigned_driver_id, last_service_date, utilization_pct, fuel_efficiency_km_per_l, active, created_at, terminated_at, termination_reason, termination_price, released_date")
+      .select("id, plate, model, year, capacity_m3, status, home_station, odometer_km, vin, assigned_driver_id, last_service_date, utilization_pct, active, created_at, terminated_at, termination_reason, termination_price, released_date")
       .eq("active", true)
       .is("terminated_at", null)
       .order("plate", { ascending: true }),

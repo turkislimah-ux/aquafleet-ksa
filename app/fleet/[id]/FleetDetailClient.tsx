@@ -122,14 +122,6 @@ function initials(name: string): string {
     .join("");
 }
 
-// A FIGURE WE DO NOT HAVE GETS NO COLOUR. A null health score returned "warn",
-// so a truck with no data was styled as a truck with a problem — and health_score
-// is null on every truck in the fleet, so that was every truck, always.
-// undefined = no tone = neutral, which is what "we don't know" should look like.
-function healthTone(v: number | null): "ok" | "warn" | "bad" | undefined {
-  if (v == null) return undefined;
-  return v > 75 ? "ok" : v > 55 ? "warn" : "bad";
-}
 
 export default function FleetDetailClient({
   truck,
@@ -372,19 +364,16 @@ export default function FleetDetailClient({
         }
       />
 
-      {/* 6 stats — REAL where present, honest-empty otherwise */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        <Stat label="Health" value={truck.health_score ?? "—"} tone={healthTone(truck.health_score)} />
-        <Stat
-          label="Utilization"
-          value={truck.utilization_pct != null ? `${truck.utilization_pct}%` : "—"}
-          tone="info"
-        />
+      {/* THREE stats, every one backed by data a person actually enters.
+          Health, Utilization and Fuel Eff. were removed: health_score,
+          fuel_efficiency_km_per_l and engine_hours are demo-era columns with
+          no source and are being dropped from the table entirely, and
+          utilization_pct stays a dormant column with no live surface until it
+          becomes a computed view. A stat that can only ever read "—" is not an
+          honest empty state, it is furniture. Health returns with IoT, as the
+          placeholder bar on the Fleet list. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Stat label="Capacity" value={truck.capacity_m3 != null ? `${truck.capacity_m3} m³` : "—"} tone="info" />
-        <Stat
-          label="Fuel Eff."
-          value={truck.fuel_efficiency_km_per_l != null ? `${truck.fuel_efficiency_km_per_l} km/L` : "—"}
-        />
         <Stat label="Odometer" value={truck.odometer_km != null ? `${formatNum(truck.odometer_km)} km` : "—"} />
         <Stat label="Last Service" value={lastServiceLabel(truck.last_service_date)} tone="ok" />
       </div>

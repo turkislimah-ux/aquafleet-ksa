@@ -8,7 +8,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PageHeader, Card, Stat, StatusPill, Bar, Btn, Table, TH, TD } from "@/components/ui";
+import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD } from "@/components/ui";
 import { type OperationStation } from "@/lib/db-types";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 import { TRUCK_OPS_STATE_LABELS, type TruckOpsState } from "@/lib/truck-status";
@@ -17,7 +17,7 @@ import { assignDriver, unassignDriver } from "./actions";
 import TruckFormModal from "./TruckFormModal";
 import { cn, formatNum } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
-import { Filter, Truck as TruckIcon, Eye, Plus, Pencil, Users, X } from "lucide-react";
+import { Activity, Eye, Filter, Pencil, Plus, Truck as TruckIcon, Users, X } from "lucide-react";
 
 type Kpis = {
   total: number;
@@ -26,7 +26,6 @@ type Kpis = {
   idle: number;
   totalCap: number;
   capHasData: boolean;
-  avgHealth: number | null;
 };
 
 // Status filter chips — Auto Truck-Status's 3-state derived model, plus
@@ -45,6 +44,54 @@ function lastServiceLabel(iso: string | null): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+/**
+ * THE HEALTH BAR IS CHROME, NOT DATA — it reads nothing, on purpose.
+ *
+ * health_score was a demo-era column with no source: null on every truck,
+ * written by nothing, and it is being dropped from the table. Rather than
+ * delete the column from the list and leave a hole where fleet health belongs,
+ * the bar stays as a placeholder for the IoT phase that will fill it.
+ *
+ * It renders a fixed EMPTY state — grey track, 0% fill — for every truck. There
+ * is no prop, so it cannot accidentally start reflecting a stale or fabricated
+ * figure, and no number is printed beside it: "0" would be a reading, and we
+ * have no reading. The note at the bottom of the page says why it is empty.
+ *
+ * THE COLOUR SCALE IS BUILT AND DORMANT, so the day sensors land the only
+ * change is passing a value in:
+ *     <= 40   critical    rose
+ *     <= 70   attention   amber
+ *      > 70   healthy     emerald
+ * With no data none of those thresholds fire — grey is not on the scale, it is
+ * the absence of one. Track geometry matches preview/app.css's .bar-track
+ * (6px, fully rounded) and the w-28 column width the demo uses.
+ */
+function healthScaleClass(pct: number): string {
+  if (pct <= 40) return "bg-rose-500";
+  if (pct <= 70) return "bg-amber-500";
+  return "bg-emerald-500";
+}
+
+function HealthBar({ pct }: { pct?: number }) {
+  const hasReading = typeof pct === "number";
+  const width = hasReading ? Math.max(0, Math.min(100, pct)) : 0;
+  return (
+    <div className="w-28">
+      <div
+        className="h-1.5 rounded-full bg-black/5 dark:bg-white/10 overflow-hidden"
+        role="img"
+        aria-label={hasReading ? `Health ${width}%` : "Health monitoring not active yet"}
+        title={hasReading ? undefined : "Awaiting IoT sensors"}
+      >
+        <div
+          className={cn("h-full transition-[width] duration-300", hasReading ? healthScaleClass(width) : "bg-transparent")}
+          style={{ width: `${width}%` }}
+        />
+      </div>
+    </div>
+  );
 }
 
 export default function FleetClient({
@@ -187,7 +234,7 @@ export default function FleetClient({
       )}
 
       {/* KPI strip (6) — all REAL */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <Stat label="Total Trucks" value={kpis.total} tone="info" />
         <Stat label="Active" value={kpis.active} tone="ok" />
         <Stat label="In Maintenance" value={kpis.maint} tone={kpis.maint > 6 ? "warn" : "info"} />
@@ -196,17 +243,6 @@ export default function FleetClient({
           label="Total Capacity"
           value={kpis.capHasData ? `${formatNum(kpis.totalCap)} m³` : "—"}
           tone="info"
-        />
-        {/* A FIGURE WE DO NOT HAVE GETS NO COLOUR. health_score is null on
-            every truck and nothing writes it, so this read "—" in amber on
-            every load — a permanent warning about missing data rather than
-            about the fleet. tone is optional; undefined means no colour class,
-            which is exactly how Total Capacity beside it already handles the
-            same case via capHasData. */}
-        <Stat
-          label="Avg Fleet Health"
-          value={kpis.avgHealth ?? "—"}
-          tone={kpis.avgHealth == null ? undefined : kpis.avgHealth > 75 ? "ok" : "warn"}
         />
       </div>
 
@@ -346,14 +382,7 @@ export default function FleetClient({
                   })()}
                 </TD>
                 <TD>
-                  {tr.health_score != null ? (
-                    <div className="w-28">
-                      <div className="text-[11px] tabular-nums mb-0.5">{tr.health_score}</div>
-                      <Bar value={tr.health_score} />
-                    </div>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
+                  <HealthBar />
                 </TD>
                 <TD className="tabular-nums font-medium">
                   {tr.capacity_m3 != null ? `${tr.capacity_m3} m³` : "—"}
@@ -386,6 +415,19 @@ export default function FleetClient({
           </tbody>
         </Table>
       </Card>
+
+      {/* Says why the Health column is empty. Sits under the table rather than
+          in the column header because it explains a state, not a heading — and
+          without it an empty bar on every row reads as a bug rather than as a
+          feature that has not arrived. */}
+      <p className="flex items-start gap-2 text-[11px] muted leading-relaxed">
+        <Activity className="h-3.5 w-3.5 shrink-0 mt-px" aria-hidden />
+        <span>
+          <b>Health monitoring is not active yet.</b> The health bar is a placeholder —
+          it activates once IoT sensors are fitted to the fleet and integrated, at which
+          point each truck reports its own condition.
+        </span>
+      </p>
 
       {/* ---- Add Truck modal ---- */}
       {addOpen && (

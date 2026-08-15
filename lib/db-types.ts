@@ -164,11 +164,9 @@ export type Truck = {
   year: number | null;
   capacity_m3: number | null;
   status: TruckStatus;
-  health_score: number | null;
   // FK -> operation_stations.id (migration 0022; nullable, on delete set null).
   home_station: string | null;
   odometer_km: number | null;
-  engine_hours: number | null;
   vin: string | null;
   // Added by 0091. The TRUCK owns these: a registration-type archive document
   // reads them and stores neither its own number nor its own expiry.
@@ -177,8 +175,14 @@ export type Truck = {
   assigned_driver_id: string | null;
   // Added in 0005 — all nullable, render "—" when absent (no fake values).
   last_service_date: string | null;
+  /**
+   * DORMANT COLUMN, NO LIVE SURFACE. Kept in the schema and in this type, but
+   * nothing renders it today — it reads null on every truck and becomes a
+   * COMPUTED view later rather than a hand-entered field. Its detail-page stat
+   * was removed with the demo-era fields, because a stat that can only ever
+   * show "—" is furniture, not an honest empty state.
+   */
   utilization_pct: number | null;
-  fuel_efficiency_km_per_l: number | null;
   active: boolean;
   created_at: string;
   // Added in 0020 — soft-delete termination (mirrors drivers). NULL = active.

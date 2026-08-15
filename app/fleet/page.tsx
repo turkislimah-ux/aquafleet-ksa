@@ -164,11 +164,6 @@ export default async function FleetPage() {
   const capVals = trucks.map((t) => t.capacity_m3).filter((v): v is number => v != null);
   const totalCap = capVals.reduce((s, v) => s + v, 0);
 
-  const healthVals = trucks.map((t) => t.health_score).filter((v): v is number => v != null);
-  const avgHealth = healthVals.length
-    ? +(healthVals.reduce((s, v) => s + v, 0) / healthVals.length).toFixed(1)
-    : null;
-
   const kpis = {
     total,
     active,
@@ -176,7 +171,6 @@ export default async function FleetPage() {
     idle,
     totalCap,
     capHasData: capVals.length > 0,
-    avgHealth,
   };
 
   return (
