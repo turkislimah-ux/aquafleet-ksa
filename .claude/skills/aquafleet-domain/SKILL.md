@@ -172,7 +172,27 @@ Draft → Review → Confirmed → Paid
 
 - Update `CLAUDE.md` section 7 (or equivalent state section) at the end of any session
   that changes what's built or what's next.
-- Keep both `HANDOFF.json` files unstaged (`.planning/` and `preview/.planning/`).
+- **The two `HANDOFF.json` files are governed DIFFERENTLY — do not generalise
+  either one to the other.** This bullet used to read "keep both HANDOFF.json
+  files unstaged"; that was wrong and is superseded (ruling: Turki via the
+  architect, 2026-08-15). **`CLAUDE.md` §5 is the authority — if this file ever
+  disagrees with §5, §5 wins.**
+  - **`.planning/HANDOFF.json` (root) — IS COMMITTED**, as a deliberate snapshot
+    (Turki's call, 2026-08-07), and only ever as a RICH, VERIFIED one. It is
+    owned by an auto-tool (`"source": "auto-postool"`) that rewrites it back to
+    an empty template after tool calls, so follow §5's sequence exactly:
+    **write it and `git add` it in ONE command** — the gap between writing and
+    staging is precisely where it gets blanked — then **confirm
+    `git diff --cached` shows the rich version**, commit, and finally
+    `git checkout -- .planning/HANDOFF.json` so the tree matches HEAD. It drifts
+    back to the blank template on the next tool run. That is expected, not a bug
+    to fix.
+    **Never `git add` it reflexively.** If the auto-tool has run since you wrote
+    it, you will commit the empty template over real content and lose it
+    silently — the diff looks like an ordinary update.
+  - **`preview/.planning/HANDOFF.json` — NEVER staged.** It lives inside the
+    read-only `preview/` tree and carries stale auto-tool content. Its permanent
+    "modified" state in `git status` is correct; leave it alone.
 - If a session is getting long (15+ turns), proactively save state and suggest
   starting fresh rather than degrading.
 - When verifying a build, check the DB state (via Supabase MCP) independently of

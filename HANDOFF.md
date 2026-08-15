@@ -83,9 +83,10 @@ HANDOFF.json files are governed differently:
 - **`preview/.planning/HANDOFF.json` — NEVER staged.** It lives inside the
   read-only `preview/` tree and carries stale auto-tool content.
 
-**`.claude/skills/aquafleet-domain` currently contradicts this** — it says to
-keep *both* files unstaged. `CLAUDE.md` §5 stands; the skill is wrong and is
-being corrected separately.
+`.claude/skills/aquafleet-domain` used to contradict this — it said to keep
+*both* files unstaged. Ruled and corrected (Turki via the architect,
+2026-08-15): `CLAUDE.md` §5 stands, and the skill now states the split rule
+explicitly rather than a single rule covering both files.
 
 Recent history, for orientation:
 
