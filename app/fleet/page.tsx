@@ -3,7 +3,7 @@ import type { Truck, OperationStation } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { buildActiveJobTruckIds, buildTruckStatusMap, type TruckOpsState } from "@/lib/truck-status";
-import { todayKey } from "@/lib/utils";
+import { daysAgoKey, todayKey } from "@/lib/utils";
 import FleetClient from "./FleetClient";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +26,10 @@ export default async function FleetPage() {
 
   // 30-day window for the per-driver trip count (Trips30d) used by the
   // Assign Driver modal + Detail driver card. UTC, consistent with the rest.
-  const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  // BOTH ends of the 30-day window on ONE clock. `since` used to be UTC
+  // (toISOString) while `today` was local, so between 00:00 and 02:59
+  // Riyadh the window started a day earlier than `today` implied.
+  const since = daysAgoKey(30);
   const today = todayKey(); // local (matches trip day-math), not UTC
 
   const [
