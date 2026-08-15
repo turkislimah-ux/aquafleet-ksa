@@ -16,8 +16,8 @@
 // statement", not the whole tab. The ids are whitelisted in globals.css.
 
 import { useMemo, useState } from "react";
-import { Info } from "lucide-react";
-import { Table, TH, TD } from "@/components/ui";
+import { Info, Printer } from "lucide-react";
+import { Table, TH, TD, Btn } from "@/components/ui";
 import { cn, formatSar, formatNum } from "@/lib/utils";
 import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
 import type { BuiltReport } from "@/lib/report-builder";
@@ -30,6 +30,7 @@ import {
   type OperationsByDriverRow,
   type FillingMonthRow, type FillingByStationRow,
   type PayslipBasisRow, type IssuedPayslipRow, payslipPreviewNet,
+  type DriverCommissionByProjectRow,
 } from "@/lib/reports";
 
 export function Note({ children }: { children: React.ReactNode }) {
@@ -1158,11 +1159,13 @@ function monthLabelOf(iso: string) {
 }
 
 export function PayslipsStatement({
-  basis, issued, periodStart, periodEnd, label, today,
+  basis, issued, commission, periodStart, periodEnd, label, today,
   selectedDriverId, onSelectDriver, onIssue, issuingId,
 }: {
   basis: PayslipBasisRow[];
   issued: IssuedPayslipRow[];
+  /** 0116 — work-month earnings, the review table below the register. */
+  commission: DriverCommissionByProjectRow[];
   periodStart: string; periodEnd: string; label: string;
   /** Riyadh today, from the server — never new Date() in the client. */
   today: string;
@@ -1223,7 +1226,8 @@ export function PayslipsStatement({
   );
 
   return (
-    <div id="payslips-print" className="card p-6">
+    <>
+      <div id="payslips-print" className="card p-6">
       <Head title="Payslips" period={label} />
 
       {rows.length === 0 ? (
@@ -1280,8 +1284,23 @@ export function PayslipsStatement({
                     </TD>
                     <TD className="text-right tabular-nums font-semibold">{formatSar(net)}</TD>
                     <TD>
+                      {/* PRIORITY, ruled: an issued number is the strongest fact
+                          (the document exists), then TERMINATED — leaving the
+                          company outranks a missing hire date, and today every
+                          NULL-hire driver is terminated so all five read
+                          Terminated. The ISSUE BLOCK is unchanged: hire_date
+                          still refuses, termination does not. */}
                       {doc ? (
                         <span className="font-mono text-[11px] font-bold">{doc.payslip_number}</span>
+                      ) : r.terminated ? (
+                        <span
+                          className="text-[11px] font-bold text-slate-600 dark:text-slate-300"
+                          title={r.termination_date
+                            ? `Left the company on ${r.termination_date}${r.hire_date_missing ? " · no hire date recorded, so no payslip can be issued" : ""}`
+                            : undefined}
+                        >
+                          Terminated
+                        </span>
                       ) : r.hire_date_missing ? (
                         <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300">
                           No hire date
@@ -1306,7 +1325,16 @@ export function PayslipsStatement({
           </Note>
         </>
       )}
-    </div>
+      </div>
+
+      {/* THE SECOND TABLE. Outside the payslips print id on purpose: it is a
+          different document with its own print button, and nesting it inside
+          would make "print the register" also print this. */}
+      <CommissionReviewTable
+        rows={commission}
+        periodStart={periodStart} periodEnd={periodEnd} label={label}
+      />
+    </>
   );
 }
 
@@ -1523,5 +1551,182 @@ function PayslipDocument({
         <Note>No salary is recorded for this driver, so basic salary reads 0.</Note>
       )}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// COMMISSION REVIEW (0116) — DISPLAY ONLY. No buttons, no actions, writes
+// nothing. Management reads what each driver EARNED.
+//
+// IT SITS UNDER THE PAYSLIP REGISTER AND SHOWS A DIFFERENT BASIS ON PURPOSE,
+// which is the whole reason it is labelled as loudly as it is:
+//
+//   the register above  -> what was SETTLED in this month (paid_at)
+//   this table          -> what was EARNED in the month the trips were DRIVEN
+//
+// The same driver legitimately shows two different totals on one screen. Live,
+// two July drivers do. Without the labelling that reads as a bug in one of
+// them, so the heading, the subtitle and the footnote all say "work month"
+// and "earned, paid out or not" rather than leaving it to be inferred.
+//
+// Delivered trips only — commission exists on no other stage, and
+// v_commissions_monthly (which the P&L reads) filters the same way, so this
+// table cannot disagree with the P&L about what trip commission means.
+// ---------------------------------------------------------------------------
+
+function CommissionReviewTable({
+  rows, periodStart, periodEnd, label,
+}: {
+  rows: DriverCommissionByProjectRow[];
+  periodStart: string; periodEnd: string; label: string;
+}) {
+  const drivers = useMemo(() => {
+    const inPeriod = rows.filter((r) => r.month >= periodStart && r.month <= periodEnd);
+
+    // Group the view's driver x month x project rows into one row per driver
+    // for the period. Summing view output across a period is what every
+    // statement here already does; no metric is defined by this.
+    const byDriver = new Map<string, {
+      driverId: string; name: string; trips: number; commission: number;
+      projects: Map<string, { name: string; trips: number }>;
+    }>();
+
+    for (const r of inPeriod) {
+      const e = byDriver.get(r.driver_id) ?? {
+        driverId: r.driver_id, name: r.driver_name, trips: 0, commission: 0,
+        projects: new Map<string, { name: string; trips: number }>(),
+      };
+      e.trips += r.trips_delivered;
+      e.commission += r.commission_sar;
+      // A NULL project is a direct-customer trip — real work with real
+      // commission, kept by the view rather than dropped. The UI names it, the
+      // same way the Operations statement names its unassigned driver row.
+      const key = r.project_id ?? "__direct__";
+      const name = r.project_name ?? "Direct customer";
+      const p = e.projects.get(key) ?? { name, trips: 0 };
+      p.trips += r.trips_delivered;
+      e.projects.set(key, p);
+      byDriver.set(r.driver_id, e);
+    }
+
+    return [...byDriver.values()].sort((a, b) => b.commission - a.commission);
+  }, [rows, periodStart, periodEnd]);
+
+  // TWO DRIVERS SHARE THE NAME "Fahad 4" — different ids, both terminated. To a
+  // manager reading a list of names they are the same person, and the rows
+  // carry different money. Only ambiguous names get a discriminator, so the
+  // common case stays clean: the app has no per-driver display code beyond the
+  // name, and inventing one for every row would be noise.
+  const duplicateNames = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const d of drivers) seen.set(d.name, (seen.get(d.name) ?? 0) + 1);
+    return new Set([...seen.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+  }, [drivers]);
+
+  const totals = drivers.reduce(
+    (a, d) => ({ trips: a.trips + d.trips, commission: a.commission + d.commission }),
+    { trips: 0, commission: 0 },
+  );
+
+  // Only this table prints, not the register above it. Both live in the DOM at
+  // once, so a body class picks which subtree the print stylesheet keeps —
+  // the same mechanism the breakdown report already uses.
+  function printReview() {
+    document.body.classList.add("printing-review");
+    window.print();
+    document.body.classList.remove("printing-review");
+  }
+
+  return (
+    <div id="commission-review-print" className="card p-6 mt-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <PrintBand title="Commission earned by driver" period={`${label} · work month`} />
+          <h2 className="text-lg font-semibold no-print">Commission earned by driver</h2>
+          <p className="text-sm muted no-print">
+            {label} · <b>work month</b> — what each driver earned from the trips he
+            drove in this period, <b>whether or not it has been paid out yet</b>.
+          </p>
+        </div>
+        <Btn variant="outline" onClick={printReview} className="no-print">
+          <Printer className="h-4 w-4" /> Print this table
+        </Btn>
+      </div>
+
+      {/* THE DISTINCTION, STATED WHERE THE NUMBERS ARE. The register above uses
+          the settlement month; this uses the work month. Same money, two
+          questions — and the totals for one driver will legitimately differ. */}
+      <div className="mt-3 mb-4 rounded-lg border border-brand-500/25 bg-brand-500/5 px-3 py-2 text-[12px] leading-relaxed">
+        This is <b>not</b> the payslip figure above. The payslip register shows what was{" "}
+        <b>settled</b> in this month; this table shows what was <b>earned</b> in the month
+        the work was done. A driver whose June trips were paid in July appears here under{" "}
+        <b>June</b> and on his payslip under <b>July</b>, so the two totals differing is
+        expected, not an error.
+      </div>
+
+      {drivers.length === 0 ? (
+        <Empty>No delivered trips in this period.</Empty>
+      ) : (
+        <>
+          <Table>
+            <thead>
+              <tr>
+                <TH>Driver</TH>
+                <TH className="text-right">Trips</TH>
+                <TH>Projects served</TH>
+                <TH className="text-right">Commission earned</TH>
+              </tr>
+            </thead>
+            <tbody>
+              {drivers.map((d) => (
+                <tr key={d.driverId}>
+                  <TD className="font-medium align-top">
+                    {d.name}
+                    {duplicateNames.has(d.name) && (
+                      <span className="ms-1.5 font-mono text-[10px] muted font-normal">
+                        #{d.driverId.slice(0, 4)}
+                      </span>
+                    )}
+                  </TD>
+                  <TD className="text-right tabular-nums align-top">{formatNum(d.trips)}</TD>
+                  <TD className="align-top">
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                      {[...d.projects.values()]
+                        .sort((a, b) => b.trips - a.trips)
+                        .map((p) => (
+                          <span key={p.name} className="whitespace-nowrap">
+                            {p.name}{" "}
+                            <span className="text-[11px] muted tabular-nums">
+                              {formatNum(p.trips)}
+                            </span>
+                          </span>
+                        ))}
+                    </div>
+                  </TD>
+                  <TD className="text-right tabular-nums font-semibold align-top">
+                    {formatSar(d.commission)}
+                  </TD>
+                </tr>
+              ))}
+              <tr className="border-t-2">
+                <TD className="font-semibold">Total</TD>
+                <TD className="text-right tabular-nums font-semibold">{formatNum(totals.trips)}</TD>
+                <TD>{""}</TD>
+                <TD className="text-right tabular-nums font-semibold">
+                  {formatSar(totals.commission)}
+                </TD>
+              </tr>
+            </tbody>
+          </Table>
+
+          <Note>
+            Delivered trips only — commission is earned on delivery, so a scheduled or
+            in-transit trip has earned nothing yet and is not counted here. The small
+            number beside each project is that project&apos;s trip count. Trips taken for a
+            direct customer rather than a project are grouped as <b>Direct customer</b>.
+          </Note>
+        </>
+      )}
+    </div>
   );
 }

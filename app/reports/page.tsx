@@ -33,7 +33,7 @@ import type {
   MaintenancePerTruckRow, PnlPeriodRow, ExpenseCategoryPeriodRow,
   RevenueInvoiceRow, SalesReturnRow, CommissionsRow, CommissionsPaidRow,
   MetricDictionaryRow, OperationsByDriverRow,
-  PayslipBasisRow, IssuedPayslipRow,
+  PayslipBasisRow, IssuedPayslipRow, DriverCommissionByProjectRow,
 } from "@/lib/reports";
 import ReportsClient from "./ReportsClient";
 
@@ -59,6 +59,7 @@ export default async function ReportsPage() {
     opsByDriverRes,
     payslipBasisRes,
     issuedPayslipsRes,
+    driverCommissionRes,
   ] = await Promise.all([
     supabase.from("v_pnl_monthly").select("*").order("month"),
     supabase.from("v_collections_monthly").select("*").order("month"),
@@ -109,6 +110,11 @@ export default async function ReportsPage() {
     // recomputed from today's data.
     supabase.from("driver_payslips").select("*")
       .order("period_start", { ascending: false }),
+    // 0116 — what each driver EARNED in the month he DROVE the trips, split by
+    // project. Work month, not settlement month: deliberately the opposite
+    // basis from the payslip rows above.
+    supabase.from("v_driver_commission_by_project_monthly").select("*")
+      .order("month", { ascending: false }),
   ]);
 
   // One honest error line beats ten empty cards that look like real zeros.
@@ -123,7 +129,7 @@ export default async function ReportsPage() {
     returnsRes.error?.message ?? commissionsRes.error?.message ??
     commissionsPaidRes.error?.message ?? metricsRes.error?.message ??
     opsByDriverRes.error?.message ?? payslipBasisRes.error?.message ??
-    issuedPayslipsRes.error?.message ?? null;
+    issuedPayslipsRes.error?.message ?? driverCommissionRes.error?.message ?? null;
 
   const pnl: PnlRow[] = ((pnlRes.data ?? []) as Row[]).map((r) => ({
     month: String(r.month),
@@ -355,6 +361,8 @@ export default async function ReportsPage() {
     base_salary_sar: n(r.base_salary_sar),
     salary_missing: r.salary_missing === true,
     hire_date_missing: r.hire_date_missing === true,
+    terminated: r.terminated === true,
+    termination_date: r.termination_date ? String(r.termination_date) : null,
     commission_basis: String(r.commission_basis) as PayslipBasisRow["commission_basis"],
     commission_settled: r.commission_settled === true,
     payout_count: n(r.payout_count),
@@ -391,12 +399,24 @@ export default async function ReportsPage() {
     snapshot: (r.snapshot ?? null) as IssuedPayslipRow["snapshot"],
   }));
 
+  const driverCommission: DriverCommissionByProjectRow[] =
+    ((driverCommissionRes.data ?? []) as Row[]).map((r) => ({
+      month: String(r.month),
+      driver_id: String(r.driver_id),
+      driver_name: String(r.driver_name ?? ""),
+      project_id: r.project_id ? String(r.project_id) : null,
+      project_name: r.project_name ? String(r.project_name) : null,
+      trips_delivered: n(r.trips_delivered),
+      commission_sar: n(r.commission_sar),
+    }));
+
   return (
     <ReportsClient
       error={error}
       metrics={metrics}
       payslipBasis={payslipBasis}
       issuedPayslips={issuedPayslips}
+      driverCommission={driverCommission}
       opsByDriver={opsByDriver}
       invoices={invoices}
       salesReturns={salesReturns}

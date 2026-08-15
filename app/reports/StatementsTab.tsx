@@ -42,6 +42,7 @@ import {
   type CollectionsRow, type MetricDictionaryRow, type RevenuePerTruckRow,
   type OperationsByDriverRow,
   type PayslipBasisRow, type IssuedPayslipRow,
+  type DriverCommissionByProjectRow,
 } from "@/lib/reports";
 import {
   RevenueStatement, ReceivablesStatement, CostStatement,
@@ -93,6 +94,7 @@ type Props = {
   opsByDriver: OperationsByDriverRow[];
   payslipBasis: PayslipBasisRow[];
   issuedPayslips: IssuedPayslipRow[];
+  driverCommission: DriverCommissionByProjectRow[];
   today: string;
   onManageExpenses: () => void;
 };
@@ -101,7 +103,7 @@ export default function StatementsTab({
   pnlPeriods, expenseCategories, invoices, salesReturns, receivables, aging,
   maintPerTruck, purchasing, payroll, commissions, commissionsPaid, operations,
   filling, fillingByStation,
-  collections, metrics, perTruck, opsByDriver, payslipBasis, issuedPayslips, today, onManageExpenses,
+  collections, metrics, perTruck, opsByDriver, payslipBasis, issuedPayslips, driverCommission, today, onManageExpenses,
 }: Props) {
   const [periodType, setPeriodType] = useState<PeriodType>("month");
   // Which statement is showing lives in the URL, so global search can open
@@ -440,6 +442,7 @@ export default function StatementsTab({
           onSelectDriver={setPayslipDriver}
           onIssue={handleIssuePayslip}
           issuingId={issuingPayslip}
+          commission={driverCommission}
         />
         </>
       )}

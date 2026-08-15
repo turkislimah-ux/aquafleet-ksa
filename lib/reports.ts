@@ -700,6 +700,39 @@ export type PayslipBasisRow = {
   /** Set once a payslip exists for this driver+month — the frozen document. */
   issued_payslip_id: string | null;
   issued_payslip_number: string | null;
+  /**
+   * Employment status (0116). A LABEL rule, not a gate: terminated outranks
+   * hire_date_missing in the Status column because leaving the company is the
+   * more important fact, but termination does NOT block issuing — a driver's
+   * final month is a legitimate payslip.
+   */
+  terminated: boolean;
+  termination_date: string | null;
+};
+
+/**
+ * One driver's earnings for one project in the month he DROVE the trips
+ * (v_driver_commission_by_project_monthly, 0116).
+ *
+ * WORK MONTH, NOT SETTLEMENT MONTH — deliberately the opposite basis from
+ * PayslipBasisRow above, and deliberately including commission already paid
+ * out. The payslip answers "what was settled this month"; this answers "what
+ * did he earn from the trips he drove this month". Same money, two questions,
+ * and the surface has to say which is which or a manager will read one as the
+ * other.
+ *
+ * Delivered trips only — commission exists on no other stage, and
+ * v_commissions_monthly (which the P&L reads) filters the same way.
+ */
+export type DriverCommissionByProjectRow = {
+  month: string;
+  driver_id: string;
+  driver_name: string;
+  /** NULL for a direct-customer trip. Real work, kept, named by the UI. */
+  project_id: string | null;
+  project_name: string | null;
+  trips_delivered: number;
+  commission_sar: number;
 };
 
 /** An issued, frozen payslip. Every money column is what it was at issue. */

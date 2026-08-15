@@ -30,6 +30,7 @@ import {
   type CommissionsPaidRow, type MetricDictionaryRow,
   type OperationsByDriverRow,
   type PayslipBasisRow, type IssuedPayslipRow,
+  type DriverCommissionByProjectRow,
 } from "@/lib/reports";
 import OverviewTab from "./OverviewTab";
 import StatementsTab from "./StatementsTab";
@@ -74,6 +75,8 @@ type ReportsClientProps = {
   /** 0115 — payslip basis per driver per month, and the frozen documents. */
   payslipBasis: PayslipBasisRow[];
   issuedPayslips: IssuedPayslipRow[];
+  /** 0116 — the commission review table's rows (work month, by project). */
+  driverCommission: DriverCommissionByProjectRow[];
   /** Per-driver operations (0101) — the Operations statement transposes on it. */
   opsByDriver: OperationsByDriverRow[];
 };
@@ -167,6 +170,7 @@ export default function ReportsClient(props: ReportsClientProps) {
           opsByDriver={props.opsByDriver}
           payslipBasis={props.payslipBasis}
           issuedPayslips={props.issuedPayslips}
+          driverCommission={props.driverCommission}
           today={props.today}
           onManageExpenses={() => setExpensesOpen(true)}
         />

@@ -147,7 +147,16 @@ body {
   #ops-print, #ops-print *,
   #narrative-print, #narrative-print *,
   #payslips-print, #payslips-print *,
+  #commission-review-print, #commission-review-print *,
   #custom-print, #custom-print * { visibility: visible !important; }
+  /* THE PAYSLIPS SURFACE IS THE ONE PLACE TWO PRINT SUBTREES COEXIST.
+     Every other statement is mounted alone, so "one id visible" is enough.
+     Here the register and the commission review render together, so a body
+     class set by the review table's own Print button decides which survives —
+     same mechanism as body.printing-breakdown below. Without this, printing
+     either one would emit both. */
+  body.printing-review #payslips-print { display: none !important; }
+  body:not(.printing-review) #commission-review-print { display: none !important; }
   .no-print { display: none !important; }
 
   /* Shown ONLY on paper — the statement's own title/period band. */
@@ -174,7 +183,8 @@ body {
   main { padding: 0 !important; margin: 0 !important; }
 
   #pnl-print, #revenue-print, #receivables-print,
-  #cost-print, #ops-print, #narrative-print, #payslips-print, #custom-print {
+  #cost-print, #ops-print, #narrative-print, #payslips-print,
+  #commission-review-print, #custom-print {
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
@@ -191,25 +201,25 @@ body {
      multi-page table loses its column headings after page one. */
   #pnl-print table, #revenue-print table, #receivables-print table,
   #cost-print table, #ops-print table, #narrative-print table,
-  #payslips-print table, #custom-print table {
+  #payslips-print table, #commission-review-print table, #custom-print table {
     width: 100% !important;
     border-collapse: collapse;
   }
   #pnl-print thead, #revenue-print thead, #receivables-print thead,
   #cost-print thead, #ops-print thead, #narrative-print thead,
-  #payslips-print thead, #custom-print thead {
+  #payslips-print thead, #commission-review-print thead, #custom-print thead {
     display: table-header-group;
   }
   #pnl-print tr, #revenue-print tr, #receivables-print tr,
   #cost-print tr, #ops-print tr, #narrative-print tr,
-  #payslips-print tr, #custom-print tr {
+  #payslips-print tr, #commission-review-print tr, #custom-print tr {
     break-inside: avoid;
     page-break-inside: avoid;
   }
   /* A section heading must never be the last thing on a page. */
   #pnl-print h3, #revenue-print h3, #receivables-print h3,
   #cost-print h3, #ops-print h3, #narrative-print h3,
-  #payslips-print h3, #custom-print h3 {
+  #payslips-print h3, #commission-review-print h3, #custom-print h3 {
     break-after: avoid;
     page-break-after: avoid;
     margin-top: 14pt;
