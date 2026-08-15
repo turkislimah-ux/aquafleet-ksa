@@ -1758,12 +1758,56 @@ relevant skill(s) **when the task calls for it**:
     EDITS — NOT AGAINST CHANGING WHICH STATION FILLED.** Editing a station's price
     later must not reprice history. But if the truck actually filled somewhere else,
     the frozen figure is a price from a station it never visited — a wrong record,
-    not a protected one — so a station change RE-TAKES it. **A DELIVERED trip is the
-    exception and is never re-snapshotted:** its cost has been reported, and moving it
-    would silently restate a closed period. `decideStationChange` returns
-    `costPatch: null` (do not touch) as a distinct outcome from
+    not a protected one — so a station change RE-TAKES it. `decideStationChange`
+    returns `costPatch: null` (do not touch) as a distinct outcome from
     `{ filling_cost_sar: null }` (moved, new station does not price this type) — two
     different claims, kept apart by the type.
+    - **THE COST IS FROZEN ONLY WHEN THE TRIP IS CLOSED HISTORY, WHICH MEANS
+      DELIVERED AT *BOTH ENDS* OF THE WRITE — NOT "the target stage is delivered".**
+      This entry originally read "a DELIVERED trip is never re-snapshotted", and that
+      phrasing is exactly the bug that shipped (`c76e731` fixed it). `setTripStage`
+      passed only the TARGET stage, so changing the station and marking the trip
+      delivered in one Move-trip apply was read as closed history: it wrote the new
+      station and kept the OLD station's price. The action did not even SELECT the
+      trip's current stage, so it could not tell "already closed" from "becoming
+      delivered right now".
+
+      | from | to | station changed | cost |
+      |---|---|---|---|
+      | in_transit | delivered | yes | **RE-TAKEN** (was the bug) |
+      | delivered | delivered | yes | frozen — closed history |
+      | delivered | in_transit | yes | **RE-TAKEN** — reopened, live again |
+      | loading | loading | yes | **RE-TAKEN** |
+
+      Becoming delivered is still live: the fill has just been asserted to have
+      happened somewhere else. Leaving delivered is live again too — which is why
+      keying on the CURRENT stage alone would have been wrong in the other direction.
+      `stationChangePatch` takes both stages and computes `closedHistory` once;
+      `decideStationChange`'s third parameter is named `closedHistory`, not
+      `isDelivered`, because **the wrong name is what made the wrong value look right
+      at the call site.**
+    - **HOW IT WAS CAUGHT, and why no test would have:** Turki read
+      "Shas Water Station · 1 fill · **15 SAR**" on the Reports cost sub-tab. Shas
+      charges 80.00 for potable and always has; the 15.00 was Manfuhah's potable price
+      from before he edited it to 5.00 — a figure that had never been a Shas price at
+      all. **The reconciliation held perfectly** (the statement faithfully reported the
+      stored snapshot), so nothing summed wrong; only a human who knew Shas's price
+      could see it. **0114 could not catch it either** — the trigger refuses impossible
+      station/type pairs but writes no money, and Shas *does* fill potable, so the move
+      was legitimate and only the snapshot was wrong. Blast radius was measured, not
+      assumed: exactly ONE trip. Every other frozen cost differing from its station's
+      current price is explained by a price edit on the same station and type (356 of
+      them, all correct). KI-026-0062 was corrected to 80.00 and the fix re-verified
+      in-browser on a second trip.
+  - **A SCHEDULED TRIP'S FROZEN COST IS NOT A COST YET.**
+    `v_filling_cost_monthly` joins `stage in (loading, in_transit, delivered)` — a
+    scheduled trip has not filled, so it contributes nothing. **Summing
+    `trips.filling_cost_sar` raw will therefore EXCEED the statement** and look like an
+    understatement in the view; live, August carries 20 scheduled trips holding 165.00
+    that correctly do not appear. This cost a false alarm during verification — a
+    predicted total was 5 SAR out purely because a scheduled trip's cost was subtracted
+    from a figure it had never been part of. **Reconcile against the view's own
+    predicate, never against a raw trip sum.**
   - **THE GATE IS ONE RULE READ FROM TWO DIRECTIONS.** Trip creation fixes the station
     and narrows the TYPE (`selectableWaterTypes`); a station change fixes the type and
     narrows the STATION (`stationBlockedForType`). Only the first existed at capture
