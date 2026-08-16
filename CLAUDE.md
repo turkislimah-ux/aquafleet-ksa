@@ -1767,9 +1767,9 @@ relevant skill(s) **when the task calls for it**:
     collapsed into "no price". Every helper in `lib/station-pricing.ts` preserves
     that, and `?? 0`, `Number(x) || 0` or any truthiness check reintroduces the bug
     the schema was shaped to prevent. The flat `water_stations.fill_cost` it replaced
-    is still on the table, deliberately unwritten, holding pre-0110 figures until its
-    own retirement migration — writing to it now would create a second, diverging
-    price of record.
+    was kept unwritten through 0110–0121 and is **now GONE — retired in `0122`**
+    (commit `dc9d411`), once both conditions 0110 set for itself were met: per-type
+    prices entered on every station, and the trip backfill verified.
   - **`trips.filling_cost_sar` IS A FROZEN SNAPSHOT, AND THE FREEZE IS AGAINST PRICE
     EDITS — NOT AGAINST CHANGING WHICH STATION FILLED.** Editing a station's price
     later must not reprice history. But if the truck actually filled somewhere else,
@@ -1916,13 +1916,43 @@ relevant skill(s) **when the task calls for it**:
     under a running dev server.** To verify a production build without stopping it,
     point `distDir` elsewhere — and note `next build` **rewrites `tsconfig.json`**
     (reformats it and injects the dist path into `include`); revert it afterwards.
-  - **Deferred — Water Station Cost:** retire the flat `water_stations.fill_cost`
-    column (its own migration; app code already ignores it); there is **no supported
-    clear-the-station path** — `trips.water_station` is NOT NULL with an FK and the
-    slug CHECK forbids `""`, so `setTripStation(id, "")` fails on the foreign key, and
-    the code's empty/NULL guards are unreachable today; `StationPricing` is hand-rolled
-    in three places (`WaterStationsModal`, `ProjectsBoard`, `app/trips/page.tsx`)
-    instead of imported — a consolidation, not dead code.
+  - **THE FLAT `water_stations.fill_cost` IS RETIRED — migration `0122`, commit
+    `dc9d411`.** 0110 had parked it with its own release condition ("once per-type
+    prices are entered and the trip backfill is verified"); both were checked live
+    and held — every station carries a per-type price, and
+    `water_stations_offers_at_least_one_type` was **already** `convalidated` (the
+    second thing 0110 parked, closed by someone before this).
+    - **NO APP COMMIT WAS NEEDED, which made this unlike `0119`/`0121`.** Every
+      remaining mention was a COMMENT saying the column was deprecated, and no
+      TypeScript type declared it — `StationPricing` names only the per-type pair —
+      so nothing selected it into a typed shape. Checked rather than assumed.
+    - **THE ONE DATUM DESTROYED, and why rescuing it would have been wrong:**
+      `olaya_filling_point.fill_cost = 70.00`, the only non-zero value. Olaya has
+      **zero trips, any stage, all time**, so that figure had never priced a fill —
+      no P&L number and no frozen `trips.filling_cost_sar` traced to it. The tempting
+      move was to write it into `fill_cost_potable_sar` so "nothing is lost". **That
+      would have invented a business fact:** nobody knows which water type the flat
+      70.00 was for, and Olaya's potable price is NULL, which under this schema's
+      central rule MEANS "does not offer potable". The migration carries a DO-NOT-FIX
+      block, and its verification asserts Olaya's potable is still NULL afterwards.
+      The full pre-drop table is preserved in the migration header so the figures
+      survive in git. **Losing an unused number beats inventing a business fact.**
+    - **The money proof:** `v_filling_cost_monthly` was byte-identical before and
+      after — Jun 210.00 (18 costed / 10 uncosted), Jul 1,285.00 (143/3), Aug
+      5,185.00 (598/0); trips 817 / 13 uncosted. Dropping a column no view reads
+      cannot reach the P&L, and that is what the check demonstrates rather than
+      assumes.
+    - **Trap for anyone re-checking dependencies:** use `fill_cost[^_]`, not
+      `%fill_cost%`. The loose pattern also matches `fill_cost_potable_sar` /
+      `fill_cost_non_potable_sar` and returns false positives on every check —
+      including the three `fill_cost`-named CONSTRAINTS, which reference only the
+      per-type columns.
+  - **Deferred — Water Station Cost:** there is **no supported clear-the-station
+    path** — `trips.water_station` is NOT NULL with an FK and the slug CHECK forbids
+    `""`, so `setTripStation(id, "")` fails on the foreign key, and the code's
+    empty/NULL guards are unreachable today; `StationPricing` is hand-rolled in three
+    places (`WaterStationsModal`, `ProjectsBoard`, `app/trips/page.tsx`) instead of
+    imported — a consolidation, not dead code.
 
 - **DRIVER PAYSLIPS — migrations `0115`–`0118`, through commit `5476b24`.** A
   numbered, frozen settlement document per driver per month, plus a commission
