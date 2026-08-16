@@ -9,3 +9,8 @@ node_modules
 out
 *.tsbuildinfo
 test-results
+
+# GSD plugin owns .planning/HANDOFF.json and rewrites it from an empty
+# template after tool calls. Ours is .planning/AQUAFLEET-HANDOFF.json (CLAUDE.md §5).
+.planning/HANDOFF.json
+preview/.planning/HANDOFF.json

@@ -172,35 +172,29 @@ Draft → Review → Confirmed → Paid
 
 - Update `CLAUDE.md` section 7 (or equivalent state section) at the end of any session
   that changes what's built or what's next.
-- **The two `HANDOFF.json` files are governed DIFFERENTLY — do not generalise
-  either one to the other.** This bullet used to read "keep both HANDOFF.json
-  files unstaged"; that was wrong and is superseded (ruling: Turki via the
-  architect, 2026-08-15). **`CLAUDE.md` §5 is the authority — if this file ever
-  disagrees with §5, §5 wins.**
-  - **`.planning/HANDOFF.json` (root) — IS COMMITTED**, as a deliberate snapshot
-    (Turki's call, 2026-08-07), and only ever as a RICH, VERIFIED one. It is
-    owned by an auto-tool (`"source": "auto-postool"`) that rewrites it back to
-    an empty template after tool calls, so follow §5's sequence exactly:
-    **write it and `git add` it in ONE command** — the gap between writing and
-    staging is precisely where it gets blanked — then **confirm
-    `git diff --cached` shows the rich version**, commit, and finally
-    `git checkout -- .planning/HANDOFF.json` so the tree matches HEAD. It drifts
-    back to the blank template on the next tool run. That is expected, not a bug
-    to fix.
-    **Never `git add` it reflexively.** If the auto-tool has run since you wrote
-    it, you will commit the empty template over real content and lose it
-    silently — the diff looks like an ordinary update.
-    **"ONE COMMAND" IS NOT SUFFICIENT ON ITS OWN — see §5 for the sharper rule,
-    which was learned by blanking this file for real** (`7b29c65`, restored in
-    `86adec8`). A write that THROWS BEFORE WRITING still lets a chained
-    `&& git add` stage whatever the auto-tool left behind. §5 now requires the
-    add to be conditional on the write having succeeded, the STAGED BLOB to be
-    parsed and asserted (`git show :.planning/HANDOFF.json`), and a shrinking
-    diff on this file to be treated as a stop signal. Do not rely on this
-    paragraph's summary — §5 is the authority.
-  - **`preview/.planning/HANDOFF.json` — NEVER staged.** It lives inside the
-    read-only `preview/` tree and carries stale auto-tool content. Its permanent
-    "modified" state in `git status` is correct; leave it alone.
+- **OUR handoff file is `.planning/AQUAFLEET-HANDOFF.json`, and it IS committed**
+  (Turki's call, 2026-08-07). Write it by hand, stage it by explicit path, commit.
+  No special ceremony — the ceremony that used to live here existed only because
+  the path was contested, and it no longer is.
+  - **`.planning/HANDOFF.json` and `preview/.planning/HANDOFF.json` are the gsd
+    plugin's, and are GITIGNORED.** gsd's PostToolUse checkpoint rewrites them
+    from an empty template after nearly every tool call. **Empty is their correct
+    state in this repo** (it generates from `.planning/STATE.md`, which we have
+    never had). Never read them for project state, never stage them, never
+    "repair" them.
+  - **THE HISTORY, BECAUSE THE LESSON GENERALISES.** We used to write our snapshot
+    to the contested `.planning/HANDOFF.json`. It was committed blank over a real
+    snapshot once (`7b29c65`, restored in `86adec8`) and blanked twice more in one
+    later round — once between the file being verified and the `git add` seconds
+    after, so the INDEX held the blank while the working tree looked right. Every
+    guard worked and it still happened three times. **The fix was ownership, not
+    vigilance: when two tools claim one path, move the path.**
+  - **`CLAUDE.md` §5 is the authority** — it keeps the staging-discipline rules
+    that came out of this, because they apply to any generated file: the `add`
+    conditional on the write succeeding, inspect the STAGED BLOB not the working
+    tree, a shrinking diff is a stop signal, and `git checkout -- <path>` restores
+    from the INDEX so recovery needs `git checkout HEAD -- <path>`. If this file
+    ever disagrees with §5, §5 wins.
 - If a session is getting long (15+ turns), proactively save state and suggest
   starting fresh rather than degrading.
 - When verifying a build, check the DB state (via Supabase MCP) independently of

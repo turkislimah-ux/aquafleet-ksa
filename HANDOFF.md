@@ -71,31 +71,40 @@ branch        main
 origin/main   0 ahead / 0 behind
 ```
 
-Working tree is clean **apart from one expected file**:
+Working tree is clean. **There is no longer a permanent phantom modification** —
+that was a symptom, and it is gone.
 
-```
- M .planning/HANDOFF.json
-```
+Three files once shared one name. They are now separated by path:
 
-**That permanent "modified" state is correct — do not fix it.** The two
-HANDOFF.json files are governed differently:
+- **`.planning/AQUAFLEET-HANDOFF.json` — OURS, and committed**, as a deliberate
+  snapshot (Turki's call, 2026-08-07). Written by hand each round, staged by
+  explicit path like anything else. No special ceremony.
+- **`.planning/HANDOFF.json` — the gsd plugin's. Gitignored.** Its PostToolUse
+  checkpoint regenerates it from `.planning/STATE.md`, which this repo has never
+  had, so it produces a 450-byte empty skeleton. **Empty is its correct state
+  here.** Do not read it for project state and do not repair it.
+- **`preview/.planning/HANDOFF.json`** — the same plugin file inside the
+  read-only `preview/` tree. Also gitignored.
 
-- **`.planning/HANDOFF.json` — IS committed**, as a deliberate snapshot
-  (Turki's call, 2026-08-07). It is owned by an auto-tool
-  (`"source": "auto-postool"`) that rewrites it back to an empty template after
-  tool calls. So: write it and `git add` it **in the same command**, then
-  commit. The gap between writing and staging is exactly where it gets blanked.
-  Confirm `git diff --cached` shows the rich version before committing —
-  otherwise you commit the empty template over real content and lose it
-  silently. Afterwards `git checkout -- .planning/HANDOFF.json` so the tree
-  matches HEAD. It will drift again on the next tool run; that is expected.
-- **`preview/.planning/HANDOFF.json` — NEVER staged.** It lives inside the
-  read-only `preview/` tree and carries stale auto-tool content.
+**Why the rename:** we used to write our snapshot to `.planning/HANDOFF.json`,
+which gsd also claims and overwrites unconditionally after nearly every tool
+call. It committed the blank template over a full snapshot once (`7b29c65`,
+restored in `86adec8`) and blanked the file twice more in a single later round —
+including once between the file being verified at 12,515 bytes and the `git add`
+seconds afterwards, so the index held the blank while the working tree looked
+correct.
 
-`.claude/skills/aquafleet-domain` used to contradict this — it said to keep
-*both* files unstaged. Ruled and corrected (Turki via the architect,
-2026-08-15): `CLAUDE.md` §5 stands, and the skill now states the split rule
-explicitly rather than a single rule covering both files.
+Every guard we had worked, and we still lost it three times. **The fix was
+ownership, not vigilance: when two tools claim one path, move the path.** The
+staging-discipline lessons that came out of it are kept in `CLAUDE.md` §5 because
+they generalise to any generated file — the `add` must be conditional on the
+write succeeding, inspect the staged blob rather than the working tree, a
+shrinking diff is a stop signal, and `git checkout -- <path>` restores from the
+INDEX so you need `git checkout HEAD -- <path>`.
+
+`.claude/skills/aquafleet-domain` once contradicted the older split rule and was
+corrected (Turki via the architect, 2026-08-15). `CLAUDE.md` §5 remains the
+single source for this.
 
 Recent history, for orientation:
 

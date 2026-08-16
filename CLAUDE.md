@@ -2,9 +2,13 @@
 
 **Read this file first, every session, before doing anything else.** It defines how
 we work on this project. It changes rarely. For *current state* (what's built, what's
-next), read **§7 below** — that is the durable record — then `.planning/HANDOFF.json`
-and recent `git log` for the short version. If the JSON and §7 disagree, §7 wins: the
-JSON is auto-tool-owned and gets blanked periodically (see §5).
+next), read **§7 below** — that is the durable record — then
+`.planning/AQUAFLEET-HANDOFF.json` and recent `git log` for the short version. If the
+JSON and §7 disagree, §7 wins.
+
+**`.planning/HANDOFF.json` (no prefix) is NOT ours — it belongs to the gsd plugin,
+is gitignored, and is rewritten from an empty template after tool calls. Never read
+it for state and never stage it. See §5.**
 
 ---
 
@@ -75,13 +79,17 @@ relevant skill(s) **when the task calls for it**:
 - **React components / composition / performance** → **`vercel-react-best-practices`**
   + **`vercel-composition-patterns`**.
 - **Verifying UI behavior in-browser** → **`webapp-testing`** (Playwright).
-- **Planning / phases / roadmap** → the **`gsd` suite**. NOTE: `.planning/HANDOFF.json`
-  uses gsd's schema and is now POPULATED by hand (it was all-null until 2026-08-07),
-  but gsd itself still is not driving this project — `phase`/`plan`/`task` stay null
-  deliberately, because we do not run gsd phases and inventing a phase number would
-  be fiction. **Before leaning on gsd, report how it fits with this project's existing
-  workflow (preview/-as-spec, the commit discipline below, HANDOFF.json) so we adopt
-  it deliberately, not blindly.**
+- **Planning / phases / roadmap** → the **`gsd` suite**. NOTE:
+  `.planning/AQUAFLEET-HANDOFF.json` uses gsd's schema and is POPULATED BY HAND (it
+  was all-null until 2026-08-07), but gsd itself is not driving this project —
+  `phase`/`plan`/`task` stay null deliberately, because we do not run gsd phases and
+  inventing a phase number would be fiction. **Before leaning on gsd, report how it
+  fits with this project's existing workflow (preview/-as-spec, the commit discipline
+  below, the handoff file) so we adopt it deliberately, not blindly.**
+  - **Borrowing gsd's SCHEMA is not the same as giving gsd the PATH, and conflating
+    the two cost us three blanked files.** gsd's PostToolUse checkpoint treats
+    `.planning/HANDOFF.json` as its own and overwrites it unconditionally. Our copy
+    lives at `.planning/AQUAFLEET-HANDOFF.json` for that reason — see §5.
 
 - **Domain rules (money, stock, RPCs, invariants)** → read
   `.claude/skills/aquafleet-domain/SKILL.md` at session start. This encodes
@@ -100,44 +108,50 @@ relevant skill(s) **when the task calls for it**:
   required by a signature, interface or callback shape gets an `_` prefix — never
   delete it, that changes the shape the caller depends on.**
 - **Explicit-path `git add`** — list each file. **NEVER `git add .`**
-- **HANDOFF.json — the root one IS committed; `preview/`'s stays UNSTAGED.**
-  `.planning/HANDOFF.json` is committed as a deliberate SNAPSHOT (Turki's call,
-  2026-08-07). `preview/.planning/HANDOFF.json` is never staged — it lives inside
-  the read-only `preview/` tree and carries stale auto-tool content.
-  **READ THIS BEFORE STAGING THE ROOT ONE.** That file is owned by an auto-tool
-  (`"source": "auto-postool"`) which rewrites it back to the EMPTY template after
-  tool calls — it did exactly that seconds after the snapshot was written, and the
-  committed copy survived only because it had been staged first. So:
-  - Write the content, then `git add` it **immediately**, then commit. A gap
-    between writing and staging is a window for the tool to blank it.
-  - **Never `git add .planning/HANDOFF.json` reflexively** — if the tool has run
-    since, you will commit the empty template straight over real content and lose
-    it silently. Check `git diff --cached` shows the rich version before committing.
-  - **"ONE COMMAND" IS NOT ENOUGH, AND THIS WAS PROVEN THE HARD WAY** — commit
-    `7b29c65` committed the blank template straight over a full snapshot
-    (restored in `86adec8`). The write was a python heredoc that threw **before
-    writing anything**, and the `&& git add` chained after it happily staged
-    whatever the auto-tool had left on disk. Writing and staging in one command
-    does not help when the write silently did nothing. So:
-    - **The `add` must be conditional on the write actually SUCCEEDING**, not
-      merely chained after it. A generator that can throw part-way through must
-      never leave an untouched or half-written file in the staging path.
-    - **INSPECT THE STAGED BLOB, NOT THE WORKING TREE.** `git show
-      :.planning/HANDOFF.json` reads exactly what would be committed — parse it
-      and assert `source == "claude-code-session"` with non-empty `decisions` and
-      `completed_tasks`. That is the check that caught it on the retry; looking
-      at the file on disk would not have.
-    - **A SHRINKING DIFF ON THIS FILE IS THE TELL.** Real updates grow or churn
-      it; a large net deletion (`16 insertions, 30 deletions`) means the template
-      won. Treat that stat line as a stop signal, not a curiosity.
-    - Nothing was lost, only because the content was already in git. **The
-      recovery is `git show <last-good-commit>:.planning/HANDOFF.json`** — rebuild
-      from that blob and re-apply the round's updates rather than retyping it.
-  - After committing, `git checkout -- .planning/HANDOFF.json` so the working tree
-    matches HEAD instead of showing a permanent phantom modification.
-  - It will drift again on the next tool run. That is expected, not a bug to fix.
-  - **§7 of this file is the durable record.** HANDOFF.json is a pointer to it,
+- **THE HANDOFF FILE IS `.planning/AQUAFLEET-HANDOFF.json`. IT IS COMMITTED.**
+  A deliberate snapshot (Turki's call, 2026-08-07), updated by hand each round and
+  staged by explicit path like any other file.
+  - **`.planning/HANDOFF.json` — no prefix — IS NOT OURS.** It belongs to the gsd
+    plugin's PostToolUse checkpoint. Gitignored. Never read it for state, never
+    stage it, and do not "fix" it when it looks empty — empty is its correct state
+    for this repo.
+  - **`preview/.planning/HANDOFF.json`** — same thing inside the read-only
+    `preview/` tree. Also gitignored.
+  - **§7 of this file is the durable record.** The handoff JSON is a pointer to it,
     never the other way round — do not let real knowledge live only in the JSON.
+
+- **WHY THE PATH MOVED, AND THE LESSON THAT OUTLIVES IT.** We wrote our handoff to
+  `.planning/HANDOFF.json` for months. gsd's PostToolUse hook writes that same path
+  after nearly every tool call (60s throttle), generating from `.planning/STATE.md`
+  and phase dirs. **This repo has never had a `STATE.md`** — so gsd found nothing,
+  produced a 450-byte empty skeleton, and overwrote our snapshot with it. It never
+  reads the existing file, never merges, and has no guard against destroying content
+  it did not author.
+  - **It committed the blank once — `7b29c65`, over a full snapshot, restored in
+    `86adec8`** — and struck twice more in a single round afterwards, including once
+    between the moment the file was verified at 12,515 bytes and the `git add` three
+    seconds later. The staged blob was blank while the working tree looked perfect.
+  - **THE FIX WAS OWNERSHIP, NOT VIGILANCE, AND THAT IS THE GENERAL RULE.** Every
+    guard below worked — and we still lost the file three times, because a rule that
+    must be obeyed on every single commit forever will eventually not be. **When two
+    tools claim one path, move the path. Do not get better at defending it.** The
+    guards are kept because they generalise, not because this specific file still
+    needs them:
+    - **The `git add` must be conditional on the write actually SUCCEEDING**, not
+      merely chained after it with `&&`. `7b29c65`'s python heredoc threw **before
+      writing anything** and the chained `add` staged whatever was already on disk.
+      One command is not atomic.
+    - **INSPECT THE STAGED BLOB, NOT THE WORKING TREE.** `git show :<path>` and
+      `git cat-file -s` read exactly what would be committed. A file can be correct
+      on disk and blank in the index. This is what caught the second and third hits.
+    - **A SHRINKING DIFF IS A STOP SIGNAL, not a curiosity.** `16 insertions, 30
+      deletions` on a file you only added to means something else wrote it.
+    - **`git checkout -- <path>` RESTORES FROM THE INDEX, NOT HEAD.** Once a bad
+      blob is staged, the reflexive restore writes the bad content over itself and
+      reports success. Use **`git checkout HEAD -- <path>`**. This one is nasty
+      precisely because the normal recovery move is the thing that fails silently.
+    - **Recovery is `git show <last-good-commit>:<path>`** — rebuild from the blob
+      and re-apply the round's updates rather than retyping from memory.
 - **Quote dynamic-route paths** with brackets in git commands, e.g.
   `git add 'app/fleet/[id]/page.tsx'` — zsh globs `[id]` and silently drops it otherwise.
 - **Avoid `!` in commit messages** (zsh history expansion).
@@ -201,9 +215,9 @@ relevant skill(s) **when the task calls for it**:
 
 ## 7. Current state & what's next
 
-- This section IS the record. `.planning/HANDOFF.json` + `git log --oneline -20`
-  give the short version, but the JSON is auto-tool-owned and periodically blanked
-  (§5) — anything that matters belongs here, not only there.
+- This section IS the record. `.planning/AQUAFLEET-HANDOFF.json` + `git log --oneline
+  -20` give the short version — anything that matters belongs here, not only there.
+  (The unprefixed `.planning/HANDOFF.json` is gsd's, gitignored, and not state — §5.)
 
 - **KANBAN board redesign — DONE and committed** (`11edf4f`, plus `92779b0` for the
   driver summary table and `180332b` for day-scoping). This entry sat at the top of §7
