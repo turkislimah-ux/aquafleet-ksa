@@ -1477,12 +1477,51 @@ relevant skill(s) **when the task calls for it**:
     were each applied in a modified form; every file was rewritten to match live
     (verified against `pg_get_viewdef`) with the differences recorded in its own
     header. Do NOT "fix" them back toward the drafts.
-  - **Known dictionary gap:** applied `0100` added ONE new key rather than amending
-    the ten existing P&L entries, so `revenue`/`operating_cost`/`operating_margin`
-    etc. still read grain "one month" and name only their monthly view, even though
-    each IS available per quarter and year. The non-averaging warning survives on the
-    `pnl_by_period` entry. Dictionary-only fix, no view changes — documented in
-    `0100`'s header.
+  - **THE DICTIONARY IS COMPLETE — migrations `0123` + `0124`, commits `f82fe1c`,
+    `dca9840`, `b479671`.** `0100` had left two holes, both now closed. Neither
+    touched a view, an RPC or a measure.
+    - **`0123` — the period pointers.** `0100` added one new key rather than amending
+      the ten existing P&L entries, so `revenue`/`operating_cost`/`operating_margin`
+      and the rest still read grain "one month" and named only their monthly view,
+      although each IS available per quarter and year. All ten now carry
+      `one month, quarter or year` and a two-source pointer. **The count and list in
+      `0100`'s own header were correct** — the first deferred note in this stretch
+      whose premise survived re-measurement.
+      - **NOT a find-and-replace, because two of the ten are COMPOSED.**
+        `v_payroll_monthly` carries the staff/driver split and `v_commissions_monthly`
+        four components, while `v_pnl_by_period` exposes only the combined total —
+        so those two say "combined total only". The other four map directly.
+      - **`operating_margin` is the dangerous one.** Widening a RATIO's grain invites
+        the error `0100` exists to prevent, so its caveat now carries the proof:
+        averaging the monthly margins for Q3-to-date gives **+20.5%** where the
+        correct figure is **−38.7%** — it flips the sign. `v_pnl_by_period` recomputes
+        per period; the risk is a reader doing their own arithmetic.
+      - **Proven inert:** `grain`/`source_view` are display strings (`String()`-coerced,
+        never parsed), and the fingerprint of `metric_key` was **identical** before and
+        after — which is what proves the builder and Add Summary offered the same set.
+    - **`0124` — the missing fifth cost bucket.** The dictionary described FOUR of the
+      five operational costs; filling had no entry despite being inside
+      `operating_cost` since `0112`. Added as `filling_cost`, a DIRECT-mapping bucket.
+      - **Its caveat is why it is not a clone of `parts_cost`:** filling is the only
+        bucket with an uncosted companion, so **the total is SHORT by an unknown
+        amount rather than complete** — live 10 uncosted in June, 3 July, 0 August.
+        It also repeats the trap above: a SCHEDULED trip has not filled, so summing
+        `trips.filling_cost_sar` raw EXCEEDS the view.
+      - **BUILDER-ELIGIBLE, and that took a second half.** A dictionary row alone does
+        nothing: `lib/report-builder` offers a block only where `BUILDER_METRICS` and
+        the live dictionary agree. **Exactly one key** was added there, plus a `filling`
+        slot on `Bucket` — the figure was being FETCHED (`PnlPeriodRow` already carried
+        it) and never bucketed. **Groupings are period-only**, like the four buckets
+        around it: there is no per-customer or per-truck filling view.
+      - **`lib/dashboard-widgets`' `WIDGET_CATALOGUE` was deliberately NOT touched** —
+        Add Summary is a Dashboard TILE with its own bilingual label, displays, href
+        and value plumbing. Builder-eligibility was the ruling.
+      - **The fingerprint MOVED here, by design**, and the expected value was asserted
+        in advance: 29 keys `b3bbb25d…` → 30 keys `c4e9e453…`, which is the proof that
+        one key moved and not more.
+    - **FILLING AND `operating_cost` ARE A COMPONENT AND ITS CONTAINER, NEVER ADDENDS.**
+      Both are legitimate builder columns; the builder has no cross-column total by
+      design (`0100`), so nothing sums them — but a reader might try.
   - **INCIDENT — a db reset dropped `v_operations_by_driver_monthly`** because the
     replay rebuilt from committed migrations and `0101` was applied but not yet
     committed. Everything else survived. Re-applied and committed. **A migration that
