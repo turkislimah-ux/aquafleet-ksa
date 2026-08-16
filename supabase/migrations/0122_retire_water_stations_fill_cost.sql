@@ -1,0 +1,234 @@
+-- 0122_retire_water_stations_fill_cost.sql
+-- Retire the flat water_stations.fill_cost. Per-type pricing (0110) is the price
+-- of record.
+--
+-- DRAFTED TO DISK. NOT APPLIED. Architect reviews, re-runs the checks
+-- independently, and applies this.
+--
+-- ===========================================================================
+-- 0110 PARKED THIS AND NAMED ITS OWN RELEASE CONDITIONS — BOTH ARE NOW MET
+-- ===========================================================================
+-- 0110's section 3 says, verbatim: the column is "retired in a later migration
+-- once per-type prices are entered and the trip backfill is verified." This is
+-- that migration. Both conditions checked against live data before drafting:
+--
+--   1) PER-TYPE PRICES ENTERED. All 5 stations now carry at least one per-type
+--      price, and water_stations_offers_at_least_one_type — which 0110 added as
+--      NOT VALID precisely because no row satisfied it yet — is now
+--      convalidated = TRUE with 0 violating rows. That second loose end 0110
+--      parked is therefore ALREADY CLOSED and this migration does not touch it.
+--
+--   2) TRIP BACKFILL VERIFIED. 817 trips, 13 uncosted, all dated 2026-06-29 to
+--      2026-07-05 — exactly the grandfathered set CLAUDE.md section 7 records
+--      for June-July, unchanged. 0114's guard means no NEW uncosted trip can be
+--      created, so that count is historical and fixed.
+--
+-- ===========================================================================
+-- WHAT IS ACTUALLY LOST — RECORDED HERE SO IT SURVIVES THE DROP
+-- ===========================================================================
+-- Unlike 0121's payment_model (which held nothing but its own default), this
+-- column holds real, distinct values. The full pre-drop state, so the figures
+-- live on in git even though the column will not:
+--
+--     key                     fill_cost   potable   non_potable
+--     furaian_station              0.00      0.00          0.00
+--     manfuhah_station             0.00      5.00          0.00
+--     olaya_filling_point         70.00      NULL         80.00
+--     shas_water_station           NULL     80.00         50.00
+--     umm_al_hamam_station         0.00      NULL         10.00
+--
+-- Four of the five are either 0.00 (fully represented by the per-type prices
+-- beside them) or NULL. The ONLY datum that disappears is:
+--
+--     olaya_filling_point.fill_cost = 70.00
+--
+-- AND THAT FIGURE HAS NEVER PRICED A SINGLE FILL. Olaya has ZERO trips — not
+-- zero delivered, zero rows of any stage, all time. 0110 recorded the same fact
+-- ("olaya_filling_point  no trips at all (flat fill_cost 70.00)"). So no P&L
+-- figure, no frozen trips.filling_cost_sar snapshot, and no statement anywhere
+-- traces back to it.
+--
+-- ===========================================================================
+-- WHY 70.00 IS NOT MIGRATED INTO A PER-TYPE COLUMN — DO NOT "FIX" THIS
+-- ===========================================================================
+-- The obvious-looking move is to write 70.00 into fill_cost_potable_sar so
+-- nothing is lost. That would be WRONG, for the reason 0110 already refused it:
+-- NOBODY KNOWS WHICH TYPE THAT 70.00 WAS FOR. The flat column predates the
+-- potable/non-potable split entirely.
+--
+-- Worse, Olaya currently reads fill_cost_potable_sar = NULL, and under this
+-- schema's central rule NULL MEANS "THIS STATION DOES NOT OFFER POTABLE" — a
+-- deliberate business statement, not a gap. Writing 70.00 there would make the
+-- database assert Olaya offers potable at 70.00, which nobody has said. That is
+-- the exact trap 0110 avoided when it refused to seed the new columns from the
+-- old one, and the same trap that got a seed migration drafted and DELETED
+-- during the Water Station Cost work (section 7: "Do not seed a column whose
+-- NULL carries meaning").
+--
+-- Losing an unused number beats inventing a business fact.
+--
+-- ===========================================================================
+-- NOTHING READS IT — VERIFIED. Re-run these; do not take my word.
+-- ===========================================================================
+-- Note the regex: `fill_cost[^_]` matches the FLAT column but not
+-- fill_cost_potable_sar / fill_cost_non_potable_sar. A plain '%fill_cost%'
+-- LIKE will match all three and give a false positive on every check below.
+--
+--   -- views ......................................... expect 0
+--   select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
+--    where n.nspname='public' and c.relkind='v'
+--      and pg_get_viewdef(c.oid,true) ~ 'fill_cost[^_]';
+--
+--   -- functions/RPCs ................................ expect 0
+--   select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+--    where n.nspname='public' and p.prokind='f'
+--      and pg_get_functiondef(p.oid) ~ 'fill_cost[^_]';
+--   -- 0114's station/type guard trigger function matches only the PER-TYPE
+--   -- columns; confirm it does not name the flat one.
+--
+--   -- constraints ................................... expect 0
+--   select con.conname, pg_get_constraintdef(con.oid)
+--     from pg_constraint con join pg_class rel on rel.oid=con.conrelid
+--    where rel.relname='water_stations'
+--      and pg_get_constraintdef(con.oid) ~ 'fill_cost[^_]';
+--   -- The three fill_cost-named constraints on this table
+--   -- (water_stations_fill_cost_potable_nonneg,
+--   --  water_stations_fill_cost_non_potable_nonneg,
+--   --  water_stations_offers_at_least_one_type) all reference ONLY the per-type
+--   -- columns. Verified by reading their definitions, not their names.
+--
+--   -- triggers / indexes ............................ expect 0
+--   select t.tgname from pg_trigger t join pg_class c on c.oid=t.tgrelid
+--     join pg_namespace n on n.oid=c.relnamespace
+--    where n.nspname='public' and c.relname='water_stations' and not t.tgisinternal
+--   union all
+--   select indexname from pg_indexes
+--    where schemaname='public' and tablename='water_stations'
+--      and indexdef ~ 'fill_cost[^_]';
+--
+-- ===========================================================================
+-- NO APP CHANGE IS NEEDED, AND THAT IS UNUSUAL — CHECK IT RATHER THAN ASSUME
+-- ===========================================================================
+-- 0119 and 0121 both required an app commit FIRST, because app code still named
+-- the column being dropped. This one does not: the app stopped reading
+-- fill_cost back at 0110's own app work, and every remaining mention is a
+-- COMMENT saying so —
+--     app/trips/WaterStationsModal.tsx:13   "The deprecated flat fill_cost is
+--                                            no longer read or written."
+--     app/trips/actions.ts:905, :928        same, on the station write path
+--     components/OperationStationsModal.tsx:6  "No key, no fill_cost"
+--
+-- Critically, NO TypeScript type declares it: `StationPricing`
+-- (lib/station-pricing.ts) names only fill_cost_potable_sar and
+-- fill_cost_non_potable_sar. So nothing selects it into a typed shape and there
+-- is no compile-time or runtime surface to break. Confirm with:
+--     grep -rn "fill_cost" app lib components | grep -v "_potable_sar\|_non_potable_sar"
+-- Expect comments only.
+--
+-- (supabase/migrations/0043 also greps positive — that is a prose line listing
+-- numeric columns and their origin migrations, not a dependency.)
+--
+-- ===========================================================================
+-- WHAT IS DELIBERATELY NOT TOUCHED
+-- ===========================================================================
+-- · fill_cost_potable_sar / fill_cost_non_potable_sar — the price of record.
+--   NULL means "type not offered" and 0 is a REAL price (company-owned stations
+--   fill free). Never collapse the two.
+-- · trips.filling_cost_sar — the frozen per-trip snapshot. It is what every P&L
+--   filling figure actually reads; this migration cannot move any of them.
+-- · water_stations_offers_at_least_one_type — already validated, left alone.
+-- · 0114's station/type guard trigger — reads per-type columns only.
+-- · Money core (lib/prepaid.ts, lib/vat.ts) — never referenced this column.
+--
+-- ===========================================================================
+-- IRREVERSIBILITY
+-- ===========================================================================
+-- No down migration; a dropped column needs a backup to recover. What goes is
+-- documented in full above — three 0.00s, one NULL, and one 70.00 belonging to
+-- a station with no trips. The column's DEPRECATED comment (set by 0110) drops
+-- with it automatically.
+-- ===========================================================================
+
+begin;
+
+-- No `cascade`: if some dependency has appeared since this was drafted, this
+-- must FAIL rather than silently destroy whatever grew on top of it.
+alter table public.water_stations drop column if exists fill_cost;
+
+commit;
+
+-- ===========================================================================
+-- VERIFICATION — run these; do not assume.
+-- ===========================================================================
+--
+-- A) THE COLUMN IS GONE. Expect 0 rows:
+--      select column_name from information_schema.columns
+--       where table_schema='public' and table_name='water_stations'
+--         and column_name='fill_cost';
+--
+--    And the per-type pair is still there — expect 2:
+--      select count(*) from information_schema.columns
+--       where table_schema='public' and table_name='water_stations'
+--         and column_name in ('fill_cost_potable_sar','fill_cost_non_potable_sar');
+--
+-- B) NO ROW WAS LOST AND NO PRICE MOVED.
+--      select key, fill_cost_potable_sar as potable,
+--             fill_cost_non_potable_sar as non_potable
+--        from public.water_stations order by key;
+--      -- expect exactly, unchanged:
+--      --   furaian_station        0.00    0.00
+--      --   manfuhah_station       5.00    0.00
+--      --   olaya_filling_point    NULL   80.00
+--      --   shas_water_station    80.00   50.00
+--      --   umm_al_hamam_station   NULL   10.00
+--      -- Olaya's potable MUST still be NULL. If it reads 70.00, someone
+--      -- "rescued" the flat value into it — see the DO NOT FIX section above.
+--
+-- C) THE CONSTRAINTS SURVIVED AND STAY VALIDATED.
+--      select con.conname, con.convalidated, pg_get_constraintdef(con.oid)
+--        from pg_constraint con join pg_class rel on rel.oid=con.conrelid
+--        join pg_namespace n on n.oid=rel.relnamespace
+--       where n.nspname='public' and rel.relname='water_stations'
+--       order by con.conname;
+--      -- expect 6 constraints, all three fill_cost-named ones present and
+--      -- water_stations_offers_at_least_one_type convalidated = true.
+--
+-- D) THE MONEY DID NOT MOVE — THE CHECK THAT ACTUALLY MATTERS.
+--      select to_char(month,'YYYY-MM') as month, filling_cost_sar,
+--             costed_trips, uncosted_trips
+--        from public.v_filling_cost_monthly order by 1;
+--      -- Captured live at drafting time; this must be IDENTICAL after applying,
+--      -- because this migration drops a column no view reads. Any movement
+--      -- means something else was touched.
+--      --   2026-06    210.00    18 costed   10 uncosted
+--      --   2026-07  1,285.00   143 costed    3 uncosted
+--      --   2026-08  5,185.00   598 costed    0 uncosted
+--      -- Those three totals are the same 210 / 1,285 / 4,390-plus figures the
+--      -- cost-mix doughnut reconciles against (section 7); August grows with
+--      -- ongoing trips, so re-take the BEFORE rather than trusting this row if
+--      -- time has passed.
+--
+--      select count(*) as trips,
+--             count(*) filter (where filling_cost_sar is null) as uncosted
+--        from public.trips;
+--      -- expect 817 / 13, unchanged. The 13 are the June-July grandfathered
+--      -- rows; a 14th appearing means 0114's guard was dropped.
+--
+-- E) NOTHING IN THE DATABASE BROKE.
+--      select count(*) as views,
+--             count(*) filter (where 'security_invoker=true' = any(c.reloptions)) as invoker,
+--             count(*) filter (where has_table_privilege('anon', c.oid,'select')) as anon_readable
+--        from pg_class c join pg_namespace n on n.oid=c.relnamespace
+--       where n.nspname='public' and c.relkind='v';
+--      -- expect 40 / 40 / 0, unchanged.
+--
+-- F) THE APP STILL LOADS. No app change shipped with this, so the risk is a
+--    surface that selects the column implicitly. In the browser, signed in:
+--      · /trips -> Water Stations modal — list renders all 5 stations; the
+--        per-type price fields show and save. This is the one surface that used
+--        to read the flat column.
+--      · /trips -> new trip — the station picker still narrows selectable water
+--        types per station (0114's gate), and Olaya still offers NON-POTABLE
+--        ONLY.
+--      · /reports -> cost statement, filling sub-tab — figures match check D.
+-- ===========================================================================
