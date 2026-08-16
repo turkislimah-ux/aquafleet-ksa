@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-08-16T07:55:00.000Z",
+  "timestamp": "2026-08-16T18:30:00.000Z",
   "source": "claude-code-session",
   "partial": false,
   "phase": null,
@@ -9,36 +9,36 @@
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "date-basis-sweep-complete",
+  "status": "payment-mode-reconciliation-complete",
   "completed_tasks": [
-    "0119 + 0120 applied by the architect, verified live by me, committed - 6945ebd",
-    "Reports printed statement 'Generated' date -> todayKey() - 708964e",
-    "Consumption overdue-return count -> one clock - b0767d0",
-    "Inventory new-PO expected-delivery -> today+7 local - 471c558",
-    "Inventory local daysAgoKey copy removed - 1ae6c6f",
-    "Commission month-key: const -> currentMonthKey() function - 83917e1",
-    "Trips current-month defaults -> currentMonthKey() - bf6722e",
+    "Date/clock sweep closed at day and month grain - through 65c081e",
     "monthKeyOf consolidated to ONE definition - 2a210a5",
-    "delivered_at bucketed on the local clock (superseded by the next commit) - 54d3f58",
-    "Delivered figures RE-BASED onto trip_date, matching v_delivered_revenue_daily; localMonthKeyOf deleted - bc32691"
+    "Delivered figures re-based onto trip_date, matching v_delivered_revenue_daily - bc32691",
+    "payment_mode reconciliation: app stops reading customers.payment_model, Payment column derived from the project - e69ec6a",
+    "0121 applied by the architect, verified live by me, committed - 25ce8cb",
+    "CLAUDE.md section 7 rewritten - the deferred entry's PREMISE was wrong, not just stale - 6776c4f"
   ],
   "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [
-    "Turki: fill in the missing hire dates (5 drivers, 1 staff). 0117 stops the views inventing one, but a real hire_date beats a created_at floor.",
-    "Turki: PDFShift account + PDF_API_KEY in .env.local before real PDF output can be verified (runtime config, not code)."
+    "Turki: browser-verify /customers after 0121. The Payment column previously read 'Postpaid' for EVERY customer; it now reads Prepaid for three of them. That is a correction, not a regression - those three projects have always been prepaid. Also confirm the Edit form opens with no 'Payment model' field and an unrelated edit (e.g. phone) still saves.",
+    "Turki: fill in the missing hire dates (5 drivers, 1 staff).",
+    "Turki: PDFShift account + PDF_API_KEY in .env.local before real PDF output can be verified."
   ],
   "decisions": [
-    "DELIVERED IS A PREDICATE, trip_date IS THE BUCKET — EVERYWHERE NOW. delivered_at records when the stage BUTTON WAS PRESSED, not when the water moved, and this fleet advances trips on the Kanban in bulk. Migration 0109 established this for the Dashboard's delivered-revenue view; CustomersTab and BreakdownReport have now followed. Proven against v_delivered_revenue_daily, the definition of record: Jun 22/6,200 - Jul 130/43,170 - Aug 577/184,860, matching exactly, where the old delivered_at basis was out by 1,200 SAR in June and again in July. delivered_at remains correct for EVENT surfaces (v_activity_feed) - the button press is a real event.",
-    "EVERY MONTH COMPARISON IN THE APP NOW BUCKETS ON A DATE COLUMN. trips.trip_date (NOT NULL) and customer_topups.topup_date are already local calendar terms, so no timezone conversion is involved anywhere and monthKeyOf's plain slice cannot drift from currentMonthKey() in any timezone. That is a stronger invariant than converting timestamps correctly, because it removes the conversion entirely.",
-    "SUPERSEDING IS NOT REMOVING - APPLIED TO MY OWN WORK. localMonthKeyOf was added one commit before the re-base to convert timestamptz values to a local month. The re-base removed its last caller, so it was DELETED rather than left exported and dormant. Same rule that retired payslipPreviewNet, AddPriceLotModal and updateTrip. tsc's noUnusedLocals is what surfaced it.",
-    "REMOVING A GUARD REQUIRES CHECKING WHETHER IT EVER FIRED. BreakdownReport's Math.max(0,…)/Math.min(1,…) clamps guarded a real possibility under the old basis (two counts on different date fields). Under the new basis deliveredInMonth is a strict subset of totalInMonth, so the bound holds by construction. Checked live before removing: 0 of 17 project-months ever violated it, max ratio exactly 1.00 - so these were correct-but-unfired guards, not ones masking a defect. An earlier draft of that comment claimed they 'hid' a problem; that was an overstatement and was corrected.",
-    "MONEY CODE WITH NO PRODUCTION CALLER IS LEFT ALONE. lib/commission-rows.ts still buckets delivered_at by month at lines 136 and 170, inside buildBaseLines (zero callers, ts-prune reports it unused) and buildCommissionRows (called only by its own harness). The live UI uses the rolling API keyed on payout_id IS NULL. Changing them is risk without benefit; they are listed here so the grep hit is not mistaken for a miss.",
-    "THE THREE MONTH QUESTIONS COLLAPSED TO TWO. currentMonthKey() reads the clock (lib/utils); monthKeyOf() slices a stored DATE (lib/commission, one definition since 2a210a5). The short-lived third one is gone.",
-    "A MODULE-LEVEL CONST THAT READS THE CLOCK IS A BUG, NOT A CACHE - the original CURRENT_MONTH_KEY never rolled over at all, which was worse than its UTC skew.",
-    "MONTH_KEY IS LOAD-BEARING ON THE COMMISSION WRITE PATH. v_commissions_monthly attributes specials, adjustments AND the bonus by exact string match, and v_driver_payslip_basis reads through it."
+    "IT WAS A RETIREMENT, NOT A MERGE, AND THE LIVE DATA IS WHAT SHOWED IT. CLAUDE.md section 7 had carried this for months as a clean concept-merge (pay_as_you_go ~ prepaid). customers.payment_model read 'postpaid' on ALL 7 rows - its own column default - so pay_as_you_go had never been used and there were zero rows to convert. It also DISAGREED with the real setting on 3 of 6 customer/project pairs. Merging it would have imported that wrongness.",
+    "WHY IT DRIFTED, the transferable part: the Customers form was its ONLY writer, and nothing updated it when the project's real mode changed through ProjectModal. Two writable sources, one of them unguarded and unread - the guarded one being can_switch_payment_mode (0035).",
+    "DIRECTION DECIDED BY CONSUMERS, NOT PREFERENCE. Nothing read payment_model: 0 views, 0 functions (create_project_with_customer mentions it in a COMMENT only and names it in no INSERT), 0 triggers, 0 policies, 0 indexes. projects.payment_mode is what all four RPCs take, what 0035 guards, and what invoices freeze at confirm. The retirement was one statement.",
+    "payment_mode EXISTS ON THREE TABLES AND ONLY ONE WAS A DUPLICATE. projects.payment_mode is the source (nullable on purpose so 'unset' stays detectable). invoices.payment_mode is the 0037 frozen snapshot and is CORRECTLY separate - it records what the arrangement WAS when the document was issued. Do not reconcile that one.",
+    "THE WRITABLE CONTROL IS GONE FROM THE CUSTOMERS FORM ON PURPOSE. The Payment column is now DERIVED from the customer's project (1:1 via projects_customer_id_unique), read-only, em dash when unset - the same convention the Archive customer tab already used. ProjectModal is the one editor, behind the settlement guard. A second writable source with no guard is what produced the drift.",
+    "NO RPC SIGNATURE CHANGED AND NONE NEEDED TO. All four p_payment_mode parameters refer to projects/invoices, not the dropped column. Money core (lib/prepaid.ts, lib/vat.ts) never referenced payment_model at all - confirmed by grep, not assumed.",
+    "APP STOPPED READING BEFORE THE DROP (the 0119 order), and the app was correct in BOTH directions: it reads customers with select('*') and simply stopped declaring the column in its type, so there was never a window where one side was broken.",
+    "RE-MEASURE A DEFERRED ITEM'S PREMISE BEFORE EXECUTING ON IT. This is the SECOND long-standing section 7 note found to be wrong rather than merely out of date (the Kanban entry was the first). One group-by on the column would have exposed it at any point in the months it sat there."
   ],
-  "uncommitted_files": [],
-  "next_action": "The date/clock/basis sweep is COMPLETE and nothing from it is outstanding. Zero UTC date keys, one monthKeyOf, every month figure bucketed on a DATE column, and the delivered basis unified with the Dashboard. What remains in the repo is the long-standing deferred list in CLAUDE.md section 7 (payment_mode reconciliation, retiring water_stations.fill_cost, StationPricing consolidation, the 0100 dictionary gap, Route Optimization / Predictive / IoT) - none of it touched or created by this work.",
-  "context_notes": "READ CLAUDE.md SECTION 7 FIRST - it is the durable record and this file is only a pointer to it. THE DATE-HELPER MAP, FINAL. lib/utils.ts owns the LOCAL clock: todayKey (today), daysAgoKey (n days back; NEGATIVE n goes forward, which is how today+7 is expressed), currentMonthKey (this month). lib/commission.ts owns monthKeyOf - the ONLY definition - which slices a stored date/timestamp. Four helpers; do not add a fifth without reading them. The rule that makes them safe: EVERY month comparison buckets on a DATE column, so no conversion is needed anywhere. SIX THINGS WORTH CARRYING FORWARD. (1) tests/month-keys.spec.ts pins that invariant and runs under four timezones (Riyadh, UTC, Los_Angeles UTC-8, Kiritimati UTC+14). It needs no diagnostic route and no auth bypass, so unlike the older suites it does not rot. Run it in a NEGATIVE-offset TZ after any date change - a DATE string round-tripped through new Date() breaks only west of Greenwich. (2) THE CURRENT MONTH DID NOT MOVE in the re-base (August 577 trips / 184,860 both bases), so the change is invisible on screen today; June and July are where the 1,200 SAR corrections landed. (3) delivered_at is still CORRECT for event surfaces (v_activity_feed) - the button press is a real event. Do not sweep it out of those. (4) Remaining toISOString() uses are TIMESTAMPS (terminated_at, decided_at, updated_at) and are legitimate. (5) All six money harnesses pass and are the standing proof no money MATH moved: commission-rows, commission, covered-unpaid, invoice, prepaid, vat. Run them after ANY change to lib/commission*.ts OR lib/utils.ts, since commission-rows imports the latter. (6) BUILD ONLY VIA ./scripts/safe-build.sh - it exits non-zero if dev is live, which it did throughout, so every build ran with --dist-dir .next-verify and dev on port 3002 was left untouched. next build also REWRITES tsconfig.json, so git checkout -- tsconfig.json afterwards."
+  "uncommitted_files": [
+    ".planning/for-review.md - the 0121 review pack handed to the architect; kept for reference, not committed",
+    ".planning/review-monthkey-and-basis.md - the earlier review pack, same status"
+  ],
+  "next_action": "0121 is applied, verified and committed, and CLAUDE.md section 7 reflects it. Nothing is in flight. Remaining work is the standing deferred list in section 7: retire water_stations.fill_cost; StationPricing hand-rolled in 3 places; the 0100 dictionary gap; effective-dated rates (one mechanism, three consumers); Route Optimization / Predictive / IoT.",
+  "context_notes": "READ CLAUDE.md SECTION 7 FIRST - it is the durable record and this file is only a pointer to it; the payment_mode entry now sits just before the deferred tail. FIVE THINGS WORTH CARRYING FORWARD. (1) A CORRECTION TO 0121'S OWN HEADER, on the record: its verification block B says 'expect 7 / 7' for total/live customers. Live is 6 and always has been - 'Turki 1' was archived 2026-06-28, seven weeks before the migration. Dropping a column cannot archive a row and the total (7) is unchanged, so nothing is wrong; the expectation was written without measuring the archived_at filter. (2) THE VISIBLE CHANGE IS A CORRECTION: /customers' Payment column read 'Postpaid' for every customer before and now reads Prepaid for three. Do not let a future pass 'fix' it back. (3) invoices.payment_mode is a FROZEN SNAPSHOT (0037) and legitimately differs from its project's current mode - it is not drift and must not be reconciled. (4) The four p_payment_mode RPCs still have EXACTLY ONE overload each, verified after apply - the standing one-signature-per-RPC rule held. (5) BUILD ONLY VIA ./scripts/safe-build.sh - it exits non-zero if dev is live, which it did throughout, so every build ran with --dist-dir .next-verify and dev on port 3002 was left untouched. next build also REWRITES tsconfig.json, so git checkout -- tsconfig.json afterwards."
 }
