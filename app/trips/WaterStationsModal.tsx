@@ -10,7 +10,8 @@
 // key immutability: generated once on Add (slug of the name, lib/slug — same
 // helper + pattern as staff_roles/leave_types), never shown, never editable.
 // Edit only ever sends name/city/latitude/longitude + the two per-type fill
-// prices (0110). The deprecated flat fill_cost is no longer read or written.
+// prices (0110) — which is exactly the WaterStationInput shape in actions.ts.
+// (The flat fill_cost this replaced was retired in 0122; the column is gone.)
 //
 // Soft-delete only: "Deactivate" sets active=false (no hard delete). If the
 // station is an ACTIVE project's default, deactivateWaterStation refuses and
@@ -27,7 +28,7 @@ import { X, Plus, Pencil, Droplet, AlertTriangle } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
-import { stationPriceFor } from "@/lib/station-pricing";
+import { stationPriceFor, type WaterStationRow } from "@/lib/station-pricing";
 import {
   createWaterStation,
   updateWaterStation,
@@ -39,18 +40,11 @@ import {
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-type StationRow = {
-  id: string;
-  key: string;
-  name: string;
-  city: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  fill_cost_potable_sar: number | null;
-  fill_cost_non_potable_sar: number | null;
-  is_default: boolean;
-  active: boolean;
-};
+// The full water_stations row, imported rather than re-declared — see
+// WaterStationRow's own note in lib/station-pricing.ts for why three copies of a
+// shape carrying two PRICE columns was a liability. Kept under the local name
+// this file already used, so nothing below it changes.
+type StationRow = WaterStationRow;
 
 type ProjectLite = { id: string; name: string };
 

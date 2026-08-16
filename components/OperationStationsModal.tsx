@@ -3,9 +3,11 @@
 // Operation-station management popup — nested inside OperationStationField's
 // "Manage stations" trigger. Full CRUD over operation_stations (the truck/
 // driver/staff BASE — deliberately separate from water_stations, see
-// migration 0022 + lib/actions/operation-stations.ts). No key, no fill_cost,
+// migration 0022 + lib/actions/operation-stations.ts). No key, no fill pricing,
 // no "default" concept — just name + coordinates, and soft-delete with no
 // reassignment prompt (nothing here can be "the default" of anything).
+// (Said "no fill_cost" until 0122 retired that column from water_stations; the
+// contrast now is against the two per-type price columns, not a flat one.)
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";

@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
-import { stationBlockedForType, type StationOption } from "@/lib/station-pricing";
+import { stationBlockedForType, type StationOption, type WaterStationRow } from "@/lib/station-pricing";
 import {
   type Trip,
   type TripStage,
@@ -136,19 +136,10 @@ type CustomerOption = {
 };
 type TruckOption = { id: string; plate: string; capacity_m3: number | null; assigned_driver_id: string | null; last_service_date: string | null };
 type DriverOption = { id: string; name: string; status: DriverStatus };
-// Full water_stations row (active + inactive) — feeds the "Manage stations" popup.
-type WaterStationRow = {
-  id: string;
-  key: string;
-  name: string;
-  city: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  fill_cost_potable_sar: number | null;
-  fill_cost_non_potable_sar: number | null;
-  is_default: boolean;
-  active: boolean;
-};
+// Full water_stations row (active + inactive) — feeds the "Manage stations"
+// popup. Imported from lib/station-pricing rather than re-declared: this shape
+// carries the two PRICE columns, and three hand-written copies of it is how a
+// NULL-vs-0 fix lands in one file and not the others.
 
 function projectDot(status: ProjectStatus) {
   return status === "active" ? "bg-emerald-500" : status === "paused" ? "bg-amber-500" : "bg-slate-400";

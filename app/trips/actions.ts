@@ -15,7 +15,7 @@
 // reintroduce a direct-write edit path.
 
 import { revalidatePath } from "next/cache";
-import { decideStationChange, stationPriceFor } from "@/lib/station-pricing";
+import { decideStationChange, stationPriceFor, type StationPricing } from "@/lib/station-pricing";
 import { createClient } from "@/lib/supabase/server";
 import {
   STAGE_ORDER,
@@ -914,24 +914,31 @@ export async function archiveProject(projectId: string): Promise<ActionResult> {
 // addStaffRole/addLeaveType) instead of erroring or creating a duplicate row.
 // ---------------------------------------------------------------------------
 
-export type WaterStationInput = {
+/**
+ * The WRITE shape for a station — deliberately NOT the row shape.
+ *
+ * It composes on `StationPricing` (lib/station-pricing) for the two price
+ * columns, so the null-vs-0 rule has one definition here as everywhere else:
+ * null = this station does not offer that type; a number INCLUDING 0 = offered
+ * at that price. 0 is real — company-owned stations fill free — so it is never
+ * coerced to null and null is never coerced to 0.
+ *
+ * IT MUST NOT BE MERGED INTO `WaterStationRow`, and the omissions are the
+ * reason. No `key`: that column is the immutable FK target for
+ * trips.water_station / projects.default_water_station, generated once on create
+ * and never present in an update payload, so an edit cannot reach it. No `id`,
+ * no `active` either — those move through their own paths. A single shared shape
+ * would put all three back within reach of this form.
+ *
+ * (The deprecated flat `fill_cost` used to be discussed here as "not written by
+ * this path, still on the table". It is GONE — retired in 0122 — so there is no
+ * longer a second column to avoid writing.)
+ */
+export type WaterStationInput = StationPricing & {
   name: string;
   city: string | null;
   latitude: number | null;
   longitude: number | null;
-  /**
-   * PER-WATER-TYPE FILL PRICING (0110). null = this station does not offer
-   * that type; a number (including 0) = offered at that price. 0 is real —
-   * company-owned stations fill free — so it is never coerced to null and
-   * null is never coerced to 0.
-   *
-   * The deprecated flat `fill_cost` is NOT written by this path any more. It
-   * stays on the table until its own retirement migration, holding the
-   * pre-0110 figures; writing to it now would create a second, diverging
-   * price of record.
-   */
-  fill_cost_potable_sar: number | null;
-  fill_cost_non_potable_sar: number | null;
 };
 
 /** At least one type must be offered — mirrors 0110's CHECK so the user gets

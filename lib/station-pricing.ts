@@ -35,6 +35,39 @@ export type StationOption = StationPricing & {
 };
 
 /**
+ * A FULL water_stations row — an option plus the administrative fields, and the
+ * exact column list the "every station" select reads:
+ *
+ *   id, key, name, city, latitude, longitude,
+ *   fill_cost_potable_sar, fill_cost_non_potable_sar, is_default, active
+ *
+ * ONE DEFINITION, THREE READERS. This shape was hand-declared byte-identically
+ * in app/trips/page.tsx (function-locally), app/trips/ProjectsBoard.tsx and
+ * app/trips/WaterStationsModal.tsx — the last two even agreeing on the field
+ * ORDER. Three copies of a row shape that includes two PRICE columns is how a
+ * "just add `?? 0`" fix lands in one of them and not the others, which is the
+ * precise failure the NULL-is-not-zero note above exists to prevent.
+ *
+ * Expressed as `StationOption & {...}` rather than a flat list on purpose: it
+ * says a full row IS a pickable option plus admin fields, so anything that
+ * takes a StationOption accepts a row without a cast.
+ *
+ * NOT the write shape. `WaterStationInput` (app/trips/actions.ts) is separate
+ * and must stay separate: it deliberately carries NO `key` — that column is the
+ * immutable FK target for trips.water_station, generated once on create and
+ * never present in an update payload — and no `id`/`active`. Folding the two
+ * together would put `key` in reach of an edit.
+ */
+export type WaterStationRow = StationOption & {
+  id: string;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  is_default: boolean;
+  active: boolean;
+};
+
+/**
  * The station's price for one water type, or null when it does not offer it.
  * The ONLY place the water_type -> column mapping is written down.
  */
