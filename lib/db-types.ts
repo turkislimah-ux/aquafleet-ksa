@@ -2,7 +2,13 @@
 // supabase/migrations/0001_init_customers_projects.sql).
 
 export type CustomerType = "construction" | "government_office" | "facility_management";
-export type PaymentModel = "postpaid" | "pay_as_you_go";
+
+// THERE IS NO `PaymentModel` TYPE ANY MORE, AND THERE MUST NOT BE ONE AGAIN.
+// `customers.payment_model` ("postpaid" | "pay_as_you_go") was a second,
+// unmaintained spelling of the payment arrangement, retired in migration 0121.
+// `PaymentMode` below ("postpaid" | "prepaid") on `projects` is the ONE source of
+// truth: it is what every finance RPC takes, what can_switch_payment_mode guards,
+// and what an invoice freezes at confirm.
 
 export type Customer = {
   id: string;
@@ -14,7 +20,6 @@ export type Customer = {
   delivery_site_address: string | null;
   delivery_lat: number | null;
   delivery_lng: number | null;
-  payment_model: PaymentModel;
   default_station: string | null;
   active: boolean;
   created_at: string;
@@ -83,10 +88,6 @@ export const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
   facility_management: "Facility management",
 };
 
-export const PAYMENT_MODEL_LABELS: Record<PaymentModel, string> = {
-  postpaid: "Postpaid",
-  pay_as_you_go: "Pay as you go",
-};
 
 export const COMMISSION_MODE_LABELS: Record<CommissionMode, string> = {
   fixed: "Fixed",

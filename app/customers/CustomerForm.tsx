@@ -9,8 +9,9 @@ import { Plus, Pencil } from "lucide-react";
 import { Btn, Table, TH, TD, StatusPill } from "@/components/ui";
 import {
   type Customer,
+  type PaymentMode,
   CUSTOMER_TYPE_LABELS,
-  PAYMENT_MODEL_LABELS,
+  PAYMENT_MODE_LABELS,
 } from "@/lib/db-types";
 import { createCustomer, updateCustomer } from "./actions";
 
@@ -18,7 +19,15 @@ const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-export default function CustomerForm({ customers }: { customers: Customer[] }) {
+export default function CustomerForm({
+  customers,
+  paymentModeByCustomer,
+}: {
+  customers: Customer[];
+  // Resolved on the server from the customer's project (1:1). READ-ONLY here —
+  // this page has no writable payment control any more; ProjectModal owns it.
+  paymentModeByCustomer: Record<string, PaymentMode | null>;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState<Customer | null>(null);
   const [open, setOpen] = useState(false);
@@ -92,7 +101,15 @@ export default function CustomerForm({ customers }: { customers: Customer[] }) {
                 <TD>{CUSTOMER_TYPE_LABELS[c.customer_type]}</TD>
                 <TD>{c.contact_name ?? "—"}</TD>
                 <TD>{c.phone ?? "—"}</TD>
-                <TD>{PAYMENT_MODEL_LABELS[c.payment_model]}</TD>
+                {/* Derived from the customer's project, never stored on the
+                    customer. Em dash when the project has no mode set yet, or
+                    when the customer has no project — same "—" convention the
+                    Archive customer tab already uses for this exact field. */}
+                <TD>
+                  {paymentModeByCustomer[c.id]
+                    ? PAYMENT_MODE_LABELS[paymentModeByCustomer[c.id]!]
+                    : "—"}
+                </TD>
                 <TD>
                   <StatusPill status={c.active ? "active" : "out_of_service"} label={c.active ? "Active" : "Inactive"} />
                 </TD>
@@ -129,14 +146,15 @@ export default function CustomerForm({ customers }: { customers: Customer[] }) {
                   ))}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Payment model</span>
-                <select name="payment_model" defaultValue={editing?.payment_model ?? "postpaid"} className={INPUT} style={INPUT_STYLE}>
-                  {Object.entries(PAYMENT_MODEL_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
-                  ))}
-                </select>
-              </label>
+              {/* THE "Payment model" SELECT USED TO BE HERE AND IS GONE ON
+                  PURPOSE. It wrote customers.payment_model, which no finance code
+                  ever read — so choosing "Pay as you go" here changed nothing
+                  while the project quietly stayed postpaid, or vice versa. The
+                  real control is the Payment & Rate section of ProjectModal
+                  (Trips -> Customers -> Manage project), where the switch is
+                  guarded by can_switch_payment_mode (0035): it refuses a change
+                  until every invoice is settled. Do not re-add a payment control
+                  to this form. */}
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">Contact name</span>
                 <input name="contact_name" defaultValue={editing?.contact_name ?? ""} className={INPUT} style={INPUT_STYLE} />
