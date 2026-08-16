@@ -2239,13 +2239,39 @@ relevant skill(s) **when the task calls for it**:
     `rate_sar ?? 0`, so a NEW scheduled trip reads 0 there until delivered.
     Self-correcting, and **not** a reason to stamp at creation — the snapshot's
     whole point is to record the price at the moment the trip became billable.
-  - **STILL OUT OF SCOPE AND STILL NEEDS ITS OWN RULING:** switching
-    `lib/prepaid.ts` to read the frozen `trips.rate_sar` instead of resolving the
-    project's live rate at call time. **That is the only remaining change that
-    could move customer money.** Today nothing reads the column for money —
-    0 views, and both `lib/prepaid.ts` and `lib/invoice.ts` say in their own
-    headers that the rate is resolved at call time and is *"NOT the raw
-    `trips.rate_sar` column"*.
+  - **PREPAID AND INVOICES NOW BILL FROM THE FROZEN RATE — commit `d0813b9`.**
+    The last money-core step, and the only change in this workstream that could
+    have moved a customer's balance. A rate change now prices only NEW work;
+    past consumption stops moving under the customer.
+    - **`lib/prepaid.ts` WAS NOT SWITCHED — ITS CALLERS WERE, and that is the
+      whole shape of it.** That module never fetches; `ConsumingTrip.rate_sar` is
+      populated by whoever builds the list. So the engine kept **zero functional
+      changes** — FIFO ordering, the covered/unpaid split and every VAT figure are
+      byte-identical code — and only its doc comment moved, because the old one
+      asserted the opposite. **Eight functional lines across three files.**
+    - **THE NULL RISK WAS STRUCTURALLY UNREACHABLE, not merely unlikely.** The
+      worry was an undelivered trip billing at NULL. But `deliveredTripsSorted()`
+      filters `delivered_at != null` BEFORE any amount is computed, and
+      `consumingItems()` is the single queue `derivedBalanceItems`,
+      `buildStatementItems` and `splitCoveredUnpaidItems` all walk — so every trip
+      that becomes money has been delivered, and a delivered trip always carries a
+      frozen rate.
+    - **The fallback is `?? project.rate_per_trip_sar`, NEVER `?? 0`** — the type
+      is non-null so a value must be written, and if that filter is ever loosened
+      behaviour degrades to the OLD basis rather than to billing nothing. `?? 0`
+      was rejected, not merely not chosen.
+    - **THE INVOICE PATH WAS SWITCHED TOO.** An invoice bills a trip at what it
+      was worth on the day for the same reason a balance does; leaving it live
+      would have let an invoice and a balance disagree about the SAME trip.
+    - **Proven a no-op on all existing data:** Airport 32,800.00, King Saud
+      59,200.00, Royal Court 53,760.00 identical on both bases, 0 delivered trips
+      with a NULL rate, confirmed invoices 20 / 114,551.50 unchanged. The
+      delivered counts had GROWN since the proposal (77/145/128 -> 80/148/128) and
+      the totals still matched — the bases agree per trip, so they agree at any
+      count, which is the stronger statement.
+    - **THE ONE TRIP THAT STILL HAS NO FROZEN RATE IS THE ORPHAN** (no project).
+      It never enters a project's trip list, so it cannot reach prepaid
+      consumption. Do not "fix" it by inventing a rate.
 
 - **SALARY-HISTORY SCREEN — `29e5f05`.** Opened from the Salary cell on the
   driver detail panel (`app/drivers/SalaryHistoryModal.tsx`).
