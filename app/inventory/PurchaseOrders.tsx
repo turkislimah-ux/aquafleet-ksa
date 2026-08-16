@@ -3339,15 +3339,6 @@ export function FinancialAnalysisTab({
     return m;
   }, [suppliers]);
 
-  function daysAgoKey(n: number): string {
-    const d = new Date();
-    d.setDate(d.getDate() - n);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  }
-
   function poActualOrEstimated(po: PurchaseOrder): number {
     return purchaseOrderLines
       .filter((l) => l.purchase_order_id === po.id)
