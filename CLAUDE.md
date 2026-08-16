@@ -2088,7 +2088,80 @@ relevant skill(s) **when the task calls for it**:
     ambiguous.
   - **Deferred — payslips:** a deductions data source (`deductions_sar` ships at
     0 so the arithmetic is complete and adding one changes no issued slip); an
-    approval step before issue (parked with RBAC); effective-dated salary.
+    approval step before issue (parked with RBAC). **Effective-dated salary is
+    now BUILT — see the entry below.**
+
+- **EFFECTIVE-DATED SALARY — migrations `0125` + `0126`, commits `742bec1`,
+  `5c67762`.** Forward-only salary history. `0125` shipped a live defect and
+  `0126` fixed it forward — `0125` stays as applied history rather than being
+  rewritten (the `0038` / `0090` / `0109` precedent).
+  - **§7's OLD FRAMING WAS WRONG AND THE SCOPE SHRANK.** This was carried for
+    months as *"one mechanism with three consumers (driver salary, commission
+    rates, customer rates)"*. Measured: the three are in **three different
+    states** and only ONE had live exposure. **Commission is already frozen**
+    (`trips.commission_sar` stamped on 730/730 delivered trips), so effective-
+    dating its config would protect an already-stamped number — **ruled out of
+    scope, do not build it.** Customer rate is a separate, still-open snapshot
+    job (below). Only salary was actually broken.
+  - **THE MODEL: forward-only, baseline at the employment floor.**
+    `salary_history` uses the subject pattern (two nullable FKs + CHECK exactly
+    one set). A month resolves to **the latest row with `effective_from <= that
+    month's end`** — one path, no fallback. Seeded 22 rows (16 drivers **including
+    the 5 terminated**, whose salaries July's 20,900 depends on, + 6 staff).
+  - **WHY THE BASELINE IS DATED AT `COALESCE(hire_date, created_at::date)`, AND
+    WHY THAT IS THE WHOLE FIX.** `0125` seeded baselines at TODAY and resolved
+    with a *fallback to the earliest row*. That made one row do two jobs — the
+    immutable baseline the past falls back to, AND today's salary a raise
+    updates — so the trigger's same-day upsert silently rewrote the past. A +100
+    raise moved June 25,000 → 25,100 and July 37,800 → 37,900. `0126` dates
+    baselines in the past instead, which **removes the fallback entirely** and
+    makes collision *impossible* rather than policed: the trigger writes
+    today-dated rows, and today is past every closed month's end.
+    **It is 0117's own floor**, the same expression the employment window uses —
+    so "counted in a month" and "has a resolvable salary that month" agree by
+    construction. **A 1900 sentinel was deliberately NOT used**; 0117 rejected
+    exactly that for employment.
+  - **HISTORY IS TRIGGER-MAINTAINED, and that is not optional.** The app writes
+    `salary_sar` straight from its forms. If only the seed wrote history, the
+    first hire or raise through the UI would leave that person with **no row —
+    and the resolution would drop them from payroll entirely**. A silent
+    under-count of real wages is the worst failure available here. Two triggers
+    per table (0114's lesson: `OLD` is unavailable in an `INSERT` `WHEN` clause).
+    **Base columns stay the current salary; history is derived from them, never
+    the reverse.**
+  - **`is_baseline` IS INFORMATIONAL ONLY** — the resolution does not read it.
+    The date separation is the fix; the flag exists so "which row is the seed"
+    is queryable and so verification can assert baselines were not mutated.
+  - **`salary_is_current_snapshot` NOW MEANS SOMETHING.** It was a hardcoded
+    `true` placeholder for exactly this feature. It now answers *"has no
+    recorded change taken effect by this month's end"* — true for all three
+    months today. It read `false` for August under `0125`, when it briefly meant
+    "fell back to the baseline"; that was a display flag, not a money figure.
+  - **PROVEN WRITE-FREE, which is stronger than the sampled test.** 0 non-baseline
+    rows dated on/before 30 Jun or 31 Jul, 0 baselines on today's date, and today
+    is past both month ends — so a today-dated raise is *unreachable* from either
+    month for every future raise, not just the one sampled. Payroll unmoved at
+    **25,000 / 37,800 / 31,300** (June is the 0117-corrected figure), and both
+    frozen payslips byte-identical.
+  - **STILL OPEN, deliberately:** `v_driver_payslip_basis` is the **fourth**
+    payroll-reading view and still reads `d.salary_sar` directly — split out
+    rather than half-done, because `create or replace` must reproduce its 18
+    columns verbatim and it is the payslip money path. **A no-op today** (every
+    past month resolves to the current salary either way); it starts mattering at
+    the first real raise. `v_pnl_monthly` and `v_monthly_only_costs` compose on
+    `v_payroll_monthly` and inherited the fix automatically.
+  - **STILL OPEN — customer rate:** `trips.rate_sar` is NULL on all 817 rows and
+    nothing stamps it. **Stamping is provably money-neutral**: `lib/prepaid.ts`'s
+    own header says `ConsumingTrip.rate_sar` is *"resolved at call time — NOT the
+    raw `trips.rate_sar` column"*, and the real feed is
+    `project.rate_per_trip_sar`. Switching prepaid to read a frozen rate would be
+    a separate change and a real ruling. The backfill choice (from the current
+    rate, vs leaving NULL) is **unruled**.
+  - **LESSON, third occurrence — derive an expected count with the SAME
+    predicate the code uses.** `0125`'s own block C predicted 17 seed rows; the
+    truth is 22, because the seed correctly includes terminated drivers and I had
+    counted live ones. Same shape as `0121`'s "7/7 customers" and `0123`'s
+    "8 month-only" slips.
 
 - **`payment_mode` reconciliation — DONE, migration `0121`, commits `e69ec6a`
   (app) + `25ce8cb` (migration).** This entry stood for months as "a clean
