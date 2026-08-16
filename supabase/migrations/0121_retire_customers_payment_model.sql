@@ -1,0 +1,205 @@
+-- 0121_retire_customers_payment_model.sql
+-- Retire customers.payment_model. projects.payment_mode is the one source.
+--
+-- DRAFTED TO DISK. NOT APPLIED. Architect reviews, re-runs the dependency checks
+-- independently, and applies this.
+--
+-- ===========================================================================
+-- THIS IS A RETIREMENT, NOT A MERGE — AND THE LIVE DATA IS WHY
+-- ===========================================================================
+-- CLAUDE.md section 7 has carried this as a "clean concept-merge" (pay_as_you_go
+-- ~ prepaid) since the Finance work. Checked against live rows before drafting,
+-- and there is nothing to merge:
+--
+--   · customers.payment_model = 'postpaid' on ALL 7 rows — the column DEFAULT.
+--     'pay_as_you_go' has NEVER been used. Zero rows to convert.
+--   · It DISAGREES with the real setting on 3 of 6 customer/project pairs:
+--     MMM construction, Seder Facility mang., Seder Facility Mang. all read
+--     'postpaid' while their project reads 'prepaid'.
+--
+-- So this column is not a second opinion that needs reconciling — it is a stale
+-- default that never tracked anything, and on half the live rows it is simply
+-- WRONG. Merging it into projects.payment_mode would import that wrongness.
+--
+-- HOW IT DRIFTED, which is the part worth keeping: the Customers form was its
+-- ONLY writer, and nothing updated it when the project's real mode changed
+-- through ProjectModal. Two writable sources, one of them unguarded and unread.
+--
+-- ===========================================================================
+-- NOTHING READS IT — VERIFIED SIX WAYS. Re-run these; do not take my word.
+-- ===========================================================================
+--   -- views referencing it .......................... expect 0
+--   select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
+--    where n.nspname='public' and c.relkind='v'
+--      and pg_get_viewdef(c.oid,true) ilike '%payment_model%';
+--
+--   -- functions/RPCs referencing it ................. expect 1, and it is a COMMENT
+--   select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+--    where n.nspname='public' and p.prokind='f'
+--      and pg_get_functiondef(p.oid) ilike '%payment_model%';
+--   -- Returns create_project_with_customer. Its ONLY mention is the line
+--   --   "-- 1) Customer. payment_model/active fall to their column defaults."
+--   -- It does not name the column in any INSERT or UPDATE. Confirm that before
+--   -- applying:
+--   select unnest(regexp_matches(pg_get_functiondef(p.oid),
+--          '(?n)^.*payment_model.*$', 'g'))
+--     from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+--    where n.nspname='public' and p.proname='create_project_with_customer';
+--   -- Expect exactly that one comment line and nothing else. If an INSERT
+--   -- names the column, STOP — the RPC needs recreating first and that is a
+--   -- signature-adjacent change requiring its own review.
+--
+--   -- triggers on customers ......................... expect 0 non-internal
+--   -- RLS policies mentioning it .................... expect 0
+--   -- indexes mentioning it ......................... expect 0
+--   select t.tgname from pg_trigger t join pg_class c on c.oid=t.tgrelid
+--     join pg_namespace n on n.oid=c.relnamespace
+--    where n.nspname='public' and c.relname='customers' and not t.tgisinternal
+--   union all
+--   select pol.polname from pg_policy pol join pg_class c on c.oid=pol.polrelid
+--     join pg_namespace n on n.oid=c.relnamespace
+--    where n.nspname='public' and c.relname='customers'
+--      and (pg_get_expr(pol.polqual,pol.polrelid) ilike '%payment_model%'
+--        or pg_get_expr(pol.polwithcheck,pol.polrelid) ilike '%payment_model%')
+--   union all
+--   select indexname from pg_indexes
+--    where schemaname='public' and tablename='customers'
+--      and indexdef ilike '%payment_model%';
+--   -- Expect ZERO rows in total.
+--
+-- ===========================================================================
+-- THE APP ALREADY STOPPED READING IT — CHECK THAT FIRST
+-- ===========================================================================
+-- Commit e69ec6a removed every app-code reference: the Customers form's writable
+-- "Payment model" select, the payment_model key in createCustomer/updateCustomer's
+-- shared parse(), the PaymentModel type, and PAYMENT_MODEL_LABELS. The Customers
+-- list's Payment column is now DERIVED from projects.payment_mode, resolved
+-- server-side.
+--
+-- That order is the whole safety story, and it is the same one 0119 used: a
+-- column stops being read BEFORE it is dropped, never the other way round.
+-- Confirm the running app is at or past e69ec6a before applying.
+--
+-- Note the app is correct in BOTH directions — it reads customers with
+-- select("*") and simply no longer declares the column in its type — so there
+-- is no window where one side is broken.
+--
+-- ===========================================================================
+-- WHAT IS DELIBERATELY NOT TOUCHED
+-- ===========================================================================
+-- · projects.payment_mode — the SOURCE OF TRUTH. Nullable on purpose so "unset"
+--   stays detectable (finance-invoice-spec.md 4.1); do not give it a default.
+-- · invoices.payment_mode — the frozen snapshot taken at confirm (0037). A THIRD
+--   column sharing the name, and correctly so: it records what the arrangement
+--   WAS when the document was issued, not what it is now.
+-- · Every RPC signature. create_project_with_customer, update_project_with_customer,
+--   confirm_invoice and can_switch_payment_mode all take p_payment_mode, and all
+--   of them mean projects/invoices.payment_mode. NONE of them is altered here.
+-- · lib/prepaid.ts and lib/vat.ts — money core. Neither ever referenced
+--   payment_model; confirmed by grep, not assumed.
+--
+-- ===========================================================================
+-- IRREVERSIBILITY
+-- ===========================================================================
+-- There is no down migration and a dropped column cannot be recovered without a
+-- backup. What is lost: one text column reading 'postpaid' on all 7 rows, which
+-- is the column default and demonstrably wrong on 3 of them. Prove that for
+-- yourself before applying rather than trusting this header — block F below.
+--
+-- The CHECK constraint customers_payment_model_check drops automatically with
+-- the column; it is not named separately.
+-- ===========================================================================
+
+begin;
+
+-- No `cascade`: if some dependency has appeared since this was drafted, this must
+-- FAIL rather than silently destroy whatever grew on top of it.
+alter table public.customers drop column if exists payment_model;
+
+commit;
+
+-- ===========================================================================
+-- VERIFICATION — run these; do not assume.
+-- ===========================================================================
+--
+-- A) THE COLUMN IS GONE, AND ITS CHECK CONSTRAINT WITH IT. Expect 0 rows each:
+--      select column_name from information_schema.columns
+--       where table_schema='public' and table_name='customers'
+--         and column_name='payment_model';
+--
+--      select con.conname from pg_constraint con
+--        join pg_class rel on rel.oid=con.conrelid
+--       where rel.relname='customers' and con.conname='customers_payment_model_check';
+--
+-- B) NO ROW WAS LOST, AND NOTHING ELSE ON customers CHANGED.
+--      select count(*) as customers, count(*) filter (where archived_at is null) as live
+--        from public.customers;
+--      -- expect 7 / 7, unchanged.
+--
+--      select column_name, data_type, is_nullable
+--        from information_schema.columns
+--       where table_schema='public' and table_name='customers'
+--       order by ordinal_position;
+--      -- Column count should differ by exactly 1. name, name_ar, customer_type,
+--      -- contact_name, phone, email, delivery_site_address, delivery_lat,
+--      -- delivery_lng, vat_number, cr_number, billing_address, active,
+--      -- archived_at, created_at all remain.
+--
+-- C) THE SOURCE OF TRUTH IS UNTOUCHED.
+--      select coalesce(payment_mode,'<NULL>') as mode, count(*)
+--        from public.projects group by 1 order by 1;
+--      -- expect prepaid 3, postpaid 3, <NULL> 1 — exactly as before.
+--
+--      select coalesce(payment_mode,'<NULL>') as mode, count(*)
+--        from public.invoices group by 1 order by 1;
+--      -- expect prepaid 5, postpaid 1, <NULL> 15 — the 0037 snapshots, unmoved.
+--
+-- D) NOTHING IN THE DATABASE BROKE.
+--      select count(*) as views,
+--             count(*) filter (where 'security_invoker=true' = any(c.reloptions)) as invoker,
+--             count(*) filter (where has_table_privilege('anon', c.oid,'select')) as anon_readable
+--        from pg_class c join pg_namespace n on n.oid=c.relnamespace
+--       where n.nspname='public' and c.relkind='v';
+--      -- expect 40 / 40 / 0 — unchanged. This migration adds and removes no view,
+--      -- but a dependency that had been missed would surface as a broken one.
+--
+--      -- The four RPCs must still resolve with their existing signatures:
+--      select p.proname, count(*) as overloads
+--        from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+--       where n.nspname='public'
+--         and p.proname in ('create_project_with_customer','update_project_with_customer',
+--                           'confirm_invoice','can_switch_payment_mode')
+--       group by 1 order by 1;
+--      -- expect EXACTLY ONE overload each — the standing one-signature-per-RPC rule.
+--
+-- E) THE APP STILL LOADS. This is the check that actually matters, because the
+--    failure mode of dropping a column is a 500 on a page that still selects it.
+--    In the browser, signed in:
+--      · /customers            — list renders 7 rows. The Payment column shows
+--                                Prepaid for the three prepaid-project customers,
+--                                Postpaid for the three postpaid ones, and an em
+--                                dash for the customer with no project mode set.
+--                                NOTE this is a VISIBLE CHANGE: it previously read
+--                                "Postpaid" on every row, which was wrong on three.
+--      · /customers -> Edit    — the form opens with NO "Payment model" field.
+--                                Save an unrelated edit (e.g. phone) and confirm
+--                                it succeeds.
+--      · /trips -> Customers -> Manage project — the Payment & Rate section still
+--                                shows and edits the real mode, still guarded.
+--      · /archive -> Customer  — the customer tab's own payment_mode display is
+--                                unaffected (it already read the project).
+--    A 500 on /customers means the deployed app predates commit e69ec6a.
+--
+-- F) PROVE THE CLAIM THIS FILE RESTS ON, BEFORE APPLYING. Run this while the
+--    column still exists — it is the evidence that nothing of value is lost:
+--      select c.name,
+--             c.payment_model      as customer_says,
+--             p.payment_mode       as project_says
+--        from public.customers c
+--        left join public.projects p on p.customer_id = c.id
+--       order by c.name;
+--      -- Expect: payment_model 'postpaid' on every row, and three rows where the
+--      -- project says 'prepaid'. If ANY row reads 'pay_as_you_go', STOP — someone
+--      -- has started using the column since this was drafted and the retirement
+--      -- needs re-deciding rather than applying.
+-- ===========================================================================
