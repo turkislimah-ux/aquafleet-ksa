@@ -31,7 +31,7 @@ import {
   Legend,
 } from "recharts";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { formatSar } from "@/lib/utils";
+import { currentMonthKey, formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { WATER_TYPE_LABELS, type CommissionMode } from "@/lib/db-types";
 
@@ -101,7 +101,13 @@ export default function BreakdownReport({
   drivers: DriverLite[];
   stations: StationLite[];
 }) {
-  const currentMonth = monthKeyOf(new Date().toISOString());
+  // currentMonthKey(), NOT monthKeyOf(new Date().toISOString()). Both the picker
+  // default and the month-list upper bound below are compared against
+  // monthKeyOf(t.trip_date) — and trip_date is a DATE column, i.e. already a
+  // local calendar month. The old UTC expression put the two on different
+  // clocks, so on the 1st between 00:00 and 02:59 Riyadh the report opened on
+  // LAST month and the list stopped one month short.
+  const currentMonth = currentMonthKey();
   const [selMonth, setSelMonth] = useState(currentMonth);
 
   // Portal target only exists after mount (no document during SSR).

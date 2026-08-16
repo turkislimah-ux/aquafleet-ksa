@@ -51,6 +51,36 @@ export function daysAgoKey(n: number): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * The CURRENT month, "YYYY-MM", on the same local clock as todayKey().
+ *
+ * A FUNCTION, NEVER A CONST. It began life as
+ * `export const CURRENT_MONTH_KEY = new Date().toISOString().slice(0, 7)` in
+ * lib/commission-rows.ts, which was wrong twice: UTC (so on the FIRST of a month
+ * between 00:00 and 02:59 Riyadh it yielded the PREVIOUS month, and on 1 January
+ * the previous YEAR), and — worse — evaluated once at module load, so it never
+ * rolled over at all and went stale for the lifetime of a session or process.
+ * Anything answering "what is now" has to be called, not captured.
+ *
+ * IT LIVES HERE, BESIDE todayKey(), BECAUSE IT IS A CLOCK HELPER — not commission
+ * logic. It was promoted out of lib/commission-rows.ts the moment a second
+ * consumer appeared, which is the same reason and the same precedent as
+ * daysAgoKey being promoted here in 22aad18. Three app/trips surfaces now read it
+ * for their current-month default, and importing that from a *commission* module
+ * would have been the wrong dependency.
+ *
+ * DO NOT CONFUSE THIS WITH monthKeyOf(). That helper (lib/commission.ts, and an
+ * identical copy in lib/commission-rows.ts) buckets an ISO timestamp by its UTC
+ * instant, deliberately and by documented decision, so payroll grouping is
+ * deterministic across machines. This answers a different question — which month
+ * the USER is in right now — and the two are only interchangeable for 21 hours a
+ * day. Passing `new Date().toISOString()` into monthKeyOf() to get "this month"
+ * is exactly the bug this replaces.
+ */
+export function currentMonthKey(): string {
+  return todayKey().slice(0, 7);
+}
+
 export function statusTone(s: string): "ok" | "warn" | "bad" | "info" | "muted" {
   switch (s) {
     case "active": case "on_duty": case "delivered": case "completed": case "paid": return "ok";

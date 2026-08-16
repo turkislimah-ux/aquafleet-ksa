@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { type StationOption } from "@/lib/station-pricing";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { formatSar } from "@/lib/utils";
+import { currentMonthKey, formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import type { CommissionMode, WaterType, PaymentMode } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
@@ -136,7 +136,28 @@ export default function CustomersTab({
     phone: string | null;
   } | null>(null);
 
-  const monthKey = monthKeyOf(new Date().toISOString());
+  // currentMonthKey(), NOT monthKeyOf(new Date().toISOString()). The old
+  // expression was UTC, so for the first three hours of the 1st this whole tab
+  // labelled itself the current month while showing LAST month's figures.
+  //
+  // THIS TAB COMPARES monthKey AGAINST TWO DIFFERENT BASES, and that is worth
+  // knowing before touching either:
+  //   · tripsThisMonth reads trips.trip_date — a DATE column, already a local
+  //     calendar month, so it now matches monthKey exactly.
+  //   · deliveredThisMonthByProject and revenueThisMonth read trips.delivered_at
+  //     — a timestamptz, which monthKeyOf buckets by the UTC instant, on purpose
+  //     (see its own comment in lib/commission.ts: deterministic across
+  //     machines, used for payroll grouping).
+  //
+  // RESIDUAL, DELIBERATELY LEFT: in that same 00:00-02:59 window on the 1st, a
+  // trip delivered right then buckets to the previous month by UTC and so is
+  // excluded from those two delivered_at figures, which read slightly low until
+  // 03:00 and then self-correct. That is strictly better than the old behaviour,
+  // where the entire tab showed the wrong month — but it is not zero, and fixing
+  // it properly means re-basing delivered_at bucketing to Riyadh, which changes a
+  // money KPI that deliberately reconciles with revenueThisMonth. That is its own
+  // decision, not a side effect of a date-helper swap.
+  const monthKey = currentMonthKey();
 
   // project lookup by customer (1:1) for the rows + by project_id for revenue.
   const projectByCustomer = useMemo(() => {

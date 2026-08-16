@@ -19,12 +19,12 @@
 // buildPayoutSnapshot / buildHistoryRows); the month-based functions above are
 // retained until the UI fully migrates off them.
 
-// The ONLY import in this file, and it is deliberately a leaf: todayKey reads
-// the local clock, which currentMonthKey (bottom of this section) needs so a
-// write is filed under the month the user is actually in. No React, no
-// Supabase, nothing that would stop scripts/commission-rows-check.ts running
-// this module directly.
-import { todayKey } from "./utils";
+// The ONLY import in this file, and it is deliberately a leaf: currentMonthKey
+// reads the local clock so a write is filed under the month the user is actually
+// in. No React, no Supabase, nothing that would stop
+// scripts/commission-rows-check.ts running this module directly — verified by
+// running it, not assumed.
+import { currentMonthKey } from "./utils";
 
 export type CommTrip = {
   driver_id: string | null;
@@ -97,46 +97,24 @@ export function monthKeyOf(iso: string): string {
   return iso.slice(0, 7);
 }
 
-/**
- * The month a NEW special / adjustment / bonus is filed under, "YYYY-MM".
- *
- * A FUNCTION, NOT A CONST, AND THAT DIFFERENCE IS HALF THE BUG. This was
- *
- *     export const CURRENT_MONTH_KEY = new Date().toISOString().slice(0, 7);
- *
- * which is wrong twice over:
- *
- *   1. UTC. toISOString is UTC, so on the FIRST of a month between 00:00 and
- *      02:59 Riyadh it yields the PREVIOUS month.
- *   2. EVALUATED ONCE, AT MODULE LOAD — the worse half. A module-level const is
- *      computed when the module is first imported and never again, so it does
- *      not roll over at a month boundary at all: it stays stale for the lifetime
- *      of a client session, and wherever it is evaluated server-side, for the
- *      lifetime of the process. The skew is unbounded, not one day.
- *
- * MONTH_KEY IS NOT COSMETIC, WHICH IS WHY THIS MATTERS. `v_commissions_monthly`
- * attributes specials, adjustments AND the bonus to a month by exact string
- * match (`month_key = to_char(month, 'YYYY-MM')`), and `v_driver_payslip_basis`
- * reads through it. A wrong key silently files real money against the wrong
- * month in Reports and on the wrong payslip.
- *
- * Note the "month_key is kept only as a human label" comment on
- * `setCommissionBonus` in app/drivers/actions.ts describes that upsert's
- * CONFLICT TARGET (driver_id alone) — it is not a statement about the views,
- * which do read this column.
- *
- * Composed from the two helpers that already exist rather than doing any date
- * math here: todayKey() is the local clock used across this app, and monthKeyOf
- * is the same slice the rest of this file uses.
- *
- * Deliberately the ONE clock-reading export in a file whose header promises pure
- * commission math. It is not math — it decides which month a write is filed
- * under — and it is exported precisely so the four write sites in
- * CommissionsTab cannot each invent their own answer.
- */
-export function currentMonthKey(): string {
-  return monthKeyOf(todayKey());
-}
+// The month a NEW special / adjustment / bonus is filed under, "YYYY-MM".
+//
+// RE-EXPORTED, NOT REDEFINED. The implementation lives in lib/utils.ts beside
+// todayKey(), because it is a clock helper rather than commission logic — see
+// its doc comment there for the two defects it replaced (UTC, and a const that
+// never rolled over). It is re-exported here so the four write sites in
+// CommissionsTab keep importing it from the module that owns their other
+// commission helpers, and so this file still names the rule it depends on.
+//
+// MONTH_KEY IS NOT COSMETIC, WHICH IS WHY IT MATTERS HERE. v_commissions_monthly
+// attributes specials, adjustments AND the bonus to a month by exact string
+// match (month_key = to_char(month, 'YYYY-MM')), and v_driver_payslip_basis
+// reads through it — so a wrong key files real money against the wrong month in
+// Reports and on the wrong payslip. Note the "month_key is kept only as a human
+// label" comment on setCommissionBonus in app/drivers/actions.ts describes that
+// upsert's CONFLICT TARGET (driver_id alone); it is not a statement about the
+// views, which do read this column.
+export { currentMonthKey };
 
 // Per-project base lines for one driver+month (delivered trips only). PURE.
 export function buildBaseLines(

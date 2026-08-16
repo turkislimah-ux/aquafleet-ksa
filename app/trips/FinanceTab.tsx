@@ -22,7 +22,7 @@
 
 import { useMemo, useState } from "react";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { formatSar } from "@/lib/utils";
+import { currentMonthKey, formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { PAYMENT_MODE_LABELS, type PaymentMode } from "@/lib/db-types";
 import { derivedBalanceItems, round2, VAT_RATE, type ConsumingTrip, type ConsumingCharge, type TopupStatementInput } from "@/lib/prepaid";
@@ -324,7 +324,12 @@ export default function FinanceTab({ customers, projects, trips, topups, special
   const postpaidCount = rows.filter((r) => r.mode === "postpaid").length;
   const unsetCount = rows.filter((r) => r.project && r.mode === null).length;
 
-  const monthKey = monthKeyOf(new Date().toISOString());
+  // currentMonthKey(), NOT monthKeyOf(new Date().toISOString()). This is compared
+  // against monthKeyOf(t.topup_date), and topup_date is a DATE column — already a
+  // local calendar month — so the old UTC expression put the two sides on
+  // different clocks and the "this month" top-up total reported LAST month's
+  // figure for the first three hours of the 1st.
+  const monthKey = currentMonthKey();
   const topupsThisMonth = useMemo(
     () => topups.filter((t) => monthKeyOf(t.topup_date) === monthKey).reduce((s, t) => s + t.amount_sar, 0),
     [topups, monthKey],
