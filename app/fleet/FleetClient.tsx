@@ -220,15 +220,39 @@ export default function FleetClient({
    * Covers the four controls live today (assign-driver button, Assign Driver
    * Btn, edit button, View link) plus anything focusable a future row gains.
    *
-   * KEYBOARD DELIBERATELY GOES THROUGH THE "View" LINK, not the row. Making the
-   * row focusable would add a tab stop per truck that duplicates a link already
-   * in that row - four stops instead of three on every one of fifteen rows,
-   * with the extra one going where the last already goes. Mouse and touch get
-   * the bigger target; keyboard keeps the shorter path.
+   * KEYBOARD REACHES THE ROW ITSELF (tabIndex + Enter/Space), overruling an
+   * earlier call to route keyboard users through the inner "View" link only.
+   * The inner controls stay individually reachable, so tabbing through a row
+   * goes: row -> driver -> edit -> View.
+   *
+   * THE KEY HANDLER FIRES ONLY WHEN THE ROW ITSELF HAS FOCUS. A keydown on an
+   * inner control BUBBLES to the row, so without `e.target !== e.currentTarget`
+   * a keyboard user pressing Enter on "View" would fire that link AND the row's
+   * navigation - the same double-fire the click guard prevents, arriving by the
+   * other route. Click is guarded by where the event started (closest), keys by
+   * whether the row is the focused element; each is the right question for its
+   * own event.
+   *
+   * NO role OVERRIDE ON THE <tr>, deliberately. role="link"/"button" on a table
+   * row removes it from the table's accessibility tree - its thirteen <td>s
+   * stop being cells of a row, so a screen-reader user loses column context on
+   * every truck. The row keeps its native row semantics and carries an
+   * aria-label naming the action instead, and the real <a> is still in the row
+   * for anyone who wants a link.
    */
   function openDetail(e: React.MouseEvent<HTMLTableRowElement>, truckId: string) {
     const el = e.target as HTMLElement;
     if (el.closest("a, button, input, select, textarea, [role='button']")) return;
+    router.push(`/fleet/${truckId}`);
+  }
+
+  function openDetailKey(e: React.KeyboardEvent<HTMLTableRowElement>, truckId: string) {
+    // Focus is on an inner control - let that control handle its own key.
+    if (e.target !== e.currentTarget) return;
+    if (e.key !== "Enter" && e.key !== " ") return;
+    // Space scrolls the page by default; Enter on a focused row does nothing
+    // natively. Both are claimed here.
+    e.preventDefault();
     router.push(`/fleet/${truckId}`);
   }
   // Computed on-leave-today set (authoritative). Feeds the pill and the assign
@@ -440,7 +464,10 @@ export default function FleetClient({
               <tr
                 key={tr.id}
                 onClick={(e) => openDetail(e, tr.id)}
-                className="cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+                onKeyDown={(e) => openDetailKey(e, tr.id)}
+                tabIndex={0}
+                aria-label={`${tr.plate} — open truck detail`}
+                className="cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/60"
               >
                 <TD>
                   <div className="flex items-center gap-2">
