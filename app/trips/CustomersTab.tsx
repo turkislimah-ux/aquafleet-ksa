@@ -62,6 +62,10 @@ type TripLite = {
   water_station: string;
   water_type: string;
   stage: string;
+  // FROZEN rate, stamped at delivery (0128 backfill + setTripStage). The page
+  // selects "*", so this already arrives at runtime — same shape FinanceTab
+  // carries. Optional because scheduled trips have not been stamped yet.
+  rate_sar?: number | null;
 };
 type Driver = { id: string; name: string; status?: string };
 type TruckLite = {
@@ -153,7 +157,10 @@ export default function CustomersTab({
   // about the same measure by 1,200 SAR in June and again in July.
   //
   // Measured against v_delivered_revenue_daily, which is the definition of
-  // record. Old basis / new basis / the view:
+  // record. (That view prices from the frozen trips.rate_sar as of 0129; the
+  // Revenue KPI below reads the same column, which is what holds these figures
+  // together through a rate change rather than only today.)
+  // Old basis / new basis / the view:
   //     Jun   26 trips  7,400   ->   22 trips  6,200   view: 22, 6,200
   //     Jul  126 trips 41,970   ->  130 trips 43,170   view: 130, 43,170
   //     Aug  577 trips 184,860  ->  577 trips 184,860  view: 577, 184,860
@@ -220,15 +227,27 @@ export default function CustomersTab({
     [trips, monthKey]
   );
 
-  // Revenue = Σ rate_per_trip_sar for trips DELIVERED this month, bucketed by
+  // Revenue = Σ FROZEN trip rate for trips DELIVERED this month, bucketed by
   // trip_date. Reconciles to v_delivered_revenue_daily riyal-for-riyal — see the
   // three-month table at the monthKey declaration.
+  //
+  // THE BASIS IS trips.rate_sar, NOT the project's current rate. That is what
+  // keeps the reconciliation TRUE after a rate change: the view (0129), prepaid
+  // consumption and invoice lines (d0813b9) all price delivered work from the
+  // frozen column. Pricing it here from projects.rate_per_trip_sar would
+  // retroactively re-price past months and make this KPI disagree with both the
+  // Dashboard and the customer's own bill. The project rate is what NEW work
+  // will cost, not what past work did.
+  //
+  // `?? project.rate_per_trip_sar` is the same fallback d0813b9 used, and it
+  // covers exactly one case: a trip delivered before the stamp existed that the
+  // 0128 backfill could not reach. It is a bridge, not a second basis.
   const revenueThisMonth = useMemo(() => {
     let sum = 0;
     for (const t of trips) {
       if (!t.project_id || !t.delivered_at || !t.trip_date) continue;
       if (monthKeyOf(t.trip_date) !== monthKey) continue;
-      sum += projectById.get(t.project_id)?.rate_per_trip_sar ?? 0;
+      sum += t.rate_sar ?? projectById.get(t.project_id)?.rate_per_trip_sar ?? 0;
     }
     return sum;
   }, [trips, monthKey, projectById]);

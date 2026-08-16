@@ -2272,6 +2272,32 @@ relevant skill(s) **when the task calls for it**:
     - **THE ONE TRIP THAT STILL HAS NO FROZEN RATE IS THE ORPHAN** (no project).
       It never enters a project's trip list, so it cannot reach prepaid
       consumption. Do not "fix" it by inventing a rate.
+  - **FOUR SURFACES PRICE DELIVERED WORK, AND ALL FOUR READ `trips.rate_sar`.
+    KEEP THEM ALIGNED — this is the invariant, not a tidy outcome.**
+
+    | surface | where | since |
+    |---|---|---|
+    | prepaid consumption | `ConsumingTrip.rate_sar` | `d0813b9` |
+    | invoice lines | `ConsumingTrip.rate_sar` | `d0813b9` |
+    | delivered revenue (Dashboard) | `v_delivered_revenue_daily` | 0129 |
+    | Customers Revenue KPI | `app/trips/CustomersTab.tsx` | 0129 |
+
+    Anything that reaches for `projects.rate_per_trip_sar` to price DELIVERED
+    work has reintroduced the defect. **The project rate is what NEW work will
+    cost, not what past work did.** A fifth surface reads the frozen column too.
+    - **THE FOURTH SURFACE WAS FOUND BY ITS OWN COMMENT, and that is the lesson.**
+      CustomersTab summed the project's CURRENT rate under a comment claiming it
+      "reconciles to `v_delivered_revenue_daily` riyal-for-riyal". True when
+      written; 0129 would have made it a lie on the first rate change — three of
+      four surfaces switched, with the code still asserting the fourth agreed.
+      **A comment that names WHY two numbers agree survives a change; a comment
+      that merely asserts they agree becomes false silently.** Both were rewritten
+      to state the basis.
+    - **The whole batch was a no-op today and that is WHY it landed now:** 737
+      trips / **237,120.00** identical on both bases in all three months, with
+      **0** trips falling through to the fallback. Land a basis change while
+      before/after is provably identical — not after a rate move, when several
+      figures shift at once and there is nothing clean to diff against.
 
 - **SALARY-HISTORY SCREEN — `29e5f05`.** Opened from the Salary cell on the
   driver detail panel (`app/drivers/SalaryHistoryModal.tsx`).
