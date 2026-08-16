@@ -80,9 +80,9 @@ Three files once shared one name. They are now separated by path:
   snapshot (Turki's call, 2026-08-07). Written by hand each round, staged by
   explicit path like anything else. No special ceremony.
 - **`.planning/HANDOFF.json` — the gsd plugin's. Gitignored.** Its PostToolUse
-  checkpoint regenerates it from `.planning/STATE.md`, which this repo has never
-  had, so it produces a 450-byte empty skeleton. **Empty is its correct state
-  here.** Do not read it for project state and do not repair it.
+  checkpoint regenerates it; on gsd 3.4.4 that means a 450-byte empty skeleton
+  (upstream bug #17, fixed in v4.0.1 — we run a stale plugin). **Empty is its
+  correct state here.** Do not read it for project state and do not repair it.
 - **`preview/.planning/HANDOFF.json`** — the same plugin file inside the
   read-only `preview/` tree. Also gitignored.
 
@@ -95,7 +95,10 @@ seconds afterwards, so the index held the blank while the working tree looked
 correct.
 
 Every guard we had worked, and we still lost it three times. **The fix was
-ownership, not vigilance: when two tools claim one path, move the path.** The
+ownership, not vigilance: when two tools claim one path, move the path.** (The
+underlying bug was already fixed upstream in v4.0.1 — we were running a stale
+plugin, and the rename stands anyway. See
+`.planning/gsd-handoff-clobber-note.md`.) The
 staging-discipline lessons that came out of it are kept in `CLAUDE.md` §5 because
 they generalise to any generated file — the `add` must be conditional on the
 write succeeding, inspect the staged blob rather than the working tree, a

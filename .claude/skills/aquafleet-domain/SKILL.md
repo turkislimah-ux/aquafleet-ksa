@@ -179,9 +179,9 @@ Draft → Review → Confirmed → Paid
   - **`.planning/HANDOFF.json` and `preview/.planning/HANDOFF.json` are the gsd
     plugin's, and are GITIGNORED.** gsd's PostToolUse checkpoint rewrites them
     from an empty template after nearly every tool call. **Empty is their correct
-    state in this repo** (it generates from `.planning/STATE.md`, which we have
-    never had). Never read them for project state, never stage them, never
-    "repair" them.
+    state in this repo** (upstream bug #17, fixed in gsd v4.0.1 — we run a stale
+    3.4.4). Never read them for project state, never stage them, never "repair"
+    them.
   - **THE HISTORY, BECAUSE THE LESSON GENERALISES.** We used to write our snapshot
     to the contested `.planning/HANDOFF.json`. It was committed blank over a real
     snapshot once (`7b29c65`, restored in `86adec8`) and blanked twice more in one

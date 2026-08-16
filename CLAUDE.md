@@ -122,11 +122,17 @@ relevant skill(s) **when the task calls for it**:
 
 - **WHY THE PATH MOVED, AND THE LESSON THAT OUTLIVES IT.** We wrote our handoff to
   `.planning/HANDOFF.json` for months. gsd's PostToolUse hook writes that same path
-  after nearly every tool call (60s throttle), generating from `.planning/STATE.md`
-  and phase dirs. **This repo has never had a `STATE.md`** — so gsd found nothing,
-  produced a 450-byte empty skeleton, and overwrote our snapshot with it. It never
-  reads the existing file, never merges, and has no guard against destroying content
-  it did not author.
+  after nearly every tool call (60s throttle), and in gsd 3.4.4 `writeCheckpoint()`
+  had no guard: it produced a 450-byte empty skeleton and overwrote our snapshot with
+  it. **This is upstream's [#17][gsd17], fixed in v4.0.1 — we were simply two months
+  stale.** The mechanism is a broken import, not missing state: `checkpoint.cjs`
+  destructures `safeReadFile`/`execGit` from `core.cjs`, which stopped exporting them
+  (verified `undefined` on our copy), so every read inside `generateCheckpoint()`
+  throws, a bare `catch {}` swallows it, and the null skeleton gets written **whether
+  or not `.planning/STATE.md` exists**. Full note, including why our first diagnosis
+  was wrong: `.planning/gsd-handoff-clobber-note.md`.
+
+  [gsd17]: https://github.com/buildomator/buildomator/issues/17
   - **It committed the blank once — `7b29c65`, over a full snapshot, restored in
     `86adec8`** — and struck twice more in a single round afterwards, including once
     between the moment the file was verified at 12,515 bytes and the `git add` three
