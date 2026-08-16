@@ -1,39 +1,34 @@
 {
   "version": "1.0",
-  "timestamp": "2026-08-16T19:10:00.000Z",
+  "timestamp": "2026-08-16T19:45:00.000Z",
   "source": "claude-code-session",
   "partial": false,
-  "phase": null,
-  "phase_name": null,
-  "phase_dir": null,
-  "plan": null,
-  "task": null,
-  "total_tasks": null,
-  "status": "fill-cost-retired",
+  "phase": null, "phase_name": null, "phase_dir": null,
+  "plan": null, "task": null, "total_tasks": null,
+  "status": "station-row-consolidated",
   "completed_tasks": [
-    "payment_mode reconciliation - 0121 applied, verified, committed (e69ec6a / 25ce8cb / 6776c4f)",
-    "Two closed review packs committed - a7a05c7",
-    "0122 retires the flat water_stations.fill_cost - applied, verified, committed - dc9d411",
-    "CLAUDE.md section 7 corrected in TWO places + 0122 review pack archived - 4d6c0d8"
+    "0121 payment_mode reconciliation - applied, verified, committed (e69ec6a / 25ce8cb / 6776c4f)",
+    "0122 retires the flat water_stations.fill_cost - applied, verified, committed (dc9d411 / 4d6c0d8)",
+    "StationPricing consolidation: ONE WaterStationRow definition, three files import it - aae45dd",
+    "CLAUDE.md section 7 corrected - the deferred entry's COUNT was wrong (four sites, not three) - a3394f8"
   ],
   "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [
-    "Turki: browser-check after 0122 (read-only, nothing writes) - /trips Water Stations modal renders all 5 stations and the per-type price fields save; new-trip station picker still narrows water types per station (0114's gate) with Olaya offering NON-POTABLE ONLY; /reports cost statement filling sub-tab matches Jun 210.00 / Jul 1,285.00 / Aug 5,185.00.",
-    "Turki: browser-verify /customers after 0121 - the Payment column now reads Prepaid for three customers where it previously read Postpaid for all seven. That is a correction, not a regression.",
+    "Turki: browser-check /trips after aae45dd (types-only, nothing should look different) - Manage stations popup lists all 5 stations and the per-type price fields save; the Kanban's station cells render; new-trip station picker still narrows water types (Olaya NON-POTABLE ONLY).",
+    "Turki: browser-check /trips Water Stations + /reports filling sub-tab after 0122 - figures Jun 210.00 / Jul 1,285.00 / Aug 5,185.00.",
+    "Turki: browser-verify /customers after 0121 - Payment column now reads Prepaid for three customers where it read Postpaid for all seven. A correction, not a regression.",
     "Turki: fill in the missing hire dates (5 drivers, 1 staff).",
-    "Turki: PDFShift account + PDF_API_KEY in .env.local before real PDF output can be verified."
+    "Turki: PDFShift account + PDF_API_KEY in .env.local."
   ],
   "decisions": [
-    "0110 SET ITS OWN RELEASE CONDITION AND IT WAS CHECKED, NOT ASSUMED. It said the flat column is 'retired in a later migration once per-type prices are entered and the trip backfill is verified'. Both held: every station carries a per-type price, and water_stations_offers_at_least_one_type was ALREADY convalidated - the second item 0110 parked, closed by someone before this, so 0122 does not touch it.",
-    "LOSING AN UNUSED NUMBER BEATS INVENTING A BUSINESS FACT. The only datum 0122 destroys is olaya_filling_point.fill_cost = 70.00. Olaya has ZERO trips all time, so it had never priced a fill - no P&L figure and no frozen trips.filling_cost_sar traced to it. Writing it into fill_cost_potable_sar to 'save' it would have asserted that Olaya offers potable, because NULL there MEANS 'not offered' under this schema's central rule. The migration carries a DO-NOT-FIX block and its check B asserts Olaya's potable is still NULL afterwards. Same trap 0110 avoided and the same one that got a seed migration drafted and deleted during the Water Station Cost work.",
-    "NO APP COMMIT WAS NEEDED, WHICH MADE 0122 UNLIKE 0119 AND 0121. Every remaining mention of the column was a COMMENT saying it was deprecated, and no TypeScript type declared it - StationPricing names only the per-type pair - so nothing selected it into a typed shape. Verified rather than trusting section 7's 'app code already ignores it'.",
-    "THE MONEY PROOF IS A BEFORE/AFTER, NOT AN ARGUMENT. v_filling_cost_monthly was byte-identical across the apply: Jun 210.00 (18 costed / 10 uncosted), Jul 1,285.00 (143/3), Aug 5,185.00 (598/0), trips 817 / 13. Dropping a column no view reads cannot reach the P&L, and the check demonstrates that rather than asserting it.",
-    "REGEX TRAP, worth carrying: use fill_cost[^_], never %fill_cost%. The loose pattern also matches fill_cost_potable_sar / fill_cost_non_potable_sar and returns false positives on every dependency check - including the three fill_cost-NAMED constraints on water_stations, which reference ONLY the per-type columns. Read constraint definitions, not their names.",
-    "RE-MEASURE A DEFERRED ITEM'S PREMISE BEFORE EXECUTING ON IT. Applied twice now. On 0121 the premise was WRONG (a 'concept-merge' with zero rows to merge). On 0122 it was RIGHT but incomplete - the note implied a constraint still needed validating when it had already been done.",
-    "REVIEW PACKS GET A CLOSED HEADER AND A PERMANENT NAME. The body stays unedited because the argument as it was made is the record; the header carries the outcome so a committed pack cannot be read as a live 'NOT APPLIED' claim. .planning/for-review.md is the architect's MAILBOX and is left empty between rounds."
+    "THE DEFERRED ENTRY'S COUNT WAS WRONG, AND THE EXTRA ONE MUST NOT BE CONSOLIDATED. Section 7 said 'StationPricing is hand-rolled in three places'. FOUR files declared a shape carrying the two price columns; the missed one was WaterStationInput in app/trips/actions.ts, and it is the WRITE shape. It deliberately omits `key` - the immutable FK target for trips.water_station, generated once on create and NEVER present in an update payload - plus `id` and `active`. Merging it would have put all three back within reach of the edit form, so following the deferred note literally would have introduced a real defect.",
+    "THE THREE THAT WERE DUPLICATED WERE BYTE-IDENTICAL - ten fields, same order, matching the 'every station' select: app/trips/page.tsx (declared FUNCTION-LOCALLY, invisible to the two client components mirroring it), ProjectsBoard.tsx and WaterStationsModal.tsx. All three now import WaterStationRow from lib/station-pricing, expressed as `StationOption & {...}` so a full row IS a pickable option plus admin fields and anything taking a StationOption accepts a row without a cast.",
+    "WHY IT WAS WORTH DOING EVEN THOUGH ALL THREE COPIES AGREED: the shape carries two PRICE columns and this schema's central rule is that NULL and 0 mean different things (not offered vs offered free). Three hand-written copies is exactly how a `?? 0` fix lands in one file and not the others. The two price columns now have EXACTLY ONE declaration in the repo (lib/station-pricing.ts:22).",
+    "STALE COMMENTS FROM 0122 SWEPT IN THE SAME PASS. Three comments still described the flat fill_cost as present hours after it was dropped: WaterStationInput's own doc ('stays on the table until its own retirement migration'), WaterStationsModal's header, and OperationStationsModal's 'no key, no fill_cost' contrast - which compared against a column that no longer exists.",
+    "RE-MEASURE A DEFERRED ITEM'S PREMISE BEFORE EXECUTING ON IT. Applied three times now, wrong three different ways: 0121's premise was FALSE (a concept-merge with zero rows to merge), 0122's was RIGHT but implied an already-closed sub-item, and this one's COUNT was low AND one of the uncounted sites was a trap."
   ],
   "uncommitted_files": [],
-  "next_action": "0122 is applied, verified, committed and reflected in CLAUDE.md section 7. Nothing is in flight. Remaining deferred work in section 7: no supported clear-the-station path; StationPricing hand-rolled in three places (a consolidation, not dead code); the 0100 dictionary gap; effective-dated rates (one mechanism, three consumers - driver salary, commission rates, customer rates); Route Optimization / Predictive / IoT.",
-  "context_notes": "READ CLAUDE.md SECTION 7 FIRST - it is the durable record and this file is only a pointer to it. FIVE THINGS WORTH CARRYING FORWARD. (1) THE MIGRATION HEADER OF 0122 PRESERVES THE PRE-DROP TABLE - furaian 0.00, manfuhah 0.00, olaya 70.00, shas NULL, umm_al_hamam 0.00 against their per-type prices. If anyone ever needs the retired figures, they are in git, not gone. (2) OLAYA'S POTABLE PRICE MUST STAY NULL. It means 'does not offer potable'. If it ever reads 70.00, someone rescued the dropped flat value and asserted a business fact nobody stated. (3) THE 13 UNCOSTED TRIPS (2026-06-29 to 07-05) ARE HISTORICAL AND FIXED - 0114's guard means no new one can be created, so a 14th appearing means the guard was dropped, not that data changed. (4) .planning now holds three CLOSED review packs (monthkey-and-basis, payment-mode-0121, fill-cost-0122) plus finance-invoice-spec.md. for-review.md is the mailbox and is intentionally absent between rounds. (5) BUILD ONLY VIA ./scripts/safe-build.sh - it exits non-zero if dev is live. next build also REWRITES tsconfig.json, so git checkout -- tsconfig.json afterwards. No build was needed this round: 0122 shipped no app code."
+  "next_action": "Nothing in flight. Remaining deferred work in CLAUDE.md section 7: no supported clear-the-station path (trips.water_station is NOT NULL with an FK, so the code's empty/NULL guards are unreachable today); the 0100 dictionary gap; effective-dated rates (one mechanism, three consumers - driver salary, commission rates, customer rates); Route Optimization / Predictive / IoT.",
+  "context_notes": "READ CLAUDE.md SECTION 7 FIRST - it is the durable record and this file is only a pointer to it. FIVE THINGS WORTH CARRYING FORWARD. (1) WaterStationRow (row, read) and WaterStationInput (write) are SEPARATE ON PURPOSE and both type docs say so in both directions. Do not 'finish the consolidation' by merging them - that reintroduces `key` into the edit path. (2) The two price columns have exactly one declaration: lib/station-pricing.ts:22. Anything that coerces NULL to 0 there (`?? 0`, `Number(x) || 0`, a truthiness check) breaks the offers-vs-free distinction everywhere at once now, which is the point. (3) Olaya's fill_cost_potable_sar must stay NULL - it means 'does not offer potable', not 'missing'. (4) The 13 uncosted trips (2026-06-29 to 07-05) are historical and fixed by 0114's guard; a 14th means the guard was dropped. (5) BUILD ONLY VIA ./scripts/safe-build.sh - it exits non-zero if dev is live, which it did again this round, so the build ran with --dist-dir .next-verify and dev on 3002 was untouched. next build REWRITES tsconfig.json, so git checkout -- tsconfig.json afterwards."
 }
