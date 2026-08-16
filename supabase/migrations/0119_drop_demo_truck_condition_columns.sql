@@ -1,0 +1,146 @@
+-- 0119_drop_demo_truck_condition_columns.sql
+-- Drop three demo-era columns from trucks that no data source ever filled.
+--
+-- DRAFTED TO DISK. NOT APPLIED. Architect reviews, re-greps dependencies
+-- independently, and runs this.
+--
+-- ===========================================================================
+-- THE APP ALREADY STOPPED READING THEM — CHECK THAT FIRST
+-- ===========================================================================
+-- Commit 9276869 removed every app-code surface for these three columns and is
+-- already on main. THAT ORDER IS THE WHOLE SAFETY STORY: a column must stop
+-- being read before it is dropped, never the other way round, or the running
+-- app 500s the moment this file executes.
+--
+-- Before applying, confirm the app on the server is at or past 9276869. If it
+-- is running older code, this migration breaks /fleet and /maintenance
+-- instantly, because their SELECT lists still name the columns.
+--
+-- ===========================================================================
+-- WHAT IS BEING DROPPED, AND WHY IT IS SAFE
+-- ===========================================================================
+--   trucks.health_score               integer, NULL on all 15 rows
+--   trucks.fuel_efficiency_km_per_l   numeric, NULL on all 15 rows
+--   trucks.engine_hours               numeric, 11 of 15 non-null — ALL ZERO
+--
+-- These came from the demo, where they were static seed data. Nothing in this
+-- app has ever written any of them — no form, no action, no RPC, no trigger.
+-- health_score in particular drove a KPI and two stats that could only ever
+-- render "—", and one of them rendered it in amber, which read as a fleet-wide
+-- warning about data that did not exist (fixed in bd54440 before this).
+--
+-- ENGINE_HOURS LOOKED LIKE THE ONE REAL LOSS AND IS NOT. An earlier version of
+-- this header warned that 9 rows carried values worth capturing first. Checked
+-- rather than assumed: 11 rows are non-null and EVERY ONE OF THEM IS 0. That is
+-- a column full of zeroes, not a column full of history — no truck has ever had
+-- an engine hour recorded. The other two are NULL on every row.
+--
+-- So NOTHING IS LOST by this migration. There is no figure to back up, and the
+-- capture query in block F below will return zero informative rows. It is left
+-- in place anyway so the claim can be re-checked rather than believed.
+--
+-- DEPENDENCY CHECK, RUN BEFORE DRAFTING (re-run it yourself, do not take my
+-- word for it — that is the point of the gate):
+--   · views referencing any of the three ............ 0
+--   · functions/RPCs referencing any of the three ... 0
+--   · indexes referencing any of the three .......... 0
+--   · constraints referencing any of the three ...... 0
+--   · defaults / generated columns .................. 0
+--   · pg_depend entries on the three attnums ........ 0
+-- Nothing in the database reads them, so no view breaks and no RESTRICT fires.
+-- The drops are written WITHOUT `cascade` deliberately: if some dependency has
+-- appeared since this was drafted, the migration must FAIL rather than silently
+-- destroy whatever depends on it.
+--
+-- ===========================================================================
+-- WHAT IS DELIBERATELY NOT DROPPED
+-- ===========================================================================
+-- · trucks.vin — a real static field that simply has not been filled in
+--   (0 of 15). It is on the Add form and the detail page and stays there.
+-- · trucks.utilization_pct — DORMANT COLUMN, KEPT. Its live stat was removed in
+--   9276869 because it could only render "—", but the column stays: it becomes
+--   a COMPUTED view later rather than a hand-entered field. Dropping it now
+--   would mean re-adding it then.
+-- · trucks.status — already dormant-for-display since Auto Truck-Status Phase
+--   2a (lib/truck-status.ts derives state fresh instead), still NOT NULL at the
+--   schema level and still seeded on insert. Out of scope here.
+--
+-- Health returns with the IoT phase. The Fleet list already renders a
+-- placeholder bar with the colour scale built and dormant, so the surface that
+-- will show it exists and is waiting for a source.
+-- ===========================================================================
+
+begin;
+
+-- No `cascade`: if anything depends on these, FAIL rather than cascade-destroy.
+alter table public.trucks drop column if exists health_score;
+alter table public.trucks drop column if exists fuel_efficiency_km_per_l;
+alter table public.trucks drop column if exists engine_hours;
+
+commit;
+
+-- ===========================================================================
+-- POST-APPLY VERIFICATION — run these; do not assume.
+-- ===========================================================================
+--
+-- A) THE THREE ARE GONE. Expect 0 rows:
+--      select column_name from information_schema.columns
+--       where table_schema='public' and table_name='trucks'
+--         and column_name in ('health_score','fuel_efficiency_km_per_l','engine_hours');
+--
+-- B) EVERYTHING ELSE ON trucks SURVIVED. vin and utilization_pct are the two
+--    that were explicitly kept, so check them by name:
+--      select column_name, data_type, is_nullable
+--        from information_schema.columns
+--       where table_schema='public' and table_name='trucks'
+--       order by ordinal_position;
+--      -- expect vin and utilization_pct present, plus id, plate, model, year,
+--      -- capacity_m3, status, home_station, odometer_km, assigned_driver_id,
+--      -- last_service_date, active, created_at, terminated_at,
+--      -- termination_reason, termination_price, released_date,
+--      -- vehicle_registration, registration_expiry, driver_before_maintenance.
+--      -- Count before/after should differ by exactly 3.
+--
+-- C) NO ROW WAS LOST. Dropping a column must not touch row count:
+--      select count(*) as trucks, count(*) filter (where terminated_at is null) as live
+--        from public.trucks;
+--      -- expect 15 / 13, unchanged.
+--
+-- D) NOTHING IN THE DATABASE BROKE. Every view must still be queryable — a
+--    dropped column that some view referenced would have failed the drop, but
+--    prove the end state rather than trusting that:
+--      select count(*) as views, count(*) filter (where has_table_privilege('anon', c.oid,'select')) as anon_readable
+--        from pg_class c join pg_namespace n on n.oid=c.relnamespace
+--       where n.nspname='public' and c.relkind='v';
+--      -- expect 40 views, 0 anon-readable — same as before this file.
+--
+--    And the fleet-state view specifically, since it is the one that reasons
+--    about trucks:
+--      select * from public.v_fleet_state_now;
+--      -- expect one row, trucks_total 13, and no error.
+--
+-- E) THE APP STILL LOADS. This is the check that actually matters, because the
+--    failure mode of dropping a column is a 500 on a page that still selects
+--    it. In the browser, signed in:
+--      · /fleet         — list renders, KPI strip shows 5 stats, every row's
+--                         Health cell shows the grey placeholder bar, and the
+--                         note under the table explains why.
+--      · /fleet/<id>    — detail renders with 3 stats (Capacity, Odometer,
+--                         Last Service). No Health, Utilization or Fuel Eff.
+--      · /maintenance   — loads; its truck select no longer names the columns.
+--    A 500 on any of these means the deployed app predates commit 9276869.
+--
+-- F) IRREVERSIBILITY, STATED PLAINLY. There is no down migration, and these
+--    drops cannot be undone without a backup. Nothing of value goes: two
+--    columns are NULL on every row and the third is 0 on every row that has a
+--    value. Prove that for yourself before applying rather than taking the
+--    header's word for it:
+--      select count(*) filter (where health_score is not null) as health_vals,
+--             count(*) filter (where fuel_efficiency_km_per_l is not null) as fuel_vals,
+--             count(*) filter (where engine_hours is not null) as engine_rows,
+--             count(*) filter (where engine_hours <> 0) as engine_nonzero
+--        from public.trucks;
+--      -- expect 0 / 0 / 11 / 0. If engine_nonzero is anything but 0, STOP —
+--      -- someone started recording engine hours since this was drafted, and
+--      -- this migration would destroy real operational data.
+-- ===========================================================================
