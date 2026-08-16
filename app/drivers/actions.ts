@@ -957,3 +957,150 @@ export async function addStaffCommissionType(label: string): Promise<{ error: st
   revalidatePath("/drivers");
   return { error: null, key };
 }
+
+// ---------------------------------------------------------------------------
+// SALARY HISTORY (0125/0126). Effective-dated salary — the read + write pair
+// behind the "Salary history" screen.
+//
+// WHY THE SCREEN EXISTS AT ALL. The triggers on drivers/staff already record a
+// change entered TODAY, so the everyday raise needs no UI. What they cannot do
+// is BACK-DATE: "she has been on 5,000 since March" is a fact about the past,
+// and the only way to record it is a row with its own effective_from. That is
+// this screen's real job — plus letting someone SEE the history that every
+// payroll figure now resolves through.
+//
+// A BACK-DATED ROW LEGITIMATELY RE-COSTS THE PAST. That is not a bug to guard
+// against: it is the entire point of recording that the salary was different
+// then. It IS something the person clicking must see coming, so the UI states
+// which months move before they save (see SalaryHistoryModal).
+//
+// BASELINE ROWS ARE NEVER TOUCHED HERE. 0126 dates each baseline at the
+// person's employment floor precisely so nothing can rewrite what pre-history
+// months resolve to. There is deliberately no edit path and no delete path for
+// them — see removeSalaryChange.
+// ---------------------------------------------------------------------------
+
+export type SalarySubject = { driverId: string } | { staffId: string };
+
+export type SalaryHistoryRow = {
+  id: string;
+  effective_from: string;
+  salary_sar: number;
+  note: string | null;
+  is_baseline: boolean;
+};
+
+function subjectColumn(subject: SalarySubject): "driver_id" | "staff_id" {
+  return "driverId" in subject ? "driver_id" : "staff_id";
+}
+function subjectId(subject: SalarySubject): string {
+  return "driverId" in subject ? subject.driverId : subject.staffId;
+}
+
+/** Every recorded salary for one person, newest first. */
+export async function fetchSalaryHistory(
+  subject: SalarySubject,
+): Promise<{ rows: SalaryHistoryRow[]; error: string | null }> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("salary_history")
+    .select("id, effective_from, salary_sar, note, is_baseline")
+    .eq(subjectColumn(subject), subjectId(subject))
+    .order("effective_from", { ascending: false });
+  if (error) return { rows: [], error: error.message };
+  return { rows: (data ?? []) as SalaryHistoryRow[], error: null };
+}
+
+/**
+ * Record a salary as effective from a given date.
+ *
+ * The DATE is the whole feature — a change dated today is what the trigger
+ * already does, so this exists for the dated and back-dated cases.
+ *
+ * IT DOES NOT TOUCH drivers.salary_sar / staff.monthly_salary_sar. Those remain
+ * the CURRENT salary the forms edit, and writing them here would fire the
+ * trigger and record a SECOND row dated today — turning one back-dated
+ * correction into two rows saying different things. One writer, one direction:
+ * the forms own the current value, this owns the timeline.
+ */
+export async function addSalaryChange(
+  subject: SalarySubject,
+  effectiveFrom: string,
+  salarySar: number,
+  note?: string | null,
+): Promise<ActionResult> {
+  if (!effectiveFrom || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
+    return { error: "Pick a valid effective date." };
+  }
+  if (!Number.isFinite(salarySar) || salarySar < 0) {
+    return { error: "Salary must be zero or greater." };
+  }
+
+  const supabase = createClient();
+  const col = subjectColumn(subject);
+
+  // One salary per person per date (0125's partial unique indexes). Upserting
+  // rather than erroring means correcting a date you already used is a re-save,
+  // not a delete-then-add — but a BASELINE on that date must never be rewritten,
+  // so it is checked first rather than relying on the upsert to be careful.
+  const { data: clash, error: clashErr } = await supabase
+    .from("salary_history")
+    .select("id, is_baseline")
+    .eq(col, subjectId(subject))
+    .eq("effective_from", effectiveFrom)
+    .maybeSingle();
+  if (clashErr) return { error: clashErr.message };
+  if (clash?.is_baseline) {
+    return {
+      error:
+        "That date is this person's opening salary, which cannot be edited. " +
+        "Pick a later date to record a change.",
+    };
+  }
+
+  const row = {
+    [col]: subjectId(subject),
+    effective_from: effectiveFrom,
+    salary_sar: salarySar,
+    note: note?.trim() ? note.trim() : null,
+    is_baseline: false,
+  };
+
+  const { error } = clash
+    ? await supabase.from("salary_history").update(row).eq("id", clash.id)
+    : await supabase.from("salary_history").insert(row);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  revalidatePath("/reports");
+  return { error: null };
+}
+
+/**
+ * Remove a recorded change. BASELINES ARE REFUSED — server-side, not just
+ * hidden in the UI. Deleting a baseline would leave months before every other
+ * row resolving to nothing, which reads as a salary of zero rather than an
+ * error: payroll would silently drop the person for their earliest months.
+ */
+export async function removeSalaryChange(id: string): Promise<ActionResult> {
+  if (!id) return { error: "Missing record." };
+
+  const supabase = createClient();
+  const { data: row, error: readErr } = await supabase
+    .from("salary_history")
+    .select("id, is_baseline")
+    .eq("id", id)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!row) return { error: "That salary record no longer exists." };
+  if (row.is_baseline) {
+    return { error: "The opening salary cannot be removed — it is what earlier months are costed at." };
+  }
+
+  const { error } = await supabase.from("salary_history").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  revalidatePath("/reports");
+  return { error: null };
+}

@@ -17,7 +17,7 @@ import { useTabParam } from "@/lib/useTabParam";
 import { useRecordFocus } from "@/lib/useRecordFocus";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Pencil, Eye, Star, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon, AlertTriangle, Trash2 } from "lucide-react";
+import { Plus, Pencil, Eye, Star, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon, AlertTriangle, Trash2, History } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
@@ -49,6 +49,7 @@ import {
 // trucks.assigned_driver_id.
 import { unassignDriver } from "@/app/fleet/actions";
 import LeaveSection from "./LeaveSection";
+import SalaryHistoryModal from "./SalaryHistoryModal";
 import CommissionsTab, {
   buildCurrentRows,
   type CommTripRow,
@@ -763,6 +764,10 @@ function DriverDetail({
   onEdit: () => void;
 }) {
   const router = useRouter();
+  // Salary-history modal target. Local to the detail panel — it is opened from
+  // the Salary cell and nothing above needs to know about it.
+  const [salaryHistoryFor, setSalaryHistoryFor] =
+    useState<{ id: string; name: string; salary: number | null } | null>(null);
   const expSoon = d.license_expiry != null && d.license_expiry <= YEAR_END;
   // Posture 2: leave never unassigns. Surface the conflict (holds a truck while
   // on leave today) as a UI-only warning inside the leave section.
@@ -867,8 +872,29 @@ function DriverDetail({
                   </span>
                 </Cell>
                 <Cell label="Salary (monthly)">
-                  <span className="font-semibold tabular-nums">{d.salary_sar != null ? formatSar(d.salary_sar) : "—"}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-semibold tabular-nums">{d.salary_sar != null ? formatSar(d.salary_sar) : "—"}</span>
+                    {/* The figure above is the CURRENT salary; this opens the
+                        effective-dated timeline every payroll month resolves
+                        through, and is the only place a back-dated change can
+                        be recorded. */}
+                    <button
+                      type="button"
+                      onClick={() => setSalaryHistoryFor({ id: d.id, name: d.name, salary: d.salary_sar ?? null })}
+                      className="text-brand-600 dark:text-brand-300 hover:underline text-xs inline-flex items-center gap-1"
+                      title="View salary history / record a dated change"
+                    >
+                      <History className="h-3.5 w-3.5" /> History
+                    </button>
+                  </span>
                 </Cell>
+                <SalaryHistoryModal
+                  open={salaryHistoryFor !== null}
+                  onClose={() => setSalaryHistoryFor(null)}
+                  subject={salaryHistoryFor ? { driverId: salaryHistoryFor.id } : null}
+                  personName={salaryHistoryFor?.name ?? ""}
+                  currentSalary={salaryHistoryFor?.salary ?? null}
+                />
               </div>
             </div>
           </div>
