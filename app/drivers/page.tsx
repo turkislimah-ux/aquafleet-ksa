@@ -10,7 +10,7 @@ import type { Driver, Staff, StaffRole, OperationStation, DriverIncident, StaffC
 import type { LeavePeriod, LeaveType } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { buildActiveJobTruckIds, buildTruckStatusMap } from "@/lib/truck-status";
-import { todayKey } from "@/lib/utils";
+import { daysAgoKey, todayKey } from "@/lib/utils";
 import DriversClient, { type TruckLite, type RecentTrip } from "./DriversClient";
 import {
   buildCurrentRows,
@@ -42,7 +42,12 @@ type TripJoin = {
 
 export default async function DriversPage() {
   const supabase = createClient();
-  const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  // 30-day window for the per-driver trip count. BOTH ENDS OF THE WINDOW ON ONE
+  // CLOCK. `since` used to be UTC (toISOString) while `today` below is local, so
+  // between 00:00 and 02:59 Riyadh the window started a day earlier than `today`
+  // implied and a driver's "Trips 30d" silently over-counted. Same defect the
+  // Fleet page carried until 22aad18; this is its twin.
+  const since = daysAgoKey(30);
 
   const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, staffCommissionsRes, commissionTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes, activeWorkOrdersRes, activeOutsourcedJobsRes] =
     await Promise.all([
