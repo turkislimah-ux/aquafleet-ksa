@@ -204,6 +204,33 @@ export default function FleetClient({
   errorMsg: string | null;
 }) {
   const router = useRouter();
+
+  /**
+   * WHOLE-ROW NAVIGATION to the truck's detail page — the same destination the
+   * row's own "View" link points at.
+   *
+   * THE GUARD IS A DESCENDANT CHECK, NOT stopPropagation ON EVERY CONTROL.
+   * Each approach stops a button click from also navigating, but
+   * stopPropagation has to be remembered on every interactive element added to
+   * a row from now on, and the failure is silent: someone adds a fifth button,
+   * clicking it also navigates away, and the row looks haunted. Asking "did
+   * this click start inside something interactive?" cannot be forgotten,
+   * because it lives in one place and covers controls that do not exist yet.
+   *
+   * Covers the four controls live today (assign-driver button, Assign Driver
+   * Btn, edit button, View link) plus anything focusable a future row gains.
+   *
+   * KEYBOARD DELIBERATELY GOES THROUGH THE "View" LINK, not the row. Making the
+   * row focusable would add a tab stop per truck that duplicates a link already
+   * in that row - four stops instead of three on every one of fifteen rows,
+   * with the extra one going where the last already goes. Mouse and touch get
+   * the bigger target; keyboard keeps the shorter path.
+   */
+  function openDetail(e: React.MouseEvent<HTMLTableRowElement>, truckId: string) {
+    const el = e.target as HTMLElement;
+    if (el.closest("a, button, input, select, textarea, [role='button']")) return;
+    router.push(`/fleet/${truckId}`);
+  }
   // Computed on-leave-today set (authoritative). Feeds the pill and the assign
   // modal's availability verdict. The row lock is a COURTESY — assignDriver
   // re-checks the same rule (lib/driver-assignment.ts) and refuses the write
@@ -410,7 +437,11 @@ export default function FleetClient({
               </tr>
             )}
             {list.map((tr) => (
-              <tr key={tr.id} className="hover:bg-black/[0.02] dark:hover:bg-white/[0.03]">
+              <tr
+                key={tr.id}
+                onClick={(e) => openDetail(e, tr.id)}
+                className="cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+              >
                 <TD>
                   <div className="flex items-center gap-2">
                     <div className="h-8 w-8 rounded-lg bg-brand-500/10 text-brand-600 grid place-items-center">
