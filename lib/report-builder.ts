@@ -91,6 +91,12 @@ type Bucket = {
   os: number;
   payroll: number;
   commissions: number;
+  /**
+   * Station fill cost (0113). The FIFTH operational cost bucket — it has been
+   * inside operating_cost since 0112, but had no column of its own here, so a
+   * by-period report could show the total without the line that makes it foot.
+   */
+  filling: number;
   operatingCost: number;
   operatingProfit: number;
   netProfit: number;
@@ -108,8 +114,9 @@ type Bucket = {
 };
 
 const EMPTY: Bucket = {
-  revenue: 0, parts: 0, os: 0, payroll: 0, commissions: 0, operatingCost: 0,
-  operatingProfit: 0, netProfit: 0, expenses: 0, collections: 0, purchasing: 0,
+  revenue: 0, parts: 0, os: 0, payroll: 0, commissions: 0, filling: 0,
+  operatingCost: 0, operatingProfit: 0, netProfit: 0, expenses: 0,
+  collections: 0, purchasing: 0,
   tripsDelivered: 0, tripsTotal: 0, invoices: 0, outstanding: 0,
   allocatedRevenue: 0, maintParts: 0, maintOs: 0, maintTotal: 0,
 };
@@ -143,6 +150,14 @@ const BUILDER_METRICS: BuilderMetric[] = [
     groupings: ["period"], kind: "sum", field: "payroll" },
   { key: "commissions_cost", label: "Commissions", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "commissions" },
+  // Filling is period-only, exactly like the four buckets around it: its figure
+  // comes from PnlPeriodRow, which is per-period. There is no per-customer or
+  // per-truck filling view, so offering those groupings would promise a number
+  // that does not exist. Requires metric_key 'filling_cost' to be live in
+  // report_metrics (migration 0124) — until then availableMetrics filters this
+  // row out and the block simply does not appear.
+  { key: "filling_cost", label: "Water filling cost", basis: "accrual", unit: "SAR",
+    groupings: ["period"], kind: "sum", field: "filling" },
   { key: "operating_cost", label: "Operating cost", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "operatingCost" },
   { key: "operating_profit", label: "Operating profit", basis: "accrual", unit: "SAR",
@@ -254,6 +269,7 @@ export function buildReport(
       b.os = p.os_cost_sar;
       b.payroll = p.payroll_sar;
       b.commissions = p.commissions_sar;
+      b.filling = p.filling_cost_sar;
       b.operatingCost = p.operating_cost_sar;
       b.operatingProfit = p.operating_profit_sar;
       b.netProfit = p.net_profit_sar;
