@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-08-17T01:05:00.000Z",
+  "timestamp": "2026-08-17T01:45:00.000Z",
   "source": "claude-code-session",
   "partial": false,
   "phase": null,
@@ -9,7 +9,7 @@
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "all-verified-backlog-clear",
+  "status": "frozen-rate-billing-live",
   "completed_tasks": [
     "0125 salary history + 0126 forward-only made structural - applied, committed",
     "0127 v_driver_payslip_basis effective salary - applied, verified, committed 78a3038",
@@ -20,7 +20,8 @@
     "CLAUDE.md section 7 entries for pieces 3 and 4 - ebbc2ae",
     "Pieces 3 and 4 BROWSER-VERIFIED by Turki; piece 3 independently confirmed in the data (8 deliveries, every rate_sar = its project rate, 0 missed / 0 wrongly-stamped / 0 mismatches)",
     "Four of the five older browser checks verified WITHOUT a browser (server-side + code): 0121 payment_model gone from the customers form, 0122 station prices intact, aae45dd proved types-only, 0124 builder fence correct. Only rendering/layout/interaction residue is left.",
-    "ALL browser checks done and passing (pieces 3+4 and the five older ones). Verified afterwards that the testing left NOTHING behind: station prices identical with Olaya potable still NULL, filling 210 / 1,285 / 5,205 unmoved, salary_history 22 rows 0 changes, payroll 25,000 / 37,800 / 31,300, trips 816/816 stamped, dictionary 30 keys."
+    "ALL browser checks done and passing (pieces 3+4 and the five older ones). Verified afterwards that the testing left NOTHING behind: station prices identical with Olaya potable still NULL, filling 210 / 1,285 / 5,205 unmoved, salary_history 22 rows 0 changes, payroll 25,000 / 37,800 / 31,300, trips 816/816 stamped, dictionary 30 keys.",
+    "PREPAID + INVOICES NOW BILL FROM THE FROZEN trips.rate_sar - d0813b9. Proven a no-op on all existing data (Airport 32,800 / King Saud 59,200 / Royal Court 53,760 identical on both bases; invoices 20 / 114,551.50)."
   ],
   "remaining_tasks": [],
   "blockers": [],
@@ -43,9 +44,11 @@
     "A CHECKLIST THAT HARDCODES A LIVE, GROWING FIGURE WILL REPORT A FAILURE THAT IS ONLY TIME PASSING. The 0122/0124 checklists said August filling is 5,185.00 / 598 costed; it now reads 5,205.00 / 600 because the piece-3 verification delivered eight trips, two of them out of 'scheduled'. Closed months (June, July) are safe to write down and reconcile against; the CURRENT month must be re-read live. CLAUDE.md section 7 now says so at the figure itself.",
     "STALE FIGURES WERE FIXED IN THE DURABLE RECORD ONLY, NOT IN HISTORY. 5,185 also appears in applied migrations 0122/0124 and in two closed review packs. Those are records of what was true AT APPLY TIME and are left alone - the same 'fix forward, do not rewrite applied history' rule as 0038/0090/0109/0125. Only CLAUDE.md section 7, which is read as CURRENT, was corrected.",
     "FOUR OF THE FIVE OLDER BROWSER CHECKS DID NOT NEED A BROWSER. 0121 verified by grep (payment_model appears only in comments under app/customers - no form field, no parse() key) plus the derived 3-prepaid/3-postpaid data; 0122 by the station rows (Olaya potable still NULL - the DO-NOT-FIX guard holding); aae45dd PROVED types-only by filtering its diff for any line that is not a type, import or comment and getting nothing; 0124 by the dictionary key + BUILDER_METRICS entry with groupings ['period'] + zero 'filling' in dashboard-widgets. Convert a browser checklist into data and code assertions where possible - what is left is then genuinely visual and takes two minutes.",
-    "THE STATIONS SAVE-TEST DID NOT DISTURB THE GUARD. That check writes a per-type price, so it was the one browser step that could have moved money data. Afterwards every station reads exactly as before and olaya_filling_point.fill_cost_potable_sar is STILL NULL - meaning nobody 'helpfully' filled in the blank that 0122's DO-NOT-FIX section exists to protect. Worth re-checking after any future stations work: a NULL there is a business statement ('does not offer potable'), not a gap."
+    "THE STATIONS SAVE-TEST DID NOT DISTURB THE GUARD. That check writes a per-type price, so it was the one browser step that could have moved money data. Afterwards every station reads exactly as before and olaya_filling_point.fill_cost_potable_sar is STILL NULL - meaning nobody 'helpfully' filled in the blank that 0122's DO-NOT-FIX section exists to protect. Worth re-checking after any future stations work: a NULL there is a business statement ('does not offer potable'), not a gap.",
+    "lib/prepaid.ts WAS NOT SWITCHED - ITS CALLERS WERE. The module never fetches; ConsumingTrip.rate_sar is populated by whoever builds the list, so the engine kept ZERO functional changes and only eight lines across three files moved. The brief said 'switch lib/prepaid.ts'; it should not be, and the reason is recorded in section 7 so the instruction is not followed literally next time.",
+    "THE NULL-RATE RISK WAS STRUCTURALLY UNREACHABLE, not merely unlikely. deliveredTripsSorted() filters delivered_at != null BEFORE any amount is computed and consumingItems() is the single queue every balance/statement/split walks, so every trip that becomes money has been delivered and always carries a frozen rate. The fallback is `?? project.rate_per_trip_sar` and `?? 0` was REJECTED - if that filter is ever loosened, behaviour must degrade to the OLD basis rather than to billing nothing."
   ],
   "uncommitted_files": [],
-  "next_action": "Verification backlog is CLEAR - every browser check is done and nothing is in flight. Remaining work is the section 7 deferred tail: no supported clear-the-station path; Route Optimization / Predictive / IoT. Still out of scope and still needing its own ruling: switching lib/prepaid.ts to read the frozen trips.rate_sar - the only remaining change that could move customer money. Turki still owes data entry: hire dates for 5 drivers and 1 staff member, and a PDFShift account + PDF_API_KEY before PDF output can be verified.",
+  "next_action": "The effective-dated-rates workstream is COMPLETE end to end - salary history, the payslip basis, the trip rate snapshot, the delivery stamp, the salary-history screen, and now frozen-rate billing for both prepaid consumption and invoices. Nothing in flight and no money question left open. Remaining deferred in CLAUDE.md section 7: no supported clear-the-station path; Route Optimization / Predictive / IoT. Turki still owes hire dates (5 drivers, 1 staff) and a PDFShift account + PDF_API_KEY.",
   "context_notes": "READ CLAUDE.md SECTION 7 FIRST. SIX THINGS WORTH CARRYING FORWARD. (1) STILL OUT OF SCOPE AND STILL NEEDS ITS OWN RULING: switching lib/prepaid.ts to read the frozen trips.rate_sar instead of resolving the project's live rate at call time. That is the only remaining change that could move customer money. Nothing reads trips.rate_sar for money today - 0 views, and prepaid/invoice both resolve at call time by their own documented design. (2) THREE FROZEN MONEY FIGURES NOW LIVE ON A TRIP: commission_sar (at delivery, gated on payout_id), filling_cost_sar (at creation, re-taken on station change), rate_sar (at delivery, ungated). They freeze at different moments for different reasons - do not unify them. (3) NEVER re-seed salary_history baselines at today's date; that IS the 0125 defect. Baselines belong at the employment floor. (4) The salary triggers are load-bearing: without them a new hire has no history row and vanishes from payroll. (5) A back-dated salary row is the ONE user action in the app that intentionally moves previously reported profit - the screen says so before saving. (6) BUILD ONLY VIA ./scripts/safe-build.sh - it exits non-zero if dev is live. next build REWRITES tsconfig.json, so git checkout -- tsconfig.json afterwards."
 }
