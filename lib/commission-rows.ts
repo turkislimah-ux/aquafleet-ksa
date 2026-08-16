@@ -19,11 +19,23 @@
 // buildPayoutSnapshot / buildHistoryRows); the month-based functions above are
 // retained until the UI fully migrates off them.
 
-// The ONLY import in this file, and it is deliberately a leaf: currentMonthKey
-// reads the local clock so a write is filed under the month the user is actually
-// in. No React, no Supabase, nothing that would stop
-// scripts/commission-rows-check.ts running this module directly — verified by
-// running it, not assumed.
+// TWO IMPORTS, BOTH DELIBERATE LEAVES. Neither pulls in React, Supabase or
+// anything else that would stop scripts/commission-rows-check.ts running this
+// module directly — verified by running it, not assumed. lib/commission's only
+// import is a TYPE (erased at runtime) and lib/db-types imports nothing at all,
+// so this file's runtime dependency graph is still effectively empty.
+//
+// monthKeyOf USED TO BE DEFINED HERE TOO, byte-identically, with a comment
+// admitting it "matches lib/commission monthKeyOf". It had no external consumer
+// — ts-prune reported it as exported-but-used-in-module — so the copy was
+// deleted rather than re-exported. lib/commission owns it, and owns the
+// documented reason it buckets by the UTC instant (deterministic payroll
+// grouping across machines). Two copies of a money-bucketing rule is one more
+// than can be kept honest.
+//
+// currentMonthKey is the opposite question — which month the USER is in now, on
+// the local clock — and lives in lib/utils beside todayKey. Do not merge the two.
+import { monthKeyOf } from "./commission";
 import { currentMonthKey } from "./utils";
 
 export type CommTrip = {
@@ -92,10 +104,6 @@ export function isActive(x: { status?: ItemStatus }): boolean {
   return (x.status ?? "active") !== "denied";
 }
 
-// month_key of an ISO timestamp = "YYYY-MM" (matches lib/commission monthKeyOf).
-export function monthKeyOf(iso: string): string {
-  return iso.slice(0, 7);
-}
 
 // The month a NEW special / adjustment / bonus is filed under, "YYYY-MM".
 //

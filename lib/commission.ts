@@ -60,8 +60,22 @@ export function commissionForDelivery(
 // "YYYY-MM" for an ISO timestamp. Derived from the UTC instant (deterministic
 // across machines). Month-boundary deliveries are bucketed by UTC date.
 // Used for REPORTING/payroll-period grouping (BreakdownReport, CustomersTab,
-// commission-rows.ts's payout cycles) — NOT for scaling position (see
-// dailyDriverProjectCommission below for that).
+// FinanceTab, commission-rows.ts's payout cycles) — NOT for scaling position
+// (see dailyDriverProjectCommission below for that).
+//
+// THE ONLY DEFINITION. lib/commission-rows.ts carried a byte-identical copy,
+// whose own comment admitted it "matches lib/commission monthKeyOf" — an
+// acknowledged duplicate of a money-bucketing rule, which is exactly the kind
+// that has to stay honest. The copy had no external consumer, so it was deleted
+// and that file now imports this one.
+//
+// IT IS NOT A "WHAT MONTH IS IT" HELPER, and the difference is a real bug that
+// shipped. Passing `new Date().toISOString()` into this function to get the
+// current month reads the UTC instant, so on the 1st between 00:00 and 02:59
+// Riyadh it answers the PREVIOUS month, and on 1 January the previous YEAR.
+// That question belongs to currentMonthKey() in lib/utils.ts, which reads the
+// local clock. Bucketing a STORED timestamp and asking what month the USER is in
+// are different questions that happen to agree for 21 hours a day.
 export function monthKeyOf(iso: string): string {
   return iso.slice(0, 7);
 }
