@@ -117,10 +117,18 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
 
   const filling_cost_sar = stationPriceFor(stationRow, water_type);
 
-  // No other money on creation: trips.rate_sar stays NULL (nullable). Project
-  // trips take their price from the project (rate_per_trip_sar); driver
-  // commission is computed + stamped by the engine on delivery (setTripStage →
-  // priceDelivery). Neither is touched here.
+  // No money is frozen on creation. BOTH customer rate and driver commission are
+  // stamped at DELIVERY by setTripStage — rate_sar from the project's rate at
+  // that moment, commission_sar via priceDelivery. Neither is touched here.
+  //
+  // CONSEQUENCE WORTH KNOWING: a trip created from now on carries rate_sar NULL
+  // until it is delivered, while every trip that existed when 0128 ran was
+  // backfilled regardless of stage. So an undelivered trip may show a rate or
+  // not depending on which side of that migration it was created — and
+  // ProjectsBoard renders `rate_sar ?? 0`, so a new scheduled trip reads 0 there
+  // until delivery. That is cosmetic and self-correcting, NOT a reason to start
+  // stamping at creation: the whole point of the snapshot is that it records the
+  // price at the moment the trip became billable.
   const base: Record<string, unknown> = {
     project_id,
     customer_id,
@@ -261,6 +269,39 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
       // Leaving delivered (correction / re-route) → no base pay for a non-delivered trip.
       row.commission_sar = null;
     }
+  }
+
+  // FREEZE THE CUSTOMER RATE AT DELIVERY (0128). This is the third frozen money
+  // figure on this row, beside commission_sar above and filling_cost_sar via
+  // stationChangePatch — a trip records what it was worth ON THE DAY, so a later
+  // rate edit cannot silently reprice history.
+  //
+  // NOT GATED ON payout_id, deliberately. That lock is about DRIVER commission
+  // being frozen into a payout snapshot; the customer rate is a different party's
+  // money and has nothing to do with whether the driver has been paid. Reusing
+  // the gate would tie two unrelated freezes together.
+  //
+  // A TRIP WITH NO PROJECT STAMPS NOTHING and keeps its NULL. There is no
+  // project rate to take, and inventing one is exactly what 0128's backfill
+  // refused to do for the single direct-customer trip.
+  //
+  // NOT NULLED WHEN LEAVING delivered, unlike commission_sar. 0128's model is
+  // that a trip carrying a project carries that project's rate; clearing it on a
+  // correction would erase a value the backfill deliberately set for the same
+  // class of trip. Re-delivering re-stamps at the then-current rate, which
+  // mirrors the station re-take rule: reopened is live again.
+  //
+  // FAILS CLOSED. If the project read errors we refuse the whole stage move
+  // rather than completing a delivery with an unstamped rate — a delivered trip
+  // that never froze its price is the defect this exists to prevent.
+  if (stage === "delivered" && trip.project_id) {
+    const { data: proj, error: projErr } = await supabase
+      .from("projects")
+      .select("rate_per_trip_sar")
+      .eq("id", trip.project_id)
+      .maybeSingle();
+    if (projErr) return { error: projErr.message };
+    if (proj) row.rate_sar = proj.rate_per_trip_sar;
   }
 
   const { error } = await supabase.from("trips").update(row).eq("id", id);
