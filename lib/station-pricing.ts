@@ -35,6 +35,32 @@ export type StationOption = StationPricing & {
 };
 
 /**
+ * THE ARRAY THAT FLOWS TO EVERY PICKER — an option plus the default flag.
+ *
+ * `app/trips/page.tsx` reads active stations as
+ * `key, name, is_default, fill_cost_potable_sar, fill_cost_non_potable_sar` and
+ * hands that ONE array to New Project, Add Trip, the phase picker, the loading
+ * chip and the project edit form. This is that shape, named once.
+ *
+ * It was hand-declared four times: an inline cast in page.tsx, `StationOption &
+ * { is_default?: boolean }` in CustomersTab, and — the part that mattered — a
+ * bare `{ key, name, is_default? }` in NewProjectModal and ProjectModal, which
+ * **dropped the price columns entirely**. Those two were the pre-0110 shape this
+ * module's header calls out: "a picker that cannot see them cannot block an
+ * unoffered type". The prices were there at runtime and invisible to the type,
+ * so nothing would have stopped either form from growing a station rule it had
+ * no data to enforce.
+ *
+ * `is_default` is OPTIONAL on purpose. The sub-pickers inside ProjectsBoard take
+ * `StationOption[]` — they genuinely need only name + prices — and an optional
+ * flag keeps those arrays assignable here without widening every prop in the
+ * chain to carry a field most of them ignore.
+ */
+export type SelectableStation = StationOption & {
+  is_default?: boolean;
+};
+
+/**
  * A FULL water_stations row — an option plus the administrative fields, and the
  * exact column list the "every station" select reads:
  *

@@ -21,6 +21,7 @@ import { formatSar } from "@/lib/utils";
 import { archiveProject, createProjectWithCustomer, updateProjectWithCustomer, checkPaymentModeSwitch } from "./actions";
 import { type DriverState } from "@/lib/driver-state";
 import DriverRosterTable from "./DriverRosterTable";
+import { type SelectableStation } from "@/lib/station-pricing";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -33,7 +34,9 @@ type TruckLite = {
   assigned_driver_id: string | null;
   last_service_date: string | null;
 };
-type Station = { key: string; name: string; is_default?: boolean };
+// Imported, not re-declared: this was a bare { key, name, is_default? } that
+// dropped the price columns the station gate reads. See SelectableStation.
+type Station = SelectableStation;
 
 // Pre-fill payload for edit mode. All numbers are kept as strings (form inputs).
 export type ProjectInitial = {

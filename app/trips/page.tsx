@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { type StationOption, type WaterStationRow } from "@/lib/station-pricing";
+import { type SelectableStation, type WaterStationRow } from "@/lib/station-pricing";
 import type { Trip, WaterType, CommissionMode, ProjectStatus, DriverStatus, ProjectDriver, PaymentMode } from "@/lib/db-types";
 import type { LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
@@ -218,7 +218,7 @@ export default async function TripsPage() {
   // `stationsByKey` resolves the trip card's "Fill at:" line and must cover
   // inactive stations too — an old trip pointing at a deactivated key still
   // needs to show its name.
-  const stations = (stationsRes.data ?? []) as (StationOption & { is_default: boolean })[];
+  const stations = (stationsRes.data ?? []) as SelectableStation[];
   // WaterStationRow is imported (lib/station-pricing), not declared here. It was
   // a FUNCTION-LOCAL type — invisible to the two client components that mirrored
   // it field-for-field — which is the least discoverable place a duplicated

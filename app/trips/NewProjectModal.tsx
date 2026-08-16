@@ -11,6 +11,7 @@ import { Plus } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { type DriverState } from "@/lib/driver-state";
 import ProjectModal from "./ProjectModal";
+import { type SelectableStation } from "@/lib/station-pricing";
 
 type Driver = { id: string; name: string; status?: string };
 type TruckLite = {
@@ -19,7 +20,9 @@ type TruckLite = {
   assigned_driver_id: string | null;
   last_service_date: string | null;
 };
-type Station = { key: string; name: string; is_default?: boolean };
+// Imported, not re-declared: this was a bare { key, name, is_default? } that
+// dropped the price columns the station gate reads. See SelectableStation.
+type Station = SelectableStation;
 
 export default function NewProjectModal({
   drivers,
