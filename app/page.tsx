@@ -8,6 +8,7 @@ import type {
   CostSliceKey, DriverOps, DriverOpsState, ComplianceStatus,
 } from "@/lib/dashboard";
 import { checkDriverStateDrift } from "@/lib/actions/driver-state-drift";
+import { fetchTruckStateCounts } from "@/lib/actions/truck-state";
 import DashboardClient from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
@@ -97,6 +98,11 @@ export default async function DashboardPage() {
   const actionItems = (actionsRes.data ?? []) as ActionItemRow[];
   const feed = (feedRes.data ?? []) as FeedRow[];
   const state = (stateRes.data ?? null) as FleetStateNow | null;
+
+  // TRUCK STATUS IS MIRRORED, NOT DERIVED HERE. Same helpers the Fleet page
+  // acts on, so the donut below and /fleet cannot disagree; the view's own
+  // truck_state CTE is no longer read.
+  const truckState = await fetchTruckStateCounts(supabase);
 
   // Views come back newest-first for the `limit`; charts read oldest-first.
   const pnl = [...((pnlRes.data ?? []) as Record<string, unknown>[])].reverse();
@@ -363,6 +369,7 @@ export default async function DashboardPage() {
       actionItems={actionItems}
       feed={feed}
       state={state}
+      truckState={truckState}
       headlines={headlines}
       charts={charts}
       dailyOps={dailyOps}

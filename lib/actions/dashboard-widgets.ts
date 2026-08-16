@@ -12,6 +12,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { isAllowedWidgetKey, isStateWidget, widgetDef } from "@/lib/dashboard-widgets";
+import { fetchTruckStateCounts } from "@/lib/actions/truck-state";
 
 export type WidgetValue = {
   key: string;
@@ -78,14 +79,21 @@ export async function getWidgetValue(key: string): Promise<WidgetValue | null> {
     if (error || !data) return { key, value: 0, parts: [], hasData: false };
     const s = data as Record<string, unknown>;
 
+    // FLEET MIX MIRRORS THE FLEET PAGE, it does not read the view's truck
+    // columns. Truck status has one definition (lib/truck-status.ts, what
+    // /fleet acts on) and this resolves it the same way, so a widget and the
+    // page it links to cannot show different counts. The view still derives
+    // trucks_* in its truck_state CTE; nothing reads that any more.
     if (key === "fleet_mix") {
+      const t = await fetchTruckStateCounts(supabase);
+      if (!t.ok) return { key, value: 0, parts: [], hasData: false };
       return {
         key,
-        value: num(s.trucks_total),
+        value: t.total,
         parts: [
-          { label: "Active", value: num(s.trucks_active) },
-          { label: "Idle", value: num(s.trucks_idle) },
-          { label: "Maintenance", value: num(s.trucks_maintenance) },
+          { label: "Active", value: t.active },
+          { label: "Idle", value: t.idle },
+          { label: "Maintenance", value: t.maintenance },
         ],
         hasData: true,
       };

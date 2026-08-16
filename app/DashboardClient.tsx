@@ -36,6 +36,7 @@ import { useApp } from "@/components/AppShell";
 import { useHeroDock, useSearchDock } from "@/components/SearchDock";
 import { ComboChart, PieChart } from "@/components/Charts";
 import { cn, formatSar } from "@/lib/utils";
+import type { TruckStateCounts } from "@/lib/actions/truck-state";
 import type { TripStage } from "@/lib/db-types";
 import {
   actionHint, actionHref, actionLabel, dayTick, feedLabel, feedTone,
@@ -89,7 +90,7 @@ const TONE_TEXT: Record<string, string> = {
 };
 
 export default function DashboardClient({
-  actionItems, feed, state, headlines, charts, dailyOps, deliveredRevenue,
+  actionItems, feed, state, truckState, headlines, charts, dailyOps, deliveredRevenue,
   delivery, monthlyOnly,
   projectStages, costComposition, driverOps, drift,
   liveTrips, widgetOptions, errorMsg,
@@ -97,6 +98,7 @@ export default function DashboardClient({
   actionItems: ActionItemRow[];
   feed: FeedRow[];
   state: FleetStateNow | null;
+  truckState: TruckStateCounts;
   headlines: Headline[];
   charts: DashCharts;
   dailyOps: DailyOps[];
@@ -641,13 +643,25 @@ export default function DashboardClient({
                 <div className="flex items-center gap-2 mb-3">
                   <TruckIcon className="h-4 w-4 muted" aria-hidden />
                   <span className="text-xs font-semibold uppercase tracking-wider muted">{ar ? "الأسطول" : "Fleet"}</span>
-                  <span className="ms-auto text-xs muted tabular-nums">{state.trucks_total}</span>
+                  {/* TRUCK COUNTS COME FROM THE FLEET PAGE'S OWN RULE, not from
+                      v_fleet_state_now. The view still derives them in SQL but
+                      nothing reads that any more — this mirrors what /fleet
+                      acts on, so the two screens cannot disagree about which
+                      trucks are in the workshop. A failed read shows an em
+                      dash, never a confident zero. */}
+                  <span className="ms-auto text-xs muted tabular-nums">
+                    {truckState.ok ? truckState.total : "—"}
+                  </span>
                 </div>
-                <MixBar parts={[
-                  { label: ar ? "نشطة" : "Active", value: state.trucks_active, color: "#10b981" },
-                  { label: ar ? "متوقفة" : "Idle", value: state.trucks_idle, color: "#3b82f6" },
-                  { label: ar ? "صيانة" : "Maintenance", value: state.trucks_maintenance, color: "#f59e0b" },
-                ]} />
+                {truckState.ok ? (
+                  <MixBar parts={[
+                    { label: ar ? "نشطة" : "Active", value: truckState.active, color: "#10b981" },
+                    { label: ar ? "متوقفة" : "Idle", value: truckState.idle, color: "#3b82f6" },
+                    { label: ar ? "صيانة" : "Maintenance", value: truckState.maintenance, color: "#f59e0b" },
+                  ]} />
+                ) : (
+                  <p className="text-xs muted">{ar ? "تعذّرت قراءة حالة الأسطول." : "Could not read fleet state."}</p>
+                )}
               </Card>
               <Card>
                 <div className="flex items-center gap-2 mb-3">

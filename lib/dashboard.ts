@@ -223,12 +223,16 @@ export function relativeTime(iso: string, lang: Lang, now = Date.now()): string 
 
 // ---------------------------------------------------------------------------
 // Current state — the shape v_fleet_state_now returns.
+//
+// THE FOUR TRUCK COLUMNS ARE DELIBERATELY ABSENT. v_fleet_state_now still
+// computes trucks_total/active/idle/maintenance in its truck_state CTE, but
+// nothing reads them any more: truck status has ONE definition
+// (lib/truck-status.ts, what the Fleet page acts on) and the Dashboard now
+// mirrors it via lib/actions/truck-state.ts instead of trusting a second
+// derivation in SQL. Do not re-add them here — carrying a figure nothing
+// renders is how two versions of one number start to drift.
 // ---------------------------------------------------------------------------
 export type FleetStateNow = {
-  trucks_total: number;
-  trucks_active: number;
-  trucks_idle: number;
-  trucks_maintenance: number;
   drivers_total: number;
   drivers_active: number;
   drivers_idle: number;
