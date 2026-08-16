@@ -2004,14 +2004,48 @@ relevant skill(s) **when the task calls for it**:
     0 so the arithmetic is complete and adding one changes no issued slip); an
     approval step before issue (parked with RBAC); effective-dated salary.
 
-- **Deferred: `payment_mode` reconciliation.** Finance Commit 1 added
-  `projects.payment_mode` (`postpaid|prepaid`) as a new, additive column — it did NOT
-  touch the legacy `customers.payment_model` (`postpaid|pay_as_you_go`, `NOT NULL`
-  default, wired into `CustomerForm.tsx`/`app/customers/actions.ts`/`lib/db-types.ts`),
-  to avoid a breaking change to an actively-used column outside that commit's scope.
-  Turki confirmed `pay_as_you_go` ≈ `prepaid` (same concept) — so reconciling the two
-  is a clean concept-merge, not resolving two different things. Do this next time
-  customer app code is touched.
+- **`payment_mode` reconciliation — DONE, migration `0121`, commits `e69ec6a`
+  (app) + `25ce8cb` (migration).** This entry stood for months as "a clean
+  concept-merge (`pay_as_you_go` ≈ `prepaid`) — do it next time customer app code is
+  touched". **The premise was wrong, and the live data is what showed it.**
+  - **THERE WAS NOTHING TO MERGE.** `customers.payment_model` read `'postpaid'` on
+    **all 7 rows** — its own column DEFAULT. `pay_as_you_go` had **never been used**,
+    so the merge had zero rows to convert. Worse, the column DISAGREED with the real
+    setting on **3 of 6** customer/project pairs (three customers read postpaid while
+    their project was prepaid). Not a second opinion needing reconciliation — a stale
+    default that never tracked anything and was outright wrong on half the live rows.
+    Merging it in would have imported that wrongness.
+  - **WHY IT DRIFTED, the transferable part:** the Customers form was its ONLY
+    writer, and nothing updated it when the project's real mode changed through
+    ProjectModal. Two writable sources, one of them unguarded and unread — the
+    guarded one being `can_switch_payment_mode` (0035).
+  - **Direction was decided by CONSUMERS, not preference.** Nothing read
+    `payment_model`: 0 views, 0 functions (`create_project_with_customer` mentions it
+    in a COMMENT only — "payment_model/active fall to their column defaults" — and
+    names it in no INSERT), 0 triggers, 0 policies, 0 indexes. `projects.payment_mode`
+    is what all four RPCs take, what 0035 guards, and what invoices freeze at confirm.
+    So the retirement was one statement: `alter table customers drop column`.
+  - **`payment_mode` EXISTS ON THREE TABLES AND ONLY ONE WAS A DUPLICATE.**
+    `projects.payment_mode` is the source (nullable on purpose — "unset" must stay
+    detectable). `invoices.payment_mode` is the 0037 frozen snapshot and is
+    CORRECTLY separate: it records what the arrangement WAS when the document was
+    issued, not what it is now. **Do not "reconcile" that one.**
+  - **The Customers list's Payment column is now DERIVED** from the customer's
+    project (1:1 via `projects_customer_id_unique`), read-only, em dash when unset —
+    the same `—` convention the Archive customer tab already used for this field.
+    **The writable control is gone from that form on purpose**; ProjectModal is the
+    one editor. `PaymentModel` and `PAYMENT_MODEL_LABELS` are deleted, and
+    `lib/db-types.ts` carries a note saying neither comes back.
+  - **Visible consequence, and it is a correction:** that column previously read
+    "Postpaid" for every customer and now reads **Prepaid for three of them**.
+  - **No RPC signature changed and none needed to** — all four `p_payment_mode`
+    parameters refer to `projects`/`invoices`, not the dropped column. Money core
+    (`lib/prepaid.ts`, `lib/vat.ts`) never referenced `payment_model` at all.
+  - **LESSON, since this is the second time a long-standing §7 note turned out to be
+    wrong rather than merely stale** (the Kanban entry was the first): a deferred item
+    describes the world as it was understood when it was written. **Re-measure the
+    premise before executing on it** — this one had been true-sounding and wrong for
+    months, and a single `group by` on the column would have shown it at any point.
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
   entries above; the old "Archive deferred / preview/archive.js is the spec" note
