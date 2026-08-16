@@ -69,55 +69,21 @@ export function daysAgoKey(n: number): string {
  * for their current-month default, and importing that from a *commission* module
  * would have been the wrong dependency.
  *
- * DO NOT CONFUSE THIS WITH monthKeyOf(). That helper (lib/commission.ts, and an
- * identical copy in lib/commission-rows.ts) buckets an ISO timestamp by its UTC
- * instant, deliberately and by documented decision, so payroll grouping is
- * deterministic across machines. This answers a different question — which month
- * the USER is in right now — and the two are only interchangeable for 21 hours a
- * day. Passing `new Date().toISOString()` into monthKeyOf() to get "this month"
- * is exactly the bug this replaces.
+ * DO NOT CONFUSE THIS WITH monthKeyOf() in lib/commission.ts, which slices a
+ * stored date/timestamp rather than reading the clock. Passing
+ * `new Date().toISOString()` into it to get "this month" is exactly the bug this
+ * replaces: that reads the UTC instant, so on the 1st between 00:00 and 02:59
+ * Riyadh it answers the previous month, and on 1 January the previous year.
+ *
+ * Every month comparison in the app now buckets on a DATE column (trips.trip_date,
+ * customer_topups.topup_date), which is already local calendar terms — so
+ * monthKeyOf's plain slice and this function land on the same calendar by
+ * construction. A short-lived localMonthKeyOf() existed here to convert
+ * timestamptz values instead; re-basing those call sites onto trip_date removed
+ * its last caller and it was deleted rather than left dormant.
  */
 export function currentMonthKey(): string {
   return todayKey().slice(0, 7);
-}
-
-/**
- * "YYYY-MM" for a stored timestamp, on the LOCAL clock.
- *
- * THIS IS THE THIRD MONTH QUESTION, AND ALL THREE ARE DIFFERENT. Keeping them
- * apart is the whole point:
- *
- *   currentMonthKey()          which month is it NOW            local clock
- *   localMonthKeyOf(iso)       which month did THIS happen in   local clock
- *   monthKeyOf(iso)            same, but by the UTC instant     lib/commission
- *
- * monthKeyOf is correct and deliberate for payroll grouping — bucketing by UTC
- * is what makes it deterministic across machines — but it is WRONG the moment
- * its result is compared against a local month key, because the two sides then
- * sit on different clocks. In Riyadh (UTC+3) a delivery stamped between 00:00
- * and 02:59 local is still the previous day in UTC, so on the 1st of a month it
- * buckets to the previous MONTH and drops out of "this month" entirely.
- *
- * IT ACCEPTS A PLAIN DATE STRING TOO, AND THAT GUARD IS DELIBERATE. These call
- * sites sit beside ones reading DATE columns (trips.trip_date,
- * customer_topups.topup_date), which are already local calendar terms and need
- * no conversion at all. Passing one to `new Date()` would parse it as UTC
- * midnight and, west of Greenwich, shift it back a day — a bug that would appear
- * only for users in negative offsets and never in Riyadh. So a bare YYYY-MM-DD
- * is sliced directly, which is both correct and what monthKeyOf would have done.
- *
- * Live check before this shipped: of 730 delivered trips, ZERO currently bucket
- * differently under UTC vs Riyadh — so this closes a latent hole rather than
- * moving a number today. Separately, 6 of those 730 fall in a different month by
- * delivered_at than by trip_date; that is a BASIS question, not a timezone one,
- * and is deliberately not addressed here.
- */
-export function localMonthKeyOf(iso: string): string {
-  // Already a local calendar date (YYYY-MM-DD) — no instant to convert.
-  if (iso.length === 10 && !iso.includes("T")) return iso.slice(0, 7);
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 7); // unparseable: behave as before
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 export function statusTone(s: string): "ok" | "warn" | "bad" | "info" | "muted" {

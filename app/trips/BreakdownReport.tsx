@@ -6,9 +6,25 @@
 // numbers + tables + print. Charts are a SEPARATE commit (a slot is left below
 // the financial section).
 //
-// Date-field basis (confirmed in recon):
-//   • delivered / revenue / commission → keyed on delivered_at
-//   • total / operational / station+type → keyed on trip_date
+// DATE-FIELD BASIS — EVERYTHING KEYS ON trip_date. This REVERSES this file's
+// original "delivered / revenue / commission → keyed on delivered_at" rule, and
+// the reversal is deliberate: delivered_at records when the stage button was
+// PRESSED, not when the water moved, and this fleet advances trips on the Kanban
+// in bulk. Migration 0109 already re-based the Dashboard's delivered-revenue
+// view onto trip_date for exactly that reason (§7 records five weeks of work
+// collapsing onto three afternoons, one holding 310 trips). This report had not
+// followed, so its months disagreed with the Dashboard's.
+//
+// DELIVERED IS NOW A PREDICATE, NOT A BUCKET: a trip counts as delivered if
+// delivered_at is set, but it lands in the month of its trip_date. Live,
+// stage='delivered' and delivered_at IS NOT NULL agree on all 730 rows, so this
+// is the same set v_delivered_revenue_daily's stage filter selects.
+//
+// CONSEQUENCE WORTH KNOWING: deliveredInMonth is now a strict SUBSET of
+// totalInMonth (both filter the same trip_date, which is NOT NULL), so delivered
+// can no longer exceed total and the completion rate is finally a real ratio.
+// The old clamps that existed to hide cross-month deliveries are gone.
+//
 // Revenue uses the project's CURRENT rate (no historical rate snapshot exists),
 // hence the disclaimer in the header.
 
@@ -31,7 +47,7 @@ import {
   Legend,
 } from "recharts";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { currentMonthKey, formatSar, localMonthKeyOf } from "@/lib/utils";
+import { currentMonthKey, formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { WATER_TYPE_LABELS, type CommissionMode } from "@/lib/db-types";
 
@@ -178,13 +194,12 @@ export default function BreakdownReport({
   }, [stations]);
 
   // --- Per-month slices --------------------------------------------------
-  // localMonthKeyOf for delivered_at (TIMESTAMPTZ — the instant must be
-  // converted before slicing), plain monthKeyOf for trip_date (a DATE column,
-  // already local calendar terms). selMonth is local, so bucketing delivered_at
-  // by the UTC instant would compare two different clocks and drop a trip
-  // delivered between 00:00 and 02:59 on the 1st out of its own month.
+  // Both slices bucket on trip_date (a DATE column, NOT NULL, already local
+  // calendar terms) — see the basis note in this file's header. The only
+  // difference between them is the delivered PREDICATE, which is what makes
+  // deliveredInMonth a strict subset of totalInMonth.
   const deliveredInMonth = useMemo(
-    () => projectTrips.filter((t) => t.delivered_at && localMonthKeyOf(t.delivered_at) === selMonth),
+    () => projectTrips.filter((t) => t.delivered_at && t.trip_date && monthKeyOf(t.trip_date) === selMonth),
     [projectTrips, selMonth],
   );
   const totalInMonth = useMemo(
@@ -201,11 +216,20 @@ export default function BreakdownReport({
 
   // --- Section 2: Operational (trip_date basis) --------------------------
   const totalCount = totalInMonth.length;
-  // delivered counts by delivered_at; not-delivered is the remainder of the
-  // month's scheduled trips. Cross-month deliveries can make delivered > total,
-  // so clamp at zero to keep the count honest.
-  const notDelivered = Math.max(0, totalCount - deliveredCount);
-  const completion = totalCount > 0 ? Math.min(1, deliveredCount / totalCount) : null;
+  // NO CLAMPS ANY MORE. Both counts bucket on the same NOT-NULL trip_date and
+  // differ only by the delivered predicate, so deliveredInMonth is a strict
+  // SUBSET of totalInMonth and 0 <= delivered <= total holds by construction.
+  //
+  // The previous Math.max(0, …) / Math.min(1, …) guarded a real possibility under
+  // the old basis — the two counts sat on different date fields, so a trip
+  // delivered in a later month than it was scheduled could push delivered past
+  // total. Checked before removing them: that never actually happened on live
+  // data (0 of 17 project-months violated it, max ratio exactly 1.00), so this
+  // removes guards that were correct-but-unfired, not guards that were masking a
+  // visible defect. They go because the condition is now impossible rather than
+  // merely rare, and a clamp left in place reads as "this can still happen".
+  const notDelivered = totalCount - deliveredCount;
+  const completion = totalCount > 0 ? deliveredCount / totalCount : null;
   const stationsUsed = useMemo(() => {
     const set = new Set<string>();
     for (const t of totalInMonth) if (t.water_station) set.add(t.water_station);
@@ -267,11 +291,12 @@ export default function BreakdownReport({
     const deliv = new Map<string, number>();
     const tot = new Map<string, number>();
     for (const t of projectTrips) {
-      if (t.delivered_at) {
-        // Same split as deliveredInMonth above — the timestamptz converts, the
-        // DATE column below does not. Both are matched against `keys`, which is
-        // built from local months.
-        const k = localMonthKeyOf(t.delivered_at);
+      // Both series bucket on trip_date, so the trend chart's two lines finally
+      // sit on one axis — previously the delivered line was keyed on the
+      // data-entry date and the total line on the operational date, which made
+      // month-to-month shape misleading.
+      if (t.delivered_at && t.trip_date) {
+        const k = monthKeyOf(t.trip_date);
         deliv.set(k, (deliv.get(k) ?? 0) + 1);
       }
       if (t.trip_date) {

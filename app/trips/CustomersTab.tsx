@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { type StationOption } from "@/lib/station-pricing";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { currentMonthKey, formatSar, localMonthKeyOf } from "@/lib/utils";
+import { currentMonthKey, formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import type { CommissionMode, WaterType, PaymentMode } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
@@ -140,26 +140,29 @@ export default function CustomersTab({
   // expression was UTC, so for the first three hours of the 1st this whole tab
   // labelled itself the current month while showing LAST month's figures.
   //
-  // EVERY COMPARISON AGAINST monthKey IS NOW ON THE LOCAL CLOCK, but the two
-  // column types get there differently and the distinction is load-bearing:
-  //   · trips.trip_date and customer_topups.topup_date are DATE columns —
-  //     already local calendar terms, so a plain slice (monthKeyOf) is correct.
-  //   · trips.delivered_at is a TIMESTAMPTZ, so it goes through localMonthKeyOf,
-  //     which converts the instant before slicing.
+  // EVERY MONTH FIGURE ON THIS TAB BUCKETS BY trips.trip_date, a DATE column
+  // that is NOT NULL — so monthKey and every key it is compared against are on
+  // one local calendar and a plain slice (monthKeyOf) is correct throughout.
   //
-  // Bucketing delivered_at with monthKeyOf was the residual this replaces: that
-  // helper buckets by the UTC instant, deliberately and correctly for payroll
-  // grouping, but comparing its result against a local month key puts the two
-  // sides on different clocks, so a trip delivered between 00:00 and 02:59 on
-  // the 1st dropped out of "this month" entirely.
+  // THE DELIVERED FIGURES USED TO BUCKET BY delivered_at AND THAT WAS WRONG.
+  // delivered_at records when the stage button was PRESSED, not when the water
+  // moved; this fleet advances trips on the Kanban in bulk, so it clusters work
+  // onto whatever afternoon someone did the data entry. Migration 0109 already
+  // re-based the Dashboard's delivered-revenue view onto trip_date for exactly
+  // that reason, and this tab had not followed — so the two screens disagreed
+  // about the same measure by 1,200 SAR in June and again in July.
   //
-  // Measured before changing it: of 730 delivered trips, ZERO bucket differently
-  // under UTC vs Riyadh today, so this closed a latent hole rather than moving a
-  // live figure. What it does NOT address is the BASIS question — 6 of those 730
-  // fall in a different month by delivered_at than by trip_date, and migration
-  // 0109 re-based the Dashboard's delivered-revenue view onto trip_date for
-  // exactly that reason. Whether these two KPIs should follow it is a separate,
-  // deliberate call.
+  // Measured against v_delivered_revenue_daily, which is the definition of
+  // record. Old basis / new basis / the view:
+  //     Jun   26 trips  7,400   ->   22 trips  6,200   view: 22, 6,200
+  //     Jul  126 trips 41,970   ->  130 trips 43,170   view: 130, 43,170
+  //     Aug  577 trips 184,860  ->  577 trips 184,860  view: 577, 184,860
+  // The new basis matches the view exactly in all three months. The current
+  // month is unchanged, which is why this is invisible on screen today.
+  //
+  // The PREDICATE is still "was delivered" — only the BUCKET moved. Live,
+  // stage='delivered' and delivered_at IS NOT NULL agree on all 730 rows, so
+  // filtering on delivered_at here is the same set the view's stage filter picks.
   const monthKey = currentMonthKey();
 
   // project lookup by customer (1:1) for the rows + by project_id for revenue.
@@ -186,17 +189,14 @@ export default function CustomersTab({
     return m;
   }, [projects, assignmentsByProject]);
 
-  // Per-project DELIVERED trip count for THIS calendar month (keyed by
-  // delivered_at — same basis as the Revenue KPI, so the two reconcile).
-  //
-  // localMonthKeyOf, NOT monthKeyOf: delivered_at is a timestamptz and monthKey
-  // is a LOCAL month, so bucketing by the UTC instant put the two sides of this
-  // comparison on different clocks. See the note at the monthKey declaration.
+  // Per-project DELIVERED trip count for THIS calendar month. Delivered is the
+  // PREDICATE (delivered_at is set); trip_date is the BUCKET — same basis as the
+  // Revenue KPI below and as v_delivered_revenue_daily, so all three reconcile.
   const deliveredThisMonthByProject = useMemo(() => {
     const m = new Map<string, number>();
     for (const t of trips) {
-      if (!t.project_id || !t.delivered_at) continue;
-      if (localMonthKeyOf(t.delivered_at) !== monthKey) continue;
+      if (!t.project_id || !t.delivered_at || !t.trip_date) continue;
+      if (monthKeyOf(t.trip_date) !== monthKey) continue;
       m.set(t.project_id, (m.get(t.project_id) ?? 0) + 1);
     }
     return m;
@@ -220,13 +220,14 @@ export default function CustomersTab({
     [trips, monthKey]
   );
 
-  // Revenue = Σ rate_per_trip_sar for trips DELIVERED this month (by
-  // delivered_at, bucketed on the local clock — same reason as above).
+  // Revenue = Σ rate_per_trip_sar for trips DELIVERED this month, bucketed by
+  // trip_date. Reconciles to v_delivered_revenue_daily riyal-for-riyal — see the
+  // three-month table at the monthKey declaration.
   const revenueThisMonth = useMemo(() => {
     let sum = 0;
     for (const t of trips) {
-      if (!t.project_id || !t.delivered_at) continue;
-      if (localMonthKeyOf(t.delivered_at) !== monthKey) continue;
+      if (!t.project_id || !t.delivered_at || !t.trip_date) continue;
+      if (monthKeyOf(t.trip_date) !== monthKey) continue;
       sum += projectById.get(t.project_id)?.rate_per_trip_sar ?? 0;
     }
     return sum;
