@@ -462,21 +462,6 @@ export default function DashboardClient({
             ar={ar} noTruckTrips={noTruckTrips} deliveredTrips={deliveredTrips} />
         </ChartCard>
 
-        {/* FLEET UTILIZATION (0130) — FOLLOWS THE SAME MONTH as the two charts
-            above, so stepping the stepper moves this figure with them rather
-            than leaving a "now" number stranded beside a historical chart.
-
-            THE FIGURE IS READ, NEVER ASSEMBLED. v_fleet_utilization_monthly
-            publishes sum(worked)/sum(available); averaging the per-truck
-            percentages here would weight a truck available 2 days the same as
-            one available 31 (live August: 45.86 blended, 38.40 averaged). */}
-        <FleetUtilizationCard
-          ar={ar}
-          row={fleetUtilization.find((f) => f.month === activeMonth) ?? null}
-          month={activeMonth}
-          failed={failed}
-        />
-
         {/* PROJECTS — one compact card per active project, each a single
             stacked bar across the four stages.
 
@@ -542,6 +527,26 @@ export default function DashboardClient({
           empty={costComposition.length === 0} failed={failed} ar={ar}>
           <CostCompositionChart ar={ar} months={costComposition} />
         </ChartCard>
+
+        {/* FLEET UTILIZATION (0130) — placed directly BELOW Cost composition:
+            both answer "how did this month go", and the two month-grained cards
+            now read as a pair rather than being separated by the projects and
+            drivers sections.
+
+            IT FOLLOWS THE SAME MONTH STEPPER as the daily charts above, so
+            stepping back moves this figure with them rather than leaving a
+            "now" number stranded beside a historical chart.
+
+            THE FIGURE IS READ, NEVER ASSEMBLED. v_fleet_utilization_monthly
+            publishes sum(worked)/sum(available); averaging the per-truck
+            percentages here would weight a truck available 2 days the same as
+            one available 31 (live August: 45.86 blended, 38.40 averaged). */}
+        <FleetUtilizationCard
+          ar={ar}
+          row={fleetUtilization.find((f) => f.month === activeMonth) ?? null}
+          month={activeMonth}
+          failed={failed}
+        />
 
       </section>
 
