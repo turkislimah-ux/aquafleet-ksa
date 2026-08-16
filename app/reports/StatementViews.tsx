@@ -18,7 +18,7 @@
 import { useMemo, useState } from "react";
 import { Info, Printer } from "lucide-react";
 import { Table, TH, TD, Btn } from "@/components/ui";
-import { cn, formatSar, formatNum } from "@/lib/utils";
+import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
 import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
 import type { BuiltReport } from "@/lib/report-builder";
 import {
@@ -62,7 +62,13 @@ function PrintBand({ title, period }: { title: React.ReactNode; period: string }
       <div style={{ fontSize: "14pt", fontWeight: 600, marginTop: "2pt" }}>{title}</div>
       <div style={{ fontSize: "9pt", display: "flex", justifyContent: "space-between", marginTop: "2pt" }}>
         <span>{period}</span>
-        <span>Generated {new Date().toISOString().slice(0, 10)}</span>
+        {/* todayKey(), NOT toISOString().slice(0,10). This date is PRINTED on a
+            document that leaves the building, and a UTC slice reads a day
+            behind local for the first three hours after Riyadh midnight — so a
+            statement generated at 01:30 went out stamped yesterday. Of the
+            three UTC-slice sites this was the only one whose wrong answer
+            ends up on paper in someone else's hands. */}
+        <span>Generated {todayKey()}</span>
       </div>
     </div>
   );
