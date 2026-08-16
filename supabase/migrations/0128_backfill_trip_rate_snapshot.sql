@@ -1,0 +1,197 @@
+-- 0128_backfill_trip_rate_snapshot.sql
+-- Freeze the customer rate onto every trip that has a project. Option A, ruled.
+--
+-- DRAFTED TO DISK. NOT APPLIED. Architect reviews and applies.
+--
+-- ===========================================================================
+-- WHY OPTION A IS DEFENSIBLE — the evidence, not a preference
+-- ===========================================================================
+-- Backfilling a frozen price from a CURRENT value normally asserts something
+-- nobody checked: that the current value was also the historical one. Here it
+-- was checked, and the frozen invoice lines are what make it provable.
+--
+-- Every confirmed invoice freezes its trip lines' amount_sar at confirm time.
+-- Comparing those frozen amounts against each project's current rate:
+--
+--     Airport facilities        frozen 410  current 410.00
+--     King Saud University      frozen 400  current 400.00
+--     The Royal Court of Saudi  frozen 420  current 420.00
+--
+-- No rate has ever moved. So "the project's current rate" IS the historical
+-- rate for every trip, and the backfill records a fact rather than an
+-- assumption. That is the whole difference between this and the seed migration
+-- deleted during the Water Station Cost work — there, a NULL carried meaning
+-- and nobody knew the answer; here the answer is on file.
+--
+-- ===========================================================================
+-- THE ONE TRIP WITHOUT A PROJECT
+-- ===========================================================================
+-- 817 trips: 816 carry a project_id, ONE does not (a direct-customer trip).
+-- It stays NULL, and the UPDATE is written so it is simply not selected rather
+-- than joined-and-coalesced — a join that assumed every trip has a project
+-- would either drop it or, worse, stamp it with something invented.
+--
+-- NULL here keeps its meaning: "no project, therefore no project rate." The
+-- same honesty as the 13 grandfathered uncosted filling trips.
+--
+-- ===========================================================================
+-- THIS CANNOT MOVE CUSTOMER MONEY, AND HERE IS WHY RATHER THAN AN ASSURANCE
+-- ===========================================================================
+-- The brief required: if stamping changes any prepaid consumption figure, STOP.
+-- It cannot, because NOTHING IN THE MONEY PATH READS THIS COLUMN:
+--
+--   · lib/prepaid.ts's own header, on ConsumingTrip.rate_sar:
+--       "resolved at call time — see header note. NOT the raw trips.rate_sar
+--        column."
+--   · lib/invoice.ts repeats it: "...never trips.rate_sar".
+--   · The actual feed is project.rate_per_trip_sar, passed in by
+--     FinanceTab.tsx and fetchProjectBalance (app/trips/actions.ts).
+--
+-- So this migration writes a column with no money consumer. Prepaid balances,
+-- consumption order, covered/unpaid splits and every invoice total are
+-- untouched — not because the arithmetic is careful, but because the input is
+-- not wired to them.
+--
+-- SWITCHING PREPAID TO READ THE FROZEN RATE WOULD BE A SEPARATE CHANGE AND A
+-- REAL RULING. It is the moment customer money could move, and it is NOT part
+-- of this migration or the app work beside it. Do not fold it in later without
+-- its own review.
+--
+-- ===========================================================================
+-- ONE VISIBLE CONSEQUENCE, FLAGGED NOT BURIED
+-- ===========================================================================
+-- app/trips/ProjectsBoard.tsx renders `getRate={(t) => t.rate_sar ?? 0}` on the
+-- direct-customer Kanban column. With every rate NULL today it always shows 0.
+-- After this backfill, project trips carry a real rate and that figure starts
+-- displaying. An improvement, but a VISIBLE change on a screen nobody was asked
+-- about — check it looks right rather than being surprised by it.
+--
+-- ===========================================================================
+-- SCOPE: BACKFILL ONLY. GOING FORWARD IS APP WORK.
+-- ===========================================================================
+-- This file freezes the rate onto trips that ALREADY EXIST. Stamping NEW trips
+-- at the delivery transition — beside commission_sar and filling_cost_sar, which
+-- already freeze there — is app code in app/trips/actions.ts and ships
+-- separately. Until that lands, a trip created after this migration will carry a
+-- NULL rate, which is visible in block D's count and is expected, not a defect.
+-- ===========================================================================
+
+begin;
+
+-- Only trips WITH a project. The one direct-customer trip is not selected, so
+-- it keeps its NULL rather than being stamped with an invented figure.
+-- `rate_sar is null` makes this re-runnable and stops it overwriting anything a
+-- future delivery-stamp has already frozen.
+update public.trips t
+   set rate_sar = p.rate_per_trip_sar
+  from public.projects p
+ where t.project_id = p.id
+   and t.rate_sar is null;
+
+commit;
+
+-- ===========================================================================
+-- VERIFICATION — run these; do not assume.
+-- ===========================================================================
+--
+-- A) EVERY TRIP WITH A PROJECT IS STAMPED; THE ONE WITHOUT IS NOT.
+--      select count(*) as trips,
+--             count(*) filter (where project_id is not null) as with_project,
+--             count(*) filter (where project_id is null)     as without_project,
+--             count(*) filter (where rate_sar is not null)   as stamped,
+--             count(*) filter (where project_id is not null and rate_sar is null) as missed,
+--             count(*) filter (where project_id is null and rate_sar is not null) as wrongly_stamped
+--        from public.trips;
+--      -- expect 817 / 816 / 1 / 816 / 0 / 0
+--      -- `missed` and `wrongly_stamped` are the two ways this could be wrong;
+--      -- both must be 0.
+--
+-- B) EVERY STAMPED RATE EQUALS ITS PROJECT'S RATE. Expect 0 rows:
+--      select t.id, t.rate_sar, p.rate_per_trip_sar
+--        from public.trips t join public.projects p on p.id = t.project_id
+--       where t.rate_sar is distinct from p.rate_per_trip_sar;
+--
+-- C) THE EVIDENCE FOR OPTION A STILL HOLDS. Re-run the check the ruling rests
+--    on — frozen invoice amounts vs the current rate. Expect rate_moved false
+--    on every row:
+--      with lines as (
+--        select i.customer_id, (l->>'amount_sar')::numeric as frozen_amount
+--          from public.invoices i, lateral jsonb_array_elements(i.covered_lines) l
+--         where i.confirmed_at is not null and l->>'kind' = 'trip')
+--      select p.name, p.rate_per_trip_sar as current_rate, l.frozen_amount,
+--             (l.frozen_amount <> p.rate_per_trip_sar) as rate_moved
+--        from lines l join public.projects p on p.customer_id = l.customer_id
+--       group by 1,2,3 order by 1;
+--      -- If any row reads rate_moved TRUE, a rate HAS moved since the ruling and
+--      -- the backfill has just recorded the wrong historical price for that
+--      -- project's trips. STOP and re-decide rather than accepting it.
+--
+-- D) PER-PROJECT MONEY IS UNMOVED. Capture BEFORE applying and compare after.
+--
+--    NOTE ON WHAT THESE FIGURES ARE. The review brief listed them as "prepaid
+--    consumption": Airport 745 / King Salman 1695 / King Saud 1440 / RRR 1160 /
+--    Royal Court 1240 / VVV 15. They were reproduced live before being written
+--    in here, and they are NOT prepaid consumption — they are the FILLING COST
+--    OF DELIVERED TRIPS per project. Two things give it away: three of the six
+--    projects (King Salman, RRR, VVV) are POSTPAID and have no prepaid
+--    consumption at all, and the figures match delivered-only filling exactly
+--    while the raw all-stage sums differ (Airport 845, King Salman 1950...).
+--    The NUMBERS are right; only the label was. Checking them under the wrong
+--    name would have meant verifying the wrong thing.
+--
+--      select p.name as project,
+--             sum(t.filling_cost_sar) filter (where t.stage = 'delivered') as delivered_filling
+--        from public.projects p left join public.trips t on t.project_id = p.id
+--       group by 1 order by 1;
+--      -- expect, unchanged:
+--      --   Airport facilities         745.00
+--      --   King Salman Park         1,695.00
+--      --   King Saud University     1,440.00
+--      --   RRR T                    1,160.00
+--      --   The Royal Court of Saudi 1,240.00
+--      --   VVV Test 2                  15.00
+--      -- (Raw all-stage sums are higher — 845 / 1,950 / 1,540 / 1,340 / 1,370 /
+--      --  15 — because a SCHEDULED trip holds a frozen fill cost that has not
+--      --  been incurred. Section 7's own warning; do not reconcile against the
+--      --  raw sum.)
+--
+--    AND the inputs the prepaid ledger actually reads, which is the real
+--    customer-money check:
+--      select p.name as project, p.rate_per_trip_sar as live_rate,
+--             count(t.id) filter (where t.delivered_at is not null) as delivered_trips,
+--             (select count(*) from public.customer_topups ct
+--               where ct.customer_id = p.customer_id) as topups
+--        from public.projects p left join public.trips t on t.project_id = p.id
+--       where p.payment_mode = 'prepaid'
+--       group by 1,2,p.customer_id order by 1;
+--      -- expect, unchanged:
+--      --   Airport facilities        410.00   77 delivered  2 top-ups
+--      --   King Saud University      400.00  145 delivered  6 top-ups
+--      --   The Royal Court of Saudi  420.00  128 delivered  1 top-up
+--      -- projects.rate_per_trip_sar is what prepaid reads and this migration
+--      -- does not write it, so it cannot have moved.
+--
+--      select count(*) as confirmed_invoices,
+--             sum(grand_total_sar) as grand_total
+--        from public.invoices where confirmed_at is not null;
+--      -- Must be identical before and after. Confirmed invoices are frozen and
+--      -- this file writes none of their columns.
+--
+-- E) THE P&L IS UNMOVED. trips.rate_sar feeds no view:
+--      select to_char(month,'YYYY-MM') as month, revenue_sar, operating_cost_sar,
+--             net_profit_sar
+--        from public.v_pnl_monthly order by 1;
+--      -- identical before and after.
+--
+--      select count(*) as views_reading_trip_rate
+--        from pg_class c join pg_namespace n on n.oid=c.relnamespace
+--       where n.nspname='public' and c.relkind='v'
+--         and pg_get_viewdef(c.oid,true) ~ 't\.rate_sar';
+--      -- expect 0 — the structural reason E can be trusted.
+--
+-- F) THE BOARD. In the browser, signed in:
+--      · /trips -> Projects — trip cards now show a real rate where they showed
+--        0. Confirm the figure matches the project's rate on the Customers tab.
+--      · The single direct-customer trip still shows 0 / no rate, correctly —
+--        it has no project to take one from.
+-- ===========================================================================
