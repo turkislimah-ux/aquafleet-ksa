@@ -1,21 +1,45 @@
 {
   "version": "1.0",
-  "timestamp": "2026-08-16T18:39:35.920Z",
-  "source": "auto-postool",
-  "partial": true,
+  "timestamp": "2026-08-16T23:10:00.000Z",
+  "source": "claude-code-session",
+  "partial": false,
   "phase": null,
   "phase_name": null,
   "phase_dir": null,
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "auto-checkpoint",
-  "completed_tasks": [],
+  "status": "effective-dated-rates-complete",
+  "completed_tasks": [
+    "0125 salary history + 0126 forward-only made structural - applied, committed",
+    "0127 v_driver_payslip_basis effective salary - applied, verified, committed 78a3038",
+    "0128 trips.rate_sar backfill (816 stamped, 1 orphan NULL) - applied, verified, committed 0e836a6",
+    "PIECE 3 - customer rate freezes at delivery in setTripStage - f4dead3",
+    "PIECE 4 - salary-history screen (view timeline, record a dated/back-dated change) - 29e5f05",
+    "Staff-side salary-history entry point + the salary cell the staff detail never had - a6f15d3 / 089a3b3",
+    "CLAUDE.md section 7 entries for pieces 3 and 4 - ebbc2ae"
+  ],
   "remaining_tasks": [],
   "blockers": [],
-  "human_actions_pending": [],
-  "decisions": [],
+  "human_actions_pending": [
+    "Turki: BROWSER CHECK PIECE 3 - deliver a trip on /trips Projects board, then confirm the freeze fired. SQL: select id, stage, rate_sar from trips where id='<the trip>'; rate_sar must equal that project's rate_per_trip_sar. Deliver a DIRECT-CUSTOMER trip too (no project) - rate_sar must stay NULL.",
+    "Turki: BROWSER CHECK PIECE 4 - now on BOTH people details. /drivers -> a driver -> Salary (monthly) -> History, and the Staff tab -> a staff member -> the NEW Salary cell -> History. The opening row shows a lock badge and NO delete control. Record a change dated in the FUTURE (calm note), then one dated in the PAST (amber warning naming the month). Cancel rather than save if you do not want the re-cost. NOTE: saving a back-dated row WILL change past payroll and profit - intended, and the one action on this screen that moves reported figures.",
+    "Turki: five older browser checks still stacked (0121 /customers, 0122 stations + filling sub-tab, aae45dd types-only, 0124 builder filling metric, 0125/0126 payroll surfaces).",
+    "Turki: fill in the missing hire dates (5 drivers, 1 staff). PDFShift account + PDF_API_KEY."
+  ],
+  "decisions": [
+    "PIECE 3 - THE RATE FREEZE IS NOT GATED ON payout_id, unlike commission_sar beside it. That lock is about DRIVER commission being frozen into a payout snapshot; the customer rate is a different party's money and has nothing to do with whether the driver has been paid. Reusing the gate would tie two unrelated freezes together.",
+    "PIECE 3 - A TRIP WITH NO PROJECT STAMPS NOTHING and keeps its NULL, matching 0128's refusal to invent a rate for the single direct-customer trip. And the rate is NOT nulled when leaving delivered (unlike commission_sar): 0128's model is that a trip carrying a project carries that project's rate, so clearing it on a correction would erase what the backfill deliberately set. Re-delivering re-stamps, mirroring the station re-take rule.",
+    "PIECE 3 - FAILS CLOSED: if the project read errors, the whole stage move is refused rather than completing a delivery with an unstamped rate.",
+    "PIECE 3 - KNOWN COSMETIC CONSEQUENCE: a trip created from now on carries rate_sar NULL until delivered, while every pre-0128 trip was backfilled regardless of stage. ProjectsBoard renders rate_sar ?? 0, so a NEW scheduled trip reads 0 there until delivery. Self-correcting, and explicitly NOT a reason to stamp at creation - the snapshot records the price at the moment the trip became billable.",
+    "PIECE 4 - THE SCREEN EXISTS FOR BACK-DATING, not for everyday raises. The triggers already record a change entered today; only a dated row can say 'this salary applied from March'. The screen's other job is showing the timeline every payroll figure resolves through.",
+    "PIECE 4 - THE HONESTY BLOCK IS THE DESIGN. A back-dated row legitimately re-costs reported months, so the form states which month the recalculation starts from BEFORE the save, computed from the DATE ALONE rather than previewing a server number - the reader can check the rule instead of trusting a figure.",
+    "PIECE 4 - BASELINES ARE GUARDED TWICE: lock badge and NO delete control in the UI (not a disabled one - there is no case where removing it is right), and removeSalaryChange refuses them server-side. Deleting a baseline would make the earliest months resolve to nothing, which reads as a salary of zero rather than an error.",
+    "PIECE 4 - addSalaryChange DOES NOT WRITE drivers.salary_sar. That would fire the trigger and record a SECOND row dated today, turning one back-dated correction into two rows saying different things. The form owns the current value; the screen owns the timeline.",
+    "THE STAFF DETAIL NEVER SHOWED SALARY AT ALL - editable on the form, displayed nowhere, while the driver detail had shown it all along. Wiring the history button added the cell too, deliberately together: a salary with no timeline beside it is exactly the arrangement that let the value drift unnoticed until 0125.",
+    "INCIDENT - I COMMITTED THE BLANK auto-postool TEMPLATE OVER THIS FILE (commit 7b29c65). A python script errored BEFORE writing, and the `git add` chained after it with && still ran against whatever the auto-tool had left on disk. CLAUDE.md section 5 warns about exactly this. The real lesson is narrower than 'write and add in one command': the add must be conditional on the write having SUCCEEDED, and the staged blob must be inspected before committing - `git diff --cached --stat` showing a SHRINK is the tell."
+  ],
   "uncommitted_files": [],
-  "next_action": null,
-  "context_notes": ""
+  "next_action": "All four effective-dated pieces are built, committed and documented in CLAUDE.md section 7, and the salary screen is on BOTH people details. Nothing in flight. Owed: browser checks for pieces 3 and 4 plus five older ones. Remaining deferred in section 7: no supported clear-the-station path; Route Optimization / Predictive / IoT. Still out of scope and still needing its own ruling: switching lib/prepaid.ts to read the frozen trips.rate_sar - the only remaining change that could move customer money.",
+  "context_notes": "READ CLAUDE.md SECTION 7 FIRST. SIX THINGS WORTH CARRYING FORWARD. (1) STILL OUT OF SCOPE AND STILL NEEDS ITS OWN RULING: switching lib/prepaid.ts to read the frozen trips.rate_sar instead of resolving the project's live rate at call time. That is the only remaining change that could move customer money. Nothing reads trips.rate_sar for money today - 0 views, and prepaid/invoice both resolve at call time by their own documented design. (2) THREE FROZEN MONEY FIGURES NOW LIVE ON A TRIP: commission_sar (at delivery, gated on payout_id), filling_cost_sar (at creation, re-taken on station change), rate_sar (at delivery, ungated). They freeze at different moments for different reasons - do not unify them. (3) NEVER re-seed salary_history baselines at today's date; that IS the 0125 defect. Baselines belong at the employment floor. (4) The salary triggers are load-bearing: without them a new hire has no history row and vanishes from payroll. (5) A back-dated salary row is the ONE user action in the app that intentionally moves previously reported profit - the screen says so before saving. (6) BUILD ONLY VIA ./scripts/safe-build.sh - it exits non-zero if dev is live. next build REWRITES tsconfig.json, so git checkout -- tsconfig.json afterwards."
 }
