@@ -1,12 +1,20 @@
 "use server";
 
 // Fleet server actions: create a truck, and assign / unassign its driver.
-// Driver assignment is single-source-of-truth on trucks.assigned_driver_id —
-// a driver can be on at most one truck (partial unique index in 0002), so any
-// assign first frees the driver from whatever truck currently holds them.
+// Driver assignment is single-source-of-truth on trucks.assigned_driver_id — a
+// driver can be on at most one truck (partial unique index in 0002).
+//
+// `assignDriver` REFUSES an unavailable driver server-side; the rule it applies
+// is lib/driver-assignment.ts's, shared verbatim with the Fleet modal's row
+// lock. Read that action's own header before changing anything about who may be
+// assigned — in particular, the free-them-from-the-other-truck step it used to
+// perform is gone on purpose.
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { driverAvailability, resolveOnLeaveToday } from "@/lib/driver-assignment";
+import type { LeavePeriod } from "@/lib/leave";
+import { todayKey } from "@/lib/utils";
 
 export type ActionResult = { error: string | null };
 
@@ -26,6 +34,10 @@ function numOrNull(v: FormDataEntryValue | null) {
 
 // Free this driver from any OTHER truck before placing them, so the unique
 // index never sees the driver on two trucks at once.
+//
+// SOLE CALLER IS `createTruck`, where the Add-Truck form may legitimately name a
+// driver who is already on another truck. `assignDriver` deliberately does NOT
+// call this anymore — it refuses that case instead. See its header.
 async function freeDriverFromOtherTrucks(
   supabase: ReturnType<typeof createClient>,
   driverId: string,
@@ -134,16 +146,97 @@ export async function updateTruck(id: string, formData: FormData): Promise<Actio
   return { error: null };
 }
 
+/**
+ * Assign a driver to a truck — availability is ENFORCED HERE, not in the modal.
+ *
+ * THE MODAL'S GREYED ROW IS A COURTESY; THIS IS THE GUARD. Both sides call the
+ * same `driverAvailability()` (lib/driver-assignment.ts), so the row that looks
+ * locked and the write that gets refused are the same rule, not two rules that
+ * agree today. Same shape as the payslip hire-date gate: the friendly sentence
+ * is the normal path, the refusal before the write is the enforcement.
+ *
+ * FAILS CLOSED. If any of the four reads errors we refuse rather than assign —
+ * an unreadable availability fact is not an available driver. That is the
+ * lesson 0114 recorded in SQL, applied here in TypeScript.
+ *
+ * WHY `freeDriverFromOtherTrucks` IS NO LONGER CALLED HERE. It existed so an
+ * assign could steal a driver off another truck without tripping 0002's partial
+ * unique index. But the modal has always LOCKED an assigned-elsewhere driver,
+ * so no UI path ever reached it, and the gate below now refuses that case
+ * outright — leaving the call would make this action quietly capable of a move
+ * the UI forbids. The helper stays for `createTruck`, which legitimately needs
+ * it. The unique index remains the backstop for the read-then-write race, and
+ * 23505 is translated below rather than shown raw.
+ *
+ * `today` is `todayKey()` — the SAME local clock app/fleet/page.tsx uses to
+ * build its on-leave set. A UTC date here would disagree with the modal for the
+ * three hours after midnight Riyadh, which is exactly the bug class just fixed
+ * on this page's 30-day window.
+ */
 export async function assignDriver(truckId: string, driverId: string): Promise<ActionResult> {
   if (!truckId || !driverId) return { error: "Missing truck or driver." };
 
   const supabase = createClient();
+  const today = todayKey();
 
-  const freeErr = await freeDriverFromOtherTrucks(supabase, driverId, truckId);
-  if (freeErr) return { error: freeErr };
+  const [truckRes, driverRes, otherTruckRes, leaveRes] = await Promise.all([
+    supabase.from("trucks").select("id, plate, assigned_driver_id, terminated_at").eq("id", truckId).maybeSingle(),
+    supabase.from("drivers").select("id, name, terminated_at").eq("id", driverId).maybeSingle(),
+    // A DIFFERENT truck already holding this driver. Terminated trucks are
+    // excluded for the same reason the page excludes them: a terminated truck
+    // keeps its assigned_driver_id (0020 never nulls it) but no longer holds
+    // anyone in practice, so counting it would block a free driver forever.
+    supabase
+      .from("trucks")
+      .select("plate")
+      .eq("assigned_driver_id", driverId)
+      .is("terminated_at", null)
+      .neq("id", truckId)
+      .maybeSingle(),
+    // Same predicate as app/fleet/page.tsx's leave fetch, narrowed to one
+    // driver. The SQL range filter and the TS check below are deliberately
+    // both present — the page does the same, and the TS half is what keeps
+    // the rule in lib/leave rather than in a query.
+    supabase
+      .from("leave_periods")
+      .select("driver_id, staff_id, start_date, end_date")
+      .eq("driver_id", driverId)
+      .lte("start_date", today)
+      .gte("end_date", today),
+  ]);
+
+  if (truckRes.error || driverRes.error || otherTruckRes.error || leaveRes.error) {
+    return { error: "Could not verify the driver's availability. Nothing was changed — please try again." };
+  }
+  if (!truckRes.data) return { error: "That truck no longer exists." };
+  if (truckRes.data.terminated_at) return { error: `Truck ${truckRes.data.plate} has been terminated and cannot take a driver.` };
+
+  const driver = driverRes.data;
+  const availability = driverAvailability({
+    // A missing driver row is reported as termination-shaped rather than
+    // crashing on a null name; the guard below refuses either way.
+    driverName: driver?.name ?? "That driver",
+    isCurrentDriver: truckRes.data.assigned_driver_id === driverId,
+    terminated: !driver || driver.terminated_at != null,
+    assignedToOtherTruckPlate: otherTruckRes.data?.plate ?? null,
+    onLeaveToday: resolveOnLeaveToday(
+      (leaveRes.data ?? []) as unknown as LeavePeriod[],
+      driverId,
+      today,
+    ),
+  });
+  if (availability.blockedReason) return { error: availability.error };
 
   const { error } = await supabase.from("trucks").update({ assigned_driver_id: driverId }).eq("id", truckId);
-  if (error) return { error: error.message };
+  if (error) {
+    // 23505 = 0002's partial unique index on assigned_driver_id. Only reachable
+    // if the driver was assigned elsewhere between the check above and this
+    // write — a real race, not a logic hole, so it gets the same sentence.
+    if (error.code === "23505") {
+      return { error: `${driver?.name ?? "That driver"} was just assigned to another truck. Refresh and try again.` };
+    }
+    return { error: error.message };
+  }
 
   revalidatePath("/fleet");
   revalidatePath("/drivers");

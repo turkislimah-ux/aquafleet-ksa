@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD } from "@/components/ui";
 import { type OperationStation } from "@/lib/db-types";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
+import { driverAvailability } from "@/lib/driver-assignment";
 import { TRUCK_OPS_STATE_LABELS, type TruckOpsState } from "@/lib/truck-status";
 import type { TruckRow, DriverLite } from "./page";
 import { assignDriver, unassignDriver } from "./actions";
@@ -123,8 +124,10 @@ export default function FleetClient({
   errorMsg: string | null;
 }) {
   const router = useRouter();
-  // Computed on-leave-today set (authoritative). Drives the pill + disables the
-  // assign row (UI only — assignDriver has no server-side availability rejection).
+  // Computed on-leave-today set (authoritative). Feeds the pill and the assign
+  // modal's availability verdict. The row lock is a COURTESY — assignDriver
+  // re-checks the same rule (lib/driver-assignment.ts) and refuses the write
+  // itself, so a stale tab cannot assign a driver this list has greyed out.
   const onLeave = useMemo(() => new Set(onLeaveDriverIds), [onLeaveDriverIds]);
 
   const [status, setStatus] = useState<(typeof STATUS_CHIPS)[number]>("all");
@@ -500,9 +503,21 @@ export default function FleetClient({
                   const busyTruck = truckByDriver.get(d.id);
                   const isCurrent = assignTruck.assigned_driver_id === d.id;
                   const busyElsewhere = !!busyTruck && busyTruck.id !== assignTruck.id;
-                  const onLeaveToday = onLeave.has(d.id);
-                  // UI-only lock: busy elsewhere OR on leave today (never the current driver).
-                  const locked = (busyElsewhere || onLeaveToday) && !isCurrent;
+                  // THE ROW LOCK AND THE SERVER GATE ARE ONE RULE. This calls
+                  // the same driverAvailability() assignDriver calls before it
+                  // writes, so a row can never look clickable and then be
+                  // refused, or look locked while the action would have allowed
+                  // it. `terminated` is always false here because the picker's
+                  // fetch already filters terminated drivers out — the server
+                  // still checks it, since a filter is not a gate.
+                  const availability = driverAvailability({
+                    driverName: d.name,
+                    isCurrentDriver: isCurrent,
+                    terminated: false,
+                    assignedToOtherTruckPlate: busyElsewhere ? busyTruck!.plate : null,
+                    onLeaveToday: onLeave.has(d.id),
+                  });
+                  const locked = availability.blockedReason !== null;
                   const state = driverStateById[d.id] ?? "off_duty";
                   return (
                     <tr
@@ -519,8 +534,13 @@ export default function FleetClient({
                       <TD>
                         <StatusPill status={state} label={DRIVER_STATE_LABELS[state]} />
                       </TD>
-                      <TD className={cn("text-xs", busyElsewhere || onLeaveToday ? "muted" : "text-emerald-600 dark:text-emerald-400 font-medium")}>
-                        {busyElsewhere ? `Already assigned · ${busyTruck!.plate}` : onLeaveToday ? "On leave today" : "Available"}
+                      {/* Label comes from the same verdict as the lock, but is
+                          NOT exempted for the current driver — a driver already
+                          on this truck who is on leave today reads "On leave
+                          today" while their row stays clickable, because both
+                          statements are true. */}
+                      <TD className={cn("text-xs", availability.label === "Available" ? "text-emerald-600 dark:text-emerald-400 font-medium" : "muted")}>
+                        {availability.label}
                       </TD>
                       <TD className="tabular-nums text-xs">{d.safety_score ?? "—"}</TD>
                       <TD className="tabular-nums text-xs">{trips30d[d.id] ?? 0}</TD>
