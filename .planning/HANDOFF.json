@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-08-17T00:40:00.000Z",
+  "timestamp": "2026-08-17T01:05:00.000Z",
   "source": "claude-code-session",
   "partial": false,
   "phase": null,
@@ -9,7 +9,7 @@
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "effective-dated-rates-verified",
+  "status": "all-verified-backlog-clear",
   "completed_tasks": [
     "0125 salary history + 0126 forward-only made structural - applied, committed",
     "0127 v_driver_payslip_basis effective salary - applied, verified, committed 78a3038",
@@ -19,12 +19,12 @@
     "Staff-side salary-history entry point + the salary cell the staff detail never had - a6f15d3 / 089a3b3",
     "CLAUDE.md section 7 entries for pieces 3 and 4 - ebbc2ae",
     "Pieces 3 and 4 BROWSER-VERIFIED by Turki; piece 3 independently confirmed in the data (8 deliveries, every rate_sar = its project rate, 0 missed / 0 wrongly-stamped / 0 mismatches)",
-    "Four of the five older browser checks verified WITHOUT a browser (server-side + code): 0121 payment_model gone from the customers form, 0122 station prices intact, aae45dd proved types-only, 0124 builder fence correct. Only rendering/layout/interaction residue is left."
+    "Four of the five older browser checks verified WITHOUT a browser (server-side + code): 0121 payment_model gone from the customers form, 0122 station prices intact, aae45dd proved types-only, 0124 builder fence correct. Only rendering/layout/interaction residue is left.",
+    "ALL browser checks done and passing (pieces 3+4 and the five older ones). Verified afterwards that the testing left NOTHING behind: station prices identical with Olaya potable still NULL, filling 210 / 1,285 / 5,205 unmoved, salary_history 22 rows 0 changes, payroll 25,000 / 37,800 / 31,300, trips 816/816 stamped, dictionary 30 keys."
   ],
   "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [
-    "Turki: the remaining browser residue is now SMALL - four of the five older checks were verified server-side/in code and only what a database and a grep cannot see is left. (a) pages render at all (no 500) on /customers, /trips, /reports; (b) LAYOUT - 0123's longer source_view strings must wrap rather than overflow their dictionary cell, the one real risk in that batch; (c) INTERACTION - the report builder's 'Water filling cost' column plots Jun 210.00 / Jul 1,285.00 / Aug (read live, it grows), and the Water Stations modal saves a per-type price. CORRECTED FIGURE: August filling is 5,205.00 / 600 costed, NOT the 5,185.00 / 598 written in the older checklists - eight deliveries moved two trips out of scheduled.",
     "Turki: fill in the missing hire dates (5 drivers, 1 staff). PDFShift account + PDF_API_KEY."
   ],
   "decisions": [
@@ -42,9 +42,10 @@
     "THE PIECE-4 VERIFICATION LEFT NOTHING. salary_history still holds 22 rows, all baselines, 0 changes - the back-dated case was exercised and CANCELLED rather than saved. Verifying that screen means deciding whether to keep what it writes; the honest end state is either a change you meant or no row at all.",
     "A CHECKLIST THAT HARDCODES A LIVE, GROWING FIGURE WILL REPORT A FAILURE THAT IS ONLY TIME PASSING. The 0122/0124 checklists said August filling is 5,185.00 / 598 costed; it now reads 5,205.00 / 600 because the piece-3 verification delivered eight trips, two of them out of 'scheduled'. Closed months (June, July) are safe to write down and reconcile against; the CURRENT month must be re-read live. CLAUDE.md section 7 now says so at the figure itself.",
     "STALE FIGURES WERE FIXED IN THE DURABLE RECORD ONLY, NOT IN HISTORY. 5,185 also appears in applied migrations 0122/0124 and in two closed review packs. Those are records of what was true AT APPLY TIME and are left alone - the same 'fix forward, do not rewrite applied history' rule as 0038/0090/0109/0125. Only CLAUDE.md section 7, which is read as CURRENT, was corrected.",
-    "FOUR OF THE FIVE OLDER BROWSER CHECKS DID NOT NEED A BROWSER. 0121 verified by grep (payment_model appears only in comments under app/customers - no form field, no parse() key) plus the derived 3-prepaid/3-postpaid data; 0122 by the station rows (Olaya potable still NULL - the DO-NOT-FIX guard holding); aae45dd PROVED types-only by filtering its diff for any line that is not a type, import or comment and getting nothing; 0124 by the dictionary key + BUILDER_METRICS entry with groupings ['period'] + zero 'filling' in dashboard-widgets. Convert a browser checklist into data and code assertions where possible - what is left is then genuinely visual and takes two minutes."
+    "FOUR OF THE FIVE OLDER BROWSER CHECKS DID NOT NEED A BROWSER. 0121 verified by grep (payment_model appears only in comments under app/customers - no form field, no parse() key) plus the derived 3-prepaid/3-postpaid data; 0122 by the station rows (Olaya potable still NULL - the DO-NOT-FIX guard holding); aae45dd PROVED types-only by filtering its diff for any line that is not a type, import or comment and getting nothing; 0124 by the dictionary key + BUILDER_METRICS entry with groupings ['period'] + zero 'filling' in dashboard-widgets. Convert a browser checklist into data and code assertions where possible - what is left is then genuinely visual and takes two minutes.",
+    "THE STATIONS SAVE-TEST DID NOT DISTURB THE GUARD. That check writes a per-type price, so it was the one browser step that could have moved money data. Afterwards every station reads exactly as before and olaya_filling_point.fill_cost_potable_sar is STILL NULL - meaning nobody 'helpfully' filled in the blank that 0122's DO-NOT-FIX section exists to protect. Worth re-checking after any future stations work: a NULL there is a business statement ('does not offer potable'), not a gap."
   ],
   "uncommitted_files": [],
-  "next_action": "Effective-dated rates are COMPLETE, committed, documented in CLAUDE.md section 7 and browser-verified. Nothing in flight. Owed: five older browser checks (0121 /customers, 0122 stations + filling sub-tab, aae45dd types-only, 0124 builder filling metric, 0125/0126 payroll surfaces) - none blocking. Remaining deferred in section 7: no supported clear-the-station path; Route Optimization / Predictive / IoT. Still out of scope and still needing its own ruling: switching lib/prepaid.ts to read the frozen trips.rate_sar - the only remaining change that could move customer money.",
+  "next_action": "Verification backlog is CLEAR - every browser check is done and nothing is in flight. Remaining work is the section 7 deferred tail: no supported clear-the-station path; Route Optimization / Predictive / IoT. Still out of scope and still needing its own ruling: switching lib/prepaid.ts to read the frozen trips.rate_sar - the only remaining change that could move customer money. Turki still owes data entry: hire dates for 5 drivers and 1 staff member, and a PDFShift account + PDF_API_KEY before PDF output can be verified.",
   "context_notes": "READ CLAUDE.md SECTION 7 FIRST. SIX THINGS WORTH CARRYING FORWARD. (1) STILL OUT OF SCOPE AND STILL NEEDS ITS OWN RULING: switching lib/prepaid.ts to read the frozen trips.rate_sar instead of resolving the project's live rate at call time. That is the only remaining change that could move customer money. Nothing reads trips.rate_sar for money today - 0 views, and prepaid/invoice both resolve at call time by their own documented design. (2) THREE FROZEN MONEY FIGURES NOW LIVE ON A TRIP: commission_sar (at delivery, gated on payout_id), filling_cost_sar (at creation, re-taken on station change), rate_sar (at delivery, ungated). They freeze at different moments for different reasons - do not unify them. (3) NEVER re-seed salary_history baselines at today's date; that IS the 0125 defect. Baselines belong at the employment floor. (4) The salary triggers are load-bearing: without them a new hire has no history row and vanishes from payroll. (5) A back-dated salary row is the ONE user action in the app that intentionally moves previously reported profit - the screen says so before saving. (6) BUILD ONLY VIA ./scripts/safe-build.sh - it exits non-zero if dev is live. next build REWRITES tsconfig.json, so git checkout -- tsconfig.json afterwards."
 }
