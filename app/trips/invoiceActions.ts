@@ -97,14 +97,18 @@ async function assembleForCustomerPeriod(params: {
     // ref/water_type added (Finance polish batch A) — display-only passenger
     // data, threaded through ConsumingTrip -> InvoiceLine. Never used in any
     // rate/VAT/total math.
-    .select("id, trip_date, delivered_at, invoice_id, ref, water_type")
+    .select("id, trip_date, delivered_at, invoice_id, ref, water_type, rate_sar")
     .eq("project_id", project.id);
   if (tripErr) return { error: tripErr.message };
   const trips: ConsumingTrip[] = (tripRows ?? []).map((t) => ({
     id: t.id,
     trip_date: t.trip_date,
     delivered_at: t.delivered_at,
-    rate_sar: project.rate_per_trip_sar,
+    // FROZEN RATE FIRST — an invoice bills each trip at what it was worth on the
+    // day it was delivered, not at whatever the project charges today. The
+    // project's current rate remains only as the not-yet-delivered fallback, and
+    // an undelivered trip is filtered out before any amount is computed.
+    rate_sar: t.rate_sar ?? project.rate_per_trip_sar,
     ref: t.ref,
     water_type: t.water_type,
   }));

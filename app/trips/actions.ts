@@ -794,7 +794,7 @@ async function fetchProjectBalance(
   ratePerTrip: number,
 ): Promise<number> {
   const [{ data: tripRows }, { data: topupRows }, { data: invoiceRows }] = await Promise.all([
-    supabase.from("trips").select("id, trip_date, delivered_at").eq("project_id", projectId),
+    supabase.from("trips").select("id, trip_date, delivered_at, rate_sar").eq("project_id", projectId),
     supabase.from("customer_topups").select("id, amount_sar, topup_date").eq("customer_id", customerId),
     supabase.from("invoices").select("id, status").eq("customer_id", customerId),
   ]);
@@ -802,7 +802,12 @@ async function fetchProjectBalance(
     id: t.id,
     trip_date: t.trip_date,
     delivered_at: t.delivered_at,
-    rate_sar: ratePerTrip,
+    // FROZEN RATE FIRST. A delivered trip bills at what it was worth on the day,
+    // so a later rate change re-prices only NEW work. `ratePerTrip` (the
+    // project's CURRENT rate) survives purely as the not-yet-delivered fallback —
+    // and an undelivered trip is filtered out before any amount is computed, so
+    // it never reaches the money.
+    rate_sar: t.rate_sar ?? ratePerTrip,
   }));
   const topups: TopupLite[] = (topupRows ?? []) as TopupLite[];
 

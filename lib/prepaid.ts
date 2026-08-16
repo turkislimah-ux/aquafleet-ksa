@@ -34,8 +34,21 @@ export type ConsumingTrip = {
   id: string;
   trip_date: string;
   delivered_at: string | null;
-  // RESOLVED pre-VAT rate for this trip (its project's rate_per_trip_sar at
-  // call time) — see header note. NOT the raw trips.rate_sar column.
+  // RESOLVED pre-VAT rate for this trip. Since the frozen-rate switch this is
+  // the trip's OWN frozen `trips.rate_sar` (stamped at delivery), falling back
+  // to its project's current rate_per_trip_sar only when the trip has not been
+  // delivered yet and so has nothing frozen.
+  //
+  // STILL RESOLVED BY THE CALLER, which has NOT changed: this module never
+  // fetches and holds no opinion about where the number came from. What changed
+  // is what the callers hand it — see each construction site.
+  //
+  // THE FALLBACK CANNOT AFFECT MONEY, BY CONSTRUCTION: deliveredTripsSorted()
+  // below filters to `delivered_at != null` BEFORE any amount is computed, and a
+  // delivered trip always carries a frozen rate. The fallback exists so an
+  // undelivered trip still holds a sane number while it is filtered out, and so
+  // the behaviour degrades to the OLD basis rather than to zero if that filter
+  // is ever loosened.
   rate_sar: number;
   // Additive, display-only (Finance polish batch A). Never read by any money
   // math below — purely passenger data threaded through to statement/invoice

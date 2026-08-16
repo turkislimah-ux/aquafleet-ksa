@@ -54,6 +54,10 @@ type TripLite = {
   project_id: string | null;
   trip_date: string;
   delivered_at: string | null;
+  // The trip's FROZEN customer rate (0128 backfill + the delivery stamp). NULL
+  // until a trip is delivered; consumption falls back to the project's current
+  // rate for those, which are filtered out before any amount is computed.
+  rate_sar?: number | null;
   // Additive (Finance polish batch A) — display-only, threaded into
   // ConsumingTrip for the statement's ref link + water-type column.
   ref?: string | null;
@@ -221,7 +225,9 @@ export default function FinanceTab({ customers, projects, trips, topups, special
           id: t.id,
           trip_date: t.trip_date,
           delivered_at: t.delivered_at,
-          rate_sar: project.rate_per_trip_sar,
+          // FROZEN RATE FIRST — see lib/prepaid.ts's ConsumingTrip note. The
+          // project's current rate is only the not-yet-delivered fallback.
+          rate_sar: t.rate_sar ?? project.rate_per_trip_sar,
           ref: t.ref,
           water_type: t.water_type,
         }));
@@ -254,7 +260,9 @@ export default function FinanceTab({ customers, projects, trips, topups, special
           id: t.id,
           trip_date: t.trip_date,
           delivered_at: t.delivered_at,
-          rate_sar: project.rate_per_trip_sar,
+          // FROZEN RATE FIRST — see lib/prepaid.ts's ConsumingTrip note. The
+          // project's current rate is only the not-yet-delivered fallback.
+          rate_sar: t.rate_sar ?? project.rate_per_trip_sar,
           ref: t.ref,
           water_type: t.water_type,
         }));
