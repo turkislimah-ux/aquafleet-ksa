@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-08-17T00:05:00.000Z",
+  "timestamp": "2026-08-17T00:40:00.000Z",
   "source": "claude-code-session",
   "partial": false,
   "phase": null,
@@ -18,12 +18,13 @@
     "PIECE 4 - salary-history screen (view timeline, record a dated/back-dated change) - 29e5f05",
     "Staff-side salary-history entry point + the salary cell the staff detail never had - a6f15d3 / 089a3b3",
     "CLAUDE.md section 7 entries for pieces 3 and 4 - ebbc2ae",
-    "Pieces 3 and 4 BROWSER-VERIFIED by Turki; piece 3 independently confirmed in the data (8 deliveries, every rate_sar = its project rate, 0 missed / 0 wrongly-stamped / 0 mismatches)"
+    "Pieces 3 and 4 BROWSER-VERIFIED by Turki; piece 3 independently confirmed in the data (8 deliveries, every rate_sar = its project rate, 0 missed / 0 wrongly-stamped / 0 mismatches)",
+    "Four of the five older browser checks verified WITHOUT a browser (server-side + code): 0121 payment_model gone from the customers form, 0122 station prices intact, aae45dd proved types-only, 0124 builder fence correct. Only rendering/layout/interaction residue is left."
   ],
   "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [
-    "Turki: five older browser checks still stacked (0121 /customers, 0122 stations + filling sub-tab, aae45dd types-only, 0124 builder filling metric, 0125/0126 payroll surfaces).",
+    "Turki: the remaining browser residue is now SMALL - four of the five older checks were verified server-side/in code and only what a database and a grep cannot see is left. (a) pages render at all (no 500) on /customers, /trips, /reports; (b) LAYOUT - 0123's longer source_view strings must wrap rather than overflow their dictionary cell, the one real risk in that batch; (c) INTERACTION - the report builder's 'Water filling cost' column plots Jun 210.00 / Jul 1,285.00 / Aug (read live, it grows), and the Water Stations modal saves a per-type price. CORRECTED FIGURE: August filling is 5,205.00 / 600 costed, NOT the 5,185.00 / 598 written in the older checklists - eight deliveries moved two trips out of scheduled.",
     "Turki: fill in the missing hire dates (5 drivers, 1 staff). PDFShift account + PDF_API_KEY."
   ],
   "decisions": [
@@ -38,7 +39,10 @@
     "THE STAFF DETAIL NEVER SHOWED SALARY AT ALL - editable on the form, displayed nowhere, while the driver detail had shown it all along. Wiring the history button added the cell too, deliberately together: a salary with no timeline beside it is exactly the arrangement that let the value drift unnoticed until 0125.",
     "INCIDENT - I COMMITTED THE BLANK auto-postool TEMPLATE OVER THIS FILE (commit 7b29c65). A python script errored BEFORE writing, and the `git add` chained after it with && still ran against whatever the auto-tool had left on disk. CLAUDE.md section 5 warns about exactly this. The real lesson is narrower than 'write and add in one command': the add must be conditional on the write having SUCCEEDED, and the staged blob must be inspected before committing - `git diff --cached --stat` showing a SHRINK is the tell.",
     "THE PIECE-3 VERIFICATION LEFT REAL DATA AND IT IS KEPT (Turki's call). Eight trips were genuinely delivered during the check, so August net profit moved -59,900.02 -> -60,088.36 on their new commission and filling cost; payroll was untouched. They are real operational events, not test residue - reverting would mean un-delivering eight real trips. Recorded because a P&L figure that moved during verification reads as a defect later if nobody wrote down why.",
-    "THE PIECE-4 VERIFICATION LEFT NOTHING. salary_history still holds 22 rows, all baselines, 0 changes - the back-dated case was exercised and CANCELLED rather than saved. Verifying that screen means deciding whether to keep what it writes; the honest end state is either a change you meant or no row at all."
+    "THE PIECE-4 VERIFICATION LEFT NOTHING. salary_history still holds 22 rows, all baselines, 0 changes - the back-dated case was exercised and CANCELLED rather than saved. Verifying that screen means deciding whether to keep what it writes; the honest end state is either a change you meant or no row at all.",
+    "A CHECKLIST THAT HARDCODES A LIVE, GROWING FIGURE WILL REPORT A FAILURE THAT IS ONLY TIME PASSING. The 0122/0124 checklists said August filling is 5,185.00 / 598 costed; it now reads 5,205.00 / 600 because the piece-3 verification delivered eight trips, two of them out of 'scheduled'. Closed months (June, July) are safe to write down and reconcile against; the CURRENT month must be re-read live. CLAUDE.md section 7 now says so at the figure itself.",
+    "STALE FIGURES WERE FIXED IN THE DURABLE RECORD ONLY, NOT IN HISTORY. 5,185 also appears in applied migrations 0122/0124 and in two closed review packs. Those are records of what was true AT APPLY TIME and are left alone - the same 'fix forward, do not rewrite applied history' rule as 0038/0090/0109/0125. Only CLAUDE.md section 7, which is read as CURRENT, was corrected.",
+    "FOUR OF THE FIVE OLDER BROWSER CHECKS DID NOT NEED A BROWSER. 0121 verified by grep (payment_model appears only in comments under app/customers - no form field, no parse() key) plus the derived 3-prepaid/3-postpaid data; 0122 by the station rows (Olaya potable still NULL - the DO-NOT-FIX guard holding); aae45dd PROVED types-only by filtering its diff for any line that is not a type, import or comment and getting nothing; 0124 by the dictionary key + BUILDER_METRICS entry with groupings ['period'] + zero 'filling' in dashboard-widgets. Convert a browser checklist into data and code assertions where possible - what is left is then genuinely visual and takes two minutes."
   ],
   "uncommitted_files": [],
   "next_action": "Effective-dated rates are COMPLETE, committed, documented in CLAUDE.md section 7 and browser-verified. Nothing in flight. Owed: five older browser checks (0121 /customers, 0122 stations + filling sub-tab, aae45dd types-only, 0124 builder filling metric, 0125/0126 payroll surfaces) - none blocking. Remaining deferred in section 7: no supported clear-the-station path; Route Optimization / Predictive / IoT. Still out of scope and still needing its own ruling: switching lib/prepaid.ts to read the frozen trips.rate_sar - the only remaining change that could move customer money.",

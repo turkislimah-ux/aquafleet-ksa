@@ -2001,6 +2001,12 @@ relevant skill(s) **when the task calls for it**:
       5,185.00 (598/0); trips 817 / 13 uncosted. Dropping a column no view reads
       cannot reach the P&L, and that is what the check demonstrates rather than
       assumes.
+      **THOSE ARE APPLY-TIME FIGURES, NOT STANDING EXPECTATIONS.** June and July
+      are closed and should not move; **August grows with every delivery** — it
+      already reads 5,205.00 / 600 costed after eight trips were delivered during
+      the piece-3 verification. **Re-read the current month live; only reconcile
+      the closed months against a written number.** A checklist that hardcodes a
+      growing figure reports a failure that is really just time passing.
     - **Trap for anyone re-checking dependencies:** use `fill_cost[^_]`, not
       `%fill_cost%`. The loose pattern also matches `fill_cost_potable_sar` /
       `fill_cost_non_potable_sar` and returns false positives on every check —
