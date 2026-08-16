@@ -113,6 +113,26 @@ relevant skill(s) **when the task calls for it**:
   - **Never `git add .planning/HANDOFF.json` reflexively** — if the tool has run
     since, you will commit the empty template straight over real content and lose
     it silently. Check `git diff --cached` shows the rich version before committing.
+  - **"ONE COMMAND" IS NOT ENOUGH, AND THIS WAS PROVEN THE HARD WAY** — commit
+    `7b29c65` committed the blank template straight over a full snapshot
+    (restored in `86adec8`). The write was a python heredoc that threw **before
+    writing anything**, and the `&& git add` chained after it happily staged
+    whatever the auto-tool had left on disk. Writing and staging in one command
+    does not help when the write silently did nothing. So:
+    - **The `add` must be conditional on the write actually SUCCEEDING**, not
+      merely chained after it. A generator that can throw part-way through must
+      never leave an untouched or half-written file in the staging path.
+    - **INSPECT THE STAGED BLOB, NOT THE WORKING TREE.** `git show
+      :.planning/HANDOFF.json` reads exactly what would be committed — parse it
+      and assert `source == "claude-code-session"` with non-empty `decisions` and
+      `completed_tasks`. That is the check that caught it on the retry; looking
+      at the file on disk would not have.
+    - **A SHRINKING DIFF ON THIS FILE IS THE TELL.** Real updates grow or churn
+      it; a large net deletion (`16 insertions, 30 deletions`) means the template
+      won. Treat that stat line as a stop signal, not a curiosity.
+    - Nothing was lost, only because the content was already in git. **The
+      recovery is `git show <last-good-commit>:.planning/HANDOFF.json`** — rebuild
+      from that blob and re-apply the round's updates rather than retyping it.
   - After committing, `git checkout -- .planning/HANDOFF.json` so the working tree
     matches HEAD instead of showing a permanent phantom modification.
   - It will drift again on the next tool run. That is expected, not a bug to fix.

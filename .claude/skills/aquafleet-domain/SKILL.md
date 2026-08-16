@@ -190,6 +190,14 @@ Draft → Review → Confirmed → Paid
     **Never `git add` it reflexively.** If the auto-tool has run since you wrote
     it, you will commit the empty template over real content and lose it
     silently — the diff looks like an ordinary update.
+    **"ONE COMMAND" IS NOT SUFFICIENT ON ITS OWN — see §5 for the sharper rule,
+    which was learned by blanking this file for real** (`7b29c65`, restored in
+    `86adec8`). A write that THROWS BEFORE WRITING still lets a chained
+    `&& git add` stage whatever the auto-tool left behind. §5 now requires the
+    add to be conditional on the write having succeeded, the STAGED BLOB to be
+    parsed and asserted (`git show :.planning/HANDOFF.json`), and a shrinking
+    diff on this file to be treated as a stop signal. Do not rely on this
+    paragraph's summary — §5 is the authority.
   - **`preview/.planning/HANDOFF.json` — NEVER staged.** It lives inside the
     read-only `preview/` tree and carries stale auto-tool content. Its permanent
     "modified" state in `git status` is correct; leave it alone.
