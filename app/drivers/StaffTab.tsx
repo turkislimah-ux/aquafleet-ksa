@@ -11,14 +11,15 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X, Pencil, Ban } from "lucide-react";
+import { Plus, X, Pencil, Ban, History } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { type Staff, type StaffRole, type OperationStation, type StaffCommission, type StaffCommissionType } from "@/lib/db-types";
 import { onLeaveTodaySet, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
-import { cn } from "@/lib/utils";
+import { cn, formatSar } from "@/lib/utils";
 import { createStaff, updateStaff, terminateStaff, addStaffRole } from "./actions";
 import LeaveSection from "./LeaveSection";
+import SalaryHistoryModal from "./SalaryHistoryModal";
 import MechanicCommissionsSection from "./MechanicCommissionsSection";
 import OperationStationField from "@/components/OperationStationField";
 import PersonIdLink from "./PersonIdLink";
@@ -60,6 +61,10 @@ export default function StaffTab({
 }) {
   const router = useRouter();
   const [detail, setDetail] = useState<Staff | null>(null);
+  // Salary-history modal target. Same screen the driver detail opens — the modal
+  // and its actions are subject-agnostic, so this is a button, not a feature.
+  const [salaryHistoryFor, setSalaryHistoryFor] =
+    useState<{ id: string; name: string; salary: number | null } | null>(null);
 
   // Global-search record focus (?focus=staff:<id>). Lives here rather than
   // in DriversClient because this component owns the staff detail modal —
@@ -256,7 +261,37 @@ export default function StaffTab({
                       ? "On leave today"
                       : detail.active ? "Active" : "Inactive"}
                 </Cell>
+                {/* Staff salary had NO cell here at all — it was only editable
+                    on the form and never shown. It is added alongside the
+                    history link rather than separately, because a figure with
+                    no timeline beside it is what let salary drift unnoticed in
+                    the first place. Mirrors the driver detail exactly. */}
+                <Cell label="Salary (monthly)">
+                  <span className="flex items-center gap-2">
+                    <span className="font-semibold tabular-nums">
+                      {detail.monthly_salary_sar != null ? formatSar(detail.monthly_salary_sar) : "—"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSalaryHistoryFor({
+                        id: detail.id, name: detail.name, salary: detail.monthly_salary_sar ?? null,
+                      })}
+                      className="text-brand-600 dark:text-brand-300 hover:underline text-xs inline-flex items-center gap-1"
+                      title="View salary history / record a dated change"
+                    >
+                      <History className="h-3.5 w-3.5" /> History
+                    </button>
+                  </span>
+                </Cell>
               </div>
+
+              <SalaryHistoryModal
+                open={salaryHistoryFor !== null}
+                onClose={() => setSalaryHistoryFor(null)}
+                subject={salaryHistoryFor ? { staffId: salaryHistoryFor.id } : null}
+                personName={salaryHistoryFor?.name ?? ""}
+                currentSalary={salaryHistoryFor?.salary ?? null}
+              />
 
               {/* Leave & absence — same reusable section as the driver detail. */}
               <LeaveSection
