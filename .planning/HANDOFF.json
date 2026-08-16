@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-08-16T18:30:00.000Z",
+  "timestamp": "2026-08-16T19:10:00.000Z",
   "source": "claude-code-session",
   "partial": false,
   "phase": null,
@@ -9,36 +9,31 @@
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "payment-mode-reconciliation-complete",
+  "status": "fill-cost-retired",
   "completed_tasks": [
-    "Date/clock sweep closed at day and month grain - through 65c081e",
-    "monthKeyOf consolidated to ONE definition - 2a210a5",
-    "Delivered figures re-based onto trip_date, matching v_delivered_revenue_daily - bc32691",
-    "payment_mode reconciliation: app stops reading customers.payment_model, Payment column derived from the project - e69ec6a",
-    "0121 applied by the architect, verified live by me, committed - 25ce8cb",
-    "CLAUDE.md section 7 rewritten - the deferred entry's PREMISE was wrong, not just stale - 6776c4f"
+    "payment_mode reconciliation - 0121 applied, verified, committed (e69ec6a / 25ce8cb / 6776c4f)",
+    "Two closed review packs committed - a7a05c7",
+    "0122 retires the flat water_stations.fill_cost - applied, verified, committed - dc9d411",
+    "CLAUDE.md section 7 corrected in TWO places + 0122 review pack archived - 4d6c0d8"
   ],
   "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [
-    "Turki: browser-verify /customers after 0121. The Payment column previously read 'Postpaid' for EVERY customer; it now reads Prepaid for three of them. That is a correction, not a regression - those three projects have always been prepaid. Also confirm the Edit form opens with no 'Payment model' field and an unrelated edit (e.g. phone) still saves.",
+    "Turki: browser-check after 0122 (read-only, nothing writes) - /trips Water Stations modal renders all 5 stations and the per-type price fields save; new-trip station picker still narrows water types per station (0114's gate) with Olaya offering NON-POTABLE ONLY; /reports cost statement filling sub-tab matches Jun 210.00 / Jul 1,285.00 / Aug 5,185.00.",
+    "Turki: browser-verify /customers after 0121 - the Payment column now reads Prepaid for three customers where it previously read Postpaid for all seven. That is a correction, not a regression.",
     "Turki: fill in the missing hire dates (5 drivers, 1 staff).",
     "Turki: PDFShift account + PDF_API_KEY in .env.local before real PDF output can be verified."
   ],
   "decisions": [
-    "IT WAS A RETIREMENT, NOT A MERGE, AND THE LIVE DATA IS WHAT SHOWED IT. CLAUDE.md section 7 had carried this for months as a clean concept-merge (pay_as_you_go ~ prepaid). customers.payment_model read 'postpaid' on ALL 7 rows - its own column default - so pay_as_you_go had never been used and there were zero rows to convert. It also DISAGREED with the real setting on 3 of 6 customer/project pairs. Merging it would have imported that wrongness.",
-    "WHY IT DRIFTED, the transferable part: the Customers form was its ONLY writer, and nothing updated it when the project's real mode changed through ProjectModal. Two writable sources, one of them unguarded and unread - the guarded one being can_switch_payment_mode (0035).",
-    "DIRECTION DECIDED BY CONSUMERS, NOT PREFERENCE. Nothing read payment_model: 0 views, 0 functions (create_project_with_customer mentions it in a COMMENT only and names it in no INSERT), 0 triggers, 0 policies, 0 indexes. projects.payment_mode is what all four RPCs take, what 0035 guards, and what invoices freeze at confirm. The retirement was one statement.",
-    "payment_mode EXISTS ON THREE TABLES AND ONLY ONE WAS A DUPLICATE. projects.payment_mode is the source (nullable on purpose so 'unset' stays detectable). invoices.payment_mode is the 0037 frozen snapshot and is CORRECTLY separate - it records what the arrangement WAS when the document was issued. Do not reconcile that one.",
-    "THE WRITABLE CONTROL IS GONE FROM THE CUSTOMERS FORM ON PURPOSE. The Payment column is now DERIVED from the customer's project (1:1 via projects_customer_id_unique), read-only, em dash when unset - the same convention the Archive customer tab already used. ProjectModal is the one editor, behind the settlement guard. A second writable source with no guard is what produced the drift.",
-    "NO RPC SIGNATURE CHANGED AND NONE NEEDED TO. All four p_payment_mode parameters refer to projects/invoices, not the dropped column. Money core (lib/prepaid.ts, lib/vat.ts) never referenced payment_model at all - confirmed by grep, not assumed.",
-    "APP STOPPED READING BEFORE THE DROP (the 0119 order), and the app was correct in BOTH directions: it reads customers with select('*') and simply stopped declaring the column in its type, so there was never a window where one side was broken.",
-    "RE-MEASURE A DEFERRED ITEM'S PREMISE BEFORE EXECUTING ON IT. This is the SECOND long-standing section 7 note found to be wrong rather than merely out of date (the Kanban entry was the first). One group-by on the column would have exposed it at any point in the months it sat there."
+    "0110 SET ITS OWN RELEASE CONDITION AND IT WAS CHECKED, NOT ASSUMED. It said the flat column is 'retired in a later migration once per-type prices are entered and the trip backfill is verified'. Both held: every station carries a per-type price, and water_stations_offers_at_least_one_type was ALREADY convalidated - the second item 0110 parked, closed by someone before this, so 0122 does not touch it.",
+    "LOSING AN UNUSED NUMBER BEATS INVENTING A BUSINESS FACT. The only datum 0122 destroys is olaya_filling_point.fill_cost = 70.00. Olaya has ZERO trips all time, so it had never priced a fill - no P&L figure and no frozen trips.filling_cost_sar traced to it. Writing it into fill_cost_potable_sar to 'save' it would have asserted that Olaya offers potable, because NULL there MEANS 'not offered' under this schema's central rule. The migration carries a DO-NOT-FIX block and its check B asserts Olaya's potable is still NULL afterwards. Same trap 0110 avoided and the same one that got a seed migration drafted and deleted during the Water Station Cost work.",
+    "NO APP COMMIT WAS NEEDED, WHICH MADE 0122 UNLIKE 0119 AND 0121. Every remaining mention of the column was a COMMENT saying it was deprecated, and no TypeScript type declared it - StationPricing names only the per-type pair - so nothing selected it into a typed shape. Verified rather than trusting section 7's 'app code already ignores it'.",
+    "THE MONEY PROOF IS A BEFORE/AFTER, NOT AN ARGUMENT. v_filling_cost_monthly was byte-identical across the apply: Jun 210.00 (18 costed / 10 uncosted), Jul 1,285.00 (143/3), Aug 5,185.00 (598/0), trips 817 / 13. Dropping a column no view reads cannot reach the P&L, and the check demonstrates that rather than asserting it.",
+    "REGEX TRAP, worth carrying: use fill_cost[^_], never %fill_cost%. The loose pattern also matches fill_cost_potable_sar / fill_cost_non_potable_sar and returns false positives on every dependency check - including the three fill_cost-NAMED constraints on water_stations, which reference ONLY the per-type columns. Read constraint definitions, not their names.",
+    "RE-MEASURE A DEFERRED ITEM'S PREMISE BEFORE EXECUTING ON IT. Applied twice now. On 0121 the premise was WRONG (a 'concept-merge' with zero rows to merge). On 0122 it was RIGHT but incomplete - the note implied a constraint still needed validating when it had already been done.",
+    "REVIEW PACKS GET A CLOSED HEADER AND A PERMANENT NAME. The body stays unedited because the argument as it was made is the record; the header carries the outcome so a committed pack cannot be read as a live 'NOT APPLIED' claim. .planning/for-review.md is the architect's MAILBOX and is left empty between rounds."
   ],
-  "uncommitted_files": [
-    ".planning/for-review.md - the 0121 review pack handed to the architect; kept for reference, not committed",
-    ".planning/review-monthkey-and-basis.md - the earlier review pack, same status"
-  ],
-  "next_action": "0121 is applied, verified and committed, and CLAUDE.md section 7 reflects it. Nothing is in flight. Remaining work is the standing deferred list in section 7: retire water_stations.fill_cost; StationPricing hand-rolled in 3 places; the 0100 dictionary gap; effective-dated rates (one mechanism, three consumers); Route Optimization / Predictive / IoT.",
-  "context_notes": "READ CLAUDE.md SECTION 7 FIRST - it is the durable record and this file is only a pointer to it; the payment_mode entry now sits just before the deferred tail. FIVE THINGS WORTH CARRYING FORWARD. (1) A CORRECTION TO 0121'S OWN HEADER, on the record: its verification block B says 'expect 7 / 7' for total/live customers. Live is 6 and always has been - 'Turki 1' was archived 2026-06-28, seven weeks before the migration. Dropping a column cannot archive a row and the total (7) is unchanged, so nothing is wrong; the expectation was written without measuring the archived_at filter. (2) THE VISIBLE CHANGE IS A CORRECTION: /customers' Payment column read 'Postpaid' for every customer before and now reads Prepaid for three. Do not let a future pass 'fix' it back. (3) invoices.payment_mode is a FROZEN SNAPSHOT (0037) and legitimately differs from its project's current mode - it is not drift and must not be reconciled. (4) The four p_payment_mode RPCs still have EXACTLY ONE overload each, verified after apply - the standing one-signature-per-RPC rule held. (5) BUILD ONLY VIA ./scripts/safe-build.sh - it exits non-zero if dev is live, which it did throughout, so every build ran with --dist-dir .next-verify and dev on port 3002 was left untouched. next build also REWRITES tsconfig.json, so git checkout -- tsconfig.json afterwards."
+  "uncommitted_files": [],
+  "next_action": "0122 is applied, verified, committed and reflected in CLAUDE.md section 7. Nothing is in flight. Remaining deferred work in section 7: no supported clear-the-station path; StationPricing hand-rolled in three places (a consolidation, not dead code); the 0100 dictionary gap; effective-dated rates (one mechanism, three consumers - driver salary, commission rates, customer rates); Route Optimization / Predictive / IoT.",
+  "context_notes": "READ CLAUDE.md SECTION 7 FIRST - it is the durable record and this file is only a pointer to it. FIVE THINGS WORTH CARRYING FORWARD. (1) THE MIGRATION HEADER OF 0122 PRESERVES THE PRE-DROP TABLE - furaian 0.00, manfuhah 0.00, olaya 70.00, shas NULL, umm_al_hamam 0.00 against their per-type prices. If anyone ever needs the retired figures, they are in git, not gone. (2) OLAYA'S POTABLE PRICE MUST STAY NULL. It means 'does not offer potable'. If it ever reads 70.00, someone rescued the dropped flat value and asserted a business fact nobody stated. (3) THE 13 UNCOSTED TRIPS (2026-06-29 to 07-05) ARE HISTORICAL AND FIXED - 0114's guard means no new one can be created, so a 14th appearing means the guard was dropped, not that data changed. (4) .planning now holds three CLOSED review packs (monthkey-and-basis, payment-mode-0121, fill-cost-0122) plus finance-invoice-spec.md. for-review.md is the mailbox and is intentionally absent between rounds. (5) BUILD ONLY VIA ./scripts/safe-build.sh - it exits non-zero if dev is live. next build also REWRITES tsconfig.json, so git checkout -- tsconfig.json afterwards. No build was needed this round: 0122 shipped no app code."
 }
