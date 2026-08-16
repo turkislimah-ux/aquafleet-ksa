@@ -4,6 +4,7 @@ import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { buildActiveJobTruckIds, buildTruckStatusMap, type TruckOpsState } from "@/lib/truck-status";
 import { daysAgoKey, todayKey } from "@/lib/utils";
+import type { TruckUtilizationRow } from "@/lib/utilization";
 import FleetClient from "./FleetClient";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +32,11 @@ export default async function FleetPage() {
   // Riyadh the window started a day earlier than `today` implied.
   const since = daysAgoKey(30);
   const today = todayKey(); // local (matches trip day-math), not UTC
+  // First of the CURRENT month, derived from the same local `today` rather than
+  // from `new Date()` — the utilization column must roll over on the operator's
+  // day boundary, not UTC's, or for three hours every night it would show last
+  // month's figures beside today's trips.
+  const monthStart = `${today.slice(0, 7)}-01`;
 
   const [
     trucksRes,
@@ -42,6 +48,7 @@ export default async function FleetPage() {
     operationStationsRes,
     activeWorkOrdersRes,
     activeOutsourcedJobsRes,
+    utilizationRes,
   ] = await Promise.all([
     // Terminated trucks vanish from the fleet list entirely (0020) — restorable
     // later from Archive. Filtering here also frees their driver: the
@@ -88,6 +95,13 @@ export default async function FleetPage() {
     // tracks. Minimal columns, filtered server-side to in_progress only.
     supabase.from("work_orders").select("truck_id").eq("status", "in_progress"),
     supabase.from("outsourced_jobs").select("truck_id").eq("status", "in_progress"),
+    // Utilization for the CURRENT month, per truck (0130). Read from the view;
+    // this page computes no part of it. `monthStart` is Riyadh-local (todayKey
+    // above), so the column rolls over with the operator's day, not UTC's.
+    supabase
+      .from("v_truck_utilization_monthly")
+      .select("*")
+      .eq("month", monthStart),
   ]);
 
   const drivers = (driversRes.data ?? []) as DriverLite[];
@@ -103,6 +117,28 @@ export default async function FleetPage() {
         ? t.driver?.name ?? null
         : null,
   }));
+
+  // ---- Utilization, current month, per truck (0130) --------------------
+  // COERCED AT THE BOUNDARY. Postgres `numeric` has no exact JS equivalent, so
+  // PostgREST sends utilization_pct as a STRING — `a - b` on it yields NaN and
+  // `a + b` concatenates, both rendering as plausible garbage rather than
+  // erroring (the rule in CLAUDE.md §7). NULL is preserved as null and never
+  // coerced to 0: no available days means no answer, not zero utilization.
+  const utilizationByTruck = new Map<string, TruckUtilizationRow>();
+  for (const r of (utilizationRes.data ?? []) as Record<string, unknown>[]) {
+    const id = String(r.truck_id ?? "");
+    if (!id) continue;
+    utilizationByTruck.set(id, {
+      truck_id: id,
+      plate: String(r.plate ?? ""),
+      month: String(r.month ?? ""),
+      worked_days: Number(r.worked_days ?? 0),
+      available_days: Number(r.available_days ?? 0),
+      maintenance_days: Number(r.maintenance_days ?? 0),
+      out_of_service_days: Number(r.out_of_service_days ?? 0),
+      utilization_pct: r.utilization_pct == null ? null : Number(r.utilization_pct),
+    });
+  }
 
   // Per-driver trip count over the last 30 days (REAL — derived, not stored).
   const trips30d: Record<string, number> = {};
@@ -187,6 +223,8 @@ export default async function FleetPage() {
       activeProjectNamesByDriver={activeProjectNamesByDriver}
       operationStations={operationStations}
       kpis={kpis}
+      utilizationByTruck={Object.fromEntries(utilizationByTruck)}
+      utilizationMonth={monthStart}
       errorMsg={error ? error.message : null}
     />
   );

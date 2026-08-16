@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatSar } from "@/lib/utils";
 import { availableWidgets, type WidgetDef } from "@/lib/dashboard-widgets";
 import { COST_TYPE } from "@/lib/dashboard";
+import type { FleetUtilizationRow } from "@/lib/utilization";
 import type {
   ActionItemRow, FeedRow, FleetStateNow, Headline, DashCharts, LiveTrip,
   DailyOps, DeliveredRevenueDay, DeliveryDay, MonthlyOnlyCost, ProjectStages, CostComposition,
@@ -54,7 +55,7 @@ export default async function DashboardPage() {
     actionsRes, feedRes, stateRes, pnlRes, opsRes, revenueRes,
     collectionsRes, receivablesRes, liveTripsRes, dictRes,
     dailyRes, monthlyOnlyRes, deliveryRes,
-    projectsRes, costCompRes, driverOpsRes, deliveredRevRes, drift,
+    projectsRes, fleetUtilRes, costCompRes, driverOpsRes, deliveredRevRes, drift,
   ] = await Promise.all([
     supabase.from("v_dashboard_action_items").select("*"),
     supabase.from("v_activity_feed").select("*").order("occurred_at", { ascending: false }).limit(FEED_LIMIT),
@@ -83,6 +84,13 @@ export default async function DashboardPage() {
       .order("day", { ascending: false }).limit(DAILY_DAYS),
     // 0106 — projects by stage, cost composition, and the drivers board.
     supabase.from("v_project_trip_stages").select("*").order("project_name"),
+    // Fleet-wide utilization per month (0130). THE PRE-BLENDED FIGURE — the
+    // page reads v_fleet_utilization_monthly rather than averaging the
+    // per-truck view, because averaging percentages weights a truck available
+    // 2 days the same as one available 31 (live August: 45.86 blended vs 38.40
+    // averaged). 0130 ships this view so the rule is enforced by which view
+    // exists, not by a comment someone has to remember.
+    supabase.from("v_fleet_utilization_monthly").select("*"),
     supabase.from("v_cost_composition_monthly").select("*")
       .order("month", { ascending: false }).limit(CHART_MONTHS),
     supabase.from("v_drivers_ops_now").select("*"),
@@ -207,6 +215,19 @@ export default async function DashboardPage() {
     filling:     { sar: num(r.filling_sar),        pct: pct(r.filling_pct) },
     other:       { sar: num(r.other_expenses_sar), pct: pct(r.other_expenses_pct) },
     fillingUncosted: num(r.filling_uncosted_trips),
+  }));
+
+  // Fleet utilization by month (0130). numeric arrives as a STRING over
+  // PostgREST, so coerce at the boundary; NULL stays null and never becomes 0.
+  const fleetUtilization: FleetUtilizationRow[] = (
+    (fleetUtilRes.data ?? []) as Record<string, unknown>[]
+  ).map((r) => ({
+    month: String(r.month ?? ""),
+    trucks_with_availability: Number(r.trucks_with_availability ?? 0),
+    worked_days: Number(r.worked_days ?? 0),
+    available_days: Number(r.available_days ?? 0),
+    maintenance_days: Number(r.maintenance_days ?? 0),
+    utilization_pct: r.utilization_pct == null ? null : Number(r.utilization_pct),
   }));
 
   const driverOps: DriverOps[] = (
@@ -362,7 +383,8 @@ export default async function DashboardPage() {
     receivablesRes.error?.message ?? dailyRes.error?.message ??
     monthlyOnlyRes.error?.message ?? deliveryRes.error?.message ??
     projectsRes.error?.message ?? costCompRes.error?.message ??
-    driverOpsRes.error?.message ?? deliveredRevRes.error?.message ?? null;
+    driverOpsRes.error?.message ?? deliveredRevRes.error?.message ??
+    fleetUtilRes.error?.message ?? null;
 
   return (
     <DashboardClient
@@ -378,6 +400,7 @@ export default async function DashboardPage() {
       monthlyOnly={monthlyOnly}
       projectStages={projectStages}
       costComposition={costComposition}
+      fleetUtilization={fleetUtilization}
       driverOps={driverOps}
       drift={drift}
       liveTrips={liveTrips}

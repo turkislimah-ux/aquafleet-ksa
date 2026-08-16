@@ -29,6 +29,10 @@ import TruckFormModal from "../TruckFormModal";
 import { cn, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { ArrowLeft, Users, X, Activity, Pencil, Eye, Wrench, Package } from "lucide-react";
 import MtStatusPill, { type MtPillKind } from "@/app/maintenance/MtStatusPill";
+import {
+  utilizationBand, formatUtilization, utilizationNaReason,
+  type TruckUtilizationRolling30Row,
+} from "@/lib/utilization";
 
 const TYPE_LABEL: Record<string, string> = {
   preventive: "Preventive",
@@ -73,6 +77,40 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 // link — used for Vehicle Registration, whose single edit point is the
 // Archive (0091), so the value stays visible here without implying it can be
 // changed here.
+/**
+ * Rolling-30-day utilization for this truck.
+ *
+ * A ROLLING WINDOW, NOT THE CALENDAR MONTH the Fleet list shows. On a detail
+ * page the question is "how has this truck been doing lately", and a
+ * month-to-date figure answers that badly on the 2nd of a month. The two
+ * surfaces therefore report different numbers for the same truck ON PURPOSE,
+ * and each names its own window so the difference reads as intent.
+ *
+ * The window's bounds come from the view (from_day/to_day) rather than being
+ * recomputed here — if 0130's definition of "30 days" ever changes, this label
+ * changes with it instead of quietly disagreeing.
+ *
+ * N/A IS NOT 0%. No available days means the question has no answer.
+ */
+function UtilizationStat({ row }: { row: TruckUtilizationRolling30Row | null }) {
+  if (!row) return <Stat label="Utilization · 30d" value="—" />;
+
+  const band = utilizationBand(row.utilization_pct);
+  const isNa = row.utilization_pct == null;
+  return (
+    <Stat
+      label="Utilization · 30d"
+      value={formatUtilization(row.utilization_pct)}
+      // No tone for N/A — a figure we do not have earns no colour, the same
+      // rule the Dashboard's compliance pills follow.
+      tone={isNa ? undefined : band === "optimal" ? "ok" : band === "under" ? "bad" : band === "below" ? "warn" : "info"}
+      sub={isNa
+        ? utilizationNaReason({ out_of_service_days: 0, maintenance_days: row.maintenance_days })
+        : `${row.worked_days} of ${row.available_days} available days · ${row.from_day} to ${row.to_day}`}
+    />
+  );
+}
+
 function InfoField({
   label,
   value,
@@ -139,6 +177,7 @@ export default function FleetDetailClient({
   workshopPayments,
   staffNames,
   repairerNames,
+  utilization,
   errorMsg,
 }: {
   truck: TruckRow | null;
@@ -159,6 +198,9 @@ export default function FleetDetailClient({
   workshopPayments: WorkshopPayment[];
   staffNames: { id: string; name: string }[];
   repairerNames: { id: string; name: string }[];
+  // Rolling-30 utilization for this truck (0130), or null when the view has no
+  // row for it. The window's own bounds travel with the row.
+  utilization: TruckUtilizationRolling30Row | null;
   errorMsg: string | null;
 }) {
   const router = useRouter();
@@ -364,18 +406,24 @@ export default function FleetDetailClient({
         }
       />
 
-      {/* THREE stats, every one backed by data a person actually enters.
-          Health, Utilization and Fuel Eff. were removed: health_score,
-          fuel_efficiency_km_per_l and engine_hours are demo-era columns with
-          no source and are being dropped from the table entirely, and
-          utilization_pct stays a dormant column with no live surface until it
-          becomes a computed view. A stat that can only ever read "—" is not an
-          honest empty state, it is furniture. Health returns with IoT, as the
-          placeholder bar on the Fleet list. */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      {/* FOUR stats, every one backed by data a person actually enters — or,
+          now, computed from it.
+
+          UTILIZATION IS BACK, AND ON THE TERMS THIS COMMENT SET. It was pulled
+          because trucks.utilization_pct was a demo-era column, 0 on every row,
+          "a dormant column with no live surface until it becomes a computed
+          view". 0130 made it exactly that: v_truck_utilization_rolling30. The
+          dormant COLUMN is still dormant and is still not read — this stat
+          reads the view, and dropping the column is a separate migration.
+
+          Health and Fuel Eff. stay out on the original reasoning: health_score,
+          fuel_efficiency_km_per_l and engine_hours have no source. A stat that
+          can only ever read "—" is furniture. Health returns with IoT. */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat label="Capacity" value={truck.capacity_m3 != null ? `${truck.capacity_m3} m³` : "—"} tone="info" />
         <Stat label="Odometer" value={truck.odometer_km != null ? `${formatNum(truck.odometer_km)} km` : "—"} />
         <Stat label="Last Service" value={lastServiceLabel(truck.last_service_date)} tone="ok" />
+        <UtilizationStat row={utilization} />
       </div>
 
       {/* GENERAL INFO — the same fields the Add-Truck form collects, shown

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import type { TruckUtilizationRolling30Row } from "@/lib/utilization";
 import type {
   Truck,
   OperationStation,
@@ -49,6 +50,7 @@ export default async function FleetDetailPage({
     outsourcedJobsRes,
     staffNamesRes,
     repairerNamesRes,
+    utilizationRes,
   ] = await Promise.all([
     // Terminated trucks are filtered out here too — a direct URL to a
     // terminated truck's id resolves to `truck: null` below (FleetDetailClient
@@ -98,6 +100,13 @@ export default async function FleetDetailPage({
     // name instead of silently vanishing from past records.
     supabase.from("staff").select("id, name"),
     supabase.from("repairers").select("id, name"),
+    // Rolling-30 utilization for THIS truck (0130). A rolling window rather
+    // than the calendar month the Fleet list shows: on a detail page the
+    // question is "how has this truck been doing lately", which a month-to-date
+    // figure answers badly on the 2nd of a month. The view owns the window --
+    // from_day/to_day come back with the row and are printed, so the reader is
+    // never guessing which 30 days these are.
+    supabase.from("v_truck_utilization_rolling30").select("*").eq("truck_id", id).maybeSingle(),
   ]);
 
   const drivers = (driversRes.data ?? []) as DriverLite[];
@@ -188,7 +197,25 @@ export default async function FleetDetailPage({
     leavePeriodsRes.error?.message ?? activeProjectsRes.error?.message ?? projectDriversRes.error?.message ??
     operationStationsRes.error?.message ?? workOrdersRes.error?.message ?? outsourcedJobsRes.error?.message ??
     workOrderPartsRes.error?.message ?? outsourcedJobRepairersRes.error?.message ?? workshopPaymentsRes.error?.message ??
-    staffNamesRes.error?.message ?? repairerNamesRes.error?.message ?? null;
+    staffNamesRes.error?.message ?? repairerNamesRes.error?.message ??
+    utilizationRes.error?.message ?? null;
+
+  // COERCED AT THE BOUNDARY (numeric arrives as a string). NULL preserved:
+  // a truck with no available days in the window has no utilization, which is
+  // not the same as 0%.
+  const uRaw = utilizationRes.data as Record<string, unknown> | null;
+  const utilization: TruckUtilizationRolling30Row | null = uRaw
+    ? {
+        truck_id: String(uRaw.truck_id ?? ""),
+        plate: String(uRaw.plate ?? ""),
+        from_day: String(uRaw.from_day ?? ""),
+        to_day: String(uRaw.to_day ?? ""),
+        worked_days: Number(uRaw.worked_days ?? 0),
+        available_days: Number(uRaw.available_days ?? 0),
+        maintenance_days: Number(uRaw.maintenance_days ?? 0),
+        utilization_pct: uRaw.utilization_pct == null ? null : Number(uRaw.utilization_pct),
+      }
+    : null;
 
   return (
     <FleetDetailClient
@@ -207,6 +234,7 @@ export default async function FleetDetailPage({
       workshopPayments={workshopPayments}
       staffNames={staffNames}
       repairerNames={repairerNames}
+      utilization={utilization}
       errorMsg={errorMsg}
     />
   );

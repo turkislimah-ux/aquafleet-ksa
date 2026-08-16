@@ -36,6 +36,13 @@ import { useApp } from "@/components/AppShell";
 import { useHeroDock, useSearchDock } from "@/components/SearchDock";
 import { ComboChart, PieChart } from "@/components/Charts";
 import { cn, formatSar } from "@/lib/utils";
+import {
+  utilizationBand, utilizationBarWidth, formatUtilization,
+  UTILIZATION_BAND, type FleetUtilizationRow,
+} from "@/lib/utilization";
+// Reused, not re-derived — the same helper the Reports Overview uses to warn
+// that a period is still running.
+import { isCurrentMonth } from "@/lib/reports";
 import type { TruckStateCounts } from "@/lib/actions/truck-state";
 import type { TripStage } from "@/lib/db-types";
 import {
@@ -92,7 +99,7 @@ const TONE_TEXT: Record<string, string> = {
 export default function DashboardClient({
   actionItems, feed, state, truckState, headlines, charts, dailyOps, deliveredRevenue,
   delivery, monthlyOnly,
-  projectStages, costComposition, driverOps, drift,
+  projectStages, costComposition, driverOps, drift, fleetUtilization,
   liveTrips, widgetOptions, errorMsg,
 }: {
   actionItems: ActionItemRow[];
@@ -107,6 +114,10 @@ export default function DashboardClient({
   monthlyOnly: MonthlyOnlyCost[];
   projectStages: ProjectStages[];
   costComposition: CostComposition[];
+  // Fleet-wide utilization per month (0130). PRE-BLENDED by the view —
+  // sum(worked)/sum(available) — so this page never averages per-truck
+  // percentages. It follows the same month stepper as the daily charts.
+  fleetUtilization: FleetUtilizationRow[];
   driverOps: DriverOps[];
   drift: DriverStateDrift;
   liveTrips: LiveTrip[];
@@ -450,6 +461,21 @@ export default function DashboardClient({
           <DeliveryOutputNote
             ar={ar} noTruckTrips={noTruckTrips} deliveredTrips={deliveredTrips} />
         </ChartCard>
+
+        {/* FLEET UTILIZATION (0130) — FOLLOWS THE SAME MONTH as the two charts
+            above, so stepping the stepper moves this figure with them rather
+            than leaving a "now" number stranded beside a historical chart.
+
+            THE FIGURE IS READ, NEVER ASSEMBLED. v_fleet_utilization_monthly
+            publishes sum(worked)/sum(available); averaging the per-truck
+            percentages here would weight a truck available 2 days the same as
+            one available 31 (live August: 45.86 blended, 38.40 averaged). */}
+        <FleetUtilizationCard
+          ar={ar}
+          row={fleetUtilization.find((f) => f.month === activeMonth) ?? null}
+          month={activeMonth}
+          failed={failed}
+        />
 
         {/* PROJECTS — one compact card per active project, each a single
             stacked bar across the four stages.
@@ -1026,6 +1052,106 @@ function ProjectStageCard({ ar, project }: { ar: boolean; project: ProjectStages
         </>
       )}
     </Card>
+  );
+}
+
+/**
+ * Fleet-wide utilization for the month on screen.
+ *
+ * THE PERCENTAGE IS READ, NOT ASSEMBLED. v_fleet_utilization_monthly (0130)
+ * publishes sum(worked_days)/sum(available_days) across the fleet. This card
+ * never touches the per-truck view, because averaging per-truck percentages
+ * weights a truck available 2 days identically to one available 31 — live
+ * August, that is 45.86% blended against 38.40% averaged, and the second
+ * number is simply wrong. The rule is enforced by which view is read.
+ *
+ * IT FOLLOWS THE MONTH STEPPER. Stepping back moves this figure with the two
+ * charts above it; a "right now" number sitting beside a historical chart is
+ * how two things on one screen come to disagree.
+ *
+ * THE CURRENT MONTH IS PARTIAL AND THE CARD SAYS SO. August is still running,
+ * so its available days grow every day and the percentage moves — that is not
+ * a defect, and labelling it "month to date" is the difference between a
+ * reader trusting the number and reporting it as a bug.
+ */
+function FleetUtilizationCard({
+  ar, row, month, failed,
+}: {
+  ar: boolean;
+  row: FleetUtilizationRow | null;
+  month: string | null;
+  failed: boolean;
+}) {
+  const band = utilizationBand(row?.utilization_pct ?? null);
+  const tone = UTILIZATION_BAND[band];
+  // A failed read and an empty month are DIFFERENT and must not share a
+  // rendering — the dashboard's own rule after it once printed "every queue is
+  // clear" over an errored fetch.
+  const unreadable = failed && !row;
+
+  return (
+    <ChartCard
+      title={ar ? "استخدام الأسطول" : "Fleet utilization"}
+      sub={month
+        ? `${monthTitle(month, ar)}${isCurrentMonth(month) ? (ar ? " — حتى تاريخه" : " — month to date") : ""}`
+        : (ar ? "شهرياً" : "monthly")}
+      href="/fleet"
+      empty={!row && !failed}
+      failed={unreadable}
+      ar={ar}
+    >
+      {row && (
+        <div className="space-y-3">
+          <div className="flex items-baseline gap-2">
+            <span className={cn("text-3xl font-semibold tabular-nums", tone.text)}>
+              {formatUtilization(row.utilization_pct)}
+            </span>
+            <span className={cn("text-xs font-medium", tone.text)}>
+              {ar ? tone.ar : tone.en}
+            </span>
+          </div>
+
+          {/* The band track. 60-80% is marked so the figure is read against the
+              target rather than in isolation — a bare 45.9% says nothing about
+              whether that is good. */}
+          <div className="relative h-2 w-full rounded-full bg-black/5 dark:bg-white/10 overflow-hidden">
+            <div
+              className="absolute inset-y-0 bg-emerald-500/15"
+              style={{ left: "60%", width: "20%" }}
+              aria-hidden
+            />
+            <div
+              className={cn("relative h-full rounded-full", tone.bar)}
+              style={{ width: `${utilizationBarWidth(row.utilization_pct)}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-[10px] muted tabular-nums" aria-hidden>
+            <span>0%</span><span>60-80% target</span><span>100%</span>
+          </div>
+
+          <dl className="grid grid-cols-3 gap-2 pt-1 text-center">
+            <div>
+              <dt className="text-[10px] muted uppercase tracking-wide">{ar ? "أيام عمل" : "Worked"}</dt>
+              <dd className="text-sm font-medium tabular-nums">{row.worked_days}</dd>
+            </div>
+            <div>
+              <dt className="text-[10px] muted uppercase tracking-wide">{ar ? "أيام متاحة" : "Available"}</dt>
+              <dd className="text-sm font-medium tabular-nums">{row.available_days}</dd>
+            </div>
+            <div>
+              <dt className="text-[10px] muted uppercase tracking-wide">{ar ? "شاحنات" : "Trucks"}</dt>
+              <dd className="text-sm font-medium tabular-nums">{row.trucks_with_availability}</dd>
+            </div>
+          </dl>
+
+          <p className="text-[11px] muted leading-relaxed">
+            {ar
+              ? "أيام شغّلت فيها الشاحنة رحلة مسلَّمة واحدة على الأقل، مقسومة على أيام توفّرها. الأيام في الصيانة أو خارج الخدمة مستبعدة من المقام، وأيام التوقف بلا عمل محتسبة."
+              : "Days a truck ran at least one delivered trip, over the days it was available. Maintenance and out-of-service days leave the denominator; idle-but-in-service days stay in it — those are the ones this measures."}
+          </p>
+        </div>
+      )}
+    </ChartCard>
   );
 }
 

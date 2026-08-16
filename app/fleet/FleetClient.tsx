@@ -18,6 +18,10 @@ import { assignDriver, unassignDriver } from "./actions";
 import TruckFormModal from "./TruckFormModal";
 import { cn, formatNum } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
+import {
+  utilizationBand, utilizationBarWidth, formatUtilization, utilizationNaReason,
+  UTILIZATION_BAND, type TruckUtilizationRow,
+} from "@/lib/utilization";
 import { Activity, Eye, Filter, Pencil, Plus, Truck as TruckIcon, Users, X } from "lucide-react";
 
 type Kpis = {
@@ -75,6 +79,74 @@ function healthScaleClass(pct: number): string {
   return "bg-emerald-500";
 }
 
+/** "2026-08-01" -> "August 2026". Local formatting only; no date math. */
+function monthLabel(monthStart: string): string {
+  const [y, m] = monthStart.split("-");
+  const name = [
+    "January","February","March","April","May","June",
+    "July","August","September","October","November","December",
+  ][Number(m) - 1];
+  return name ? `${name} ${y}` : monthStart;
+}
+
+/**
+ * One truck's utilization for the current month.
+ *
+ * READS THE VIEW, COMPUTES NOTHING. The percentage, the day counts and the NULL
+ * all arrive from v_truck_utilization_monthly (0130); this decides only how they
+ * are worn, via lib/utilization.ts.
+ *
+ * THREE DISTINCT STATES, and collapsing any two of them would lie:
+ *   · no row at all      -> "—". The view has nothing for this truck this month.
+ *   · row, pct is NULL   -> "N/A" + why. Zero available days, so the question
+ *                           has no answer. NEVER 0%.
+ *   · row, pct is 0.00   -> "0.0%" in the under-used band. The truck COULD have
+ *                           worked and did not — the alarm this metric exists
+ *                           to raise. Live right now: seven trucks.
+ * Live, both middle and last cases are on screen at once (1112/1113 BBB read
+ * N/A while seven others read 0.0%), so the difference is visible rather than
+ * theoretical.
+ */
+function UtilizationCell({ row }: { row: TruckUtilizationRow | undefined }) {
+  if (!row) return <span className="muted">—</span>;
+
+  const band = utilizationBand(row.utilization_pct);
+  const tone = UTILIZATION_BAND[band];
+  const isNa = row.utilization_pct == null;
+  const title = isNa
+    ? utilizationNaReason(row)
+    : `${row.worked_days} of ${row.available_days} available days worked` +
+      (row.maintenance_days > 0 ? ` · ${row.maintenance_days} in maintenance` : "") +
+      (row.out_of_service_days > 0 ? ` · ${row.out_of_service_days} out of service` : "");
+
+  return (
+    <div className="min-w-[7.5rem]" title={title}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className={cn("text-xs font-medium tabular-nums", isNa ? "muted" : tone.text)}>
+          {formatUtilization(row.utilization_pct)}
+        </span>
+        {!isNa && (
+          <span className="text-[10px] muted tabular-nums">
+            {row.worked_days}/{row.available_days}d
+          </span>
+        )}
+      </div>
+      {/* No bar at all for N/A — an empty track at zero width reads as 0%,
+          which is the one thing this cell must never say. */}
+      {isNa ? (
+        <div className="mt-1 text-[10px] muted">no available days</div>
+      ) : (
+        <div className="mt-1 h-1.5 w-full rounded-full bg-black/5 dark:bg-white/10 overflow-hidden">
+          <div
+            className={cn("h-full rounded-full", tone.bar)}
+            style={{ width: `${utilizationBarWidth(row.utilization_pct)}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HealthBar({ pct }: { pct?: number }) {
   const hasReading = typeof pct === "number";
   const width = hasReading ? Math.max(0, Math.min(100, pct)) : 0;
@@ -105,6 +177,8 @@ export default function FleetClient({
   activeProjectNamesByDriver,
   operationStations,
   kpis,
+  utilizationByTruck,
+  utilizationMonth,
   errorMsg,
 }: {
   trucks: TruckRow[];
@@ -121,6 +195,12 @@ export default function FleetClient({
   activeProjectNamesByDriver: Record<string, { id: string; name: string }[]>;
   operationStations: OperationStation[];
   kpis: Kpis;
+  // Current-month utilization per truck, keyed by truck id (0130). A truck
+  // absent from this map has no row in the view for this month at all, which
+  // is a different thing from a row whose percentage is null — see
+  // UtilizationCell.
+  utilizationByTruck: Record<string, TruckUtilizationRow | undefined>;
+  utilizationMonth: string;
   errorMsg: string | null;
 }) {
   const router = useRouter();
@@ -306,6 +386,10 @@ export default function FleetClient({
               <TH>Status</TH>
               <TH>Driver</TH>
               <TH>Assigned Project</TH>
+              {/* Utilization sits with the operational story (status -> driver
+                  -> project -> how much the truck is actually used) and before
+                  Health, which is still an inert placeholder. */}
+              <TH>Utilization</TH>
               <TH>Health</TH>
               <TH>Capacity</TH>
               <TH>Odometer</TH>
@@ -317,7 +401,7 @@ export default function FleetClient({
             {list.length === 0 && (
               <tr>
                 <td
-                  colSpan={12}
+                  colSpan={13}
                   className="py-6 px-3 border-t text-center muted text-sm"
                   style={{ borderColor: "rgb(var(--border))" }}
                 >
@@ -385,6 +469,9 @@ export default function FleetClient({
                   })()}
                 </TD>
                 <TD>
+                  <UtilizationCell row={utilizationByTruck[tr.id]} />
+                </TD>
+                <TD>
                   <HealthBar />
                 </TD>
                 <TD className="tabular-nums font-medium">
@@ -418,6 +505,21 @@ export default function FleetClient({
           </tbody>
         </Table>
       </Card>
+
+      {/* Names the window the Utilization column covers. A percentage with no
+          period is not a fact, and this one is CURRENT-MONTH-TO-DATE: early in
+          a month a low figure means "few days have happened", not "this truck
+          is idle", so the reader needs the month on screen to judge it. */}
+      <p className="flex items-start gap-2 text-[11px] muted leading-relaxed">
+        <TruckIcon className="h-3.5 w-3.5 shrink-0 mt-px" aria-hidden />
+        <span>
+          <b>Utilization is {monthLabel(utilizationMonth)}, month to date.</b>{" "}
+          Days the truck ran at least one delivered trip, over the days it was
+          available — calendar days minus any time terminated, in maintenance or
+          out of service. A truck with no available days shows <b>N/A</b> rather
+          than 0%, because there is nothing to measure against.
+        </span>
+      </p>
 
       {/* Says why the Health column is empty. Sits under the table rather than
           in the column header because it explains a state, not a heading — and
