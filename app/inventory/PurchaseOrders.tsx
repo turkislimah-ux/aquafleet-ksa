@@ -64,7 +64,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { Btn, Table, TH, TD, Card, Stat } from "@/components/ui";
-import { cn, formatSar } from "@/lib/utils";
+import { cn, daysAgoKey, formatSar } from "@/lib/utils";
 // VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
 // NOT lib/vat.ts (document-level rounding, a different convention for a
 // different document — see lib/inventory-vat.ts's own header).
@@ -505,9 +505,13 @@ export function NewPOModal({
   // stays blank, not re-defaulted to today+7).
   const [expectedDelivery, setExpectedDelivery] = useState(() => {
     if (editingPO) return editingPO.po.expected_delivery ?? "";
-    const d = new Date();
-    d.setDate(d.getDate() + 7);
-    return d.toISOString().slice(0, 10);
+    // daysAgoKey(-7) is today+7 on the LOCAL clock. The hand-rolled version
+    // this replaces ended in toISOString().slice(0,10), which is UTC — so for
+    // the first three hours after Riyadh midnight the default landed on
+    // today+6 and quietly gave the supplier one day less than intended.
+    // Negative n is the shared helper's own arithmetic (setDate handles the
+    // month rollover); no second date helper is introduced for it.
+    return daysAgoKey(-7);
   });
   const [lines, setLines] = useState<NewPOLine[]>(
     editingPO
