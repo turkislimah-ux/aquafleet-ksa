@@ -56,7 +56,7 @@ import {
   isUnpaid,
   buildCurrentRows,
   buildCurrentBaseLines,
-  CURRENT_MONTH_KEY,
+  currentMonthKey,
   type DriverLite,
   type CommTripRow,
   type CommCycle,
@@ -793,7 +793,7 @@ function SpecialsModal({
     const form = e.currentTarget;
     const fd = new FormData(form);
     fd.set("driver_id", driverId);
-    fd.set("month_key", CURRENT_MONTH_KEY);
+    fd.set("month_key", currentMonthKey());
     setBusy(true);
     setErr(null);
     const res = editId ? await updateCommissionSpecial(editId, fd) : await addCommissionSpecial(fd);
@@ -884,11 +884,11 @@ function SpecialsModal({
               className="px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-28 tabular-nums disabled:opacity-60"
               style={INPUT_STYLE}
             />
-            <OutlineBtn onClick={() => run(() => setCommissionBonus(driverId, CURRENT_MONTH_KEY, Number(bonusVal) || 0))} disabled={busy}>
+            <OutlineBtn onClick={() => run(() => setCommissionBonus(driverId, currentMonthKey(), Number(bonusVal) || 0))} disabled={busy}>
               <Save className="h-3.5 w-3.5" /> Set
             </OutlineBtn>
             {bonus !== 0 && (
-              <button type="button" disabled={busy} onClick={() => confirm("Remove the manager bonus?") && run(() => setCommissionBonus(driverId, CURRENT_MONTH_KEY, 0))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove bonus"><Trash2 className="h-4 w-4" /></button>
+              <button type="button" disabled={busy} onClick={() => confirm("Remove the manager bonus?") && run(() => setCommissionBonus(driverId, currentMonthKey(), 0))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Remove bonus"><Trash2 className="h-4 w-4" /></button>
             )}
           </div>
         </div>
@@ -943,7 +943,7 @@ function AdjustmentsModal({
     const form = e.currentTarget;
     const fd = new FormData(form);
     fd.set("driver_id", driverId);
-    fd.set("month_key", CURRENT_MONTH_KEY);
+    fd.set("month_key", currentMonthKey());
     setBusy(true);
     setErr(null);
     const res = editId ? await updateCommissionAdjustment(editId, fd) : await addCommissionAdjustment(fd);
