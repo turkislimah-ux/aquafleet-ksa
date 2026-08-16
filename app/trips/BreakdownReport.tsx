@@ -31,7 +31,7 @@ import {
   Legend,
 } from "recharts";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { currentMonthKey, formatSar } from "@/lib/utils";
+import { currentMonthKey, formatSar, localMonthKeyOf } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { WATER_TYPE_LABELS, type CommissionMode } from "@/lib/db-types";
 
@@ -101,12 +101,13 @@ export default function BreakdownReport({
   drivers: DriverLite[];
   stations: StationLite[];
 }) {
-  // currentMonthKey(), NOT monthKeyOf(new Date().toISOString()). Both the picker
-  // default and the month-list upper bound below are compared against
-  // monthKeyOf(t.trip_date) — and trip_date is a DATE column, i.e. already a
-  // local calendar month. The old UTC expression put the two on different
-  // clocks, so on the 1st between 00:00 and 02:59 Riyadh the report opened on
-  // LAST month and the list stopped one month short.
+  // currentMonthKey(), NOT monthKeyOf(new Date().toISOString()). It seeds the
+  // picker default and caps the month list, both of which are then matched
+  // against per-trip month keys — so it has to be on the same LOCAL clock those
+  // keys are on. The old UTC expression was not, so on the 1st between 00:00 and
+  // 02:59 Riyadh the report opened on LAST month and the list stopped one month
+  // short. (The per-trip keys reach the local clock two ways depending on column
+  // type — see the note above deliveredInMonth.)
   const currentMonth = currentMonthKey();
   const [selMonth, setSelMonth] = useState(currentMonth);
 
@@ -177,8 +178,13 @@ export default function BreakdownReport({
   }, [stations]);
 
   // --- Per-month slices --------------------------------------------------
+  // localMonthKeyOf for delivered_at (TIMESTAMPTZ — the instant must be
+  // converted before slicing), plain monthKeyOf for trip_date (a DATE column,
+  // already local calendar terms). selMonth is local, so bucketing delivered_at
+  // by the UTC instant would compare two different clocks and drop a trip
+  // delivered between 00:00 and 02:59 on the 1st out of its own month.
   const deliveredInMonth = useMemo(
-    () => projectTrips.filter((t) => t.delivered_at && monthKeyOf(t.delivered_at) === selMonth),
+    () => projectTrips.filter((t) => t.delivered_at && localMonthKeyOf(t.delivered_at) === selMonth),
     [projectTrips, selMonth],
   );
   const totalInMonth = useMemo(
@@ -262,7 +268,10 @@ export default function BreakdownReport({
     const tot = new Map<string, number>();
     for (const t of projectTrips) {
       if (t.delivered_at) {
-        const k = monthKeyOf(t.delivered_at);
+        // Same split as deliveredInMonth above — the timestamptz converts, the
+        // DATE column below does not. Both are matched against `keys`, which is
+        // built from local months.
+        const k = localMonthKeyOf(t.delivered_at);
         deliv.set(k, (deliv.get(k) ?? 0) + 1);
       }
       if (t.trip_date) {

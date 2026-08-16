@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { type StationOption } from "@/lib/station-pricing";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { currentMonthKey, formatSar } from "@/lib/utils";
+import { currentMonthKey, formatSar, localMonthKeyOf } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import type { CommissionMode, WaterType, PaymentMode } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
@@ -140,23 +140,26 @@ export default function CustomersTab({
   // expression was UTC, so for the first three hours of the 1st this whole tab
   // labelled itself the current month while showing LAST month's figures.
   //
-  // THIS TAB COMPARES monthKey AGAINST TWO DIFFERENT BASES, and that is worth
-  // knowing before touching either:
-  //   · tripsThisMonth reads trips.trip_date — a DATE column, already a local
-  //     calendar month, so it now matches monthKey exactly.
-  //   · deliveredThisMonthByProject and revenueThisMonth read trips.delivered_at
-  //     — a timestamptz, which monthKeyOf buckets by the UTC instant, on purpose
-  //     (see its own comment in lib/commission.ts: deterministic across
-  //     machines, used for payroll grouping).
+  // EVERY COMPARISON AGAINST monthKey IS NOW ON THE LOCAL CLOCK, but the two
+  // column types get there differently and the distinction is load-bearing:
+  //   · trips.trip_date and customer_topups.topup_date are DATE columns —
+  //     already local calendar terms, so a plain slice (monthKeyOf) is correct.
+  //   · trips.delivered_at is a TIMESTAMPTZ, so it goes through localMonthKeyOf,
+  //     which converts the instant before slicing.
   //
-  // RESIDUAL, DELIBERATELY LEFT: in that same 00:00-02:59 window on the 1st, a
-  // trip delivered right then buckets to the previous month by UTC and so is
-  // excluded from those two delivered_at figures, which read slightly low until
-  // 03:00 and then self-correct. That is strictly better than the old behaviour,
-  // where the entire tab showed the wrong month — but it is not zero, and fixing
-  // it properly means re-basing delivered_at bucketing to Riyadh, which changes a
-  // money KPI that deliberately reconciles with revenueThisMonth. That is its own
-  // decision, not a side effect of a date-helper swap.
+  // Bucketing delivered_at with monthKeyOf was the residual this replaces: that
+  // helper buckets by the UTC instant, deliberately and correctly for payroll
+  // grouping, but comparing its result against a local month key puts the two
+  // sides on different clocks, so a trip delivered between 00:00 and 02:59 on
+  // the 1st dropped out of "this month" entirely.
+  //
+  // Measured before changing it: of 730 delivered trips, ZERO bucket differently
+  // under UTC vs Riyadh today, so this closed a latent hole rather than moving a
+  // live figure. What it does NOT address is the BASIS question — 6 of those 730
+  // fall in a different month by delivered_at than by trip_date, and migration
+  // 0109 re-based the Dashboard's delivered-revenue view onto trip_date for
+  // exactly that reason. Whether these two KPIs should follow it is a separate,
+  // deliberate call.
   const monthKey = currentMonthKey();
 
   // project lookup by customer (1:1) for the rows + by project_id for revenue.
@@ -185,11 +188,15 @@ export default function CustomersTab({
 
   // Per-project DELIVERED trip count for THIS calendar month (keyed by
   // delivered_at — same basis as the Revenue KPI, so the two reconcile).
+  //
+  // localMonthKeyOf, NOT monthKeyOf: delivered_at is a timestamptz and monthKey
+  // is a LOCAL month, so bucketing by the UTC instant put the two sides of this
+  // comparison on different clocks. See the note at the monthKey declaration.
   const deliveredThisMonthByProject = useMemo(() => {
     const m = new Map<string, number>();
     for (const t of trips) {
       if (!t.project_id || !t.delivered_at) continue;
-      if (monthKeyOf(t.delivered_at) !== monthKey) continue;
+      if (localMonthKeyOf(t.delivered_at) !== monthKey) continue;
       m.set(t.project_id, (m.get(t.project_id) ?? 0) + 1);
     }
     return m;
@@ -213,12 +220,13 @@ export default function CustomersTab({
     [trips, monthKey]
   );
 
-  // Revenue = Σ rate_per_trip_sar for trips DELIVERED this month (by delivered_at).
+  // Revenue = Σ rate_per_trip_sar for trips DELIVERED this month (by
+  // delivered_at, bucketed on the local clock — same reason as above).
   const revenueThisMonth = useMemo(() => {
     let sum = 0;
     for (const t of trips) {
       if (!t.project_id || !t.delivered_at) continue;
-      if (monthKeyOf(t.delivered_at) !== monthKey) continue;
+      if (localMonthKeyOf(t.delivered_at) !== monthKey) continue;
       sum += projectById.get(t.project_id)?.rate_per_trip_sar ?? 0;
     }
     return sum;

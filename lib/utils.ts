@@ -81,6 +81,45 @@ export function currentMonthKey(): string {
   return todayKey().slice(0, 7);
 }
 
+/**
+ * "YYYY-MM" for a stored timestamp, on the LOCAL clock.
+ *
+ * THIS IS THE THIRD MONTH QUESTION, AND ALL THREE ARE DIFFERENT. Keeping them
+ * apart is the whole point:
+ *
+ *   currentMonthKey()          which month is it NOW            local clock
+ *   localMonthKeyOf(iso)       which month did THIS happen in   local clock
+ *   monthKeyOf(iso)            same, but by the UTC instant     lib/commission
+ *
+ * monthKeyOf is correct and deliberate for payroll grouping — bucketing by UTC
+ * is what makes it deterministic across machines — but it is WRONG the moment
+ * its result is compared against a local month key, because the two sides then
+ * sit on different clocks. In Riyadh (UTC+3) a delivery stamped between 00:00
+ * and 02:59 local is still the previous day in UTC, so on the 1st of a month it
+ * buckets to the previous MONTH and drops out of "this month" entirely.
+ *
+ * IT ACCEPTS A PLAIN DATE STRING TOO, AND THAT GUARD IS DELIBERATE. These call
+ * sites sit beside ones reading DATE columns (trips.trip_date,
+ * customer_topups.topup_date), which are already local calendar terms and need
+ * no conversion at all. Passing one to `new Date()` would parse it as UTC
+ * midnight and, west of Greenwich, shift it back a day — a bug that would appear
+ * only for users in negative offsets and never in Riyadh. So a bare YYYY-MM-DD
+ * is sliced directly, which is both correct and what monthKeyOf would have done.
+ *
+ * Live check before this shipped: of 730 delivered trips, ZERO currently bucket
+ * differently under UTC vs Riyadh — so this closes a latent hole rather than
+ * moving a number today. Separately, 6 of those 730 fall in a different month by
+ * delivered_at than by trip_date; that is a BASIS question, not a timezone one,
+ * and is deliberately not addressed here.
+ */
+export function localMonthKeyOf(iso: string): string {
+  // Already a local calendar date (YYYY-MM-DD) — no instant to convert.
+  if (iso.length === 10 && !iso.includes("T")) return iso.slice(0, 7);
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 7); // unparseable: behave as before
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export function statusTone(s: string): "ok" | "warn" | "bad" | "info" | "muted" {
   switch (s) {
     case "active": case "on_duty": case "delivered": case "completed": case "paid": return "ok";
