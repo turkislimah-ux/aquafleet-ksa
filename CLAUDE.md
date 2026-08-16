@@ -2234,9 +2234,13 @@ relevant skill(s) **when the task calls for it**:
     the timeline.
   - A failed read renders as an **error, not an empty timeline** — "never had a
     salary recorded" is a very different claim from "could not load it".
-  - **Not built:** a staff-side entry point. The modal is subject-agnostic
-    (`{driverId}` | `{staffId}`) and the actions already accept either, so wiring
-    `StaffTab` is a button, not a feature.
+  - **BOTH PEOPLE-DETAIL PANELS CARRY IT** — drivers and staff. The modal and
+    both actions are subject-agnostic (`{driverId}` | `{staffId}`), so the staff
+    side was a button rather than a feature. Wiring it also **added the salary
+    cell to the staff detail, which never had one** — staff salary was editable
+    on the form and displayed nowhere. The figure and its timeline went in
+    together on purpose: a salary with no history beside it is exactly the
+    arrangement that let the value drift unnoticed until `0125`.
 
 - **`payment_mode` reconciliation — DONE, migration `0121`, commits `e69ec6a`
   (app) + `25ce8cb` (migration).** This entry stood for months as "a clean
