@@ -2208,6 +2208,20 @@ relevant skill(s) **when the task calls for it**:
     the station re-take rule); and it **fails closed** — a failed project read
     refuses the whole stage move rather than completing a delivery with an
     unstamped rate.
+  - **BROWSER-VERIFIED, AND CONFIRMED IN THE DATA AFTERWARDS.** Eight trips were
+    delivered across five projects and the freeze fired correctly on every one —
+    RRR 160, King Saud 400 x3, King Salman 300, Airport 410 x3, each equal to its
+    project's rate. Table-wide after: 817 trips / 816 stamped / 0 missed /
+    0 wrongly-stamped / 0 mismatches. The freeze also fired ALONGSIDE the other
+    two on the same rows (`commission_sar`, `filling_cost_sar` both stamped),
+    which is the check that matters most — three freezes, one transition, no
+    interference.
+  - **THAT VERIFICATION LEFT REAL DATA, KEPT DELIBERATELY (Turki's call).** Those
+    eight deliveries are genuine operational events, not test residue, so August
+    net profit moved **-59,900.02 -> -60,088.36** on their new commission and
+    filling cost. Payroll was untouched. Recorded because a P&L figure that moved
+    during verification looks like a defect later if nobody wrote down that it
+    was a real delivery.
   - **THREE FROZEN MONEY FIGURES NOW LIVE ON A TRIP, and they freeze at
     different moments for different reasons — do NOT unify them:**
     `commission_sar` (at delivery, gated on `payout_id`, re-derived across a
@@ -2252,6 +2266,13 @@ relevant skill(s) **when the task calls for it**:
     correction into two rows saying different things. **One writer, one
     direction:** the person's own form owns the current value, this screen owns
     the timeline.
+  - **BROWSER-VERIFIED ON BOTH PANELS, AND IT LEFT NOTHING BEHIND.** After the
+    check, `salary_history` still held **22 rows, all baselines, 0 changes** — the
+    back-dated case was exercised and CANCELLED rather than saved, so payroll
+    stayed 25,000 / 37,800 / 31,300 with `salary_is_current_snapshot` true for all
+    three months. Verifying this screen means deciding whether to keep what it
+    writes; the honest end state of that check is either a recorded change you
+    meant, or no row at all.
   - A failed read renders as an **error, not an empty timeline** — "never had a
     salary recorded" is a very different claim from "could not load it".
   - **BOTH PEOPLE-DETAIL PANELS CARRY IT** — drivers and staff. The modal and
