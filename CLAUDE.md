@@ -1947,12 +1947,29 @@ relevant skill(s) **when the task calls for it**:
       `fill_cost_non_potable_sar` and returns false positives on every check —
       including the three `fill_cost`-named CONSTRAINTS, which reference only the
       per-type columns.
+  - **THE STATION ROW SHAPE IS CONSOLIDATED — commit `aae45dd`.** This entry used to
+    read "`StationPricing` is hand-rolled in three places". The count was LOW: four
+    files declared a shape carrying the two price columns, and one of them must stay
+    separate — so the split matters more than the number.
+    - **Three were genuinely duplicated**, byte-identical, ten fields, same order:
+      `app/trips/page.tsx` (declared FUNCTION-LOCALLY, the least discoverable place
+      for it), `ProjectsBoard.tsx`, `WaterStationsModal.tsx`. All three now import
+      **`WaterStationRow`** from `lib/station-pricing`, expressed there as
+      `StationOption & {...}` so a full row IS a pickable option plus admin fields.
+    - **`WaterStationInput` (app/trips/actions.ts) is NOT merged, deliberately.** It
+      is the WRITE shape: it composes on `StationPricing` for the price pair but
+      carries **no `key`** — the immutable FK target for `trips.water_station`,
+      generated once on create and never present in an update payload — and no
+      `id`/`active`. Folding it into the row type would put all three back within
+      reach of the edit form. Both type docs state the boundary, in both directions.
+    - **Why it mattered even though all three copies agreed:** the shape carries two
+      PRICE columns, and NULL vs 0 mean different things here. Three hand-written
+      copies is how a `?? 0` "fix" lands in one file and not the others. The two
+      price columns now have **exactly one declaration in the repo**.
   - **Deferred — Water Station Cost:** there is **no supported clear-the-station
     path** — `trips.water_station` is NOT NULL with an FK and the slug CHECK forbids
     `""`, so `setTripStation(id, "")` fails on the foreign key, and the code's
-    empty/NULL guards are unreachable today; `StationPricing` is hand-rolled in three
-    places (`WaterStationsModal`, `ProjectsBoard`, `app/trips/page.tsx`) instead of
-    imported — a consolidation, not dead code.
+    empty/NULL guards are unreachable today.
 
 - **DRIVER PAYSLIPS — migrations `0115`–`0118`, through commit `5476b24`.** A
   numbered, frozen settlement document per driver per month, plus a commission
