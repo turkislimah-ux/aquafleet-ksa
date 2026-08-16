@@ -27,7 +27,7 @@ import {
   TrendingUp, TrendingDown, Minus, Truck,
 } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn, formatSar, formatNum } from "@/lib/utils";
+import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
 import {
   buildUsageRows, totals, bySource, byWarehouse, byDestination,
   topParts, outstandingReturnable, byTruck, weeklySummary,
@@ -148,7 +148,12 @@ export default function PartsUsageTab({
     [permits, permitLines, destinationLabel],
   );
   const outstandingTotal = useMemo(() => {
-    const todayIso = new Date().toISOString().slice(0, 10);
+    // todayKey(), NOT toISOString().slice(0,10). expectedReturnOn is a DATE
+    // column already in local calendar terms, so comparing it against a UTC
+    // slice compares two different clocks: for the first three hours after
+    // Riyadh midnight the slice still reads yesterday, and a part that became
+    // overdue at midnight is not counted until 03:00.
+    const todayIso = todayKey();
     return outstanding.reduce(
       (a, r) => ({
         qty: a.qty + r.qty,
