@@ -2091,10 +2091,13 @@ relevant skill(s) **when the task calls for it**:
     approval step before issue (parked with RBAC). **Effective-dated salary is
     now BUILT — see the entry below.**
 
-- **EFFECTIVE-DATED SALARY — migrations `0125` + `0126`, commits `742bec1`,
-  `5c67762`.** Forward-only salary history. `0125` shipped a live defect and
-  `0126` fixed it forward — `0125` stays as applied history rather than being
-  rewritten (the `0038` / `0090` / `0109` precedent).
+- **EFFECTIVE-DATED RATES — COMPLETE. Migrations `0125`–`0128`, commits
+  `742bec1`, `5c67762`, `78a3038`, `0e836a6`, plus app work `f4dead3`
+  (rate freezes at delivery) and `29e5f05` (salary-history screen).**
+  Forward-only salary history, the customer rate frozen per trip, and the screen
+  that records a back-dated raise. `0125` shipped a live defect and `0126` fixed
+  it forward — `0125` stays as applied history rather than being rewritten (the
+  `0038` / `0090` / `0109` precedent).
   - **§7's OLD FRAMING WAS WRONG AND THE SCOPE SHRANK.** This was carried for
     months as *"one mechanism with three consumers (driver salary, commission
     rates, customer rates)"*. Measured: the three are in **three different
@@ -2143,25 +2146,97 @@ relevant skill(s) **when the task calls for it**:
     month for every future raise, not just the one sampled. Payroll unmoved at
     **25,000 / 37,800 / 31,300** (June is the 0117-corrected figure), and both
     frozen payslips byte-identical.
-  - **STILL OPEN, deliberately:** `v_driver_payslip_basis` is the **fourth**
-    payroll-reading view and still reads `d.salary_sar` directly — split out
-    rather than half-done, because `create or replace` must reproduce its 18
-    columns verbatim and it is the payslip money path. **A no-op today** (every
-    past month resolves to the current salary either way); it starts mattering at
-    the first real raise. `v_pnl_monthly` and `v_monthly_only_costs` compose on
-    `v_payroll_monthly` and inherited the fix automatically.
-  - **STILL OPEN — customer rate:** `trips.rate_sar` is NULL on all 817 rows and
-    nothing stamps it. **Stamping is provably money-neutral**: `lib/prepaid.ts`'s
-    own header says `ConsumingTrip.rate_sar` is *"resolved at call time — NOT the
-    raw `trips.rate_sar` column"*, and the real feed is
-    `project.rate_per_trip_sar`. Switching prepaid to read a frozen rate would be
-    a separate change and a real ruling. The backfill choice (from the current
-    rate, vs leaving NULL) is **unruled**.
+  - **`0127` — THE FOURTH PAYROLL VIEW.** `v_driver_payslip_basis` read
+    `d.salary_sar` directly and was split out rather than half-done, because
+    `create or replace` must reproduce its **18 columns verbatim** and it is the
+    payslip money path. Written against the full `pg_get_viewdef` with exactly
+    ONE expression changed. **Applied while it was still a no-op, deliberately** —
+    every past month resolved to the current salary either way, so nothing could
+    move; applying it after the first raise would have changed several figures at
+    once with no clean before/after to diff. `v_pnl_monthly` and
+    `v_monthly_only_costs` compose on `v_payroll_monthly` and inherited the fix
+    for free. `salary_missing` was left as `d.salary_sar IS NULL` — keeping the
+    change to one expression is what made the no-op claim checkable.
+
   - **LESSON, third occurrence — derive an expected count with the SAME
     predicate the code uses.** `0125`'s own block C predicted 17 seed rows; the
     truth is 22, because the seed correctly includes terminated drivers and I had
     counted live ones. Same shape as `0121`'s "7/7 customers" and `0123`'s
     "8 month-only" slips.
+
+- **CUSTOMER RATE FROZEN PER TRIP — migration `0128`, app `f4dead3`.**
+  `trips.rate_sar` was NULL on all 817 rows and nothing stamped it, so anything
+  not yet on a confirmed invoice re-priced at the project's CURRENT rate.
+  - **`0128` BACKFILLED 816 TRIPS; THE ONE WITHOUT A PROJECT KEPT ITS NULL.**
+    The UPDATE **selects rather than joins-and-coalesces**, so a project-less trip
+    is never a candidate — a join would have dropped it or stamped it with
+    something invented.
+  - **OPTION A WAS EVIDENCE-BACKED, NOT PREFERENCE.** Backfilling a frozen price
+    from a CURRENT value normally asserts something nobody checked. Here the
+    frozen confirmed-invoice lines prove it: every `amount_sar` equals its
+    project's current rate (410=410, 400=400, 420=420), so **no rate has ever
+    moved** and "current" IS the historical rate. `0128`'s block C re-runs that
+    check and says STOP if it ever reads otherwise.
+  - **`f4dead3` FREEZES IT GOING FORWARD, in `setTripStage`**, beside the two
+    freezes already there. **Four decisions that could have gone the other way:**
+    it is **NOT gated on `payout_id`** (that lock is about DRIVER commission
+    frozen into a payout snapshot; the customer rate is a different party's
+    money); a trip with **no project stamps nothing**; it is **NOT nulled when
+    leaving delivered** (unlike `commission_sar` — `0128`'s model is that a trip
+    carrying a project carries that project's rate, so clearing it would erase
+    what the backfill deliberately set, and re-delivering re-stamps, mirroring
+    the station re-take rule); and it **fails closed** — a failed project read
+    refuses the whole stage move rather than completing a delivery with an
+    unstamped rate.
+  - **THREE FROZEN MONEY FIGURES NOW LIVE ON A TRIP, and they freeze at
+    different moments for different reasons — do NOT unify them:**
+    `commission_sar` (at delivery, gated on `payout_id`, re-derived across a
+    driver+project+day ramp), `filling_cost_sar` (at creation, re-taken on a
+    station change), `rate_sar` (at delivery, ungated, never nulled).
+  - **COSMETIC CONSEQUENCE, recorded so it is not "fixed" wrongly:** a trip
+    created from now on carries `rate_sar` NULL until delivery, while every
+    pre-`0128` trip was backfilled regardless of stage. `ProjectsBoard` renders
+    `rate_sar ?? 0`, so a NEW scheduled trip reads 0 there until delivered.
+    Self-correcting, and **not** a reason to stamp at creation — the snapshot's
+    whole point is to record the price at the moment the trip became billable.
+  - **STILL OUT OF SCOPE AND STILL NEEDS ITS OWN RULING:** switching
+    `lib/prepaid.ts` to read the frozen `trips.rate_sar` instead of resolving the
+    project's live rate at call time. **That is the only remaining change that
+    could move customer money.** Today nothing reads the column for money —
+    0 views, and both `lib/prepaid.ts` and `lib/invoice.ts` say in their own
+    headers that the rate is resolved at call time and is *"NOT the raw
+    `trips.rate_sar` column"*.
+
+- **SALARY-HISTORY SCREEN — `29e5f05`.** Opened from the Salary cell on the
+  driver detail panel (`app/drivers/SalaryHistoryModal.tsx`).
+  - **IT EXISTS FOR BACK-DATING, not for everyday raises.** The triggers already
+    record a change entered TODAY, so the ordinary case never needed a screen.
+    Only a dated row can say *"he has been on 5,000 since March"*. Its other job
+    is showing the timeline every payroll figure now resolves through.
+  - **THE HONESTY BLOCK IS THE DESIGN, not decoration.** A back-dated row
+    legitimately re-costs reported months — that is what recording it MEANS — but
+    it must never be discovered afterwards. The form states, **before the save**,
+    which month the recalculation starts from and that it reaches months already
+    reported. It is computed **from the DATE ALONE** rather than previewing a
+    server-side number, so the reader can check the rule instead of trusting a
+    figure. **Saving a back-dated row is the ONE user action in this app that
+    intentionally moves previously reported profit.**
+  - **BASELINES ARE GUARDED TWICE.** A baseline renders with a lock badge and
+    **no delete control at all** — not a disabled one, because there is no
+    circumstance in which removing it is right and a greyed button would only
+    invite the question — and `removeSalaryChange` refuses it **server-side**.
+    Deleting one would make the earliest months resolve to nothing, which reads
+    as a salary of **zero** rather than an error.
+  - **`addSalaryChange` DOES NOT WRITE `drivers.salary_sar`.** That would fire
+    the trigger and record a SECOND row dated today, turning one back-dated
+    correction into two rows saying different things. **One writer, one
+    direction:** the person's own form owns the current value, this screen owns
+    the timeline.
+  - A failed read renders as an **error, not an empty timeline** — "never had a
+    salary recorded" is a very different claim from "could not load it".
+  - **Not built:** a staff-side entry point. The modal is subject-agnostic
+    (`{driverId}` | `{staffId}`) and the actions already accept either, so wiring
+    `StaffTab` is a button, not a feature.
 
 - **`payment_mode` reconciliation — DONE, migration `0121`, commits `e69ec6a`
   (app) + `25ce8cb` (migration).** This entry stood for months as "a clean
