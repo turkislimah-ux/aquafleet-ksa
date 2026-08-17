@@ -96,9 +96,10 @@ export default async function ReportsPage() {
     supabase.from("v_commissions_paid_monthly").select("*").order("month"),
     // The metrics DICTIONARY. Read as data, not as a metric. TWO consumers,
     // and the split matters: StatementsTab reads metric_key ONLY, as the fence
-    // the custom-report builder is bounded to; OverviewTab's "Metrics
-    // dictionary" section RENDERS the description columns (meaning, formula,
-    // grain, source_view, basis, caveat) as the on-screen glossary.
+    // the custom-report builder is bounded to; MetricsGlossaryModal RENDERS
+    // the description columns (meaning, formula, grain, source_view, basis,
+    // caveat) as the on-screen glossary — a popup opened from the "Metrics
+    // dictionary" button in the page header, on the Overview tab.
     //
     // This comment used to claim that "showing it is what makes that
     // constraint visible rather than merely claimed" — and nothing showed it.

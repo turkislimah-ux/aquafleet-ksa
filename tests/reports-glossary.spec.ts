@@ -1,9 +1,14 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
 
-// Metrics glossary — Reports → Overview, bottom of the tab.
+// Metrics glossary — Reports → Overview, the "Metrics dictionary" POPUP.
+//
+// It shipped as a section at the bottom of the Overview tab and was moved into
+// a modal launched from the page header (Turki's call). This spec was rewritten
+// with it: it now opens the popup through the real button rather than finding a
+// section already on the page, so the launcher is under test too.
 //
 // Drives the THROWAWAY `/reports-glossary-check` route, which mounts the REAL
-// OverviewTab against a hardcoded copy of all 30 live `report_metrics` rows.
+// ReportsClient against a hardcoded copy of all 30 live `report_metrics` rows.
 // The fixture is hardcoded rather than fetched because `report_metrics` is
 // RLS'd to `authenticated` and this route has no session — a real fetch there
 // returns zero rows and the glossary would render its "could not be read"
@@ -32,13 +37,12 @@ const NO_CAVEAT = ["operating_profit", "operations", "os_cost"];
 
 // The longest source_view in the dictionary — 0123's two-source pointer, 169
 // chars with no break opportunity in `v_commissions_paid_monthly`. This is the
-// string the layout had to survive.
+// string the layout had to survive, and the popup's `xl:grid-cols-2` entry grid
+// gives it HALF the width the old full-width section did.
 const LONG_SOURCE = "v_commissions_monthly (month; trip commission, specials, adjustments and bonus split out)";
 
 function glossary(page: Page): Locator {
-  return page.locator("div.card").filter({
-    has: page.getByRole("heading", { name: "Metrics dictionary" }),
-  });
+  return page.getByRole("dialog", { name: "Metrics dictionary" });
 }
 
 function entryFor(page: Page, key: string): Locator {
@@ -47,12 +51,41 @@ function entryFor(page: Page, key: string): Locator {
     .filter({ has: page.getByText(key, { exact: true }) });
 }
 
+async function openGlossary(page: Page) {
+  await page.getByRole("button", { name: "Metrics dictionary" }).click();
+  await expect(glossary(page)).toBeVisible();
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto(URL);
-  await expect(glossary(page)).toBeVisible();
 });
 
-test("all 30 metrics render, grouped by basis", async ({ page }) => {
+test("the launcher sits beside the period picker, and only on Overview", async ({ page }) => {
+  const button = page.getByRole("button", { name: "Metrics dictionary" });
+  const period = page.getByText("Period", { exact: true });
+
+  // Both in the header, side by side — same row, button to the right.
+  await expect(button).toBeVisible();
+  await expect(period).toBeVisible();
+  const bBox = await button.boundingBox();
+  const pBox = await period.boundingBox();
+  expect(bBox).not.toBeNull();
+  expect(pBox).not.toBeNull();
+  expect(Math.abs(bBox!.y - pBox!.y)).toBeLessThan(24);
+  expect(bBox!.x).toBeGreaterThan(pBox!.x);
+
+  // Nothing is open until it is clicked.
+  await expect(glossary(page)).toHaveCount(0);
+
+  // Tab 2 carries its own period control and its own use of the dictionary
+  // (as the builder's fence) — no second launcher there.
+  await page.getByRole("button", { name: "Reports", exact: true }).click();
+  await expect(button).toHaveCount(0);
+  await expect(period).toHaveCount(0);
+});
+
+test("all 30 metrics render in the popup, grouped by basis", async ({ page }) => {
+  await openGlossary(page);
   const g = glossary(page);
 
   // One <dl> per metric entry (Formula / Grain / Source view).
@@ -72,6 +105,7 @@ test("all 30 metrics render, grouped by basis", async ({ page }) => {
 });
 
 test("every entry shows meaning, formula, grain and source view", async ({ page }) => {
+  await openGlossary(page);
   const g = glossary(page);
   await expect(g.getByText("Formula", { exact: true })).toHaveCount(TOTAL);
   await expect(g.getByText("Grain", { exact: true })).toHaveCount(TOTAL);
@@ -85,6 +119,7 @@ test("every entry shows meaning, formula, grain and source view", async ({ page 
 });
 
 test("the long two-source pointers wrap inside their cell", async ({ page }) => {
+  await openGlossary(page);
   const cell = glossary(page).locator("dd").filter({ hasText: LONG_SOURCE }).first();
   await expect(cell).toBeVisible();
 
@@ -92,7 +127,7 @@ test("the long two-source pointers wrap inside their cell", async ({ page }) => 
   const overflow = await cell.evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 
-  // And the cell itself stays inside the card — a cell that overflowed its
+  // And the cell itself stays inside the dialog — a cell that overflowed its
   // container would still report scrollWidth === clientWidth.
   const cellBox = await cell.boundingBox();
   const cardBox = await glossary(page).boundingBox();
@@ -104,7 +139,29 @@ test("the long two-source pointers wrap inside their cell", async ({ page }) => 
   expect(cellBox!.height).toBeGreaterThan(20);
 });
 
+test("nothing overflows its box at either column count", async ({ page }) => {
+  // The entry grid is two columns from `xl` up and one below it, so the text
+  // cells are NARROWEST at a wide viewport — the opposite of the usual
+  // assumption, and the reason both widths are checked rather than just the
+  // small one.
+  for (const width of [1440, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(URL);
+    await openGlossary(page);
+
+    const overflowing = await glossary(page).evaluate((root) => {
+      const bad: string[] = [];
+      for (const el of Array.from(root.querySelectorAll("dd, code, p, h4"))) {
+        if (el.scrollWidth - el.clientWidth > 1) bad.push(el.textContent?.slice(0, 40) ?? "");
+      }
+      return bad;
+    });
+    expect(overflowing, `overflowing at ${width}px`).toEqual([]);
+  }
+});
+
 test("a NULL caveat renders nothing at all", async ({ page }) => {
+  await openGlossary(page);
   for (const key of NO_CAVEAT) {
     const entry = entryFor(page, key);
     await expect(entry).toHaveCount(1);
@@ -119,6 +176,7 @@ test("a NULL caveat renders nothing at all", async ({ page }) => {
 });
 
 test("the filter narrows the list and says so when nothing matches", async ({ page }) => {
+  await openGlossary(page);
   const g = glossary(page);
   const search = g.getByLabel("Filter metrics");
 
@@ -134,4 +192,19 @@ test("the filter narrows the list and says so when nothing matches", async ({ pa
 
   await search.fill("");
   await expect(g.locator("dl")).toHaveCount(TOTAL);
+});
+
+test("Esc, the close button and the backdrop all dismiss it", async ({ page }) => {
+  await openGlossary(page);
+  await page.keyboard.press("Escape");
+  await expect(glossary(page)).toHaveCount(0);
+
+  await openGlossary(page);
+  await glossary(page).getByRole("button", { name: "Close" }).click();
+  await expect(glossary(page)).toHaveCount(0);
+
+  await openGlossary(page);
+  // Top-left of the viewport is backdrop — the panel is centred.
+  await page.mouse.click(4, 4);
+  await expect(glossary(page)).toHaveCount(0);
 });

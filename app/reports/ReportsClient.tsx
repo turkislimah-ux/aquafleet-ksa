@@ -17,7 +17,8 @@
 import { useMemo, useState } from "react";
 import { useTabParam } from "@/lib/useTabParam";
 import { useRouter } from "next/navigation";
-import { PageHeader } from "@/components/ui";
+import { BookOpen } from "lucide-react";
+import { PageHeader, Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
   monthsDesc, monthLabel,
@@ -34,6 +35,7 @@ import {
 } from "@/lib/reports";
 import OverviewTab from "./OverviewTab";
 import StatementsTab from "./StatementsTab";
+import MetricsGlossaryModal from "./MetricsGlossaryModal";
 import ExpensesModal, { type ExpenseRow } from "./ExpensesModal";
 
 const REPORT_TABS = ["overview", "statements"] as const;
@@ -73,9 +75,14 @@ type ReportsClientProps = {
   /**
    * The metrics dictionary. TWO consumers, and they use it for opposite
    * reasons: StatementsTab FENCES the custom-report builder to these keys
-   * (metric_key only), and OverviewTab RENDERS the description columns as the
-   * glossary at the bottom of the tab. It reaches OverviewTab through the
-   * `{...props}` spread below rather than a named prop.
+   * (metric_key only), and MetricsGlossaryModal RENDERS the description
+   * columns (meaning / formula / grain / source_view / basis / caveat) — the
+   * only place in the app those columns are shown at all.
+   *
+   * The glossary is mounted HERE rather than inside OverviewTab because its
+   * launcher sits in the page header beside the period picker, and because it
+   * must open at any scroll position. OverviewTab no longer receives `metrics`
+   * at all; the `{...props}` spread below passes only what that tab reads.
    */
   metrics: MetricDictionaryRow[];
   /** 0115 — payslip basis per driver per month, and the frozen documents. */
@@ -92,6 +99,7 @@ export default function ReportsClient(props: ReportsClientProps) {
   // Tab lives in the URL so global search can deep-link a sub-page.
   const [tab, setTab] = useTabParam<Tab>(REPORT_TABS, "overview");
   const [expensesOpen, setExpensesOpen] = useState(false);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
 
   const months = useMemo(() => monthsDesc(props.pnl), [props.pnl]);
   // Default to the newest month the spine knows about. The spine always runs
@@ -105,21 +113,38 @@ export default function ReportsClient(props: ReportsClientProps) {
       <PageHeader
         title="Reports"
         subtitle="Revenue, cost and profit — every figure from one shared definition"
+        // OVERVIEW ONLY — both controls. The dictionary defines the figures on
+        // THIS tab; tab 2 carries its own grain/period control and its own use
+        // of the same dictionary (as the builder's fence), so a second launcher
+        // there would point at a reference the reader is already inside.
+        //
+        // The period picker keeps its own `months.length > 0` guard rather than
+        // gating the whole block: an empty month spine is a reason not to offer
+        // a period, not a reason to hide the dictionary — the dictionary is what
+        // explains what the missing figures WOULD have meant.
         actions={
-          tab === "overview" && months.length > 0 ? (
-            <label className="flex items-center gap-2 text-sm">
-              <span className="muted">Period</span>
-              <select
-                value={active ?? ""}
-                onChange={(e) => setMonth(e.target.value)}
-                className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
-                style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
-              >
-                {months.map((m) => (
-                  <option key={m} value={m}>{monthLabel(m)}</option>
-                ))}
-              </select>
-            </label>
+          tab === "overview" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {months.length > 0 && (
+                <label className="flex items-center gap-2 text-sm">
+                  <span className="muted">Period</span>
+                  <select
+                    value={active ?? ""}
+                    onChange={(e) => setMonth(e.target.value)}
+                    className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
+                    style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
+                  >
+                    {months.map((m) => (
+                      <option key={m} value={m}>{monthLabel(m)}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <Btn variant="outline" onClick={() => setGlossaryOpen(true)}>
+                <BookOpen className="h-4 w-4" />
+                Metrics dictionary
+              </Btn>
+            </div>
           ) : undefined
         }
       />
@@ -181,6 +206,15 @@ export default function ReportsClient(props: ReportsClientProps) {
           onManageExpenses={() => setExpensesOpen(true)}
         />
       )}
+
+      {/* Mounted at the PAGE level, not inside OverviewTab, so it survives a tab
+          switch and opens from a header button at any scroll position. It reads
+          nothing and writes nothing — a pure render of `report_metrics`. */}
+      <MetricsGlossaryModal
+        open={glossaryOpen}
+        onClose={() => setGlossaryOpen(false)}
+        metrics={props.metrics}
+      />
 
       {/* router.refresh() rather than local state: the expense figures on this
           page come from VIEWS, so after a write the server has to recompute

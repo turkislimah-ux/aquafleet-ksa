@@ -18,7 +18,7 @@
 // overlays that were fiddly to get right; nothing here needs that, so the
 // library earns its place rather than 300 lines of hand-rolled SVG.
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, BarChart,
@@ -32,7 +32,7 @@ import {
   type Delta, type PnlRow, type CollectionsRow, type RevenueMonthRow,
   type ReceivableRow, type AgingRow, type PayrollRow, type OperationsRow,
   type RevenuePerTruckRow, type TopupsRow, type PurchasingRow,
-  type MaintenancePerTruckRow, type MetricDictionaryRow,
+  type MaintenancePerTruckRow,
 } from "@/lib/reports";
 
 const AXIS = "#94a3b8";      // slate-400 — legible on both themes
@@ -52,19 +52,13 @@ type Props = {
   topups: TopupsRow[];
   purchasing: PurchasingRow[];
   maintPerTruck: MaintenancePerTruckRow[];
-  /**
-   * The metrics DICTIONARY (report_metrics). Not a measure — it is the
-   * vocabulary every figure above is defined in, rendered at the bottom of
-   * this tab by <MetricsGlossary>.
-   */
-  metrics: MetricDictionaryRow[];
   onManageExpenses: () => void;
 };
 
 export default function OverviewTab({
   months, month, pnl, collections, revenue, receivables, aging,
   payroll, operations, perTruck, topups, purchasing, maintPerTruck,
-  metrics, onManageExpenses,
+  onManageExpenses,
 }: Props) {
   const prev = month ? priorMonth(months, month) : null;
 
@@ -488,8 +482,6 @@ export default function OverviewTab({
         )}
       </div>
 
-      {/* ---- Metrics dictionary ---------------------------------------- */}
-      <MetricsGlossary metrics={metrics} />
     </div>
   );
 }
@@ -571,8 +563,15 @@ function DeltaLine({ d, tone, prev }: { d: Delta; tone?: "ok" | "bad"; prev: str
   );
 }
 
+// The two helpers below are EXPORTED for MetricsGlossaryModal, which renders
+// the report_metrics dictionary this tab's figures are defined in. That modal
+// used to be a section at the bottom of this file and was moved out to a popup
+// launched from the page header (Turki's call) — a 30-metric reference is
+// something you consult mid-thought, not something you scroll the whole tab to
+// reach. The import edge is ONE WAY: that file imports this one, never back.
+
 /** A caveat the semantic layer exposed on purpose — shown, not buried. */
-function Disclosure({ children }: { children: React.ReactNode }) {
+export function Disclosure({ children }: { children: React.ReactNode }) {
   return (
     <div className="mt-3 flex gap-2 text-[11px] muted leading-relaxed">
       <Info className="h-3.5 w-3.5 shrink-0 mt-px" />
@@ -581,167 +580,6 @@ function Disclosure({ children }: { children: React.ReactNode }) {
   );
 }
 
-function EmptyNote({ children }: { children: React.ReactNode }) {
+export function EmptyNote({ children }: { children: React.ReactNode }) {
   return <div className="py-8 text-center text-sm muted">{children}</div>;
-}
-
-// --- Metrics dictionary -----------------------------------------------------
-//
-// THE SEMANTIC LAYER, READ RATHER THAN COUNTED. Every figure on this page comes
-// from a view whose meaning is defined once, in SQL (report_metrics, migration
-// 0098, extended by 0123/0124). This section renders that table — it computes
-// nothing, and it is the only place on the page where the DESCRIPTION columns
-// (meaning / formula / grain / source_view / basis / caveat) are shown at all.
-// They were fetched and threaded here for a year and rendered nowhere, which is
-// the exact failure mode CLAUDE.md §7 records for DailyOps.revenue: a column
-// nothing displays is a column nobody can check.
-//
-// LAYOUT IS STACKED, NOT A GRID TABLE, and that is a measurement not a taste:
-// live max lengths are caveat 785 chars, formula 208, source_view 169, meaning
-// 113. Six columns of that in one row would either overflow or shrink every
-// cell to a sliver. Each metric is its own block; the label/value pairs use
-// `minmax(0,1fr)` on the value track — a plain `1fr` refuses to shrink below
-// its content, which is what lets a long unbroken pointer like
-// "v_payroll_monthly (…) · v_pnl_by_period.payroll_sar (…)" push past its
-// container instead of wrapping.
-//
-// A NULL caveat renders NOTHING — no dash, no "N/A". 3 of the 30 rows have no
-// caveat (operating_profit, operations, os_cost); those metrics carry no
-// warning, which is a different claim from a warning we failed to load. Same
-// rule as the compliance pills: absent never renders as a value.
-
-/** Reading order — money first, then position, then activity. */
-const BASIS_ORDER = ["accrual", "cash", "state", "operational"];
-
-/**
- * What a basis MEANS, beside the group it labels. This is the distinction the
- * report builder is built to protect (migration 0100): accrual and cash measure
- * the same riyal at two different moments, so adding them double-counts. Saying
- * so once here beats hoping the reader knows.
- */
-const BASIS_NOTE: Record<string, string> = {
-  accrual: "Earned or incurred in the period — whether or not the money has moved yet.",
-  cash: "Money that actually moved in the period. Never added to an accrual figure: a commission payout's base IS the trip commission the accrual side already counted.",
-  state: "A position as of now, not a total for a period. A state figure does not belong in a period column.",
-  operational: "Counts and activity rather than money.",
-};
-
-function MetricsGlossary({ metrics }: { metrics: MetricDictionaryRow[] }) {
-  const [q, setQ] = useState("");
-
-  // Grouped by basis. An unrecognised basis still renders — it sorts after the
-  // four known ones rather than being dropped, so a metric added by a future
-  // migration appears here without this file being touched.
-  const groups = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const matched = needle
-      ? metrics.filter((m) =>
-          `${m.label} ${m.metric_key} ${m.meaning} ${m.source_view}`.toLowerCase().includes(needle))
-      : metrics;
-
-    const by = new Map<string, MetricDictionaryRow[]>();
-    for (const m of matched) {
-      const arr = by.get(m.basis) ?? [];
-      arr.push(m);
-      by.set(m.basis, arr);
-    }
-    const rank = (b: string) => {
-      const i = BASIS_ORDER.indexOf(b);
-      return i === -1 ? BASIS_ORDER.length : i;
-    };
-    return Array.from(by.entries())
-      .map(([basis, rows]) => ({
-        basis,
-        rows: rows.slice().sort((a, b) => a.label.localeCompare(b.label)),
-      }))
-      .sort((a, b) => rank(a.basis) - rank(b.basis) || a.basis.localeCompare(b.basis));
-  }, [metrics, q]);
-
-  const shown = groups.reduce((n, g) => n + g.rows.length, 0);
-
-  return (
-    <Section
-      title="Metrics dictionary"
-      action={
-        <input
-          type="search"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Filter metrics"
-          aria-label="Filter metrics"
-          className="w-40 sm:w-56 rounded-lg border bg-transparent px-2.5 py-1 text-xs outline-none focus:ring-1 focus:ring-brand-500/40"
-          style={{ borderColor: "rgb(var(--border))" }}
-        />
-      }
-    >
-      <p className="text-xs muted leading-relaxed">
-        Every number on this page is defined once, in SQL — this is that
-        definition, read straight from <code className="font-mono">report_metrics</code>.
-        It is also the vocabulary the custom-report builder is fenced to: a
-        metric it cannot offer is a metric that is not listed here.{" "}
-        <span className="tabular-nums">
-          {q.trim()
-            ? `${formatNum(shown)} of ${formatNum(metrics.length)} shown.`
-            : `${formatNum(metrics.length)} metrics.`}
-        </span>
-      </p>
-
-      {metrics.length === 0 ? (
-        <EmptyNote>The dictionary could not be read.</EmptyNote>
-      ) : shown === 0 ? (
-        <EmptyNote>No metric matches “{q.trim()}”.</EmptyNote>
-      ) : (
-        <div className="mt-4 space-y-6">
-          {groups.map((g) => (
-            <div key={g.basis}>
-              <div className="flex flex-wrap items-baseline gap-x-2">
-                <h4 className="text-xs font-semibold uppercase tracking-wide">{g.basis}</h4>
-                <span className="text-[11px] muted tabular-nums">
-                  {formatNum(g.rows.length)}
-                </span>
-              </div>
-              {BASIS_NOTE[g.basis] && (
-                <p className="mt-0.5 text-[11px] muted leading-relaxed">{BASIS_NOTE[g.basis]}</p>
-              )}
-              <div className="mt-2">
-                {g.rows.map((m) => (
-                  <MetricEntry key={m.metric_key} m={m} />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Section>
-  );
-}
-
-function MetricEntry({ m }: { m: MetricDictionaryRow }) {
-  return (
-    <div className="py-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="text-sm font-medium">{m.label}</span>
-        <code className="font-mono text-[11px] muted break-all">{m.metric_key}</code>
-        <span className="ml-auto text-[11px] muted uppercase tracking-wide shrink-0">{m.unit}</span>
-      </div>
-
-      <p className="mt-1 text-sm leading-relaxed">{m.meaning}</p>
-
-      {/* `minmax(0,1fr)` on the value track — see the note above; a bare `1fr`
-          is what lets a long source_view pointer overflow instead of wrap. */}
-      <dl className="mt-2 grid gap-x-4 gap-y-1 text-[11px] sm:grid-cols-[6.5rem_minmax(0,1fr)]">
-        <dt className="muted uppercase tracking-wide">Formula</dt>
-        <dd className="min-w-0 break-words font-mono">{m.formula}</dd>
-
-        <dt className="muted uppercase tracking-wide">Grain</dt>
-        <dd className="min-w-0 break-words">{m.grain}</dd>
-
-        <dt className="muted uppercase tracking-wide">Source view</dt>
-        <dd className="min-w-0 break-words font-mono">{m.source_view}</dd>
-      </dl>
-
-      {/* No caveat means no warning — never a dash, never "N/A". */}
-      {m.caveat && <Disclosure>{m.caveat}</Disclosure>}
-    </div>
-  );
 }
