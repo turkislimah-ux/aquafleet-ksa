@@ -113,30 +113,46 @@ function rowFor(specials: CommSpecial[], adjustments: CommAdjustment[]) {
 }
 
 // ===========================================================================
-// ROLLING MODEL (migration 0009). "Current" = unpaid rows (payout_id == null).
-// Pending AND approved COUNT; only denied is excluded. Pay snapshots the
-// non-denied lines and resets the current balance to zero.
+// UNSCOPED (ROLLING) VIEW. "Current" = unpaid rows (payout_id == null). Pending
+// AND approved COUNT; only denied is excluded.
+//
+// These cases call the builders with NO monthKey, which since 0131 means "every
+// unpaid month at once" rather than "the way paying works" — that is now the
+// Drivers tab badge and the terminated-driver roster, not a payment scope. Pay
+// settles ONE month; see the month-scoped cases further down.
 // ===========================================================================
 
 const D1: DriverLite = { id: "d1", name: "Test Driver", name_ar: null };
 
-function trip(commission: number, paid: boolean): CommTripRow {
+// Every fixture defaults to MK (2026-06) so the pre-0131 cases below, which call
+// the builders WITHOUT a monthKey, are unaffected: with no lens, inMonth() admits
+// every row whatever its date. The month arguments exist for the 0131 cases.
+function trip(commission: number, paid: boolean, tripDate: string | null = "2026-06-10"): CommTripRow {
   return {
     driver_id: "d1",
     project_id: "p1",
     commission_sar: commission,
     delivered_at: "2026-06-10T08:00:00Z",
+    // trip_date is a Postgres DATE ("YYYY-MM-DD"), which is what makes
+    // slice(0,7) an exact, timezone-free month test.
+    trip_date: tripDate,
     payout_id: paid ? "PAID" : null,
   };
 }
-function sp(id: string, amount: number, status: "pending" | "approved" | "denied", paid = false): CommExtraRow {
-  return { id, driver_id: "d1", label: id, amount_sar: amount, status, deny_reason: status === "denied" ? "x" : null, payout_id: paid ? "PAID" : null };
+function sp(id: string, amount: number, status: "pending" | "approved" | "denied", paid = false, monthKey: string | null = MK): CommExtraRow {
+  return { id, driver_id: "d1", label: id, amount_sar: amount, status, deny_reason: status === "denied" ? "x" : null, payout_id: paid ? "PAID" : null, month_key: monthKey };
 }
-function adj(id: string, amount: number, status: "pending" | "approved" | "denied", paid = false): CommExtraRow {
-  return { id, driver_id: "d1", label: id, amount_sar: amount, status, deny_reason: status === "denied" ? "x" : null, payout_id: paid ? "PAID" : null };
+function adj(id: string, amount: number, status: "pending" | "approved" | "denied", paid = false, monthKey: string | null = MK): CommExtraRow {
+  return { id, driver_id: "d1", label: id, amount_sar: amount, status, deny_reason: status === "denied" ? "x" : null, payout_id: paid ? "PAID" : null, month_key: monthKey };
 }
-function cycle(bonus: number, bonusStatus: "pending" | "approved" | "denied", payoutStatus: "pending" | "approved" | "denied" = "pending"): CommCycle {
-  return { driver_id: "d1", bonus_sar: bonus, bonus_status: bonusStatus, bonus_deny_reason: bonusStatus === "denied" ? "x" : null, payout_status: payoutStatus, approved_by: null, month_key: null, deny_reason: null };
+function cycle(
+  bonus: number,
+  bonusStatus: "pending" | "approved" | "denied",
+  payoutStatus: "pending" | "approved" | "denied" = "pending",
+  monthKey: string | null = MK,
+  paid = false,
+): CommCycle {
+  return { driver_id: "d1", bonus_sar: bonus, bonus_status: bonusStatus, bonus_deny_reason: bonusStatus === "denied" ? "x" : null, payout_status: payoutStatus, approved_by: null, month_key: monthKey, deny_reason: null, payout_id: paid ? "PAID" : null };
 }
 
 // --- Predicates.
@@ -202,6 +218,7 @@ function cycle(bonus: number, bonusStatus: "pending" | "approved" | "denied", pa
   const snap = buildPayoutSnapshot({
     driver: D1,
     periodLabel: "Jun 2026",
+    monthKey: MK,
     baseLines,
     specials: [sp("s_pending", 250, "pending"), sp("s_denied", 999, "denied")],
     adjustments: [adj("a_pending", -100, "pending")],
@@ -214,6 +231,7 @@ function cycle(bonus: number, bonusStatus: "pending" | "approved" | "denied", pa
   check("snapshot TOTAL = 400 (approved-only)", snap.total, 400);
   check("snapshot records ALL items incl denied (2 sp + 1 adj + 1 bonus = 4)", snap.items.length, 4);
   check("snapshot keeps denied 999 line", snap.items.some((i) => i.amount === 999 && i.status === "denied"), true);
+  check("snapshot records the month it pays for", snap.monthKey, MK);
 }
 
 // --- Case H2: current base lines group unpaid delivered trips by project.
@@ -229,17 +247,122 @@ function cycle(bonus: number, bonusStatus: "pending" | "approved" | "denied", pa
   check("base line p1 trips = 2", p1?.trips, 2);
 }
 
-// --- Case I: History rows — newest first, optional driver filter.
+// ===========================================================================
+// MONTH-SCOPED MODEL (migration 0131). The lens month is the scope of the
+// balance AND of the payment: pay_commission takes a month_key and settles only
+// that month. These cases prove the CLIENT computes the same scope the RPC pays
+// — trips by trip_date, extras and the cycle by month_key — and, just as load-
+// bearing, that a row with NO date is never swept into a month it might not
+// belong to.
+// ===========================================================================
+
+// --- Case J: the lens picks one month; the other months stay untouched.
+// June: base 100 + special 250 + adjustment -50 + bonus 50 = 350.
+// July: base 200 + special 400 = 600. Neither can see the other's rows.
 {
+  const args = {
+    drivers: [D1],
+    trips: [trip(100, false, "2026-06-10"), trip(200, false, "2026-07-03")],
+    cycles: [cycle(50, "approved", "pending", "2026-06"), cycle(900, "approved", "pending", "2026-07")],
+    specials: [sp("s_jun", 250, "approved", false, "2026-06"), sp("s_jul", 400, "approved", false, "2026-07")],
+    adjustments: [adj("a_jun", -50, "pending", false, "2026-06")],
+    includeEmpty: true,
+  };
+  const [jun] = buildCurrentRows({ ...args, monthKey: "2026-06" });
+  check("June base = 100 (July trip out of scope)", jun.base, 100);
+  check("June specials = 250 (July special out of scope)", jun.specials, 250);
+  check("June adjustments = -50", jun.adjustments, -50);
+  check("June bonus = 50 (July cycle out of scope)", jun.bonus, 50);
+  check("June TOTAL = 350", jun.total, 350);
+
+  const [jul] = buildCurrentRows({ ...args, monthKey: "2026-07" });
+  check("July base = 200", jul.base, 200);
+  check("July specials = 400", jul.specials, 400);
+  check("July adjustments = 0 (June-only adjustment out of scope)", jul.adjustments, 0);
+  check("July bonus = 900", jul.bonus, 900);
+  check("July TOTAL = 1500", jul.total, 1500);
+
+  // No lens = every unpaid month at once. This is what the Drivers tab badge and
+  // the terminated-driver roster read, and it must still sum the lot.
+  const [rolling] = buildCurrentRows(args);
+  check("no lens: rolling TOTAL = 1850 (both months)", rolling.total, 1850);
+}
+
+// --- Case K: a row with NO date belongs to NO specific month.
+// It still counts in the rolling view — it is real unpaid money — but a month
+// filter must never adopt it, or paying June would silently pay it too.
+{
+  const args = {
+    drivers: [D1],
+    trips: [trip(100, false, null)],
+    cycles: [cycle(0, "pending", "pending", null)],
+    specials: [sp("s_nomonth", 700, "approved", false, null)],
+    adjustments: [],
+    includeEmpty: true,
+  };
+  const [scoped] = buildCurrentRows({ ...args, monthKey: MK });
+  check("undated trip excluded from a specific month", scoped.base, 0);
+  check("month-less special excluded from a specific month", scoped.specials, 0);
+  check("month-scoped TOTAL = 0", scoped.total, 0);
+
+  const [rolling] = buildCurrentRows(args);
+  check("no lens: undated rows still count (800)", rolling.total, 800);
+}
+
+// --- Case K2: the paid cycle is excluded, and the bonus is NOT double-paid.
+// 0131 TAGS the cycle row at pay time and deliberately leaves bonus_sar on it.
+{
+  const [r] = buildCurrentRows({
+    drivers: [D1],
+    trips: [],
+    cycles: [cycle(300, "approved", "approved", MK, true)],
+    specials: [],
+    adjustments: [],
+    monthKey: MK,
+    includeEmpty: true,
+  });
+  check("paid cycle's frozen bonus is not counted again", r.bonus, 0);
+}
+
+// --- Case K3: base lines scope to the lens month too (the Breakdown's table).
+{
+  const lines = buildCurrentBaseLines(
+    [trip(100, false, "2026-06-10"), trip(100, false, "2026-06-11"), trip(999, false, "2026-07-01"), trip(50, false, null)],
+    "d1",
+    { p1: "Proj 1" },
+    "2026-06",
+  );
+  check("base lines: one project in June", lines.length, 1);
+  check("base lines: June amount = 200 (July + undated excluded)", lines[0]?.amount, 200);
+  check("base lines: June trips = 2", lines[0]?.trips, 2);
+}
+
+// --- Case I: History rows — newest first, optional driver filter, month filter.
+{
+  // A 0131 payout carries the month it settled in its frozen snapshot; a
+  // pre-0131 sweep carries none, and no month may be back-derived from
+  // period_label (a payout-RUN caption, not the work period).
   const payouts: CommPayout[] = [
     { id: "p_old", driver_id: "d1", paid_at: "2026-04-01T00:00:00Z", approved_by: "M", period_label: "Apr", base_sar: 100, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 100, snapshot: {} },
-    { id: "p_new", driver_id: "d1", paid_at: "2026-06-01T00:00:00Z", approved_by: "M", period_label: "Jun", base_sar: 200, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 200, snapshot: {} },
-    { id: "p_other", driver_id: "d2", paid_at: "2026-05-01T00:00:00Z", approved_by: "M", period_label: "May", base_sar: 50, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 50, snapshot: {} },
+    { id: "p_new", driver_id: "d1", paid_at: "2026-06-01T00:00:00Z", approved_by: "M", period_label: "Jun", base_sar: 200, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 200, snapshot: { monthKey: "2026-05" } },
+    { id: "p_other", driver_id: "d2", paid_at: "2026-05-01T00:00:00Z", approved_by: "M", period_label: "May", base_sar: 50, specials_sar: 0, adjustments_sar: 0, bonus_sar: 0, total_sar: 50, snapshot: { monthKey: "2026-05" } },
   ];
   const all = buildHistoryRows(payouts);
   check("history newest first", [all[0].id, all[1].id, all[2].id], ["p_new", "p_other", "p_old"]);
   const d1Only = buildHistoryRows(payouts, "d1");
   check("history driver filter (d1 → 2 rows)", d1Only.map((r) => r.id), ["p_new", "p_old"]);
+
+  // The run caption says "Jun" while the record settled May — exactly the
+  // divergence that makes parsing period_label wrong.
+  check("history month comes from the snapshot, not the run caption", all.find((r) => r.id === "p_new")?.monthKey, "2026-05");
+  check("legacy sweep reports NO month", all.find((r) => r.id === "p_old")?.monthKey, null);
+
+  const may = buildHistoryRows(payouts, undefined, "2026-05");
+  check("history month filter (2026-05 → 2 rows, legacy excluded)", may.map((r) => r.id), ["p_new", "p_other"]);
+  check("month filter never adopts an unmonthed sweep", may.some((r) => r.id === "p_old"), false);
+  const mayD1 = buildHistoryRows(payouts, "d1", "2026-05");
+  check("history driver + month filter", mayD1.map((r) => r.id), ["p_new"]);
+  check("history month with no payout is empty, not a fallback", buildHistoryRows(payouts, undefined, "2026-04").length, 0);
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);

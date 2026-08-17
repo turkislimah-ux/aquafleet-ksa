@@ -65,15 +65,25 @@ export default async function DriversPage() {
         .order("trip_date", { ascending: false }),
       // Commissions base = UNPAID delivered trips (commission_sar stamped on
       // Delivered; payout_id IS NULL = still in the driver's current balance).
+      //
+      // trip_date IS THE MONTH GRAIN (migration 0131). The RPC scopes a payment
+      // with `trip_date >= start and trip_date < end`, so the client's month lens
+      // must bucket on the SAME column or the screen and the payment disagree.
+      // NOT delivered_at — 0109 already re-bucketed the Dashboard off it because
+      // this fleet advances trips on the Kanban in bulk (310 trips once landed on
+      // one afternoon). delivered_at stays the "is it earned" test, nothing more.
       supabase
         .from("trips")
-        .select("driver_id, project_id, commission_sar, delivered_at, payout_id")
+        .select("driver_id, project_id, commission_sar, delivered_at, trip_date, payout_id")
         .not("delivered_at", "is", null)
         .is("payout_id", null),
-      // The open per-driver cycle (rolling). Bonus is reviewable.
+      // The per-driver, PER-MONTH cycle row (0131 re-grained commission_periods
+      // from one-open-row-per-driver to one row per (driver_id, month_key)).
+      // payout_id tags a cycle whose bonus has already been paid — the client
+      // must exclude those or a paid month's bonus double-counts.
       supabase
         .from("commission_periods")
-        .select("driver_id, bonus_sar, bonus_status, bonus_deny_reason, payout_status, approved_by, month_key, deny_reason"),
+        .select("driver_id, bonus_sar, bonus_status, bonus_deny_reason, payout_status, approved_by, month_key, deny_reason, payout_id"),
       // Only UNPAID specials/adjustments are part of the current balance.
       supabase
         .from("commission_specials")

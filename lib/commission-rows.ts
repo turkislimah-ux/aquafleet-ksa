@@ -18,6 +18,25 @@
 // rolling API lives at the bottom of this file (buildCurrentRows /
 // buildPayoutSnapshot / buildHistoryRows); the month-based functions above are
 // retained until the UI fully migrates off them.
+//
+// MONTH-SCOPED SINCE 0131. `pay_commission` now pays ONE MONTH at a time — it
+// takes p_month_key ('YYYY-MM') and tags only that month's rows. So every
+// rolling function below takes an OPTIONAL `monthKey`:
+//   - set     → the balance FOR THAT MONTH, which is exactly what the RPC will
+//               pay. This is the figure a Pay button may show.
+//   - omitted → every unpaid month at once (the old all-time rolling balance).
+//               Used for "does this terminated driver still owe anything" and
+//               for the tab badge — questions about the driver, not a payment.
+// A NUMBER SHOWN BESIDE A PAY BUTTON MUST BE THE MONTH-SCOPED ONE. The all-time
+// total is larger whenever a driver has more than one unpaid month, and paying
+// it would look like the RPC short-paid him.
+//
+// THE MONTH GRAIN IS trips.trip_date, NOT delivered_at. The RPC scopes base
+// trips with `trip_date >= start and trip_date < end`; bucketing the screen on
+// delivered_at would put a trip in a different month than the payment does
+// (this fleet advances trips on the Kanban in bulk — 0109's finding). Specials,
+// adjustments and the cycle row all carry their own month_key text column and
+// are matched on it, byte-for-byte, the same way the RPC matches them.
 
 // TWO IMPORTS, BOTH DELIBERATE LEAVES. Neither pulls in React, Supabase or
 // anything else that would stop scripts/commission-rows-check.ts running this
@@ -118,11 +137,28 @@ export function isActive(x: { status?: ItemStatus }): boolean {
 // attributes specials, adjustments AND the bonus to a month by exact string
 // match (month_key = to_char(month, 'YYYY-MM')), and v_driver_payslip_basis
 // reads through it — so a wrong key files real money against the wrong month in
-// Reports and on the wrong payslip. Note the "month_key is kept only as a human
-// label" comment on setCommissionBonus in app/drivers/actions.ts describes that
-// upsert's CONFLICT TARGET (driver_id alone); it is not a statement about the
-// views, which do read this column.
+// Reports and on the wrong payslip. Since 0131 it is also the GRAIN of
+// commission_periods and the conflict target of setCommissionBonus's upsert
+// (driver_id,month_key) — the old "kept only as a human label" reading died with
+// the one-open-row-per-driver index.
 export { currentMonthKey };
+
+// "2026-08" → "Aug 2026". HARDCODED month names, deliberately — pay_commission
+// (0131) derives its own frozen payout caption from the same fixed English array
+// rather than to_char(), which is lc_time-dependent. A screen label and a frozen
+// payout caption that disagree about a month name would be read as two months.
+//
+// It lives here rather than in either tab because BOTH read it — Commissions
+// labels the lens it is paying, History labels the month a frozen record paid
+// for — and two copies of the month naming is exactly how the two screens start
+// captioning the same payout differently. PURE display: it computes no money and
+// is never parsed back into a key.
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export function monthLabel(monthKey: string): string {
+  const m = Number(monthKey.slice(5, 7));
+  const name = MONTH_NAMES[m - 1];
+  return name ? `${name} ${monthKey.slice(0, 4)}` : monthKey;
+}
 
 // Per-project base lines for one driver+month (delivered trips only). PURE.
 export function buildBaseLines(
@@ -219,12 +255,33 @@ export function isUnpaid(x: { payout_id?: string | null }): boolean {
   return (x.payout_id ?? null) === null;
 }
 
+// Does a row belong to `monthKey` ("YYYY-MM")? An OMITTED monthKey means "every
+// month" and matches everything — that is the all-time rolling reading.
+//
+// trip_date is a Postgres DATE, which PostgREST returns as "YYYY-MM-DD", so the
+// slice is exact and timezone-free: it agrees with the RPC's
+// `trip_date >= to_date(key) and trip_date < to_date(key) + 1 month` for every
+// value a DATE column can hold. Do NOT swap this for a `new Date()` round-trip —
+// that reintroduces the UTC skew todayKey() exists to avoid.
+//
+// A row with NO date is EXCLUDED from a specific month rather than swept into
+// the current one: it cannot be attributed, and the RPC will not pay it either.
+function inMonth(value: string | null | undefined, monthKey?: string): boolean {
+  if (monthKey == null) return true;
+  if (!value) return false;
+  return value.slice(0, 7) === monthKey;
+}
+
 // A delivered trip in the rolling model (carries payout_id; NULL = current).
 export type CommTripRow = {
   driver_id: string | null;
   project_id: string | null;
   commission_sar: number | null;
   delivered_at: string | null;
+  // The OPERATIONAL day, and the column the month lens buckets on (see the file
+  // header). delivered_at answers "is it earned"; trip_date answers "which month
+  // pays for it". Optional only so the pure-math harness can omit it.
+  trip_date?: string | null;
   payout_id?: string | null;
 };
 
@@ -237,6 +294,9 @@ export type CommExtraRow = {
   status?: ReviewStatus | null;
   deny_reason?: string | null;
   payout_id?: string | null;
+  // The month this item is filed under. Matched by exact string equality, the
+  // same test `pay_commission` and v_commissions_monthly both use.
+  month_key?: string | null;
 };
 
 // Full special row for the UI (rolling model). Extends the pure CommExtraRow with
@@ -263,8 +323,14 @@ export type CommAdjustmentRow = CommExtraRow & {
   month_key: string | null;
 };
 
-// The single OPEN cycle per driver (commission_periods after 0009). Bonus is
-// reviewable; payout_status drives the strict Approve→Pay gate.
+// ONE cycle row per (driver, month) — commission_periods after 0131 re-grained
+// it (the old one-open-row-per-driver unique index is gone; the live one is
+// commission_periods_driver_month_idx on (driver_id, month_key), and month_key
+// is NOT NULL). Bonus is reviewable; payout_status drives the Approve→Pay gate.
+//
+// month_key stays `string | null` in TS on purpose: the COLUMN is NOT NULL, but
+// a row that has not been read back from the DB yet has no key, and widening a
+// type to match a constraint we did not write here would be borrowed confidence.
 export type CommCycle = {
   driver_id: string;
   bonus_sar: number;
@@ -274,6 +340,10 @@ export type CommCycle = {
   approved_by: string | null;
   month_key: string | null;
   deny_reason: string | null;
+  // Set once this month's bonus has been frozen into a payout (0131 TAGS the
+  // cycle row, it never zeroes the bonus). A tagged row must be excluded from
+  // every current-balance sum or the paid bonus counts a second time.
+  payout_id?: string | null;
 };
 
 // A frozen History record (commission_payouts row).
@@ -315,25 +385,53 @@ export function buildCurrentRows(p: {
   cycles: CommCycle[];
   specials: CommExtraRow[];
   adjustments: CommExtraRow[];
+  // "YYYY-MM" → this month's balance (what pay_commission would pay for it).
+  // Omitted → every unpaid month at once. See the file header.
+  monthKey?: string;
   includeEmpty?: boolean;
 }): CurrentRow[] {
-  const { drivers, trips, cycles, specials, adjustments, includeEmpty = false } = p;
+  const { drivers, trips, cycles, specials, adjustments, monthKey, includeEmpty = false } = p;
   const rows: CurrentRow[] = [];
   for (const d of drivers) {
-    // Base = unpaid delivered trips for this driver.
-    const dt = trips.filter((t) => t.driver_id === d.id && t.delivered_at && isUnpaid(t));
+    // Base = unpaid delivered trips for this driver, in month (if scoped).
+    const dt = trips.filter(
+      (t) => t.driver_id === d.id && t.delivered_at && isUnpaid(t) && inMonth(t.trip_date, monthKey),
+    );
     const base = round2(dt.reduce((s, t) => s + (t.commission_sar ?? 0), 0));
     const projects = new Set(dt.map((t) => t.project_id).filter(Boolean)).size;
 
     const sp = round2(
-      specials.filter((x) => x.driver_id === d.id && isUnpaid(x) && countsForPay(x)).reduce((s, x) => s + x.amount_sar, 0),
+      specials
+        .filter((x) => x.driver_id === d.id && isUnpaid(x) && countsForPay(x) && inMonth(x.month_key, monthKey))
+        .reduce((s, x) => s + x.amount_sar, 0),
     );
     const adj = round2(
-      adjustments.filter((x) => x.driver_id === d.id && isUnpaid(x) && countsForPay(x)).reduce((s, x) => s + x.amount_sar, 0),
+      adjustments
+        .filter((x) => x.driver_id === d.id && isUnpaid(x) && countsForPay(x) && inMonth(x.month_key, monthKey))
+        .reduce((s, x) => s + x.amount_sar, 0),
     );
 
-    const cycle = cycles.find((c) => c.driver_id === d.id) ?? null;
-    const bonus = round2(cycle && countsForPay({ status: cycle.bonus_status }) ? cycle.bonus_sar : 0);
+    // UNPAID cycle rows only. A row tagged with a payout_id has already had its
+    // bonus frozen into a payout; 0131 keeps the amount on the row rather than
+    // zeroing it, so including it here would pay the same bonus twice.
+    //
+    // With monthKey set this is AT MOST ONE row (the unique index guarantees
+    // it) — but the sum is written once and reads correctly either way, rather
+    // than as two branches that could drift apart.
+    const driverCycles = cycles.filter(
+      (c) => c.driver_id === d.id && isUnpaid(c) && inMonth(c.month_key, monthKey),
+    );
+    const bonus = round2(
+      driverCycles
+        .filter((c) => countsForPay({ status: c.bonus_status }))
+        .reduce((s, c) => s + c.bonus_sar, 0),
+    );
+    // Latest month wins when unscoped — the Approve→Pay gate is per month, so
+    // an all-time reading can only report the most recent one.
+    const cycle =
+      driverCycles.length === 0
+        ? null
+        : driverCycles.reduce((a, b) => ((a.month_key ?? "") >= (b.month_key ?? "") ? a : b));
     const payoutStatus: ReviewStatus = cycle?.payout_status ?? "pending";
 
     const hasActivity = base !== 0 || sp !== 0 || adj !== 0 || bonus !== 0 || cycle != null;
@@ -357,16 +455,24 @@ export function buildCurrentRows(p: {
   return rows;
 }
 
-// Per-project base lines for one driver's CURRENT (unpaid) cycle. Like
-// buildBaseLines but filtered by payout_id == null instead of by month. PURE.
+// Per-project base lines for one driver's CURRENT (unpaid) cycle, optionally
+// scoped to one month. Like buildBaseLines but keyed on payout_id + trip_date
+// rather than on delivered_at. PURE.
+//
+// THIS IS A PAY-TIME FUNCTION: its output becomes snapshot.baseLines and the
+// `base` total the driver is paid. When it feeds payCommission the monthKey is
+// REQUIRED to match the RPC's own trip window, or the snapshot would describe
+// more trips than the payment tags.
 export function buildCurrentBaseLines(
   trips: CommTripRow[],
   driverId: string,
   projectsById: Record<string, string>,
+  monthKey?: string,
 ): BaseLine[] {
   const map = new Map<string, BaseLine>();
   for (const t of trips) {
     if (t.driver_id !== driverId || !t.delivered_at || !isUnpaid(t)) continue;
+    if (!inMonth(t.trip_date, monthKey)) continue;
     const key = t.project_id ?? "—";
     const cur =
       map.get(key) ??
@@ -401,7 +507,19 @@ export type PayoutSnapshot = {
   driverId: string;
   name: string;
   nameAr: string | null;
+  // BOTH ARE WRITTEN BY THE RPC, NOT BY THIS FILE. pay_commission (0131) merges
+  // `{periodLabel, monthKey}` over whatever snapshot it is handed: the label is
+  // derived in SQL from p_month_key with a hardcoded English month array (never
+  // to_char, which is lc_time-dependent), and monthKey is the paid scope itself.
+  // What TypeScript puts here is a best effort that the database then makes
+  // authoritative — one clock, one spelling, no chance of the caption and the
+  // scope disagreeing. Read them back from the frozen snapshot, never re-derive.
   periodLabel: string;
+  // Null on any payout frozen BEFORE 0131 — those were all-unpaid sweeps with
+  // no month at all. Never back-derive it from period_label: that field is a
+  // payout-RUN label, not the work period (the payslips work proved a payout
+  // labelled "Jul 2026" that paid for work done entirely in June).
+  monthKey: string | null;
   baseLines: BaseLine[];
   items: SnapItem[];
   base: number;
@@ -413,15 +531,25 @@ export type PayoutSnapshot = {
 
 // Build the frozen snapshot + totals for one driver's CURRENT (unpaid) cycle.
 // Totals exclude denied lines (those are what the strict pay flips to approved).
+//
+// THIS FUNCTION FILTERS NOTHING. It sums exactly the rows it is handed, so the
+// CALLER owns the scope — pass the specials/adjustments already narrowed to the
+// unpaid rows of the month being paid, the baseLines from buildCurrentBaseLines
+// for that same month, and `cycle` = that month's UNPAID cycle row or null.
+// Handing it an already-tagged (paid) cycle would put a second copy of a bonus
+// the driver has already been paid into the snapshot AND into p_bonus, which
+// the RPC then refuses with "bonus already paid" — loudly, but only after the
+// figures were wrong.
 export function buildPayoutSnapshot(p: {
   driver: DriverLite;
   periodLabel: string;
+  monthKey: string | null;
   baseLines: BaseLine[];
   specials: CommExtraRow[];
   adjustments: CommExtraRow[];
   cycle: CommCycle | null;
 }): PayoutSnapshot {
-  const { driver, periodLabel, baseLines, specials, adjustments, cycle } = p;
+  const { driver, periodLabel, monthKey, baseLines, specials, adjustments, cycle } = p;
 
   const base = round2(baseLines.reduce((s, l) => s + l.amount, 0));
 
@@ -470,6 +598,7 @@ export function buildPayoutSnapshot(p: {
     name: driver.name,
     nameAr: driver.name_ar,
     periodLabel,
+    monthKey,
     baseLines,
     items,
     base,
@@ -488,6 +617,11 @@ export type HistoryRow = {
   driverId: string;
   paidAt: string;
   periodLabel: string;
+  // The month this payout PAID FOR, read out of the frozen snapshot (0131's RPC
+  // writes it). NULL on every pre-0131 record — those swept all unpaid rows
+  // regardless of month, so they genuinely have no single month, and the UI
+  // must show that rather than guess. NEVER parsed out of periodLabel.
+  monthKey: string | null;
   approvedBy: string | null;
   base: number;
   specials: number;
@@ -496,9 +630,23 @@ export type HistoryRow = {
   total: number;
 };
 
-export function buildHistoryRows(payouts: CommPayout[], driverId?: string): HistoryRow[] {
+// snapshot is typed `PayoutSnapshot | unknown` on CommPayout (it is raw jsonb),
+// so the month is read defensively: a legacy record has no monthKey key at all,
+// and a malformed one must read as "no month", never as a fabricated string.
+export function payoutMonthKey(p: CommPayout): string | null {
+  const snap = p.snapshot;
+  if (!snap || typeof snap !== "object") return null;
+  const v = (snap as { monthKey?: unknown }).monthKey;
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+export function buildHistoryRows(payouts: CommPayout[], driverId?: string, monthKey?: string): HistoryRow[] {
   return payouts
     .filter((p) => !driverId || p.driver_id === driverId)
+    // A month filter matches ONLY records that carry that month. Pre-0131
+    // payouts have none and are excluded — an unmonthed sweep is not evidence
+    // that this month was paid.
+    .filter((p) => monthKey == null || payoutMonthKey(p) === monthKey)
     .slice()
     .sort((a, b) => (a.paid_at < b.paid_at ? 1 : a.paid_at > b.paid_at ? -1 : 0))
     .map((p) => ({
@@ -506,6 +654,7 @@ export function buildHistoryRows(payouts: CommPayout[], driverId?: string): Hist
       driverId: p.driver_id,
       paidAt: p.paid_at,
       periodLabel: p.period_label,
+      monthKey: payoutMonthKey(p),
       approvedBy: p.approved_by,
       base: p.base_sar,
       specials: p.specials_sar,

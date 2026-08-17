@@ -7,7 +7,17 @@
 // was actually paid. Print renders only the record (scoped @media print in
 // globals.css isolates #history-print).
 //
-// Nothing here mutates: a paid cycle is immutable. Filter by driver to browse.
+// Nothing here mutates: a paid cycle is immutable. Filter by driver and/or by
+// the month the payout PAID FOR to browse.
+//
+// SINCE 0131 A PAYOUT SETTLES ONE MONTH, and the month it settled is read out of
+// the frozen snapshot (payoutMonthKey), never out of period_label — period_label
+// is a payout-RUN caption, not the work period, and the live data proves the two
+// come apart (a run labelled "Jul 2026" paid for work done entirely in June).
+// A pre-0131 record swept EVERY unpaid row regardless of month, so it genuinely
+// has no single month: it renders an em dash in the Month column and is excluded
+// from every specific-month filter. An unmonthed sweep is not evidence that the
+// month you picked was paid — so it is never counted as one.
 
 import { useMemo, useState } from "react";
 import { Eye, X, Printer, History as HistoryIcon } from "lucide-react";
@@ -15,6 +25,8 @@ import { Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
 import {
   buildHistoryRows,
+  monthLabel,
+  payoutMonthKey,
   type CommPayout,
   type DriverLite,
   type PayoutSnapshot,
@@ -46,6 +58,7 @@ export default function HistoryTab({
   dropdownDrivers: DriverLite[];
 }) {
   const [driverFilter, setDriverFilter] = useState<string>("all");
+  const [monthFilter, setMonthFilter] = useState<string>("all");
   const [open, setOpen] = useState<CommPayout | null>(null);
 
   const nameById = useMemo(() => {
@@ -54,9 +67,38 @@ export default function HistoryTab({
     return m;
   }, [drivers]);
 
+  // Only months that a record actually settled — this is history, so unlike the
+  // Commissions lens the current month is NOT added. An empty month here would
+  // be an invitation to look for a payout that was never made.
+  const monthOptions = useMemo(() => {
+    const keys = new Set<string>();
+    for (const p of payouts) {
+      const k = payoutMonthKey(p);
+      if (k) keys.add(k);
+    }
+    return [...keys].sort().reverse();
+  }, [payouts]);
+
   const rows = useMemo(
-    () => buildHistoryRows(payouts, driverFilter === "all" ? undefined : driverFilter),
-    [payouts, driverFilter],
+    () =>
+      buildHistoryRows(
+        payouts,
+        driverFilter === "all" ? undefined : driverFilter,
+        monthFilter === "all" ? undefined : monthFilter,
+      ),
+    [payouts, driverFilter, monthFilter],
+  );
+
+  // Pre-0131 sweeps carry no month, so a specific-month filter hides them. Say
+  // so rather than letting a record silently vanish from a filtered view.
+  const unmonthedHidden = useMemo(
+    () =>
+      monthFilter === "all"
+        ? 0
+        : payouts.filter(
+            (p) => (driverFilter === "all" || p.driver_id === driverFilter) && payoutMonthKey(p) == null,
+          ).length,
+    [payouts, driverFilter, monthFilter],
   );
 
   // KPIs over the (filtered) history view.
@@ -73,21 +115,49 @@ export default function HistoryTab({
       </div>
 
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="muted">Driver</span>
-          <select
-            value={driverFilter}
-            onChange={(e) => setDriverFilter(e.target.value)}
-            className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
-            style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
-          >
-            <option value="all">All drivers</option>
-            {dropdownDrivers.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
-          </select>
+        <div className="flex items-center gap-3 text-sm flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="muted">Driver</span>
+            <select
+              value={driverFilter}
+              onChange={(e) => setDriverFilter(e.target.value)}
+              className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
+              style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
+            >
+              <option value="all">All drivers</option>
+              {dropdownDrivers.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* The month a record PAID FOR — not when it was paid. Both columns are
+              in the table, and they routinely differ: August's settlement run
+              pays July's work. */}
+          <div className="flex items-center gap-2">
+            <span className="muted">Month settled</span>
+            <select
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
+              style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
+            >
+              <option value="all">All months</option>
+              {monthOptions.map((k) => (
+                <option key={k} value={k}>{monthLabel(k)}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
+
+      {unmonthedHidden > 0 && (
+        <p className="mb-3 text-xs muted">
+          {unmonthedHidden} earlier {unmonthedHidden === 1 ? "payout" : "payouts"} settled every unpaid month at once
+          and record no single month — hidden while a month is picked. Choose <em>All months</em> to see{" "}
+          {unmonthedHidden === 1 ? "it" : "them"}.
+        </p>
+      )}
 
       <div className="card p-0 overflow-hidden">
         <Table>
@@ -95,7 +165,8 @@ export default function HistoryTab({
             <tr>
               <TH>Paid</TH>
               <TH>Driver</TH>
-              <TH>Period</TH>
+              <TH>Month settled</TH>
+              <TH>Payout run</TH>
               <TH className="text-end">Base</TH>
               <TH className="text-end">Specials</TH>
               <TH className="text-end">Adjustments</TH>
@@ -107,9 +178,11 @@ export default function HistoryTab({
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="py-8 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                <td colSpan={10} className="py-8 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                   <HistoryIcon className="h-5 w-5 mx-auto mb-2 opacity-50" />
-                  No paid commissions yet.
+                  {monthFilter === "all"
+                    ? "No paid commissions yet."
+                    : `Nothing paid for ${monthLabel(monthFilter)} under this filter.`}
                 </td>
               </tr>
             )}
@@ -117,7 +190,16 @@ export default function HistoryTab({
               <tr key={r.id} className="hover:bg-black/5 dark:hover:bg-white/5">
                 <TD className="whitespace-nowrap">{fmtDate(r.paidAt)}</TD>
                 <TD className="font-medium">{nameById.get(r.driverId) ?? "—"}</TD>
-                <TD>{r.periodLabel}</TD>
+                {/* Em dash for a pre-0131 sweep — it settled no single month, and
+                    a month must never be back-derived from the run caption. */}
+                <TD className="whitespace-nowrap">
+                  {r.monthKey ? (
+                    <span className="font-medium">{monthLabel(r.monthKey)}</span>
+                  ) : (
+                    <span className="muted" title="Paid before commissions were settled one month at a time">—</span>
+                  )}
+                </TD>
+                <TD className="muted">{r.periodLabel}</TD>
                 <TD className="text-end tabular-nums">{formatSar(r.base)}</TD>
                 <TD className="text-end tabular-nums">{formatSar(r.specials)}</TD>
                 <TD className="text-end tabular-nums">{formatSar(r.adjustments)}</TD>
@@ -192,6 +274,14 @@ function PayoutDetail({
               {snap?.nameAr && <div className="text-sm muted">{snap.nameAr}</div>}
             </div>
             <div className="text-end">
+              {/* The month settled leads; the run caption sits under it as the
+                  smaller fact. A legacy sweep has no month and shows only the
+                  caption — nothing is invented to fill the gap. */}
+              {snap?.monthKey ? (
+                <div className="text-sm font-semibold">{monthLabel(snap.monthKey)}</div>
+              ) : (
+                <div className="text-xs muted">Settled every unpaid month at once</div>
+              )}
               <div className="text-xs muted uppercase tracking-wide">{payout.period_label}</div>
               <div className="text-xs muted">Paid {fmtDate(payout.paid_at)}</div>
               {payout.approved_by && <div className="text-xs muted">Approved by {payout.approved_by}</div>}

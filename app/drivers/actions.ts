@@ -286,7 +286,27 @@ export async function addStaffRole(label: string): Promise<{ error: string | nul
 //                               per (driver, month); upserted on first action.
 // ============================================================================
 
-const MONTH_KEY_RE = /^\d{4}-\d{2}$/;
+// "YYYY-MM", month 01-12. The month range is checked, not just the shape: this
+// is the SAME test pay_commission (0131) applies to p_month_key
+// (`^\d{4}-(0[1-9]|1[0-2])$`), so a key this file accepts is one the RPC will
+// accept too. It used to be /^\d{4}-\d{2}$/, which let "2026-13" through to a
+// month_key that no month view could ever match.
+const MONTH_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+// First day of `monthKey`, and first day of the month AFTER it — the half-open
+// window [start, end). Pure string/number math on the key itself: no Date, no
+// timezone, and it lands on the same two dates as the RPC's
+// `to_date(p_month_key,'YYYY-MM')` / `+ interval '1 month'`.
+function monthWindow(monthKey: string): { start: string; end: string } {
+  const year = Number(monthKey.slice(0, 4));
+  const month = Number(monthKey.slice(5, 7)); // 1-12, already range-checked
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  return {
+    start: `${monthKey}-01`,
+    end: `${String(nextYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`,
+  };
+}
 
 export async function addCommissionSpecial(formData: FormData): Promise<ActionResult> {
   const driver_id = str(formData.get("driver_id"));
@@ -388,9 +408,18 @@ export async function removeCommissionAdjustment(id: string): Promise<ActionResu
   return { error: null };
 }
 
-// Set/clear the open cycle's bonus. ONE open cycle row per driver now (0009),
-// so we upsert on driver_id; month_key is kept only as a human label. Changing
-// the bonus amount RE-OPENS its review (bonus_status → pending, reason cleared).
+// Set/clear ONE MONTH's bonus. Since 0131 commission_periods is grained on
+// (driver_id, month_key) — the old one-open-row-per-driver unique index is
+// GONE, so the conflict target MUST be the pair. month_key is the real grain
+// now, not a human label. Changing the bonus amount RE-OPENS its review
+// (bonus_status → pending, reason cleared).
+//
+// REFUSES A PAID MONTH. 0131 tags a paid cycle with payout_id and leaves the
+// bonus figure in place as history. buildCurrentRows drops a tagged cycle from
+// the current balance, so a bonus written onto a paid month would be invisible
+// on screen AND would go to the RPC as p_bonus = 0 — money entered that never
+// pays. Refuse loudly instead. (The upsert itself never clears payout_id: it is
+// not in the payload.)
 export async function setCommissionBonus(
   driverId: string,
   monthKey: string,
@@ -400,11 +429,23 @@ export async function setCommissionBonus(
   if (!Number.isFinite(bonus) || bonus < 0) return { error: "Bonus must be zero or positive." };
 
   const supabase = createClient();
+
+  const { data: existing, error: readErr } = await supabase
+    .from("commission_periods")
+    .select("payout_id")
+    .eq("driver_id", driverId)
+    .eq("month_key", monthKey)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (existing?.payout_id) {
+    return { error: "That month is already paid — its bonus is frozen in the payout record." };
+  }
+
   const { error } = await supabase
     .from("commission_periods")
     .upsert(
       { driver_id: driverId, month_key: monthKey, bonus_sar: bonus, bonus_status: "pending", bonus_deny_reason: null },
-      { onConflict: "driver_id" },
+      { onConflict: "driver_id,month_key" },
     );
   if (error) return { error: error.message };
 
@@ -464,55 +505,71 @@ export async function setAdjustmentStatus(
 }
 
 // ============================================================================
-// Rolling-cycle review + pay (migration 0009). The Breakdown is the decision
-// center: per-item approve/deny above, plus bonus review and the whole-payout
-// Approve → Pay gate here. Pay is STRICT (only from an approved cycle) and
-// atomic (pay_commission RPC snapshots, tags rows with payout_id, resets cycle).
+// MONTHLY review + pay (migration 0009, re-grained by 0131). The Breakdown is
+// the decision center: per-item approve/deny above, plus bonus review and the
+// whole-payout Approve → Pay gate here. Pay is STRICT (only from an approved
+// cycle) and atomic (pay_commission RPC snapshots, tags rows with payout_id,
+// tags the cycle).
+//
+// EVERY ACTION BELOW IS SCOPED TO ONE MONTH. Before 0131 a driver had one open
+// cycle row, so `.eq("driver_id", …)` was the whole scope. It is not any more —
+// an unscoped update here approves or re-opens EVERY month the driver has.
 // ============================================================================
 
-// Make sure the driver's single open cycle row exists (created lazily on first
-// action). Idempotent: ignores the row if it is already there.
+// Make sure the (driver, month) cycle row exists (created lazily on first
+// action). Idempotent: ignores the row if it is already there. month_key is
+// NOT NULL since 0131, so it must be in the payload.
 async function ensureCycle(
   supabase: ReturnType<typeof createClient>,
   driverId: string,
+  monthKey: string,
 ): Promise<string | null> {
   const { error } = await supabase
     .from("commission_periods")
-    .upsert({ driver_id: driverId }, { onConflict: "driver_id", ignoreDuplicates: true });
+    .upsert(
+      { driver_id: driverId, month_key: monthKey },
+      { onConflict: "driver_id,month_key", ignoreDuplicates: true },
+    );
   return error ? error.message : null;
 }
 
-// Review the bonus line (pending|approved|denied). Denied bonus drops from the total.
+// Review ONE MONTH's bonus line (pending|approved|denied). Denied bonus drops
+// from that month's total.
 export async function setBonusStatus(
   driverId: string,
+  monthKey: string,
   status: "pending" | "approved" | "denied",
   reason?: string,
 ): Promise<ActionResult> {
-  if (!driverId) return { error: "Missing driver." };
+  if (!driverId || !MONTH_KEY_RE.test(monthKey)) return { error: "Missing driver or month." };
   if (!["pending", "approved", "denied"].includes(status)) return { error: "Invalid status." };
 
   const supabase = createClient();
-  const ensureErr = await ensureCycle(supabase, driverId);
+  const ensureErr = await ensureCycle(supabase, driverId, monthKey);
   if (ensureErr) return { error: ensureErr };
 
   const { error } = await supabase
     .from("commission_periods")
     .update({ bonus_status: status, bonus_deny_reason: status === "denied" ? (reason ?? null) : null })
-    .eq("driver_id", driverId);
+    .eq("driver_id", driverId)
+    .eq("month_key", monthKey);
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
   return { error: null };
 }
 
-// Approve the whole payout: every remaining PENDING item + the bonus flips to
-// approved (denied lines stay denied), and the cycle moves to 'approved' — the
-// only state from which Pay is allowed.
-export async function approvePayout(driverId: string): Promise<ActionResult> {
-  if (!driverId) return { error: "Missing driver." };
+// Approve ONE MONTH's payout: every remaining PENDING item + the bonus IN THAT
+// MONTH flips to approved (denied lines stay denied), and that month's cycle
+// moves to 'approved' — the only state from which Pay is allowed.
+//
+// Every filter below carries `month_key`. Without it, approving June also
+// approved July, and July could then be paid without anyone reviewing it.
+export async function approvePayout(driverId: string, monthKey: string): Promise<ActionResult> {
+  if (!driverId || !MONTH_KEY_RE.test(monthKey)) return { error: "Missing driver or month." };
 
   const supabase = createClient();
-  const ensureErr = await ensureCycle(supabase, driverId);
+  const ensureErr = await ensureCycle(supabase, driverId, monthKey);
   if (ensureErr) return { error: ensureErr };
 
   const flips = await Promise.all([
@@ -520,18 +577,21 @@ export async function approvePayout(driverId: string): Promise<ActionResult> {
       .from("commission_specials")
       .update({ status: "approved" })
       .eq("driver_id", driverId)
+      .eq("month_key", monthKey)
       .is("payout_id", null)
       .eq("status", "pending"),
     supabase
       .from("commission_adjustments")
       .update({ status: "approved" })
       .eq("driver_id", driverId)
+      .eq("month_key", monthKey)
       .is("payout_id", null)
       .eq("status", "pending"),
     supabase
       .from("commission_periods")
       .update({ bonus_status: "approved" })
       .eq("driver_id", driverId)
+      .eq("month_key", monthKey)
       .eq("bonus_status", "pending"),
   ]);
   const flipErr = flips.find((r) => r.error)?.error;
@@ -541,60 +601,79 @@ export async function approvePayout(driverId: string): Promise<ActionResult> {
   const { error } = await supabase
     .from("commission_periods")
     .update({ payout_status: "approved", approved_by: auth?.user?.email ?? null })
-    .eq("driver_id", driverId);
+    .eq("driver_id", driverId)
+    .eq("month_key", monthKey);
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
   return { error: null };
 }
 
-// Re-open an approved cycle for more edits (back to pending). Item/bonus decisions
-// are preserved; the manager can still restore or re-deny before paying.
-export async function reopenPayout(driverId: string): Promise<ActionResult> {
-  if (!driverId) return { error: "Missing driver." };
+// Re-open ONE MONTH's approved cycle for more edits (back to pending). Item/bonus
+// decisions are preserved; the manager can still restore or re-deny before paying.
+export async function reopenPayout(driverId: string, monthKey: string): Promise<ActionResult> {
+  if (!driverId || !MONTH_KEY_RE.test(monthKey)) return { error: "Missing driver or month." };
   const supabase = createClient();
   const { error } = await supabase
     .from("commission_periods")
     .update({ payout_status: "pending" })
-    .eq("driver_id", driverId);
+    .eq("driver_id", driverId)
+    .eq("month_key", monthKey);
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
   return { error: null };
 }
 
-// PAY the driver's current cycle. Builds the frozen snapshot in pure TS, then
-// calls the atomic pay_commission RPC. STRICT: the RPC raises unless the cycle
-// is 'approved'. On success the current balance resets to zero and a History
-// record appears.
-export async function payCommission(driverId: string, periodLabel?: string): Promise<ActionResult> {
-  if (!driverId) return { error: "Missing driver." };
+// PAY ONE MONTH. Builds the frozen snapshot in pure TS, then calls the atomic
+// pay_commission RPC (0131). STRICT: the RPC raises unless that month's cycle is
+// 'approved'. On success that MONTH's balance resets to zero — other months are
+// untouched — and a History record appears.
+//
+// EVERY FETCH BELOW IS SCOPED TO THE MONTH, because the snapshot is what gets
+// paid. An unscoped fetch here would pay every unpaid month under one month's
+// caption, which is exactly what 0131 exists to stop.
+//
+// The trips window matches the RPC's own tagging predicate character for
+// character: trip_date >= start and trip_date < end, half-open, on trip_date
+// (NOT delivered_at — 0109: this fleet advances the Kanban in bulk, so
+// delivered_at is when a button was pressed, not when the work happened).
+export async function payCommission(driverId: string, monthKey: string): Promise<ActionResult> {
+  if (!driverId || !MONTH_KEY_RE.test(monthKey)) return { error: "Missing driver or month." };
 
   const supabase = createClient();
+  const { start, end } = monthWindow(monthKey);
 
-  // Gather the CURRENT (unpaid) inputs for the snapshot.
+  // Gather THAT MONTH's unpaid inputs for the snapshot.
   const [driverRes, tripsRes, specialsRes, adjustmentsRes, cycleRes, projectsRes] = await Promise.all([
     supabase.from("drivers").select("id, name, name_ar").eq("id", driverId).maybeSingle(),
     supabase
       .from("trips")
-      .select("driver_id, project_id, commission_sar, delivered_at, payout_id")
+      .select("driver_id, project_id, commission_sar, delivered_at, trip_date, payout_id")
       .eq("driver_id", driverId)
       .not("delivered_at", "is", null)
-      .is("payout_id", null),
+      .is("payout_id", null)
+      .gte("trip_date", start)
+      .lt("trip_date", end),
     supabase
       .from("commission_specials")
-      .select("id, driver_id, label, amount_sar, status, deny_reason, payout_id")
+      .select("id, driver_id, label, amount_sar, status, deny_reason, month_key, payout_id")
       .eq("driver_id", driverId)
+      .eq("month_key", monthKey)
       .is("payout_id", null),
     supabase
       .from("commission_adjustments")
-      .select("id, driver_id, label, amount_sar, status, deny_reason, payout_id")
+      .select("id, driver_id, label, amount_sar, status, deny_reason, month_key, payout_id")
       .eq("driver_id", driverId)
+      .eq("month_key", monthKey)
       .is("payout_id", null),
     supabase
       .from("commission_periods")
-      .select("driver_id, bonus_sar, bonus_status, bonus_deny_reason, payout_status, approved_by, month_key, deny_reason")
+      .select(
+        "driver_id, bonus_sar, bonus_status, bonus_deny_reason, payout_status, approved_by, month_key, deny_reason, payout_id",
+      )
       .eq("driver_id", driverId)
+      .eq("month_key", monthKey)
       .maybeSingle(),
     supabase.from("projects").select("id, name"),
   ]);
@@ -610,33 +689,47 @@ export async function payCommission(driverId: string, periodLabel?: string): Pro
   const trips = (tripsRes.data ?? []) as CommTripRow[];
   const specials = (specialsRes.data ?? []) as CommExtraRow[];
   const adjustments = (adjustmentsRes.data ?? []) as CommExtraRow[];
-  const cycle = (cycleRes.data ?? null) as CommCycle | null;
+  const cycleRow = (cycleRes.data ?? null) as CommCycle | null;
   const driver = driverRes.data as { id: string; name: string; name_ar: string | null };
 
-  const baseLines = buildCurrentBaseLines(trips, driverId, projectsById);
-  const label = periodLabel?.trim() || defaultPeriodLabel();
-  const snapshot = buildPayoutSnapshot({ driver, periodLabel: label, baseLines, specials, adjustments, cycle });
+  // A cycle already TAGGED with a payout_id has had its bonus paid — 0131 tags
+  // it and deliberately leaves the figure in place as history rather than
+  // zeroing it. Paying the same month again (more trips landed since) must send
+  // p_bonus = 0 or the RPC raises. Withholding the row from the snapshot builder
+  // is what makes that 0; approved_by still comes from the RAW row, because the
+  // approval that authorises THIS payment is recorded there either way.
+  const cycleForSnapshot = cycleRow && cycleRow.payout_id == null ? cycleRow : null;
+
+  const baseLines = buildCurrentBaseLines(trips, driverId, projectsById, monthKey);
+  // periodLabel/monthKey are both OVERWRITTEN by the RPC from p_month_key — it
+  // derives the label in SQL from a hardcoded English month array, so the
+  // caption on a payout can never depend on the server's lc_time. Passing the
+  // key here keeps the TS-side snapshot shape honest before it is sent.
+  const snapshot = buildPayoutSnapshot({
+    driver,
+    periodLabel: monthKey,
+    monthKey,
+    baseLines,
+    specials,
+    adjustments,
+    cycle: cycleForSnapshot,
+  });
 
   const { error } = await supabase.rpc("pay_commission", {
     p_driver_id: driverId,
-    p_period_label: label,
+    p_month_key: monthKey,
     p_base: snapshot.base,
     p_specials: snapshot.specials,
     p_adjustments: snapshot.adjustments,
     p_bonus: snapshot.bonus,
     p_total: snapshot.total,
     p_snapshot: snapshot,
-    p_approved_by: cycle?.approved_by ?? null,
+    p_approved_by: cycleRow?.approved_by ?? null,
   });
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
   return { error: null };
-}
-
-// "Mon YYYY" label for a payout when the caller doesn't supply one.
-function defaultPeriodLabel(): string {
-  return new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }
 
 // ============================================================================
