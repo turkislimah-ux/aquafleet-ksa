@@ -15,9 +15,20 @@
 // PDFShift's URL, auth shape, or response format directly — every caller
 // goes through generateInvoicePdf() below.
 //
-// Auth: PDFShift uses HTTP Basic auth with the API key as the username and
-// an empty password. Key is read from process.env.PDF_API_KEY — never
-// hardcoded, never committed (.env.local is gitignored; Turki sets this).
+// Auth: PDFShift v3 uses HTTP Basic auth with the LITERAL username "api" and
+// the API key as the PASSWORD — `api:sk_...`, exactly as its own curl examples
+// show. Key is read from process.env.PDF_API_KEY — never hardcoded, never
+// committed (.env.local is gitignored; Turki sets this).
+//
+// THIS LINE WAS WRONG FOR THE WHOLE LIFE OF THE FEATURE AND NOTHING COULD HAVE
+// CAUGHT IT UNTIL A REAL KEY EXISTED. It sent `${apiKey}:` — the key as the
+// USERNAME with an empty password, which is v2's form — and v3 answers that
+// with a flat 401. Until Turki added a key the code never got past the
+// `if (!apiKey)` guard, so every "test" of this path was really a test of the
+// not-configured message. Proven against the live API with a valid key:
+// `-u "$KEY:"` -> 401, `-u "api:$KEY"` -> 200, `-H "X-API-Key: $KEY"` -> 200.
+// The header form works too; Basic is kept because it is what the provider
+// documents first and it keeps the key out of a custom header.
 
 const PDFSHIFT_ENDPOINT = "https://api.pdfshift.io/v3/convert/pdf";
 
@@ -47,7 +58,8 @@ export async function generateInvoicePdf(html: string): Promise<Buffer> {
     throw new PdfServiceNotConfiguredError();
   }
 
-  const auth = Buffer.from(`${apiKey}:`).toString("base64");
+  // "api" is a literal, not a placeholder for the key — see the header note.
+  const auth = Buffer.from(`api:${apiKey}`).toString("base64");
 
   let res: Response;
   try {
