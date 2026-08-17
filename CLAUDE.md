@@ -1562,6 +1562,57 @@ relevant skill(s) **when the task calls for it**:
     - **FILLING AND `operating_cost` ARE A COMPONENT AND ITS CONTAINER, NEVER ADDENDS.**
       Both are legitimate builder columns; the builder has no cross-column total by
       design (`0100`), so nothing sums them — but a reader might try.
+  - **THE DICTIONARY IS ON SCREEN — commits `0da456b` (built as a section) and
+    `e0a5289` (relocated as a popup).** `app/reports/MetricsGlossaryModal.tsx`. Read-
+    only render of `report_metrics`; no view, RPC, measure or fence was touched.
+    - **IT EXISTS BECAUSE SIX COLUMNS HAD TRAVELLED UNREAD FOR A YEAR.**
+      `meaning`, `formula`, `grain`, `source_view`, `basis` and `caveat` were
+      fetched on every `/reports` load and rendered NOWHERE — `StatementsTab` reads
+      `metric_key` only, as the builder's fence. **`noUnusedLocals` cannot catch an
+      unused object FIELD**, so the compiler had nothing to say. `0123`/`0124` had
+      just spent two migrations getting those columns right, into a screen that did
+      not show them. All six now render, which is the whole point of the piece.
+    - **A PAGE-LEVEL POPUP, launched from a "Metrics dictionary" button in the page
+      header, right of the period picker, Overview tab only.** It shipped as a
+      section at the bottom of Overview and was moved (Turki's call) — a 30-metric
+      reference is consulted mid-thought, not scrolled to. Mounted in
+      `ReportsClient`, NOT inside `OverviewTab`, so it survives a tab switch and
+      opens at any scroll position. **Do not restore it inline.**
+      - `OverviewTab` no longer receives `metrics` at all. It keeps and EXPORTS
+        `Disclosure`/`EmptyNote`; the import edge is ONE WAY — the modal imports
+        that tab, never back.
+      - **The header's `actions` gate was `tab === "overview" && months.length > 0`;
+        the month guard moved INWARD to cover only the period picker.** An empty
+        month spine is a reason not to offer a period, not a reason to hide the
+        dictionary — the dictionary is what explains what the missing figures would
+        have meant.
+      - **No launcher on tab 2, deliberately:** it carries its own period control and
+        its own use of the same dictionary, as the builder's fence.
+    - **THREE OF THIRTY HAVE A NULL `caveat` AND RENDER NO BLOCK AT ALL** —
+      `operating_profit`, `operations`, `os_cost`. Never "N/A", never an em dash:
+      both read as missing data, and a metric with nothing to warn about is not the
+      same as one whose warning failed to load. **The brief for this build asserted
+      all 30 rows had content in every column. Measured live three times; they do
+      not.** A test asserts the empty case renders one `<p>` and the `collections`
+      control renders two, so the check cannot pass by matching nothing.
+    - **`app/reports/page.tsx`'s comment is now TRUE.** It had claimed the dictionary
+      was displayed; for a year nothing displayed it. It now names both consumers and
+      the split between them — `metric_key` for the fence, the description columns for
+      the glossary — and points at the popup by name.
+    - **LAYOUT: `minmax(0,1fr)` is the load-bearing part.** A bare `1fr` refuses to
+      shrink below its content, so `0123`'s two-source pointers (169 chars, no break
+      opportunity inside `v_commissions_paid_monthly`) overflowed their cell. Paired
+      with `min-w-0 break-words`. **The popup's `xl:grid-cols-2` entry grid inverts
+      the usual responsive assumption — text cells are NARROWEST at a WIDE viewport**,
+      so the overflow audit runs at 1440px as the hard case and 1024px as the
+      single-column control.
+    - **`tests/reports-glossary.spec.ts` (8 tests) depends on the DELETED
+      `/reports-glossary-check` route** — same convention as every prior phase. It
+      opens the popup through the REAL button rather than finding a mounted modal, so
+      the launcher and the tab gate were under test, not only the modal's internals.
+      Its fixture was HARDCODED from all 30 live rows because `report_metrics` is
+      RLS'd to `authenticated`: a session-less route fetches zero rows and the
+      glossary renders its "could not be read" branch, proving nothing.
   - **INCIDENT — a db reset dropped `v_operations_by_driver_monthly`** because the
     replay rebuilt from committed migrations and `0101` was applied but not yet
     committed. Everything else survived. Re-applied and committed. **A migration that
