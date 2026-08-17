@@ -94,9 +94,18 @@ export default async function ReportsPage() {
     supabase.from("v_revenue_sales_returns").select("*").order("voided_at", { ascending: false }),
     supabase.from("v_commissions_monthly").select("*").order("month"),
     supabase.from("v_commissions_paid_monthly").select("*").order("month"),
-    // The metrics DICTIONARY. Read as data, not as a metric: it is the
-    // vocabulary a future custom-report generator is bounded to, and showing it
-    // is what makes that constraint visible rather than merely claimed.
+    // The metrics DICTIONARY. Read as data, not as a metric. TWO consumers,
+    // and the split matters: StatementsTab reads metric_key ONLY, as the fence
+    // the custom-report builder is bounded to; OverviewTab's "Metrics
+    // dictionary" section RENDERS the description columns (meaning, formula,
+    // grain, source_view, basis, caveat) as the on-screen glossary.
+    //
+    // This comment used to claim that "showing it is what makes that
+    // constraint visible rather than merely claimed" — and nothing showed it.
+    // The description columns were fetched, coerced, threaded through two
+    // components and read by none of them; noUnusedLocals cannot catch an
+    // unused object FIELD, so nothing failed. The glossary is what makes the
+    // sentence true; if it is ever removed, this comment goes with it.
     supabase.from("report_metrics").select("*"),
     // 0101 — the driver grain for the Operations statement.
     supabase.from("v_operations_by_driver_monthly").select("*")

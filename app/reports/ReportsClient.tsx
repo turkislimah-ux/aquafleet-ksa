@@ -70,7 +70,13 @@ type ReportsClientProps = {
   salesReturns: SalesReturnRow[];
   commissions: CommissionsRow[];
   commissionsPaid: CommissionsPaidRow[];
-  /** The metrics dictionary — vocabulary for the custom-report seam. */
+  /**
+   * The metrics dictionary. TWO consumers, and they use it for opposite
+   * reasons: StatementsTab FENCES the custom-report builder to these keys
+   * (metric_key only), and OverviewTab RENDERS the description columns as the
+   * glossary at the bottom of the tab. It reaches OverviewTab through the
+   * `{...props}` spread below rather than a named prop.
+   */
   metrics: MetricDictionaryRow[];
   /** 0115 — payslip basis per driver per month, and the frozen documents. */
   payslipBasis: PayslipBasisRow[];
