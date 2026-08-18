@@ -2537,12 +2537,12 @@ relevant skill(s) **when the task calls for it**:
       surfaces read `driver_incidents`. **Reconciling them was the fix, not the bug.**
       The reducer carries this in its own comment and
       `tests/staff-batch.spec.ts`'s item-3 test asserts the count again.
-    - **`drivers.incidents_12mo` IS A CONFIRMED DEAD DUPLICATE AND IS TO BE DROPPED —
-      IN ITS OWN MIGRATION, DURING THE STAFF CLEANUP, NOT INLINE WITH A UI BATCH.**
-      A drop needs the app-refs-stripped-first ordering (`lib/db-types.ts:133` still
-      declares it; strip, then drop — the `rating`/`0132` precedent, and PostgREST
-      returns 400 on a select naming a dropped column). Nothing writes it, so there is
-      no writer to build: **a writer was the wrong answer, the column is.**
+    - **`drivers.incidents_12mo` WAS A CONFIRMED DEAD DUPLICATE AND IS NOW DROPPED —
+      migration `0133`, applied and verified.** It rode with the Staff cleanup, in
+      its own migration, app-refs-stripped-first (`bea2a52`, the `rating`/`0132`
+      precedent — PostgREST returns 400 on a select naming a dropped column).
+      Nothing wrote it, so there was no writer to build: **a writer was the wrong
+      answer, the column was.** See the Staff cleanup entry.
     - Avg Safety was dropped from the KPI row; **`drivers.safety_score` stays in the
       database.**
   - **Item 3's On Duty bar prints its zeros.** Every one of the four derived states
@@ -2725,16 +2725,19 @@ relevant skill(s) **when the task calls for it**:
   and a type-only re-export trim, no arithmetic — and that is recorded here so a
   later reader who sees the file in this commit does not have to re-derive that it
   was safe.
-  - **`drivers.incidents_12mo`: the app half is DONE, `0133` IS DRAFTED AND NOT
-    APPLIED.** `lib/db-types.ts:133` was the ONE real reference and now carries a
-    tombstone modelled on the adjacent `rating` block. `supabase/migrations/
-    0133_drop_driver_incidents_12mo.sql` holds the single `drop column if exists`
-    plus before/after verification queries, **for the architect to run** — the
-    app-refs-stripped-FIRST ordering is the `rating`/`0132` precedent, because a
-    PostgREST select naming a dropped column returns **400**. `app/drivers/
-    actions.ts`'s comment names the drop as *by* 0132 and 0133, present tense —
-    **not** a past-tense claim that it happened, which is the same class of error
-    as writing an invented commit hash into this file.
+  - **`drivers.incidents_12mo`: DROPPED — migration `0133`, applied and verified by
+    the architect.** `lib/db-types.ts:133` was the ONE real reference and now
+    carries a tombstone modelled on the adjacent `rating` block. The app half
+    (`bea2a52`) landed first, then `0133` ran — the `rating`/`0132` precedent,
+    because a PostgREST select naming a dropped column returns **400**. Verified
+    live afterward: the column no longer exists on `drivers`; `driver_incidents`
+    (the real record) is untouched — `mohammed 2`'s row is still there and the
+    Incidents KPI reads it. **Naming note, same as 0131/0132:** the Supabase MCP
+    records the apply under its own auto-generated timestamp version
+    (`20260818160714`), not a sequential `0133` version number — the file on disk,
+    `supabase/migrations/0133_drop_driver_incidents_12mo.sql`, is the source of
+    truth and its name IS what the migration list shows this time (unlike 0131,
+    which lost its numeric prefix entirely). Cosmetic only, schema identical.
   - **`RoleSelect` IS DELETED — one definition where there were two.** ~106 lines
     in `StaffTab.tsx`, line for line `./LookupSelect`, which was written later as
     its generalized form and whose own header already said so. `addStaffRole`
@@ -2823,16 +2826,9 @@ relevant skill(s) **when the task calls for it**:
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
   entries above; the old "Archive deferred / preview/archive.js is the spec" note
-  was stale and has been removed.)
-  - **`drivers.incidents_12mo`'s DROP — THE APP HALF IS DONE, THE SQL IS WAITING ON
-    THE ARCHITECT.** Confirmed dead (unwritten since `0023` removed its form controls,
-    0 on every row, nothing reads it since `87eb4b5`). It rode with the Staff cleanup's
-    survey because the survey is what establishes the ordering a drop needs: the app
-    references were stripped first (`bea2a52`), and **`0133` is drafted to disk and NOT
-    applied** — the `rating`/`0132` precedent, where the app half landed first so the
-    page was never down. **A PostgREST select naming a dropped column returns 400**, so
-    the reverse order takes both Fleet fetches out the instant it applies. **A writer
-    for the column was the wrong answer; the column is.** See the Staff cleanup entry.
+  was stale and has been removed. `drivers.incidents_12mo`'s drop was ALSO on this
+  list — it is no longer deferred, `0133` is applied and verified; see the Staff
+  cleanup entry above.)
 - **Deferred — Consumption:** customer archive documents as a schema question
   (`customer_id` on `archive_documents`) was raised at Archive Phase 3 and not
   decided; an optional UNIQUE on `drivers.iqama_number` / `staff.iqama_number` /
