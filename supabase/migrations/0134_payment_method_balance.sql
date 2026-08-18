@@ -26,16 +26,24 @@
 -- reporting. This is a REPORTING-ACCURACY change: no amount, no balance, no
 -- VAT figure and no ledger row moves, in this migration or the app half.
 --
--- NO BACKFILL, DELIBERATELY. 2 already-paid invoices carry
--- payment_mode='prepaid' + payment_method='cash' and are, on the evidence,
--- exactly the mislabel this fixes. They are LEFT ALONE: rewriting the stored
--- method on a settled document changes a historical record after the fact, and
--- the instruction was explicit that an existing cash/bank_transfer value is
--- never overwritten. A further 7 paid rows carry payment_mode=null (pre-0037,
--- before the snapshot existed) and CANNOT be classified either way — inventing
--- a mode for them would be worse than leaving them as recorded. So 'balance'
--- describes settlements made from now on, and any report splitting cash from
--- balance must expect the pre-0134 period to read cash-heavy.
+-- NO BACKFILL, DELIBERATELY. Two populations of already-paid invoices, and
+-- neither is rewritten:
+--   (a) payment_mode='prepaid' + payment_method='cash' — on the evidence,
+--       exactly the mislabel this fixes. LEFT ALONE: rewriting the stored
+--       method on a settled document changes a historical record after the
+--       fact, and the instruction was explicit that an existing
+--       cash/bank_transfer value is never overwritten.
+--   (b) payment_mode=null (pre-0037, before the snapshot existed) — CANNOT be
+--       classified either way. Inventing a mode for them would be worse than
+--       leaving them as recorded.
+-- So 'balance' describes settlements made from now on, and any report splitting
+-- cash from balance must expect the pre-0134 period to read cash-heavy.
+--
+-- Counts for both populations sit in verification block C below, where they are
+-- an apply-time before/after IDENTITY check ("nothing moved") rather than a
+-- claim about the world. They are deliberately not restated up here as prose:
+-- population (a) can still grow until the app half ships, so a number in this
+-- header would go stale while reading like a fixed fact.
 --
 -- SCOPE: one CHECK constraint and one function body. No amount column, no
 -- view, no trigger, no ledger. lib/prepaid.ts / vat.ts / invoice.ts are
@@ -84,15 +92,24 @@ comment on column public.invoices.payment_method is
 -- With it, the audit holds by construction going forward.
 --
 -- HOW PREPAID IS RESOLVED, AND WHY IT IS NOT JUST THE SNAPSHOT COLUMN.
--- invoices.payment_mode is 0037's frozen snapshot, but it is NULL on every
--- invoice confirmed before 0037 — 2 confirmed-and-unpaid invoices live today
--- are in exactly that state. Keying the guard on the snapshot alone would
--- refuse a legitimate settlement of one of those. So it resolves
--- snapshot-first, falling back to the customer's project — which is EXACTLY
--- what the UI already does (InvoiceDetailModal: `payment_mode ??
--- projectPaymentMode`). The two must agree: if the screen offers "Pay with
--- Balance" the RPC must accept it, and any other resolution here would put a
--- refusal behind a button that is already enabled.
+-- invoices.payment_mode is 0037's frozen snapshot, and it is NULL on any
+-- invoice confirmed before 0037 existed. THE RULE, not a row count: a NULL
+-- snapshot is not evidence of "not prepaid" — it is evidence that no snapshot
+-- was taken. Keying the guard on the snapshot alone would therefore refuse a
+-- legitimate settlement of any such invoice. So it resolves snapshot-first,
+-- falling back to the customer's project — which is EXACTLY what the UI
+-- already does (InvoiceDetailModal: `payment_mode ?? projectPaymentMode`).
+-- The two must agree: if the screen offers "Pay with Balance" the RPC must
+-- accept it, and any other resolution here would put a refusal behind a button
+-- that is already enabled.
+--
+-- DO NOT re-justify this coalesce with a live count of NULL-snapshot invoices.
+-- That population is transient — it shrinks as old invoices settle and grows
+-- again only if 0037's snapshot ever fails to write — so a count here would be
+-- stale within weeks and would read as the REASON for the coalesce rather than
+-- an illustration of it. The reason is the UI-agreement rule above, which holds
+-- at a count of zero. (For the record, at drafting the population was non-empty;
+-- the design does not depend on that and must not be revisited if it empties.)
 --
 -- The lookup is by customer_id because invoices key off the customer, never
 -- the project (0025), and projects_customer_id_unique (0015) makes that a 1:1
@@ -204,10 +221,14 @@ commit;
 --   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 --  where n.nspname = 'public' and p.proname = 'pay_invoice';
 --
--- C. NOTHING WAS BACKFILLED. Expect the pre-apply distribution, unchanged:
---    postpaid/bank_transfer 1, prepaid/cash 2, null/bank_transfer 1,
---    null/cash 7 — and ZERO 'balance' rows until the app half ships and a
---    real prepaid invoice is settled.
+-- C. NOTHING WAS BACKFILLED. This is an IDENTITY check: run it BEFORE apply,
+--    run it after, expect the two to match exactly — and ZERO 'balance' rows
+--    until the app half ships and a real prepaid invoice is settled.
+--    Distribution measured at drafting was postpaid/bank_transfer 1,
+--    prepaid/cash 2, null/bank_transfer 1, null/cash 7. THAT IS A READING,
+--    NOT AN EXPECTATION: prepaid/cash can still grow until the app half
+--    ships. Compare against your own pre-apply run, never against these
+--    numbers.
 -- select payment_mode, payment_method, count(*)
 --   from public.invoices where status = 'paid' group by 1,2 order by 1,2;
 --
