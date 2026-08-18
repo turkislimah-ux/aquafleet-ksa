@@ -2808,6 +2808,17 @@ relevant skill(s) **when the task calls for it**:
     **`has_table_privilege('anon', …, 'SELECT')` is a GRANT check, not a
     row-visibility check.** An over-broad grant, not a live exposure; revoking it
     is a DB change and therefore the architect's.
+  - **RULING, app-wide, not just the 14 staff tables above: LEAVE THE ANON
+    SELECT GRANT AS-IS, for now.** The same finding holds across all 74 tables in
+    the schema, not only the Staff surface — Supabase's own default grants `anon`
+    table-level SELECT on every new table, and every one of those 74 tables carries
+    an `authenticated`-scoped RLS policy that blocks every anon row. Turki reviewed
+    this and ruled to leave it: zero live exposure, and the grant itself is
+    cosmetic (over-broad, not open). **Deferred to a dedicated app-wide security
+    pass, done alongside future RBAC** (the same pass that role-checks and
+    `APPROVER_ROLES`-style gating are already deferred to elsewhere in this file) —
+    not fixed piecemeal per feature. **No grant has been revoked; none should be,
+    outside that pass.**
   - **TWO STALE FACTS IN THIS FILE WERE CORRECTED FROM LIVE MEASUREMENT** — §6's
     view posture (40/40 → **44/44/0**, with the note that *the two counts matching
     is the check, not the number*) and the commission entry's `commission_cycles`
