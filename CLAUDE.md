@@ -2507,24 +2507,33 @@ relevant skill(s) **when the task calls for it**:
     **Zero is printed as a muted `formatSar(0)`, never an em dash** — nothing owed is
     a real answer, and a dash reads as missing data (same rule as the glossary's null
     caveats).
-  - **Item 3 — THE DEVIATION WAS DISCLOSED, THEN OVERRULED. The KPI IS BACK ON THE
-    DEAD COLUMN, ON PURPOSE (reverted in `e0326d0`).** The brief said "fix Incidents
-    (12mo) so it reads `incidents_12mo`". The old reducer ALREADY read that column
-    correctly; **the column is dead** — unwritten since `0023` removed its form
-    controls, 0 on every row — so it renders a permanent 0 beside a detail panel
-    already showing real incidents from `driver_incidents`. `b50c534` switched it to
-    count LIVE `driver_incidents` rows inside a 12-month cutoff and reported the
-    swap; **Turki's instruction afterwards was to put it back**, so the KPI is once
-    again `drivers.reduce((s, d) => s + (d.incidents_12mo ?? 0), 0)`.
-    - **THE TWO FIGURES ON THAT SCREEN ARE DIFFERENT SOURCES AND ARE NOT EXPECTED TO
-      AGREE.** The KPI sums a stored column that reads 0; the detail panel counts
-      real `driver_incidents` rows. **Do not "reconcile" them** — that is the shape of
-      the change that was just reverted.
-    - **The fix for the permanent 0 is a WRITER for the column, not a new reader.**
-      If it ever moves again, the live-rows version is in `b50c534` — take it from
-      there rather than rewriting it. The reducer carries all of this in its own
-      comment, and `tests/staff-batch.spec.ts`'s item-3 test carries the matching
-      note where its old `"2"` assertion used to be.
+  - **Item 3 — THE INCIDENTS KPI READS `driver_incidents`. ONE SOURCE, READ IN TWO
+    PLACES. It went to the dead column and back, and the round trip is the record.**
+    - **The final state (`SETTLED`):** the KPI counts LIVE `driver_incidents` rows
+      inside a rolling 12-month cutoff, roster-scoped — the SAME table the driver
+      detail panel reads — so the two figures on that screen agree by construction.
+      That is `b50c534`'s version, reinstated.
+    - **The path, so nobody walks it again.** The brief said "fix Incidents (12mo) so
+      it reads `incidents_12mo`". The old reducer ALREADY read that column correctly;
+      **the column is dead** — unwritten since `0023` removed its form controls, 0 on
+      every row. `b50c534` switched to live rows and disclosed the swap; the
+      instruction afterwards was to put it back, and `e0326d0` did, with a comment
+      asserting the KPI and the panel were *different sources not expected to agree*.
+      **Then the architect measured it live: `mohammed 2` has a real
+      `driver_incidents` row inside the window, and `incidents_12mo` reads 0 for
+      every driver.** So the KPI was printing 0 beside a panel showing a real
+      incident — not two honest sources, one broken one. Reverted forward.
+    - **THE `e0326d0` INSTRUCTION IS WITHDRAWN AND MUST NOT BE RE-APPLIED.** "KPI
+      reads `incidents_12mo`, do not reconcile with the detail panel" is WRONG. Both
+      surfaces read `driver_incidents`. **Reconciling them was the fix, not the bug.**
+      The reducer carries this in its own comment and
+      `tests/staff-batch.spec.ts`'s item-3 test asserts the count again.
+    - **`drivers.incidents_12mo` IS A CONFIRMED DEAD DUPLICATE AND IS TO BE DROPPED —
+      IN ITS OWN MIGRATION, DURING THE STAFF CLEANUP, NOT INLINE WITH A UI BATCH.**
+      A drop needs the app-refs-stripped-first ordering (`lib/db-types.ts:133` still
+      declares it; strip, then drop — the `rating`/`0132` precedent, and PostgREST
+      returns 400 on a select naming a dropped column). Nothing writes it, so there is
+      no writer to build: **a writer was the wrong answer, the column is.**
     - Avg Safety was dropped from the KPI row; **`drivers.safety_score` stays in the
       database.**
   - **Item 3's On Duty bar prints its zeros.** Every one of the four derived states
@@ -2594,6 +2603,97 @@ relevant skill(s) **when the task calls for it**:
       unscoped `getByRole("option")` resolves against BOTH selects on that screen —
       the tab's month lens carries the same labels — so the option assertions are
       scoped to the bonus select.
+
+- **STAFF PAGE BATCH 2 — five display refinements, commit `3f9c7b8`.** All
+  non-money: no migration, no RPC, no money helper touched, and every figure was
+  already being computed before this batch — only how it is shown changed.
+  - **Item 1 — the CSV export is Excel-friendly, and BOTH halves of that are
+    load-bearing.** A **UTF-8 BOM** leads the file (built from `String.fromCharCode
+    (0xfeff)`, never a literal — U+FEFF renders as nothing, so a literal is invisible
+    in every editor and indistinguishable from a stray edit that deleted it); without
+    it Excel assumes the system ANSI codepage and every Arabic driver name arrives as
+    mojibake, which is what made this export unusable for an Arabic roster. A
+    **`sep=,` directive** follows it, because Excel opens a `.csv` with the SYSTEM
+    list separator rather than the comma the format is named after — on a `;` locale
+    every row lands in a single cell. **The trade was decided on asymmetric failure
+    cost:** the directive costs one stray first row in Numbers/Sheets, which do not
+    know it, and a visible junk row is recoverable in seconds where a silently
+    single-columned sheet is not. Rows terminate **CRLF**, and `csvCell` quotes a
+    bare `\r` too — otherwise a name pasted in from another system starts a row
+    mid-value.
+    - The assembled lines are named `lines`, **not `rows`** — `rows` is the
+      component's own unfiltered row memo, and shadowing it there is exactly how an
+      export quietly starts ignoring the filter.
+  - **Item 2 — the month lens and Export CSV moved beside the sub-tabs, VIA A PORTAL,
+    and the portal is the point.** They govern the whole screen, so they belong next
+    to the control that chooses the screen rather than among the status chips that
+    filter only the table below them. **Lifting `monthKey` into `DriversClient` was
+    rejected:** `CommissionsTab`'s own header states that the figure beside the Pay
+    button and the `monthKey` handed to `payCommission` cannot diverge *because there
+    is exactly one of that state*, and a prop boundary between them is precisely what
+    would break it. `buildMonthOptions` is module-private too, so the parent could not
+    build the option list anyway. `controlsHost` decides **WHERE** they render, never
+    **WHETHER** — given no host they stay in the card's own header, which is what a
+    standalone mount gets.
+    - **The host node is `useState`, not `useRef`, and the setter IS the callback
+      ref.** A ref's `.current` fills during commit without re-rendering, so the first
+      paint would read null and the portal would never mount.
+  - **Item 3 — the On Duty card is FOUR SEPARATE BARS, ONE PER STATE. DO NOT MERGE
+    THEM BACK INTO ONE.** It shipped in batch 1 as a single stacked track with a
+    four-cell legend and was replaced on Turki's call. The reason generalises: on a
+    stacked track every segment is measured against its neighbours, so the eye reads
+    *which state is biggest* and cannot read *how much of the roster is idle* without
+    doing arithmetic. **All four bars share ONE denominator — the whole roster** — so
+    the second question is answered directly, and a state at 0 degenerates into an
+    empty track rather than a segment that vanished and took its label with it.
+    Colours are still `PILL_TONE_CLS[DRIVER_STATE_TONE[s]]`, the same table the status
+    pills read, so bar and pill cannot disagree.
+  - **Item 4 — the staff leave tally moved INSIDE the card and now states its basis on
+    screen.** It was an absolutely-positioned corner badge on a wrapper `div.relative`
+    that existed for nothing else (the wrapper went with it), which read as a
+    notification stuck ON the card rather than a fact ABOUT the person. **"since Jan 1"
+    is on screen, not only in the tooltip** — without it the reader guesses between a
+    rolling twelve months, an entitlement balance and a calendar-year tally, and those
+    are three different conversations to have with an employee. **Zero renders
+    nothing**: a "0d" chip on most of the grid drowns the ones that matter.
+    - **DERIVED LIVE FROM `leave_periods` EVERY RENDER, AND THERE MUST NEVER BE A
+      SCHEDULED RESET.** `leaveDaysInYear(periods, currentYear)` already existed, so
+      this item was a relocation rather than new plumbing. A cron that zeroed a stored
+      counter each January would **destroy the prior year's record** to produce a
+      number this expression gets for free — on 1 January the year rolls, no period
+      falls inside it yet, and it reads 0 on its own. Distinct from the "On leave"
+      pill, which is a state TODAY.
+  - **Item 5 — the Incidents and Licence KPIs name the drivers behind the figure.**
+    Incident names come from `driver_incidents` (the same rows the KPI counts, so
+    `mohammed 2` appears), **grouped by driver with a count suffix** — the KPI counts
+    ROWS and a driver can have several, and the "(2)" is what keeps the list addable
+    back up to the figure above it. Licence names are ordered **soonest first**, which
+    is the order the list is acted on.
+    - **DUPLICATE NAMES ARE REAL IN THIS DATA** — two drivers are both called
+      "Fahad 4" — so `driverLabelById` appends a 4-char id fragment **only where the
+      name is ambiguous**, the same convention the payslip register already uses.
+    - **Truncated at three with the remainder counted, full list on hover.** A KPI card
+      is a fixed-height tile in a six-column row; an unbounded list would push it
+      taller than the three beside it and shear the whole row. Nothing is hidden, only
+      deferred — the figure above already says how many there are. **Zero names render
+      NOTHING, never "None"**: the KPI already reads 0 and a second element saying so
+      is noise on the three cards where it would appear.
+  - **`tests/staff-batch2.spec.ts` (6 tests, all passed) depends on the DELETED
+    `/staff-batch2-check` route** — same convention as every prior phase. Item 1 is
+    asserted on the downloaded file's raw BYTES, because reading it as a string can
+    silently strip U+FEFF and the test would then pass with the BOM missing. Item 3
+    asserts the shared denominator (every fill at 25% on a 1/1/1/1 fixture), not just
+    the four figures — four bars that each scaled to their own maximum would print the
+    same numbers.
+    - **One test bug worth not repeating: the page header carries the SAME
+      `flex items-start justify-between` classes as the new sub-tab row**, so a
+      class-only locator resolved to the header and proved nothing. Scoped by content
+      (the row that contains the Historical sub-tab) instead.
+  - **`tests/staff-batch.spec.ts`'s per-state figure assertions were DELETED, not
+    repointed** — they described the stacked track item 3 replaced, down to its
+    `text-xl` class. Same rule as `tests/dashboard-0108.spec.ts`: a spec asserting the
+    opposite of intent is worse than no spec. Its label assertions survive, because
+    labelling every state including the zeros is a rule both versions obey.
 
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
