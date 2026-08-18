@@ -1,0 +1,221 @@
+-- 0134 — payment_method gains 'balance', for prepaid credit settlements.
+--
+-- WHY THIS MIGRATION EXISTS AT ALL. The request that produced it said
+-- "no migration needed — invoices.payment_method is free text". It is NOT free
+-- text, and there are TWO independent gates, either of which would have made a
+-- 'balance' write fail:
+--
+--   1. 0025 line 181:
+--        check (payment_method is null or payment_method in ('cash','bank_transfer'))
+--   2. 0039's pay_invoice() body:
+--        if p_payment_method not in ('cash','bank_transfer')
+--          then raise exception 'Invalid payment method: %'
+--
+-- The RPC guard fires FIRST, so flipping the app half without this migration
+-- would not have produced a bad label — it would have made EVERY prepaid
+-- settlement fail outright ("Invalid payment method: balance"). That is a live
+-- outage on the money path, which is why the app half is gated behind this
+-- file rather than shipped alongside it.
+--
+-- WHAT 'balance' MEANS. A prepaid customer's invoice is settled by drawing the
+-- amount down from credit they already topped up. No cash changes hands at the
+-- moment of settlement, and the money was already consumed at delivery by
+-- lib/prepaid.ts's FIFO walk — the pay action only records and locks. Storing
+-- 'cash' for that (which is what the app does today, see
+-- InvoiceDetailModal.onMarkPaidBalance) overstates cash receipts in internal
+-- reporting. This is a REPORTING-ACCURACY change: no amount, no balance, no
+-- VAT figure and no ledger row moves, in this migration or the app half.
+--
+-- NO BACKFILL, DELIBERATELY. 2 already-paid invoices carry
+-- payment_mode='prepaid' + payment_method='cash' and are, on the evidence,
+-- exactly the mislabel this fixes. They are LEFT ALONE: rewriting the stored
+-- method on a settled document changes a historical record after the fact, and
+-- the instruction was explicit that an existing cash/bank_transfer value is
+-- never overwritten. A further 7 paid rows carry payment_mode=null (pre-0037,
+-- before the snapshot existed) and CANNOT be classified either way — inventing
+-- a mode for them would be worse than leaving them as recorded. So 'balance'
+-- describes settlements made from now on, and any report splitting cash from
+-- balance must expect the pre-0134 period to read cash-heavy.
+--
+-- SCOPE: one CHECK constraint and one function body. No amount column, no
+-- view, no trigger, no ledger. lib/prepaid.ts / vat.ts / invoice.ts are
+-- untouched by the app half too.
+
+begin;
+
+-- ---------------------------------------------------------------------------
+-- 1. invoices.payment_method — widen the allowed set.
+--
+-- Drop-and-re-add rather than a second constraint: two overlapping CHECKs on
+-- one column is how a later reader ends up reading only one of them. The name
+-- is preserved (invoices_payment_method_check — verified live) so anything
+-- matching on the constraint name keeps working.
+--
+-- NULL stays allowed: an unpaid invoice has no method, and unpay_invoice()
+-- nulls the column on revert.
+-- ---------------------------------------------------------------------------
+alter table public.invoices
+  drop constraint if exists invoices_payment_method_check;
+
+alter table public.invoices
+  add constraint invoices_payment_method_check
+  check (payment_method is null
+         or payment_method in ('cash', 'bank_transfer', 'balance'));
+
+comment on column public.invoices.payment_method is
+  'How a paid invoice was settled. cash / bank_transfer = money received now. '
+  'balance = drawn from a PREPAID customer''s existing credit, no fresh payment '
+  '(0134). NULL until paid. Rows paid before 0134 read cash even where the '
+  'settlement was from balance — not backfilled, see 0134''s header.';
+
+-- ---------------------------------------------------------------------------
+-- 2. pay_invoice() — accept 'balance', and refuse it on a postpaid invoice.
+--
+-- CREATE OR REPLACE, NOT drop+recreate: the signature is byte-identical to
+-- 0039's, so replacing in place cannot produce a second overload. That is the
+-- 0038 rule (exactly one signature per RPC) satisfied by construction rather
+-- than by a drop that has to name the old argument list correctly. Verified
+-- live before drafting: exactly one pay_invoice, the 6-arg one.
+--
+-- THE PREPAID CHECK IS THE POINT OF THIS HALF, not the widened allowlist.
+-- Without it, 'balance' is merely a third string anyone can store on any
+-- invoice, and the read-only audit ("does 'balance' only ever land on real
+-- prepaid settlements?") would be checking a convention rather than a rule.
+-- With it, the audit holds by construction going forward.
+--
+-- HOW PREPAID IS RESOLVED, AND WHY IT IS NOT JUST THE SNAPSHOT COLUMN.
+-- invoices.payment_mode is 0037's frozen snapshot, but it is NULL on every
+-- invoice confirmed before 0037 — 2 confirmed-and-unpaid invoices live today
+-- are in exactly that state. Keying the guard on the snapshot alone would
+-- refuse a legitimate settlement of one of those. So it resolves
+-- snapshot-first, falling back to the customer's project — which is EXACTLY
+-- what the UI already does (InvoiceDetailModal: `payment_mode ??
+-- projectPaymentMode`). The two must agree: if the screen offers "Pay with
+-- Balance" the RPC must accept it, and any other resolution here would put a
+-- refusal behind a button that is already enabled.
+--
+-- The lookup is by customer_id because invoices key off the customer, never
+-- the project (0025), and projects_customer_id_unique (0015) makes that a 1:1
+-- — so the scalar subquery cannot return more than one row.
+--
+-- This is NOT expressible as a table CHECK: it needs a join, and a CHECK is
+-- also retroactive, which would re-validate the 9 pre-0134 paid rows.
+--
+-- 'balance' requires NO proof, NO reference and NO date: there is no external
+-- transaction to evidence. The bank_transfer requirements below are unchanged,
+-- verbatim from 0039.
+-- ---------------------------------------------------------------------------
+create or replace function public.pay_invoice(
+  p_invoice_id        uuid,
+  p_payment_method    text,
+  p_proof_path        text,
+  p_payment_reference text,
+  p_payment_date      date,
+  p_payment_note      text
+) returns public.invoices
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row  public.invoices;
+  v_mode text;
+begin
+  if p_payment_method not in ('cash', 'bank_transfer', 'balance') then
+    raise exception 'Invalid payment method: %', p_payment_method;
+  end if;
+  if p_payment_method = 'bank_transfer' and p_proof_path is null then
+    raise exception 'bank_transfer payment requires a proof-of-payment file.';
+  end if;
+  if p_payment_method = 'bank_transfer' and p_payment_reference is null then
+    raise exception 'bank_transfer payment requires a payment reference.';
+  end if;
+  if p_payment_method = 'bank_transfer' and p_payment_date is null then
+    raise exception 'bank_transfer payment requires a payment date.';
+  end if;
+
+  -- Resolve prepaid-ness BEFORE the update, so a refusal leaves the invoice
+  -- untouched rather than rolling back a write.
+  if p_payment_method = 'balance' then
+    select coalesce(
+             i.payment_mode,
+             (select pr.payment_mode
+                from public.projects pr
+               where pr.customer_id = i.customer_id)
+           )
+      into v_mode
+      from public.invoices i
+     where i.id = p_invoice_id;
+
+    if v_mode is distinct from 'prepaid' then
+      raise exception
+        'payment_method ''balance'' is only valid for a prepaid invoice (resolved mode: %).',
+        coalesce(v_mode, 'unknown');
+    end if;
+  end if;
+
+  update public.invoices
+     set status                 = 'paid',
+         paid_at                = now(),
+         payment_method         = p_payment_method,
+         proof_of_payment_path  = p_proof_path,
+         payment_reference      = p_payment_reference,
+         payment_date           = p_payment_date,
+         payment_note           = p_payment_note
+   where id = p_invoice_id
+     and status = 'confirmed'
+  returning * into v_row;
+
+  if v_row.id is null then
+    raise exception 'Invoice is not in confirmed status (or does not exist) — cannot mark paid.';
+  end if;
+
+  -- Lock every trip in both tables — covered AND unpaid (unchanged from
+  -- 0027 — see that migration's comment for why unpaid trips lock too).
+  update public.trips
+     set invoice_id = p_invoice_id
+   where id = any(coalesce(v_row.covered_trip_ids, array[]::uuid[])
+             || coalesce(v_row.unpaid_trip_ids, array[]::uuid[]));
+
+  return v_row;
+end;
+$$;
+
+grant execute on function public.pay_invoice(uuid, text, text, text, date, text) to authenticated;
+
+-- unpay_invoice() NEEDS NO CHANGE and is deliberately not touched: it already
+-- sets payment_method = null on revert, which is correct for 'balance' too.
+
+commit;
+
+-- ---------------------------------------------------------------------------
+-- VERIFICATION (run after apply; read-only, safe to re-run)
+-- ---------------------------------------------------------------------------
+-- A. The constraint allows exactly three values plus NULL.
+--    Expect: CHECK (... = ANY (ARRAY['cash','bank_transfer','balance'])).
+-- select conname, pg_get_constraintdef(oid)
+--   from pg_constraint
+--  where conrelid = 'public.invoices'::regclass
+--    and conname = 'invoices_payment_method_check';
+--
+-- B. STILL EXACTLY ONE pay_invoice. Expect 1 row, the 6-arg signature.
+--    More than one means an overload was created — stop and fix (0038).
+-- select p.proname, pg_get_function_identity_arguments(p.oid)
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--  where n.nspname = 'public' and p.proname = 'pay_invoice';
+--
+-- C. NOTHING WAS BACKFILLED. Expect the pre-apply distribution, unchanged:
+--    postpaid/bank_transfer 1, prepaid/cash 2, null/bank_transfer 1,
+--    null/cash 7 — and ZERO 'balance' rows until the app half ships and a
+--    real prepaid invoice is settled.
+-- select payment_mode, payment_method, count(*)
+--   from public.invoices where status = 'paid' group by 1,2 order by 1,2;
+--
+-- D. THE AUDIT QUERY, for after the app half ships. Expect ZERO rows,
+--    forever: a 'balance' row whose resolved mode is not prepaid.
+-- select i.id, i.invoice_number, i.payment_mode, i.payment_method
+--   from public.invoices i
+--  where i.payment_method = 'balance'
+--    and coalesce(i.payment_mode,
+--                 (select pr.payment_mode from public.projects pr
+--                   where pr.customer_id = i.customer_id)) is distinct from 'prepaid';
