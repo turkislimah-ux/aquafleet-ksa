@@ -361,22 +361,33 @@ export default function DriversClient({
   const total = drivers.length;
   const onDuty = drivers.filter((d) => truckByDriver.has(d.id)).length;
 
-  // Incidents (12mo) — sums the STORED drivers.incidents_12mo column. Turki's
-  // explicit call, taken AFTER the alternative was built and reported, so this is
-  // a decision, not an oversight. Two things to know before "fixing" it:
+  // Incidents (12mo) — counted from the LIVE driver_incidents rows, the SAME
+  // source the driver detail panel reads. ONE source read in two places, so the
+  // KPI and the panel cannot disagree.
   //
-  //  1. THE COLUMN IS UNWRITTEN. 0023 removed the form controls that fed it and
-  //     nothing has written it since, so it reads 0 on every row and this KPI
-  //     therefore reads 0 — while the driver detail panel beside it shows real
-  //     incidents counted from the driver_incidents table. The two are different
-  //     sources on purpose and are NOT expected to agree.
-  //  2. It was briefly switched (b50c534) to count live driver_incidents rows
-  //     inside a 12-month cutoff, and switched back here on instruction. If it
-  //     ever moves again, that version is in b50c534 — do not rewrite it from
-  //     scratch, and do not "reconcile" this figure against the panel.
+  // DO NOT PUT THIS BACK ON drivers.incidents_12mo. It was reverted to that
+  // column once (e0326d0) on an instruction that has since been withdrawn on
+  // live evidence: the column reads 0 for every driver — 0023 removed the form
+  // controls that fed it and nothing has written it since — while a real
+  // driver_incidents row exists inside the 12-month window. The KPI therefore
+  // printed 0 next to a panel showing a real incident, and the comment sitting
+  // here at the time said that mismatch was intended. It was not. The old
+  // instruction ("KPI reads incidents_12mo, do not reconcile with the detail
+  // panel") is WRONG and must not be re-applied.
   //
-  // The fix for the permanent 0 is a WRITER for the column, not a new reader.
-  const incidents = drivers.reduce((s, d) => s + (d.incidents_12mo ?? 0), 0);
+  // incidents_12mo is a confirmed dead duplicate and is slated to be DROPPED in
+  // its own migration during the Staff cleanup — app refs stripped first, then
+  // the drop, the same ordering `rating`/0132 used.
+  const incidentsInWindow = useMemo(() => {
+    const cutoff = new Date(`${today}T00:00:00`);
+    cutoff.setFullYear(cutoff.getFullYear() - 1);
+    const from = cutoff.toISOString().slice(0, 10);
+    // Roster-scoped (the visible drivers), matching every other KPI in this row
+    // — driverIncidents itself is deliberately unfiltered, for the detail panel.
+    const byId = new Map(drivers.map((d) => [d.id, d]));
+    return driverIncidents.filter((i) => byId.has(i.driver_id) && i.incident_date >= from);
+  }, [driverIncidents, drivers, today]);
+  const incidents = incidentsInWindow.length;
 
   const expiring = drivers.filter((d) => d.license_expiry != null && d.license_expiry <= YEAR_END).length;
 
