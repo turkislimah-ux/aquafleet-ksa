@@ -1,5 +1,15 @@
 -- 0134 — payment_method gains 'balance', for prepaid credit settlements.
 --
+-- APPLIED. THIS FILE HAS BEEN RECONCILED TO WHAT ACTUALLY RAN, and the
+-- reconciliation is the reason to read the next paragraph before "fixing" it
+-- back. The drafted guard resolved the customer's project mode with a plain
+-- scalar subquery; the applied guard wraps it in a single-mode aggregate
+-- (count(distinct …) = 1) that returns NULL rather than an arbitrary row when a
+-- customer somehow has projects in two different modes. The body below is the
+-- APPLIED one, verified against pg_get_functiondef. Same precedent as
+-- 0099/0100/0101 (files rewritten to match live) and 0038/0090/0109 (a
+-- correction is recorded, not squashed).
+--
 -- WHY THIS MIGRATION EXISTS AT ALL. The request that produced it said
 -- "no migration needed — invoices.payment_method is free text". It is NOT free
 -- text, and there are TWO independent gates, either of which would have made a
@@ -111,12 +121,29 @@ comment on column public.invoices.payment_method is
 -- at a count of zero. (For the record, at drafting the population was non-empty;
 -- the design does not depend on that and must not be revisited if it empties.)
 --
--- The lookup is by customer_id because invoices key off the customer, never
--- the project (0025), and projects_customer_id_unique (0015) makes that a 1:1
--- — so the scalar subquery cannot return more than one row.
+-- THE LOOKUP IS BY customer_id. There is no invoices.project_id — invoices key
+-- off the customer and always have (0025) — so customer_id is the only join
+-- available, not a preference.
+--
+-- WHY THE SUBQUERY AGGREGATES INSTEAD OF JUST SELECTING THE ROW.
+-- projects_customer_id_unique (0015) makes customer→project 1:1 TODAY, so the
+-- distinct count can only be 0 or 1 and the aggregate returns exactly what a
+-- plain scalar subquery would. It is written this way for the case that unique
+-- is lifted: multi-project customers are an explicitly deferred Finance item,
+-- and on the day it lands a customer could hold a prepaid project and a
+-- postpaid one. A plain subquery would then return whichever row Postgres felt
+-- like and silently authorise a balance settlement on the strength of the wrong
+-- project. count(distinct …) = 1 else NULL makes that ambiguity resolve to
+-- "unknown", and the guard below refuses anything that is not exactly
+-- 'prepaid' — so it FAILS CLOSED rather than guessing.
+-- NOTE FOR WHOEVER BUILDS MIXED-MODE CUSTOMERS: this resolution is the thing to
+-- revisit. It will refuse a legitimate settlement for such a customer, which is
+-- the correct failure while there is no per-invoice project to disambiguate.
+-- Zero mixed-mode customers exist today, which is why the refusal is unreachable
+-- and NOT a reason to weaken it now.
 --
 -- This is NOT expressible as a table CHECK: it needs a join, and a CHECK is
--- also retroactive, which would re-validate the 9 pre-0134 paid rows.
+-- also retroactive, which would re-validate every pre-0134 paid row.
 --
 -- 'balance' requires NO proof, NO reference and NO date: there is no external
 -- transaction to evidence. The bank_transfer requirements below are unchanged,
@@ -151,23 +178,28 @@ begin
     raise exception 'bank_transfer payment requires a payment date.';
   end if;
 
-  -- Resolve prepaid-ness BEFORE the update, so a refusal leaves the invoice
-  -- untouched rather than rolling back a write.
+  -- 'balance' may only settle an invoice that resolves to prepaid mode.
+  -- Resolve mode: invoice snapshot first, else the customer's project mode.
+  -- Invoices link by customer_id (there is no invoices.project_id); every customer
+  -- is single-mode today (0 mixed-mode customers) so the distinct project mode is
+  -- unambiguous. A NULL snapshot is NOT evidence of "not prepaid" — resolve through
+  -- the customer's projects, do not treat null as non-prepaid.
+  -- NOTE: if multi-project customers with MIXED modes are ever introduced (a deferred
+  -- feature), this single-mode resolution must be revisited.
+  -- Resolved BEFORE the update, so a refusal leaves the invoice untouched
+  -- rather than rolling back a write.
   if p_payment_method = 'balance' then
     select coalesce(
              i.payment_mode,
-             (select pr.payment_mode
-                from public.projects pr
-               where pr.customer_id = i.customer_id)
+             (select case when count(distinct pr.payment_mode) = 1
+                          then max(pr.payment_mode) else null end
+                from public.projects pr where pr.customer_id = i.customer_id)
            )
       into v_mode
       from public.invoices i
      where i.id = p_invoice_id;
-
     if v_mode is distinct from 'prepaid' then
-      raise exception
-        'payment_method ''balance'' is only valid for a prepaid invoice (resolved mode: %).',
-        coalesce(v_mode, 'unknown');
+      raise exception 'balance payment is only valid for prepaid invoices (resolved mode: %).', coalesce(v_mode,'unknown');
     end if;
   end if;
 
@@ -232,11 +264,22 @@ commit;
 -- select payment_mode, payment_method, count(*)
 --   from public.invoices where status = 'paid' group by 1,2 order by 1,2;
 --
--- D. THE AUDIT QUERY, for after the app half ships. Expect ZERO rows,
---    forever: a 'balance' row whose resolved mode is not prepaid.
+-- D. THE AUDIT QUERY — A STANDING CHECK, not a one-off apply-time reading.
+--    Expect ZERO rows, forever: a 'balance' row whose resolved mode is not
+--    prepaid. The guard makes this hold by construction for anything settled
+--    THROUGH pay_invoice; the widened CHECK constraint on its own would still
+--    permit 'balance' on any row, so this query is what covers a direct write
+--    that bypasses the RPC. Re-run it after any change to the pay path.
+--
+--    THE RESOLUTION BELOW IS A COPY OF THE GUARD'S, DELIBERATELY IDENTICAL —
+--    including the single-mode aggregate. An audit that resolves mode
+--    differently from the rule it audits reports its own disagreement as a
+--    finding. If the guard changes, change this too, in the same commit.
 -- select i.id, i.invoice_number, i.payment_mode, i.payment_method
 --   from public.invoices i
 --  where i.payment_method = 'balance'
 --    and coalesce(i.payment_mode,
---                 (select pr.payment_mode from public.projects pr
+--                 (select case when count(distinct pr.payment_mode) = 1
+--                              then max(pr.payment_mode) else null end
+--                    from public.projects pr
 --                   where pr.customer_id = i.customer_id)) is distinct from 'prepaid';
