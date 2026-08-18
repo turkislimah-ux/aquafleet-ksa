@@ -2507,14 +2507,26 @@ relevant skill(s) **when the task calls for it**:
     **Zero is printed as a muted `formatSar(0)`, never an em dash** — nothing owed is
     a real answer, and a dash reads as missing data (same rule as the glossary's null
     caveats).
-  - **Item 3 — DELIBERATE DEVIATION, disclosed rather than absorbed.** The brief said
-    "fix Incidents (12mo) so it reads `incidents_12mo`". The old reducer ALREADY read
-    that column correctly; **the column is dead** — unwritten since `0023` removed its
-    form controls, 0 on every row — so it rendered a permanent 0 beside a detail panel
-    already showing real incidents from `driver_incidents`. It now counts LIVE
-    `driver_incidents` rows inside a 12-month cutoff off `today`, roster-scoped like
-    every other KPI in that row. Same source as the panel, one cutoff. Avg Safety was
-    dropped from the KPI row; **`drivers.safety_score` stays in the database.**
+  - **Item 3 — THE DEVIATION WAS DISCLOSED, THEN OVERRULED. The KPI IS BACK ON THE
+    DEAD COLUMN, ON PURPOSE (reverted in `e0326d0`).** The brief said "fix Incidents
+    (12mo) so it reads `incidents_12mo`". The old reducer ALREADY read that column
+    correctly; **the column is dead** — unwritten since `0023` removed its form
+    controls, 0 on every row — so it renders a permanent 0 beside a detail panel
+    already showing real incidents from `driver_incidents`. `b50c534` switched it to
+    count LIVE `driver_incidents` rows inside a 12-month cutoff and reported the
+    swap; **Turki's instruction afterwards was to put it back**, so the KPI is once
+    again `drivers.reduce((s, d) => s + (d.incidents_12mo ?? 0), 0)`.
+    - **THE TWO FIGURES ON THAT SCREEN ARE DIFFERENT SOURCES AND ARE NOT EXPECTED TO
+      AGREE.** The KPI sums a stored column that reads 0; the detail panel counts
+      real `driver_incidents` rows. **Do not "reconcile" them** — that is the shape of
+      the change that was just reverted.
+    - **The fix for the permanent 0 is a WRITER for the column, not a new reader.**
+      If it ever moves again, the live-rows version is in `b50c534` — take it from
+      there rather than rewriting it. The reducer carries all of this in its own
+      comment, and `tests/staff-batch.spec.ts`'s item-3 test carries the matching
+      note where its old `"2"` assertion used to be.
+    - Avg Safety was dropped from the KPI row; **`drivers.safety_score` stays in the
+      database.**
   - **Item 3's On Duty bar prints its zeros.** Every one of the four derived states
     gets a key even at 0 (`OnDutyBar`) — a dropped segment reads as a broken chart,
     and today all live drivers sit in one state. Colours come from `DRIVER_STATE_TONE`,
@@ -2554,9 +2566,34 @@ relevant skill(s) **when the task calls for it**:
   - **Escape does not close the driver detail modal** — there is no key handler, only
     the footer Close button and the X. A spec that presses Escape times out on the
     overlay intercepting the next click.
-  - **Open, carried forward:** the review checklist claims the bonus month picker
-    "refuses save without a month". It cannot — `bonusMonth` is `useState<string>(monthKey)`
-    with a re-sync effect, so it is never empty. Reported as a mismatch, not built.
+  - **BONUS MONTH PICKER — the mismatch is CLOSED, and the refusal is now real
+    (`578743e`).** The review checklist claimed the picker "refuses save without a
+    month". It could not: `bonusMonth` was `useState<string>(monthKey)` with a
+    re-sync effect, so it was never empty and the refusal could never fire. It was
+    reported as a mismatch rather than quietly built, then built on instruction.
+    - **It starts EMPTY and the lens moving re-seeds it to EMPTY, never to the new
+      lens** — otherwise moving the lens silently re-points a pick made under the
+      old one. A `Select month…` placeholder leads the options.
+    - **THE AMOUNT INPUT IS GATED TOO, NOT JUST `Set`** — an editable amount beside
+      a greyed-out button reads as a broken button rather than a missing input.
+    - **WHY THIS ONE FIELD DOES NOT TAKE THE LENS.** Every other month-scoped write
+      on that screen does, because the lens is what the reader is looking at. The
+      bonus is the one write that can legitimately DISAGREE with the lens, so it
+      must be chosen rather than defaulted — a bonus filed against the wrong month
+      is a money error nobody sees until that month is paid, and a pre-filled month
+      is exactly how it happens. The amber cross-month warning stays, now guarded
+      against the empty string.
+    - `bonusCycle` resolves to `null` while the month is empty, so `bonus` is 0 and
+      the Remove button (gated on `bonus !== 0`) does not render — no change needed
+      there, but that is why.
+    - **`tests/bonus-month-picker.spec.ts` (5 tests, all passed) depends on the
+      DELETED `/bonus-month-check` route** — same convention as every prior phase.
+      **The SAVE is deliberately not under test**: `setCommissionBonus` is an
+      auth-gated server action and a session-less route would fail it for a reason
+      that has nothing to do with the gate. One test bug worth not repeating: an
+      unscoped `getByRole("option")` resolves against BOTH selects on that screen —
+      the tab's month lens carries the same labels — so the option assertions are
+      scoped to the bonus select.
 
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
