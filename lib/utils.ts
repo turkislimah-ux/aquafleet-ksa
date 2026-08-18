@@ -52,6 +52,43 @@ export function daysAgoKey(n: number): string {
 }
 
 /**
+ * Shift an existing YYYY-MM-DD key by a number of days or years, returning
+ * another YYYY-MM-DD key. Unlike todayKey()/daysAgoKey() these read no clock at
+ * all — they move a date the CALLER already has, which is what a page holding a
+ * server-computed Riyadh `today` needs.
+ *
+ * THE WHOLE ROUND TRIP IS UTC, AND THAT IS THE POINT. The shape these replace,
+ * written twice in app/drivers, was:
+ *
+ *   const end = new Date(`${today}T00:00:00`);   // no Z -> parsed as LOCAL
+ *   end.setDate(end.getDate() + 90);
+ *   const endKey = end.toISOString().slice(0, 10);   // serialized as UTC
+ *
+ * A date-time literal with no offset is parsed on the local clock, but
+ * toISOString() always prints UTC — so east of UTC the slice lands on the day
+ * BEFORE the one that was computed. In Riyadh (UTC+3) a "+90 days" window was
+ * really 89 days and a "12 months back" cutoff started a day late, every day of
+ * the year, on the one screen whose comments promised Riyadh correctness.
+ * Appending "Z" and using the setUTC* setters keeps parse and serialize on one
+ * clock, so the arithmetic is exactly the arithmetic that was asked for.
+ *
+ * setUTCDate/setUTCFullYear handle month, year and leap-day rollover, so
+ * addYearsToKey("2024-02-29", -1) normalizes to 2023-03-01 rather than throwing
+ * or producing an invalid date — the same behaviour daysAgoKey relies on.
+ */
+export function addDaysToKey(key: string, days: number): string {
+  const d = new Date(`${key}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export function addYearsToKey(key: string, years: number): string {
+  const d = new Date(`${key}T00:00:00Z`);
+  d.setUTCFullYear(d.getUTCFullYear() + years);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
  * The CURRENT month, "YYYY-MM", on the same local clock as todayKey().
  *
  * A FUNCTION, NEVER A CONST. It began life as

@@ -285,7 +285,16 @@ export default async function DriversPage() {
     projectDriversRes.error ||
     operationStationsRes.error ||
     driverIncidentsRes.error ||
-    openWorkOrdersRes.error;
+    openWorkOrdersRes.error ||
+    // These two were the only fetches on this page missing from the chain, and
+    // the omission was not harmless: they feed buildActiveJobTruckIds, and a
+    // failed read arrives as `null`, which yields an EMPTY set — i.e. every
+    // truck reads as having no active job, so a truck in the workshop shows as
+    // available. That is the "a failed read must never claim an empty queue"
+    // rule (see the Dashboard entry in CLAUDE.md §7) in a different costume:
+    // silently reporting the all-clear is worse than reporting nothing.
+    activeWorkOrdersRes.error ||
+    activeOutsourcedJobsRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};

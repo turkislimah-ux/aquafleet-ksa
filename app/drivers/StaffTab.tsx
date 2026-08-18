@@ -15,14 +15,14 @@ import { X, Pencil, Ban, History, Wrench } from "lucide-react";
 import { Btn, Stat } from "@/components/ui";
 import { type Staff, type StaffRole, type OperationStation, type StaffCommission, type StaffCommissionType } from "@/lib/db-types";
 import { onLeaveTodaySet, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
-import { slugifyKey, isValidSlug } from "@/lib/slug";
-import { cn, formatSar } from "@/lib/utils";
+import { addDaysToKey, formatSar } from "@/lib/utils";
 import { createStaff, updateStaff, terminateStaff, addStaffRole } from "./actions";
 import LeaveSection from "./LeaveSection";
 import SalaryHistoryModal from "./SalaryHistoryModal";
 import MechanicCommissionsSection from "./MechanicCommissionsSection";
 import OperationStationField from "@/components/OperationStationField";
 import PersonIdLink from "./PersonIdLink";
+import LookupSelect from "./LookupSelect";
 import LinkedIdField from "@/components/LinkedIdField";
 import { useRecordFocus } from "@/lib/useRecordFocus";
 
@@ -171,10 +171,12 @@ export default function StaffTab({
   // multi-week errand (medical, fees, employer paperwork), so a 60-day window
   // would surface a case that is already late. Computed off `today` (the Riyadh
   // date passed in) — never `new Date()` here.
+  //
+  // The shift goes through addDaysToKey rather than a local `new Date(...)` +
+  // toISOString() round trip: that pair parses local and serializes UTC, which
+  // in Riyadh made this a 89-day window while the comment above claimed 90.
   const iqamaSoon = useMemo(() => {
-    const end = new Date(`${today}T00:00:00`);
-    end.setDate(end.getDate() + 90);
-    const endKey = end.toISOString().slice(0, 10);
+    const endKey = addDaysToKey(today, 90);
     // Already-expired dates count too: they are the most urgent version of the
     // same problem, and hiding them behind a "soon" window would make the
     // number shrink the day a renewal is missed.
@@ -520,7 +522,18 @@ export default function StaffTab({
                 <input name="name_ar" dir="rtl" defaultValue={editing?.name_ar ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
               <Field label="Role">
-                <RoleSelect roles={staffRoles} defaultKey={editing?.role ?? staffRoles[0]?.key ?? ""} />
+                {/* LookupSelect IS the generalized RoleSelect — this page carried
+                    both, line for line the same component, until the cleanup.
+                    `addStaffRole` already matches its `onAdd` signature exactly,
+                    so no adapter is needed; only the copy is passed in. */}
+                <LookupSelect
+                  name="role"
+                  items={staffRoles}
+                  defaultKey={editing?.role ?? staffRoles[0]?.key ?? ""}
+                  onAdd={addStaffRole}
+                  addLabel="+ Add custom role…"
+                  newPlaceholder="New role name"
+                />
               </Field>
               <Field label="Duty hours">
                 <input name="duty_hours" type="number" step="1" min="0" defaultValue={editing?.duty_hours ?? 10} className={INPUT} style={INPUT_STYLE} />
@@ -591,112 +604,13 @@ export default function StaffTab({
   );
 }
 
-// Role dropdown fed by staff_roles, with an inline "Add custom role" that inserts
-// a new role and selects it immediately. A hidden input carries the chosen key
-// into the surrounding form submit.
-function RoleSelect({ roles, defaultKey }: { roles: StaffRole[]; defaultKey: string }) {
-  const router = useRouter();
-  const [extra, setExtra] = useState<{ key: string; label: string }[]>([]);
-  const [value, setValue] = useState(defaultKey);
-  const [adding, setAdding] = useState(false);
-  const [label, setLabel] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  // Merge fetched roles + locally-added + the current value (covers an inactive
-  // role on edit that the fetch omitted). Dedup by key.
-  const options = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const r of roles) map.set(r.key, r.label);
-    for (const e of extra) if (!map.has(e.key)) map.set(e.key, e.label);
-    if (value && !map.has(value)) map.set(value, value);
-    return Array.from(map, ([key, lbl]) => ({ key, label: lbl }));
-  }, [roles, extra, value]);
-
-  // Live slug preview/gate (mirrors the DB CHECK via lib/slug). Empty label →
-  // no preview, submit disabled. Invalid slug (starts with digit/_) → loud error.
-  const slug = slugifyKey(label);
-  const validSlug = isValidSlug(slug);
-  const canAdd = slug !== "" && validSlug;
-
-  async function onAdd() {
-    const clean = label.trim();
-    if (!clean) {
-      setErr("Role name is required.");
-      return;
-    }
-    if (!canAdd) {
-      setErr("Label must start with a letter.");
-      return;
-    }
-    setBusy(true);
-    setErr(null);
-    const res = await addStaffRole(clean);
-    setBusy(false);
-    if (res.error || !res.key) {
-      setErr(res.error ?? "Could not add role.");
-      return;
-    }
-    setExtra((x) => [...x, { key: res.key!, label: clean }]);
-    setValue(res.key);
-    setLabel("");
-    setAdding(false);
-    router.refresh();
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      {!adding ? (
-        <select
-          value={value}
-          onChange={(e) => {
-            if (e.target.value === "__add__") {
-              setAdding(true);
-              setErr(null);
-            } else {
-              setValue(e.target.value);
-            }
-          }}
-          className={INPUT}
-          style={INPUT_STYLE}
-        >
-          {options.length === 0 && <option value="">—</option>}
-          {options.map((o) => (
-            <option key={o.key} value={o.key}>{o.label}</option>
-          ))}
-          <option value="__add__">+ Add custom role…</option>
-        </select>
-      ) : (
-        <div className="flex gap-2">
-          <input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="New role name"
-            className={INPUT}
-            style={INPUT_STYLE}
-            autoFocus
-          />
-          <Btn
-            type="button"
-            variant="primary"
-            onClick={onAdd}
-            className={cn(!canAdd && "opacity-50 pointer-events-none")}
-          >
-            {busy ? "…" : "Add"}
-          </Btn>
-          <Btn type="button" variant="outline" onClick={() => { setAdding(false); setErr(null); }}>Cancel</Btn>
-        </div>
-      )}
-      {adding && label.trim() !== "" && slug !== "" && (
-        validSlug
-          ? <p className="text-xs muted">Will be saved as: {slug}</p>
-          : <p className="text-xs text-rose-600 dark:text-rose-400">Label must start with a letter.</p>
-      )}
-      {err && <p className="text-xs text-rose-600 dark:text-rose-400">{err}</p>}
-      <input type="hidden" name="role" value={value} />
-    </div>
-  );
-}
+// `RoleSelect` used to sit here — a role dropdown with an inline "Add custom
+// role", line for line the same component as ./LookupSelect, which was written
+// later as its generalized form and already carries LookupSelect's own header
+// saying so. The Role field mounts LookupSelect directly now; `addStaffRole`
+// already matches its `onAdd` signature, so nothing adapts between them. Do not
+// re-add a role-specific copy: the role wording that users actually see is
+// passed in through `addLabel`/`newPlaceholder`.
 
 function StatusBadge({ s, onLeave }: { s: Staff; onLeave: boolean }) {
   const base = "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ";

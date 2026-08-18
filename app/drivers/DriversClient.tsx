@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Pencil, Eye, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon, AlertTriangle, Trash2, History } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD, PILL_TONE_CLS } from "@/components/ui";
-import { cn, formatSar } from "@/lib/utils";
+import { addYearsToKey, cn, formatSar } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
 import {
   type Driver,
@@ -89,7 +89,20 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 
 // License counts as "expiring" if it lapses on or before the end of this year —
 // mirrors the demo's `< Dec 31 2026` check, generalized to the current year.
-const YEAR_END = `${new Date().getFullYear()}-12-31`;
+//
+// A FUNCTION OF `today`, NEVER A MODULE CONST. It was
+// `const YEAR_END = \`${new Date().getFullYear()}-12-31\`` — two faults in one
+// line. `new Date()` in a client component reads the BROWSER's clock, which is
+// whatever timezone the laptop is set to, while every other date on this page
+// comes from the server-computed Riyadh `today`; on 31 December a browser
+// behind Riyadh still reports the old year, so the licence window disagreed
+// with the rest of the screen. And evaluated once at module load, it never
+// rolls over — a long-lived session would keep last year's boundary. Deriving
+// it from `today` puts the boundary on the same clock as the dates it is
+// compared against, and re-derives it on every render.
+function yearEndKey(today: string): string {
+  return `${today.slice(0, 4)}-12-31`;
+}
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -419,10 +432,12 @@ export default function DriversClient({
   // duplicate, its app references were stripped in the Staff cleanup and it is
   // dropped by 0133 — app refs first, then the drop, the ordering `rating`/0132
   // used.
+  //
+  // The 12-month cutoff shifts `today` through addYearsToKey rather than a
+  // local `new Date(...)` + toISOString() round trip: that pair parses local and
+  // serializes UTC, so in Riyadh the window opened a day late every day.
   const incidentsInWindow = useMemo(() => {
-    const cutoff = new Date(`${today}T00:00:00`);
-    cutoff.setFullYear(cutoff.getFullYear() - 1);
-    const from = cutoff.toISOString().slice(0, 10);
+    const from = addYearsToKey(today, -1);
     // Roster-scoped (the visible drivers), matching every other KPI in this row
     // — driverIncidents itself is deliberately unfiltered, for the detail panel.
     const byId = new Map(drivers.map((d) => [d.id, d]));
@@ -460,13 +475,15 @@ export default function DriversClient({
       .map((x) => x.label);
   }, [incidentsInWindow, driverLabelById]);
 
+  const yearEnd = yearEndKey(today);
+
   // Licences expiring this year, SOONEST FIRST — the order the list is acted on.
   const expiringDrivers = useMemo(
     () =>
       drivers
-        .filter((d) => d.license_expiry != null && d.license_expiry <= YEAR_END)
+        .filter((d) => d.license_expiry != null && d.license_expiry <= yearEnd)
         .sort((a, b) => (a.license_expiry! < b.license_expiry! ? -1 : a.license_expiry! > b.license_expiry! ? 1 : 0)),
-    [drivers],
+    [drivers, yearEnd],
   );
   const expiring = expiringDrivers.length;
   const expiringNames = useMemo(
@@ -658,7 +675,7 @@ export default function DriversClient({
                 )}
                 {drivers.map((d) => {
                   const truck = truckByDriver.get(d.id);
-                  const expSoon = d.license_expiry != null && d.license_expiry <= YEAR_END;
+                  const expSoon = d.license_expiry != null && d.license_expiry <= yearEnd;
                   return (
                     <tr key={d.id} className="cursor-pointer hover:bg-black/5 dark:hover:bg-white/5" onClick={() => setDetail(d)}>
                       <TD>
@@ -1108,7 +1125,7 @@ function DriverDetail({
   // the Salary cell and nothing above needs to know about it.
   const [salaryHistoryFor, setSalaryHistoryFor] =
     useState<{ id: string; name: string; salary: number | null } | null>(null);
-  const expSoon = d.license_expiry != null && d.license_expiry <= YEAR_END;
+  const expSoon = d.license_expiry != null && d.license_expiry <= yearEndKey(today);
   // Posture 2: leave never unassigns. Surface the conflict (holds a truck while
   // on leave today) as a UI-only warning inside the leave section.
   const truckConflict = onLeaveToday && truck != null;

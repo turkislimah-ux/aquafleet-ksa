@@ -60,9 +60,17 @@ import {
 
 // Pure money math + shared types live in a NON-client module so they are
 // unit-testable without React (see lib/commission-rows.ts and
-// scripts/commission-rows-check.ts). Import for local use here, and re-export so
-// the existing "./CommissionsTab" import sites (page.tsx, DriversClient) keep
-// resolving these from here unchanged.
+// scripts/commission-rows-check.ts). Imported here for local use, and re-exported
+// below for ONE consumer: DriversClient, which already imports this file for the
+// component and takes buildCurrentRows + four row types off the same import.
+//
+// This comment used to name page.tsx as a second consumer. It no longer is —
+// page.tsx imports from "@/lib/commission-rows" directly — and the re-export
+// list was trimmed to exactly what DriversClient takes at the same time, so
+// "who reads this" is answerable by grepping one import site rather than
+// trusting this paragraph. If the last consumer ever goes, so does the
+// re-export: lib/commission-rows is the real home and importing from there is
+// the shorter path anyway.
 import {
   round2,
   countsForPay,
@@ -81,12 +89,10 @@ import {
 
 export { buildCurrentRows } from "@/lib/commission-rows";
 export type {
-  DriverLite,
   CommTripRow,
   CommCycle,
   CommSpecialRow,
   CommAdjustmentRow,
-  CurrentRow,
 } from "@/lib/commission-rows";
 
 // Review pill: map a 3-state review → an existing statusTone token for color.
