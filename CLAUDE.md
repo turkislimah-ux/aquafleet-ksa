@@ -2648,10 +2648,21 @@ relevant skill(s) **when the task calls for it**:
     empty track rather than a segment that vanished and took its label with it.
     Colours are still `PILL_TONE_CLS[DRIVER_STATE_TONE[s]]`, the same table the status
     pills read, so bar and pill cannot disagree.
-  - **Item 4 — the staff leave tally moved INSIDE the card and now states its basis on
-    screen.** It was an absolutely-positioned corner badge on a wrapper `div.relative`
-    that existed for nothing else (the wrapper went with it), which read as a
-    notification stuck ON the card rather than a fact ABOUT the person. **"since Jan 1"
+  - **Item 4 — the staff leave tally sits BESIDE THE NAME and states its basis on
+    screen.** It took two moves to land (`3f9c7b8`, then `7400c81`), and both are the
+    same lesson at different distances. It was an absolutely-positioned corner badge on
+    a wrapper `div.relative` that existed for nothing else (the wrapper went with it),
+    which read as a notification stuck ON the card rather than a fact ABOUT the person;
+    batch 2 brought it inside the card but left it at the RIGHT EDGE, where it was
+    technically in the card and still read as a separate column with nothing tying it to
+    whose leave it was. It now sits in the name row, immediately after the "On leave"
+    pill — **the person and their leave read as one unit, which is the whole claim the
+    number makes.** It is sized to that pill (`text-[10px]`, `px-1.5 py-0.5`), not to its
+    old right-edge treatment, because that row sets the card's height and the previous
+    `text-sm`/`px-2` chip would have pushed every card taller for a figure most of them
+    do not carry. **The "On leave" status pill is a DIFFERENT FACT and stays put** — it
+    is a state TODAY, the tally is how much of the year has been taken; they sit
+    together deliberately. **"since Jan 1"
     is on screen, not only in the tooltip** — without it the reader guesses between a
     rolling twelve months, an entitlement balance and a calendar-year tally, and those
     are three different conversations to have with an employee. **Zero renders
@@ -2699,6 +2710,15 @@ relevant skill(s) **when the task calls for it**:
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
   entries above; the old "Archive deferred / preview/archive.js is the spec" note
   was stale and has been removed.)
+  - **THE STAFF CLEANUP CARRIES `drivers.incidents_12mo`'s DROP** — confirmed dead
+    (unwritten since `0023` removed its form controls, 0 on every row, nothing reads
+    it since `87eb4b5`), and confirmed NOT to be done as a standalone cycle. It rides
+    with the cleanup's full survey because the survey is what establishes the ordering
+    a drop needs: strip the app references first (`lib/db-types.ts:133` still declares
+    it), then drop — the `rating`/`0132` precedent, where the app half landed first so
+    the page was never down. **A PostgREST select naming a dropped column returns 400**,
+    so the reverse order takes both Fleet fetches out the instant it applies. **A writer
+    for the column was the wrong answer; the column is.**
 - **Deferred — Consumption:** customer archive documents as a schema question
   (`customer_id` on `archive_documents`) was raised at Archive Phase 3 and not
   decided; an optional UNIQUE on `drivers.iqama_number` / `staff.iqama_number` /
