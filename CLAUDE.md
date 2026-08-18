@@ -2454,6 +2454,110 @@ relevant skill(s) **when the task calls for it**:
     describes the world as it was understood when it was written. **Re-measure the
     premise before executing on it** — this one had been true-sounding and wrong for
     months, and a single `group by` on the column would have shown it at any point.
+- **COMMISSION MONTH LENS — migration `0131`, commits `c8fa286` (SQL) + `48d9629`
+  (app).** `pay_commission` used to sweep every unpaid row; `0131` re-grains it to
+  ONE month, and `48d9629` is the repair for the app half, which was still calling
+  the old all-time signature. **The screen could show one month and pay another** —
+  that is the defect this closed, and it is why the two halves are a pair.
+  - `commission_cycles` is now **one row per driver per month** (`ensureCycle` upserts
+    `onConflict "driver_id,month_key"` — a hard dependency on 0131's re-grain).
+    `payCommission(driverId, monthKey)`, `approvePayout`, `setBonusStatus` and
+    `reopenPayout` are all month-scoped, and `setCommissionBonus` refuses to write
+    into a month that is already paid.
+  - **`period_label` IS A PAYOUT-RUN CAPTION, NEVER THE WORK PERIOD** — the same
+    finding the payslip register made (`paid_at`, not the label). `defaultPeriodLabel()`
+    is deleted. `buildPayoutSnapshot` now REQUIRES a `monthKey` and freezes it into
+    the snapshot; `payoutMonthKey()` reads it back. **A pre-0131 sweep reports `null`
+    and is never back-derived from `period_label`** — History shows those legacy rows
+    with an em dash, excludes them from any specific month, and SAYS SO on screen
+    rather than letting a record silently vanish.
+  - `monthLabel()` lives in `lib/commission-rows.ts` as the single definition, from a
+    hardcoded English month array, so the screen label and the RPC's frozen caption
+    cannot disagree about a month name.
+  - **TWO CALL SITES STAY MONTH-LESS ON PURPOSE** — the drivers-roster balance and the
+    drivers badge look across ALL months, not the lens. Item 9 below depends on that.
+  - Money harness: **70 PASS / 0 FAIL**, with new month-scoped cases J/K/K2/K3.
+
+- **`0132` — `drivers.health_insurance` ADDED (tri-state), `drivers.rating` DROPPED.**
+  Commits `c144978` (app stops reading `rating`) then `8cd3a76` (the migration) —
+  **in that order, deliberately.** A PostgREST select naming a dropped column returns
+  400, so both Fleet fetches would have failed to render the instant it applied;
+  landing the app half first meant the page was never down. Same code-then-migrate
+  rule as everywhere else, applied to a DROP.
+  - **`health_insurance` IS NULLABLE WITH NO DEFAULT AND NO BACKFILL, AND THE
+    TRI-STATE IS THE FEATURE.** Null = "not recorded yet", which is a DIFFERENT FACT
+    from an explicit No. Defaulting the fleet to `false` would assert that ~every
+    driver is uninsured — a compliance claim nobody made. The column COMMENT says so
+    on the column itself so a later migration does not tidy a default in. All 16
+    drivers read null today.
+  - `rating` had been dead since `0023` replaced the safety/rating/hours/incidents
+    block: no form ever wrote it, every cell on screen was already an em dash, and
+    0 views / 0 functions referenced it, so the drop could not cascade.
+
+- **STAFF PAGE UI BATCH — commit `b50c534`.** Eight items on `/drivers`, batch-built
+  against `0132`'s new column. No migration, no RPC, no money helper touched.
+  - **Item 9 is the only money-display item, and it ADDS NO ARITHMETIC.** The Drivers
+    table's new **Unpaid Commission** column renders the PRE-EXISTING `balanceByDriver`
+    map built in `app/drivers/page.tsx` by
+    `buildCurrentRows({ drivers: allDrivers, trips: commTrips, cycles, specials,
+    adjustments, includeEmpty: true })` — no `monthKey`, so **all periods**, over
+    fetches already pre-filtered to `payout_id is null`. That map already gated
+    `commissionDrivers`, so **it IS the Commissions tab's own source, not a copy of
+    it** — the column is structurally incapable of drifting from the tab beside it.
+    **Zero is printed as a muted `formatSar(0)`, never an em dash** — nothing owed is
+    a real answer, and a dash reads as missing data (same rule as the glossary's null
+    caveats).
+  - **Item 3 — DELIBERATE DEVIATION, disclosed rather than absorbed.** The brief said
+    "fix Incidents (12mo) so it reads `incidents_12mo`". The old reducer ALREADY read
+    that column correctly; **the column is dead** — unwritten since `0023` removed its
+    form controls, 0 on every row — so it rendered a permanent 0 beside a detail panel
+    already showing real incidents from `driver_incidents`. It now counts LIVE
+    `driver_incidents` rows inside a 12-month cutoff off `today`, roster-scoped like
+    every other KPI in that row. Same source as the panel, one cutoff. Avg Safety was
+    dropped from the KPI row; **`drivers.safety_score` stays in the database.**
+  - **Item 3's On Duty bar prints its zeros.** Every one of the four derived states
+    gets a key even at 0 (`OnDutyBar`) — a dropped segment reads as a broken chart,
+    and today all live drivers sit in one state. Colours come from `DRIVER_STATE_TONE`,
+    the same mapping the pills use, so the bar and the pill can never disagree.
+  - **Item 4 routes through a NEW optional `tone` override on `StatusPill`, NOT through
+    `statusTone()`.** `lib/utils.ts`'s `statusTone()` is a GLOBAL shared mapping
+    (trucks/invoices/trips/drivers) returning `"info"` for BOTH `idle` and `off_duty`
+    — recolouring there would have repainted three other pages. `DRIVER_STATE_TONE`
+    (`lib/driver-state.ts`) holds the driver mapping: active=ok/green, idle=warn/amber,
+    off_duty and on_leave=yellow. `PILL_TONE_CLS` is exported from `components/ui.tsx`
+    so the bar reads the same class table.
+  - **Item 6's mechanics cluster EXCLUDES `head_of_maintenance`, everywhere.** Open
+    work orders come from `work_orders.assigned_mechanic_id` reduced in `page.tsx`;
+    the head's own open WOs are NOT in the count. Duty hours are labelled **"With duty
+    hours set"** and the card deliberately never says "on duty now" — `duty_hours` is a
+    shift LENGTH, not a clock-in state, and the wording is load-bearing (a test asserts
+    the card does not contain /on duty now/i). Iqama window is **90 days** (a renewal
+    is a multi-week errand), already-expired iqamas are counted, and a station-less
+    staff member becomes a real **"Unassigned"** row rather than being dropped.
+  - **Item 1 — History became a sub-tab of Commissions**; `?tab=history` still
+    deep-links into it, so no existing link breaks. Item 5 — Add staff sits in the page
+    header where New driver does, staff tab only, and opens the form via a **nonce
+    prop, not a boolean**, so cancelling and pressing again reopens it. Item 7 — the
+    plate cell is `font-mono text-sm font-semibold`. Item 8 — health insurance renders
+    where Rating was: Yes (emerald) / No (rose) / a MUTED `—` titled "Not recorded"
+    that is **explicitly not red**, and the form's select offers all three with a new
+    driver defaulting to unrecorded.
+  - **`tests/staff-batch.spec.ts` (9 tests) depends on the DELETED `/staff-batch-check`
+    route** — same convention as every prior phase. Route and middleware bypass torn
+    down, `git diff` confirmed empty, `/login` 200 and `/drivers` 307 reconfirmed.
+  - **PROCESS INCIDENT, second occurrence, same cause:** four tests failed because the
+    page never HYDRATED — three `/_next/static/*` 404s from a `next build` run earlier
+    under the live dev server, which clobbers `.next`. Exactly the trap already recorded
+    under Water Station Cost. The `?tab=history` deep-link test PASSED throughout
+    (server-rendered), and that split is what localised the fault to client JS.
+    **Never delete or rebuild `.next` under a running dev server.**
+  - **Escape does not close the driver detail modal** — there is no key handler, only
+    the footer Close button and the X. A spec that presses Escape times out on the
+    overlay intercepting the next click.
+  - **Open, carried forward:** the review checklist claims the bonus month picker
+    "refuses save without a month". It cannot — `bonusMonth` is `useState<string>(monthKey)`
+    with a re-sync effect, so it is never empty. Reported as a mismatch, not built.
+
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
   entries above; the old "Archive deferred / preview/archive.js is the spec" note
