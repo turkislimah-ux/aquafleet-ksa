@@ -14,6 +14,8 @@ import { test, expect } from "@playwright/test";
 //   trucks    ABC-1234 -> Ali, XYZ-9876 -> Ibrahim, QQQ-1111 unassigned
 //   balances  Ali 1250, Ibrahim 0, Omar 430, Osama 0
 //   incidents 2026-07-01 + 2026-01-05 inside the 12mo window, 2024-01-05 outside
+//             (still fed to the detail panel; the Incidents KPI no longer reads
+//              them at all — see the item-3 test for why)
 //   staff     2 mechanics (Manfuhah), 1 head_of_maintenance (Shas), 1 admin (no station)
 //   open WOs  s-1: 2, s-2: 1, s-3: 5  -> the mechanics cluster must read 3, not 8
 
@@ -47,16 +49,23 @@ test.describe("Staff page UI batch", () => {
     await expect(page.getByText("Jul 2026")).toBeVisible();
   });
 
-  test("item 3 — Avg Safety gone; On Duty bar, Incidents (12mo), License Exp correct", async ({ page }) => {
+  test("item 3 — Avg Safety gone; On Duty bar, License Exp correct", async ({ page }) => {
     await page.goto(ROUTE);
 
     // AVG Safety KPI removed (the drivers.safety_score column itself stays).
     await expect(page.getByText(/Avg Safety/i)).toHaveCount(0);
 
-    // Incidents (12mo) counts LIVE driver_incidents rows inside the window:
-    // 2 of the 3 fixture incidents, the 2024 one excluded.
-    const incidents = page.locator("div.card", { hasText: "Incidents (12mo)" }).first();
-    await expect(incidents).toContainText("2");
+    // NO INCIDENTS (12mo) ASSERTION HERE, AND THAT IS DELIBERATE. This test used
+    // to assert the KPI read "2" — the count of LIVE driver_incidents rows inside
+    // a 12-month cutoff, which is what b50c534 shipped. Turki reverted that after
+    // the report: the KPI sums the STORED drivers.incidents_12mo column again, a
+    // column nothing has written since 0023, so it reads 0 on every real row. The
+    // old assertion is now the opposite of shipped design, and a spec that
+    // contradicts shipped design gets deleted rather than left to fail — someone
+    // eventually "fixes" the code to match it. Nothing replaces it because the
+    // fixture's own incidents_12mo values are not the interesting fact; the KPI is
+    // a plain sum of a dead column, and the reason it reads 0 lives in
+    // DriversClient.tsx's own comment beside the reducer.
 
     // License Exp (this year) — only Ali's 2026-03-01 is on/before year end.
     const licence = page.locator("div.card", { hasText: "License Exp (this year)" }).first();
