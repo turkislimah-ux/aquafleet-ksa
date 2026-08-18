@@ -520,19 +520,33 @@ export default function InvoiceDetailModal({
   // Prepaid "Pay with Balance" (Batch 1) — no cash/bank choice (prepaid never
   // pays that way, spec v3 §7): the engine already deducted the balance at
   // delivery (trips) / add-to-draft (charges), so this step only RECORDS
-  // settlement and LOCKS the covered items — same pay_invoice() RPC the old
-  // cash/bank form called, just with no user-facing method choice. The RPC's
-  // payment_method column only accepts 'cash'/'bank_transfer' (0025's check
-  // constraint) — there's no 'balance' value without a migration, out of
-  // scope for this batch — so this records 'cash' under the hood (no file
-  // needed, least-wrong of the two existing options). Purely a bookkeeping
-  // label on a column the customer never sees; the invoice UI never shows
-  // "Cash" for a prepaid invoice anywhere.
+  // settlement and LOCKS the covered items — same pay_invoice() RPC the
+  // postpaid cash/bank form calls, just with no user-facing method choice.
+  //
+  // IT NOW RECORDS 'balance', WHICH IS WHAT MIGRATION 0134 EXISTS FOR.
+  // This used to send 'cash' — a deliberate mislabel, because 0025's CHECK
+  // constraint permitted only 'cash'/'bank_transfer' and no 'balance' value
+  // existed to write. 0134 widened that constraint AND added a guard inside
+  // pay_invoice() that refuses 'balance' unless the invoice resolves to prepaid
+  // mode (snapshot first, else the customer's project mode), so the honest value
+  // is now both storable and enforced. THIS IS THE ONLY CALLER THAT SENDS
+  // 'balance' — the postpaid form still sends the user's cash/bank_transfer
+  // choice, and neither path ever rewrites an already-settled record.
+  //
+  // No proof file, reference or date are sent, and that is not an omission:
+  // there is no bank transaction to point at. The money left the balance when
+  // the work was delivered, not now.
+  //
+  // HISTORICAL ROWS ARE NOT BACKFILLED. Prepaid invoices settled before 0134
+  // still read 'cash'. A settled document records what was written at the time,
+  // and no figure anywhere derives from this column — the prepaid engine walks
+  // its own FIFO queue, never payment_method — so a rewrite would buy nothing
+  // and would make history claim a value that did not exist when it was issued.
   async function onMarkPaidBalance() {
     if (!invoiceId) return;
     const form = new FormData();
     form.set("invoiceId", invoiceId);
-    form.set("paymentMethod", "cash");
+    form.set("paymentMethod", "balance");
     setBusy(true);
     setActionError(null);
     const res = await markInvoicePaid(form);

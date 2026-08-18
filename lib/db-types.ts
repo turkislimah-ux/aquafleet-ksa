@@ -432,7 +432,18 @@ export type InvoiceSpecialCharge = {
 // See lib/invoice.ts for the assembly logic and CLAUDE.md/finance-invoice-
 // spec.md for the lifecycle rules.
 export type InvoiceStatus = "draft" | "review" | "confirmed" | "paid" | "void";
-export type InvoicePaymentMethod = "cash" | "bank_transfer";
+// 'balance' (migration 0134) settles a PREPAID invoice out of the customer's
+// already-deducted prepaid balance. It is NOT a third way to hand over money:
+// the engine took the money at delivery / add-to-draft, so this value records
+// WHICH settlement happened, not a payment event. pay_invoice() refuses it on
+// anything that does not resolve to prepaid mode, so only the prepaid "Pay with
+// Balance" path can ever produce it.
+//
+// This union is the compiler's completeness check: every Record<
+// InvoicePaymentMethod, …> label map must carry all three or tsc fails. That is
+// deliberate — a new method must be NAMED everywhere it is displayed, not
+// silently rendered as undefined. Do not loosen it to `string`.
+export type InvoicePaymentMethod = "cash" | "bank_transfer" | "balance";
 
 // 5c: shared display labels, same convention as PAYMENT_MODE_LABELS above.
 // Batch C — status VALUE stays 'void' in the DB (avoids a data migration on
@@ -448,6 +459,11 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
 export const PAYMENT_METHOD_LABELS: Record<InvoicePaymentMethod, string> = {
   cash: "Cash",
   bank_transfer: "Bank transfer",
+  // Reads as a SETTLEMENT SOURCE, not a payment channel, because that is what it
+  // is — the money left the customer's balance when the trip was delivered, not
+  // when this label was written. "Balance" alone would sit beside Cash/Bank
+  // transfer as if it were a third way to pay at the counter.
+  balance: "Prepaid balance",
 };
 
 // A frozen line, as stored in invoices.covered_lines / unpaid_lines (jsonb)

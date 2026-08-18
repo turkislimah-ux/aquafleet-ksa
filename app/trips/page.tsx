@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { type SelectableStation, type WaterStationRow } from "@/lib/station-pricing";
-import type { Trip, WaterType, CommissionMode, ProjectStatus, DriverStatus, ProjectDriver, PaymentMode } from "@/lib/db-types";
+import type { Trip, WaterType, CommissionMode, ProjectStatus, DriverStatus, ProjectDriver, PaymentMode, InvoicePaymentMethod } from "@/lib/db-types";
 import type { LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { todayKey } from "@/lib/utils";
@@ -85,7 +85,12 @@ export type SpecialChargeRow = {
 export type PaidInvoiceRow = {
   id: string;
   customer_id: string;
-  payment_method: "cash" | "bank_transfer" | null;
+  // IMPORTED, NOT RE-DECLARED. This was a hand-rolled "cash" | "bank_transfer"
+  // copy of the union in lib/db-types.ts, which meant migration 0134's third
+  // value ('balance') would have arrived at runtime from a column the type said
+  // could not produce it — the compiler agreeing with a stale copy of the truth.
+  // One declaration, same rule as StationPricing (see CLAUDE.md).
+  payment_method: InvoicePaymentMethod | null;
   payment_reference: string | null;
   payment_date: string | null;
   paid_at: string | null;

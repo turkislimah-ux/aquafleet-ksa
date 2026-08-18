@@ -65,7 +65,12 @@ import {
   type ConsumingCharge,
   type TopupStatementInput,
 } from "@/lib/prepaid";
-import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
+import {
+  WATER_TYPE_LABELS,
+  PAYMENT_METHOD_LABELS,
+  type WaterType,
+  type InvoicePaymentMethod,
+} from "@/lib/db-types";
 import { formatTripRef, sampleTripRef } from "@/lib/trip-ref";
 import TripRefLink from "@/components/TripRefLink";
 
@@ -83,7 +88,10 @@ export type TripMeta = { truckPlate: string | null; truckCapacityM3: number | nu
 // PaidInvoiceRow). Not engine output; a plain data pass-through.
 export type StatementPayment = {
   id: string;
-  payment_method: "cash" | "bank_transfer" | null;
+  // Imported, not re-declared — see PaidInvoiceRow (app/trips/page.tsx), which
+  // this mirrors field-for-field. A hand-rolled two-value copy would have denied
+  // 0134's 'balance' at the type level while the column returns it.
+  payment_method: InvoicePaymentMethod | null;
   payment_reference: string | null;
   payment_date: string | null;
   paid_at: string | null;
@@ -382,11 +390,21 @@ export default function StatementModal({
                   ) : (
                     <tr key={`payment-${r.row.id}`}>
                       <TD className="tabular-nums">{paymentDateOf(r.row) || "—"}</TD>
+                      {/* The REFERENCE column. bank_transfer is the only method
+                          that carries one (0039 requires it), so it shows the
+                          reference; every other method names itself from the
+                          shared label map instead. Reading the branch the other
+                          way round — special-casing 'cash' and letting
+                          everything else fall through to the reference — is what
+                          made 0134's 'balance' render as a bare em dash: it has
+                          no reference either, and never will. */}
                       <TD>
-                        {r.row.payment_method === "cash" ? (
-                          "Cash"
-                        ) : (
+                        {r.row.payment_method === "bank_transfer" ? (
                           r.row.payment_reference || <span className="muted">—</span>
+                        ) : r.row.payment_method ? (
+                          PAYMENT_METHOD_LABELS[r.row.payment_method]
+                        ) : (
+                          <span className="muted">—</span>
                         )}
                       </TD>
                       <TD>

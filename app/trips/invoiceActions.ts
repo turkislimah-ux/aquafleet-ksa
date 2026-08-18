@@ -678,15 +678,29 @@ export async function voidInvoice(invoiceId: string, reason: string): Promise<Ac
 // upload is plain I/O). cash needs no file. Locks both covered AND unpaid
 // trips (migration 0027's pay_invoice()).
 //
-// v3 Batch 2 (migration 0039, NOT YET RUN) — three new postpaid-only fields:
-// reference/date/note. Prepaid's "Pay with Balance" (Batch 1) calls this
-// same action but always with paymentMethod "cash" and no reference/date/
-// note fields in its FormData — trimmed-to-null here same as any other
-// caller, so that path is unaffected. bank_transfer requires reference AND
-// date (a real bank transaction exists to point to — same reasoning as the
-// existing proof-file requirement); cash leaves both optional. note is
-// always optional. Trimmed to null here (not in the RPC), same convention
-// as recordTopup (lib/actions/finance.ts).
+// v3 Batch 2 (migration 0039, APPLIED) — three postpaid-only fields:
+// reference/date/note. bank_transfer requires reference AND date (a real bank
+// transaction exists to point to — same reasoning as the existing proof-file
+// requirement); cash leaves both optional. note is always optional. Trimmed to
+// null here (not in the RPC), same convention as recordTopup
+// (lib/actions/finance.ts).
+//
+// THREE METHODS, AND 'balance' IS NOT A THIRD WAY TO HAND OVER MONEY.
+// 'balance' (migration 0134) is what prepaid's "Pay with Balance" writes: the
+// prepaid engine already deducted the money at delivery / add-to-draft, so this
+// records WHICH settlement happened. It therefore requires no proof file, no
+// reference and no date — the bank_transfer branch below is the only one that
+// gates on those, and 'balance' deliberately does not fall into it. Sending
+// those fields would be inventing a bank transaction that never took place.
+//
+// THIS ALLOWLIST IS NOT THE PREPAID GUARD, AND MUST NOT BE MISTAKEN FOR IT.
+// It admits 'balance' flatly. What refuses 'balance' on a POSTPAID invoice is
+// pay_invoice() itself (0134), which resolves the invoice's mode — snapshot
+// first, else the customer's project mode — BEFORE its update and raises if the
+// result is not exactly 'prepaid'. Enforcement is server-side in the database on
+// purpose: a client-side check here would be bypassable and would also be a
+// second expression of a money rule. If that error surfaces to a user, the RPC's
+// message is what they see, unwrapped.
 // ---------------------------------------------------------------------------
 export async function markInvoicePaid(formData: FormData): Promise<ActionResult> {
   const supabase = createClient();
@@ -698,8 +712,8 @@ export async function markInvoicePaid(formData: FormData): Promise<ActionResult>
   const note = String(formData.get("paymentNote") ?? "").trim() || null;
 
   if (!invoiceId) return { error: "Missing invoice id." };
-  if (paymentMethod !== "cash" && paymentMethod !== "bank_transfer") {
-    return { error: "Payment method must be cash or bank_transfer." };
+  if (paymentMethod !== "cash" && paymentMethod !== "bank_transfer" && paymentMethod !== "balance") {
+    return { error: "Payment method must be cash, bank_transfer or balance." };
   }
 
   let proofPath: string | null = null;

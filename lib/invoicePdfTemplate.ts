@@ -142,13 +142,19 @@ const STATUS_LABEL_EN: Record<InvoiceStatus, string> = {
   paid: "Paid",
   void: "Sales Return",
 };
+// 'balance' = a prepaid invoice settled from the customer's prepaid balance
+// (migration 0134). Both maps must stay exhaustive — Record<InvoicePaymentMethod,
+// string> is what forces a new method to be named in BOTH languages rather than
+// rendering `undefined` onto a legal document.
 const PAYMENT_METHOD_AR: Record<InvoicePaymentMethod, string> = {
   cash: "نقدًا",
   bank_transfer: "تحويل بنكي",
+  balance: "الرصيد المدفوع مقدمًا",
 };
 const PAYMENT_METHOD_EN: Record<InvoicePaymentMethod, string> = {
   cash: "Cash",
   bank_transfer: "Bank transfer",
+  balance: "Prepaid balance",
 };
 
 function esc(s: string | null | undefined): string {
