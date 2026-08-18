@@ -405,19 +405,20 @@ export default function DriversClient({
   // source the driver detail panel reads. ONE source read in two places, so the
   // KPI and the panel cannot disagree.
   //
-  // DO NOT PUT THIS BACK ON drivers.incidents_12mo. It was reverted to that
-  // column once (e0326d0) on an instruction that has since been withdrawn on
-  // live evidence: the column reads 0 for every driver — 0023 removed the form
-  // controls that fed it and nothing has written it since — while a real
-  // driver_incidents row exists inside the 12-month window. The KPI therefore
-  // printed 0 next to a panel showing a real incident, and the comment sitting
-  // here at the time said that mismatch was intended. It was not. The old
-  // instruction ("KPI reads incidents_12mo, do not reconcile with the detail
-  // panel") is WRONG and must not be re-applied.
+  // DO NOT PUT THIS BACK ON a stored per-driver incident counter. This KPI was
+  // reverted to the old `drivers.incidents_12mo` column once (e0326d0) on an
+  // instruction that has since been withdrawn on live evidence: the column read
+  // 0 for every driver — 0023 removed the form controls that fed it and nothing
+  // has written it since — while a real driver_incidents row exists inside the
+  // 12-month window. The KPI therefore printed 0 next to a panel showing a real
+  // incident, and the comment sitting here at the time said that mismatch was
+  // intended. It was not. The old instruction ("KPI reads incidents_12mo, do
+  // not reconcile with the detail panel") is WRONG and must not be re-applied.
   //
-  // incidents_12mo is a confirmed dead duplicate and is slated to be DROPPED in
-  // its own migration during the Staff cleanup — app refs stripped first, then
-  // the drop, the same ordering `rating`/0132 used.
+  // That column no longer exists to go back to: it was a confirmed dead
+  // duplicate, its app references were stripped in the Staff cleanup and it is
+  // dropped by 0133 — app refs first, then the drop, the ordering `rating`/0132
+  // used.
   const incidentsInWindow = useMemo(() => {
     const cutoff = new Date(`${today}T00:00:00`);
     cutoff.setFullYear(cutoff.getFullYear() - 1);

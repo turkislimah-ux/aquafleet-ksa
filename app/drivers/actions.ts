@@ -55,9 +55,10 @@ function parse(formData: FormData) {
     // status is dead (Commit 4): derived driver state (lib/driver-state.ts)
     // reads drivers.active, not this column. No longer written from the form —
     // the DB column + NOT NULL DEFAULT 'active' stay untouched.
-    // safety_score/hours_this_week/incidents_12mo (Commit B, 0023): form
-    // controls removed, no longer written — columns stay in DB, dead. `rating`
-    // was in that group too and has since been dropped from the table (0132).
+    // safety_score/hours_this_week (Commit B, 0023): form controls removed, no
+    // longer written — columns stay in DB, dead. `rating` and `incidents_12mo`
+    // were in that group too and are dropped from the table outright, by 0132
+    // and 0133.
     phone: nullable(formData.get("phone")),
     hire_date: nullable(formData.get("hire_date")),
     home_station: nullable(formData.get("home_station")),

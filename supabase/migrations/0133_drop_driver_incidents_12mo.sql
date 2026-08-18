@@ -1,0 +1,49 @@
+-- 0133_drop_driver_incidents_12mo.sql
+--
+-- DROP drivers.incidents_12mo PERMANENTLY. No money touches this file: no RPC
+-- is created or replaced, no view is created or replaced, no amount is
+-- computed, and nothing here is read by pay_commission or any payout path.
+--
+-- WHY IT IS DEAD
+--
+--   Added by 0006 as a display-only counter with, in its own words, "no real
+--   source". 0023 replaced that whole safety/rating/hours/incidents block and
+--   removed the form controls that fed it, so nothing has written the column
+--   since — it reads 0 on every driver row.
+--
+--   The real incident record is the `driver_incidents` table (0024). The
+--   Incidents (12mo) KPI and the driver detail panel BOTH count rows from it,
+--   which is what makes them agree. While the KPI briefly read this column
+--   instead (e0326d0, since withdrawn) it printed 0 beside a panel showing a
+--   real incident. A writer for this column was the wrong answer; the column
+--   is. Do not re-add it, and do not "fix" it by backfilling a count — that
+--   would create a second figure that can drift from driver_incidents.
+--
+-- ORDERING — THE APP HALF LANDED FIRST, DELIBERATELY
+--
+--   This is the same code-then-migrate ordering `rating`/0132 used. A PostgREST
+--   select naming a column that no longer exists returns 400, not a silent
+--   null, so dropping first would take both Fleet fetches down the instant it
+--   applied. The app references were stripped and committed BEFORE this file is
+--   run: `lib/db-types.ts` no longer declares the field, and
+--   `app/drivers/page.tsx` selects `*` on drivers, so no query names it.
+--
+-- BEFORE APPLYING — verify the column is still dead. Expect 0 rows from each:
+--
+--   -- any non-zero / non-null value anywhere?
+--   select count(*) from public.drivers where coalesce(incidents_12mo, 0) <> 0;
+--
+--   -- any view or function referencing it?
+--   select table_name from information_schema.view_column_usage
+--    where table_schema = 'public' and column_name = 'incidents_12mo';
+--   select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--    where n.nspname = 'public' and pg_get_functiondef(p.oid) like '%incidents_12mo%';
+--
+-- AFTER APPLYING — expect 0 rows (the column is gone):
+--
+--   select column_name from information_schema.columns
+--    where table_schema = 'public' and table_name = 'drivers'
+--      and column_name = 'incidents_12mo';
+
+alter table public.drivers
+  drop column if exists incidents_12mo;

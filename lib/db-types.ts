@@ -130,12 +130,18 @@ export type Driver = {
   // FK -> operation_stations.id (migration 0022; nullable, on delete set null).
   home_station: string | null;
   hours_this_week: number | null;
-  incidents_12mo: number | null;
+  // `incidents_12mo` used to sit here. Dead since 0023 removed the form
+  // controls that fed it: nothing has written it since, it read 0 on every
+  // row, and the Incidents (12mo) KPI counts live `driver_incidents` rows
+  // instead (see app/drivers/DriversClient.tsx). The field is stripped here
+  // FIRST so the column can be dropped without the app ever naming it — a
+  // select naming a column that no longer exists is a 400 from PostgREST, not
+  // a silent null. Do not re-add it; the drop is 0133.
   // Added in 0023 — replaces the dead safety/rating/hours/incidents fields
   // above. Those columns stayed on the table and the form stopped reading or
-  // writing them; `rating` is the one that has since been dropped outright
-  // (0132), the rest are still there. duty_hours is NOT NULL (DB default 10);
-  // iqama_expiry is optional.
+  // writing them; `rating` (0132) and `incidents_12mo` (0133) have since been
+  // dropped outright, the rest are still there. duty_hours is NOT NULL (DB
+  // default 10); iqama_expiry is optional.
   duty_hours: number;
   iqama_expiry: string | null;
   // Added in 0008 — standalone monthly salary (SAR). Display-only: never part of
