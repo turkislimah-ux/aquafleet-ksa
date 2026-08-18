@@ -209,8 +209,11 @@ relevant skill(s) **when the task calls for it**:
   ```
   This is not per-feature style — it is the standing rule for every view, and
   the failure is invisible: the view keeps returning rows, just with the wrong
-  privileges. Live count to check against: **40 views, 40 security_invoker, 0
-  anon-readable.**
+  privileges. Live count to check against: **44 views, 44 security_invoker, 0
+  anon-readable** (re-measured during the Staff cleanup; this line read 40/40 for
+  months while four more views had been added — **the two counts matching is the
+  check, not the number**, so re-measure and update rather than trusting the
+  figure written here).
 - **`create or replace view` can only APPEND a column** — it cannot insert,
   reorder or rename one (error **42P16**, which cost 0112 an apply cycle). If a
   new column belongs in the middle, it still goes at the end.
@@ -2459,8 +2462,14 @@ relevant skill(s) **when the task calls for it**:
   ONE month, and `48d9629` is the repair for the app half, which was still calling
   the old all-time signature. **The screen could show one month and pay another** —
   that is the defect this closed, and it is why the two halves are a pair.
-  - `commission_cycles` is now **one row per driver per month** (`ensureCycle` upserts
-    `onConflict "driver_id,month_key"` — a hard dependency on 0131's re-grain).
+  - **`commission_periods`** is now **one row per driver per month** (`ensureCycle`
+    upserts `onConflict "driver_id,month_key"` — a hard dependency on 0131's re-grain).
+    **This entry used to call that table `commission_cycles`, which DOES NOT EXIST**
+    — the loose name came from the app's own `cycles`/`CommCycle` variable and type,
+    which are deliberately generic and are NOT the table name. Every query in
+    `app/drivers/actions.ts` names `commission_periods` correctly; only this
+    paragraph was wrong. Sibling trap: `staff_commission_types` does not exist
+    either — it is `commission_types`.
     `payCommission(driverId, monthKey)`, `approvePayout`, `setBonusStatus` and
     `reopenPayout` are all month-scoped, and `setCommissionBonus` refuses to write
     into a month that is already paid.
@@ -2706,19 +2715,124 @@ relevant skill(s) **when the task calls for it**:
     opposite of intent is worse than no spec. Its label assertions survive, because
     labelling every state including the zeros is a rule both versions obey.
 
+- **STAFF PAGE CLEANUP — one survey pass over the whole page, commits `bea2a52`
+  (the `incidents_12mo` strip, alone and first) and `343923f` (everything else).**
+  13 files, ~6,644 lines, surveyed for dead code, 0098 drift, duplicated
+  definitions, lying comments, UTC-vs-Riyadh date bugs, dead specs and RLS.
+  **THE MONEY GATE WAS NOT TRIGGERED:** `lib/commission-rows.ts`,
+  `SalaryHistoryModal.tsx`, `staff.monthly_salary_sar` and the unpaid-commission
+  column source are untouched. `CommissionsTab.tsx` WAS edited — a stale comment
+  and a type-only re-export trim, no arithmetic — and that is recorded here so a
+  later reader who sees the file in this commit does not have to re-derive that it
+  was safe.
+  - **`drivers.incidents_12mo`: the app half is DONE, `0133` IS DRAFTED AND NOT
+    APPLIED.** `lib/db-types.ts:133` was the ONE real reference and now carries a
+    tombstone modelled on the adjacent `rating` block. `supabase/migrations/
+    0133_drop_driver_incidents_12mo.sql` holds the single `drop column if exists`
+    plus before/after verification queries, **for the architect to run** — the
+    app-refs-stripped-FIRST ordering is the `rating`/`0132` precedent, because a
+    PostgREST select naming a dropped column returns **400**. `app/drivers/
+    actions.ts`'s comment names the drop as *by* 0132 and 0133, present tense —
+    **not** a past-tense claim that it happened, which is the same class of error
+    as writing an invented commit hash into this file.
+  - **`RoleSelect` IS DELETED — one definition where there were two.** ~106 lines
+    in `StaffTab.tsx`, line for line `./LookupSelect`, which was written later as
+    its generalized form and whose own header already said so. `addStaffRole`
+    already matches `onAdd` exactly, so nothing adapts between them, and the two
+    behavioural deltas are generic error strings — **the role wording users
+    actually see is passed in through `addLabel`/`newPlaceholder`.** A tombstone
+    says not to re-add a role-specific copy.
+    - **`noUnusedLocals` NAMED THE ORPHANED IMPORTS; MY PREDICTION HAD BEEN
+      WIDER THAN REALITY.** I expected `useMemo`, `useRouter`, `Btn` and
+      `StaffRole` to fall out too; the compiler showed all four are still used
+      elsewhere in the file and only `@/lib/slug` and `cn` were dead. **Delete,
+      then let the compiler tell you the closure** — guessing it produces
+      collateral damage that looks like part of the same change.
+  - **TWO DATE BUGS, AND THEY ARE THE SAME BUG TWICE.** Both built a key with
+    `new Date("YYYY-MM-DDT00:00:00")` — no `Z`, so it parses **local** — then
+    serialized with `.toISOString()`, which is **UTC**. East of UTC that slices
+    back one day, every day: `StaffTab`'s iqama window opened at **89** days while
+    its own comment said 90 (a lying comment and a date bug in one place), and
+    `DriversClient`'s incident 12-month window opened a day late.
+    - Fixed through **two NEW shared helpers in `lib/utils.ts`** —
+      `addDaysToKey` / `addYearsToKey` — which keep the whole round trip in UTC
+      (`T00:00:00Z` + `setUTCDate`/`setUTCFullYear`) and normalize Feb-29 as a
+      side effect. **Routing both sites through one definition was the point**;
+      fixing them in place would have left two copies of the correct expression
+      the way there were two of the wrong one.
+    - **THE OTHER `new Date` SITES ARE CORRECT AND WERE LEFT ALONE** — a
+      `new Date(iso)` on a **timestamptz** (`HistoryTab:38`, `StaffTab:435`,
+      `actions.ts:169,251`), a `new Date(iso + "T00:00:00").toLocaleDateString()`
+      for **local display** (`LeaveSection:27`, `MechanicCommissionsSection:39`),
+      and all pure string-slice date math. The bug shape is specifically
+      **local parse → UTC serialize**, not `new Date` itself.
+  - **`YEAR_END` BECAME `yearEndKey(today)`** in `DriversClient` — a module-level
+    const with two independent faults: it read the **browser** clock rather than
+    the server's Riyadh `today`, and being captured at module load it **never
+    rolled over** into a new year. Ruled a clear fix rather than a Turki decision,
+    since neither fault has a defensible reading.
+  - **`app/drivers/page.tsx`'s ERROR CHAIN COVERED 19 OF 21 FETCHES, AND THE TWO
+    MISSING ONES WERE NOT HARMLESS.** `activeWorkOrdersRes` and
+    `activeOutsourcedJobsRes` feed `buildActiveJobTruckIds`; **a failed read
+    arrives as `null`, and `null` yields an EMPTY set** — so every truck reads as
+    having no active job and a truck in the workshop shows as available.
+    That is the Dashboard's **"a failed read must never claim an empty queue"** in
+    a different costume: silently reporting the all-clear is worse than reporting
+    nothing.
+  - **31 OF 35 SPEC FILES DELETED — a spec that cannot pass in ANY configuration
+    is not documentation.** 24 drove diagnostic routes torn down at the end of
+    their own pass (this repo's standing convention), and
+    `station-type-pricing.spec.ts` targets the REAL `/trips` route but its own
+    header admits it needs the reverted `VERIFY_BYPASS`. A permanently-red suite
+    is a broken build everyone learns to ignore, **which is what makes a real
+    failure invisible**. Survivors, all pure-unit, no server: `cost-colors`,
+    `driver-assign-gate`, `month-keys`, `trip-station-gate` — 28 tests, **run
+    green BEFORE anything was deleted**, so the deletion was subtraction from a
+    known-good baseline rather than a hope.
+    - **A QUOTED-ROUTE GREP ALONE UNDER-REPORTS.** Many specs embed the route in a
+      full `http://localhost:3002/...` const, so the sweep had to extract quoted
+      literals **and** `^const [A-Z0-9_]+ ?=` lines, then check each of the 24
+      candidate routes for existence in `app/`. All 24 are gone.
+    - `playwright.config.ts`'s own comment had become a lying comment ("throwaway
+      config for the follow-up-batch browser test"). It now states that every
+      remaining spec needs no server, why the 31 went, and why `baseURL` is kept
+      with **deliberately no `webServer` auto-start** — `next build`/dev-server
+      interaction has taken this repo down twice.
+  - **SECURITY: CLEAN.** All 14 staff-surface tables carry exactly one
+    `authenticated_all_<table>` policy (`roles={authenticated}`, `cmd=ALL`,
+    `qual=true`). Anon holds the table-level SELECT **grant** but every policy is
+    `authenticated`-scoped, so anon receives **zero rows** —
+    **`has_table_privilege('anon', …, 'SELECT')` is a GRANT check, not a
+    row-visibility check.** An over-broad grant, not a live exposure; revoking it
+    is a DB change and therefore the architect's.
+  - **TWO STALE FACTS IN THIS FILE WERE CORRECTED FROM LIVE MEASUREMENT** — §6's
+    view posture (40/40 → **44/44/0**, with the note that *the two counts matching
+    is the check, not the number*) and the commission entry's `commission_cycles`
+    → **`commission_periods`**. Both are recorded in their own sections above.
+  - **AN EMPTY GREP FROM THE WRONG DIRECTORY IS INDISTINGUISHABLE FROM A REAL
+    FINDING.** A `commission_cycles|commission_periods` sweep returned nothing at
+    all and briefly read as "no references anywhere"; the shell's cwd had drifted
+    into `tests/` from an earlier `cd`. From the repo root it returns 11+ hits in
+    `app/drivers/actions.ts`. **Absence of output is only evidence if you know
+    where you were standing.**
+  - **0098 drift: NONE FOUND.** No Staff metric is computed in the page that
+    belongs in a view — the KPIs read live rows the detail panels read too, which
+    is the reconciliation batch 1 already established.
+  - Verified: `npx tsc --noEmit` clean, `npx playwright test` **28 passed**.
+
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
   entries above; the old "Archive deferred / preview/archive.js is the spec" note
   was stale and has been removed.)
-  - **THE STAFF CLEANUP CARRIES `drivers.incidents_12mo`'s DROP** — confirmed dead
-    (unwritten since `0023` removed its form controls, 0 on every row, nothing reads
-    it since `87eb4b5`), and confirmed NOT to be done as a standalone cycle. It rides
-    with the cleanup's full survey because the survey is what establishes the ordering
-    a drop needs: strip the app references first (`lib/db-types.ts:133` still declares
-    it), then drop — the `rating`/`0132` precedent, where the app half landed first so
-    the page was never down. **A PostgREST select naming a dropped column returns 400**,
-    so the reverse order takes both Fleet fetches out the instant it applies. **A writer
-    for the column was the wrong answer; the column is.**
+  - **`drivers.incidents_12mo`'s DROP — THE APP HALF IS DONE, THE SQL IS WAITING ON
+    THE ARCHITECT.** Confirmed dead (unwritten since `0023` removed its form controls,
+    0 on every row, nothing reads it since `87eb4b5`). It rode with the Staff cleanup's
+    survey because the survey is what establishes the ordering a drop needs: the app
+    references were stripped first (`bea2a52`), and **`0133` is drafted to disk and NOT
+    applied** — the `rating`/`0132` precedent, where the app half landed first so the
+    page was never down. **A PostgREST select naming a dropped column returns 400**, so
+    the reverse order takes both Fleet fetches out the instant it applies. **A writer
+    for the column was the wrong answer; the column is.** See the Staff cleanup entry.
 - **Deferred — Consumption:** customer archive documents as a schema question
   (`customer_id` on `archive_documents`) was raised at Archive Phase 3 and not
   decided; an optional UNIQUE on `drivers.iqama_number` / `staff.iqama_number` /
