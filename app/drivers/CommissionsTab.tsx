@@ -876,10 +876,20 @@ function SpecialsModal({
   const editing = mySpecials.find((s) => s.id === editId) ?? null;
 
   // The bonus month. Separate from the lens on purpose (see the header note) and
-  // re-seeded whenever the lens moves, so the default is always "the month I am
-  // looking at" rather than a stale pick from a previous open.
-  const [bonusMonth, setBonusMonth] = useState<string>(monthKey);
-  useEffect(() => setBonusMonth(monthKey), [monthKey]);
+  // deliberately STARTS EMPTY — the month must be picked, it is never defaulted.
+  //
+  // It used to seed from monthKey, which meant the control could not be empty and
+  // so could never refuse a save. That is the wrong shape for this one field: a
+  // bonus filed against the wrong month is a money error that nobody sees until
+  // that month is paid, and a pre-filled month is exactly how it happens — the
+  // reader agrees with a value they never chose. Every OTHER month-scoped write on
+  // this screen takes the lens, because the lens is what the reader is looking at;
+  // this one does not, because it is the one that can disagree with the lens.
+  //
+  // Re-seeded to empty (not to the new lens) whenever the lens moves, so moving the
+  // lens can never silently re-point a pick made under the old one.
+  const [bonusMonth, setBonusMonth] = useState<string>("");
+  useEffect(() => setBonusMonth(""), [monthKey]);
 
   // The bonus SHOWN is the one on that month's own cycle row. isUnpaid keeps a
   // settled month's frozen bonus out of an editable box — setCommissionBonus
@@ -989,7 +999,9 @@ function SpecialsModal({
             <div className="flex-1 min-w-[180px]">
               <div className="font-medium text-sm flex items-center gap-2"><Banknote className="h-4 w-4 muted" /> Manager Bonus</div>
               <div className="text-[11px] muted">
-                Discretionary bonus for {monthLabel(bonusMonth)} (current: {formatSar(bonus)}).
+                {bonusMonth
+                  ? `Discretionary bonus for ${monthLabel(bonusMonth)} (current: ${formatSar(bonus)}).`
+                  : "Discretionary bonus — pick the month it is filed against."}
               </div>
             </div>
             <select
@@ -1000,6 +1012,7 @@ function SpecialsModal({
               style={INPUT_STYLE}
               aria-label="Bonus month"
             >
+              <option value="">Select month…</option>
               {monthOptions.map((k) => (
                 <option key={k} value={k}>
                   {monthLabel(k)}
@@ -1012,11 +1025,13 @@ function SpecialsModal({
               step="50"
               value={bonusVal}
               onChange={(e) => setBonusVal(e.target.value)}
-              disabled={busy}
+              disabled={busy || !bonusMonth}
               className="px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-28 tabular-nums disabled:opacity-60"
               style={INPUT_STYLE}
             />
-            <OutlineBtn onClick={() => run(() => setCommissionBonus(driverId, bonusMonth, Number(bonusVal) || 0))} disabled={busy}>
+            {/* Both the amount and Set are gated on the month, not just Set — an
+                editable amount beside a greyed-out Set reads as a broken button. */}
+            <OutlineBtn onClick={() => run(() => setCommissionBonus(driverId, bonusMonth, Number(bonusVal) || 0))} disabled={busy || !bonusMonth}>
               <Save className="h-3.5 w-3.5" /> Set
             </OutlineBtn>
             {bonus !== 0 && (
@@ -1030,7 +1045,12 @@ function SpecialsModal({
                 <Trash2 className="h-4 w-4" />
               </button>
             )}
-            {bonusMonth !== monthKey && (
+            {!bonusMonth && (
+              <p className="basis-full text-[11px] muted">
+                No month selected — a bonus cannot be saved until you pick the month it belongs to.
+              </p>
+            )}
+            {bonusMonth !== "" && bonusMonth !== monthKey && (
               <p className="basis-full text-[11px] text-amber-600 dark:text-amber-400">
                 Filing against {monthLabel(bonusMonth)}, not {monthLabel(monthKey)} — this amount will not appear in
                 the view you are in. Switch the tab&apos;s month lens to {monthLabel(bonusMonth)} to review and pay it.
