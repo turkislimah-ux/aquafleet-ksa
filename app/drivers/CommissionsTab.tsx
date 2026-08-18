@@ -36,6 +36,7 @@
 // trip count / rate. We don't — base is computed-truth.
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Download, Plus, Pencil, Eye, Save, Trash2, Check, X, Banknote, Info, Ban, RotateCcw } from "lucide-react";
 import { Stat, StatusPill } from "@/components/ui";
@@ -104,8 +105,32 @@ const STATUS_LABEL: Record<ReviewStatus, string> = {
 
 function csvCell(v: string | number): string {
   const s = String(v ?? "");
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  // \r is quoted too. The row terminator below is CRLF, so a bare CR inside a
+  // value would otherwise be read as the start of one — a driver name pasted in
+  // from another system is exactly where that arrives.
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
+
+// Excel opens a .csv with the SYSTEM list separator, not the comma the format is
+// named after. On a locale where that separator is ";" every row lands in a
+// single cell, which is what "the export is broken" looks like to the person
+// opening it. The `sep=` directive is Excel's own override and is honoured
+// whatever the locale, so the file reads the same on every machine.
+//
+// It costs one stray first row in Numbers/Sheets, which do not know the
+// directive. That trade is deliberate: a visible junk row is recoverable in
+// seconds, a silently single-columned sheet is not, and Excel is what this file
+// is exported for.
+const CSV_SEP = ",";
+const CSV_SEP_DIRECTIVE = `sep=${CSV_SEP}`;
+
+// Excel assumes the system ANSI codepage unless a UTF-8 BOM says otherwise, and
+// without it every Arabic driver name renders as mojibake. The BOM is the whole
+// reason this export was unusable for an Arabic roster.
+// Built from its code point rather than typed as a literal: U+FEFF renders as
+// nothing at all, so a literal here would be invisible in every editor and
+// indistinguishable from a stray edit that deleted it.
+const UTF8_BOM = String.fromCharCode(0xfeff);
 
 const CHIPS = ["all", "pending", "approved", "denied"] as const;
 type Filter = (typeof CHIPS)[number];
@@ -255,6 +280,7 @@ export default function CommissionsTab({
   specials,
   adjustments,
   projectsById,
+  controlsHost = null,
 }: {
   drivers: DriverLite[];
   trips: CommTripRow[];
@@ -262,6 +288,18 @@ export default function CommissionsTab({
   specials: CommSpecialRow[];
   adjustments: CommAdjustmentRow[];
   projectsById: Record<string, string>;
+  // WHERE the month lens and Export CSV render — not WHETHER. Given a host node
+  // they are portalled up beside the sub-tabs; given nothing they stay in this
+  // card's own header, which is what a standalone mount (a diagnostic route, a
+  // future embed) gets.
+  //
+  // A PORTAL RATHER THAN LIFTING THE STATE, deliberately. `monthKey` is the lens
+  // this file's header calls load-bearing: the figure beside the Pay button and
+  // the monthKey handed to payCommission are the same value, and they cannot
+  // diverge only because there is exactly one of it. Moving it to the parent
+  // would put a prop boundary between the two. `buildMonthOptions` is also
+  // module-private, so the parent could not build the option list anyway.
+  controlsHost?: HTMLElement | null;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [breakdownFor, setBreakdownFor] = useState<string | null>(null);
@@ -299,7 +337,10 @@ export default function CommissionsTab({
   function exportCsv() {
     const header = ["Driver", "Driver ID", "Month", "Base SAR", "Trips", "Projects", "Specials SAR", "Adjustments SAR", "Bonus SAR", "Total SAR", "Payout Status"];
     const body = list.map((r) => [r.name, r.driverId, monthKey, r.base, r.trips, r.projects, r.specials, r.adjustments, r.bonus, r.total, r.payoutStatus]);
-    const csv = [header, ...body].map((row) => row.map(csvCell).join(",")).join("\r\n");
+    // Not named `rows` — that is the component's own unfiltered row list, and
+    // shadowing it here is how an export quietly starts ignoring the filter.
+    const lines = [header, ...body].map((row) => row.map(csvCell).join(CSV_SEP));
+    const csv = UTF8_BOM + [CSV_SEP_DIRECTIVE, ...lines].join("\r\n") + "\r\n";
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -311,8 +352,43 @@ export default function CommissionsTab({
     URL.revokeObjectURL(url);
   }
 
+  // The two page-scope controls. Rendered once, mounted in one of two places.
+  const scopeControls = (
+    <div className="flex items-center gap-2 flex-wrap">
+      {/* THE LENS — the scope of every figure and every action on this screen,
+          not a filter over a rolling balance. Deliberately sized and labelled
+          like a scope control rather than dropped in among the status chips. */}
+      <label className="flex items-center gap-2 h-9 ps-3 pe-1 rounded-lg border" style={BORDER}>
+        <span className="text-xs muted uppercase tracking-[.05em]">Month</span>
+        <select
+          value={monthKey}
+          onChange={(e) => setMonthKey(e.target.value)}
+          className="h-7 pe-1 bg-transparent text-sm font-medium outline-none focus:ring-2 focus:ring-brand-500/30 rounded"
+        >
+          {monthOptions.map((k) => (
+            <option key={k} value={k}>
+              {monthLabel(k)}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <button
+        type="button"
+        onClick={exportCsv}
+        disabled={list.length === 0}
+        className="h-9 px-3 rounded-lg text-sm font-medium inline-flex items-center gap-2 border hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+        style={BORDER}
+      >
+        <Download className="h-4 w-4" /> Export CSV
+      </button>
+    </div>
+  );
+
   return (
     <div className="card p-4">
+      {controlsHost ? createPortal(scopeControls, controlsHost) : null}
+
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <span className="text-emerald-600 dark:text-emerald-400 text-lg">﷼</span>
@@ -325,24 +401,9 @@ export default function CommissionsTab({
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
-          {/* THE LENS — the scope of every figure and every action on this screen,
-              not a filter over a rolling balance. Deliberately sized and labelled
-              like a scope control rather than dropped in among the status chips. */}
-          <label className="flex items-center gap-2 h-9 ps-3 pe-1 rounded-lg border" style={BORDER}>
-            <span className="text-xs muted uppercase tracking-[.05em]">Month</span>
-            <select
-              value={monthKey}
-              onChange={(e) => setMonthKey(e.target.value)}
-              className="h-7 pe-1 bg-transparent text-sm font-medium outline-none focus:ring-2 focus:ring-brand-500/30 rounded"
-            >
-              {monthOptions.map((k) => (
-                <option key={k} value={k}>
-                  {monthLabel(k)}
-                </option>
-              ))}
-            </select>
-          </label>
-
+          {/* The status chips filter the TABLE. They stay in the card header
+              because that is what they act on; the month lens and the export act
+              on the whole screen and have moved up beside the sub-tabs. */}
           <div className="flex items-center gap-1 flex-wrap">
             {CHIPS.map((s) => (
               <button
@@ -360,15 +421,7 @@ export default function CommissionsTab({
             ))}
           </div>
 
-          <button
-            type="button"
-            onClick={exportCsv}
-            disabled={list.length === 0}
-            className="h-9 px-3 rounded-lg text-sm font-medium inline-flex items-center gap-2 border hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={BORDER}
-          >
-            <Download className="h-4 w-4" /> Export CSV
-          </button>
+          {controlsHost ? null : scopeControls}
         </div>
       </div>
 

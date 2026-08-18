@@ -83,9 +83,19 @@ test.describe("Staff page UI batch", () => {
     for (const label of ["Active", "Idle", "Off duty", "On leave"]) {
       await expect(bar.getByText(label, { exact: true })).toBeVisible();
     }
-    await expect(bar.locator("div.text-xl.font-semibold")).toHaveCount(4);
-    await expect(bar.locator("div.text-xl.font-semibold").nth(0)).toHaveText("1");
-    await expect(bar.locator("div.text-xl.font-semibold").nth(3)).toHaveText("1");
+
+    // THE PER-STATE FIGURE ASSERTIONS THAT USED TO SIT HERE WERE DELETED, NOT
+    // REPOINTED. This card shipped as ONE combined proportional track with a
+    // four-cell legend below it (figures at `text-xl font-semibold`); batch 2
+    // replaced it wholesale with FOUR separate bars, one per state, sharing the
+    // roster as a single denominator. Those assertions therefore described the
+    // opposite of what the card now is, and a spec asserting the opposite of
+    // intent is worse than no spec — someone eventually "fixes" the code to
+    // match it. The four-bar card is covered in full by
+    // tests/staff-batch2.spec.ts's item-3 test, which asserts the track count,
+    // the per-state figures AND the shared denominator (every fill at 25%).
+    // The label assertions above survive unchanged, because labelling every
+    // state including the zeros is a rule both versions of the card obey.
   });
 
   test("item 4 — status pills: Active green, Idle amber, Off duty / On leave yellow", async ({ page }) => {

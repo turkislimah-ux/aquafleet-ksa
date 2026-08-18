@@ -317,16 +317,8 @@ export default function StaffTab({
             {staff.map((p) => {
               const leaveDays = leaveDaysByStaff.get(p.id) ?? 0;
               return (
-              <div key={p.id} className="relative">
-                {leaveDays > 0 && (
-                  <span
-                    className="absolute -top-1.5 -left-1.5 z-10 rounded-full bg-amber-500 text-white text-[10px] font-semibold px-1.5 py-0.5 shadow"
-                    title={`${leaveDays} leave day${leaveDays === 1 ? "" : "s"} this year`}
-                  >
-                    {leaveDays}d leave
-                  </span>
-                )}
               <button
+                key={p.id}
                 type="button"
                 onClick={() => setDetail(p)}
                 className={
@@ -352,8 +344,41 @@ export default function StaffTab({
                   <div className="text-[11px] muted truncate">{p.phone ?? "—"}</div>
                   {p.email && <div className="text-[11px] muted truncate">{p.email}</div>}
                 </div>
+
+                {/* Item 4 — the year-to-date leave tally, INSIDE the card.
+                    It used to hang off the corner as an absolutely-positioned
+                    badge on a wrapper div, which read as a notification dot
+                    stuck ON the card rather than a fact ABOUT the person — and
+                    the wrapper existed for nothing else, so it went with it.
+
+                    THE BASIS IS ON SCREEN, not only in the tooltip: "since Jan 1"
+                    is the whole meaning of the number. Without it the reader has
+                    to guess between a rolling 12 months, an entitlement balance
+                    and a calendar-year tally, and those are three different
+                    conversations to have with an employee.
+
+                    DERIVED LIVE from leave_periods every render
+                    (leaveDaysInYear(periods, currentYear) above) — there is NO
+                    scheduled reset anywhere and there must never be one. A cron
+                    that zeroed a stored counter each January would destroy the
+                    prior year's record to produce a number this expression gets
+                    for free: on 1 January the year rolls, no period falls inside
+                    it yet, and this reads 0 on its own.
+
+                    Distinct from the "On leave" pill beside the name, which is a
+                    state TODAY. Zero renders nothing — a person who took no leave
+                    has nothing to report, and a "0d" chip on most of the grid
+                    would drown the ones that matter. */}
+                {leaveDays > 0 && (
+                  <span
+                    className="shrink-0 self-center inline-flex items-baseline gap-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2 py-1"
+                    title={`${leaveDays} leave day${leaveDays === 1 ? "" : "s"} taken since 1 January ${currentYear}`}
+                  >
+                    <span className="text-sm font-semibold tabular-nums leading-none">{leaveDays}d</span>
+                    <span className="text-[10px] leading-none opacity-80">since Jan 1</span>
+                  </span>
+                )}
               </button>
-              </div>
               );
             })}
           </div>

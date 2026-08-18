@@ -112,53 +112,85 @@ function driverStatePill(s: DriverState) {
 // bar's segments never reorder as counts change.
 const DRIVER_STATE_ORDER: DriverState[] = ["active", "idle", "off_duty", "on_leave"];
 
-// "On duty" KPI bar. Deliberately NOT a fifth <Stat> card: it answers a
-// different question (how the roster is SPLIT, not one number) and Turki asked
-// for it to read slightly larger than the cards beside it — hence its own
+// Item 5 — the names behind a KPI figure, rendered into <Stat>'s own `sub` slot.
+//
+// TRUNCATED, WITH THE REMAINDER COUNTED. A KPI card is a fixed-height tile in a
+// six-column row; an unbounded list would push the card taller than the three
+// beside it and shear the whole row. Three names plus "+N more" keeps the tile
+// stable, and the full list stays reachable on hover — the figure above already
+// says how many there are, so nothing is hidden, only deferred.
+//
+// Returns null at zero rather than "None": the KPI already reads 0, and a second
+// element saying so is noise on the three cards where it would render.
+function KpiNames({ names, max = 3 }: { names: string[]; max?: number }) {
+  if (names.length === 0) return null;
+  const shown = names.slice(0, max);
+  const rest = names.length - shown.length;
+  return (
+    <span title={names.join(", ")} className="block truncate">
+      {shown.join(", ")}
+      {rest > 0 ? <span className="opacity-70"> +{rest} more</span> : null}
+    </span>
+  );
+}
+
+// "On duty" KPI card. Deliberately NOT a fifth <Stat>: it answers a different
+// question (how the roster is SPLIT, not one number), so it gets its own
 // component rather than a tone prop on the shared one.
 //
-// ZEROS RENDER, they do not vanish. Every state keeps its label and its dot at
-// full opacity and prints 0; today all 16 drivers resolve to one state and the
-// other three are legitimately 0. A segment that disappeared at 0 would read as
-// a broken component rather than as an empty bucket, and the bar's whole job is
-// to show the shape of the roster including the empty parts of it.
+// FOUR SEPARATE BARS, ONE PER STATE — NOT one combined proportional track.
+// It shipped as a single stacked track and was replaced on Turki's call, and the
+// reason generalises: on a stacked track every segment is measured against its
+// neighbours, so the eye reads "which state is biggest" and cannot read "how
+// much of the roster is idle" without doing arithmetic. Four bars against a
+// common full-width denominator answer the second question directly, and they
+// degenerate gracefully — a state at 0 is an empty track, not a segment that
+// vanished and took its label with it. DO NOT MERGE THESE BACK INTO ONE BAR.
+//
+// ZEROS RENDER, they do not vanish. Every state keeps its label, its dot and its
+// figure at full opacity and prints 0; today all 16 drivers resolve to one state
+// and the other three are legitimately 0. A row that disappeared at 0 would read
+// as a broken component rather than as an empty bucket, and this card's whole job
+// is to show the shape of the roster including the empty parts of it.
+//
+// Colours are PILL_TONE_CLS[DRIVER_STATE_TONE[s]] — the exact mapping the status
+// pills in the table below use — so a colour means the same state in both places.
+// There is no second palette here to drift.
 function OnDutyBar({ counts, total }: { counts: Record<DriverState, number>; total: number }) {
   return (
-    <div className="card p-5 h-full">
-      <div className="flex items-baseline justify-between gap-3 mb-3">
+    <div className="card p-5 h-full flex flex-col">
+      <div className="flex items-baseline justify-between gap-3 mb-4">
         <div className="text-xs muted uppercase tracking-wide">On Duty</div>
         <div className="text-xs muted tabular-nums">{total} drivers</div>
       </div>
 
-      {/* Proportional bar. With no drivers at all there is nothing to divide by,
-          so the track renders empty rather than showing four equal slices of
-          nothing. */}
-      <div className="h-2.5 rounded-full overflow-hidden flex bg-black/5 dark:bg-white/10">
-        {total > 0 &&
-          DRIVER_STATE_ORDER.map((s) =>
-            counts[s] > 0 ? (
-              <div
-                key={s}
-                className={PILL_TONE_CLS[DRIVER_STATE_TONE[s]].dot}
-                style={{ width: `${(counts[s] / total) * 100}%` }}
-                title={`${DRIVER_STATE_LABELS[s]}: ${counts[s]}`}
-              />
-            ) : null,
-          )}
-      </div>
+      <div className="flex-1 flex flex-col justify-center gap-3">
+        {DRIVER_STATE_ORDER.map((s) => {
+          const tone = PILL_TONE_CLS[DRIVER_STATE_TONE[s]];
+          // Every bar shares ONE denominator — the whole roster — which is what
+          // makes the four comparable. With no drivers at all there is nothing to
+          // divide by, so every track renders empty rather than full.
+          const pct = total > 0 ? (counts[s] / total) * 100 : 0;
+          return (
+            <div key={s} className="grid grid-cols-[6rem_1fr_auto] items-center gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={cn("h-2 w-2 rounded-full shrink-0", tone.dot)} />
+                <span className="text-[11px] muted truncate">{DRIVER_STATE_LABELS[s]}</span>
+              </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-        {DRIVER_STATE_ORDER.map((s) => (
-          <div key={s} className="flex items-center gap-2">
-            <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", PILL_TONE_CLS[DRIVER_STATE_TONE[s]].dot)} />
-            <div className="min-w-0">
-              <div className={cn("text-xl font-semibold tabular-nums leading-none", PILL_TONE_CLS[DRIVER_STATE_TONE[s]].text)}>
+              <div
+                className="h-2 rounded-full overflow-hidden bg-black/5 dark:bg-white/10"
+                title={`${DRIVER_STATE_LABELS[s]}: ${counts[s]} of ${total}`}
+              >
+                <div className={cn("h-full rounded-full transition-[width]", tone.dot)} style={{ width: `${pct}%` }} />
+              </div>
+
+              <div className={cn("text-base font-semibold tabular-nums leading-none w-6 text-end", tone.text)}>
                 {counts[s]}
               </div>
-              <div className="text-[11px] muted truncate mt-1">{DRIVER_STATE_LABELS[s]}</div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -267,6 +299,14 @@ export default function DriversClient({
   // of this value, so pressing Add staff twice in a row (after cancelling) still
   // reopens it; a boolean would need resetting from the child.
   const [addStaffSignal, setAddStaffSignal] = useState(0);
+
+  // Item 2 — the node CommissionsTab portals its month lens and Export CSV into.
+  // STATE, not a useRef: a ref's `.current` is filled during commit without
+  // re-rendering, so the first paint would read null and the portal would never
+  // mount. The setter doubles as the callback ref, so React hands us the node and
+  // schedules the render that consumes it in one step.
+  const [commControlsHost, setCommControlsHost] = useState<HTMLDivElement | null>(null);
+
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Driver | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -389,7 +429,49 @@ export default function DriversClient({
   }, [driverIncidents, drivers, today]);
   const incidents = incidentsInWindow.length;
 
-  const expiring = drivers.filter((d) => d.license_expiry != null && d.license_expiry <= YEAR_END).length;
+  // Item 5 — the KPIs below name WHO they are counting, so a figure is
+  // actionable without opening four detail panels to find out.
+  //
+  // DUPLICATE NAMES ARE REAL IN THIS DATA — two drivers are both called
+  // "Fahad 4" — so a bare name can point at the wrong person, which on an
+  // incident list is the one mistake worth engineering against. Ambiguous names
+  // carry a short id, unique ones do not (same rule the payslip register uses:
+  // disambiguate only where it is actually ambiguous, or every label turns into
+  // a database key).
+  const driverLabelById = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const d of drivers) seen.set(d.name, (seen.get(d.name) ?? 0) + 1);
+    return new Map(drivers.map((d) => [d.id, (seen.get(d.name) ?? 0) > 1 ? `${d.name} · ${d.id.slice(0, 4)}` : d.name]));
+  }, [drivers]);
+
+  // Names behind Incidents (12mo). Grouped by driver, because the KPI counts
+  // ROWS and a driver can have more than one — the "(2)" suffix is what keeps
+  // the list addable back up to the figure above it.
+  const incidentDriverNames = useMemo(() => {
+    const per = new Map<string, number>();
+    for (const i of incidentsInWindow) per.set(i.driver_id, (per.get(i.driver_id) ?? 0) + 1);
+    return [...per.entries()]
+      .map(([id, n]) => {
+        const label = driverLabelById.get(id) ?? "Unknown driver";
+        return { label: n > 1 ? `${label} (${n})` : label, n };
+      })
+      .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label))
+      .map((x) => x.label);
+  }, [incidentsInWindow, driverLabelById]);
+
+  // Licences expiring this year, SOONEST FIRST — the order the list is acted on.
+  const expiringDrivers = useMemo(
+    () =>
+      drivers
+        .filter((d) => d.license_expiry != null && d.license_expiry <= YEAR_END)
+        .sort((a, b) => (a.license_expiry! < b.license_expiry! ? -1 : a.license_expiry! > b.license_expiry! ? 1 : 0)),
+    [drivers],
+  );
+  const expiring = expiringDrivers.length;
+  const expiringNames = useMemo(
+    () => expiringDrivers.map((d) => driverLabelById.get(d.id) ?? d.name),
+    [expiringDrivers, driverLabelById],
+  );
 
   // "On duty" bar input. Every state gets a key even at 0 — the bar prints the
   // zeros rather than dropping the segment (see OnDutyBar).
@@ -532,8 +614,18 @@ export default function DriversClient({
               <OnDutyBar counts={stateCounts} total={total} />
             </div>
             <Stat label="On Duty Now" value={`${onDuty}/${total}`} tone="ok" />
-            <Stat label="Incidents (12mo)" value={incidents} tone={incidents > 5 ? "warn" : "ok"} />
-            <Stat label="License Exp (this year)" value={expiring} tone={expiring > 5 ? "warn" : "info"} />
+            <Stat
+              label="Incidents (12mo)"
+              value={incidents}
+              tone={incidents > 5 ? "warn" : "ok"}
+              sub={<KpiNames names={incidentDriverNames} />}
+            />
+            <Stat
+              label="License Exp (this year)"
+              value={expiring}
+              tone={expiring > 5 ? "warn" : "info"}
+              sub={<KpiNames names={expiringNames} />}
+            />
           </div>
 
           <div className="card p-0 overflow-hidden">
@@ -649,12 +741,27 @@ export default function DriversClient({
           component needed a single change. */}
       {(tab === "commissions" || tab === "history") && (
         <>
-          <div
-            className="inline-flex items-center gap-1 rounded-lg border p-1 mb-4"
-            style={{ borderColor: "rgb(var(--border))" }}
-          >
-            <SubTabBtn active={tab === "commissions"} onClick={() => setTab("commissions")} label="Commissions" badge={pendingPayouts} />
-            <SubTabBtn active={tab === "history"} onClick={() => setTab("history")} label="Historical" badge={payouts.length} />
+          {/* The sub-tabs and the tab's scope controls share one row: the month
+              lens and Export CSV govern the whole screen, so they belong beside
+              the thing that chooses the screen, not buried in the card header
+              among the status chips (which filter only the table below them).
+              `items-start` because the sub-tab bar is the taller element and the
+              controls should sit level with its top edge, not float mid-height. */}
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+            <div
+              className="inline-flex items-center gap-1 rounded-lg border p-1"
+              style={{ borderColor: "rgb(var(--border))" }}
+            >
+              <SubTabBtn active={tab === "commissions"} onClick={() => setTab("commissions")} label="Commissions" badge={pendingPayouts} />
+              <SubTabBtn active={tab === "history"} onClick={() => setTab("history")} label="Historical" badge={payouts.length} />
+            </div>
+
+            {/* CommissionsTab portals its own controls in here. The node is
+                rendered by the parent but OWNED by the child — the lens value
+                never leaves CommissionsTab, so what is shown and what is paid
+                still come from one state. Empty on the Historical sub-tab, which
+                carries its own filters inside its own card. */}
+            <div ref={setCommControlsHost} />
           </div>
 
           {tab === "commissions" ? (
@@ -665,6 +772,7 @@ export default function DriversClient({
               specials={specials}
               adjustments={adjustments}
               projectsById={projectsById}
+              controlsHost={commControlsHost}
             />
           ) : (
             <HistoryTab payouts={payouts} drivers={allDrivers} dropdownDrivers={historyDropdownDrivers} />
