@@ -171,13 +171,13 @@ function KpiNames({ names, max = 3 }: { names: string[]; max?: number }) {
 // There is no second palette here to drift.
 function OnDutyBar({ counts, total }: { counts: Record<DriverState, number>; total: number }) {
   return (
-    <div className="card p-5 h-full flex flex-col">
-      <div className="flex items-baseline justify-between gap-3 mb-4">
+    <div className="card p-4 h-full flex flex-col">
+      <div className="flex items-baseline justify-between gap-3 mb-1.5">
         <div className="text-xs muted uppercase tracking-wide">On Duty</div>
         <div className="text-xs muted tabular-nums">{total} drivers</div>
       </div>
 
-      <div className="flex-1 flex flex-col justify-center gap-3">
+      <div className="flex-1 flex flex-col justify-center gap-1">
         {DRIVER_STATE_ORDER.map((s) => {
           const tone = PILL_TONE_CLS[DRIVER_STATE_TONE[s]];
           // Every bar shares ONE denominator — the whole roster — which is what
@@ -185,20 +185,20 @@ function OnDutyBar({ counts, total }: { counts: Record<DriverState, number>; tot
           // divide by, so every track renders empty rather than full.
           const pct = total > 0 ? (counts[s] / total) * 100 : 0;
           return (
-            <div key={s} className="grid grid-cols-[6rem_1fr_auto] items-center gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className={cn("h-2 w-2 rounded-full shrink-0", tone.dot)} />
-                <span className="text-[11px] muted truncate">{DRIVER_STATE_LABELS[s]}</span>
+            <div key={s} className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", tone.dot)} />
+                <span className="text-[10px] muted truncate leading-none">{DRIVER_STATE_LABELS[s]}</span>
               </div>
 
               <div
-                className="h-2 rounded-full overflow-hidden bg-black/5 dark:bg-white/10"
+                className="h-1 rounded-full overflow-hidden bg-black/5 dark:bg-white/10"
                 title={`${DRIVER_STATE_LABELS[s]}: ${counts[s]} of ${total}`}
               >
                 <div className={cn("h-full rounded-full transition-[width]", tone.dot)} style={{ width: `${pct}%` }} />
               </div>
 
-              <div className={cn("text-base font-semibold tabular-nums leading-none w-6 text-end", tone.text)}>
+              <div className={cn("text-xs font-semibold tabular-nums leading-none w-4 text-end", tone.text)}>
                 {counts[s]}
               </div>
             </div>
