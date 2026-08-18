@@ -32,6 +32,16 @@ function numOrDefault(v: FormDataEntryValue | null, fallback: number) {
   const n = numOrNull(v);
   return n ?? fallback;
 }
+// TRI-STATE boolean (drivers.health_insurance, 0132). "" is the "not recorded"
+// option and MUST map to null, not false — the whole reason the column is
+// nullable is that "not asked yet" and "no cover" are different facts. Anything
+// unrecognised also falls to null rather than guessing false.
+function boolOrNull(v: FormDataEntryValue | null): boolean | null {
+  const s = str(v);
+  if (s === "true") return true;
+  if (s === "false") return false;
+  return null;
+}
 
 function parse(formData: FormData) {
   return {
@@ -56,6 +66,11 @@ function parse(formData: FormData) {
     iqama_expiry: nullable(formData.get("iqama_expiry")),
     // Standalone monthly salary — display-only, never part of commission math.
     salary_sar: numOrNull(formData.get("salary_sar")),
+    // 0132. NOT a linked identity field — this one IS editable here, so it must
+    // NOT be destructured out of updateDriver's payload the way iqama/licence
+    // are. The form renders a real three-option control (Yes / No / not
+    // recorded), so a submitted "" is a deliberate choice, not a disabled input.
+    health_insurance: boolOrNull(formData.get("health_insurance")),
     // active: dropped (Commit 2, termination sequence) — drivers.active no
     // longer written from the form; derived state's "deactivated" branch is
     // gone, termination (0020, terminated_at) supersedes it. Column stays in

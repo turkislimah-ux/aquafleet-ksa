@@ -49,7 +49,7 @@ export default async function DriversPage() {
   // Fleet page carried until 22aad18; this is its twin.
   const since = daysAgoKey(30);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, staffCommissionsRes, commissionTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes, activeWorkOrdersRes, activeOutsourcedJobsRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, staffCommissionsRes, commissionTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes, activeWorkOrdersRes, activeOutsourcedJobsRes, openWorkOrdersRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       // Terminated trucks vanish from the driver-detail "Current Assignment"
@@ -154,6 +154,19 @@ export default async function DriversPage() {
       // driver detail card's "Current Assignment" truck pill.
       supabase.from("work_orders").select("truck_id").eq("status", "in_progress"),
       supabase.from("outsourced_jobs").select("truck_id").eq("status", "in_progress"),
+      // Mechanics-team KPI (Management & Staff tab) — OPEN work orders per
+      // mechanic. A SEPARATE fetch rather than widening the in_progress one
+      // above: that one feeds buildActiveJobTruckIds, whose whole definition of
+      // "this truck is in the workshop" is status = in_progress. Widening it
+      // would silently put every open-but-not-started work order's truck into
+      // maintenance across the Fleet surfaces.
+      //
+      // "Open" is an ALLOWLIST, not `neq('completed')` — a denylist adopts every
+      // future status automatically (same rule 0103's trip_overdue follows).
+      supabase
+        .from("work_orders")
+        .select("assigned_mechanic_id")
+        .in("status", ["open", "in_progress", "awaiting_parts"]),
     ]);
 
   // ---- Driver set split (termination) ----------------------------------
@@ -243,6 +256,16 @@ export default async function DriversPage() {
     (d) => !d.terminated_at || (balanceByDriver[d.id] ?? 0) !== 0,
   );
 
+  // Mechanics-team KPI input: staff_id -> count of OPEN work orders assigned to
+  // them. Unassigned work orders (null mechanic) are dropped — they are open
+  // work, but they are nobody's load, and counting them under a mechanic would
+  // be a fabrication.
+  const openWoByMechanic: Record<string, number> = {};
+  for (const w of (openWorkOrdersRes.data ?? []) as { assigned_mechanic_id: string | null }[]) {
+    if (!w.assigned_mechanic_id) continue;
+    openWoByMechanic[w.assigned_mechanic_id] = (openWoByMechanic[w.assigned_mechanic_id] ?? 0) + 1;
+  }
+
   const error =
     driversRes.error ||
     trucksRes.error ||
@@ -261,7 +284,8 @@ export default async function DriversPage() {
     commissionTypesRes.error ||
     projectDriversRes.error ||
     operationStationsRes.error ||
-    driverIncidentsRes.error;
+    driverIncidentsRes.error ||
+    openWorkOrdersRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -309,6 +333,14 @@ export default async function DriversPage() {
       projectsById={projectsById}
       activeProjectNamesByDriver={activeProjectNamesByDriver}
       driverStateById={driverStateById}
+      // Drivers-table "Unpaid commission" column. THE SAME MAP the Commissions
+      // tab and its badge are built from — buildCurrentRows() above, run ONCE
+      // over every driver with no month lens, against fetches already
+      // pre-filtered to payout_id IS NULL. Threaded as a value rather than
+      // recomputed in the client, so the column is structurally incapable of
+      // disagreeing with the tab it links to.
+      balanceByDriver={balanceByDriver}
+      openWoByMechanic={openWoByMechanic}
       error={error?.message ?? null}
     />
   );

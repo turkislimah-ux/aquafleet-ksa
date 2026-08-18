@@ -34,22 +34,40 @@ export function Stat({ label, value, sub, tone }: { label: string; value: ReactN
   );
 }
 
-export function StatusPill({ status, label }: { status: string; label: string }) {
-  const tone = statusTone(status);
-  const cls =
-    tone === "ok" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20" :
-    tone === "warn" ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20" :
-    tone === "bad" ? "bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20" :
-    tone === "info" ? "bg-brand-500/10 text-brand-700 dark:text-brand-300 ring-brand-500/20" :
-    "bg-slate-500/10 text-slate-700 dark:text-slate-300 ring-slate-500/20";
+// ONE place where a pill tone becomes real colour. Exported because a non-pill
+// surface (the Drivers "On duty" state bar) has to paint the SAME colours — the
+// alternative is a second hand-picked palette that drifts from the pills the
+// moment either side is touched. Same precedent as STAGE_STYLES in lib/db-types.
+//
+// `yellow` is genuinely new: statusTone() has no yellow (its warn IS amber), and
+// the driver-state mapping needs amber and yellow to mean different things.
+// `neutral` exists because statusTone() can return "muted", which is not a tone
+// any caller passes explicitly.
+export type PillTone = "ok" | "warn" | "yellow" | "bad" | "info" | "neutral";
+
+export const PILL_TONE_CLS: Record<PillTone, { chip: string; dot: string; text: string }> = {
+  ok:      { chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
+  warn:    { chip: "bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20",         dot: "bg-amber-500",   text: "text-amber-600 dark:text-amber-400" },
+  yellow:  { chip: "bg-yellow-400/15 text-yellow-700 dark:text-yellow-300 ring-yellow-400/30",     dot: "bg-yellow-400",  text: "text-yellow-600 dark:text-yellow-300" },
+  bad:     { chip: "bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20",             dot: "bg-rose-500",    text: "text-rose-600 dark:text-rose-400" },
+  info:    { chip: "bg-brand-500/10 text-brand-700 dark:text-brand-300 ring-brand-500/20",         dot: "bg-brand-500",   text: "text-brand-600 dark:text-brand-300" },
+  neutral: { chip: "bg-slate-500/10 text-slate-700 dark:text-slate-300 ring-slate-500/20",         dot: "bg-slate-500",   text: "text-slate-600 dark:text-slate-300" },
+};
+
+// `tone` is an OPTIONAL override. Left unset (every pre-existing caller), the
+// colour still comes from the global statusTone() map, so trucks/invoices/trips
+// are untouched. Passed, the caller owns the mapping — which is what the driver
+// pills need, because their required colours conflict with statusTone()'s
+// meanings for the same strings (idle/off_duty are "info" there).
+export function StatusPill({ status, label, tone }: { status: string; label: string; tone?: PillTone }) {
+  const t: PillTone = tone ?? (() => {
+    const s = statusTone(status);
+    return s === "muted" ? "neutral" : s;
+  })();
+  const c = PILL_TONE_CLS[t];
   return (
-    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", cls)}>
-      <span className={cn("h-1.5 w-1.5 rounded-full",
-        tone === "ok" ? "bg-emerald-500" :
-        tone === "warn" ? "bg-amber-500" :
-        tone === "bad" ? "bg-rose-500" :
-        tone === "info" ? "bg-brand-500" : "bg-slate-500"
-      )} />
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", c.chip)}>
+      <span className={cn("h-1.5 w-1.5 rounded-full", c.dot)} />
       {label}
     </span>
   );

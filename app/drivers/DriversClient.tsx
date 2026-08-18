@@ -18,7 +18,7 @@ import { useRecordFocus } from "@/lib/useRecordFocus";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Pencil, Eye, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon, AlertTriangle, Trash2, History } from "lucide-react";
-import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
+import { Btn, Stat, StatusPill, Table, TH, TD, PILL_TONE_CLS } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
 import {
@@ -34,7 +34,7 @@ import {
 import OperationStationField from "@/components/OperationStationField";
 import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
-import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
+import { DRIVER_STATE_LABELS, DRIVER_STATE_TONE, type DriverState } from "@/lib/driver-state";
 import { TRUCK_OPS_STATE_LABELS, type TruckOpsState } from "@/lib/truck-status";
 import {
   createDriver,
@@ -98,9 +98,80 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-// Derived-state pill (single source of truth, lib/driver-state).
+// Derived-state pill (single source of truth, lib/driver-state). The COLOUR is
+// passed explicitly from DRIVER_STATE_TONE rather than left to statusTone():
+// this fleet's driver mapping (Active green / Idle amber / Off duty + On leave
+// yellow) conflicts with what those same strings mean on truck, invoice and
+// trip pills, where `idle` and `off_duty` are both blue. Routing it through the
+// global map would have recoloured four unrelated surfaces to fix one.
 function driverStatePill(s: DriverState) {
-  return <StatusPill status={s} label={DRIVER_STATE_LABELS[s]} />;
+  return <StatusPill status={s} label={DRIVER_STATE_LABELS[s]} tone={DRIVER_STATE_TONE[s]} />;
+}
+
+// The 4 derived states in precedence order (lib/driver-state) — fixed, so the
+// bar's segments never reorder as counts change.
+const DRIVER_STATE_ORDER: DriverState[] = ["active", "idle", "off_duty", "on_leave"];
+
+// "On duty" KPI bar. Deliberately NOT a fifth <Stat> card: it answers a
+// different question (how the roster is SPLIT, not one number) and Turki asked
+// for it to read slightly larger than the cards beside it — hence its own
+// component rather than a tone prop on the shared one.
+//
+// ZEROS RENDER, they do not vanish. Every state keeps its label and its dot at
+// full opacity and prints 0; today all 16 drivers resolve to one state and the
+// other three are legitimately 0. A segment that disappeared at 0 would read as
+// a broken component rather than as an empty bucket, and the bar's whole job is
+// to show the shape of the roster including the empty parts of it.
+function OnDutyBar({ counts, total }: { counts: Record<DriverState, number>; total: number }) {
+  return (
+    <div className="card p-5 h-full">
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <div className="text-xs muted uppercase tracking-wide">On Duty</div>
+        <div className="text-xs muted tabular-nums">{total} drivers</div>
+      </div>
+
+      {/* Proportional bar. With no drivers at all there is nothing to divide by,
+          so the track renders empty rather than showing four equal slices of
+          nothing. */}
+      <div className="h-2.5 rounded-full overflow-hidden flex bg-black/5 dark:bg-white/10">
+        {total > 0 &&
+          DRIVER_STATE_ORDER.map((s) =>
+            counts[s] > 0 ? (
+              <div
+                key={s}
+                className={PILL_TONE_CLS[DRIVER_STATE_TONE[s]].dot}
+                style={{ width: `${(counts[s] / total) * 100}%` }}
+                title={`${DRIVER_STATE_LABELS[s]}: ${counts[s]}`}
+              />
+            ) : null,
+          )}
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+        {DRIVER_STATE_ORDER.map((s) => (
+          <div key={s} className="flex items-center gap-2">
+            <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", PILL_TONE_CLS[DRIVER_STATE_TONE[s]].dot)} />
+            <div className="min-w-0">
+              <div className={cn("text-xl font-semibold tabular-nums leading-none", PILL_TONE_CLS[DRIVER_STATE_TONE[s]].text)}>
+                {counts[s]}
+              </div>
+              <div className="text-[11px] muted truncate mt-1">{DRIVER_STATE_LABELS[s]}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Health insurance (0132) — TRI-STATE, and the third state is the point.
+// true = Yes (green), false = No (red), null = a neutral dash. null is NOT
+// styled as No: "never recorded" is a data gap, and painting it red would
+// assert a fact about the driver that nobody has established.
+function healthInsuranceCell(v: boolean | null) {
+  if (v === true) return <span className="font-semibold text-emerald-600 dark:text-emerald-400">Yes</span>;
+  if (v === false) return <span className="font-semibold text-rose-600 dark:text-rose-400">No</span>;
+  return <span className="muted" title="Not recorded">—</span>;
 }
 
 export default function DriversClient({
@@ -128,6 +199,8 @@ export default function DriversClient({
   projectsById,
   activeProjectNamesByDriver,
   driverStateById,
+  balanceByDriver,
+  openWoByMechanic,
   error,
 }: {
   // ACTIVE roster only (terminated_at is null) — KPIs, roster grid, pickers.
@@ -166,6 +239,17 @@ export default function DriversClient({
   // id feeds pillColor() so a project's pill color matches the Trips board.
   activeProjectNamesByDriver: Record<string, { id: string; name: string }[]>;
   driverStateById: Record<string, DriverState>;
+  // driver_id -> TOTAL UNPAID commission across ALL periods (trips + specials +
+  // adjustments + bonus). Built ONE level up by the SAME buildCurrentRows() the
+  // Commissions tab and its badge run on, with no month lens, over fetches
+  // already pre-filtered to payout_id IS NULL. Passed as a value rather than
+  // recomputed here ON PURPOSE — a second sum in this file is exactly how the
+  // roster column and the tab it mirrors would start disagreeing.
+  balanceByDriver: Record<string, number>;
+  // staff_id -> count of OPEN work orders assigned to that mechanic. Feeds the
+  // Management & Staff mechanics cluster; threaded through here because the
+  // fetch belongs to the page, not to StaffTab.
+  openWoByMechanic: Record<string, number>;
   error: string | null;
 }) {
   const router = useRouter();
@@ -179,6 +263,10 @@ export default function DriversClient({
     const d = drivers.find((x) => x.id === id);
     if (d) setDetail(d);
   });
+  // Item 5 — nonce, not a boolean. StaffTab opens its own form on every CHANGE
+  // of this value, so pressing Add staff twice in a row (after cancelling) still
+  // reopens it; a boolean would need resetting from the child.
+  const [addStaffSignal, setAddStaffSignal] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Driver | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -269,13 +357,35 @@ export default function DriversClient({
   }, [driverIncidents]);
   const pillFor = (d: Driver) => driverStatePill(driverStateById[d.id] ?? "off_duty");
 
-  // KPIs — honest: averages/sums skip null, "On Duty" derived from assignment.
+  // KPIs — honest: sums skip null, "On Duty" derived from assignment.
   const total = drivers.length;
   const onDuty = drivers.filter((d) => truckByDriver.has(d.id)).length;
-  const safetyVals = drivers.map((d) => d.safety_score).filter((n): n is number => n != null);
-  const avgSafety = safetyVals.length ? +(safetyVals.reduce((s, n) => s + n, 0) / safetyVals.length).toFixed(1) : null;
-  const incidents = drivers.reduce((s, d) => s + (d.incidents_12mo ?? 0), 0);
+
+  // Incidents (12mo) — counted from the LIVE driver_incidents rows, not from
+  // drivers.incidents_12mo. That column is DEAD: its form controls were removed
+  // with the incidents table (see app/drivers/actions.ts), nothing has written
+  // it since, and it reads 0 on every row — so the old reducer rendered a
+  // permanent 0 beside a driver detail panel that was already showing real
+  // incidents from the table. Same source as that panel now, one cutoff.
+  const incidents = useMemo(() => {
+    const cutoff = new Date(`${today}T00:00:00`);
+    cutoff.setFullYear(cutoff.getFullYear() - 1);
+    const from = cutoff.toISOString().slice(0, 10);
+    // Roster-scoped (active drivers), matching every other KPI in this row —
+    // driverIncidents itself is deliberately unfiltered for the detail panel.
+    const active = new Set(drivers.map((d) => d.id));
+    return driverIncidents.filter((i) => active.has(i.driver_id) && i.incident_date >= from).length;
+  }, [driverIncidents, drivers, today]);
+
   const expiring = drivers.filter((d) => d.license_expiry != null && d.license_expiry <= YEAR_END).length;
+
+  // "On duty" bar input. Every state gets a key even at 0 — the bar prints the
+  // zeros rather than dropping the segment (see OnDutyBar).
+  const stateCounts = useMemo(() => {
+    const c: Record<DriverState, number> = { active: 0, idle: 0, off_duty: 0, on_leave: 0 };
+    for (const d of drivers) c[driverStateById[d.id] ?? "off_duty"] += 1;
+    return c;
+  }, [drivers, driverStateById]);
 
   // Commissions tab badge = drivers whose current balance needs review (open
   // cycle still pending, with something to review/pay). commissionDrivers so a
@@ -362,14 +472,34 @@ export default function DriversClient({
               <Plus className="h-4 w-4" /> New driver
             </Btn>
           )}
+          {/* Item 5 — same slot, same treatment as New driver, so the two tabs
+              offer their primary action in one place instead of one in the page
+              header and one buried in a card header. The form itself still lives
+              inside StaffTab; this bumps a nonce that StaffTab watches (see
+              openAddSignal there) rather than hoisting formOpen/editing up here
+              — a ref handle would have been more machinery for the same effect. */}
+          {tab === "staff" && (
+            <Btn variant="primary" onClick={() => setAddStaffSignal((n) => n + 1)}>
+              <Plus className="h-4 w-4" /> Add staff
+            </Btn>
+          )}
         </div>
       </div>
 
       {/* Tab bar — underline style mirrors the demo. */}
       <div className="flex items-center gap-1 border-b mb-4 flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
         <TabBtn active={tab === "drivers"} onClick={() => setTab("drivers")} label="Drivers" badge={total} />
-        <TabBtn active={tab === "commissions"} onClick={() => setTab("commissions")} label="Commissions" badge={pendingPayouts} />
-        <TabBtn active={tab === "history"} onClick={() => setTab("history")} label="History" badge={payouts.length} />
+        {/* Item 1 — Commission owns History now, as a sub-tab. The top-level
+            button therefore reads active for BOTH values. "history" stays in
+            DRIVER_TABS and in the Tab union deliberately: it is a real URL
+            (?tab=history) that global search deep-links into, so removing the
+            value would break existing links to settle it as a sub-tab. */}
+        <TabBtn
+          active={tab === "commissions" || tab === "history"}
+          onClick={() => setTab("commissions")}
+          label="Commissions"
+          badge={pendingPayouts}
+        />
         <TabBtn active={tab === "staff"} onClick={() => setTab("staff")} label="Management & Staff" badge={staff.length} />
       </div>
 
@@ -379,9 +509,17 @@ export default function DriversClient({
 
       {tab === "drivers" && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          {/* Item 3 — the On Duty bar is deliberately WIDER than the cards beside
+              it (3 of 6 columns against 1 each): it carries four figures plus a
+              proportional track, and squeezed into a quarter of the row it would
+              have been the least readable thing on the page rather than the
+              headline. Avg Safety is gone from this row; drivers.safety_score
+              itself is untouched in the DB. */}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
+            <div className="col-span-2 md:col-span-3">
+              <OnDutyBar counts={stateCounts} total={total} />
+            </div>
             <Stat label="On Duty Now" value={`${onDuty}/${total}`} tone="ok" />
-            <Stat label="Avg Safety" value={avgSafety ?? "—"} tone={avgSafety != null && avgSafety > 80 ? "ok" : "warn"} />
             <Stat label="Incidents (12mo)" value={incidents} tone={incidents > 5 ? "warn" : "ok"} />
             <Stat label="License Exp (this year)" value={expiring} tone={expiring > 5 ? "warn" : "info"} />
           </div>
@@ -397,6 +535,10 @@ export default function DriversClient({
                   <TH>Assigned Project</TH>
                   <TH>Trips 30d</TH>
                   <TH>Salary</TH>
+                  {/* Item 9 — ALL-PERIODS unpaid commission, not month-scoped:
+                      this is "total owed", the same all-time basis the roster
+                      balance and the Commissions badge already use. */}
+                  <TH>Unpaid Commission</TH>
                   <TH>License Exp</TH>
                   <TH className="text-end" />
                 </tr>
@@ -404,7 +546,7 @@ export default function DriversClient({
               <tbody>
                 {drivers.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                    <td colSpan={10} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                       No drivers yet.
                     </td>
                   </tr>
@@ -425,7 +567,12 @@ export default function DriversClient({
                       </TD>
                       <TD>{stationName(d.home_station) ?? <span className="muted">—</span>}</TD>
                       <TD>{pillFor(d)}</TD>
-                      <TD>{truck ? <span className="font-mono text-xs">{truck.plate}</span> : <span className="muted">—</span>}</TD>
+                      {/* Item 7 — the plate is one of the two things people scan
+                          this table for (that and the name), and at font-mono
+                          text-xs regular it was the faintest cell in the row.
+                          Bumped to the body size and semibold so it carries the
+                          same weight as the driver name opposite it. */}
+                      <TD>{truck ? <span className="font-mono text-sm font-semibold">{truck.plate}</span> : <span className="muted">—</span>}</TD>
                       <TD>
                         {(activeProjectNamesByDriver[d.id]?.length ?? 0) > 0 ? (
                           <div className="flex flex-col gap-1">
@@ -450,6 +597,20 @@ export default function DriversClient({
                       <TD className="tabular-nums">
                         {d.salary_sar != null ? formatSar(d.salary_sar) : <span className="muted">—</span>}
                       </TD>
+                      {/* Item 9. Zero is a REAL answer here (nothing owed), not
+                          missing data, so it prints as a figure rather than the
+                          em dash this table uses for unknowns — just muted, so a
+                          driver who IS owed money stands out down the column. */}
+                      <TD className="tabular-nums">
+                        {(() => {
+                          const bal = balanceByDriver[d.id] ?? 0;
+                          return bal !== 0 ? (
+                            <span className="font-semibold">{formatSar(bal)}</span>
+                          ) : (
+                            <span className="muted">{formatSar(0)}</span>
+                          );
+                        })()}
+                      </TD>
                       <TD className={expSoon ? "text-amber-600 dark:text-amber-400 font-medium" : ""}>
                         {d.license_expiry ?? <span className="muted">—</span>}
                       </TD>
@@ -467,19 +628,36 @@ export default function DriversClient({
         </>
       )}
 
-      {tab === "commissions" && (
-        <CommissionsTab
-          drivers={commissionDrivers}
-          trips={commTrips}
-          cycles={cycles}
-          specials={specials}
-          adjustments={adjustments}
-          projectsById={projectsById}
-        />
-      )}
+      {/* Item 1 — Commissions and Historical are two views of the same subject,
+          so they sit behind one top-level tab with a segmented sub-tab bar
+          above them. Deliberately NOT a second underline row: two identical
+          underline bars stacked read as one broken bar, and the pill treatment
+          says "inside" rather than "beside". Each sub-tab still sets the URL
+          value it already had, so both stay deep-linkable and neither child
+          component needed a single change. */}
+      {(tab === "commissions" || tab === "history") && (
+        <>
+          <div
+            className="inline-flex items-center gap-1 rounded-lg border p-1 mb-4"
+            style={{ borderColor: "rgb(var(--border))" }}
+          >
+            <SubTabBtn active={tab === "commissions"} onClick={() => setTab("commissions")} label="Commissions" badge={pendingPayouts} />
+            <SubTabBtn active={tab === "history"} onClick={() => setTab("history")} label="Historical" badge={payouts.length} />
+          </div>
 
-      {tab === "history" && (
-        <HistoryTab payouts={payouts} drivers={allDrivers} dropdownDrivers={historyDropdownDrivers} />
+          {tab === "commissions" ? (
+            <CommissionsTab
+              drivers={commissionDrivers}
+              trips={commTrips}
+              cycles={cycles}
+              specials={specials}
+              adjustments={adjustments}
+              projectsById={projectsById}
+            />
+          ) : (
+            <HistoryTab payouts={payouts} drivers={allDrivers} dropdownDrivers={historyDropdownDrivers} />
+          )}
+        </>
       )}
 
       {tab === "staff" && (
@@ -492,6 +670,9 @@ export default function DriversClient({
           commissionTypes={commissionTypes}
           operationStations={operationStations}
           today={today}
+          openAddSignal={addStaffSignal}
+          openWoByMechanic={openWoByMechanic}
+          truckCount={trucks.length}
         />
       )}
 
@@ -661,6 +842,23 @@ export default function DriversClient({
               <Field label="Salary (SAR / month)">
                 <input name="salary_sar" type="number" step="0.01" min="0" defaultValue={editing?.salary_sar ?? ""} placeholder="—" className={INPUT} style={INPUT_STYLE} />
               </Field>
+              {/* Health insurance (0132). THREE options, not a checkbox: a
+                  checkbox can only say yes or no, and this column's null is a
+                  real third answer ("nobody has recorded it"). The empty value
+                  is the DEFAULT for a new driver, so saving a form nobody filled
+                  in asserts nothing. boolOrNull() in actions.ts maps "" -> null. */}
+              <Field label="Health insurance">
+                <select
+                  name="health_insurance"
+                  defaultValue={editing?.health_insurance == null ? "" : editing.health_insurance ? "true" : "false"}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                >
+                  <option value="">Not recorded</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              </Field>
               {formError && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{formError}</p>}
 
               <div className="flex justify-end gap-2 sm:col-span-2 mt-2">
@@ -688,6 +886,37 @@ function TabBtn({ active, onClick, label, badge }: { active: boolean; onClick: (
       {label}
       {badge != null && badge > 0 && (
         <span className={"rounded-full px-1.5 text-[11px] font-semibold " + (active ? "bg-brand-600 text-white" : "bg-black/10 dark:bg-white/10")}>
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// Sub-tab inside the Commission tab (Item 1). A filled segmented control, NOT
+// the underline treatment TabBtn uses — the two bars sit within ~50px of each
+// other and a second underline row would read as a rendering fault rather than
+// as a level of nesting.
+function SubTabBtn({ active, onClick, label, badge }: { active: boolean; onClick: () => void; label: string; badge?: number }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "px-3 py-1.5 rounded-md text-sm font-medium inline-flex items-center gap-2 transition",
+        active
+          ? "bg-brand-600 text-white"
+          : "muted hover:text-[rgb(var(--fg))] hover:bg-black/5 dark:hover:bg-white/5",
+      )}
+    >
+      {label}
+      {badge != null && badge > 0 && (
+        <span
+          className={cn(
+            "rounded-full px-1.5 text-[11px] font-semibold tabular-nums",
+            active ? "bg-white/25 text-white" : "bg-black/10 dark:bg-white/10",
+          )}
+        >
           {badge}
         </span>
       )}
@@ -854,6 +1083,9 @@ function DriverDetail({
                     {incidents.length} incident{incidents.length === 1 ? "" : "s"}
                   </span>
                 </Cell>
+                {/* Item 8 — occupies the slot Rating held before 0132 dropped
+                    it. Tri-state: Yes / No / a neutral dash for never-recorded. */}
+                <Cell label="Health insurance">{healthInsuranceCell(d.health_insurance)}</Cell>
                 <Cell label="Salary (monthly)">
                   <span className="flex items-center gap-2">
                     <span className="font-semibold tabular-nums">{d.salary_sar != null ? formatSar(d.salary_sar) : "—"}</span>

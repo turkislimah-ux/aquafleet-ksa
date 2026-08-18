@@ -9,10 +9,10 @@
 //     (soft delete: stamps terminated_at, keeps the row). A leave section is
 //     stubbed for the future leave system.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X, Pencil, Ban, History } from "lucide-react";
-import { Btn } from "@/components/ui";
+import { X, Pencil, Ban, History, Wrench } from "lucide-react";
+import { Btn, Stat } from "@/components/ui";
 import { type Staff, type StaffRole, type OperationStation, type StaffCommission, type StaffCommissionType } from "@/lib/db-types";
 import { onLeaveTodaySet, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
@@ -45,6 +45,9 @@ export default function StaffTab({
   today,
   staffCommissions,
   commissionTypes,
+  openAddSignal,
+  openWoByMechanic,
+  truckCount,
 }: {
   staff: Staff[];
   staffRoles: StaffRole[];
@@ -58,6 +61,18 @@ export default function StaffTab({
   // live active/terminated_at to decide whether to show anything.
   staffCommissions: StaffCommission[];
   commissionTypes: StaffCommissionType[];
+  // Item 5 — a NONCE, not a boolean. The Add staff button lives in the page
+  // header (DriversClient owns that slot for both tabs); the form and its state
+  // live here. Every CHANGE of this number opens the form, so pressing the
+  // button again after cancelling still works — a boolean would need the child
+  // to reach back up and reset it.
+  openAddSignal: number;
+  // staff_id -> count of OPEN work orders assigned to that mechanic
+  // (work_orders.assigned_mechanic_id, status open/in_progress/awaiting_parts).
+  // Fetched by the page, not here — this component never queries.
+  openWoByMechanic: Record<string, number>;
+  // Total non-terminated trucks, for the mechanics-to-truck ratio.
+  truckCount: number;
 }) {
   const router = useRouter();
   const [detail, setDetail] = useState<Staff | null>(null);
@@ -119,11 +134,11 @@ export default function StaffTab({
     return m;
   }, [staffCommissions]);
 
-  function openNew() {
-    setEditing(null);
-    setFormError(null);
-    setFormOpen(true);
-  }
+  // NOTE: there is no openNew() any more. Its only caller was the in-card Add
+  // staff button, which moved to the page header (Item 5) — the openAddSignal
+  // effect below does the same three writes inline rather than leaving a
+  // one-caller helper behind. openEdit is unaffected; the detail modal still
+  // uses it.
   function openEdit(s: Staff) {
     setEditing(s);
     setFormError(null);
@@ -133,6 +148,70 @@ export default function StaffTab({
     setFormOpen(false);
     setEditing(null);
   }
+
+  // Item 5 — the header button's nonce. 0 is the initial value DriversClient
+  // mounts with and is deliberately ignored, so the form does not fly open on
+  // first render; every later value is a real press.
+  useEffect(() => {
+    if (openAddSignal === 0) return;
+    setEditing(null);
+    setFormError(null);
+    setFormOpen(true);
+  }, [openAddSignal]);
+
+  // ---- Item 6: staff-only KPIs -------------------------------------------
+  // STAFF ONLY. Drivers have their own KPI row one level up and are a different
+  // table entirely; nothing here counts a driver.
+  const activeHeadcount = useMemo(
+    () => staff.filter((s) => s.active && !s.terminated_at).length,
+    [staff],
+  );
+
+  // Iqama expiring soon — 90 days, not 60. An iqama renewal is a
+  // multi-week errand (medical, fees, employer paperwork), so a 60-day window
+  // would surface a case that is already late. Computed off `today` (the Riyadh
+  // date passed in) — never `new Date()` here.
+  const iqamaSoon = useMemo(() => {
+    const end = new Date(`${today}T00:00:00`);
+    end.setDate(end.getDate() + 90);
+    const endKey = end.toISOString().slice(0, 10);
+    // Already-expired dates count too: they are the most urgent version of the
+    // same problem, and hiding them behind a "soon" window would make the
+    // number shrink the day a renewal is missed.
+    return staff.filter((s) => s.iqama_expiry != null && s.iqama_expiry <= endKey).length;
+  }, [staff, today]);
+
+  // Headcount per branch of operation. A staff member with no station gets a
+  // real "Unassigned" row rather than being dropped — an unbased employee is
+  // something to notice, not something to hide.
+  const byStation = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of staff) {
+      const label = stationName(s.station) ?? "Unassigned";
+      m.set(label, (m.get(label) ?? 0) + 1);
+    }
+    return Array.from(m, ([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+    // stationName closes over stationNameById; that map is the real dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staff, stationNameById]);
+
+  // Mechanics team — role === 'mechanic' ONLY. head_of_maintenance is
+  // deliberately EXCLUDED: he supervises the team, he is not a spare pair of
+  // hands on the ratio, and counting him would flatter every figure below.
+  const mechanics = useMemo(() => staff.filter((s) => s.role === "mechanic" && !s.terminated_at), [staff]);
+  const mechanicOpenWo = useMemo(
+    () => mechanics.reduce((n, m) => n + (openWoByMechanic[m.id] ?? 0), 0),
+    [mechanics, openWoByMechanic],
+  );
+  // "With duty hours set" — NOT a live clock-in state. staff.duty_hours is a
+  // shift LENGTH (NOT NULL, DB default 10), so this says how many mechanics
+  // have a shift on record, and nothing at all about who is at the workshop
+  // right now. Labelled that way on screen for the same reason.
+  const mechanicsWithDuty = useMemo(
+    () => mechanics.filter((m) => m.duty_hours != null && m.duty_hours > 0).length,
+    [mechanics],
+  );
+  const trucksPerMechanic = mechanics.length > 0 ? truckCount / mechanics.length : null;
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -162,12 +241,73 @@ export default function StaffTab({
 
   return (
     <div>
+      {/* Item 6 — staff-only KPIs. Two plain figures, then two cards that
+          carry a LIST rather than a single number: a per-branch headcount and
+          the mechanics cluster. Both are given two columns each because a
+          breakdown squeezed into a quarter-width Stat card would be unreadable
+          at exactly the moment it stops being one line long. */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+        <Stat label="Active staff" value={activeHeadcount} tone="ok" />
+        <Stat
+          label="Iqama exp (90d)"
+          value={iqamaSoon}
+          tone={iqamaSoon > 0 ? "warn" : "ok"}
+        />
+
+        <div className="card p-4 col-span-2">
+          <div className="text-xs muted mb-2">Headcount by branch</div>
+          {byStation.length === 0 ? (
+            <p className="muted text-sm">No staff yet.</p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {byStation.map((s) => (
+                <div key={s.label} className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="truncate">{s.label}</span>
+                  <span className="font-semibold tabular-nums">{s.count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="card p-4 col-span-2">
+          <div className="flex items-center gap-1.5 text-xs muted mb-2">
+            <Wrench className="h-3.5 w-3.5" /> Mechanics team
+          </div>
+          <div className="flex items-baseline gap-2 mb-2">
+            <span className="text-2xl font-semibold tabular-nums">{mechanics.length}</span>
+            <span className="text-xs muted">mechanics</span>
+          </div>
+          <div className="flex flex-col gap-1 text-sm">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="muted">Open work orders</span>
+              <span className="font-semibold tabular-nums">{mechanicOpenWo}</span>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="muted">Trucks per mechanic</span>
+              <span className="font-semibold tabular-nums">
+                {trucksPerMechanic == null ? "—" : `${trucksPerMechanic.toFixed(1)} : 1`}
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              {/* Wording is load-bearing: duty_hours is a shift LENGTH, so this
+                  is "has a shift on record", never "is clocked in now". */}
+              <span className="muted">With duty hours set</span>
+              <span className="font-semibold tabular-nums">
+                {mechanicsWithDuty}/{mechanics.length}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="card p-4">
         <div className="flex items-center justify-between mb-3 gap-3">
+          {/* Item 5 — the Add staff button that used to sit here now lives in
+              the page header beside New driver, so both tabs offer their
+              primary action from the same slot. The form itself still lives
+              here, opened by the openAddSignal effect above. */}
           <h3 className="font-semibold text-sm">Management &amp; Support Staff</h3>
-          <Btn variant="primary" onClick={openNew}>
-            <Plus className="h-4 w-4" /> Add staff
-          </Btn>
         </div>
 
         {staff.length === 0 ? (

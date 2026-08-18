@@ -141,6 +141,12 @@ export type Driver = {
   // Added in 0008 — standalone monthly salary (SAR). Display-only: never part of
   // commission/payout math. Nullable, render "—" when unset.
   salary_sar: number | null;
+  // Added in 0132 — TRI-STATE, and the null is load-bearing. true = covered,
+  // false = explicitly NOT covered, null = never recorded. null is NOT false:
+  // "we have not asked yet" is a different fact from "he has no insurance", and
+  // the display rule follows it (Yes green / No red / null a neutral dash, never
+  // red). The DB column carries the same rule in a `comment on column`.
+  health_insurance: boolean | null;
   active: boolean;
   // Soft delete (0020): NULL = active; a timestamp = terminated. termination_date
   // is the effective last-working-day the manager picked (may be in the past).

@@ -47,6 +47,27 @@ export const DRIVER_STATE_LABELS: Record<DriverState, string> = {
   on_leave: "On leave",
 };
 
+// Colour mapping for the 4 derived states — Turki's call: Active=green,
+// Idle=amber, Off duty=yellow, On leave=yellow. Lives HERE, beside the labels,
+// so the pill and the "On duty" KPI bar read one map instead of two.
+//
+// The token names match components/ui.tsx's PillTone STRUCTURALLY but the type
+// is declared locally ON PURPOSE: importing PillTone would add a lib -> components
+// import edge (this file is a pure leaf that never touches React). Structural
+// compatibility is all the call site needs.
+//
+// NOT COVERED HERE: `terminated` is not a DriverState (termination is a
+// pre-filter, never a state — see CLAUDE.md §6). Its red is applied by whatever
+// surface renders a terminated row, outside this map.
+export type DriverStateTone = "ok" | "warn" | "yellow";
+
+export const DRIVER_STATE_TONE: Record<DriverState, DriverStateTone> = {
+  active: "ok",
+  idle: "warn",
+  off_duty: "yellow",
+  on_leave: "yellow",
+};
+
 // Resolve the on-leave fact for one driver on an arbitrary date, reusing the
 // canonical range check (periodCoversToday) — NO new date logic here.
 export function resolveOnLeave(
