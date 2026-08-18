@@ -337,6 +337,51 @@ export default function StaffTab({
                         On leave
                       </span>
                     )}
+
+                    {/* Item 4 — the year-to-date leave tally, BESIDE THE NAME.
+                        It first hung off the corner as an absolutely-positioned
+                        badge on a wrapper div (a notification dot stuck ON the
+                        card rather than a fact ABOUT the person), then sat at the
+                        card's right edge, where it was inside the card but read
+                        as a separate column with nothing tying it to whose leave
+                        it was. Beside the name, the person and their leave read
+                        as one unit — which is the whole claim the number makes.
+
+                        Sized to the "On leave" pill it sits next to, not to its
+                        old right-edge treatment: this row sets the card's height,
+                        so the previous text-sm/px-2 chip would have pushed every
+                        card taller for a figure most of them do not carry.
+
+                        THE BASIS IS ON SCREEN, not only in the tooltip: "since
+                        Jan 1" is the whole meaning of the number. Without it the
+                        reader has to guess between a rolling 12 months, an
+                        entitlement balance and a calendar-year tally, and those
+                        are three different conversations to have with an employee.
+
+                        DERIVED LIVE from leave_periods every render
+                        (leaveDaysInYear(periods, currentYear) above) — there is NO
+                        scheduled reset anywhere and there must never be one. A
+                        cron that zeroed a stored counter each January would
+                        destroy the prior year's record to produce a number this
+                        expression gets for free: on 1 January the year rolls, no
+                        period falls inside it yet, and this reads 0 on its own.
+
+                        Distinct from the "On leave" pill immediately before it,
+                        which is a state TODAY — they sit together deliberately,
+                        one saying where the person is now and the other how much
+                        of the year they have taken. Zero renders nothing: a
+                        person who took no leave has nothing to report, and a "0d"
+                        chip on most of the grid would drown the ones that
+                        matter. */}
+                    {leaveDays > 0 && (
+                      <span
+                        className="shrink-0 inline-flex items-baseline gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                        title={`${leaveDays} leave day${leaveDays === 1 ? "" : "s"} taken since 1 January ${currentYear}`}
+                      >
+                        <span className="font-semibold tabular-nums">{leaveDays}d</span>
+                        <span className="opacity-80">since Jan 1</span>
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs muted truncate">
                     {roleName(p.role)}{stationName(p.station) ? ` · ${stationName(p.station)}` : ""}
@@ -344,40 +389,6 @@ export default function StaffTab({
                   <div className="text-[11px] muted truncate">{p.phone ?? "—"}</div>
                   {p.email && <div className="text-[11px] muted truncate">{p.email}</div>}
                 </div>
-
-                {/* Item 4 — the year-to-date leave tally, INSIDE the card.
-                    It used to hang off the corner as an absolutely-positioned
-                    badge on a wrapper div, which read as a notification dot
-                    stuck ON the card rather than a fact ABOUT the person — and
-                    the wrapper existed for nothing else, so it went with it.
-
-                    THE BASIS IS ON SCREEN, not only in the tooltip: "since Jan 1"
-                    is the whole meaning of the number. Without it the reader has
-                    to guess between a rolling 12 months, an entitlement balance
-                    and a calendar-year tally, and those are three different
-                    conversations to have with an employee.
-
-                    DERIVED LIVE from leave_periods every render
-                    (leaveDaysInYear(periods, currentYear) above) — there is NO
-                    scheduled reset anywhere and there must never be one. A cron
-                    that zeroed a stored counter each January would destroy the
-                    prior year's record to produce a number this expression gets
-                    for free: on 1 January the year rolls, no period falls inside
-                    it yet, and this reads 0 on its own.
-
-                    Distinct from the "On leave" pill beside the name, which is a
-                    state TODAY. Zero renders nothing — a person who took no leave
-                    has nothing to report, and a "0d" chip on most of the grid
-                    would drown the ones that matter. */}
-                {leaveDays > 0 && (
-                  <span
-                    className="shrink-0 self-center inline-flex items-baseline gap-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2 py-1"
-                    title={`${leaveDays} leave day${leaveDays === 1 ? "" : "s"} taken since 1 January ${currentYear}`}
-                  >
-                    <span className="text-sm font-semibold tabular-nums leading-none">{leaveDays}d</span>
-                    <span className="text-[10px] leading-none opacity-80">since Jan 1</span>
-                  </span>
-                )}
               </button>
               );
             })}
