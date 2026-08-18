@@ -1,18 +1,27 @@
 "use client";
 
-// Trips page shell: Projects | Customers tabs. The page header (title +
-// subtitle) swaps with the active tab. Tab state lives in the URL (?tab=…) so a
-// refresh keeps the tab; default (no param) is Projects.
+// Trips page shell: Projects | Customers | Finance/Invoice tabs. The page
+// header (title + subtitle) swaps with the active tab. Tab state lives in the
+// URL (?tab=…) so a refresh keeps the tab; default (no param) is Projects.
 //
-// Projects tab = the existing ProjectsBoard (KPIs + New Project button + project
-// kanban boards). Customers tab is a placeholder for now — its KPIs + table land
-// in a later commit. Tab visual style mirrors the Drivers & People sub-tabs.
+// This shell also OWNS the two page-level actions — "New Project" and "Manage
+// stations" — in the header's top-right slot. They used to sit inside
+// ProjectsBoard under its KPIs, which made them Projects-tab-only and moved
+// them down the page; they are page-wide concerns, so they are mounted here,
+// above the tab bar, and rendered on every tab.
+//
+// Projects tab = ProjectsBoard (day calendar + KPIs + per-project kanban).
+// Tab visual style mirrors the Drivers & People sub-tabs.
 
+import { useMemo, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { PageHeader } from "@/components/ui";
-import ProjectsBoard, { type ProjectsBoardProps } from "./ProjectsBoard";
+import { Droplet } from "lucide-react";
+import { Btn, PageHeader } from "@/components/ui";
+import ProjectsBoard, { buildDriverProjectNames, type ProjectsBoardProps } from "./ProjectsBoard";
 import CustomersTab from "./CustomersTab";
 import FinanceTab from "./FinanceTab";
+import NewProjectModal from "./NewProjectModal";
+import WaterStationsModal from "./WaterStationsModal";
 import type { TopupRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
 
 type Tab = "projects" | "customers" | "finance";
@@ -60,9 +69,54 @@ export default function TripsTabs({
 
   const head = HEADER[tab];
 
+  // Water station management popup (false = closed). Lives HERE, not in
+  // ProjectsBoard, so the trigger survives a tab switch.
+  const [managingStations, setManagingStations] = useState(false);
+
+  // Driver roster for the create-project form. Same helper ProjectsBoard uses
+  // for its EDIT-mode ProjectModal — one inversion, two mount points.
+  const driverProjectNames = useMemo(
+    () => buildDriverProjectNames(boardProps.projects, boardProps.assignmentsByProject),
+    [boardProps.projects, boardProps.assignmentsByProject],
+  );
+
   return (
     <div>
-      <PageHeader title={head.title} subtitle={head.subtitle} />
+      {/* THE TWO PAGE-LEVEL ACTIONS LIVE IN THE HEADER, NOT IN A TAB.
+          Both act on the page as a whole — a new project and the station list
+          are not facts about Projects-vs-Customers-vs-Finance — so they are
+          mounted ABOVE the tab bar and rendered UNCONDITIONALLY. Switching
+          tabs must not move them or take them away, which is exactly what
+          happened while they sat inside ProjectsBoard below its KPIs.
+          PageHeader's `actions` slot is already top-right aligned; no
+          positioning of our own, so the header keeps wrapping on narrow
+          screens instead of overlapping the title. */}
+      <PageHeader
+        title={head.title}
+        subtitle={head.subtitle}
+        actions={
+          <>
+            <Btn variant="outline" onClick={() => setManagingStations(true)}>
+              <Droplet className="h-4 w-4" /> Manage stations
+            </Btn>
+            <NewProjectModal
+              drivers={boardProps.drivers}
+              trucks={boardProps.trucks}
+              driverProjectNames={driverProjectNames}
+              stations={boardProps.stations}
+              driverStateById={boardProps.driverStateById}
+              leaveUnavailable={boardProps.leaveLoadFailed}
+            />
+          </>
+        }
+      />
+      {managingStations && (
+        <WaterStationsModal
+          open={managingStations}
+          onClose={() => setManagingStations(false)}
+          stations={boardProps.allStations}
+        />
+      )}
 
       {/* Tab bar — underline style mirrors the Drivers & People sub-tabs. */}
       <div

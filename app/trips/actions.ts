@@ -65,9 +65,31 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
   if (!water_type) return { error: "Water type is required." };
   if (!validWaterType(water_type)) return { error: "Invalid water type." };
 
-  let count = num(formData.get("count")) || 1;
-  if (count < 1) count = 1;
+  // BATCH IS REQUIRED, AND THE OLD `|| 1` FALLBACK IS GONE ON PURPOSE.
+  // It read a missing/blank/garbage value as "one trip" — a silent decision on
+  // the user's behalf. The form now starts the field EMPTY (no 0, no 1) so that
+  // blank is a real state the user has not resolved yet, and blank must not
+  // become a trip. Rejecting is the only reading that cannot invent a number.
+  //
+  // Enforced HERE as well as in CreateTripForm because this is an exported
+  // "use server" endpoint: it is reachable whether or not a component posts to
+  // it. That is the same reasoning that got updateTrip deleted rather than left
+  // uncalled — unused is not unreachable.
+  const rawCount = str(formData.get("count"));
+  if (rawCount === "") return { error: "Enter how many trips to create." };
+  const count = num(formData.get("count"));
+  if (!Number.isInteger(count) || count < 1) {
+    return { error: `Batch must be a whole number from 1 to ${MAX_BATCH_TRIPS}.` };
+  }
   if (count > MAX_BATCH_TRIPS) return { error: `Max ${MAX_BATCH_TRIPS} trips at once.` };
+
+  // A TRIP CANNOT BE CREATED UNASSIGNED. driver_id stays a NULLABLE column —
+  // 0 pre-existing trips are being rewritten and a driver can still be cleared
+  // later through the board — this refuses only the CREATE path, which is what
+  // was asked for. Read once here and reused in the insert payload below, so
+  // the check and the written value cannot diverge.
+  const driver_id = nullable(formData.get("driver_id"));
+  if (!driver_id) return { error: "Pick a driver — a trip cannot be created unassigned." };
 
   const supabase = createClient();
 
@@ -136,7 +158,7 @@ export async function createTrip(formData: FormData): Promise<ActionResult> {
     water_type,
     filling_cost_sar,
     truck_id: nullable(formData.get("truck_id")),
-    driver_id: nullable(formData.get("driver_id")),
+    driver_id,
   };
   // Only override the DB default (current_date) when a date is actually given.
   const trip_date = nullable(formData.get("trip_date"));

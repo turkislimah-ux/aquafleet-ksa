@@ -15,7 +15,7 @@
 // The single day-filter point is `dayTrips` (trip_date === selectedDay), which
 // feeds both the KPIs and the per-project grouping. Stage columns and ProjectCard
 // internals are unchanged — they just receive fewer trips. Stage changes funnel
-// through setTripStage (Start trip -> Mark in transit -> Mark delivered).
+// through setTripStage (Dispatch -> Mark in transit -> Mark delivered).
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -45,8 +45,6 @@ import { formatTripRef } from "@/lib/trip-ref";
 import { useIncomingTripHighlight } from "@/lib/tripHighlight";
 import { setTripStage, setTripStation, deleteTrip } from "./actions";
 import CreateTripForm from "./CreateTripForm";
-import NewProjectModal from "./NewProjectModal";
-import WaterStationsModal from "./WaterStationsModal";
 import ManageDriversModal from "../projects/ManageDriversModal";
 
 // Mid-sentence wording for a water type, off the ONE label map — the same map
@@ -210,7 +208,7 @@ const ACTION_BTN =
 // under), never the destination stage's color. Colors match STAGE_STYLES'
 // per-stage tokens (lib/db-types.ts) so column accent and button always
 // agree:
-//   Start trip        (on a scheduled card) -> solid blue   (brand-600, same
+//   Dispatch          (on a scheduled card) -> solid blue   (brand-600, same
 //                       hex as scheduled's blue-500 family / Btn primary)
 //   Mark in transit    (on a loading card)   -> solid amber  (amber-500,
 //                       matches STAGE_STYLES.loading.dot)
@@ -381,7 +379,11 @@ function TripCard({
         }}
         className={cn(ACTION_BTN, ACTION_PRIMARY)}
       >
-        <Play className="h-3.5 w-3.5" /> {busy ? "…" : "Start trip"}
+        {/* LABEL ONLY. "Start trip" -> "Dispatch" (Turki's wording — the
+            scheduled -> loading move is the dispatch decision, not the start
+            of driving). The action, the icon and the own-current-stage colour
+            lock documented above ACTION_PRIMARY are untouched. */}
+        <Play className="h-3.5 w-3.5" /> {busy ? "…" : "Dispatch"}
       </button>
     );
   } else if (trip.stage === "loading") {
@@ -1185,6 +1187,29 @@ function ProjectCard({
   );
 }
 
+// driver_id -> [project name…]. Inverts assignmentsByProject and resolves ids
+// to names, for the project form's driver roster ("which projects does this
+// driver already serve").
+//
+// EXPORTED because TWO components need it and a hand-copied second inversion is
+// how the create form and the edit form start disagreeing about who is already
+// booked: ProjectModal in EDIT mode is mounted by this board, and the same modal
+// in CREATE mode is mounted by the page header (TripsTabs). The import edge is
+// ONE WAY — TripsTabs already imports this file, never the reverse.
+export function buildDriverProjectNames(
+  projects: ProjectHeader[],
+  assignmentsByProject: Record<string, string[]>,
+): Record<string, string[]> {
+  const nameById = new Map(projects.map((p) => [p.id, p.name] as const));
+  const m: Record<string, string[]> = {};
+  for (const [pid, ids] of Object.entries(assignmentsByProject)) {
+    const name = nameById.get(pid);
+    if (!name) continue;
+    for (const did of ids) (m[did] ??= []).push(name);
+  }
+  return m;
+}
+
 export type ProjectsBoardProps = {
   trips: TripRow[];
   projects: ProjectHeader[];
@@ -1194,7 +1219,9 @@ export type ProjectsBoardProps = {
   assignmentsByProject: Record<string, string[]>;
   stationsByKey: Record<string, string>;
   stations: StationOption[];
-  // Full rows (active + inactive) — "Manage stations" popup only.
+  // Full rows (active + inactive) — "Manage stations" popup only. NOT read by
+  // this component: the popup moved to the page header (TripsTabs), which reads
+  // it off this same bundle. Kept on the type so page.tsx keeps one prop set.
   allStations: WaterStationRow[];
   driverStateById: Record<string, DriverState>;
   // FULL leave periods (any date) — Add Trip resolves on-leave for the selected day.
@@ -1212,7 +1239,6 @@ export default function ProjectsBoard({
   assignmentsByProject,
   stationsByKey,
   stations,
-  allStations,
   driverStateById,
   leavePeriods,
   leaveLoadFailed,
@@ -1224,8 +1250,6 @@ export default function ProjectsBoard({
   const [addTripProjectId, setAddTripProjectId] = useState<string | null>(null);
   // Commit 2 — the trip currently open in the any-stage phase picker (null = closed).
   const [pickerTrip, setPickerTrip] = useState<TripRow | null>(null);
-  // Water station management popup (null = closed).
-  const [managingStations, setManagingStations] = useState(false);
 
   // Calendar state — selected day + the visible week (Sunday key). Default today.
   const todayKey = dayKey(new Date());
@@ -1367,17 +1391,11 @@ export default function ProjectsBoard({
   const customersById = useMemo(() => new Map(customers.map((c) => [c.id, c.name] as const)), [customers]);
 
   // driver_id -> [project name…] for the project form's driver roster (which
-  // projects each driver already serves). Inverts assignmentsByProject + names.
-  const driverProjectNames = useMemo(() => {
-    const nameById = new Map(projects.map((p) => [p.id, p.name] as const));
-    const m: Record<string, string[]> = {};
-    for (const [pid, ids] of Object.entries(assignmentsByProject)) {
-      const name = nameById.get(pid);
-      if (!name) continue;
-      for (const did of ids) (m[did] ??= []).push(name);
-    }
-    return m;
-  }, [projects, assignmentsByProject]);
+  // projects each driver already serves). See buildDriverProjectNames.
+  const driverProjectNames = useMemo(
+    () => buildDriverProjectNames(projects, assignmentsByProject),
+    [projects, assignmentsByProject],
+  );
 
   // Per-day distinct project pills for the calendar strip (across ALL trips, not
   // just the selected day). Keyed by trip_date; only projects present in `projects`.
@@ -1452,7 +1470,7 @@ export default function ProjectsBoard({
 
   const activeList = projects.filter((p) => p.status === "active");
 
-  // Sequential, one-step advance (Start trip / Mark in transit / Mark delivered).
+  // Sequential, one-step advance (Dispatch / Mark in transit / Mark delivered).
   // Funnels through setTripStage, which stamps the *_at column and commission on delivered.
   async function advance(tripId: string, to: TripStage) {
     setAdvancingId(tripId);
@@ -1612,28 +1630,12 @@ export default function ProjectsBoard({
         <Stat label="Commission (day)" value={formatSar(commissionDay)} tone="ok" />
       </div>
 
-      {/* New Project + Manage stations — Projects tab only, below the KPIs
-          (relocated from the page header). */}
-      <div className="flex justify-end gap-2 mb-4">
-        <Btn variant="outline" onClick={() => setManagingStations(true)}>
-          <Droplet className="h-4 w-4" /> Manage stations
-        </Btn>
-        <NewProjectModal
-          drivers={drivers}
-          trucks={trucks}
-          driverProjectNames={driverProjectNames}
-          stations={stations}
-          driverStateById={driverStateById}
-          leaveUnavailable={leaveLoadFailed}
-        />
-      </div>
-      {managingStations && (
-        <WaterStationsModal
-          open={managingStations}
-          onClose={() => setManagingStations(false)}
-          stations={allStations}
-        />
-      )}
+      {/* New Project + Manage stations USED TO SIT HERE, below the KPIs. They
+          now live in the PAGE HEADER's top-right actions slot (TripsTabs), so
+          they are reachable from Projects, Customers AND Finance/Invoice
+          rather than only from this board. Do not re-add a second pair here —
+          two "New Project" buttons on one page is how a duplicate customer
+          gets created. */}
 
       {error && (
         <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">

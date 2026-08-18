@@ -55,6 +55,26 @@ const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
+// BATCH IS THE ONE FIELD WITH NO SAFE DEFAULT, so it is the one field that looks
+// different. It used to carry defaultValue={1} — a value the user never chose and
+// which silently created exactly one trip whenever the field was skipped. It now
+// starts EMPTY and is REQUIRED, which means the field is also the most likely
+// place a submit gets refused; the standout treatment (brand-tinted border, ring,
+// bold tabular value, its own label weight) is what makes "you have not filled
+// this in" visible before the user presses Create rather than after.
+//
+// Kept deliberately distinct from INPUT rather than layered on top of it. The
+// brand border is a CLASS (`border-brand-500`) while INPUT's border colour is an
+// INLINE style from INPUT_STYLE — and an inline style beats any class, so reusing
+// INPUT_STYLE here would silently repaint the border neutral and undo the whole
+// point. This field carries its own style object with background only.
+// `brand` is a Tailwind colour scale (tailwind.config.ts), NOT a CSS variable —
+// `rgb(var(--brand-500))` does not exist and must not be reintroduced.
+const BATCH_INPUT =
+  "px-3 py-2.5 rounded-lg border-2 border-brand-500 text-base font-semibold tabular-nums " +
+  "outline-none focus:ring-2 focus:ring-brand-500/40 w-full";
+const BATCH_INPUT_STYLE = { background: "rgb(var(--card))" } as const;
+
 export default function CreateTripForm({
   projects,
   customers,
@@ -122,12 +142,19 @@ export default function CreateTripForm({
   // this the field would silently blank and look like a glitch.
   const blockedType = waterType !== "" && !allowedTypes.includes(waterType) ? waterType : null;
   const stationName = pickedStation?.name ?? "This station";
-  // Single-select operational driver (null = unassigned). Truck is DERIVED from
-  // this driver (one truck per driver) — there is no separate truck selector.
+  // Single-select operational driver. null = NOTHING PICKED YET, which is now a
+  // REFUSING state, not a valid "unassigned" trip — see the required-fields block
+  // above onSubmit. Truck is DERIVED from this driver (one truck per driver) —
+  // there is no separate truck selector.
   const [driverId, setDriverId] = useState<string | null>(null);
   // Controlled trip date — seeded from the board's selected day, reseeded when it
   // changes. Free to edit; the manager can still pick any date in the form.
   const [tripDate, setTripDate] = useState<string>(defaultDate ?? "");
+  // Batch count. CONTROLLED and starting EMPTY — see BATCH_INPUT's header. Kept as
+  // a STRING, not a number, because "" is a real state the user is in (nothing
+  // typed) and a number type would force it to be 0 or NaN, both of which read as
+  // a value the user chose. The parse happens once, at validation.
+  const [count, setCount] = useState<string>("");
 
   function close() {
     setOpen(false);
@@ -215,7 +242,11 @@ export default function CreateTripForm({
     return trucks.find((t) => t.assigned_driver_id === driverId)?.id ?? "";
   }, [driverId, trucks]);
 
-  // Toggle-select: re-clicking the chosen driver clears it (driver is optional).
+  // Toggle-select: re-clicking the chosen driver clears it. Clearing is still
+  // allowed — it is how you correct a mis-click — but a cleared driver can no
+  // longer be SAVED (see the required-fields block above onSubmit). The toggle
+  // stays because the alternative, a pick you cannot undo without closing the
+  // modal, is worse than a state the form refuses to submit.
   function onSelectDriver(id: string) {
     setDriverId((prev) => (prev === id ? null : id));
   }
@@ -236,8 +267,40 @@ export default function CreateTripForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openForProject]);
 
+  // TWO REQUIRED FIELDS, BOTH ENFORCED HERE RATHER THAN BY THE BROWSER.
+  //
+  // Batch could have carried a plain `required` attribute — but the driver could
+  // NOT: it is submitted through `<input type="hidden" name="driver_id">`, and a
+  // hidden input is exempt from HTML constraint validation, so `required` on it
+  // is silently ignored and the form submits with an empty driver. Putting both
+  // checks in one place is what stops the two requirements behaving differently
+  // (one blocking with a native bubble, the other with an in-form message).
+  //
+  // `required`/`min`/`max` stay on the batch input as a second, cheaper line —
+  // they are not the enforcement.
+  const parsedCount = Number(count);
+  const countInvalid =
+    count.trim() === "" ||
+    !Number.isInteger(parsedCount) ||
+    parsedCount < 1 ||
+    parsedCount > MAX_BATCH_TRIPS;
+  const missingDriver = driverId === null;
+  // Gates the Create button. Deliberately NOT a per-field disable: the fields
+  // themselves stay editable so the user can always reach the state that unblocks.
+  const blockedReason = countInvalid
+    ? count.trim() === ""
+      ? "Enter how many trips to create."
+      : `Batch must be a whole number from 1 to ${MAX_BATCH_TRIPS}.`
+    : missingDriver
+      ? "Pick a driver — a trip cannot be created unassigned."
+      : null;
+
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (blockedReason) {
+      setError(blockedReason);
+      return;
+    }
     setSaving(true);
     setError(null);
     const formData = new FormData(e.currentTarget);
@@ -402,7 +465,13 @@ export default function CreateTripForm({
                   is implied, so there is no separate truck selector; truck_id is
                   derived from the chosen driver and submitted via a hidden input. */}
               <div className="sm:col-span-2 flex flex-col gap-1 text-sm">
-                <span className="muted">Driver {driverId ? "" : "· unassigned"}</span>
+                {/* REQUIRED. The asterisk carries the same weight/colour as the
+                    Batch field's, because the two requirements are enforced by
+                    the same block and must not look like different rules. */}
+                <span className="muted">
+                  Driver <span className="text-rose-600 dark:text-rose-400 font-semibold">*</span>
+                  {driverId ? "" : " · none picked"}
+                </span>
                 <DriverDutyTable
                   drivers={visibleDrivers}
                   trucks={trucks}
@@ -429,29 +498,47 @@ export default function CreateTripForm({
                 />
               </label>
 
+              {/* BATCH — required, starts empty, deliberately louder than every
+                  other field on this form. See BATCH_INPUT's header for why. */}
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">How many (batch)</span>
+                <span className="font-semibold">
+                  How many (batch){" "}
+                  <span className="text-rose-600 dark:text-rose-400">*</span>
+                </span>
                 <input
                   name="count"
                   type="number"
+                  inputMode="numeric"
                   step="1"
                   min="1"
                   max={MAX_BATCH_TRIPS}
-                  defaultValue={1}
-                  className={INPUT}
-                  style={INPUT_STYLE}
+                  required
+                  placeholder={`1 – ${MAX_BATCH_TRIPS}`}
+                  value={count}
+                  onChange={(e) => setCount(e.target.value)}
+                  className={BATCH_INPUT}
+                  style={BATCH_INPUT_STYLE}
                 />
+                <span className="text-[11px] muted">
+                  Required — how many identical trips to create.
+                </span>
               </label>
 
               {error && (
                 <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{error}</p>
               )}
 
-              <div className="flex justify-end gap-2 sm:col-span-2 mt-2">
+              <div className="flex justify-end items-center gap-3 sm:col-span-2 mt-2">
+                {/* The reason sits BESIDE the disabled button, not only inside the
+                    error line — a greyed-out Create with no stated cause is the
+                    thing that makes a form feel broken rather than strict. */}
+                {blockedReason && !saving && (
+                  <span className="text-xs muted text-end">{blockedReason}</span>
+                )}
                 <Btn variant="outline" onClick={close}>
                   Cancel
                 </Btn>
-                <Btn type="submit" variant="primary">
+                <Btn type="submit" variant="primary" disabled={saving || blockedReason !== null}>
                   {saving ? "Saving…" : "Create"}
                 </Btn>
               </div>
