@@ -17,7 +17,7 @@ import { useTabParam } from "@/lib/useTabParam";
 import { useRecordFocus } from "@/lib/useRecordFocus";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Pencil, Eye, Star, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon, AlertTriangle, Trash2, History } from "lucide-react";
+import { Plus, Pencil, Eye, X, Phone, Shield, Route as RouteIcon, Truck as TruckIcon, AlertTriangle, Trash2, History } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
@@ -396,7 +396,6 @@ export default function DriversClient({
                   <TH>Truck</TH>
                   <TH>Assigned Project</TH>
                   <TH>Trips 30d</TH>
-                  <TH>Rating</TH>
                   <TH>Salary</TH>
                   <TH>License Exp</TH>
                   <TH className="text-end" />
@@ -405,7 +404,7 @@ export default function DriversClient({
               <tbody>
                 {drivers.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                    <td colSpan={9} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                       No drivers yet.
                     </td>
                   </tr>
@@ -448,15 +447,6 @@ export default function DriversClient({
                         )}
                       </TD>
                       <TD className="tabular-nums">{trips30dByDriver[d.id] ?? 0}</TD>
-                      <TD>
-                        {d.rating != null ? (
-                          <span className="inline-flex items-center gap-1">
-                            <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500" /> {d.rating}
-                          </span>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </TD>
                       <TD className="tabular-nums">
                         {d.salary_sar != null ? formatSar(d.salary_sar) : <span className="muted">—</span>}
                       </TD>
@@ -857,13 +847,6 @@ function DriverDetail({
               <div className="grid grid-cols-2 gap-2">
                 <Cell label="Trips 30d"><span className="font-semibold tabular-nums">{trips30d}</span></Cell>
                 <Cell label="Duty hours"><span className="font-semibold tabular-nums">{d.duty_hours}</span></Cell>
-                {/* Read-only — rating column is dead (no form input), reserved
-                    for later use. Display only, never editable here. */}
-                <Cell label="Rating">
-                  {d.rating != null ? (
-                    <span className="inline-flex items-center gap-1 font-semibold"><Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500" /> {d.rating}</span>
-                  ) : <span className="muted">—</span>}
-                </Cell>
                 {/* Live count — reuses the `incidents` prop already passed in
                     (driverIncidentsById lookup one level up), no new fetch. */}
                 <Cell label="Incidents">

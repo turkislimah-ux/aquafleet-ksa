@@ -60,7 +60,7 @@ export default async function FleetDetailPage({
     // Driver picker — filtered at the fetch.
     supabase
       .from("drivers")
-      .select("id, name, status, active, safety_score, rating")
+      .select("id, name, status, active, safety_score")
       .is("terminated_at", null)
       .order("name", { ascending: true }),
     supabase.from("trips").select("driver_id, trip_date").gte("trip_date", since),

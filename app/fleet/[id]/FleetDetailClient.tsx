@@ -517,10 +517,6 @@ export default function FleetDetailClient({
                     <span className="muted">Trips 30d:</span>{" "}
                     <span className="font-medium">{trips30d[driver.id] ?? 0}</span>
                   </div>
-                  <div>
-                    <span className="muted">Rating:</span>{" "}
-                    <span className="font-medium">{driver.rating != null ? `${driver.rating} / 5` : "—"}</span>
-                  </div>
                 </div>
               </div>
             ) : freedDriver ? (

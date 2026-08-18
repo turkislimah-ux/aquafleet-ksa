@@ -120,7 +120,10 @@ export type Driver = {
   license_expiry: string | null;
   status: DriverStatus;
   safety_score: number | null;
-  rating: number | null;
+  // `rating` used to sit here. DROPPED from the table in 0132 — dead since 0023
+  // replaced this block, never writable from any form, 0 views and 0 functions
+  // referencing it. Do not re-add the field: a select naming a column that no
+  // longer exists is a 400 from PostgREST, not a silent null.
   // Added in 0006 — all nullable, render "—" when absent (no fake values).
   phone: string | null;
   hire_date: string | null;
@@ -129,8 +132,10 @@ export type Driver = {
   hours_this_week: number | null;
   incidents_12mo: number | null;
   // Added in 0023 — replaces the dead safety/rating/hours/incidents fields
-  // above (columns stay, form no longer reads/writes them). duty_hours is
-  // NOT NULL (DB default 10); iqama_expiry is optional.
+  // above. Those columns stayed on the table and the form stopped reading or
+  // writing them; `rating` is the one that has since been dropped outright
+  // (0132), the rest are still there. duty_hours is NOT NULL (DB default 10);
+  // iqama_expiry is optional.
   duty_hours: number;
   iqama_expiry: string | null;
   // Added in 0008 — standalone monthly salary (SAR). Display-only: never part of
