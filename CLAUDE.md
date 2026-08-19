@@ -209,11 +209,19 @@ relevant skill(s) **when the task calls for it**:
   ```
   This is not per-feature style — it is the standing rule for every view, and
   the failure is invisible: the view keeps returning rows, just with the wrong
-  privileges. Live count to check against: **44 views, 44 security_invoker, 0
-  anon-readable** (re-measured during the Staff cleanup; this line read 40/40 for
-  months while four more views had been added — **the two counts matching is the
-  check, not the number**, so re-measure and update rather than trusting the
-  figure written here).
+  privileges. Live count to check against: **46 views, 46 security_invoker, 0
+  anon-readable** (re-measured after 0137, which added `v_customer_prepaid_balance`
+  and `v_invoice_outstanding_live`). This line has now gone stale twice — it read
+  40/40 for months while four views were added, then 44/44 while 0137 added two
+  more — which is the point: **the two counts matching is the check, not the
+  number**, so re-measure and update rather than trusting the figure written here:
+  ```sql
+  select count(*) as views,
+         count(*) filter (where c.reloptions::text[] @> array['security_invoker=true']) as security_invoker,
+         count(*) filter (where has_table_privilege('anon', c.oid, 'select')) as anon_readable
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where c.relkind = 'v' and n.nspname = 'public';
+  ```
 - **`create or replace view` can only APPEND a column** — it cannot insert,
   reorder or rename one (error **42P16**, which cost 0112 an apply cycle). If a
   new column belongs in the middle, it still goes at the end.
