@@ -338,13 +338,25 @@ export default function StatementModal({
                     const consumed =
                       e.kind === "trip" || e.kind === "charge" ? consumedById.get(`${e.kind}:${e.id}`) : undefined;
                     return (
-                      <tr key={`${e.kind}-${e.id}`}>
+                      <tr
+                        key={`${e.kind}-${e.id}`}
+                        // DISPLAY COLOUR ONLY — a settlement row is tinted so
+                        // management can pick the paid invoices out of a long
+                        // statement at a glance. It changes no figure: the row
+                        // still RECORDS rather than deducts, and the running
+                        // balance still holds flat across it (lib/prepaid.ts).
+                        // The tint is on the ROW while a top-up's green is on
+                        // its TEXT, deliberately — both are green-family, but
+                        // a top-up is money arriving and a settlement is not,
+                        // so they must not render identically.
+                        className={e.kind === "settlement" ? "bg-emerald-500/[0.07]" : ""}
+                      >
                         <TD className="tabular-nums">{e.date}</TD>
                         <TD>
                           {e.kind === "topup" ? (
                             <span className="text-emerald-600 dark:text-emerald-400 font-medium">Add Balance</span>
                           ) : e.kind === "settlement" ? (
-                            <span className="muted">Invoice payable</span>
+                            <span className="text-emerald-700 dark:text-emerald-400 font-medium">Invoice payable</span>
                           ) : e.kind === "charge" ? (
                             <span className="muted">Special charge</span>
                           ) : (
