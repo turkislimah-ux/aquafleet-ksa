@@ -970,10 +970,10 @@ export type ArchiveProjectResult = {
 //
 // SINCE 0139 THIS GOES THROUGH archive_project_guarded, NOT archive_project.
 // The guard reads v_customer_amount_payable — the one definition of what the
-// customer owes — and refuses while the figure is negative. The old
-// archive_project() still exists in the database and is a back door around the
-// guard; it is scheduled for a DROP migration now that this, its only call
-// site, no longer uses it. Do not reach for it.
+// customer owes — and refuses while the figure is negative. 0019's unguarded
+// archive_project() was the back door around that guard, and migration 0140
+// DROPPED it — archive_project_guarded is now the only archive path that
+// exists in the database. Do not add a second one.
 //
 // overrideReason is the MANAGER OVERRIDE, and an override is a WRITE-OFF: the
 // RPC records amount + reason + actor + timestamp in customer_write_offs, which
