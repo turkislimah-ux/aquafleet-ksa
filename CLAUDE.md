@@ -3282,6 +3282,79 @@ relevant skill(s) **when the task calls for it**:
     only `balance_returned` may change, and a second call must raise "already been
     returned".
 
+- **AMOUNT PAYABLE HAS ONE AUTHORITY, AND IT IS TYPESCRIPT — `app/trips/amountPayable.ts`,
+  commit `629a1a9`.** The rule was written inline in `FinanceTab.tsx` for the Finance
+  tab's Amount Payable column (`a69a06d`); the project Breakdown report now shows the
+  same figure, and `BreakdownReport` is not inside `FinanceTab` — it is rendered by
+  `CustomersTab`, a sibling under `TripsTabs` — so the value could not simply be read
+  across. The rule moved to a leaf module that imports nothing from either caller
+  (only `lib/prepaid` and `lib/db-types`), imported ONE WAY by both. **Same shape and
+  same reason as `DeliveriesReportBand` (`b0c386c`)**: two siblings importing one leaf
+  cannot form a cycle, which is the trap already recorded under Inventory Phase 4.
+  - **THE CORRECTION THAT PRODUCED THIS ENTRY.** `.planning/AQUAFLEET-HANDOFF.json`'s
+    `next_action` carried the rule **BACKWARDS** — "`v_customer_amount_payable` IS THE
+    SINGLE SOURCE for Amount Payable — any second surface showing that figure reads
+    that view and never recomputes it a second way." **`a69a06d` deliberately REJECTED
+    fetching that view**, and item 3 shipped TypeScript-side. The view (`0139`) is a
+    **RECONCILIATION MIRROR**, exactly as `v_customer_prepaid_balance` (`0137`) is a
+    declared SQL mirror of `lib/prepaid.ts` — a mirror is not an authority.
+    **A NEW SURFACE SHOWING THIS FIGURE IMPORTS `amountPayable.ts`. IT DOES NOT FETCH
+    THE VIEW.** Putting a second computation of this number on a screen is the exact
+    thing `a69a06d` rejected.
+  - **This is also §5's own failure mode, and it is the reason for this entry:** the
+    JSON is a POINTER to §7, never the record itself. A rule that lives only in the
+    JSON can go stale and actively wrong with nothing to check it against — this one
+    had, for two commits.
+  - **IT REUSES `derivedBalanceItems`; THERE IS NO ARITHMETIC IN THE FILE.** Prepaid =
+    the running balance (top-ups minus VAT-inclusive consumption), so the uncovered
+    part is exactly its negative side. Postpaid = `derivedBalanceItems([], …)` over the
+    slice that has not been PAID FOR — credits-minus-debits with the credits side
+    empty — which reuses `consumingItems()`'s delivered-only filter and per-item
+    rounding rather than restating either. **Drafting, reviewing or confirming an
+    invoice does not reduce it; only Mark Paid does.**
+  - **SIGN IS THE MEANING, and it matches `0139`'s table exactly** — negative = owed to
+    us, zero = settled, positive = credit the customer holds (prepaid only; a postpaid
+    customer has no pool and can never compute above 0). Renderers read the sign and
+    add nothing of their own. **Null** (no project, or `payment_mode` unset on a legacy
+    pre-`0025` row) renders an em dash — guessing at a receivable is what `0137` exists
+    to prevent.
+  - **PERIOD-INDEPENDENT BY CONSTRUCTION.** Nothing in the file takes a month or a date
+    window. The Breakdown box therefore sits beside month-scoped figures and **says so
+    on screen** — a month-sliced payable is a different number from the one the Finance
+    column renders, so it must never be "fixed" by slicing the inputs.
+  - **`prepaidBalance` IS A REUSE HATCH, NOT A SECOND FORMULA.** FinanceTab already
+    computes the running balance for its KPI and its over-balance banner, so it passes
+    it in rather than computing the identical figure twice per row. Both paths are the
+    same call with the same inputs. **A caller passing a DIFFERENT number there is
+    misusing it.**
+  - **PROVEN READ-ONLY BEFORE THE COMMIT LANDED, both halves.** (1) The extracted rule
+    equals the pre-refactor `FinanceTab` logic line-for-line in behaviour — same
+    branches, same prepaid-balance source, same sign, same rounding — so the Finance
+    column is unchanged. (2) The Breakdown box reads the SAME slices the column does
+    for all three inputs: `TripsTabs` hands the same array references to both branches,
+    so there is no second fetch and no exclusion rule that could differ. **Trips are
+    project-scoped on BOTH paths; topups and charges are customer-wide on BOTH paths**
+    — that asymmetry is a property of the rule (invoices, topups and charges carry
+    `customer_id`, never `project_id`, per `0025`), not a divergence between surfaces.
+    The one shape difference is inert: FinanceTab projects topups to five fields while
+    the report passes whole rows, and `derivedBalanceItems` reads only `amount_sar`.
+  - **DEFERRED, LOGGED NOT FIXED — the TypeScript multi-project resolution FAILS OPEN
+    where the SQL side fails CLOSED.** `FinanceTab.tsx` resolves a customer's project
+    with `m.set(p.customer_id, p)`, so **the last project silently wins**. `0134` met
+    the same ambiguity in SQL and chose `count(distinct …) = 1 else NULL`, which fails
+    closed — `0139`'s view byte-copies that guard for the same reason.
+    - **Unreachable today**: `projects_customer_id_unique` (`0015`, guard-wrapped,
+      "Business rule LOCKED") makes customer→project 1:1 at the database, and 0 live
+      customers have more than one active project.
+    - **If `0015` is ever lifted** — and multi-project customers with separate finance
+      is already a named deferred Finance item, so this is a scheduled change and not a
+      hypothetical — the Finance column would net a customer's WHOLE topup and charge
+      history against ONE arbitrarily chosen project's trips, while each project's
+      Breakdown box nets it against its own. **Two boxes, one column, three numbers,
+      no error.**
+    - **The fix is a fail-LOUD TS guard, landing in the same commit as whatever lifts
+      `0015`** — not a second arbitrary choice, and not a quiet null.
+
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
   entries above; the old "Archive deferred / preview/archive.js is the spec" note
