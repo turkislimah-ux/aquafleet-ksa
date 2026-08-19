@@ -71,7 +71,9 @@ export default function ManageDriversModal({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <div
-        className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin"
+        // Hosts DriverRosterTable — a table-bearing popup, so it takes the
+        // app's size:lg width (1080px) like every other one.
+        className="card p-6 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold">Manage drivers</h2>

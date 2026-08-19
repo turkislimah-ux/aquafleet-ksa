@@ -170,13 +170,13 @@ export default function AddBalanceModal({
         // TWO WIDTHS, because this shell hosts two different things. The list
         // view is a five-column history table (Date / Method / ETF Ref. /
         // Amount / Photo) and gets the app's size:lg width, 1080px, like every
-        // other table-bearing trips popup. The ADD FORM keeps max-w-md: it is a
-        // stack of single-line fields, and a 1080px-wide date input beside a
-        // 1080px-wide amount input is harder to fill in, not easier. Widening a
-        // popup is about fitting its COLUMNS, and a form has none.
+        // other table-bearing trips popup. The ADD FORM stays narrower — it is a
+        // single-column stack of single-line fields, and a 1080px-wide date
+        // input is harder to fill in, not easier — but not as narrow as the
+        // md it used to be, which cramped the amount and ETF-reference rows.
         className={
           "card p-6 w-full max-h-[90vh] overflow-y-auto scrollbar-thin " +
-          (view === "list" ? "max-w-[1080px]" : "max-w-md")
+          (view === "list" ? "max-w-[1080px]" : "max-w-xl")
         }
         onClick={(e) => e.stopPropagation()}
       >

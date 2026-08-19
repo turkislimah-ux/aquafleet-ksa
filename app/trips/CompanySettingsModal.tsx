@@ -89,7 +89,7 @@ export default function CompanySettingsModal({ open, onClose }: { open: boolean;
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
-      <div className="card p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-lg font-semibold">Company settings</h2>
           <button type="button" onClick={close} className="muted hover:text-[rgb(var(--fg))]">
