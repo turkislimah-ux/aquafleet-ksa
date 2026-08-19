@@ -155,6 +155,12 @@ export default function ProjectModal({
   const [confirmingArchive, setConfirmingArchive] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [archiving, setArchiving] = useState(false);
+  // The debt guard's refusal (0139), held SEPARATELY from `error`. It is not a
+  // failure to report at the foot of the form — it is the guard stating what
+  // is owed and inviting a written override, so it renders in the danger zone
+  // beside the field that answers it.
+  const [blockMessage, setBlockMessage] = useState<string | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
 
   // Seed the fields each time the modal opens: from `initial` in edit mode, or
   // back to create defaults otherwise.
@@ -164,6 +170,8 @@ export default function ProjectModal({
     setConfirmingArchive(false);
     setConfirmText("");
     setArchiving(false);
+    setBlockMessage(null);
+    setOverrideReason("");
     setModeCheck({ checking: false, blocked: false, reason: null });
     if (mode === "edit" && initial) {
       setCustName(initial.cust_name);
@@ -332,12 +340,25 @@ export default function ProjectModal({
   // Type-to-confirm: trimmed, case-sensitive exact match against the project name.
   const archiveMatch = confirmText.trim() !== "" && confirmText.trim() === projName.trim();
 
-  async function onArchive() {
+  // A forced archive is a WRITE-OFF, so it needs a written reason. The RPC
+  // trims a blank one and blocks again — refusing here keeps the button honest
+  // rather than letting an empty box look like it did something.
+  const overrideReady = overrideReason.trim() !== "";
+
+  async function onArchive(reason?: string) {
     if (!isEdit || !initial?.project_id || !archiveMatch) return;
+    if (blockMessage && !overrideReady) return;
     setArchiving(true);
     setError(null);
-    const res = await archiveProject(initial.project_id);
+    const res = await archiveProject(initial.project_id, reason);
     setArchiving(false);
+    if (res.blocked) {
+      // Not a failure to report generically: the guard is telling us what is
+      // owed and inviting a written override. It renders in the danger zone,
+      // beside the field that answers it.
+      setBlockMessage(res.error);
+      return;
+    }
     if (res.error) {
       setError(res.error);
       return;
@@ -635,27 +656,73 @@ export default function ProjectModal({
                     style={INPUT_STYLE}
                     placeholder={projName}
                   />
+
+                  {/* The debt guard refused (0139). The message is the one the
+                      RPC RAISED — it names the figure, so nothing is recomputed
+                      here. Overriding is a WRITE-OFF, not a bypass: it zeroes
+                      what the customer owes and records who / why / when, which
+                      is why the reason is required and why the button says so. */}
+                  {blockMessage && (
+                    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
+                      <div className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                        Archiving is blocked
+                      </div>
+                      <p className="text-sm text-amber-800 dark:text-amber-200">{blockMessage}</p>
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300/80">
+                        A manager can override this. Overriding <b>writes the amount off</b> — the
+                        customer stops owing it, and your name, the reason and the time are recorded
+                        against the write-off. It cannot be undone from here.
+                      </p>
+                      <textarea
+                        value={overrideReason}
+                        onChange={(e) => setOverrideReason(e.target.value)}
+                        rows={2}
+                        className={INPUT}
+                        style={INPUT_STYLE}
+                        placeholder="Reason for writing off the outstanding amount"
+                      />
+                    </div>
+                  )}
+
                   <div className="flex justify-end gap-2">
                     <Btn
                       variant="outline"
                       onClick={() => {
                         setConfirmingArchive(false);
                         setConfirmText("");
+                        setBlockMessage(null);
+                        setOverrideReason("");
                       }}
                     >
                       Cancel
                     </Btn>
-                    <button
-                      type="button"
-                      onClick={onArchive}
-                      disabled={!archiveMatch || archiving}
-                      className={
-                        "rounded-lg px-3 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 " +
-                        (!archiveMatch || archiving ? "opacity-50 pointer-events-none" : "")
-                      }
-                    >
-                      {archiving ? "Removing…" : "Remove project"}
-                    </button>
+                    {blockMessage ? (
+                      <button
+                        type="button"
+                        onClick={() => onArchive(overrideReason)}
+                        disabled={!archiveMatch || !overrideReady || archiving}
+                        className={
+                          "rounded-lg px-3 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 " +
+                          (!archiveMatch || !overrideReady || archiving
+                            ? "opacity-50 pointer-events-none"
+                            : "")
+                        }
+                      >
+                        {archiving ? "Writing off…" : "Write off and remove project"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onArchive()}
+                        disabled={!archiveMatch || archiving}
+                        className={
+                          "rounded-lg px-3 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 " +
+                          (!archiveMatch || archiving ? "opacity-50 pointer-events-none" : "")
+                        }
+                      >
+                        {archiving ? "Removing…" : "Remove project"}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

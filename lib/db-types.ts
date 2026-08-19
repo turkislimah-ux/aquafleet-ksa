@@ -1311,6 +1311,43 @@ export type ArchiveCustomerRow = {
   created_at: string;
 };
 
+// One row per customer from v_customer_amount_payable (migration 0139) — the
+// single definition of "does this customer owe us, or do we owe them".
+//
+// SIGN CONVENTION, and it is the whole point of the view:
+//   amount_payable_sar <  0  money owed TO US        -> archiving is BLOCKED
+//   amount_payable_sar == 0  settled                 -> archivable
+//   amount_payable_sar >  0  credit we owe THEM      -> archivable AND returnable
+//
+// DELIBERATELY NARROWER THAN THE VIEW. The view also publishes customer_name,
+// archived_at, payment_mode, prepaid_balance_sar, postpaid_unpaid_sar, owed_sar
+// and archive_blocked. None of them render on the Archive surface: the tab
+// already holds the customer row (name, archived_at) from its own fetch, a
+// positive amount_payable_sar can only come from the prepaid arm (the postpaid
+// arm is <= 0 by construction), and the block message ProjectModal shows is the
+// text the RPC RAISES, never a figure recomputed here. Carrying a figure nothing
+// renders is how two versions of one number start to drift, and noUnusedLocals
+// cannot catch an unused object FIELD. Widen it when a consumer needs a column.
+export type CustomerAmountPayableRow = {
+  customer_id: string;
+  amount_payable_sar: number;
+  // Balance return (customer_balance_returns). balance_returned is the MARK —
+  // it records that the money went back; it does NOT move amount_payable_sar.
+  // A positive balance without this mark is a live liability; with it, it is a
+  // settled one. Rendering the two apart is what makes that readable.
+  balance_returned: boolean;
+  returned_sar: number | null;
+  returned_method: "cash" | "bank_transfer" | null;
+  returned_on: string | null;
+  // Manager override write-off (customer_write_offs) — recorded when an archive
+  // was forced past the debt guard. Audit only; owed_sar is already 0 after it.
+  is_written_off: boolean;
+  written_off_sar: number | null;
+  write_off_reason: string | null;
+  written_off_by: string | null;
+  written_off_at: string | null;
+};
+
 // Narrow invoice shape for the Customer tab's cards. Everything here IS
 // selected by app/archive/page.tsx.
 export type ArchiveInvoiceRow = {

@@ -14,14 +14,16 @@
 // reached for.
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, FileText, Eye, X, Archive } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, Eye, X, Archive, Undo2 } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { SubTabItem } from "./SubTabPicker";
 import {
   PROJECT_STATUS_LABELS, PAYMENT_MODE_LABELS, COMMISSION_MODE_LABELS,
 } from "@/lib/db-types";
-import type { ArchiveCustomerRow, ArchiveInvoiceRow, ArchiveProjectRow } from "@/lib/db-types";
+import type {
+  ArchiveCustomerRow, ArchiveInvoiceRow, ArchiveProjectRow, CustomerAmountPayableRow,
+} from "@/lib/db-types";
 
 export type CustomerSubTab = "invoices" | "deleted";
 
@@ -72,12 +74,47 @@ function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
+const PILL = "text-[11px] px-2 py-0.5 rounded-full ring-1 ring-inset font-medium shrink-0";
+
+// THE MARK RENDERS BESIDE THE FIGURE. NEVER IN ITS OWN COLUMN, NEVER A ROW
+// DOWN, NEVER BEHIND A CLICK.
+//
+// Recording a return does NOT move amount_payable_sar — the RPC writes the
+// mark and deliberately leaves the balance alone (0139's own header calls
+// this load-bearing, and lib/db-types.ts repeats it on the type). So the bare
+// figure is ambiguous by construction: the same number means "we still owe
+// this" before the return and "this was paid back" after it. Only the
+// adjacent mark tells the two apart, which is why they are rendered as one
+// unit rather than as two facts a reader has to pair up.
+function BalanceWithMark({ row }: { row: CustomerAmountPayableRow | null }) {
+  if (!row || row.amount_payable_sar <= 0) return <span className="muted">—</span>;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="tabular-nums font-medium">{money(row.amount_payable_sar)}</span>
+      {row.balance_returned ? (
+        <span
+          className={cn(PILL, "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20")}
+          title={`Returned${row.returned_on ? ` on ${fmtDate(row.returned_on)}` : ""}`}
+        >
+          Returned
+        </span>
+      ) : (
+        <span className={cn(PILL, "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/25")}>
+          To return
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function ArchiveCustomerTab({
   subTab,
   customers,
   invoices,
   projects,
+  amountPayable,
   onOpenInvoice,
+  onReturnBalance,
 }: {
   subTab: CustomerSubTab;
   customers: ArchiveCustomerRow[];
@@ -86,13 +123,25 @@ export default function ArchiveCustomerTab({
   // effect of archiving its project (0019), so the project is the rest of
   // that record — shown in the archived-customer view.
   projects: ArchiveProjectRow[];
+  // v_customer_amount_payable (0139) — what we owe the customer, plus the
+  // return MARK and the write-off audit. Read, never recomputed here: the
+  // figure is the database's, and a second opinion about it is exactly what
+  // the return RPC refuses to accept as a form field.
+  amountPayable: CustomerAmountPayableRow[];
   onOpenInvoice: (invoiceId: string, customerEmail: string | null) => void;
+  // LEAF contract: the return popup is owned by ArchiveClient, same as the
+  // invoice popup above. This tab asks; it does not reach for a modal.
+  onReturnBalance: (customer: ArchiveCustomerRow) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [detailCustomer, setDetailCustomer] = useState<ArchiveCustomerRow | null>(null);
   const projectByCustomer = useMemo(
     () => new Map(projects.map((p) => [p.customer_id, p])),
     [projects],
+  );
+  const payableByCustomer = useMemo(
+    () => new Map(amountPayable.map((r) => [r.customer_id, r])),
+    [amountPayable],
   );
 
   const activeCustomers = useMemo(
@@ -270,33 +319,55 @@ export default function ArchiveCustomerTab({
                 <TH>Customer</TH>
                 <TH>Contact</TH>
                 <TH>Invoices</TH>
+                <TH>Balance to return</TH>
                 <TH>Archived on</TH>
                 <TH>{null}</TH>
               </tr>
             </thead>
             <tbody>
-              {archivedCustomers.map((c) => (
-                <tr key={c.id}>
-                  <TD>
-                    <span className="font-medium">{c.name}</span>
-                    {c.name_ar && <div className="text-[11px] muted">{c.name_ar}</div>}
-                  </TD>
-                  <TD className="text-xs">
-                    {c.contact_name || c.phone || c.email || <span className="muted">—</span>}
-                  </TD>
-                  <TD className="text-xs tabular-nums">
-                    {(invoicesByCustomer.get(c.id) ?? []).length}
-                  </TD>
-                  <TD className="text-xs">{fmtDate(c.archived_at)}</TD>
-                  <TD>
-                    <div className="flex items-center justify-end">
-                      <Btn variant="outline" onClick={() => setDetailCustomer(c)}>
-                        <Eye className="h-3.5 w-3.5" />View
-                      </Btn>
-                    </div>
-                  </TD>
-                </tr>
-              ))}
+              {archivedCustomers.map((c) => {
+                const payable = payableByCustomer.get(c.id) ?? null;
+                // The launcher's gate is the whole rule in one line: money is
+                // owed, and it has not gone back yet. A returned customer keeps
+                // the figure and the mark, and loses the button — there is no
+                // second return to record.
+                const canReturn = !!payable && payable.amount_payable_sar > 0 && !payable.balance_returned;
+                return (
+                  <tr key={c.id}>
+                    <TD>
+                      <span className="font-medium">{c.name}</span>
+                      {c.name_ar && <div className="text-[11px] muted">{c.name_ar}</div>}
+                      {payable?.is_written_off && (
+                        <div className="text-[11px] muted mt-0.5">
+                          Written off{payable.written_off_sar != null ? ` · ${money(payable.written_off_sar)}` : ""}
+                        </div>
+                      )}
+                    </TD>
+                    <TD className="text-xs">
+                      {c.contact_name || c.phone || c.email || <span className="muted">—</span>}
+                    </TD>
+                    <TD className="text-xs tabular-nums">
+                      {(invoicesByCustomer.get(c.id) ?? []).length}
+                    </TD>
+                    <TD className="text-xs">
+                      <BalanceWithMark row={payable} />
+                    </TD>
+                    <TD className="text-xs">{fmtDate(c.archived_at)}</TD>
+                    <TD>
+                      <div className="flex items-center justify-end gap-2">
+                        {canReturn && (
+                          <Btn variant="primary" onClick={() => onReturnBalance(c)}>
+                            <Undo2 className="h-3.5 w-3.5" />Return balance
+                          </Btn>
+                        )}
+                        <Btn variant="outline" onClick={() => setDetailCustomer(c)}>
+                          <Eye className="h-3.5 w-3.5" />View
+                        </Btn>
+                      </div>
+                    </TD>
+                  </tr>
+                );
+              })}
             </tbody>
           </Table>
         )}
@@ -307,7 +378,9 @@ export default function ArchiveCustomerTab({
           customer={detailCustomer}
           project={projectByCustomer.get(detailCustomer.id) ?? null}
           invoices={invoicesByCustomer.get(detailCustomer.id) ?? []}
+          payable={payableByCustomer.get(detailCustomer.id) ?? null}
           onOpenInvoice={onOpenInvoice}
+          onReturnBalance={onReturnBalance}
           onClose={() => setDetailCustomer(null)}
         />
       )}
@@ -319,13 +392,17 @@ function ArchivedCustomerDetail({
   customer,
   project,
   invoices,
+  payable,
   onOpenInvoice,
+  onReturnBalance,
   onClose,
 }: {
   customer: ArchiveCustomerRow;
   project: ArchiveProjectRow | null;
   invoices: ArchiveInvoiceRow[];
+  payable: CustomerAmountPayableRow | null;
   onOpenInvoice: (invoiceId: string, customerEmail: string | null) => void;
+  onReturnBalance: (customer: ArchiveCustomerRow) => void;
   onClose: () => void;
 }) {
   // REVENUE — collected means PAID. status 'paid' is the settled state
@@ -385,6 +462,72 @@ function ArchivedCustomerDetail({
               hint={billed - collected > 0 ? "Never collected" : "Fully settled"}
             />
           </div>
+
+          {/* BALANCE TO RETURN — the customer's money, not ours, and the
+              opposite direction to the three figures above. It gets its own
+              block rather than a fourth Stat for exactly that reason: a
+              liability sitting in a row of receipts reads as more revenue.
+              The mark travels with the figure (see BalanceWithMark). */}
+          {payable && payable.amount_payable_sar > 0 && (
+            <div className="rounded-xl border p-3" style={{ borderColor: "rgb(var(--border))" }}>
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div>
+                  <div className="text-[11px] muted uppercase tracking-wide">Balance to return</div>
+                  <div className="text-lg mt-0.5">
+                    <BalanceWithMark row={payable} />
+                  </div>
+                  <div className="text-[11px] muted mt-0.5">
+                    {payable.balance_returned
+                      ? "Paid back to the customer. The figure is kept as the record of what was returned."
+                      : "Prepaid credit left over at archive — owed to the customer."}
+                  </div>
+                </div>
+                {!payable.balance_returned && (
+                  <Btn variant="primary" onClick={() => onReturnBalance(customer)}>
+                    <Undo2 className="h-3.5 w-3.5" />Return balance
+                  </Btn>
+                )}
+              </div>
+
+              {payable.balance_returned && (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3 pt-3 border-t"
+                     style={{ borderColor: "rgb(var(--border))" }}>
+                  <Field
+                    label="Returned"
+                    value={payable.returned_sar != null ? money(payable.returned_sar) : "—"}
+                  />
+                  <Field
+                    label="Method"
+                    value={payable.returned_method === "bank_transfer"
+                      ? "Bank transfer"
+                      : payable.returned_method === "cash"
+                        ? "Cash"
+                        : "—"}
+                  />
+                  <Field label="Returned on" value={fmtDate(payable.returned_on)} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* WRITE-OFF — audit only. owed_sar is already 0 by the time this
+              row exists (0139), so this is the record of WHO forced the
+              archive and WHY, not a live figure. Shown because a forced
+              archive that leaves no visible trace is the thing the override
+              was built to avoid. */}
+          {payable?.is_written_off && (
+            <div className="rounded-xl border p-3 bg-amber-500/5" style={{ borderColor: "rgb(var(--border))" }}>
+              <div className="text-[11px] muted uppercase tracking-wide">Written off on archive</div>
+              <div className="text-lg font-semibold tabular-nums mt-0.5">
+                {payable.written_off_sar != null ? money(payable.written_off_sar) : "—"}
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
+                <Field label="Reason" value={payable.write_off_reason || "—"} />
+                <Field label="By" value={payable.written_off_by || "—"} />
+                <Field label="On" value={fmtDate(payable.written_off_at)} />
+              </div>
+            </div>
+          )}
 
           <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Customer</div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">

@@ -950,21 +950,64 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
   return { error: null };
 }
 
+// The guard refused: money is still owed TO US. archive_project_guarded raises
+// with errcode check_violation (23514), so `blocked` is set from the SQLSTATE
+// rather than by matching the message text — the wording of a raised message is
+// presentation and will be reworded one day; the code is the contract.
+const CHECK_VIOLATION = "23514";
+
+export type ArchiveProjectResult = {
+  error: string | null;
+  // true ONLY for the debt block, never for any other failure. The caller
+  // collects a written reason and calls again with it to force the archive.
+  blocked?: boolean;
+};
+
 // Soft-archive (Manage project → Danger zone). Flips the project AND its 1:1
-// customer to archived_at = now() ATOMICALLY via the archive_project RPC
-// (migration 0019). trips are NOT touched — they vanish from active views by the
-// page-level archived-project filter, but stay in the DB for history/restore.
-export async function archiveProject(projectId: string): Promise<ActionResult> {
+// customer to archived_at = now() ATOMICALLY (migration 0019). trips are NOT
+// touched — they vanish from active views by the page-level archived-project
+// filter, but stay in the DB for history/restore.
+//
+// SINCE 0139 THIS GOES THROUGH archive_project_guarded, NOT archive_project.
+// The guard reads v_customer_amount_payable — the one definition of what the
+// customer owes — and refuses while the figure is negative. The old
+// archive_project() still exists in the database and is a back door around the
+// guard; it is scheduled for a DROP migration now that this, its only call
+// site, no longer uses it. Do not reach for it.
+//
+// overrideReason is the MANAGER OVERRIDE, and an override is a WRITE-OFF: the
+// RPC records amount + reason + actor + timestamp in customer_write_offs, which
+// zeroes what the customer owes. There is no forced archive that leaves a
+// phantom receivable on the books. Passing a blank reason is the same as
+// passing none — the RPC trims it and blocks again, so an empty box cannot
+// silently write off a debt.
+export async function archiveProject(
+  projectId: string,
+  overrideReason?: string,
+): Promise<ArchiveProjectResult> {
   const id = projectId?.trim() ?? "";
   if (!id) return { error: "Missing project id." };
 
   const supabase = createClient();
-  const { error } = await supabase.rpc("archive_project", { p_project_id: id });
-  if (error) return { error: error.message };
+
+  // The actor is the authenticated session, never a form field — same
+  // convention as every other actor column in this app (there is no RBAC yet,
+  // so this is an audit trail, not an authorisation check).
+  const { data: auth } = await supabase.auth.getUser();
+
+  const { error } = await supabase.rpc("archive_project_guarded", {
+    p_project_id: id,
+    p_override_reason: overrideReason?.trim() || null,
+    p_actor: auth?.user?.email ?? null,
+  });
+  if (error) {
+    return { error: error.message, blocked: error.code === CHECK_VIOLATION };
+  }
 
   revalidatePath("/trips");
   revalidatePath("/projects");
   revalidatePath("/customers");
+  revalidatePath("/archive");
   return { error: null };
 }
 

@@ -52,6 +52,7 @@ import type {
   ArchiveCustomerRow,
   ArchiveInvoiceRow,
   ArchiveProjectRow,
+  CustomerAmountPayableRow,
   ConsumptionApproval,
   ExitPermit,
   ExitPermitLine,
@@ -76,6 +77,7 @@ import ArchiveTruckTab, {
   type ArchiveTruckTabOutsourcedJob,
 } from "./ArchiveTruckTab";
 import ArchiveCustomerTab, { CUSTOMER_SUB_TABS, type CustomerSubTab } from "./ArchiveCustomerTab";
+import ReturnBalanceModal from "./ReturnBalanceModal";
 import SubTabPicker from "./SubTabPicker";
 import ApprovalsLedgerTab, {
   type PoApprovalLite, type ReceiptApprovalLite,
@@ -148,6 +150,7 @@ export default function ArchiveClient({
   customers,
   invoices,
   projects,
+  amountPayable,
   ledger,
   today,
   error,
@@ -166,6 +169,7 @@ export default function ArchiveClient({
   customers: ArchiveCustomerRow[];
   invoices: ArchiveInvoiceRow[];
   projects: ArchiveProjectRow[];
+  amountPayable: CustomerAmountPayableRow[];
   // Everything the Approvals Ledger tab needs, kept in one bag rather than
   // twelve more top-level props on a component that already has plenty.
   ledger: LedgerData;
@@ -203,6 +207,11 @@ export default function ArchiveClient({
   const [truckSubTab, setTruckSubTab] = useState<TruckSubTab>("documents");
   const [customerSubTab, setCustomerSubTab] = useState<CustomerSubTab>("invoices");
   const [openInvoice, setOpenInvoice] = useState<{ id: string; email: string | null } | null>(null);
+  // Same shape as openInvoice above: the customer tab is a LEAF and asks for
+  // this popup through a callback rather than owning it. The whole row is held
+  // (not just the id) because the popup names the customer, and re-finding it
+  // from the id would be a second lookup of something the caller already had.
+  const [returningCustomer, setReturningCustomer] = useState<ArchiveCustomerRow | null>(null);
   const [highlightTruckId, setHighlightTruckId] = useState<string | null>(null);
   // WHOSE document the open DocumentModal is for. Set from the matrix row
   // that was clicked, cleared for company documents.
@@ -703,7 +712,9 @@ export default function ArchiveClient({
             customers={customers}
             invoices={invoices}
             projects={projects}
+            amountPayable={amountPayable}
             onOpenInvoice={(id, email) => setOpenInvoice({ id, email })}
+            onReturnBalance={(c) => setReturningCustomer(c)}
           />
         </div>
       ) : tab === "ledger" ? (
@@ -991,6 +1002,21 @@ export default function ArchiveClient({
         onClose={() => setOpenInvoice(null)}
         onBack={() => setOpenInvoice(null)}
         onMutated={() => {}}
+      />
+
+      {/* The payable row is looked up HERE rather than passed up from the tab:
+          amountPayable is already in scope, and handing the popup a row the
+          launcher had captured earlier would let it show a figure that has
+          since been refreshed. One customer id in, the current row out. */}
+      <ReturnBalanceModal
+        open={!!returningCustomer}
+        customer={returningCustomer}
+        payable={
+          returningCustomer
+            ? amountPayable.find((r) => r.customer_id === returningCustomer.id) ?? null
+            : null
+        }
+        onClose={() => setReturningCustomer(null)}
       />
 
       {detailDoc && detailGroup && (

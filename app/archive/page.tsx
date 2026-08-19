@@ -23,6 +23,7 @@ import type {
   ArchiveCustomerRow,
   ArchiveInvoiceRow,
   ArchiveProjectRow,
+  CustomerAmountPayableRow,
   ArchiveDocument,
   ArchiveDocumentFile,
   ArchiveDocumentRenewal,
@@ -54,7 +55,7 @@ export default async function ArchivePage() {
     groupsRes, documentsRes, filesRes, renewalsRes, typesRes,
     driversRes, staffRes, payoutsRes,
     trucksRes, workOrdersRes, outsourcedJobsRes,
-    customersRes, invoicesRes, projectsRes,
+    customersRes, invoicesRes, projectsRes, amountPayableRes,
     // --- Approvals Ledger ---
     consApprovalsRes, permitsRes, permitLinesRes,
     ledgerWorkOrdersRes, workOrderPartsRes, ledgerJobsRes, paymentsRes,
@@ -159,6 +160,18 @@ export default async function ArchivePage() {
     supabase
       .from("projects")
       .select("id, customer_id, name, initials, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, payment_mode, water_type, default_station, start_date, end_date, status, location, description, created_at"),
+    // v_customer_amount_payable (0139) — the one definition of "does this
+    // customer owe us, or do we owe them". Columns are named explicitly and
+    // stop at the eleven CustomerAmountPayableRow declares: the view publishes
+    // seven more (customer_name, archived_at, payment_mode, the two component
+    // balances, owed_sar, archive_blocked) that nothing on this surface
+    // renders, and a figure carried but never shown is how two versions of one
+    // number start to drift.
+    supabase
+      .from("v_customer_amount_payable")
+      .select(
+        "customer_id, amount_payable_sar, balance_returned, returned_sar, returned_method, returned_on, is_written_off, written_off_sar, write_off_reason, written_off_by, written_off_at",
+      ),
 
     // -----------------------------------------------------------------------
     // APPROVALS LEDGER — reads only. The ledger is DERIVED from these tables;
@@ -207,6 +220,18 @@ export default async function ArchivePage() {
   const customers = (customersRes.data ?? []) as ArchiveCustomerRow[];
   const invoices = (invoicesRes.data ?? []) as ArchiveInvoiceRow[];
   const projects = (projectsRes.data ?? []) as ArchiveProjectRow[];
+  // `numeric` arrives from PostgREST as a STRING, so the three money columns
+  // are coerced ONCE here at the server boundary rather than at each render —
+  // untouched, `a - b` yields NaN and `a + b` concatenates, both of which
+  // render as plausible garbage instead of erroring. Nulls stay null: a
+  // customer with no return on file has no returned amount, which is a
+  // different fact from 0.00.
+  const amountPayable = ((amountPayableRes.data ?? []) as Record<string, unknown>[]).map((r) => ({
+    ...r,
+    amount_payable_sar: Number(r.amount_payable_sar ?? 0),
+    returned_sar: r.returned_sar == null ? null : Number(r.returned_sar),
+    written_off_sar: r.written_off_sar == null ? null : Number(r.written_off_sar),
+  })) as CustomerAmountPayableRow[];
 
   // Scope documents to the fetched groups. Written tab-agnostically in Phase
   // 1 and it kept working unchanged when the group query widened — the only
@@ -229,6 +254,7 @@ export default async function ArchivePage() {
     customersRes.error?.message ??
     invoicesRes.error?.message ??
     projectsRes.error?.message ??
+    amountPayableRes.error?.message ??
     consApprovalsRes.error?.message ??
     permitsRes.error?.message ??
     permitLinesRes.error?.message ??
@@ -259,6 +285,7 @@ export default async function ArchivePage() {
       customers={customers}
       invoices={invoices}
       projects={projects}
+      amountPayable={amountPayable}
       ledger={{
         approvals: (consApprovalsRes.data ?? []) as ConsumptionApproval[],
         permits: (permitsRes.data ?? []) as ExitPermit[],
