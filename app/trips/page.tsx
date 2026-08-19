@@ -347,6 +347,12 @@ export default async function TripsPage() {
     leavePeriodsRes.error ||
     terminatedDriversRes.error ||
     topupsRes.error ||
+    // A failed paid-invoice read must NOT degrade silently: (paidInvoicesRes.data
+    // ?? []) would drop every payment row from the statement AND unlock every
+    // paid-invoice trip, i.e. show false data rather than an error. Same rule as
+    // leaveLoadFailed above, and the Dashboard's "a failed read must never claim
+    // an empty queue".
+    paidInvoicesRes.error ||
     specialChargesRes.error;
 
   return (
