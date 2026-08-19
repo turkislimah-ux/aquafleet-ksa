@@ -427,7 +427,20 @@ export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
   `
       : `
     ${prepaidTripTable("Covered Trips", "الرحلات المغطاة", data.coveredLines, data.ledger?.covered ?? { subtotal: 0, balance: 0, remaining: 0 })}
-    ${prepaidTripTable("Unpaid Trips", "الرحلات غير المدفوعة", data.unpaidLines, data.ledger?.unpaid ?? { subtotal: 0, balance: 0, remaining: 0 })}
+    ${
+      // hideAmountDue suppresses the WHOLE unpaid section, not just the figure.
+      // It used to guard only the due-card below, which left the customer's PDF
+      // carrying an "Unpaid Trips" table — the exact thing the toggle is for.
+      // The two now travel together: hide the table, hide the card, one flag.
+      data.hideAmountDue
+        ? ""
+        : prepaidTripTable(
+            "Unpaid Trips",
+            "الرحلات غير المدفوعة",
+            data.unpaidLines,
+            data.ledger?.unpaid ?? { subtotal: 0, balance: 0, remaining: 0 },
+          )
+    }
     ${chargesTable(data.chargeLines)}
 
     <div class="grand-stack">

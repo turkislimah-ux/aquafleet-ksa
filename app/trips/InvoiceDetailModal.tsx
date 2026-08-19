@@ -803,6 +803,15 @@ export default function InvoiceDetailModal({
                   lines={view.unpaidLines}
                   ledger={view.ledger?.unpaid ?? { subtotal: view.amountDue.total, balance: null, remaining: null }}
                   fallbackWaterType={view.projectWaterType}
+                  // PRINT ONLY — the section stays on screen either way (§7:
+                  // this toggle "governs print/PDF/email only, always visible
+                  // on-screen"). Pairs with the PDF's own guard in
+                  // lib/invoicePdfTemplate.ts so the printed sheet and the
+                  // downloaded PDF suppress the same thing, and with the
+                  // Amount Due card below — the table and the figure it feeds
+                  // travel together or the customer gets a due total with no
+                  // rows behind it.
+                  hiddenFromPrint={raw.hide_amount_due}
                   headerRight={
                     <HideAmountDueToggle
                       hidden={raw.hide_amount_due}
@@ -852,7 +861,15 @@ export default function InvoiceDetailModal({
                     Unpaid Trips table above (item 6) — the Amount Due card
                     itself is just the figure, no sentence, no toggle. */}
                 <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:justify-end break-inside-avoid">
-                  <div className="sm:w-64 sm:flex-shrink-0">
+                  {/* Same print-only suppression as the Unpaid Trips table
+                      above, for the same reason: Amount Due IS the unpaid
+                      table's total, so hiding one and printing the other
+                      leaves the customer a figure with nothing behind it.
+                      Screen keeps both — the person choosing what the
+                      customer sees has to keep seeing it themselves. */}
+                  <div
+                    className={"sm:w-64 sm:flex-shrink-0" + (raw.hide_amount_due ? " no-print" : "")}
+                  >
                     <TotalCard label="Amount Due" totals={view.amountDue} tone={view.amountDue.total > 0 ? "bad" : "ok"} />
                   </div>
                   {/* Grand Total — v3 §9, one stacked block: covered trips +
@@ -1393,6 +1410,7 @@ function PrepaidTripTable({
   ledger,
   fallbackWaterType,
   headerRight,
+  hiddenFromPrint = false,
 }: {
   title: string;
   lines: InvoiceLineSnapshot[];
@@ -1401,6 +1419,11 @@ function PrepaidTripTable({
   // v3.1 (item 6) — lets the Unpaid Trips table host the hide-amount-due
   // toggle at its header, same row as the title. Undefined for Covered.
   headerRight?: React.ReactNode;
+  // hide_amount_due, PRINT ONLY. §7's rule for this toggle is that it
+  // "governs print/PDF/email only — always visible on-screen", so this is a
+  // print-media class and MUST NOT become a conditional render: the person
+  // deciding what the customer sees has to keep seeing it themselves.
+  hiddenFromPrint?: boolean;
 }) {
   const rows = groupInvoiceLines(lines, fallbackWaterType);
   // v3.1 (item 3) — faded pre-VAT + VAT breakdown alongside the Subtotal
@@ -1413,12 +1436,22 @@ function PrepaidTripTable({
   const vatAmt = round2(ledger.subtotal - preVat);
 
   return (
-    <section className="space-y-2 break-inside-avoid">
+    <section className={"space-y-2 break-inside-avoid" + (hiddenFromPrint ? " no-print" : "")}>
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wide muted">{title}</h3>
         {headerRight}
       </div>
       <div className="card p-0 overflow-hidden">
+        {/* EMPTY STATE: no six-column header, no row of five blank cells. A
+            skeleton table with nothing in it reads as a table that failed to
+            load; one quiet line reads as an answer. The ledger footer below
+            stays either way — "always shown, even at zero" is still the rule,
+            and Remaining is a real figure whether or not any trip sits above
+            it. This also brings the screen CLOSER to the PDF, whose own empty
+            state is a single colspan cell (invoicePdfTemplate.ts). */}
+        {rows.length === 0 ? (
+          <div className="px-4 py-3 text-sm muted">No trips.</div>
+        ) : (
         <Table>
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
             <tr>
@@ -1431,16 +1464,7 @@ function PrepaidTripTable({
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <TD className="muted">No trips.</TD>
-                <TD>{""}</TD>
-                <TD>{""}</TD>
-                <TD>{""}</TD>
-                <TD>{""}</TD>
-                <TD>{""}</TD>
-              </tr>
-            ) : (
+            {
               rows.map((r) => (
                 <tr key={r.key}>
                   <TD>{r.periodLabel}</TD>
@@ -1457,9 +1481,10 @@ function PrepaidTripTable({
                   <TD className="tabular-nums">{formatSar(r.amount)}</TD>
                 </tr>
               ))
-            )}
+            }
           </tbody>
         </Table>
+        )}
         <div className="border-t border-app px-4 py-3 space-y-1 text-sm">
           <div className="flex items-center justify-between">
             <span className="muted">Subtotal</span>
