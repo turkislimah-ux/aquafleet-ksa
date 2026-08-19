@@ -2955,6 +2955,101 @@ relevant skill(s) **when the task calls for it**:
       **uncommented in the file**: a comment-only migration replays as a no-op, so
       a db reset would resurrect "test z".
 
+- **OUTSTANDING REFLECTS THE LIVE PREPAID BALANCE — migration `0137`, commits
+  `9603778` (SQL) and `0b46a6a` (the app half).** A confirmed invoice's
+  `amount_due_sar` is frozen at confirm. For a PREPAID customer that figure goes
+  stale the moment the balance moves — **a top-up after confirmation covers work
+  the invoice still shows as due** — so the receivable was overstated by however
+  much balance had arrived since. The fix is one SQL definition read by every
+  consumer.
+  - **THE RULE, in full:**
+    ```
+    prepaid   : outstanding = least(frozen, greatest(0, shortfall − already_taken))
+    otherwise : outstanding = frozen                     (byte-unchanged)
+    ```
+    **The cap can only ever REDUCE a receivable, never invent one** — a balance
+    swing cannot make an invoice owe more than the document it was printed on.
+    A postpaid invoice comes out of the view identical to what went in.
+  - **IT IS A VIEW BECAUSE THE BALANCE IS A PLAIN SUM, AND THAT IS THE ONE FACT
+    THE WHOLE DESIGN RESTS ON.** Balance is `topups − Σ consumedAmount` — the
+    **FIFO walk only decides the covered/unpaid SPLIT**, not the total. So SQL can
+    express the balance without reimplementing `lib/prepaid.ts`'s queue. Had the
+    balance itself been order-dependent, this would have had to stay in TypeScript.
+  - **THREE VIEWS:**
+    - `v_customer_prepaid_balance` — a SQL mirror of `derivedBalanceItems`. VAT is
+      `round2(amount * (1 + VAT_RATE))` **per item**, matching
+      `ConsumedItem.consumedAmount`; sum-then-round disagrees by riyals.
+    - `v_invoice_outstanding_live` — eleven columns, keyed by `invoice_id`.
+      Allocation is a **newest-first window** so two invoices cannot both claim the
+      same riyal of balance.
+    - `v_receivables_open` — first nine columns byte-identical to `0098`'s, two
+      appended (42P16: append only), `where o.outstanding_sar > 0`.
+  - **"ABSENT MEANS ZERO" IS A PROPERTY OF THE VIEW, NOT AN ASSUMPTION AT THE CALL
+    SITE.** `v_invoice_outstanding_live` emits a row for **every** confirmed,
+    unpaid, non-void invoice **including the ones whose outstanding is 0.00**. So a
+    miss means the invoice is paid, void or unconfirmed — all of which owe nothing
+    — and each consumer's `?? 0` is a fact rather than a fallback.
+    - **CONSEQUENCE, and both consumers were rewritten for it: the `if (!is_paid)`
+      / `else` branch is GONE, not kept alongside.** It used to add the frozen
+      figure only on the not-paid branch. Re-testing `is_paid` in TypeScript would
+      be a second, weaker copy of a predicate the view already applies, and the two
+      could disagree. `e.outstanding += index.get(i.invoice_id) ?? 0` is
+      unconditional. **Note a prepaid invoice can now be UNPAID and owe NOTHING**,
+      so paid and outstanding are not two halves of one number and are not shown
+      as such.
+  - **ONE SQL DEFINITION, THREE CONSUMERS. DO NOT REIMPLEMENT THE CAP IN
+    TYPESCRIPT** — and a per-row TS copy could not be correct anyway, because the
+    rule reads a customer's **whole invoice set in date order**, not one row.
+    - `app/reports/StatementViews.tsx` (`RevenueStatement`) — joins by id, sums.
+    - `lib/report-builder.ts` (customer grouping) — same join, and the builder now
+      emits a second note saying the figure reflects the CURRENT balance, because
+      it can move without any invoice changing.
+    - `v_receivables_open` — which means the **Overview receivables KPI and the
+      Dashboard's `invoice_unpaid` queue went live for free**, by composition. They
+      were never threaded through `ReportsClient`, and must not be.
+  - **DELIBERATELY LEFT FROZEN: `app/trips/InvoicesModal.tsx` (~line 201)** renders
+    the per-invoice `amount_due_sar` in the Finance list. **That is THE DOCUMENT'S
+    OWN NUMBER on a per-document row and it must keep matching the printed
+    invoice.** A live figure there would make the screen disagree with the PDF the
+    customer holds. Same reasoning as `invoices.payment_mode` (0037) being a
+    snapshot: a document records what was true when it was issued.
+  - **TWO OF ELEVEN COLUMNS CROSS THE MODULE BOUNDARY.** `InvoiceOutstandingLiveRow`
+    carries `invoice_id` and `outstanding_sar` only, and `page.tsx`'s `select()`
+    names them rather than using `*`. The other nine (the resolved payment mode,
+    the balance, the shortfall, the basis) are real and useful in SQL and render
+    nowhere. **Carrying a figure nothing renders is how two versions of one number
+    start to drift** — the `DailyOps.revenue` lesson (`3638707`), and the glossary's
+    six description columns travelling unread for a year, which `noUnusedLocals`
+    could not catch because it does not see an unused object FIELD. Widen it when a
+    consumer needs a column, not in advance.
+  - **FAILED-READ HAZARD, stated where it lives rather than hidden.** An errored
+    fetch degrades to an empty array, an empty index makes every outstanding read
+    0, and that **UNDERSTATES receivables** instead of erroring.
+    `outstandingLiveRes.error` is in `page.tsx`'s error chain and the page renders
+    its banner, which is the same bargain every other read on that page makes.
+    **If outstanding ever gets a surface that renders without the page-level
+    banner, it needs its own could-not-read state** — a receivable quietly reading
+    zero is the Dashboard's "a failed read must never claim an empty queue" in
+    another costume.
+  - **VERIFIED LIVE by the architect before the app half was written**, six blocks
+    green:
+
+    | invoice | mode | frozen | live |
+    |---|---|---|---|
+    | `026-000009` (`de4b1ffc`) | prepaid | 4,243.50 | **0.00**, basis `live_prepaid_balance` |
+    | `026-000002` (`e958b840`) | postpaid | 3,795.00 | **3,795.00**, unchanged |
+
+    `v_receivables_open` moved 2 rows / 8,038.50 → **1 row / 3,795.00**. Zero cap
+    violations, zero double-count, all three views `security_invoker` and
+    anon-locked. **View posture 44/44 → 46/46** (two new; `v_receivables_open` was
+    replaced, not added).
+  - **`0137` FAILED ITS FIRST APPLY ON 42P16's TYPE FACE** — see §6, which was
+    corrected because of it. `least()`/`greatest()` returns bare `numeric` where
+    the replaced column was `numeric(12,2)`.
+  - **ORDERING: the migration went FIRST here, unlike `0132`/`0133`.** A PostgREST
+    select naming a view that does not exist returns **400**, so the app half had
+    to wait for the views. A DROP runs the opposite way — app refs stripped first.
+
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
   entries above; the old "Archive deferred / preview/archive.js is the spec" note
