@@ -36,9 +36,21 @@
 //   Special Charges table — ALL of THIS invoice's charges (covered AND
 //     uncovered), each tagged `covered: boolean`. Positioned below the
 //     Unpaid trips table per §9. A covered charge counts toward Grand Total;
-//     an uncovered one rolls forward (same "unpaid rolls forward" mechanism
-//     as trips, since it's simply excluded from the next covered walk by
-//     still being in the un-consumed-by-topups portion of the shared pool).
+//     an uncovered one counts toward AMOUNT DUE (see below).
+//     THE COMMENT THAT USED TO SIT HERE WAS FALSE AND IS RECORDED AS SUCH:
+//     it said an uncovered charge "rolls forward (same 'unpaid rolls forward'
+//     mechanism as trips)". It does not. It rolls forward only INSIDE the
+//     FIFO pool — i.e. it keeps consuming balance — and it never reached a
+//     billable document, because (a) Amount Due was trips-only and (b) every
+//     charge is FK-bound to exactly one invoice at creation and hidden from
+//     every other invoice by reservedElsewhereIds (see RESERVE-AT-DRAFT
+//     EXCLUSION below, which is the paragraph that contradicted it). A charge
+//     on a CONFIRMED invoice is frozen there, so an uncovered one was
+//     unbillable forever while the balance engine had already deducted it.
+//     Two live charges stranded that way (517.50 + 1,150.00) are what forced
+//     this fix. Trips have TWO outlets (covered -> Grand Total, unpaid ->
+//     Amount Due); charges now have the same two, instead of one outlet and a
+//     dead end.
 //   Each of Covered/Unpaid TRIPS tables ALSO gets a `ledger` entry — three
 //   stacked figures (subtotal/balance/remaining), always present even at
 //   zero, computed from the SAME splitCoveredUnpaidItems() walk (never
@@ -49,11 +61,40 @@
 // charges (pre-VAT), ONE combined VAT pass. Unpaid trips are explicitly
 // EXCLUDED (the opposite of v2, where grand = covered + unpaid combined).
 //
-// AMOUNT DUE (v3 §9, NARROWED from v2): = the Unpaid TRIPS table's own
-// VAT-inclusive subtotal only (never special charges) — informational-only,
-// not collectible on this invoice. Deliberately computed from the exact same
-// number as `ledger.unpaid.subtotal` (see below) so the two on-screen
-// figures can never diverge by a halala.
+// AMOUNT DUE (v3 §9, NARROWED from v2; WIDENED AGAIN by the stranded-charge
+// fix): = the Unpaid TRIPS table's own VAT-inclusive subtotal PLUS this
+// invoice's UNCOVERED special charges, VAT-inclusive.
+//
+// IT USED TO BE TRIPS-ONLY ("never special charges"), AND THAT IS THE BUG THE
+// SPECIAL-CHARGES NOTE ABOVE DESCRIBES: a charge the pool could not cover had
+// nowhere to go — excluded from Grand Total by being uncovered, excluded from
+// Amount Due by being a charge, and unable to appear on any later invoice.
+// Adding it here is the whole of the structural fix; nothing else about the
+// document changes.
+//
+// UNITS. Each uncovered charge contributes round2(amount_sar * (1 + VAT_RATE))
+// — per item, rounded per item, then summed. That is BYTE-FOR-BYTE how
+// lib/prepaid.ts computes ConsumedItem.consumedAmount, which is what the FIFO
+// pool actually deducted, so Amount Due reconciles to the balance engine to
+// the halala. It is deliberately NOT a calculateVat() document-level pass over
+// the charges: that would round once against their combined subtotal and could
+// land a halala away from what the pool spent.
+//
+// AMOUNT DUE IS NO LONGER `ledger.unpaid.subtotal`. It is
+// `ledger.unpaid.subtotal + uncovered charges`. The ledger stays trips-only on
+// purpose — it is the footer OF the Unpaid TRIPS table and must keep
+// describing that table's own rows. So the two figures are now allowed to
+// differ, and they differ by exactly the uncovered-charges total. Do not
+// "restore" the old equality; it would re-strand the charges.
+//
+// FORWARD-LOOKING ONLY, AND THIS NEEDS NO MIGRATION. Draft/review invoices
+// recompute live through this file on every open (see
+// InvoiceDetailModal's status branch / previewInvoice); confirmed and paid
+// invoices render from their frozen snapshot columns and are never re-derived.
+// confirm_invoice() stores whatever total the app hands it, so widening the
+// figure here changes NEW confirms only — no already-confirmed document is
+// rewritten, which is the same "fix forward, never rewrite applied history"
+// rule the migrations follow.
 //
 // Each independently-rounded total (covered / amountDue / grand) is its own
 // document-level calculateVat() pass (or, for amountDue, derived directly
@@ -427,13 +468,32 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   const coveredTripVatItems = toVatItems(coveredTripEntries);
   const coveredVat = calculateVat(coveredTripVatItems);
 
-  // Amount Due = unpaid TRIPS only, VAT-inclusive, deliberately set equal to
-  // ledger.unpaid.subtotal (never independently rounded — see file header).
+  // Amount Due = unpaid TRIPS + UNCOVERED special charges, VAT-inclusive.
+  // The trips half is still taken verbatim from ledger.unpaid.subtotal (never
+  // independently rounded); the charges half is summed per-item at
+  // round2(amount * 1.15), which is exactly ConsumedItem.consumedAmount — see
+  // the AMOUNT DUE note in the file header for why both halves are built this
+  // way and why this figure is no longer equal to ledger.unpaid.subtotal.
+  //
+  // `covered !== true` rather than `covered === false`: covered is optional on
+  // InvoiceLine and undefined for postpaid/trip lines. It is always set on the
+  // prepaid charge lines built above, so the two are equivalent here — the
+  // stricter form is written to survive a future line that omits the flag,
+  // because an unflagged charge belongs in Amount Due (billable), never
+  // silently in Grand Total (settled).
+  const uncoveredChargeLines = chargeLines.filter((l) => l.covered !== true);
+  const uncoveredChargePreVat = round2(uncoveredChargeLines.reduce((s, l) => s + l.amount_sar, 0));
+  const uncoveredChargeInclVat = round2(
+    uncoveredChargeLines.reduce((s, l) => s + round2(l.amount_sar * (1 + VAT_RATE)), 0),
+  );
+
   const unpaidTripPreVat = round2(unpaidTripEntries.reduce((s, e) => s + e.amount, 0));
+  const amountDueSubtotal = round2(unpaidTripPreVat + uncoveredChargePreVat);
+  const amountDueTotal = round2(unpaidLedgerSubtotal + uncoveredChargeInclVat);
   const amountDue: InvoiceTableTotals = {
-    subtotal: unpaidTripPreVat,
-    vat: round2(unpaidLedgerSubtotal - unpaidTripPreVat),
-    total: unpaidLedgerSubtotal,
+    subtotal: amountDueSubtotal,
+    vat: round2(amountDueTotal - amountDueSubtotal),
+    total: amountDueTotal,
   };
 
   // Grand Total (v3, reversed from v2): covered trips + covered charges

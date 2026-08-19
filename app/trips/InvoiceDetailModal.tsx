@@ -84,9 +84,14 @@ type Totals = { subtotal: number; vat: number; total: number };
 // forever — frozen columns are never backfilled, see lib/db-types.ts). For
 // those legacy rows, `subtotal` is still derivable (view.covered.total /
 // view.amountDue.total already exist as real VAT-inclusive frozen figures —
-// see lib/invoice.ts's file header: amountDue.total IS ledger.unpaid.subtotal
-// by construction, and covered.total is its own calculateVat() pass that
-// reconciles to within a halala), but `balance`/`remaining` genuinely no
+// on a pre-0036 row amountDue.total IS ledger.unpaid.subtotal, because Amount
+// Due was trips-only for the whole of that era; the stranded-charge fix later
+// widened Amount Due to include uncovered special charges, so the two figures
+// are NOT equal on invoices confirmed after it, and this fallback is not a
+// general identity — it holds only for the frozen legacy rows it fires on. See
+// lib/invoice.ts's AMOUNT DUE header note. covered.total is its own
+// calculateVat() pass that reconciles to within a halala), but
+// `balance`/`remaining` genuinely no
 // longer exist on disk — showing them as "0" is what caused the original
 // bug (a fabricated "-2,940 VAT" and a false "Running Balance: 0" next to 7
 // real covered trips). Rendered as "—" instead of a fabricated number.

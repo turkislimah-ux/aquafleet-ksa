@@ -177,6 +177,113 @@ function checkTrue(name: string, cond: boolean) {
   check("divergence proof: naive sum actually is 0.18", naiveSum, 0.18);
 }
 
+// --- THE STRANDED-CHARGE FIX: an uncovered charge reaches Amount Due --------
+// This is invoice 026-000009's exact shape, in miniature, and it is the case
+// that used to lose money. Pool 1,000. One trip of 500 consumes
+// round2(500*1.15) = 575 -> covered, 425 left. One charge of 450 needs
+// round2(450*1.15) = 517.50 -> does NOT fit -> uncovered.
+//
+// BEFORE THE FIX: grand = covered trip only (575). amountDue = unpaid TRIPS
+// only = 0, because there are no unpaid trips and charges were excluded by
+// rule. So the 450 charge appeared in NO document total at all, while
+// lib/prepaid.ts had already deducted its 517.50 from the balance — and
+// because a charge is FK-bound to one invoice at creation and hidden from
+// every other by reservedElsewhereIds, it could never be billed later either.
+// AFTER: it lands in amountDue, which is the only figure that changes.
+{
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-07-17", delivered_at: "2026-07-17T10:00:00Z", rate_sar: 500 },
+  ];
+  const topups: TopupLite[] = [{ id: "top1", amount_sar: 1000, topup_date: "2026-07-01" }];
+  const r = assembleInvoice({
+    customerId: "c1",
+    paymentMode: "prepaid",
+    periodStart: "2026-07-01",
+    periodEnd: "2026-07-31",
+    trips,
+    topups,
+    specialCharges: [{ id: "ch1", label: "emergency hours", amount_sar: 450, charge_date: "2026-07-18" }],
+  });
+  check("stranded-charge: the charge is tagged uncovered (517.50 did not fit in 425)", r.chargeLines.find((l) => l.id === "ch1")?.covered, false);
+  check("stranded-charge: covered trip still covered", r.coveredLines.map((l) => l.id), ["t1"]);
+  check("stranded-charge: no unpaid TRIPS at all", r.unpaidLines, []);
+  check("stranded-charge: amountDue = the uncovered charge, VAT-inclusive (was 0/0/0 and lost)", r.amountDue, {
+    subtotal: 450,
+    vat: 67.5,
+    total: 517.5,
+  });
+  check("stranded-charge: grand UNCHANGED — covered trip only, uncovered charge excluded", r.grand, {
+    subtotal: 500,
+    vat: 75,
+    total: 575,
+  });
+  // The ledger is the Unpaid TRIPS table's own footer and must keep describing
+  // that table's rows — it stays at zero here even though Amount Due is 517.50.
+  // This inequality is the fix, not a bug: see lib/invoice.ts's AMOUNT DUE note.
+  check("stranded-charge: ledger.unpaid stays TRIPS-only (0), not widened", r.ledger?.unpaid.subtotal, 0);
+  checkTrue(
+    "stranded-charge: amountDue.total is NO LONGER equal to ledger.unpaid.subtotal",
+    r.amountDue.total !== r.ledger?.unpaid.subtotal,
+  );
+  check(
+    "stranded-charge: amountDue.total - ledger.unpaid.subtotal = the uncovered charge exactly",
+    Math.round((r.amountDue.total - (r.ledger?.unpaid.subtotal ?? 0)) * 100) / 100,
+    517.5,
+  );
+}
+
+// --- Unpaid TRIPS and an uncovered charge TOGETHER (the two halves add) -----
+// Pool 600. Trip A 500 -> consumes 575, covered, 25 left. Trip B 200 ->
+// consumes 230, does not fit -> unpaid (and hitWall, so everything after is
+// unpaid too). Charge 100 -> consumes 115, uncovered.
+// amountDue = ledger.unpaid.subtotal (230, trips) + 115 (charge) = 345.
+// Pre-VAT subtotal = 200 + 100 = 300. VAT = 345 - 300 = 45.
+{
+  const trips: ConsumingTrip[] = [
+    { id: "tA", trip_date: "2026-07-01", delivered_at: "2026-07-01T10:00:00Z", rate_sar: 500 },
+    { id: "tB", trip_date: "2026-07-02", delivered_at: "2026-07-02T10:00:00Z", rate_sar: 200 },
+  ];
+  const topups: TopupLite[] = [{ id: "top1", amount_sar: 600, topup_date: "2026-07-01" }];
+  const r = assembleInvoice({
+    customerId: "c1",
+    paymentMode: "prepaid",
+    periodStart: "2026-07-01",
+    periodEnd: "2026-07-31",
+    trips,
+    topups,
+    specialCharges: [{ id: "ch1", label: "uncovered charge", amount_sar: 100, charge_date: "2026-07-03" }],
+  });
+  check("both halves: tA covered, tB unpaid", [r.coveredLines.map((l) => l.id), r.unpaidLines.map((l) => l.id)], [["tA"], ["tB"]]);
+  check("both halves: charge uncovered", r.chargeLines.find((l) => l.id === "ch1")?.covered, false);
+  check("both halves: ledger.unpaid.subtotal is the TRIP half only (230)", r.ledger?.unpaid.subtotal, 230);
+  check("both halves: amountDue = 230 (trips) + 115 (charge)", r.amountDue, { subtotal: 300, vat: 45, total: 345 });
+  check("both halves: grand still covered-only (575)", r.grand.total, 575);
+}
+
+// --- A COVERED charge must NOT leak into Amount Due (the complement) --------
+// Pool 2,000 covers the trip (575) and the charge (115) both. The charge
+// belongs in grand, and Amount Due must stay at zero — the fix widens Amount
+// Due for UNCOVERED charges only, and this is what proves it did not widen it
+// for all of them.
+{
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-07-01", delivered_at: "2026-07-01T10:00:00Z", rate_sar: 500 },
+  ];
+  const topups: TopupLite[] = [{ id: "top1", amount_sar: 2000, topup_date: "2026-07-01" }];
+  const r = assembleInvoice({
+    customerId: "c1",
+    paymentMode: "prepaid",
+    periodStart: "2026-07-01",
+    periodEnd: "2026-07-31",
+    trips,
+    topups,
+    specialCharges: [{ id: "ch1", label: "covered charge", amount_sar: 100, charge_date: "2026-07-02" }],
+  });
+  check("covered charge: tagged covered", r.chargeLines.find((l) => l.id === "ch1")?.covered, true);
+  check("covered charge: amountDue stays ZERO", r.amountDue, { subtotal: 0, vat: 0, total: 0 });
+  check("covered charge: grand = trip 500 + charge 100, one VAT pass", r.grand, { subtotal: 600, vat: 90, total: 690 });
+}
+
 // --- Empty period / no trips --------------------------------------------------
 {
   const r = assembleInvoice({
