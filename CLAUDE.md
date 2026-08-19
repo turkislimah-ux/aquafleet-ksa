@@ -3262,11 +3262,12 @@ relevant skill(s) **when the task calls for it**:
       code.
     - `lib/db-types.ts` — `CustomerAmountPayableRow` (the 11 columns the app actually
       reads).
-  - **NOT YET VERIFIED IN-BROWSER — nothing in this feature has been clicked
-    through.** `2c9103e` is pushed ahead of Turki's check, which inverts §5's normal
-    order and is recorded here for that reason. **Two things to exercise:** the block
-    message + override on a project with money owed, and the Return flow on the one
-    prepaid customer in credit. Measured at apply time, Amount Payable for the six
+  - **THE BLOCK PATH IS VERIFIED IN-BROWSER — Turki clicked it himself on 2026-08-20
+    and archiving blocked with the figure.** `2c9103e` was pushed ahead of that check,
+    which inverted §5's normal order and is recorded here for that reason. **Two paths
+    remain never-clicked:** the OVERRIDE (force-archive) on a project with money owed,
+    and the Return flow on the one prepaid customer in credit — the latter unreachable
+    until that customer is archived. Measured at apply time, Amount Payable for the six
     active customers was:
 
     | customer | mode | amount payable |
@@ -3279,7 +3280,12 @@ relevant skill(s) **when the task calls for it**:
     | **Seder Facility Mang. Co.** | prepaid | **+11,895.00** ← the one in credit |
 
     **Those are APPLY-TIME figures, not standing expectations** — they move with
-    every delivery and invoice, same caveat as `0122`'s. The return rehearsal is the
+    every delivery and invoice, same caveat as `0122`'s. Re-measured 2026-08-20 the six
+    were unchanged, but the view returned a **SEVENTH** row this table omits:
+    **`Turki 1` — `payment_mode` NULL, no active project, −1,035.00, blocked.** That is
+    `0139`'s Q1 fail-closed rule working: an unresolvable payment mode is treated as
+    postpaid and still blocks. **A customer with no project still appears in this view.**
+    The return rehearsal is the
     migration's own block G: **`balance_sar` must be IDENTICAL before and after**,
     only `balance_returned` may change, and a second call must raise "already been
     returned".
@@ -3332,6 +3338,12 @@ relevant skill(s) **when the task calls for it**:
     clean sweep; and **`grep` is case-sensitive by default**, so `drop function` alone
     cannot prove no `DROP FUNCTION` exists on disk. **An empty result is only evidence
     once you know the command ran.**
+  - **VERIFIED IN-BROWSER 2026-08-20 — Turki ran it himself and archiving blocked with
+    the figure.** That closes the PGRST202 question from the APP side, not just the DB
+    side: a block is a REFUSED write, nothing changed, and it still proves the app
+    resolved AND executed `archive_project_guarded` through PostgREST after the bare
+    name was gone. **Prefer the refused write** whenever the alternative writes
+    irreversible data — it exercises the same resolution path at zero cost.
 
 - **AMOUNT PAYABLE HAS ONE AUTHORITY, AND IT IS TYPESCRIPT — `app/trips/amountPayable.ts`,
   commit `629a1a9`.** The rule was written inline in `FinanceTab.tsx` for the Finance
