@@ -17,6 +17,7 @@ import {
   type ConsumingTrip,
   type TopupLite,
   type ConsumingCharge,
+  type SettlementStatementInput,
   type TopupStatementInput,
 } from "../lib/prepaid";
 
@@ -233,6 +234,69 @@ check(
   check("statement same-day: credit (topup) before debit (trip)", sameDayStmt.map((e) => e.kind), ["topup", "trip"]);
   // 200 * 1.15 = 230 consumed -> 500 - 230 = 270.
   check("statement same-day running balances", sameDayStmt.map((e) => e.runningBalance), [500, 270]);
+}
+
+// --- Settlement rows: RECORD ONLY, interleaved in true date order -----------
+// A paid prepaid invoice is traced on the statement but must NOT move the
+// balance — the trips/charges it covers already consumed at delivery, so
+// deducting the invoice too would double-count.
+{
+  const topups: TopupStatementInput[] = [
+    { id: "u1", amount_sar: 1000, topup_date: "2026-06-01", note: null, reference: null },
+  ];
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", rate_sar: 400 },
+    { id: "t2", trip_date: "2026-06-09", delivered_at: "2026-06-09T08:00:00.000Z", rate_sar: 100 },
+  ];
+  const charges: ConsumingCharge[] = [{ id: "ch1", charge_date: "2026-06-07", amount_sar: 100, label: "Fee" }];
+  // Dated BETWEEN the charge and t2 — it must land there, not at the end.
+  const settlements: SettlementStatementInput[] = [
+    { id: "inv1", date: "2026-06-08", invoice_number: "026-000009", amount: 575 },
+  ];
+  const baseline = buildStatementItems(topups, trips, charges);
+  const stmt = buildStatementItems(topups, trips, charges, undefined, settlements);
+
+  check(
+    "settlement: interleaved in TRUE date order, not appended",
+    stmt.map((e) => e.kind),
+    ["topup", "trip", "charge", "settlement", "trip"],
+  );
+  check("settlement: carries the invoice number as reference", stmt[3].reference, "026-000009");
+  check("settlement: carries the invoice grand total as amount", stmt[3].amount, 575);
+  // 1000 -> -460 (t1) -> -115 (ch1) -> FLAT across the settlement -> -115 (t2).
+  check(
+    "settlement: running balance holds FLAT across the row",
+    stmt.map((e) => e.runningBalance),
+    [1000, 540, 425, 425, 310],
+  );
+  check("settlement: balance identical to the row immediately before it", stmt[3].runningBalance, stmt[2].runningBalance);
+  check(
+    "settlement: every OTHER row's balance is byte-identical to the no-settlement statement",
+    stmt.filter((e) => e.kind !== "settlement").map((e) => e.runningBalance),
+    baseline.map((e) => e.runningBalance),
+  );
+  check(
+    "settlement: final balance still matches derivedBalanceItems",
+    stmt[stmt.length - 1].runningBalance,
+    derivedBalanceItems(topups, trips, charges),
+  );
+}
+
+// --- Settlement same-day: never splits a credit/debit pair -------------------
+{
+  const stmt = buildStatementItems(
+    [{ id: "u1", amount_sar: 500, topup_date: "2026-06-03", note: null, reference: null }],
+    [{ id: "t1", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", rate_sar: 200 }],
+    [],
+    undefined,
+    [{ id: "inv1", date: "2026-06-03", invoice_number: "026-000001", amount: 230 }],
+  );
+  check("settlement same-day: sorts LAST, after the credit and its debit", stmt.map((e) => e.kind), [
+    "topup",
+    "trip",
+    "settlement",
+  ]);
+  check("settlement same-day: running balances", stmt.map((e) => e.runningBalance), [500, 270, 270]);
 }
 
 console.log("");

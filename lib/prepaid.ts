@@ -268,13 +268,29 @@ export function derivedBalanceItems(
   return round2(credits - debits);
 }
 
+/**
+ * A PAID prepaid invoice, shown on the statement as a RECORD-ONLY row.
+ *
+ * It is NOT a debit and NOT a credit: the trips and charges that invoice
+ * covers already consumed balance at delivery (see consumingItems), so
+ * deducting it again here would double-count. buildStatementItems therefore
+ * carries the amount for display and leaves runningBalance untouched.
+ */
+export type SettlementStatementInput = {
+  id: string;
+  date: string; // invoice payment date
+  invoice_number: string;
+  amount: number; // invoice grand_total_sar, VAT-inclusive, positive
+};
+
 export type StatementItemEntry = {
-  kind: "topup" | "trip" | "charge";
+  kind: "topup" | "trip" | "charge" | "settlement";
   id: string;
   date: string;
   // Positive for a top-up credit, NEGATIVE VAT-INCLUSIVE consumedAmount for
   // a trip/charge debit — the statement shows the true draw on balance, not
-  // the pre-VAT item amount.
+  // the pre-VAT item amount. A "settlement" row carries the paid invoice's
+  // positive grand total for DISPLAY ONLY and never moves runningBalance.
   amount: number;
   runningBalance: number;
   note?: string | null;
@@ -290,12 +306,21 @@ export type StatementItemEntry = {
  * with a running balance. The final entry's runningBalance always equals
  * derivedBalanceItems(...) for the same inputs — both derive from the same
  * consumingItems() core.
+ *
+ * PAID INVOICES (settlements) are RECORD-ONLY rows interleaved in true date
+ * order. They carry an amount for display and contribute NOTHING to the
+ * running balance — the trips and charges the invoice covers already left the
+ * balance at delivery, so deducting the invoice too would double-count. A
+ * settlement sorts LAST within its own date so it can never split a same-day
+ * credit/debit pair, and the credit-before-debit tiebreak below is unchanged
+ * for every non-settlement pair.
  */
 export function buildStatementItems(
   topups: TopupStatementInput[],
   trips: ConsumingTrip[],
   charges: ConsumingCharge[] = [],
   asOfDate?: string,
+  settlements: SettlementStatementInput[] = [],
 ): StatementItemEntry[] {
   const credits = topups
     .filter((t) => asOfDate == null || t.topup_date <= asOfDate)
@@ -318,15 +343,33 @@ export function buildStatementItems(
     water_type: e.kind === "trip" ? e.water_type ?? null : null,
   }));
 
-  const merged = [...credits, ...debits].sort((a, b) => {
+  const settlementRows = settlements
+    .filter((s) => asOfDate == null || s.date <= asOfDate)
+    .map((s) => ({
+      kind: "settlement" as const,
+      id: s.id,
+      date: s.date,
+      amount: round2(s.amount),
+      note: null as string | null,
+      reference: s.invoice_number,
+    }));
+
+  const merged = [...credits, ...debits, ...settlementRows].sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    // Record-only rows sort last within their own day, so a settlement can
+    // never land between a same-day credit and the debit it funded.
+    const aSettlement = a.kind === "settlement";
+    const bSettlement = b.kind === "settlement";
+    if (aSettlement !== bSettlement) return aSettlement ? 1 : -1;
     if (a.kind !== b.kind) return a.kind === "topup" ? -1 : 1; // same-day: credit before debit
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
 
   let running = 0;
   return merged.map((e) => {
-    running = round2(running + e.amount);
+    // A settlement RECORDS, it does not deduct — the balance holds flat across
+    // it and is not recomputed.
+    if (e.kind !== "settlement") running = round2(running + e.amount);
     return { ...e, runningBalance: running };
   });
 }

@@ -42,6 +42,17 @@
 //   - Prepaid top-up rows show reference (not note) — note is only ever
 //     shown for trip/charge debit rows now.
 //
+// Paid-invoice trace (prepaid) — a "settlement" row per PAID prepaid invoice,
+// interleaved in true date order like every other event:
+//   Date = payment date · Type = "Invoice payable" · Ref = invoice number ·
+//   Note = "Balance" · Amount = the invoice grand total.
+// It is a RECORD, not a movement: the running balance holds FLAT across it,
+// because the trips and charges the invoice covers already consumed balance at
+// delivery — deducting the invoice too would double-count. The engine
+// (buildStatementItems' `settlements` parameter) skips these rows in its
+// running walk; the labels above are rendered here, so lib/prepaid.ts stays
+// pure math with no presentation strings.
+//
 // Pre-VAT throughout for postpaid's raw AMOUNT column (VAT is broken out
 // separately) — the prepaid ledger's debit amounts are VAT-inclusive by
 // design (see StatementItemEntry's comment in lib/prepaid.ts).
@@ -63,6 +74,7 @@ import {
   type ConsumedItem,
   type ConsumingTrip,
   type ConsumingCharge,
+  type SettlementStatementInput,
   type TopupStatementInput,
 } from "@/lib/prepaid";
 import {
@@ -84,10 +96,14 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 // types, which stay untouched.
 export type TripMeta = { truckPlate: string | null; truckCapacityM3: number | null; invoiceLocked: boolean };
 
-// Postpaid Payment-row source — one row per paid invoice (app/trips/page.tsx
+// Paid-invoice row source — one row per paid invoice (app/trips/page.tsx
 // PaidInvoiceRow). Not engine output; a plain data pass-through.
+// BOTH MODES read it now: postpaid renders it as a Payment (a real credit
+// against what is owed), prepaid as a record-only "Invoice payable" row that
+// traces the document without moving the balance.
 export type StatementPayment = {
   id: string;
+  invoice_number: string;
   // Imported, not re-declared — see PaidInvoiceRow (app/trips/page.tsx), which
   // this mirrors field-for-field. A hand-rolled two-value copy would have denied
   // 0134's 'balance' at the type level while the column returns it.
@@ -147,8 +163,10 @@ export default function StatementModal({
   projectName?: string | null;
   // Statement rebuild (Batch 3) — truck plate/capacity + paid-lock per trip.
   tripMetaById: Map<string, TripMeta>;
-  // Statement rebuild (Batch 3) — postpaid Payment rows source. Always []
-  // for prepaid (its "credit" rows are top-ups, already in `topups`).
+  // Paid invoices for this customer. Postpaid renders them as Payment rows;
+  // prepaid renders them as record-only "Invoice payable" rows (prepaid's
+  // real credits are top-ups, already in `topups` — a paid prepaid invoice is
+  // NOT a credit and NOT a debit, see the settlement note in lib/prepaid.ts).
   payments: StatementPayment[];
 }) {
   const [mounted, setMounted] = useState(false);
@@ -177,10 +195,27 @@ export default function StatementModal({
 
   const sampleRef = sampleTripRef(projectInitials);
 
+  // Paid invoices, BOTH modes (the old `mode === "postpaid" ? payments : []`
+  // gate is lifted — prepaid needs them for its record-only settlement rows).
+  // A row with neither payment_date nor paid_at has no place on a dated
+  // ledger, so it is dropped rather than sorted to the top under "".
+  const allPayments = payments.filter((p) => paymentDateOf(p) !== "");
+
   // ---- Prepaid ----------------------------------------------------------
+  // Record-only rows: a paid prepaid invoice is TRACED, never deducted — the
+  // trips and charges it covers already consumed balance at delivery.
+  const settlements: SettlementStatementInput[] =
+    mode === "prepaid"
+      ? allPayments.map((p) => ({
+          id: p.id,
+          date: paymentDateOf(p),
+          invoice_number: p.invoice_number,
+          amount: p.grand_total_sar,
+        }))
+      : [];
   // Full (unfiltered) sequence — running balance must reflect true
   // cumulative history even when the visible rows are period-filtered.
-  const allEntries = mode === "prepaid" ? buildStatementItems(topups, trips, charges) : [];
+  const allEntries = mode === "prepaid" ? buildStatementItems(topups, trips, charges, undefined, settlements) : [];
   const entries = allEntries.filter((e) => inPeriod(e.date));
   const balance = allEntries.length > 0 ? allEntries[allEntries.length - 1].runningBalance : 0;
   // Pre-VAT/VAT breakdown for trip+charge debit rows — a second, already-
@@ -203,8 +238,7 @@ export default function StatementModal({
       .filter((t) => !tripMetaById.get(t.id)?.invoiceLocked)
       .reduce((s, t) => s + t.consumedAmount, 0),
   );
-  const allPayments = mode === "postpaid" ? payments : [];
-  const paymentRows = allPayments.filter((p) => inPeriod(paymentDateOf(p)));
+  const paymentRows = mode === "postpaid" ? allPayments.filter((p) => inPeriod(paymentDateOf(p))) : [];
   // Merge trip + payment rows chronologically for display (payments render
   // like any other statement row, oldest first, same as top-ups above).
   const postpaidRows: (
@@ -296,13 +330,16 @@ export default function StatementModal({
                 <tbody>
                   {entries.map((e) => {
                     const truck = e.kind === "trip" ? truckCell(tripMetaById.get(e.id)) : { plate: null, capacity: null };
-                    const consumed = e.kind !== "topup" ? consumedById.get(`${e.kind}:${e.id}`) : undefined;
+                    const consumed =
+                      e.kind === "trip" || e.kind === "charge" ? consumedById.get(`${e.kind}:${e.id}`) : undefined;
                     return (
                       <tr key={`${e.kind}-${e.id}`}>
                         <TD className="tabular-nums">{e.date}</TD>
                         <TD>
                           {e.kind === "topup" ? (
                             <span className="text-emerald-600 dark:text-emerald-400 font-medium">Add Balance</span>
+                          ) : e.kind === "settlement" ? (
+                            <span className="muted">Invoice payable</span>
                           ) : e.kind === "charge" ? (
                             <span className="muted">Special charge</span>
                           ) : (
@@ -316,18 +353,28 @@ export default function StatementModal({
                         <TD>
                           {e.kind === "trip" ? (
                             <TripRefLink tripId={e.id} label={formatTripRef(e.ref)} />
-                          ) : e.kind === "topup" ? (
+                          ) : e.kind === "topup" || e.kind === "settlement" ? (
                             e.reference || <span className="muted">—</span>
                           ) : (
                             <span className="muted">—</span>
                           )}
                         </TD>
                         <TD className="max-w-[10rem] truncate">
-                          {e.kind === "topup" ? <span className="muted">—</span> : e.note || <span className="muted">—</span>}
+                          {e.kind === "topup" ? (
+                            <span className="muted">—</span>
+                          ) : e.kind === "settlement" ? (
+                            "Balance"
+                          ) : (
+                            e.note || <span className="muted">—</span>
+                          )}
                         </TD>
                         <TD className="tabular-nums">
                           {e.kind === "topup" ? (
                             <span className="text-emerald-600 dark:text-emerald-400">+{formatSar(e.amount)}</span>
+                          ) : e.kind === "settlement" ? (
+                            // Neither a credit nor a debit — no sign, no VAT
+                            // split. The document's own total, for the record.
+                            <span>{formatSar(e.amount)}</span>
                           ) : (
                             <span className="flex flex-col items-end">
                               <span className="tabular-nums font-medium">−{formatSar(Math.abs(e.amount))}</span>

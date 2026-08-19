@@ -85,6 +85,9 @@ export type SpecialChargeRow = {
 export type PaidInvoiceRow = {
   id: string;
   customer_id: string;
+  // The document's own number, shown as the Ref of the prepaid statement's
+  // record-only settlement row.
+  invoice_number: string;
   // IMPORTED, NOT RE-DECLARED. This was a hand-rolled "cash" | "bank_transfer"
   // copy of the union in lib/db-types.ts, which meant migration 0134's third
   // value ('balance') would have arrived at runtime from a column the type said
@@ -189,7 +192,9 @@ export default async function TripsPage() {
       // rows (PaidInvoiceRow, above) — same paid-only set, no second query.
       supabase
         .from("invoices")
-        .select("id, customer_id, payment_method, payment_reference, payment_date, paid_at, grand_total_sar")
+        .select(
+          "id, customer_id, invoice_number, payment_method, payment_reference, payment_date, paid_at, grand_total_sar",
+        )
         .eq("status", "paid"),
       // v3 Finance ledger source (2 of 2, with customer_topups above) — every
       // special charge on a non-void invoice, customer-tagged via its parent

@@ -276,11 +276,13 @@ export default function FinanceTab({ customers, projects, trips, topups, special
           }));
         settledBalance = derivedBalanceItems(customerTopups, consumingPaidOnly, customerChargesPaidOnly);
       }
-      // Statement rebuild (Batch 3) — postpaid Payment rows source. Only
-      // meaningful for postpaid (prepaid never mixes cash/bank_transfer Mark-
-      // Paid — Batch 1's "Pay with Balance" sets none of these fields), but
-      // harmless to attach either way; StatementModal only reads it in
-      // postpaid mode.
+      // Paid invoices for this customer — read in BOTH modes now. Postpaid
+      // renders them as Payment rows; prepaid renders them as record-only
+      // "Invoice payable" rows that trace the document without touching the
+      // balance (see StatementModal's header / lib/prepaid.ts's settlement
+      // note). Prepaid never mixes cash/bank_transfer Mark-Paid — Batch 1's
+      // "Pay with Balance" sets none of the payment_* fields — which is why
+      // the prepaid row reads paid_at and the invoice number, not the method.
       const customerPaidInvoices = paidInvoicesByCustomer.get(c.id) ?? [];
 
       // Batch A — "Unsettled Trips": delivered trips not yet on a PAID
