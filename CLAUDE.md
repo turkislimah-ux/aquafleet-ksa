@@ -280,10 +280,14 @@ relevant skill(s) **when the task calls for it**:
   templates (migrations `0028`/`0029`), and bilingual (EN/AR) PDF export (`lib/pdf.ts`,
   `lib/invoicePdfTemplate.ts`, migration `0031` — `invoice-pdfs` bucket). All
   money-logic harnesses green.
-  - **Remaining setup (not code — runtime config):** PDF export code is done but
-    needs a **PDFShift account + `PDF_API_KEY`** in `.env.local` (Turki's action)
-    before real PDF output can be verified. Until then, Download PDF shows a graceful
-    "PDF service not configured" message.
+  - **Runtime config — NO LONGER PENDING (this line used to say "Turki's action,
+    pending" and was stale).** `PDF_API_KEY` **IS set** in `.env.local` (a real
+    PDFShift key, `sk_833…`), so the missing-key guard no longer short-circuits and
+    the v3 auth fix (`f7ad606`, `-u "api:$KEY"`) is the line that actually executes.
+    The graceful "PDF service not configured" message is now a fallback for a
+    key-less environment, not the normal state. **Still owed: an end-to-end
+    in-browser Download PDF check against the live API** — nobody has confirmed a
+    real PDF came back since the key landed.
   - **Deferred — Finance:**
     1. Send-from-domain email (real outbound sending, e.g. via a transactional email
        provider) — current email is mailto-only (opens the user's own mail client).
@@ -363,9 +367,10 @@ relevant skill(s) **when the task calls for it**:
 - **Statement rebuild is COMPLETE, through commit `5889092`.**
   - **Batch 1 (`39ed7f8`):** prepaid pay action is "Pay with Balance" — confirmation
     shows settled balance − Grand Total, records/locks via the existing pay path (no
-    double-deduct). Postpaid keeps cash/bank+proof. Known limitation: stored
-    `payment_method` is `'cash'` under the hood — no `'balance'` enum value without a
-    migration.
+    double-deduct). Postpaid keeps cash/bank+proof. ~~Known limitation: stored
+    `payment_method` is `'cash'` under the hood~~ — **SUPERSEDED by migration `0134`,
+    applied: prepaid settlements now store `payment_method = 'balance'`. See the
+    `0134` entry below.**
   - **Batch 2 (migration `0039`):** `invoices` gains `payment_reference`/
     `payment_date` (user-entered, distinct from `paid_at`)/`payment_note`, all
     nullable. `pay_invoice` dropped+recreated 6-arg (bank_transfer requires
@@ -379,7 +384,9 @@ relevant skill(s) **when the task calls for it**:
     top-up rows (date/ref/'Top-up'/amount, no note). Postpaid: VAT + TOTAL columns,
     payment rows (`payment_date` date-only, ref or 'Cash', 'Payment', amount under
     TOTAL), 'Total payable' footer.
-  - **Deferred related:** real `payment_method='balance'` enum for prepaid reporting.
+  - ~~**Deferred related:** real `payment_method='balance'` enum for prepaid
+    reporting.~~ **NO LONGER DEFERRED — migration `0134` is applied and verified.
+    See its own entry below.**
 
 - **Finance/Invoice page polish (Batches A–D, migrations `0040`–`0042`) is DONE,
   through commit `6601e50`.**
@@ -2833,6 +2840,81 @@ relevant skill(s) **when the task calls for it**:
     belongs in a view — the KPIs read live rows the detail panels read too, which
     is the reconciliation batch 1 already established.
   - Verified: `npx tsc --noEmit` clean, `npx playwright test` **28 passed**.
+
+- **PREPAID SETTLEMENT VISIBILITY — migration `0134` (applied) plus commits
+  `219b175` (app half of 0134), `c588831` (statement settlement rows) and
+  `64ace36` (failed-read surfacing).**
+  - **`0134` — `invoices.payment_method` gains `'balance'`.** The request that
+    produced it said "no migration needed, `payment_method` is free text". **It is
+    not free text, and there were TWO gates:** `0025`'s CHECK constraint and
+    `0039`'s `pay_invoice()` body, which raises `Invalid payment method: balance`.
+    The RPC gate fires first, so shipping the app half alone would not have written
+    a wrong label — it would have made **every prepaid settlement fail outright**, a
+    live outage on the money path. That is why the app half was gated behind the
+    file. **`'balance'` is a bookkeeping LABEL, not a debit:** the money was already
+    consumed at delivery by `lib/prepaid.ts`'s FIFO walk, and the pay action only
+    records and locks. **No amount, balance, VAT figure or ledger row moves.**
+  - **NO BACKFILL, deliberately.** Two populations of already-paid invoices are
+    left exactly as recorded: `prepaid`+`cash` (the mislabel this fixes — rewriting
+    a settled document's stored method changes history after the fact) and
+    `payment_mode = null` (pre-`0037`, unclassifiable). **Any report splitting cash
+    from balance must expect the pre-`0134` period to read cash-heavy.**
+  - **The prepaid guard is the point, not the widened allowlist.** `pay_invoice()`
+    resolves mode snapshot-first then falls back to the customer's project —
+    **exactly what the UI already does** (`payment_mode ?? projectPaymentMode`); any
+    other resolution would put a refusal behind an enabled button. A NULL snapshot
+    is **not** evidence of "not prepaid", it is evidence no snapshot was taken.
+    **RECONCILED FILE:** the applied guard wraps the project lookup in
+    `count(distinct …) = 1` so a future mixed-mode customer resolves to *unknown*
+    and **fails closed** rather than authorising off an arbitrary row; the drafted
+    version used a plain scalar subquery. The file on disk was rewritten to match
+    what ran — `0099`/`0100`/`0101` precedent, correction recorded not squashed.
+    `CREATE OR REPLACE` (not drop+recreate) because the signature is byte-identical
+    to `0039`'s, which satisfies the `0038` one-signature rule by construction.
+  - **STANDING AUDIT (verification block D in the migration), not a one-off:** zero
+    rows, forever, where `payment_method = 'balance'` resolves to a non-prepaid
+    mode. The CHECK alone would still permit `'balance'` on any row, so the query
+    covers a direct write bypassing the RPC. **Its mode resolution is a deliberate
+    byte-copy of the guard's** — an audit that resolves differently from the rule it
+    audits reports its own disagreement as a finding. Change both in one commit.
+  - **`c588831` — the prepaid statement now TRACES paid invoices.** A paid prepaid
+    invoice previously vanished from the statement entirely (the `mode ===
+    "postpaid" ? payments : []` gate), so the customer saw balance consumed with no
+    document tying it to an invoice. `StatementItemEntry.kind` gains **`settlement`**
+    and `buildStatementItems` a **5th** defaulted parameter (5th, not 4th —
+    `asOfDate` already held slot 4). **THE ROW RECORDS, IT DOES NOT DEDUCT:** the
+    trips and charges the invoice covers already consumed balance at delivery, so
+    the running balance **holds flat across it and is not recomputed** — deducting
+    would double-count. It sits in **TRUE date order** interleaved with topups,
+    trips and charges, never appended at the end; within its own day it sorts
+    **last**, so it can never land between a same-day credit and the debit it
+    funded. `"Invoice payable"` / `"Balance"` are rendered by `StatementModal` —
+    `lib/prepaid.ts` is pure math and carries only `reference: invoice_number`.
+    **Zero arithmetic changed:** the settlement branch short-circuits before the
+    pre-existing comparator, and `scripts/prepaid-check.ts` asserts every
+    non-settlement row is byte-identical to the no-settlement baseline.
+  - **`64ace36` — `paidInvoicesRes.error` was UNCHECKED.** `app/trips/page.tsx`
+    destructured 13 fetches and the error chain covered 12; a failed read degraded
+    to `(paidInvoicesRes.data ?? [])`, which would drop every payment row **and**
+    unlock every paid-invoice trip — false data, silently. Same rule as the Staff
+    cleanup's failed-read fix and the Dashboard's "a failed read must never claim an
+    empty queue".
+  - **OPEN, NOT BUILT — the stranded special charge (~1,667.50).** An **uncovered**
+    special charge on a **confirmed** invoice is excluded from `grand_total` AND
+    from `amount_due` (which is unpaid TRIPS only), yet it is FK-bound to that one
+    invoice at creation, editable only in Draft/Review, and hidden from every other
+    invoice by `reservedElsewhereIds` — **so it can never be billed anywhere, while
+    `consumingItems` already deducted it from balance.** Two live instances, not
+    one: `98551243` "emergency hours" 517.50 incl VAT on `026-000009` (confirmed)
+    and `fa048000` "test z" 1,150.00 on `026-000008` (**already paid**).
+    **`lib/invoice.ts`'s header lines 36-41 are a LYING COMMENT** — "an uncovered
+    one rolls forward (same mechanism as trips)" is false for display and billing;
+    it rolls forward only inside the FIFO pool, and the reserve-at-draft paragraph
+    directly below it says so. **Trips have two outlets (covered→balance,
+    unpaid→amount due); charges have one outlet and a dead end.** Proposed and
+    STOPPED for architect live-verify + Turki's business-rule call — the money is
+    already deducted, and "already deducted" has more than one honest resolution.
+    **Do not pick one silently.**
 
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
