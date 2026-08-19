@@ -89,6 +89,18 @@ import TripRefLink from "@/components/TripRefLink";
 const INPUT = "px-2.5 py-1.5 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-brand-500/30";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
+// Settlement-row colour, ON SCREEN ONLY — the leading `statement-settlement-*`
+// class carries no colour itself, it is the hook app/globals.css's @media print
+// block reads to strip the tint and the green ink so a printed (or saved-as-PDF,
+// same dialog) statement renders the row like every other one. Two reasons the
+// suppression lives in that CSS block rather than in Tailwind `print:` variants:
+// #statement-print sets print-color-adjust:exact, so this WOULD otherwise reach
+// paper; and tailwind.config.ts declares no darkMode key, so `media` applies
+// dark:text-emerald-400 when printing from a dark-mode OS. Font weight is not
+// colour, so font-medium survives print deliberately.
+const SETTLEMENT_ROW_CLS = "statement-settlement-row bg-emerald-500/[0.07]";
+const SETTLEMENT_INK_CLS = "statement-settlement-ink text-emerald-700 dark:text-emerald-400 font-medium";
+
 // Statement rebuild (Batch 3) — per-trip display metadata (truck + paid-
 // lock), keyed by trip id. Built once in FinanceTab from the FULL trips
 // list (app/trips/page.tsx's existing truck join + invoiceLocked flag) —
@@ -349,14 +361,14 @@ export default function StatementModal({
                         // its TEXT, deliberately — both are green-family, but
                         // a top-up is money arriving and a settlement is not,
                         // so they must not render identically.
-                        className={e.kind === "settlement" ? "bg-emerald-500/[0.07]" : ""}
+                        className={e.kind === "settlement" ? SETTLEMENT_ROW_CLS : ""}
                       >
                         <TD className="tabular-nums">{e.date}</TD>
                         <TD>
                           {e.kind === "topup" ? (
                             <span className="text-emerald-600 dark:text-emerald-400 font-medium">Add Balance</span>
                           ) : e.kind === "settlement" ? (
-                            <span className="text-emerald-700 dark:text-emerald-400 font-medium">Invoice payable</span>
+                            <span className={SETTLEMENT_INK_CLS}>Invoice payable</span>
                           ) : e.kind === "charge" ? (
                             <span className="muted">Special charge</span>
                           ) : (
@@ -380,7 +392,7 @@ export default function StatementModal({
                           {e.kind === "topup" ? (
                             <span className="muted">—</span>
                           ) : e.kind === "settlement" ? (
-                            "Balance"
+                            <span className={SETTLEMENT_INK_CLS}>Balance</span>
                           ) : (
                             e.note || <span className="muted">—</span>
                           )}
@@ -391,7 +403,7 @@ export default function StatementModal({
                           ) : e.kind === "settlement" ? (
                             // Neither a credit nor a debit — no sign, no VAT
                             // split. The document's own total, for the record.
-                            <span>{formatSar(e.amount)}</span>
+                            <span className={SETTLEMENT_INK_CLS}>{formatSar(e.amount)}</span>
                           ) : (
                             <span className="flex flex-col items-end">
                               <span className="tabular-nums font-medium">−{formatSar(Math.abs(e.amount))}</span>

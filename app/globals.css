@@ -347,6 +347,18 @@ body {
   }
   #statement-print table tr { break-inside: avoid; }
 
+  /* A settlement row's green is a SCREEN affordance for scanning a long
+     statement — on paper it reads as an annotation on a legal document, so
+     it comes off. #statement-print sets print-color-adjust:exact above, so
+     without these two rules the tint and the green ink WOULD reach the page.
+     Only colour is stripped: font-weight stays, and the Running Balance
+     cell keeps its rose because every other row keeps it too — the ask is
+     that the row print like its neighbours, not that it lose their
+     treatment. Downloading is Save-as-PDF through this same dialog, so
+     there is nothing separate to cover. */
+  #statement-print .statement-settlement-row { background-color: transparent !important; }
+  #statement-print .statement-settlement-ink { color: inherit !important; }
+
   /* Purchase Order detail (Inventory Phase 4) — same portal/paginate
      pattern as invoice/breakdown/statement above, fourth independent
      id/class/marker set. */
