@@ -44,9 +44,9 @@
 import type {
   PnlPeriodRow, CollectionsRow, PurchasingRow, OperationsRow,
   RevenueInvoiceRow, RevenuePerTruckRow, MaintenancePerTruckRow,
-  MetricDictionaryRow, PeriodType,
+  MetricDictionaryRow, PeriodType, InvoiceOutstandingLiveRow,
 } from "./reports";
-import { monthsIn, periodsOf } from "./reports";
+import { monthsIn, periodsOf, outstandingLiveIndex } from "./reports";
 
 export type Grouping = "period" | "customer" | "truck";
 
@@ -230,6 +230,12 @@ type BuilderData = {
   purchasing: PurchasingRow[];
   operations: OperationsRow[];
   invoices: RevenueInvoiceRow[];
+  /**
+   * 0137 — live outstanding per confirmed-unpaid invoice, joined to `invoices`
+   * by invoice_id. Read ONLY by the customer grouping below, because that is
+   * the only grouping the `outstanding` field is offered for.
+   */
+  outstandingLive: InvoiceOutstandingLiveRow[];
   perTruck: RevenuePerTruckRow[];
   maintPerTruck: MaintenancePerTruckRow[];
 };
@@ -291,18 +297,33 @@ export function buildReport(
     notes.push(`Rows cover ${period.label} only.`);
 
     if (selection.grouping === "customer") {
+      // 0137 — outstanding comes from v_invoice_outstanding_live, keyed by
+      // invoice_id. The cap against the invoice's own frozen amount_due_sar
+      // lives in SQL; this is a join and a sum, which is what rule 1 above
+      // permits and all it permits.
+      const outstanding = outstandingLiveIndex(data.outstandingLive);
       const byId = new Map<string, { label: string; b: Bucket }>();
       for (const i of data.invoices) {
         if (i.month < period.period_start || i.month > period.period_end) continue;
         const e = byId.get(i.customer_id) ?? { label: i.customer_name, b: { ...EMPTY } };
         e.b.revenue += i.revenue_sar;
         e.b.invoices += 1;
-        if (!i.is_paid) e.b.outstanding += i.amount_due_sar;
+        // NO `if (!i.is_paid)` HERE, deliberately. This used to add the frozen
+        // amount_due_sar only on the not-paid branch; the view already publishes
+        // a row for every confirmed, unpaid, non-void invoice and for nothing
+        // else, so a paid invoice is simply absent and contributes 0 on its own.
+        // Re-testing is_paid would be a second, weaker copy of a predicate the
+        // view already applies — and the two could disagree.
+        e.b.outstanding += outstanding.get(i.invoice_id) ?? 0;
         byId.set(i.customer_id, e);
       }
       for (const e of byId.values()) rows.push({ label: e.label, bucket: e.b });
       if (selected.some((m) => m.field === "outstanding")) {
         notes.push("Outstanding is measured on this period's own invoices, not the all-time receivables position.");
+        // Said out loud because the figure can now MOVE without any invoice
+        // changing: for a prepaid customer it reflects the balance as it stands
+        // right now, so a top-up today reduces what a closed period shows as due.
+        notes.push("Outstanding reflects the customer's current prepaid balance, capped at each invoice's own amount due — it can never exceed the document.");
       }
     } else {
       const byId = new Map<string, { label: string; b: Bucket }>();

@@ -226,6 +226,46 @@ export type RevenueInvoiceRow = {
 };
 
 /**
+ * 0137 — what is STILL outstanding on a confirmed invoice, right now.
+ *
+ * `RevenueInvoiceRow.amount_due_sar` above is the DOCUMENT'S OWN figure, frozen
+ * at confirm. For a PREPAID customer that figure goes stale the moment the
+ * balance moves: a top-up after confirmation covers work the invoice still
+ * shows as due. This view applies the live balance and caps the result at the
+ * frozen figure, so it can only ever REDUCE a receivable, never invent one.
+ *
+ * THE CAP IS SQL'S JOB, NOT TYPESCRIPT'S. Every consumer joins on invoice_id
+ * and adds outstanding_sar. Restating the rule here would be a second
+ * expression of it, which is exactly the drift 0098's semantic layer exists to
+ * prevent — and this rule reads a customer's whole invoice set in date order,
+ * so a per-row TS reimplementation could not even be correct.
+ *
+ * DELIBERATELY NARROW. The view publishes eleven columns (the payment mode it
+ * resolved, the balance, the shortfall, the basis it used); only the two below
+ * are read by anything, so only those two cross the boundary. Carrying a figure
+ * nothing renders is how two versions of one number start to drift — the same
+ * reason DailyOps.revenue stopped being threaded. Widen this when a consumer
+ * actually needs a column, not in advance.
+ */
+export type InvoiceOutstandingLiveRow = {
+  invoice_id: string;
+  outstanding_sar: number;
+};
+
+/**
+ * invoice_id -> outstanding_sar, built once per consumer.
+ *
+ * ABSENT MEANS ZERO, and that is a property of the view rather than an
+ * assumption made here: it emits a row for EVERY confirmed, unpaid, non-void
+ * invoice, including the ones whose outstanding is 0.00. So a miss means the
+ * invoice is paid, void or unconfirmed — all of which owe nothing — and the
+ * `?? 0` at each call site is a fact, not a fallback.
+ */
+export function outstandingLiveIndex(rows: InvoiceOutstandingLiveRow[]): Map<string, number> {
+  return new Map(rows.map((r) => [r.invoice_id, r.outstanding_sar]));
+}
+
+/**
  * Voided-after-confirmation invoices — "Sales Returns" in the UI.
  *
  * Note this view carries customer_id but NOT customer_name, and a voided

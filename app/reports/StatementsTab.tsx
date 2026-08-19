@@ -36,6 +36,7 @@ import {
   PERIOD_TYPES, monthsIn, sumOver, peakOver, buildNarrative,
   type PeriodType, type PnlPeriodRow, type ExpenseCategoryPeriodRow, type Delta,
   type RevenueInvoiceRow, type SalesReturnRow, type ReceivableRow, type AgingRow,
+  type InvoiceOutstandingLiveRow,
   type MaintenancePerTruckRow, type PurchasingRow, type PayrollRow,
   type FillingMonthRow, type FillingByStationRow,
   type CommissionsRow, type CommissionsPaidRow, type OperationsRow,
@@ -77,6 +78,8 @@ type Props = {
   pnlPeriods: PnlPeriodRow[];
   expenseCategories: ExpenseCategoryPeriodRow[];
   invoices: RevenueInvoiceRow[];
+  /** 0137 — joined to `invoices` by invoice_id. Read by BOTH consumers below. */
+  outstandingLive: InvoiceOutstandingLiveRow[];
   salesReturns: SalesReturnRow[];
   receivables: ReceivableRow[];
   aging: AgingRow[];
@@ -100,7 +103,7 @@ type Props = {
 };
 
 export default function StatementsTab({
-  pnlPeriods, expenseCategories, invoices, salesReturns, receivables, aging,
+  pnlPeriods, expenseCategories, invoices, outstandingLive, salesReturns, receivables, aging,
   maintPerTruck, purchasing, payroll, commissions, commissionsPaid, operations,
   filling, fillingByStation,
   collections, metrics, perTruck, opsByDriver, payslipBasis, issuedPayslips, driverCommission, today, onManageExpenses,
@@ -394,6 +397,7 @@ export default function StatementsTab({
       {statement === "revenue" && (
         <RevenueStatement
           invoices={invoices} returns={salesReturns}
+          outstandingLive={outstandingLive}
           periodStart={current.period_start} periodEnd={current.period_end}
           label={current.label}
         />
@@ -455,7 +459,7 @@ export default function StatementsTab({
         <CustomStatement
           report={buildReport(customSpec, {
             pnlPeriods, collections, purchasing, operations,
-            invoices, perTruck, maintPerTruck,
+            invoices, outstandingLive, perTruck, maintPerTruck,
           }, metrics)}
           title={customTitle(customSpec, pnlPeriods)}
           onEdit={() => setCustomOpen(true)}

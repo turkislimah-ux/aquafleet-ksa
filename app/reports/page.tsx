@@ -32,7 +32,7 @@ import type {
   FillingMonthRow, FillingByStationRow,
   MaintenancePerTruckRow, PnlPeriodRow, ExpenseCategoryPeriodRow,
   RevenueInvoiceRow, SalesReturnRow, CommissionsRow, CommissionsPaidRow,
-  MetricDictionaryRow, OperationsByDriverRow,
+  MetricDictionaryRow, OperationsByDriverRow, InvoiceOutstandingLiveRow,
   PayslipBasisRow, IssuedPayslipRow, DriverCommissionByProjectRow,
 } from "@/lib/reports";
 import ReportsClient from "./ReportsClient";
@@ -60,6 +60,7 @@ export default async function ReportsPage() {
     payslipBasisRes,
     issuedPayslipsRes,
     driverCommissionRes,
+    outstandingLiveRes,
   ] = await Promise.all([
     supabase.from("v_pnl_monthly").select("*").order("month"),
     supabase.from("v_collections_monthly").select("*").order("month"),
@@ -125,6 +126,17 @@ export default async function ReportsPage() {
     // basis from the payslip rows above.
     supabase.from("v_driver_commission_by_project_monthly").select("*")
       .order("month", { ascending: false }),
+    // 0137 — what is STILL outstanding on each confirmed, unpaid invoice, with
+    // the customer's LIVE prepaid balance applied and capped at the document's
+    // own frozen amount_due_sar. The cap is the VIEW's, not this page's.
+    //
+    // TWO COLUMNS, not "*", and that is the one place on this page where an
+    // explicit column list is about scope rather than coercion: the view
+    // publishes eleven, nothing renders the other nine, and a column fetched
+    // and threaded but never read is how the glossary's six description
+    // columns travelled unread for a year. No .order() either — every consumer
+    // indexes this by invoice_id, so row order is not observable.
+    supabase.from("v_invoice_outstanding_live").select("invoice_id, outstanding_sar"),
   ]);
 
   // One honest error line beats ten empty cards that look like real zeros.
@@ -139,7 +151,8 @@ export default async function ReportsPage() {
     returnsRes.error?.message ?? commissionsRes.error?.message ??
     commissionsPaidRes.error?.message ?? metricsRes.error?.message ??
     opsByDriverRes.error?.message ?? payslipBasisRes.error?.message ??
-    issuedPayslipsRes.error?.message ?? driverCommissionRes.error?.message ?? null;
+    issuedPayslipsRes.error?.message ?? driverCommissionRes.error?.message ??
+    outstandingLiveRes.error?.message ?? null;
 
   const pnl: PnlRow[] = ((pnlRes.data ?? []) as Row[]).map((r) => ({
     month: String(r.month),
@@ -312,6 +325,22 @@ export default async function ReportsPage() {
     is_paid: Boolean(r.is_paid),
   }));
 
+  // 0137. Pairs with `invoices` above: same invoice_id key, one figure each.
+  //
+  // ON A FAILED READ this degrades to an empty array, and an empty index makes
+  // every outstanding figure read 0 — which UNDERSTATES receivables rather than
+  // erroring. That is survivable only because `outstandingLiveRes.error` is in
+  // the chain above and the page renders its error line; the same bargain every
+  // other read on this page makes. If outstanding ever gets its own surface that
+  // renders without the page-level banner, it needs its own could-not-read state
+  // — a receivable that quietly reads zero is the Dashboard's "failed read must
+  // never claim an empty queue" in another costume.
+  const outstandingLive: InvoiceOutstandingLiveRow[] =
+    ((outstandingLiveRes.data ?? []) as Row[]).map((r) => ({
+      invoice_id: String(r.invoice_id),
+      outstanding_sar: n(r.outstanding_sar),
+    }));
+
   const salesReturns: SalesReturnRow[] = ((returnsRes.data ?? []) as Row[]).map((r) => ({
     invoice_id: String(r.invoice_id),
     invoice_number: r.invoice_number ? String(r.invoice_number) : null,
@@ -430,6 +459,7 @@ export default async function ReportsPage() {
       driverCommission={driverCommission}
       opsByDriver={opsByDriver}
       invoices={invoices}
+      outstandingLive={outstandingLive}
       salesReturns={salesReturns}
       commissions={commissions}
       commissionsPaid={commissionsPaid}

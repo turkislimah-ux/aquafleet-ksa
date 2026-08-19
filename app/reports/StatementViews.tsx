@@ -22,7 +22,8 @@ import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
 import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
 import type { BuiltReport } from "@/lib/report-builder";
 import {
-  monthsIn, sumOver, peakOver, formatShare, AGING_ORDER,
+  monthsIn, sumOver, peakOver, formatShare, AGING_ORDER, outstandingLiveIndex,
+  type InvoiceOutstandingLiveRow,
   type PnlPeriodRow, type RevenueInvoiceRow, type SalesReturnRow,
   type ReceivableRow, type AgingRow, type MaintenancePerTruckRow,
   type PurchasingRow, type PayrollRow, type CommissionsRow,
@@ -96,13 +97,17 @@ function Empty({ children }: { children: React.ReactNode }) {
 // every figure summed here came out of v_revenue_invoices.
 // ---------------------------------------------------------------------------
 export function RevenueStatement({
-  invoices, returns, periodStart, periodEnd, label,
+  invoices, returns, outstandingLive, periodStart, periodEnd, label,
 }: {
   invoices: RevenueInvoiceRow[]; returns: SalesReturnRow[];
+  outstandingLive: InvoiceOutstandingLiveRow[];
   periodStart: string; periodEnd: string; label: string;
 }) {
   const rows = useMemo(() => {
     const inPeriod = invoices.filter((i) => i.month >= periodStart && i.month <= periodEnd);
+    // 0137 — outstanding comes from the view, keyed by invoice_id. The cap
+    // against the frozen figure lives in SQL; this is a join and a sum.
+    const outstanding = outstandingLiveIndex(outstandingLive);
     const byCustomer = new Map<string, {
       name: string; revenue: number; paid: number; outstanding: number; count: number;
     }>();
@@ -111,15 +116,24 @@ export function RevenueStatement({
         ?? { name: i.customer_name, revenue: 0, paid: 0, outstanding: 0, count: 0 };
       e.revenue += i.revenue_sar;
       e.count += 1;
-      // Paid is measured on the invoice's own flag; outstanding on the amount
-      // still due. An invoice can be partly covered by a prepaid balance, so
-      // these are not two halves of one number and are not presented as such.
+      // Paid is measured on the invoice's own flag; outstanding on what the
+      // customer STILL owes right now. An invoice can be partly covered by a
+      // prepaid balance, so these are not two halves of one number and are not
+      // presented as such — and since 0137 that is truer than it was: a prepaid
+      // invoice can be unpaid AND owe nothing, because the balance now covers it.
+      //
+      // NO `else` HERE, deliberately. This used to add the frozen
+      // amount_due_sar only on the not-paid branch; the view already publishes
+      // a row for every confirmed, unpaid, non-void invoice and for nothing
+      // else, so a PAID invoice is simply absent and contributes 0 on its own.
+      // Re-testing is_paid would be a second, weaker copy of a predicate the
+      // view already applies — and the two could disagree.
       if (i.is_paid) e.paid += i.revenue_sar;
-      else e.outstanding += i.amount_due_sar;
+      e.outstanding += outstanding.get(i.invoice_id) ?? 0;
       byCustomer.set(i.customer_id, e);
     }
     return [...byCustomer.values()].sort((a, b) => b.revenue - a.revenue);
-  }, [invoices, periodStart, periodEnd]);
+  }, [invoices, outstandingLive, periodStart, periodEnd]);
 
   const periodReturns = useMemo(
     () => returns.filter((r) => r.month >= periodStart && r.month <= periodEnd),

@@ -29,7 +29,7 @@ import {
   type PnlPeriodRow, type ExpenseCategoryPeriodRow,
   type RevenueInvoiceRow, type SalesReturnRow, type CommissionsRow,
   type CommissionsPaidRow, type MetricDictionaryRow,
-  type OperationsByDriverRow,
+  type OperationsByDriverRow, type InvoiceOutstandingLiveRow,
   type PayslipBasisRow, type IssuedPayslipRow,
   type DriverCommissionByProjectRow,
 } from "@/lib/reports";
@@ -69,6 +69,13 @@ type ReportsClientProps = {
   pnlPeriods: PnlPeriodRow[];
   expenseCategories: ExpenseCategoryPeriodRow[];
   invoices: RevenueInvoiceRow[];
+  /**
+   * 0137 — live outstanding per confirmed-unpaid invoice, joined to `invoices`
+   * by invoice_id. STATEMENTS TAB ONLY: the Overview's receivables KPI reads
+   * `v_receivables_open`, which 0137 already rewrote to sit on the same view,
+   * so that figure is live without passing through here.
+   */
+  outstandingLive: InvoiceOutstandingLiveRow[];
   salesReturns: SalesReturnRow[];
   commissions: CommissionsRow[];
   commissionsPaid: CommissionsPaidRow[];
@@ -184,6 +191,7 @@ export default function ReportsClient(props: ReportsClientProps) {
           pnlPeriods={props.pnlPeriods}
           expenseCategories={props.expenseCategories}
           invoices={props.invoices}
+          outstandingLive={props.outstandingLive}
           salesReturns={props.salesReturns}
           receivables={props.receivables}
           aging={props.aging}
