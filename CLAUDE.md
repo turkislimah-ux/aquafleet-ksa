@@ -217,6 +217,22 @@ relevant skill(s) **when the task calls for it**:
 - **`create or replace view` can only APPEND a column** — it cannot insert,
   reorder or rename one (error **42P16**, which cost 0112 an apply cycle). If a
   new column belongs in the middle, it still goes at the end.
+  - **42P16 HAS A SECOND FACE: IT ALSO REFUSES A TYPE CHANGE**, and this entry
+    listing only insert/reorder/rename is what let it through a second time —
+    **`0137` failed its first apply on it.** A column declared `numeric(12,2)`
+    cannot be replaced by a bare `numeric`. The typmod is part of the column's
+    identity, so "same name, same position" is NOT enough: `least()`/`greatest()`
+    arithmetic returns bare `numeric` even when every input carries a typmod,
+    whereas a plain column reference inherits one — so simply wrapping an existing
+    column in arithmetic changes its type and breaks the replace.
+  - **The fix is an explicit cast, and the parens go on BOTH sides:**
+    `(case … end)::numeric(12,2)`. A `case` expression must be parenthesised
+    before `::` binds to the whole thing rather than to the last branch.
+  - **VERIFY THE TYPE, NOT JUST THE NAME AND ORDER.** `0137`'s own header claimed
+    the replaced columns were "byte-identical in NAME, ORDER and TYPE" when only
+    name and order had been checked. `select attname, format_type(atttypid,
+    atttypmod) from pg_attribute` on the existing view is the check — reading the
+    `pg_get_viewdef` body is not, because the body does not show the resolved type.
 - **Immutable keys** on lookup tables (water_stations.key) — rename updates name only.
 - **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew in date logic.
 
@@ -2899,22 +2915,45 @@ relevant skill(s) **when the task calls for it**:
     unlock every paid-invoice trip — false data, silently. Same rule as the Staff
     cleanup's failed-read fix and the Dashboard's "a failed read must never claim an
     empty queue".
-  - **OPEN, NOT BUILT — the stranded special charge (~1,667.50).** An **uncovered**
-    special charge on a **confirmed** invoice is excluded from `grand_total` AND
-    from `amount_due` (which is unpaid TRIPS only), yet it is FK-bound to that one
-    invoice at creation, editable only in Draft/Review, and hidden from every other
-    invoice by `reservedElsewhereIds` — **so it can never be billed anywhere, while
-    `consumingItems` already deducted it from balance.** Two live instances, not
-    one: `98551243` "emergency hours" 517.50 incl VAT on `026-000009` (confirmed)
-    and `fa048000` "test z" 1,150.00 on `026-000008` (**already paid**).
-    **`lib/invoice.ts`'s header lines 36-41 are a LYING COMMENT** — "an uncovered
-    one rolls forward (same mechanism as trips)" is false for display and billing;
-    it rolls forward only inside the FIFO pool, and the reserve-at-draft paragraph
-    directly below it says so. **Trips have two outlets (covered→balance,
-    unpaid→amount due); charges have one outlet and a dead end.** Proposed and
-    STOPPED for architect live-verify + Turki's business-rule call — the money is
-    already deducted, and "already deducted" has more than one honest resolution.
-    **Do not pick one silently.**
+  - **CLOSED — the stranded special charge (~1,667.50).** Commits `6109f3b` (the
+    app fix) and `d5c9271` (migration `0138`). This entry stood as "OPEN, NOT
+    BUILT" pending Turki's business-rule call; he made it, and the framing that
+    decided it was **"all app data is DUMMY — we are not fixing fake balances for
+    their own sake, we are fixing the STRUCTURAL LOGIC so it is correct when real
+    data arrives."**
+    - **THE DEFECT, for anyone reading this after the fix.** An **uncovered**
+      special charge on a **confirmed** invoice was excluded from `grand_total`
+      AND from `amount_due` (which was unpaid TRIPS only), yet it is FK-bound to
+      that one invoice at creation, editable only in Draft/Review, and hidden from
+      every other invoice by `reservedElsewhereIds` — **so it could never be billed
+      anywhere, while `consumingItems` had already deducted it from balance.**
+      Trips had two outlets (covered→balance, unpaid→amount due); charges had one
+      outlet and a dead end.
+    - **THE FIX IS THE SECOND OUTLET, NOT A SPECIAL CASE.** `lib/invoice.ts` now
+      routes uncovered charges into `amount_due` exactly as unpaid trips already
+      flow, so a charge cannot strand. **The filter is `covered !== true`, NOT
+      `=== false`** — an unflagged charge belongs in Amount Due, never silently
+      inside Grand Total; the failure has to land where someone will see it.
+      VAT is rounded **per charge line** (`round2(amount * (1 + VAT_RATE))` each,
+      then summed), matching `ConsumedItem.consumedAmount` — sum-then-round
+      disagrees by riyals against the balance the same charge already consumed.
+    - **The LYING COMMENT at `lib/invoice.ts:36-41` is corrected.** It claimed an
+      uncovered charge "rolls forward (same mechanism as trips)", which was false
+      for display and billing — it rolled forward only inside the FIFO pool, and
+      the reserve-at-draft paragraph directly below it said so.
+    - **The two live instances resolved differently, on purpose.** `98551243`
+      "emergency hours" 517.50 incl VAT on `026-000009` (confirmed, unpaid) now
+      appears in Amount Due and is billable — the structural fix reaches it with
+      no data edit. `fa048000` "test z" 1,150.00 on `026-000008` was **already
+      paid**, so no billing outlet could reach it retroactively; it was test data
+      and `0138` **plain-deletes it, no audit trail** (Turki's call). Balance moved
+      −49,440.00 → −48,290.00 (+1,150.00 = 1,000.00 × 1.15) and `026-000008` stayed
+      byte-identical at 2,530.00 grand / 0.00 due.
+    - **`0138` MATCHES ON id AND label AND amount, and the redundancy is
+      deliberate:** `026-000008` carries TWO 1,000.00 charges dated the same day —
+      "test" (`70e80c73`, KEEP) and "test z" (`fa048000`, DELETE). It also stays
+      **uncommented in the file**: a comment-only migration replays as a no-op, so
+      a db reset would resurrect "test z".
 
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
