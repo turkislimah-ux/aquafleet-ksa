@@ -1,0 +1,169 @@
+-- 0138 — delete the "test z" special charge. **APPLIED 2026-08-19, VERIFIED.**
+-- DATA ONLY — NO SCHEMA CHANGE, NO VIEW, NO RPC, NO APP CODE.
+--
+-- VERIFIED ON APPLY: DELETE 1. Sibling "test" (70e80c73) intact. Customer
+-- 8f119304's balance moved -49,440.00 -> -48,290.00, exactly the +1,150.00
+-- predicted below. 026-000008 byte-identical (2,530.00 grand / 0.00 due), its
+-- one-element snapshot untouched.
+--
+-- Turki's ruling, 2026-08-19: "plain delete, it's test data, no audit trail."
+-- This supersedes 0135, which proposed a written_off_at/written_off_reason
+-- column pair for the same charge. 0135's own header already recorded that a
+-- plain DELETE was the honest alternative and that if Turki preferred it, the
+-- migration "should not be applied at all, rather than applied and left
+-- unused." He preferred it. 0135 is retired; the argument it carried is
+-- summarised below so nothing load-bearing is lost with the file.
+--
+--   WHY A WRITE-OFF COLUMN WAS THE OTHER OPTION, AND WHY IT LOST HERE. A
+--   write-off keeps the row on disk with a stated reason, which is right for a
+--   REAL charge the company decides to eat — it is an accounting event and
+--   wants a paper trail. This charge is not that: it is test data entered
+--   against a test invoice in a database whose contents are entirely dummy.
+--   There is no accounting event to record. Applying 0135 would also have
+--   required three app-code filters (app/trips/page.tsx, actions.ts,
+--   invoiceActions.ts) before the column did anything at all — a column, a
+--   constraint and three call sites to remove one row that should not exist.
+--   IF WRITE-OFFS BECOME A REAL BUSINESS EVENT ON REAL DATA, 0135's design is
+--   the right one and should be revived rather than re-derived.
+--
+-- ============================================================================
+-- TURKI'S INSTRUCTION SAID TO EDIT 026-000008's special_charges_snapshot.
+-- THERE IS NOTHING THERE TO EDIT. MEASURED 2026-08-19, READ-ONLY:
+--
+--   * 026-000008's special_charges_snapshot holds EXACTLY ONE element —
+--     70e80c73... "test", covered:true, amount_sar 1000.00, quantity 2,
+--     price_sar 500.00. The charge being deleted, fa048000... "test z", IS
+--     NOT IN IT.
+--   * A search of special_charges_snapshot across EVERY invoice for the string
+--     'fa048000-adc6-473e-a864-efc4ab4a6db2' returns ZERO rows. It is in no
+--     snapshot anywhere.
+--   * 026-000008's stored totals never included it: grand_subtotal_sar
+--     2,200.00 = 1,200.00 of trips + 1,000.00 for "test" alone. grand_vat_sar
+--     330.00, grand_total_sar 2,530.00, amount_due_sar 0.00.
+--
+-- SO THIS IS A SINGLE-STATEMENT DELETE. No JSONB surgery. No paid invoice is
+-- written to. No frozen document figure moves. The ONLY thing that moves is
+-- the customer's prepaid balance.
+--
+-- THIS IS NOT THE COVERED/UNCOVERED ASYMMETRY. Do not conclude that uncovered
+-- charges are missing from snapshots generally — 026-000009's snapshot DOES
+-- list its uncovered charge (98551243..., "covered": false, vat_sar 67.50,
+-- amount_sar 450.00). Uncovered charges reach snapshots fine.
+--
+-- MOST PLAUSIBLE CAUSE, recorded because it is a real bug shape worth
+-- watching for on real data: "test z" was created 2026-07-17 16:21:30 and
+-- 026-000008 was confirmed 2026-07-17 16:22:01 — THIRTY-ONE SECONDS later.
+-- A confirm run from a client-side assembly loaded before the charge was added
+-- would freeze a snapshot that predates it while the FK still binds the charge
+-- to the invoice. That would be a stale-assembly race, not a snapshot-format
+-- issue. ONE OCCURRENCE ON DUMMY DATA IS NOT A DIAGNOSIS — it is a thing to
+-- look for if it ever happens again.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- THE OPERATION.
+--
+-- MATCHED BY id AND label AND amount TOGETHER, not by id alone. 026-000008
+-- carries TWO 1,000.00 charges dated the same day — "test" (70e80c73...,
+-- KEEP) and "test z" (fa048000..., DELETE). A mistyped uuid that happened to
+-- land on the sibling would be invisible in a bare DELETE 1.
+--
+-- LIVE, NOT COMMENTED OUT, AND THAT IS DELIBERATE. This file was drafted with
+-- the statement commented so it could be reviewed without being runnable; it
+-- was uncommented to apply. It stays uncommented now that it HAS applied,
+-- because a committed migration whose only operation is a comment replays as a
+-- NO-OP — and a db reset rebuilds from committed migrations (the incident that
+-- dropped v_operations_by_driver_monthly). Leaving it commented would quietly
+-- resurrect "test z" on the next reset.
+--
+-- RE-RUNNING IT IS SAFE: the row is already gone, so a replay against current
+-- data reports DELETE 0 and raises nothing. On a restored-from-backup database
+-- it reports DELETE 1, which is the point.
+-- ---------------------------------------------------------------------------
+delete from public.invoice_special_charges
+ where id         = 'fa048000-adc6-473e-a864-efc4ab4a6db2'
+   and label      = 'test z'
+   and amount_sar = 1000.00;
+-- EXPECT on first apply: DELETE 1. Anything else — STOP and re-read.
+-- APPLIED 2026-08-19. Reported DELETE 1. Sibling 70e80c73 "test" intact.
+
+-- ---------------------------------------------------------------------------
+-- WHAT MOVES, EXACTLY.
+--
+-- 1. THE BALANCE. Customer 8f119304-b19c-41ac-b756-69c6fa34c0a2 goes from
+--    -49,440.00 to exactly -48,290.00. Measured: topups 67,400.00, trip
+--    consumption 68,540.00, charge consumption 48,300.00 -> 47,150.00 once
+--    this charge's 1,150.00 (1,000.00 * 1.15) leaves. +1,150.00, and that is
+--    the acceptance test.
+--
+-- 2. THE FIFO WALL. NOT OPTIONAL, AND IT MUST BE EYEBALLED IN THE BROWSER.
+--    This charge sits at cumulative 16,100.00 of a 67,400.00 pool — well
+--    INSIDE the covered region — so removing it hands 1,150.00 back to every
+--    item after it and roughly 1,150.00 worth of items immediately past the
+--    wall flip Unpaid -> Covered. Confirmed and paid invoices render from
+--    frozen snapshots and CANNOT change. Customer 8f119304 has exactly ONE
+--    draft (no invoice number yet, period 2026-08-01..2026-08-15, stored
+--    amount_due 0.00, grand_total 0.00) and THAT draft's covered/unpaid split
+--    WILL change. Correct behaviour — the pool really does have 1,150.00 more
+--    in it — but assumed is not verified.
+--
+-- 3. NOTHING ELSE. The FIFO walk is per-customer, so no other customer moves.
+--    026-000008 is untouched in every sense: its stored totals do not include
+--    this charge and its snapshot does not mention it.
+--
+-- INTERACTION WITH 0137 (outstanding reflects live prepaid balance): NONE.
+-- 8f119304's only confirmed-unpaid invoice is 026-000011, whose frozen
+-- amount_due_sar is 0.00, and 0137 caps outstanding at the frozen figure — so
+-- its live outstanding is 0.00 both before and after this delete. The two
+-- files can land in either order.
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- VERIFICATION (read-only, safe to re-run)
+--
+-- A. THE RIGHT ROW IS GONE AND THE SIBLING IS NOT. Before: two rows. After:
+--    one row, and it must be 70e80c73... "test".
+-- select c.id, c.label, c.amount_sar, c.charge_date
+--   from public.invoice_special_charges c
+--   join public.invoices i on i.id = c.invoice_id
+--  where i.invoice_number = '026-000008'
+--  order by c.label;
+--
+-- B. THE BALANCE. Run BEFORE and AFTER. Before: -49,440.00. After:
+--    -48,290.00. This mirrors derivedBalanceItems' inputs in SQL — a
+--    cross-check on the app, not a substitute for opening the statement.
+-- with cust as (select '8f119304-b19c-41ac-b756-69c6fa34c0a2'::uuid cid)
+-- select (select coalesce(sum(amount_sar),0) from customer_topups tp, cust where tp.customer_id=cust.cid)
+--      - (select coalesce(sum(round(coalesce(t.rate_sar, p.rate_per_trip_sar)*1.15,2)),0)
+--           from trips t join projects p on p.id=t.project_id, cust
+--          where p.customer_id=cust.cid and t.delivered_at is not null)
+--      - (select coalesce(sum(round(c.amount_sar*1.15,2)),0)
+--           from invoice_special_charges c join invoices i on i.id=c.invoice_id, cust
+--          where i.customer_id=cust.cid and i.status<>'void')
+--      as balance_sar;
+--
+-- C. 026-000008 IS BYTE-IDENTICAL. Run before and after; every column must
+--    match, including the one-element snapshot.
+-- select invoice_number, status, grand_subtotal_sar, grand_vat_sar,
+--        grand_total_sar, amount_due_sar, special_charges_snapshot
+--   from public.invoices where invoice_number = '026-000008';
+-- -- EXPECT both times: 2200.00 / 330.00 / 2530.00 / 0.00, and a snapshot
+-- -- array of length 1 naming 70e80c73... "test".
+--
+-- D. NOBODY ELSE MOVED. Run before and after; the two outputs must be
+--    IDENTICAL for every customer except 8f119304.
+-- select p.customer_id,
+--        (select coalesce(sum(amount_sar),0) from customer_topups tp where tp.customer_id=p.customer_id)
+--      - (select coalesce(sum(round(coalesce(t.rate_sar, p2.rate_per_trip_sar)*1.15,2)),0)
+--           from trips t join projects p2 on p2.id=t.project_id
+--          where p2.customer_id=p.customer_id and t.delivered_at is not null)
+--      - (select coalesce(sum(round(c.amount_sar*1.15,2)),0)
+--           from invoice_special_charges c join invoices i on i.id=c.invoice_id
+--          where i.customer_id=p.customer_id and i.status<>'void')
+--   from projects p order by p.customer_id;
+--
+-- E. THE DRAFT, IN THE BROWSER — not SQL. Open customer 8f119304's draft
+--    invoice (period 2026-08-01..2026-08-15) and confirm ~1,150.00 of items
+--    moved from Unpaid to Covered, and that its Grand Total / Amount Due move
+--    accordingly. This is the one check no query substitutes for.
+-- ---------------------------------------------------------------------------
