@@ -209,11 +209,12 @@ relevant skill(s) **when the task calls for it**:
   ```
   This is not per-feature style — it is the standing rule for every view, and
   the failure is invisible: the view keeps returning rows, just with the wrong
-  privileges. Live count to check against: **46 views, 46 security_invoker, 0
-  anon-readable** (re-measured after 0137, which added `v_customer_prepaid_balance`
-  and `v_invoice_outstanding_live`). This line has now gone stale twice — it read
-  40/40 for months while four views were added, then 44/44 while 0137 added two
-  more — which is the point: **the two counts matching is the check, not the
+  privileges. Live count to check against: **47 views, 47 security_invoker, 0
+  anon-readable** (re-measured 2026-08-19, after 0139 added
+  `v_customer_amount_payable` — its other two views were REPLACEMENTS, not
+  additions). This line has now gone stale three times — 40/40 for months while
+  four views were added, then 44/44 while 0137 added two, then 46/46 while 0139
+  added one — which is the point: **the two counts matching is the check, not the
   number**, so re-measure and update rather than trusting the figure written here:
   ```sql
   select count(*) as views,
@@ -3058,12 +3059,240 @@ relevant skill(s) **when the task calls for it**:
     select naming a view that does not exist returns **400**, so the app half had
     to wait for the views. A DROP runs the opposite way — app refs stripped first.
 
+- **YOU CANNOT ARCHIVE AWAY A DEBT — migration `0139` (applied by the architect)
+  plus commit `2c9103e` (the whole app half).** Three parts that are one feature:
+  **THE BLOCK** (archiving is refused while money is owed TO US), **THE RETURN** (a
+  prepaid customer in CREDIT *is* archivable, and the leftover is money WE owe THEM,
+  paid back as a real outbound payment), and **THE WRITE-OFF** (a manager may force
+  the archive with a REASON — not a bypass, a decision: the debt is written off,
+  zeroed and attributed). **NOTHING HERE INVENTS A NUMBER** — every figure is read
+  from an existing view and frozen. Composes on `0137`'s `v_customer_prepaid_balance`
+  and extends its `v_invoice_outstanding_live`, which is why it reads in sequence
+  directly after the entry above.
+  - **THE SIGN CONVENTION IS THE LOAD-BEARING IDEA. Learn it before reading anything
+    else in this entry:**
+
+    | `amount_payable_sar` | meaning | archive |
+    |---|---|---|
+    | **< 0** | money owed **TO US** | **BLOCKED** |
+    | **= 0** | settled | allowed |
+    | **> 0** | credit we owe **THEM** | allowed, return offered |
+
+    **THE BLOCK IS EXACTLY "Amount Payable IS NEGATIVE", FOR BOTH MODES.** Turki
+    stated it as two rules (one for prepaid, one for postpaid) because he states
+    owed as a positive quantity; they are **the same rule** once the sign is fixed,
+    and collapsing them to one expression is the point — **two expressions of one
+    rule is two things that can drift.** `owed_sar = greatest(0, -amount_payable_sar)`
+    is published alongside it purely so Turki's reading of "owed" has a column of its
+    own; it is derived, never a second source.
+  - **THE POSTPAID ARM IS A DECLARED SECOND EXPRESSION OF A MONEY RULE, AND IT IS
+    DECLARED AS ONE.** The prepaid side **COMPOSES** on `0137`'s
+    `v_customer_prepaid_balance` (itself the declared SQL mirror of `lib/prepaid.ts`)
+    — not copied, not touched. Postpaid has **no SQL home**: the Finance tab computes
+    it in TypeScript from `derivedBalanceItems([], …)`, so `0139` expresses it in SQL
+    for the first time. **The five conventions it must copy exactly, or it is
+    wrong:**
+    1. VAT-inclusive **rounded PER ITEM** (`round(amount * 1.15, 2)` then summed —
+       never sum-then-round).
+    2. A trip counts only once `delivered_at is not null`.
+    3. Priced `coalesce(trips.rate_sar, projects.rate_per_trip_sar)` — the frozen
+       rate first (`0128`).
+    4. A trip reaches its customer through **`projects.customer_id`**.
+       `trips.customer_id` is NULL on every row and **must never be used here**.
+    5. "Not paid" means the invoice is not `status='paid'` — draft/review/confirmed/
+       void still owe. A special charge counts on a non-void invoice and stops when
+       paid.
+
+    **IF ANY OF THOSE CHANGE IN `lib/prepaid.ts` OR IN `FinanceTab.tsx`, THEY CHANGE
+    HERE IN THE SAME COMMIT.**
+  - **THE WRITE-OFF SITS ONE LAYER ABOVE THE BALANCE, AND SUBTRACTING IT INSIDE
+    `v_customer_prepaid_balance` WAS CONSIDERED AND REJECTED.** That view is in
+    lockstep with `lib/prepaid.ts`, which has no write-off concept — changing one
+    without the other is the exact drift `0137`'s header forbids. So the two
+    questions stay separate views:
+    ```
+    "What did this customer actually consume?"  -> v_customer_prepaid_balance
+    "What do they still owe us?"                -> v_customer_amount_payable
+    ```
+    A written-off customer is **ALWAYS** an archived one — the write-off row is
+    inserted in the same transaction as the archive stamp, and nothing else can
+    insert one.
+  - **RECORDING IS NOT DEDUCTING, AND THEREFORE THE MARK IS LOAD-BEARING.**
+    `customer_balance_returns` is **NOT A TOP-UP AND MUST NEVER BE READ AS ONE.**
+    `v_customer_prepaid_balance` does not subtract it; `lib/prepaid.ts` does not know
+    it exists; **nothing in the balance chain reads that table.** The customer's
+    balance figure is deliberately UNCHANGED after a return. Because the figure does
+    not move, **a positive balance next to no mark means "we still owe this" and the
+    same figure with a mark means "already paid back" — a returned balance shown
+    bare is a FALSE LIABILITY.** Do not "finish the job" by writing a negative
+    top-up: that double-counts against a balance that was already correct.
+    - **`BalanceWithMark` (`app/archive/ArchiveCustomerTab.tsx`) is the ONE component
+      that renders figure-plus-mark**, used by both the Soft-deleted table cell and
+      the detail block, so the two surfaces cannot disagree. **Any new surface showing
+      this balance uses that component; do not render the figure bare anywhere.**
+  - **THE AMOUNT IS NOT A FIELD AND MUST NEVER BECOME ONE — on either side.**
+    `return_customer_balance()` reads it from `v_customer_amount_payable` and freezes
+    its own copy into the row; **the caller does not get to name the amount.** A
+    number typed into a form would be a second opinion about a figure the database
+    already holds, and the only outcomes of a disagreement are paying back the wrong
+    sum or recording a return that does not match what was paid.
+    `ReturnBalanceModal.tsx` therefore **SHOWS** it — read-only, from the same view
+    row the table behind the popup renders — so the person handing over the money can
+    check it, without being able to change it. Same rule stated in three headers
+    (the modal, `lib/actions/finance.ts`, the migration) on purpose.
+  - **FIVE OPEN QUESTIONS, EACH DECIDED IN THE MIGRATION. Do not re-litigate without
+    reading its header:**
+    - **Q1 — UNKNOWN PAYMENT MODE FAILS CLOSED.** A customer resolving to no single
+      `payment_mode` is treated as POSTPAID, so unpaid delivered work still blocks.
+      `0137` set the precedent in the other direction (unknown keeps the FROZEN
+      figure) and the principle is the same one: **never suppress a debt we cannot
+      prove is settled.**
+    - **Q2 — THE GUARD IS CUSTOMER-WIDE; THE FINANCE TAB'S COLUMN IS NOT.** The tab
+      resolves ONE project and reads page-filtered trips; this view sums every
+      project including archived ones. Measured at apply time: **3 such trips exist
+      (1,035.00, customer "Turki 1", already archived, `payment_mode` null)** and
+      **0 customers have more than one active project**, so the two agree on every
+      live row today. Deliberate — the guard should be the conservative one.
+    - **Q3 — ONE RETURN AND ONE WRITE-OFF PER CUSTOMER**, enforced by unique indexes.
+      **Partial returns are NOT supported by design:** allowing them would mean the
+      "Returned" mark needs an amount comparison rather than an existence check, and
+      the mark is what the whole feature rests on.
+    - **Q4 — "MANAGER" IS NOT ENFORCED, BECAUSE THIS APP HAS NO ROLE GATE.** The
+      override is available to any authenticated user AND FULLY ATTRIBUTED — reason
+      NOT NULL and non-blank (`check (btrim(reason) <> '')`, so the DATABASE refuses
+      a blank one rather than trusting a form validator), actor, timestamp.
+      **The audit trail is the control.** If a real role gate lands later it goes in
+      the RPC and nowhere else. Parked with the same RBAC pass everything else is.
+    - **Q5 — `0019`'s `archive_project()` IS STILL IN PLACE, AND IT IS AN UNGUARDED
+      BACK DOOR.** A function's argument list cannot change under create-or-replace,
+      so the guarded version is a new name rather than a replacement. **This is the
+      one thing about `0139` that is not self-contained.** All app call sites are
+      switched (see the app half below), so the DROP is unblocked and there are no
+      app refs left to strip — it is a bare drop whenever the architect wants it.
+      **SCHEDULED, DELIBERATELY NOT DONE YET.**
+  - **WHY AN RPC AND NOT APP CODE:** this is a data-integrity rule, not a UI
+    courtesy, and **PostgREST runs each statement in its own transaction** — an
+    app-side pair could half-apply and leave either a debt archived with no
+    write-off, or a write-off against a customer that is still active.
+    `archive_project_guarded()` reads `archive_blocked`, `owed_sar` and
+    `payment_mode` from the view; **if that function ever grows its own arithmetic,
+    that is the bug.**
+    - **`errcode = 'check_violation'` → PostgREST `error.code === "23514"` is the
+      app's branch condition** (`const CHECK_VIOLATION = "23514"` in
+      `app/trips/actions.ts`). **Branch on the code, never on the message text.**
+    - The raised message carries the figure already formatted
+      (`to_char(v_owed, 'FM999,999,990.00')`) **because the caller has to show it
+      and re-deriving it app-side would be a second answer to the same question.**
+    - The write-off insert uses `on conflict (customer_id) do nothing` so a retry is
+      idempotent; the archive stamp is guarded on `archived_at is null` so a
+      double-archive is a true no-op. Trips are intentionally untouched (`0019`).
+  - **`v_receivables_open` DROPS WRITTEN-OFF INVOICES BY COMPOSITION — no second
+    edit.** `v_invoice_outstanding_live` gained ONE case branch: a written-off
+    customer's confirmed-unpaid invoices report `0.00` on basis `'written_off'`, and
+    `v_receivables_open`'s own `where outstanding_sar > 0` filters them out for free
+    — the same ride `0137` got.
+  - **42P16 discipline, since this replaced a view on the money path:** no column
+    added, removed, reordered or renamed, and types were verified with
+    `format_type(atttypid, atttypmod)` on `pg_attribute` — **NOT `pg_get_viewdef`,
+    which does not show a resolved type** (§6). `outstanding_basis` is now cast
+    **`::text` explicitly** (it was three bare literals resolving by inference) so a
+    future branch cannot quietly shift the column type and cost another apply cycle.
+  - **Objects added:** `customer_write_offs` and `customer_balance_returns` (both
+    `customer_id` UNIQUE + `on delete restrict`, both with the amount FROZEN by the
+    RPC and **never recomputed afterwards** — re-deriving it later would silently
+    rewrite the size of a decision someone signed their name to); the **PRIVATE**
+    `balance-return-proofs` bucket (one-bucket-per-proof-type, the `invoice-proofs`
+    /`special-charge-images`/`topup-proofs` precedent, app-generated key
+    `${customerId}/return-${Date.now()}.${ext}`, **never the raw filename**);
+    `v_customer_amount_payable` (18 columns, mode resolution a **byte-copy of
+    `0134`'s `pay_invoice()` guard** — `count(distinct payment_mode) = 1` else NULL —
+    and `archive_blocked` published **as a column** so the RPC, the UI and any future
+    reader all ask the same question of the same expression); and the two RPCs.
+    - `customer_balance_returns_bank_transfer_proof_check` is **byte-equivalent to
+      `customer_topups_bank_transfer_proof_check` (`0040`)** — a transfer carries a
+      reference AND a photo of it; cash keeps both optional-but-recorded. **Neither
+      direction of money can be recorded to a weaker standard than the other**, and
+      that rule is now stated in three places (the CHECK, the server action, the
+      modal's `canSubmit`) so the button is never enabled into a refusal.
+    - `return_customer_balance()` enforces its preconditions **in the function, not
+      in a form**: the customer must be ARCHIVED (a return is the closing act of an
+      archive, not a routine withdrawal), the credit strictly positive, one return
+      per customer. First three raise `check_violation`, the fourth
+      `unique_violation`. It ends by writing **NO BALANCE** — if a future edit adds
+      an update to `customer_topups` or any balance source there, it is wrong.
+  - **VIEW POSTURE MOVED 46 → 47** — `v_customer_amount_payable` is the only
+    addition; the other two were replacements. **Re-measured live 2026-08-19:
+    47 views / 47 security_invoker / 0 anon-readable**, and §6's standing line was
+    updated to match. That line has now gone stale three times, which is exactly why
+    it says *the two counts matching is the check, not the number* — re-measure with
+    §6's own query rather than trusting either figure.
+  - **THE APP HALF — commit `2c9103e`, 8 files, tsc clean.** Every archive call site
+    is on the guarded RPC; nothing calls `archive_project()` any more.
+    - `app/trips/actions.ts` — `archiveProject(projectId, overrideReason?)` calls
+      `archive_project_guarded`, returns `{ error, blocked? }`, branches on `23514`.
+    - `app/trips/ProjectModal.tsx` — danger-zone override flow: the block message
+      arrives from the RPC (carrying the figure), and the force-archive button is
+      double-gated on `overrideReason` being non-blank.
+    - `app/archive/page.tsx` — fetches `v_customer_amount_payable` naming its
+      columns **explicitly** (not `*` — the "carrying a figure nothing renders" rule),
+      coerces the three numerics at the server boundary (`numeric` arrives as a
+      STRING), and adds the fetch to the page's error chain.
+    - `app/archive/ArchiveCustomerTab.tsx` — the Soft-deleted sub-tab, the
+      `BalanceWithMark` component, the "Balance to return" column, and the two detail
+      blocks (balance-to-return + write-off audit). The Return launcher is gated
+      `!!payable && payable.amount_payable_sar > 0 && !payable.balance_returned`.
+    - `app/archive/ReturnBalanceModal.tsx` (new) — mirrors `AddBalanceModal` shell for
+      shell, minus the amount. **The payable row is resolved at the MOUNT in
+      `ArchiveClient`, not captured by the launcher** — otherwise the popup could show
+      a figure that `router.refresh()` has since moved. The reset effect keys on
+      `[open, customer]`, not `[open]`: this launches from a table of many rows and a
+      method left over from the previous customer is exactly the carry-over nobody
+      re-reads before pressing the button.
+    - `lib/actions/finance.ts` — `returnCustomerBalance(formData)` (no amount read
+      anywhere in it) and `getBalanceReturnProofSignedUrl(customerId)`, keyed by
+      CUSTOMER because the return row is unique per customer. It lives beside
+      `recordTopup` rather than in `app/archive/actions.ts`, whose own header states
+      that file holds **no RPC, only single-table CRUD** — this one reads a view,
+      enforces preconditions and freezes a figure inside one RPC, which is the
+      opposite of that rule and the same shape as the top-up above it.
+      **`getBalanceReturnProofSignedUrl` has NO caller yet, deliberately** — the modal
+      has no history list to view a proof from. It is for a future viewer, not dead
+      code.
+    - `lib/db-types.ts` — `CustomerAmountPayableRow` (the 11 columns the app actually
+      reads).
+  - **NOT YET VERIFIED IN-BROWSER — nothing in this feature has been clicked
+    through.** `2c9103e` is pushed ahead of Turki's check, which inverts §5's normal
+    order and is recorded here for that reason. **Two things to exercise:** the block
+    message + override on a project with money owed, and the Return flow on the one
+    prepaid customer in credit. Measured at apply time, Amount Payable for the six
+    active customers was:
+
+    | customer | mode | amount payable |
+    |---|---|---|
+    | TEST 111 Co. | postpaid | −20,056.00 |
+    | Turki Contraction Co. | postpaid | −38,295.00 |
+    | VVV CO. | postpaid | −46,460.00 |
+    | MMM construction Co. | prepaid | −48,290.00 |
+    | Seder Facility mang. Co. | prepaid | −55,274.00 |
+    | **Seder Facility Mang. Co.** | prepaid | **+11,895.00** ← the one in credit |
+
+    **Those are APPLY-TIME figures, not standing expectations** — they move with
+    every delivery and invoice, same caveat as `0122`'s. The return rehearsal is the
+    migration's own block G: **`balance_sar` must be IDENTICAL before and after**,
+    only `balance_returned` may change, and a second call must raise "already been
+    returned".
+
 - **Deferred:** Route Optimization (`preview/map.js`), stored-status column cleanup
   migration, Predictive, IoT. (Archive and Maintenance are BUILT — see their own
   entries above; the old "Archive deferred / preview/archive.js is the spec" note
   was stale and has been removed. `drivers.incidents_12mo`'s drop was ALSO on this
   list — it is no longer deferred, `0133` is applied and verified; see the Staff
   cleanup entry above.)
+  - **SCHEDULED, UNBLOCKED, NOT DONE: the DROP migration retiring `0019`'s
+    `archive_project()`.** Every app call site is on `archive_project_guarded`
+    already, so there are no app refs left to strip — it is a bare drop.
+    **Until it lands, `archive_project()` is an unguarded back door around the whole
+    debt guard** (`0139`, Q5). Architect's call on timing; do not leave it to memory.
 - **Deferred — Consumption:** customer archive documents as a schema question
   (`customer_id` on `archive_documents`) was raised at Archive Phase 3 and not
   decided; an optional UNIQUE on `drivers.iqama_number` / `staff.iqama_number` /
