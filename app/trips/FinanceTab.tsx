@@ -26,6 +26,7 @@ import { currentMonthKey, formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { PAYMENT_MODE_LABELS, type PaymentMode } from "@/lib/db-types";
 import { derivedBalanceItems, round2, VAT_RATE, type ConsumingTrip, type ConsumingCharge, type TopupStatementInput } from "@/lib/prepaid";
+import { computeAmountPayable, toConsumingTrip, toConsumingCharge } from "./amountPayable";
 import type { WaterType } from "@/lib/db-types";
 import type { SpecialChargeRow, PaidInvoiceRow } from "./page";
 import AddBalanceModal, { type AddBalanceCustomerOption } from "./AddBalanceModal";
@@ -91,43 +92,10 @@ type TopupRow = {
   photo_path: string | null;
 };
 
-// ---------------------------------------------------------------------------
-// Engine-input adapters. These were three (soon four) byte-identical inline
-// `.map()`s inside the row loop below — one per slice we hand the shared
-// consumption engine. They are extracted because the RATE RESOLUTION they
-// carry is a money rule (frozen `trips.rate_sar` first, the project's current
-// rate only as the not-yet-delivered fallback — lib/prepaid.ts's ConsumingTrip
-// note, migration 0128), and a money rule copied N times is a money rule that
-// can drift in N-1 places. One copy, every slice.
-//
-// Neither adapter FILTERS anything: which trips and which charges belong in a
-// given slice is the caller's question and differs per slice (all / paid-only /
-// unpaid-only). These only translate a row into the engine's input shape.
-// ---------------------------------------------------------------------------
-function toConsumingTrip(t: TripLite, project: ProjectLite): ConsumingTrip {
-  return {
-    id: t.id,
-    trip_date: t.trip_date,
-    delivered_at: t.delivered_at,
-    // FROZEN RATE FIRST — see lib/prepaid.ts's ConsumingTrip note. The
-    // project's current rate is only the not-yet-delivered fallback.
-    rate_sar: t.rate_sar ?? project.rate_per_trip_sar,
-    ref: t.ref,
-    water_type: t.water_type,
-  };
-}
-
-function toConsumingCharge(ch: SpecialChargeRow): ConsumingCharge {
-  return {
-    id: ch.id,
-    // Resolve a date the same way lib/invoice.ts's resolveChargeDate does
-    // (charge_date, falling back to created_at's date) — the engine requires
-    // one and never re-derives it.
-    charge_date: ch.charge_date ?? ch.created_at.slice(0, 10),
-    amount_sar: ch.amount_sar,
-    label: ch.label,
-  };
-}
+// The engine-input adapters (toConsumingTrip / toConsumingCharge) and the
+// Amount Payable rule itself now live in ./amountPayable, because the project
+// Breakdown report renders the same figure and is NOT inside this component —
+// see that module's header for why it moved rather than being copied.
 
 export type FinanceTabProps = {
   customers: CustomerLite[];
@@ -259,7 +227,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
       // the itemized-trips statement view (no balance, no top-ups involved).
       if (project && (mode === "prepaid" || mode === "postpaid")) {
         const projTrips = tripsByProject.get(project.id) ?? [];
-        consuming = projTrips.map((t) => toConsumingTrip(t, project));
+        consuming = projTrips.map((t) => toConsumingTrip(t, project.rate_per_trip_sar));
       }
       if (project && mode === "prepaid") {
         customerTopups = (topupsByCustomer.get(c.id) ?? []).map((t) => ({
@@ -279,7 +247,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
         // `paid` (SpecialChargeRow, page.tsx) is the charge-side equivalent.
         const consumingPaidOnly: ConsumingTrip[] = (tripsByProject.get(project.id) ?? [])
           .filter((t) => t.invoiceLocked)
-          .map((t) => toConsumingTrip(t, project));
+          .map((t) => toConsumingTrip(t, project.rate_per_trip_sar));
         const customerChargesPaidOnly: ConsumingCharge[] = (chargesByCustomer.get(c.id) ?? [])
           .filter((ch) => ch.paid)
           .map(toConsumingCharge);
@@ -308,67 +276,25 @@ export default function FinanceTab({ customers, projects, trips, topups, special
       // ahead of consumption.
       const rateVatInclusive = project ? round2(project.rate_per_trip_sar * (1 + VAT_RATE)) : null;
 
-      // ---------------------------------------------------------------------
-      // AMOUNT PAYABLE — one number: what this customer still owes us for work
-      // already provided, net of what they have actually paid.
+      // AMOUNT PAYABLE — what this customer still owes us for work already
+      // provided, net of what they have actually paid. The rule (both modes,
+      // the null cases, and the sign convention) lives in ./amountPayable, which
+      // the project Breakdown report also calls, so the column here and the box
+      // there cannot render two different numbers.
       //
-      // SIGN IS THE MEANING, not decoration. Negative = owed to us. Zero =
-      // settled. Positive = credit the customer holds (prepaid only — a
-      // postpaid customer has no pool and so can never be positive). The
-      // renderer colours off this sign and adds nothing of its own.
-      //
-      // The two modes answer the same question from different sides, and
-      // NEITHER side gets a new formula:
-      // ---------------------------------------------------------------------
-      let amountPayable: number | null = null;
-      if (project && mode === "prepaid") {
-        // PREPAID — the answer IS the running balance. `balance` is already
-        // top-ups minus the VAT-inclusive consumption of every delivered trip
-        // and every non-void charge, so the part their pool does not cover is
-        // exactly its negative side. Charges from draft/review/confirmed
-        // invoices are in there by construction (page.tsx excludes only void).
-        //
-        // NOT a second read of v_customer_prepaid_balance, deliberately. That
-        // view is the declared SQL MIRROR of derivedBalanceItems (migration
-        // 0137 §1), not a separate authority — and this component already
-        // computes the primary, for this same customer, three lines up. Adding
-        // a fetch would put two computations of one number on one screen,
-        // where the "Total running balance" KPI and the over-balance banner
-        // above already sum THIS one. That is how two versions of a number
-        // start to drift (the DailyOps.revenue lesson). The architect
-        // reconciles this column against v_customer_prepaid_balance.balance_sar
-        // — the two are supposed to agree, and if they ever do not, the drift
-        // is the finding, not something a second fetch would have hidden.
-        amountPayable = balance;
-      } else if (project && mode === "postpaid") {
-        // POSTPAID — no pool to net against, so payable is the consumption
-        // that has not been PAID FOR. Drafting, reviewing or confirming an
-        // invoice does not reduce it; only Mark Paid does. That is precisely
-        // what the two existing paid-flags already mean:
-        //   - trips:   `invoiceLocked` = invoice_id set AND that invoice is
-        //              status='paid' (page.tsx). A trip on a draft, review,
-        //              confirmed or void invoice is NOT locked and still owes.
-        //   - charges: `paid` = parent invoice status='paid' (page.tsx), with
-        //              void-invoice charges already dropped upstream. So
-        //              draft/review/confirmed charges all count, as required.
-        //
-        // Same engine, no top-ups: derivedBalanceItems([], …) is credits minus
-        // debits with the credits side empty, i.e. the negated VAT-inclusive
-        // consumption of exactly this slice. It reuses consumingItems()'s
-        // delivered-only filter and per-item rounding rather than restating
-        // either — there is no second summation of money in this file.
-        const consumingUnpaid: ConsumingTrip[] = (tripsByProject.get(project.id) ?? [])
-          .filter((t) => !t.invoiceLocked)
-          .map((t) => toConsumingTrip(t, project));
-        const chargesUnpaid: ConsumingCharge[] = (chargesByCustomer.get(c.id) ?? [])
-          .filter((ch) => !ch.paid)
-          .map(toConsumingCharge);
-        amountPayable = derivedBalanceItems([], consumingUnpaid, chargesUnpaid);
-      }
-      // mode null (legacy pre-0025 project) or no project at all: stays null
-      // and renders as "—". We cannot say what an unset customer owes without
-      // guessing which model to apply, and guessing at a receivable is the one
-      // thing migration 0137 exists to prevent.
+      // `prepaidBalance` hands over the running balance computed above rather
+      // than making the module derive the identical figure a second time — it
+      // is the same derivedBalanceItems() call over the same inputs, and the
+      // "Total running balance" KPI and over-balance banner already sum it.
+      const amountPayable = computeAmountPayable({
+        mode,
+        hasProject: project != null,
+        projectRate: project?.rate_per_trip_sar ?? 0,
+        trips: project ? (tripsByProject.get(project.id) ?? []) : [],
+        charges: chargesByCustomer.get(c.id) ?? [],
+        topups: customerTopups,
+        prepaidBalance: balance,
+      });
 
       return {
         customer: c,

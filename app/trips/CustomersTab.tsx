@@ -14,6 +14,7 @@ import type { CommissionMode, WaterType, PaymentMode } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
 import ProjectModal, { type ProjectInitial } from "./ProjectModal";
 import BreakdownReport from "./BreakdownReport";
+import type { TopupRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
 
 // Minimal shapes — the page passes wider objects (assignable to these). These
 // carry every field the edit form pre-fills.
@@ -54,14 +55,23 @@ type ProjectLite = {
 // water_station, water_type, stage) feed the BreakdownReport, which the page
 // already passes at runtime.
 type TripLite = {
+  // Present at runtime already — the page selects "*". BreakdownReport needs a
+  // trip identity for the Amount payable box's consumption queue.
+  id: string;
   project_id: string | null;
   trip_date: string | null;
   delivered_at: string | null;
   driver_id: string | null;
   commission_sar: number | null;
   water_station: string;
-  water_type: string;
+  // Narrowed from `string` to match BreakdownTrip — `Trip` (lib/db-types) already
+  // declares WaterType, so this was the wider shape, not the honest one.
+  water_type: WaterType | null;
   stage: string;
+  // invoice_id set AND that invoice is status='paid' (app/trips/page.tsx:222).
+  // Flows at runtime; declared here so the Amount payable box's postpaid arm is
+  // not silently type-blind to the paid-invoice lock.
+  invoiceLocked?: boolean;
   // FROZEN rate, stamped at delivery (0128 backfill + setTripStage). The page
   // selects "*", so this already arrives at runtime — same shape FinanceTab
   // carries. NOT optional: an unstamped trip carries NULL, it does not omit the
@@ -90,6 +100,13 @@ export type CustomersTabProps = {
   driverStateById: Record<string, DriverState>;
   // Fail-safe: leave data failed to load — block NEW roster selections.
   leaveUnavailable?: boolean;
+  // Finance slices, passed straight through to the per-project Breakdown
+  // report's Financial section (payments table + Amount payable). Already
+  // fetched by app/trips/page.tsx for the Finance tab and handed to both tabs
+  // by TripsTabs — this tab itself reads none of them.
+  topups: TopupRow[];
+  specialCharges: SpecialChargeRow[];
+  paidInvoices: PaidInvoiceRow[];
 };
 
 // Build the edit-form pre-fill from a customer + its project + assigned drivers.
@@ -131,6 +148,9 @@ export default function CustomersTab({
   stations,
   driverStateById,
   leaveUnavailable,
+  topups,
+  specialCharges,
+  paidInvoices,
 }: CustomersTabProps) {
   // Edit modal pre-fill (null = closed).
   const [editing, setEditing] = useState<ProjectInitial | null>(null);
@@ -381,6 +401,9 @@ export default function CustomersTab({
         trips={trips}
         drivers={drivers}
         stations={stations}
+        topups={topups}
+        specialCharges={specialCharges}
+        paidInvoices={paidInvoices}
       />
     </div>
   );

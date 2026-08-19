@@ -145,6 +145,9 @@ export default function TripsTabs({
           stations={boardProps.stations}
           driverStateById={boardProps.driverStateById}
           leaveUnavailable={boardProps.leaveLoadFailed}
+          topups={topups}
+          specialCharges={specialCharges}
+          paidInvoices={paidInvoices}
         />
       )}
 

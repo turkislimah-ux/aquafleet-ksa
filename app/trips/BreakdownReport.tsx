@@ -49,8 +49,17 @@ import {
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { currentMonthKey, formatSar, todayKey } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
-import { WATER_TYPE_LABELS, type CommissionMode } from "@/lib/db-types";
+import {
+  WATER_TYPE_LABELS,
+  PAYMENT_MODE_LABELS,
+  PAYMENT_METHOD_LABELS,
+  type CommissionMode,
+  type PaymentMode,
+  type WaterType,
+} from "@/lib/db-types";
 import DeliveriesReportBand, { buildDeliveriesReport } from "./DeliveriesReportBand";
+import { computeAmountPayable } from "./amountPayable";
+import type { TopupRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
 
 // Chart palette — emerald for money (consistent with the report), slate/amber for
 // the rest. Hex (not Tailwind tokens) so the SVG fills survive print.
@@ -62,18 +71,29 @@ const C_NOT_DELIVERED = "#f59e0b"; // amber-500
 // Widened trip shape — every field is already present at runtime (the page
 // passes full trip rows); we only need this subset for the report.
 export type BreakdownTrip = {
+  // Widened for the Financial section's Amount payable box, which feeds these
+  // rows to the shared payable rule (./amountPayable) and needs a trip identity
+  // for the consumption queue. Present at runtime already — the page selects
+  // "*" — same widening b0c386c did for rate_sar.
+  id: string;
   project_id: string | null;
   trip_date: string | null;
   delivered_at: string | null;
   driver_id: string | null;
   commission_sar: number | null;
   water_station: string;
-  water_type: string;
+  // Narrowed from `string` so these rows satisfy PayableTrip (./amountPayable).
+  // `Trip` in lib/db-types already declares WaterType — this shape was the wider
+  // one, not the honest one.
+  water_type: WaterType | null;
   // Frozen customer rate (0128). Read ONLY by the Deliveries report band, which
   // joins the four-surface invariant — see ./DeliveriesReportBand's PRICE BASIS
   // note. Every OTHER figure in this report still prices at the project's
   // CURRENT rate, which is what the header's disclaimer is about.
   rate_sar: number | null;
+  // invoice_id set AND that invoice is status='paid' (app/trips/page.tsx).
+  // Read ONLY by the Amount payable box, for the postpaid arm.
+  invoiceLocked?: boolean;
 };
 type DriverLite = { id: string; name: string };
 type StationLite = { key: string; name: string };
@@ -84,6 +104,13 @@ type ProjectLite = {
   commission_value: number;
   commission_mode: CommissionMode;
   commission_bump_pct: number;
+  // Financial section additions. The customer is how the payable rule and the
+  // payments table reach their rows (invoices and charges key off customer_id,
+  // never project_id — migration 0025), and payment_mode selects which arm of
+  // the rule applies. 1 customer = 1 project (projects_customer_id_unique,
+  // 0015), so a per-project report is also a per-customer one.
+  customer_id: string;
+  payment_mode: PaymentMode | null;
 };
 
 const MONTH_LBL = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -112,6 +139,9 @@ export default function BreakdownReport({
   trips,
   drivers,
   stations,
+  topups,
+  specialCharges,
+  paidInvoices,
 }: {
   open: boolean;
   onClose: () => void;
@@ -122,6 +152,13 @@ export default function BreakdownReport({
   trips: BreakdownTrip[];
   drivers: DriverLite[];
   stations: StationLite[];
+  // Financial section sources, customer-wide and unsliced. Fetched once in
+  // app/trips/page.tsx for the Finance tab and handed here through CustomersTab
+  // — this report adds no query of its own, and deliberately does NOT read
+  // v_customer_amount_payable (0139): see ./amountPayable's header.
+  topups: TopupRow[];
+  specialCharges: SpecialChargeRow[];
+  paidInvoices: PaidInvoiceRow[];
 }) {
   // currentMonthKey(), NOT monthKeyOf(new Date().toISOString()). It seeds the
   // picker default and caps the month list, both of which are then matched
@@ -176,6 +213,63 @@ export default function BreakdownReport({
   const deliveriesWindows = useMemo(
     () => buildDeliveriesReport(projectTrips, todayKey(), rate),
     [projectTrips, rate],
+  );
+
+  // --- Financial section: payments + amount payable ------------------------
+  // Both key off the CUSTOMER, not the project: invoices, top-ups and special
+  // charges all carry customer_id and never project_id (migration 0025). The
+  // two are 1:1 (0015), so this is the same customer the report's header names.
+  const customerId = project?.customer_id ?? null;
+
+  const customerCharges = useMemo(
+    () => (customerId ? specialCharges.filter((ch) => ch.customer_id === customerId) : []),
+    [specialCharges, customerId],
+  );
+  const customerTopups = useMemo(
+    () => (customerId ? topups.filter((t) => t.customer_id === customerId) : []),
+    [topups, customerId],
+  );
+
+  // AMOUNT PAYABLE — DELIBERATELY NOT MONTH-SLICED. Every other figure in the
+  // Financial section is a slice of selMonth; this one is a running total as of
+  // now, over all periods, and is labelled as such on screen. Feeding it
+  // monthTrips instead would make it a DIFFERENT number from the Finance tab's
+  // Amount Payable column, which is the one thing it must not be — so it reads
+  // projectTrips (all months) and the customer's full charge/top-up history.
+  //
+  // The rule lives in ./amountPayable, shared with FinanceTab. No prepaidBalance
+  // is passed because this report computes no running balance of its own; the
+  // module derives it from the same inputs with the same engine call.
+  const amountPayable = useMemo(
+    () =>
+      computeAmountPayable({
+        mode: project?.payment_mode ?? null,
+        hasProject: project != null,
+        projectRate: rate,
+        trips: projectTrips,
+        charges: customerCharges,
+        topups: customerTopups,
+      }),
+    [project, rate, projectTrips, customerCharges, customerTopups],
+  );
+
+  // payment_date is a plain date (user-entered); paid_at is a full timestamp
+  // (server now()) — the fallback trims it to date-only. Same "recorded vs
+  // actual" convention as StatementModal's paymentDateOf and as
+  // SpecialChargeRow.charge_date falling back to created_at.slice(0, 10);
+  // if that convention changes, it changes in all of them.
+  const monthPayments = useMemo(() => {
+    if (!customerId) return [];
+    return paidInvoices
+      .filter((inv) => inv.customer_id === customerId)
+      .map((inv) => ({ inv, date: inv.payment_date ?? (inv.paid_at ? inv.paid_at.slice(0, 10) : "") }))
+      .filter((p) => p.date !== "" && monthKeyOf(p.date) === selMonth)
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  }, [paidInvoices, customerId, selMonth]);
+
+  const monthPaymentsTotal = useMemo(
+    () => monthPayments.reduce((s, p) => s + p.inv.grand_total_sar, 0),
+    [monthPayments],
   );
 
   // Month list: earliest trip month → current, descending. Always includes current.
@@ -485,6 +579,108 @@ export default function BreakdownReport({
                 value={avgRevenue == null ? "—" : formatSar(avgRevenue)}
                 tone="info"
               />
+            </div>
+
+            {/* THE TWO HALVES OF THIS ROW ARE SCOPED DIFFERENTLY, AND EACH SAYS
+                SO ON ITS OWN FACE. The payments table is MONTH-SCOPED like the
+                Stat row above it; Amount payable is a running figure over ALL
+                periods, as of today. Slicing the payable to the month would make
+                it a different number than the Finance tab's own column renders
+                — see ./amountPayable's period-independence note. */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="card p-0 overflow-hidden lg:col-span-2 break-inside-avoid">
+                <div className="px-3 py-2 text-sm font-medium border-b border-app">
+                  Invoice payments · {monthLabel(selMonth)}
+                </div>
+                <Table>
+                  <thead style={{ background: "rgba(0,0,0,0.02)" }}>
+                    <tr>
+                      <TH>Date</TH>
+                      <TH>Invoice</TH>
+                      <TH>Method</TH>
+                      <TH>Reference</TH>
+                      <TH>Amount</TH>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthPayments.length === 0 ? (
+                      <tr>
+                        <TD className="muted">No invoice paid this month.</TD>
+                        <TD>{""}</TD>
+                        <TD>{""}</TD>
+                        <TD>{""}</TD>
+                        <TD>{""}</TD>
+                      </tr>
+                    ) : (
+                      <>
+                        {monthPayments.map((p) => (
+                          <tr key={p.inv.id}>
+                            <TD className="tabular-nums">{p.date}</TD>
+                            <TD className="font-medium">{p.inv.invoice_number}</TD>
+                            {/* payment_method is NULLABLE on the row — a legacy
+                                paid invoice predates 0039's method capture. */}
+                            <TD className={p.inv.payment_method ? "" : "muted"}>
+                              {p.inv.payment_method ? PAYMENT_METHOD_LABELS[p.inv.payment_method] : "—"}
+                            </TD>
+                            <TD className={p.inv.payment_reference ? "" : "muted"}>
+                              {p.inv.payment_reference || "—"}
+                            </TD>
+                            <TD className="tabular-nums">{formatSar(p.inv.grand_total_sar)}</TD>
+                          </tr>
+                        ))}
+                        <tr className="border-t border-app">
+                          <TD className="font-medium">Total</TD>
+                          <TD>{""}</TD>
+                          <TD>{""}</TD>
+                          <TD>{""}</TD>
+                          <TD className="tabular-nums font-semibold">{formatSar(monthPaymentsTotal)}</TD>
+                        </tr>
+                      </>
+                    )}
+                  </tbody>
+                </Table>
+              </div>
+
+              <div className="card p-3 break-inside-avoid">
+                <div className="text-sm font-medium">Amount payable</div>
+                <div className="text-[11px] muted mt-0.5">
+                  All periods, as of {todayKey()} — not limited to {monthLabel(selMonth)}.
+                </div>
+                {/* Sign IS the meaning (./amountPayable): negative = owed to us,
+                    zero = settled, positive = credit the customer holds. Same
+                    mapping the Finance tab's column uses; the treatment differs
+                    because that is a cell and this is a box. Halalas ride on the
+                    title, as they do there. */}
+                <div
+                  className={
+                    "mt-3 text-2xl font-semibold tabular-nums " +
+                    (amountPayable == null
+                      ? "muted"
+                      : amountPayable < 0
+                      ? "text-rose-600 dark:text-rose-400"
+                      : amountPayable > 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "muted")
+                  }
+                  title={amountPayable == null ? undefined : `${amountPayable.toFixed(2)} SAR`}
+                >
+                  {amountPayable == null ? "—" : formatSar(amountPayable)}
+                </div>
+                <div className="text-xs muted mt-1">
+                  {amountPayable == null
+                    ? "No payment mode set — nothing can be claimed."
+                    : amountPayable < 0
+                    ? "Owed to us"
+                    : amountPayable > 0
+                    ? "Credit the customer holds"
+                    : "Settled"}
+                </div>
+                {project?.payment_mode && (
+                  <div className="text-[11px] muted mt-2">
+                    {PAYMENT_MODE_LABELS[project.payment_mode]}
+                  </div>
+                )}
+              </div>
             </div>
           </section>
 
