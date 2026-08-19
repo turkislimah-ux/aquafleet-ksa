@@ -1,4 +1,4 @@
-# SESSION HANDOFF — 2026-08-20
+# SESSION HANDOFF — 2026-08-20 (archive block verified)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -14,28 +14,31 @@ three blanked files. Our durable JSON snapshot remains
 
 ---
 
-## 1. RECENT COMMITS — this session
+## 1. RECENT COMMITS
 
-Four commits, all pushed. `e361597..f23ca2f  main -> main`.
+Two commits pushed this session. `f23ca2f..e65d980`, then `e65d980..0adbab1`.
 
 | hash | what |
 |---|---|
-| `e42c233` | Migration 0140: drop 0019's unguarded `archive_project(uuid)` |
-| `35d0946` | Update `archiveProject` comment now that 0140 dropped the back door |
-| `44ba27c` | Record 0140 in CLAUDE.md §7 and close 0139's Q5 (+62/−12) |
-| `f23ca2f` | Point handoff at 0140 — nothing is scheduled-but-undone now |
+| `e65d980` | Previous session's handoff — committed there, **pushed here** |
+| `0adbab1` | Record the in-browser archive block verification in §7 + the JSON |
 
-`e361597` and earlier belong to the previous session.
+`e65d980` was already committed but **unpushed** when this session opened, while the
+handoff's own §2 asserted "Nothing unpushed." `git status -sb` read
+`## main...origin/main [ahead 1]`. **The handoff's self-claim about push state is the
+one claim it cannot verify about itself — check `git status`, never the prose.**
 
-Each was its own logical unit, staged by explicit path, `tsc --noEmit` clean before
-each. The `f23ca2f` diff GREW (7 insertions / 5 deletions) — expected, and reasoned
-before committing: 3 changed scalar lines plus 2 array appends, each adding a comma
-to the previous last element. §5's shrinking-diff-is-a-stop-signal did not fire.
+`0adbab1` is docs-only: `CLAUDE.md` + `.planning/AQUAFLEET-HANDOFF.json`,
++27/−12, `tsc --noEmit` clean, staged by explicit path, staged blob inspected
+(`git cat-file -s`, and the staged JSON re-parsed with `json.load` before commit).
+The JSON diff GREW (9 insertions / 6 deletions) — reasoned before committing: 3
+changed scalar lines plus 3 array appends, each append adding a comma to the previous
+last element. §5's shrinking-diff-is-a-stop-signal did not fire.
 
 ## 2. CURRENT STATE
 
 ```
-$ git status -sb
+$ git -C /Users/turkislimah/aquafleet-ksa status -sb
 ## main...origin/main
 
 $ git diff --stat            (empty)
@@ -45,91 +48,117 @@ $ git diff --stat --cached   (empty)
 **Working tree clean. Nothing uncommitted. Nothing unpushed. `main` level with
 `origin/main`.** `npx tsc --noEmit` clean at session end.
 
-## 3. INTERRUPTED WORK
+**`git` needs `-C /Users/turkislimah/aquafleet-ksa`.** The Bash tool's cwd is
+`/Users/turkislimah`, which is NOT a repo — a bare `git push` died with
+`fatal: not a git repository`. Shell cwd did not persist across turns this session.
+Same family as the wrong-directory grep in §5: **a command that ran somewhere else
+does not report that it ran somewhere else.**
 
-**The task was Turki's verbatim request: "verify archiving still works in browser".**
-Nothing else was in flight. (The commit message on this handoff says "item 3
-interrupted" — that phrasing was supplied by the closing instruction and does NOT
-map to any numbered item in this session. The interrupted work is the in-browser
-archive verification described here. Disregard "item 3".)
+## 3. THE ARCHIVE VERIFICATION — CLOSED
 
-### Done
+**Turki's verbatim request was "verify archiving still works in browser". IT IS
+DONE.** He ran the click-through **himself** on 2026-08-20 and reported "Test
+Completed, Verified and pass". Archiving blocked with the figure.
 
-- **Dev server confirmed up on :3002** (NOT 3000). `curl /login` → 200 on 3002, 000
-  on 3000; `ps aux` shows `next dev -p 3002`, pid 4638, next-server v14.2.5.
-  **Do not touch `.next`** — deleting or rebuilding it under a running dev server has
-  taken this repo down twice (§7 records both).
-- **DB-side proof complete, read-only.** The real post-DROP failure mode is a
-  PostgREST call that can no longer resolve its function (PGRST202, "Could not find
-  the function"), which would take archiving down entirely. It resolves:
+**What that proves, and it is the whole question a DROP raises:** the app resolved
+AND executed `archive_project_guarded` through PostgREST after `0140` removed the
+bare name. **PGRST202 ("Could not find the function") does not occur** — ruled out
+from the APP side, not just the DB side. Recorded in §7 on both the `0139` and the
+`0140` entries (`0adbab1`).
 
-  | check | result |
-  |---|---|
-  | `archive_project*` routines in `public` | exactly one — `archive_project_guarded(uuid,text,text)` |
-  | argument shape | `p_project_id uuid, p_override_reason text DEFAULT null, p_actor text DEFAULT null` |
-  | matches the call at `app/trips/actions.ts:998`? | yes |
-  | `authenticated` EXECUTE | true |
-  | bare `archive_project` | gone |
-  | `prosecdef` (security definer) | **false** — runs as invoker |
+**A BLOCK is a REFUSED write.** Nothing changed, and it still exercised the function
+end-to-end. **Prefer the refused write whenever the alternative writes irreversible
+data** — §5 carries this as a standing method.
 
-  Query used:
-  ```sql
-  select p.oid::regprocedure::text as signature,
-         pg_get_function_arguments(p.oid) as args,
-         p.prosecdef as security_definer,
-         has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_can_execute,
-         has_function_privilege('anon', p.oid, 'EXECUTE') as anon_can_execute
-    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-   where n.nspname = 'public' and p.proname like 'archive_project%'
-   order by 1;
-  ```
+### DB-side proof, from the prior session — still valid, read-only
 
-### Left
+| check | result |
+|---|---|
+| `archive_project*` routines in `public` | exactly one — `archive_project_guarded(uuid,text,text)` |
+| argument shape | `p_project_id uuid, p_override_reason text DEFAULT null, p_actor text DEFAULT null` |
+| matches the call at `app/trips/actions.ts:998`? | yes |
+| `authenticated` EXECUTE | true |
+| bare `archive_project` | gone |
+| `prosecdef` (security definer) | **false** — runs as invoker |
 
-**The in-browser click-through itself. Zero progress — it was never reachable.**
+```sql
+select p.oid::regprocedure::text as signature,
+       pg_get_function_arguments(p.oid) as args,
+       p.prosecdef as security_definer,
+       has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_can_execute,
+       has_function_privilege('anon', p.oid, 'EXECUTE') as anon_can_execute
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' and p.proname like 'archive_project%'
+ order by 1;
+```
 
-**Blocker: the Claude-in-Chrome MCP is not connected.** Four attempts across the
-session, all returning `Claude in Chrome is not connected`.
-**Computer-use cannot substitute** — browsers are tier "read" there, so clicks and
-typing are blocked; it can only see what is already on screen. This was reported to
-Turki plainly rather than silently falling through to a slower tier.
+The app branches on `const CHECK_VIOLATION = "23514"` and the figure is formatted by
+the RPC (`to_char(v_owed, 'FM999,999,990.00')`). **Branch on the code, never the
+message text.**
 
-Unblock: Chrome open with the extension signed in, then retry
-`mcp__Claude_in_Chrome__tabs_context_mcp`. Otherwise Turki clicks it himself.
+### Still never clicked
 
-### The verification plan, when the browser is available
+- **The OVERRIDE / force-archive path.**
+- **A COMPLETED archive.**
+- **The Return Balance flow** — unreachable until the one credit customer is archived.
 
-**Exercise the debt-guard BLOCK, not a completed archive.** A block is a REFUSED
-write — nothing changes — and it still proves the function resolved AND executed,
-which is the whole question a DROP raises.
-
-1. Open any project whose customer owes money (table below).
-2. ProjectModal → danger zone → Archive.
-3. Expect the `23514` block message carrying the figure **formatted by the RPC**
-   (`to_char(v_owed, 'FM999,999,990.00')`). The app branches on
-   `const CHECK_VIOLATION = "23514"` — **branch on the code, never the message text.**
-
-**Live figures, re-measured this session** (§7's table is apply-time only and its own
-note says these "move with every delivery and invoice" — re-measure again before use):
-
-| project | customer | mode | owed SAR | blocked |
-|---|---|---|---|---|
-| The Royal Court of Saudi | Seder Facility mang. Co. | prepaid | 55,274.00 | yes |
-| King Saud University | MMM construction Co. | prepaid | 48,290.00 | yes |
-| VVV Test 2 | VVV CO. | postpaid | 46,460.00 | yes |
-| King Salman Park | Turki Contraction Co. | postpaid | 38,295.00 | yes |
-| RRR T | TEST 111 Co. | postpaid | 20,056.00 | yes |
-| Airport facilities | Seder Facility Mang. Co. | prepaid | — (credit 11,895.00) | no |
+**Turki said on 2026-08-20: "i will do the archives my self."** Both are in
+`human_actions_pending` in the JSON. Do not perform them.
 
 ### DO NOT, without asking Turki first
 
-- **Complete an archive** — stamps `archived_at` on the project AND its customer.
+- **Complete an archive** — stamps `archived_at` on the project AND its customer, and
+  **customers have NO Restore** (§7, deliberate — `0019` archives the customer as a
+  side effect of the 1:1 project).
 - **Force-archive with an override reason** — additionally inserts a
   `customer_write_offs` row: one per customer, unique-indexed, amount frozen at
   insert and never recomputed, and **a written-off customer is permanently an
   archived one.**
 
 Both are real, effectively irreversible state changes on live data.
+
+### Live figures, re-measured 2026-08-20 — RE-MEASURE AGAIN BEFORE USE
+
+Unchanged from `0139`'s apply-time table, whose own note says these "move with every
+delivery and invoice".
+
+| project | project_id | customer | mode | owed SAR | blocked |
+|---|---|---|---|---|---|
+| The Royal Court of Saudi | `00243565-c998-4650-afb6-a87075747a11` | Seder Facility **m**ang. Co. | prepaid | 55,274.00 | yes |
+| King Saud University | `dfab388f-db51-47ad-b144-f6b03b245a6a` | MMM construction Co. | prepaid | 48,290.00 | yes |
+| VVV Test 2 | `70dcb451-dce0-4153-81af-182dc0a1d537` | VVV CO. | postpaid | 46,460.00 | yes |
+| King Salman Park | `7a94e22e-83b3-45e8-a7d0-766da0855b8a` | Turki Contraction Co. | postpaid | 38,295.00 | yes |
+| RRR T | `fd408e6e-5acf-4109-b474-28ae1b7e8e92` | TEST 111 Co. | postpaid | 20,056.00 | yes |
+| *(no active project)* | — | Turki 1 | **null** | 1,035.00 | yes |
+| Airport facilities | `42941279-747b-4fb8-b511-5d9c380766a6` | Seder Facility **M**ang. Co. | prepaid | — (credit 11,895.00) | no |
+
+```sql
+select p.name as project_name, p.id as project_id, v.customer_name,
+       v.payment_mode, v.amount_payable_sar, v.owed_sar, v.archive_blocked
+  from public.v_customer_amount_payable v
+  left join public.projects p
+    on p.customer_id = v.customer_id and p.archived_at is null
+ order by v.amount_payable_sar asc;
+```
+
+**The `Turki 1` row is the SEVENTH and §7's apply-time table omits it** — no active
+project, `payment_mode` NULL, still blocked. That is `0139`'s Q1 fail-closed rule
+working: an unresolvable payment mode is treated as postpaid. **A customer with no
+project still appears in this view.**
+
+### NAME COLLISION — confirm by ID, never by the name on screen
+
+Two DISTINCT customers, one letter apart, with two DISTINCT projects. Measured
+read-only before anything irreversible was proposed:
+
+| customer | customer_id | project | payable |
+|---|---|---|---|
+| Seder Facility **m**ang. Co. | `d59b9bfe-8a69-4b31-9d1d-a97ee2159341` | The Royal Court of Saudi | −55,274.00 |
+| Seder Facility **M**ang. Co. | `de4b1ffc-fbc6-435b-a803-9dc116233003` | Airport facilities | **+11,895.00** |
+
+`archived_at` null on both customers and both projects; both prepaid.
+**Archiving one cannot touch the other.** This check had to clear first precisely
+because an archive stamps the CUSTOMER and there is no customer restore.
 
 ## 4. DB STATE
 
@@ -138,14 +167,37 @@ Both are real, effectively irreversible state changes on live data.
 - Nothing drafted-but-unapplied. Nothing applied-but-uncommitted. (The `0101`
   incident: **an applied-but-uncommitted migration is exactly what a db reset
   drops.**)
-- View posture unchanged by this session: **47 views / 47 security_invoker / 0
-  anon-readable** (last measured 2026-08-19). §6 carries the re-measure query —
-  *the two counts matching is the check, not the number.*
+- **No DB writes this session.** Every query above was read-only.
+- View posture unchanged: **47 views / 47 security_invoker / 0 anon-readable**
+  (last measured 2026-08-19). §6 carries the re-measure query — *the two counts
+  matching is the check, not the number.*
 - **Migrations are DRAFTED to disk for Turki to run in the Supabase SQL Editor —
   never self-applied through the MCP.** Read-only `execute_sql` queries ARE allowed
   and are the standard proof mechanism; that is all this session used.
 
-## 5. DECISIONS / CONSTRAINTS DISCOVERED
+## 5. DECISIONS / CONSTRAINTS
+
+### No browser channel exists for an agent here — all three tiers assessed
+
+1. **Claude-in-Chrome MCP** — `Claude in Chrome is not connected`, every attempt.
+2. **Computer-use** — browsers are granted at tier **"read"**: visible in
+   screenshots, clicks and typing BLOCKED. It cannot substitute.
+3. **`mcp__Claude_Preview__preview_*`** — `preview_list` returns `[]`. It cannot
+   attach to the externally-started dev server; every other tool in that server needs
+   a `serverId` only `preview_start` produces, and `.claude/launch.json` does not
+   exist.
+
+**`preview_start` is NOT the workaround.** A second server lands on `/login` with no
+Supabase session, so it proves nothing about archiving, and it writes to the same
+`.next` as the running pid — **the exact thing that took this repo down twice.**
+**Do not touch `.next`.** Dev server: `next dev -p 3002` (NOT 3000), pid 4638,
+next-server v14.2.5; `/login` 200, everything else 307 behind auth.
+
+**Calling `archive_project_guarded` through the Supabase MCP is NOT the fallback.**
+It is a WRITE through the MCP, which §5 forbids, AND it bypasses the
+app → PostgREST → RPC path that is the actual thing under test. A green result there
+would prove nothing about the app. **Report the blocker plainly instead of falling
+through to a tier that answers a different question.**
 
 ### `anon` holds EXECUTE on `archive_project_guarded` — and it is INERT
 
@@ -185,9 +237,10 @@ back door. `if exists` makes `0140` a no-op today and a real drop on every repla
 
 Proving an RPC resolves does not require completing its side effect. The block path
 executes the function end-to-end and changes nothing. Reach for that shape first when
-the alternative writes irreversible data.
+the alternative writes irreversible data. **This is no longer theory — it is how the
+`0140` question was actually answered.**
 
-### Grep traps re-confirmed this session
+### Grep traps — and the ToolSearch one
 
 - **`archive_project` MATCHES `archive_project_guarded`** — any sweep for the bare
   name must exclude the guarded one or it reports the replacement as the thing it was
@@ -197,24 +250,36 @@ the alternative writes irreversible data.
 - **`grep` is case-sensitive by default** — `drop function` alone cannot prove no
   `DROP FUNCTION` exists.
 - **An empty grep from the wrong directory is indistinguishable from a real finding.**
+- **`ToolSearch`'s `select:` needs the EXACT fully-qualified deferred-tool name.**
+  `select:preview_list` returns "No matching deferred tools found", which reads like
+  the tool does not exist. Use the keyword form, or the full
+  `mcp__<server-id>__<tool>` name.
 
 **An empty result is only evidence once you know the command ran.**
 
 ## 6. NEXT
 
-1. **Get Chrome connected and run the block verification above.** That is the one
-   open item and it is the direct continuation of Turki's request.
-2. **If it blocks with the figure → archiving is verified end-to-end.** Record it in
-   §7's `0140` entry (one line — the entry already exists, it just has no in-browser
-   confirmation on it yet) and in `.planning/AQUAFLEET-HANDOFF.json`. §7 is the
-   durable record; the JSON points at it, never the reverse.
-3. **If it errors with "Could not find the function" → the app half and the DB
-   disagree.** That would be the PGRST202 case, and the DB-side proof above says it
-   should not happen. Do not patch the app around it — re-measure the signature first.
-4. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed and the Deferred
-   list in §7 carries nothing that is blocked-and-actionable. The named deferred items
-   (RBAC + the app-wide security pass, effective-dated customer rates, multi-project
-   customers, Route Optimization / Predictive / IoT) are all parked deliberately.
+1. **Turki does the two archives himself** — he said so on 2026-08-20. Do not perform
+   them. Targets confirmed by measurement, both irreversible:
+   - **Complete an archive:** `Airport facilities`
+     (`42941279-747b-4fb8-b511-5d9c380766a6`, customer `de4b1ffc…`, +11,895.00
+     credit) — the ONLY project that archives without an override, and doing it is
+     what makes the never-clicked **Return Balance** flow reachable.
+   - **Force-archive with an override reason:** `RRR T`
+     (`fd408e6e-5acf-4109-b474-28ae1b7e8e92`, TEST 111 Co., 20,056.00) — smallest
+     stake, most obviously test data.
+2. **When he reports back, record it in §7** — the `0139` entry already tracks which
+   paths are clicked and which are not; update that, then
+   `.planning/AQUAFLEET-HANDOFF.json`. §7 is the durable record; the JSON points at
+   it, never the reverse.
+3. **The Return rehearsal, when it becomes reachable, is `0139`'s own block G:**
+   **`balance_sar` must be IDENTICAL before and after**, only `balance_returned` may
+   change, and a second call must raise "already been returned".
+4. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
+   in §7 carries nothing blocked-and-actionable — RBAC + the app-wide security pass,
+   effective-dated customer rates, multi-project customers, Route Optimization /
+   Predictive / IoT are all parked deliberately.
 5. **Still owed from much earlier, unrelated and still true:** an end-to-end
    in-browser "Download PDF" check against the live PDFShift API — nobody has
    confirmed a real PDF came back since `PDF_API_KEY` landed in `.env.local`.
+   **Blocked on the same missing browser channel as §5.**
