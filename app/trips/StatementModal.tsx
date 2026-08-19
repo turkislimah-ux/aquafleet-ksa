@@ -256,7 +256,12 @@ export default function StatementModal({
     <div className="statement-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <div
         id="statement-print"
-        className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin"
+        // 1080px is this app's size:lg popup width (InventoryClient.tsx:130,
+        // PurchaseOrders.tsx, the maintenance and reports modals). Widened from
+        // max-w-3xl because BOTH statement tables are EIGHT columns — the widest
+        // in the app — and Date/Type/Truck/Capacity/Ref/Note/Amount/Running
+        // Balance at 768px wraps the Note and Ref cells into unreadable stacks.
+        className="card p-6 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between mb-1 gap-4">

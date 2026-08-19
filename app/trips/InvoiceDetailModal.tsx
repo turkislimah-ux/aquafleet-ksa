@@ -628,7 +628,12 @@ export default function InvoiceDetailModal({
     <>
     <div className="invoice-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <div
-        className="card p-0 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin"
+        // 1080px = this app's size:lg popup width (InventoryClient.tsx:130).
+        // Widened from max-w-4xl: the trip tables are six columns and each row
+        // carries a stacked pre-VAT+VAT figure, so the money column needs room
+        // that Date/Ref/Truck/Capacity/Type were taking. The PRINT sheet is
+        // unaffected — globals.css flattens this portal and sizes to the page.
+        className="card p-0 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Toolbar — not printed. */}

@@ -155,7 +155,11 @@ export default function WaterStationsModal({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
       <div
-        className="card p-6 w-full max-w-3xl max-h-[85vh] overflow-y-auto scrollbar-thin"
+        // 1080px = this app's size:lg popup width (InventoryClient.tsx:130).
+        // Widened from max-w-3xl: the list view's fourth column holds BOTH
+        // per-type price inputs plus their labels, which is the widest cell in
+        // any trips table and was being squeezed by Name/City/Coordinates.
+        className="card p-6 w-full max-w-[1080px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         {view === "list" ? (

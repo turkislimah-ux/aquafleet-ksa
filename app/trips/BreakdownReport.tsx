@@ -358,7 +358,12 @@ export default function BreakdownReport({
       onClick={onClose}
     >
       <div
-        className="card p-0 w-full max-w-5xl max-h-[90vh] overflow-y-auto scrollbar-thin"
+        // 1080px = this app's size:lg popup width (InventoryClient.tsx:130).
+        // Only 56px wider than the max-w-5xl (1024px) it replaces, so this one
+        // was never the cramped case — the point is that every trips popup now
+        // lands on ONE width instead of five, and this one is about to gain an
+        // invoice-payments table.
+        className="card p-0 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Toolbar — not printed. */}

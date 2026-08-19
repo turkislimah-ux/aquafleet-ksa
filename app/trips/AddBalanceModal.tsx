@@ -167,7 +167,17 @@ export default function AddBalanceModal({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
       <div
-        className="card p-6 w-full max-w-md max-h-[90vh] overflow-y-auto scrollbar-thin"
+        // TWO WIDTHS, because this shell hosts two different things. The list
+        // view is a five-column history table (Date / Method / ETF Ref. /
+        // Amount / Photo) and gets the app's size:lg width, 1080px, like every
+        // other table-bearing trips popup. The ADD FORM keeps max-w-md: it is a
+        // stack of single-line fields, and a 1080px-wide date input beside a
+        // 1080px-wide amount input is harder to fill in, not easier. Widening a
+        // popup is about fitting its COLUMNS, and a form has none.
+        className={
+          "card p-6 w-full max-h-[90vh] overflow-y-auto scrollbar-thin " +
+          (view === "list" ? "max-w-[1080px]" : "max-w-md")
+        }
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-1">
