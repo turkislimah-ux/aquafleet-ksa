@@ -3163,13 +3163,15 @@ relevant skill(s) **when the task calls for it**:
       a blank one rather than trusting a form validator), actor, timestamp.
       **The audit trail is the control.** If a real role gate lands later it goes in
       the RPC and nowhere else. Parked with the same RBAC pass everything else is.
-    - **Q5 — `0019`'s `archive_project()` IS STILL IN PLACE, AND IT IS AN UNGUARDED
-      BACK DOOR.** A function's argument list cannot change under create-or-replace,
-      so the guarded version is a new name rather than a replacement. **This is the
-      one thing about `0139` that is not self-contained.** All app call sites are
-      switched (see the app half below), so the DROP is unblocked and there are no
-      app refs left to strip — it is a bare drop whenever the architect wants it.
-      **SCHEDULED, DELIBERATELY NOT DONE YET.**
+    - **Q5 — `0019`'s `archive_project()` WAS AN UNGUARDED BACK DOOR. CLOSED —
+      migration `0140`, applied and committed (`e42c233`).** A function's argument
+      list cannot change under create-or-replace, so the guarded version had to be a
+      new name rather than a replacement, which left the old two-line archive
+      callable and able to archive a debt away. It was the one thing about `0139`
+      that was not self-contained; it is now. `archive_project_guarded(uuid, text,
+      text)` is the ONLY archive path that exists in the database. See the `0140`
+      entry below for why the file was still required even though the function had
+      already gone missing from production.
   - **WHY AN RPC AND NOT APP CODE:** this is a data-integrity rule, not a UI
     courtesy, and **PostgREST runs each statement in its own transaction** — an
     app-side pair could half-apply and leave either a debt archived with no
@@ -3282,6 +3284,55 @@ relevant skill(s) **when the task calls for it**:
     only `balance_returned` may change, and a second call must raise "already been
     returned".
 
+- **THE UNGUARDED BACK DOOR IS CLOSED — migration `0140`, applied clean, commits
+  `e42c233` (the migration) and `35d0946` (the stale comment it left behind).**
+  `drop function if exists public.archive_project(uuid)` — `0139`'s Q5, the one thing
+  that entry flagged as not self-contained. `archive_project_guarded(uuid, text,
+  text)` is now the only archive path the database has.
+  - **THE PREMISE WAS WRONG, NOT MERELY STALE, AND MEASURING IT FIRST IS THE ONLY
+    REASON THAT WAS FOUND.** §7 and the handoff both asserted the function "IS STILL
+    IN PLACE". Measured live before drafting: `public.archive_project(uuid)` was
+    **ALREADY ABSENT**, and the only `archive_project*` routine in the database was
+    the guarded one. It had been dropped out-of-band at some point after `0139` —
+    **no migration on disk removed it.** This is the THIRD time a long-standing §7
+    note has turned out wrong rather than out of date (the Kanban entry was the first,
+    `payment_model` the second). **Re-measure the premise before executing on it.**
+  - **THE FILE WAS STILL REQUIRED, AND THAT IS THE WHOLE POINT — a drift like this is
+    an argument FOR writing the migration, never for waving it off as already done.**
+    Migration history on disk is the RESET PATH: replaying from scratch runs `0019`,
+    which **RECREATES** the back door, and nothing downstream removes it. Without this
+    file a database reset silently reintroduces the hole `0139` was written to close —
+    the same class of problem as the applied-but-uncommitted `0101`. `if exists` makes
+    it idempotent: **a no-op against production today, a real drop on every replay.**
+    - `0019` is wrapped in a single `begin`/`commit`, so it was all-or-nothing, and
+      its other artifacts (`projects.archived_at`, `customers.archived_at`,
+      `projects_active_idx`, `customers_active_idx`) are all still present — which is
+      what proves the function was created and later removed rather than never made.
+    - **IT IS NOT COMMENT-ONLY** (`0138`'s lesson — a comment-only migration replays
+      as a no-op). The drop is real DDL, and a `do $$` block asserts BOTH halves of
+      the end state in the same run: the bare name at **0** signatures (an overload
+      with a different argument list would still be an unguarded back door — the
+      `0038` one-signature rule) and `archive_project_guarded` at **exactly 1**.
+      **A drop that silently took out the wrong function would otherwise look
+      identical to a successful one.** No revoke footer is needed: dropping a
+      function drops its privileges with it.
+  - **ORDERING — app half first, the DROP direction.** Same as `rating`/`0132` and
+    `incidents_12mo`/`0133`: a PostgREST call naming a function that no longer exists
+    fails outright, so dropping first would have broken archiving the instant it
+    applied. `2c9103e` had already moved every call site, so there were no refs left
+    to strip — a bare drop. `35d0946` fixed the one thing that went stale on apply:
+    `app/trips/actions.ts`'s comment still said the old function existed and a drop
+    was scheduled.
+  - **GREP TRAP, and it is the `fill_cost[^_]` trap in a new costume:**
+    **`archive_project` MATCHES `archive_project_guarded`**, so any sweep for the bare
+    name must exclude the guarded one or it reports the replacement as the thing it
+    was meant to find. Two other false negatives cost time in the same session and are
+    the same shape as the recorded wrong-directory grep: **zsh expands an unquoted
+    `--include=*.ts`** and kills the command, returning EMPTY output that reads as a
+    clean sweep; and **`grep` is case-sensitive by default**, so `drop function` alone
+    cannot prove no `DROP FUNCTION` exists on disk. **An empty result is only evidence
+    once you know the command ran.**
+
 - **AMOUNT PAYABLE HAS ONE AUTHORITY, AND IT IS TYPESCRIPT — `app/trips/amountPayable.ts`,
   commit `629a1a9`.** The rule was written inline in `FinanceTab.tsx` for the Finance
   tab's Amount Payable column (`a69a06d`); the project Breakdown report now shows the
@@ -3361,11 +3412,10 @@ relevant skill(s) **when the task calls for it**:
   was stale and has been removed. `drivers.incidents_12mo`'s drop was ALSO on this
   list — it is no longer deferred, `0133` is applied and verified; see the Staff
   cleanup entry above.)
-  - **SCHEDULED, UNBLOCKED, NOT DONE: the DROP migration retiring `0019`'s
-    `archive_project()`.** Every app call site is on `archive_project_guarded`
-    already, so there are no app refs left to strip — it is a bare drop.
-    **Until it lands, `archive_project()` is an unguarded back door around the whole
-    debt guard** (`0139`, Q5). Architect's call on timing; do not leave it to memory.
+  - The DROP migration retiring `0019`'s `archive_project()` was on this list and is
+    **no longer deferred — `0140` is applied, verified and committed**, so nothing
+    on the list above is scheduled-but-undone. See the `0140` entry above (it closes
+    `0139`'s Q5, and its premise turned out to be wrong rather than merely stale).
 - **Deferred — Consumption:** customer archive documents as a schema question
   (`customer_id` on `archive_documents`) was raised at Archive Phase 3 and not
   decided; an optional UNIQUE on `drivers.iqama_number` / `staff.iqama_number` /
