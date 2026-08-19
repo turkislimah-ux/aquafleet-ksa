@@ -47,9 +47,10 @@ import {
   Legend,
 } from "recharts";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { currentMonthKey, formatSar } from "@/lib/utils";
+import { currentMonthKey, formatSar, todayKey } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { WATER_TYPE_LABELS, type CommissionMode } from "@/lib/db-types";
+import DeliveriesReportBand, { buildDeliveriesReport } from "./DeliveriesReportBand";
 
 // Chart palette — emerald for money (consistent with the report), slate/amber for
 // the rest. Hex (not Tailwind tokens) so the SVG fills survive print.
@@ -68,6 +69,11 @@ export type BreakdownTrip = {
   commission_sar: number | null;
   water_station: string;
   water_type: string;
+  // Frozen customer rate (0128). Read ONLY by the Deliveries report band, which
+  // joins the four-surface invariant — see ./DeliveriesReportBand's PRICE BASIS
+  // note. Every OTHER figure in this report still prices at the project's
+  // CURRENT rate, which is what the header's disclaimer is about.
+  rate_sar: number | null;
 };
 type DriverLite = { id: string; name: string };
 type StationLite = { key: string; name: string };
@@ -155,6 +161,21 @@ export default function BreakdownReport({
   const projectTrips = useMemo(
     () => (project ? trips.filter((t) => t.project_id === project.id) : []),
     [trips, project],
+  );
+
+  // Deliveries report band — the same strip that sits on top of this project's
+  // Kanban card, from the same builder, so the two cannot drift.
+  //
+  // ANCHORED TO TODAY, NOT TO selMonth, AND THAT IS THE POINT. Its windows are
+  // Today / 7 / 30 / 90 rolling; feeding it the selected month would make the
+  // same-named band mean two different things on two screens. It reads
+  // projectTrips (ALL months) because the builder's own windows do the date
+  // filtering — a month-sliced input would silently truncate the 90-day figure.
+  // The band renders under a month-scoped heading here, so it carries a `hint`
+  // saying so; the Kanban needs none.
+  const deliveriesWindows = useMemo(
+    () => buildDeliveriesReport(projectTrips, todayKey(), rate),
+    [projectTrips, rate],
   );
 
   // Month list: earliest trip month → current, descending. Always includes current.
@@ -543,6 +564,11 @@ export default function BreakdownReport({
                 tone="info"
               />
             </div>
+            <DeliveriesReportBand
+              windows={deliveriesWindows}
+              className="break-inside-avoid"
+              hint="Rolling windows anchored to today — not the selected month."
+            />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
               <div className="rounded-lg border border-app p-3">
                 <div className="muted text-[11px] uppercase tracking-wide mb-1">Water stations used</div>

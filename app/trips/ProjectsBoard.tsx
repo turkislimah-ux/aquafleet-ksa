@@ -20,7 +20,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MapPin, Plus, Users, Play, Truck, Check, Droplet, ChevronLeft, ChevronRight, ChevronDown, Calendar, History,
+  MapPin, Plus, Users, Play, Truck, Check, Droplet, ChevronLeft, ChevronRight, ChevronDown, Calendar,
   X, Lock, AlertTriangle, Trash2,
 } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
@@ -44,6 +44,11 @@ import { pillColor } from "@/lib/project-colors";
 import { formatTripRef } from "@/lib/trip-ref";
 import { useIncomingTripHighlight } from "@/lib/tripHighlight";
 import { setTripStage, setTripStation, deleteTrip } from "./actions";
+import DeliveriesReportBand, {
+  buildDeliveriesReport,
+  EMPTY_DELIVERIES_REPORT,
+  type DeliveriesReportWindow,
+} from "./DeliveriesReportBand";
 import CreateTripForm from "./CreateTripForm";
 import ManageDriversModal from "../projects/ManageDriversModal";
 
@@ -94,11 +99,10 @@ type ProjectHeader = {
   description: string | null;
 };
 
-// Anchored-to-today delivery counts per project (Today / 7 / 30 / 90 windows).
-// Revenue is derived in the card (count × the project's rate), so only counts
-// travel as a prop.
-type ProjectReport = { dayN: number; weekN: number; monthN: number; quarterN: number };
-const EMPTY_REPORT: ProjectReport = { dayN: 0, weekN: 0, monthN: 0, quarterN: 0 };
+// The deliveries-report shape now lives in ./DeliveriesReportBand — the leaf
+// module BreakdownReport also imports, so the two surfaces cannot drift. It
+// carries BOTH count and SAR per window (revenue is no longer derived in the
+// card from the project's CURRENT rate; see that file's PRICE BASIS note).
 
 // One row of the per-project driver summary. trips/commission are DAY-SCOPED
 // (selectedDay); lastTripDate is all-time (most recent trip_date on the project).
@@ -969,7 +973,7 @@ function ProjectCard({
 }: {
   project: ProjectHeader;
   trips: TripRow[];
-  report: ProjectReport;
+  report: DeliveriesReportWindow[];
   driverRows: DriverRow[];
   assignedCount: number;
   stationsByKey: Record<string, string>;
@@ -989,15 +993,6 @@ function ProjectCard({
   highlightedTripId?: string | null;
   onHighlightHover?: () => void;
 }) {
-  // Deliveries report tiles — count primary, revenue (count × rate) secondary.
-  // Counts are anchored to today (computed in the parent), NOT the selected day.
-  const rate = project.rate_per_trip_sar;
-  const reportTiles: { label: string; count: number }[] = [
-    { label: "Today", count: report.dayN },
-    { label: "Last 7 days", count: report.weekN },
-    { label: "Last 30 days", count: report.monthN },
-    { label: "Last 90 days", count: report.quarterN },
-  ];
   return (
     <div className="card p-4">
       {/* Header (block A) */}
@@ -1042,29 +1037,10 @@ function ProjectCard({
 
       {/* Deliveries report strip (block B) — all 4 windows at once, anchored to
           today (independent of the selected calendar day). Mirrors the demo's
-          reportingStrip; our addition = a revenue line under each count. */}
-      <div
-        className="mt-4 rounded-lg border grid grid-cols-2 md:grid-cols-[auto_repeat(4,minmax(0,1fr))] items-center gap-y-2 px-3 py-2"
-        style={{ borderColor: "rgb(var(--border))", background: "rgba(11,126,234,0.03)" }}
-      >
-        <div className="col-span-2 md:col-span-1 inline-flex items-center gap-1.5 pe-3 text-xs font-semibold muted">
-          <History className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
-          Deliveries report
-        </div>
-        {reportTiles.map((t) => (
-          <div
-            key={t.label}
-            className="flex flex-col items-start gap-0.5 px-3 border-s"
-            style={{ borderColor: "rgb(var(--border))" }}
-          >
-            <span className="text-[10px] uppercase tracking-wide font-semibold muted">{t.label}</span>
-            <span className="text-lg font-bold tabular-nums leading-none">{t.count}</span>
-            <span className="text-[11px] text-emerald-600 dark:text-emerald-400 tabular-nums">
-              {formatSar(t.count * rate)}
-            </span>
-          </div>
-        ))}
-      </div>
+          reportingStrip; our addition = a revenue line under each count. The
+          markup moved to ./DeliveriesReportBand so BreakdownReport renders the
+          identical strip from the identical builder. */}
+      <DeliveriesReportBand windows={report} className="mt-4" />
 
       {/* Kanban (block C) */}
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1308,27 +1284,33 @@ export default function ProjectsBoard({
   );
 
   // Deliveries report per project — Today / 7 / 30 / 90 windows, anchored to
-  // TODAY (delivered_at's local date), independent of selectedDay. Counts only;
-  // revenue is derived in the card. Window bounds are local YYYY-MM-DD keys, so
-  // lexicographic string compare == chronological compare.
+  // TODAY, independent of selectedDay. Built by ./DeliveriesReportBand's shared
+  // builder, so this strip and BreakdownReport's cannot drift.
+  //
+  // BASIS CHANGED HERE: the window is trips.trip_date, with delivered_at as the
+  // PREDICATE — it used to bucket on delivered_at's own local date, which is
+  // when the stage button was PRESSED, not the operational day. This fleet
+  // advances the Kanban in bulk (one afternoon holds 310 trips), which is the
+  // same defect migration 0109 corrected in the Dashboard's delivered-revenue
+  // view. See DeliveriesReportBand's header for the full reasoning.
+  //
+  // NOT day-scoped, so this cannot reuse `byProject` (which is dayTrips only) —
+  // it groups the FULL trip set. The per-project fallback rate is that project's
+  // current rate; the builder prefers the trip's own frozen rate_sar.
   const reportByProject = useMemo(() => {
-    const w7 = addDays(todayKey, -6);
-    const w30 = addDays(todayKey, -29);
-    const w90 = addDays(todayKey, -89);
-    const m = new Map<string, ProjectReport>();
+    const tripsByProject = new Map<string, TripRow[]>();
     for (const t of trips) {
-      if (!t.project_id || !t.delivered_at) continue;
-      const dk = dayKey(new Date(t.delivered_at));
-      if (dk > todayKey) continue; // future-dated delivery (shouldn't happen) — ignore
-      const cur = m.get(t.project_id) ?? { dayN: 0, weekN: 0, monthN: 0, quarterN: 0 };
-      if (dk === todayKey) cur.dayN += 1;
-      if (dk >= w7) cur.weekN += 1;
-      if (dk >= w30) cur.monthN += 1;
-      if (dk >= w90) cur.quarterN += 1;
-      m.set(t.project_id, cur);
+      if (!t.project_id) continue;
+      const list = tripsByProject.get(t.project_id);
+      if (list) list.push(t);
+      else tripsByProject.set(t.project_id, [t]);
+    }
+    const m = new Map<string, DeliveriesReportWindow[]>();
+    for (const p of projects) {
+      m.set(p.id, buildDeliveriesReport(tripsByProject.get(p.id) ?? [], todayKey, p.rate_per_trip_sar));
     }
     return m;
-  }, [trips, todayKey]);
+  }, [trips, projects, todayKey]);
 
   // Driver summary rows per project. trips/commission are scoped to selectedDay
   // (so the table moves with the calendar); lastTripDate is all-time. Assigned
@@ -1671,7 +1653,7 @@ export default function ProjectsBoard({
               key={p.id}
               project={p}
               trips={byProject.get(p.id) ?? []}
-              report={reportByProject.get(p.id) ?? EMPTY_REPORT}
+              report={reportByProject.get(p.id) ?? EMPTY_DELIVERIES_REPORT}
               driverRows={driverRowsByProject.get(p.id) ?? []}
               assignedCount={(assignmentsByProject[p.id] ?? []).length}
               stationsByKey={stationsByKey}

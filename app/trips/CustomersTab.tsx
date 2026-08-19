@@ -64,8 +64,11 @@ type TripLite = {
   stage: string;
   // FROZEN rate, stamped at delivery (0128 backfill + setTripStage). The page
   // selects "*", so this already arrives at runtime — same shape FinanceTab
-  // carries. Optional because scheduled trips have not been stamped yet.
-  rate_sar?: number | null;
+  // carries. NOT optional: an unstamped trip carries NULL, it does not omit the
+  // key, and `Trip.rate_sar` (lib/db-types) declares it required. The `?` this
+  // used to carry read as "sometimes absent" and made this shape unassignable
+  // to BreakdownTrip, which passes the same rows into the deliveries band.
+  rate_sar: number | null;
 };
 type Driver = { id: string; name: string; status?: string };
 type TruckLite = {
