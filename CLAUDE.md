@@ -101,152 +101,73 @@ relevant skill(s) **when the task calls for it**:
 
 ## 5. Workflow discipline (non-negotiable)
 
-- **One logical unit per commit.** Each commit tsc-clean — and since `6506f2e`
-  that means MORE than it used to: `tsconfig.json` carries `noUnusedLocals` and
-  `noUnusedParameters`, so an unused import, local or parameter now FAILS the
-  build rather than accumulating until someone sweeps. **A parameter genuinely
-  required by a signature, interface or callback shape gets an `_` prefix — never
-  delete it, that changes the shape the caller depends on.**
+- **One logical unit per commit.** Each commit tsc-clean. `noUnusedLocals` +
+  `noUnusedParameters` are enforced — unused = build failure. Required params
+  kept for signature shape get an `_` prefix, never deleted.
 - **Explicit-path `git add`** — list each file. **NEVER `git add .`**
-- **THE HANDOFF FILE IS `.planning/AQUAFLEET-HANDOFF.json`. IT IS COMMITTED.**
-  A deliberate snapshot (Turki's call, 2026-08-07), updated by hand each round and
-  staged by explicit path like any other file.
-  - **`.planning/HANDOFF.json` — no prefix — IS NOT OURS.** It belongs to the gsd
-    plugin's PostToolUse checkpoint. Gitignored. Never read it for state, never
-    stage it, and do not "fix" it when it looks empty — empty is its correct state
-    for this repo.
-  - **`preview/.planning/HANDOFF.json`** — same thing inside the read-only
-    `preview/` tree. Also gitignored.
-  - **§7 of this file is the durable record.** The handoff JSON is a pointer to it,
-    never the other way round — do not let real knowledge live only in the JSON.
-
-- **WHY THE PATH MOVED, AND THE LESSON THAT OUTLIVES IT.** We wrote our handoff to
-  `.planning/HANDOFF.json` for months. gsd's PostToolUse hook writes that same path
-  after nearly every tool call (60s throttle), and in gsd 3.4.4 `writeCheckpoint()`
-  had no guard: it produced a 450-byte empty skeleton and overwrote our snapshot with
-  it. **This is upstream's [#17][gsd17], fixed in v4.0.1 — we were simply two months
-  stale.** The mechanism is a broken import, not missing state: `checkpoint.cjs`
-  destructures `safeReadFile`/`execGit` from `core.cjs`, which stopped exporting them
-  (verified `undefined` on our copy), so every read inside `generateCheckpoint()`
-  throws, a bare `catch {}` swallows it, and the null skeleton gets written **whether
-  or not `.planning/STATE.md` exists**. Full note, including why our first diagnosis
-  was wrong: `.planning/gsd-handoff-clobber-note.md`.
-
-  [gsd17]: https://github.com/buildomator/buildomator/issues/17
-  - **It committed the blank once — `7b29c65`, over a full snapshot, restored in
-    `86adec8`** — and struck twice more in a single round afterwards, including once
-    between the moment the file was verified at 12,515 bytes and the `git add` three
-    seconds later. The staged blob was blank while the working tree looked perfect.
-  - **THE FIX WAS OWNERSHIP, NOT VIGILANCE, AND THAT IS THE GENERAL RULE.** Every
-    guard below worked — and we still lost the file three times, because a rule that
-    must be obeyed on every single commit forever will eventually not be. **When two
-    tools claim one path, move the path. Do not get better at defending it.** The
-    guards are kept because they generalise, not because this specific file still
-    needs them:
-    - **The `git add` must be conditional on the write actually SUCCEEDING**, not
-      merely chained after it with `&&`. `7b29c65`'s python heredoc threw **before
-      writing anything** and the chained `add` staged whatever was already on disk.
-      One command is not atomic.
-    - **INSPECT THE STAGED BLOB, NOT THE WORKING TREE.** `git show :<path>` and
-      `git cat-file -s` read exactly what would be committed. A file can be correct
-      on disk and blank in the index. This is what caught the second and third hits.
-    - **A SHRINKING DIFF IS A STOP SIGNAL, not a curiosity.** `16 insertions, 30
-      deletions` on a file you only added to means something else wrote it.
-    - **`git checkout -- <path>` RESTORES FROM THE INDEX, NOT HEAD.** Once a bad
-      blob is staged, the reflexive restore writes the bad content over itself and
-      reports success. Use **`git checkout HEAD -- <path>`**. This one is nasty
-      precisely because the normal recovery move is the thing that fails silently.
-    - **Recovery is `git show <last-good-commit>:<path>`** — rebuild from the blob
-      and re-apply the round's updates rather than retyping from memory.
-- **Quote dynamic-route paths** with brackets in git commands, e.g.
-  `git add 'app/fleet/[id]/page.tsx'` — zsh globs `[id]` and silently drops it otherwise.
+- **HANDOFF files:**
+  - `.planning/HANDOFF.md` — session handoff, committed. Read at session start,
+    write at session end. Current state lives HERE, not in CLAUDE.md §7.
+  - `.planning/HANDOFF.json` (no prefix) — gsd plugin's checkpoint. Gitignored.
+    Never read for state, never stage.
+  - `preview/.planning/HANDOFF.json` — same, inside read-only `preview/`. Gitignored.
+- **Quote dynamic-route paths** in git commands: `git add 'app/fleet/[id]/page.tsx'`
+  — zsh globs `[id]` silently.
 - **Avoid `!` in commit messages** (zsh history expansion).
-- **Stage with a single-line `git add`, then `git status` to confirm** the exact set is
-  staged BEFORE committing. (A multi-line paste has silently staged nothing before.)
-- **Verify migration files exist on disk** (`ls supabase/migrations/ | tail -3` + `cat`)
-  BEFORE running them in Supabase. (Migrations have been "drafted in report" but never
-  written to disk multiple times — always verify.)
-- **Code-then-migrate** for breaking schema changes: build the code against the new
-  schema first, then run the migration, then verify in-browser, then commit both together.
-  Purely additive migrations (new nullable/defaulted columns) are lower-risk.
+- **Stage with single-line `git add`, then `git status`** to confirm before
+  committing. Multi-line paste has silently staged nothing before.
+- **Inspect the staged blob, not the working tree.** `git show :<path>` reads
+  what would be committed. A file can be correct on disk and blank in the index.
+- **Verify migration files on disk** (`ls supabase/migrations/ | tail -3` + `cat`)
+  BEFORE running in Supabase. Migrations have been "drafted in conversation" but
+  never written to disk — always verify.
+- **Code-then-migrate** for breaking schema changes: build code against the new
+  schema, run migration, verify in-browser, commit both together. Additive
+  migrations (new nullable/defaulted columns) are lower-risk.
 - **Turki verifies in-browser before every commit.** Nothing commits unverified.
-- Migrations numbered sequentially (`00NN_name.sql`). Highest so far: check
-  `ls supabase/migrations/`.
-- **Migrations are DRAFTED to disk for Turki to run in the Supabase SQL Editor — never
-  self-applied by Claude Code through the Supabase MCP** (reaffirming §1). Incident: the
-  v3 prepaid rebuild self-applied `0036`/`0037` directly via MCP instead of drafting them
-  for Turki, which is how they ended up as stray `confirm_invoice` overloads instead of
-  clean replacements (fixed in `0038` — see §7). Draft the file, stop, let Turki run it.
+- Migrations numbered sequentially (`00NN_name.sql`).
+- **Migrations DRAFTED to disk** — never self-applied by Claude Code through
+  Supabase MCP. Draft the file, stop, let Turki run it.
+- **Do NOT append build history to CLAUDE.md.** Session state goes in HANDOFF.md.
+  If this file exceeds 20KB, check for appended diary.
 
 ---
 
 ## 6. Key architecture locks (persistent — do not violate)
 
-- **Soft-delete, not hard-delete**, for operational records: terminated drivers/trucks
-  (`terminated_at`), archived projects. Terminated = a **pre-filter, never a state**.
-  Records persist (commission history, incidents, etc. survive termination).
-- **Derived driver state** (`lib/driver-state.ts`): 4 states (on_leave > off_duty >
-  idle > active), server-computed per page. Never a stored status.
-  **EXACTLY TWO EXPRESSIONS OF THIS RULE MAY EXIST** — that TS helper and
-  `v_driver_state_now` (0106), which mirrors its precedence. `v_fleet_state_now` and
-  `v_drivers_ops_now` COMPOSE on the view rather than restating it, and
-  `lib/actions/driver-state-drift.ts` asserts the two remaining copies agree on live
-  data at every Dashboard load. **Do not add a third.** Note `active` means ASSIGNED
-  (a truck and a live project), NOT currently driving — a driver with no truck can
-  still hold in-flight trips, and the two facts are shown separately.
-- **Water stations vs Operation stations are SEPARATE** (migration 0014's "do NOT
-  unify" rule). Water = fill stations (trips). Operation = driver/truck/staff base.
-- **`lib/project-colors.ts`** = shared id-hashed project color palette (one source,
-  used across Trips/Kanban/pills).
-- **EVERY VIEW REPLACEMENT RESTATES ITS SECURITY FOOTER.** `create or replace
-  view` does **NOT** preserve reloptions, so a replaced view silently reverts to
-  owner-run and bypasses RLS on 68 RLS-enabled tables. Every `create or replace
-  view` must be followed by:
-  ```sql
+- **Soft-delete, not hard-delete** for operational records: `terminated_at`,
+  `archived_at`. Terminated = pre-filter, never a state.
+- **Derived driver state** (`lib/driver-state.ts`): 4 states (on_leave > off_duty
+  > idle > active), server-computed. **Exactly TWO expressions:** TS helper +
+  `v_driver_state_now` (0106). `v_fleet_state_now` and `v_drivers_ops_now` compose
+  on the view. Drift guard asserts agreement at Dashboard load. Do not add a third.
+- **Water stations ≠ Operation stations** (0014). Separate, do NOT unify.
+- **`lib/project-colors.ts`** = shared id-hashed project color palette.
+- **EVERY VIEW REPLACEMENT RESTATES ITS SECURITY FOOTER:**
+```sql
   alter view public.X set (security_invoker = true);
   revoke all on public.X from anon;
   grant select on public.X to authenticated;
-  ```
-  This is not per-feature style — it is the standing rule for every view, and
-  the failure is invisible: the view keeps returning rows, just with the wrong
-  privileges. Live count to check against: **47 views, 47 security_invoker, 0
-  anon-readable** (re-measured 2026-08-19, after 0139 added
-  `v_customer_amount_payable` — its other two views were REPLACEMENTS, not
-  additions). This line has now gone stale three times — 40/40 for months while
-  four views were added, then 44/44 while 0137 added two, then 46/46 while 0139
-  added one — which is the point: **the two counts matching is the check, not the
-  number**, so re-measure and update rather than trusting the figure written here:
-  ```sql
+```
+  `create or replace view` silently drops reloptions. Re-measure after every
+  view change — the two counts matching is the check, not the number:
+```sql
   select count(*) as views,
          count(*) filter (where c.reloptions::text[] @> array['security_invoker=true']) as security_invoker,
          count(*) filter (where has_table_privilege('anon', c.oid, 'select')) as anon_readable
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where c.relkind = 'v' and n.nspname = 'public';
-  ```
-- **`create or replace view` can only APPEND a column** — it cannot insert,
-  reorder or rename one (error **42P16**, which cost 0112 an apply cycle). If a
-  new column belongs in the middle, it still goes at the end.
-  - **42P16 HAS A SECOND FACE: IT ALSO REFUSES A TYPE CHANGE**, and this entry
-    listing only insert/reorder/rename is what let it through a second time —
-    **`0137` failed its first apply on it.** A column declared `numeric(12,2)`
-    cannot be replaced by a bare `numeric`. The typmod is part of the column's
-    identity, so "same name, same position" is NOT enough: `least()`/`greatest()`
-    arithmetic returns bare `numeric` even when every input carries a typmod,
-    whereas a plain column reference inherits one — so simply wrapping an existing
-    column in arithmetic changes its type and breaks the replace.
-  - **The fix is an explicit cast, and the parens go on BOTH sides:**
-    `(case … end)::numeric(12,2)`. A `case` expression must be parenthesised
-    before `::` binds to the whole thing rather than to the last branch.
-  - **VERIFY THE TYPE, NOT JUST THE NAME AND ORDER.** `0137`'s own header claimed
-    the replaced columns were "byte-identical in NAME, ORDER and TYPE" when only
-    name and order had been checked. `select attname, format_type(atttypid,
-    atttypmod) from pg_attribute` on the existing view is the check — reading the
-    `pg_get_viewdef` body is not, because the body does not show the resolved type.
-- **Immutable keys** on lookup tables (water_stations.key) — rename updates name only.
-- **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew in date logic.
+```
+- **`create or replace view` can only APPEND a column** (error 42P16). Cannot
+  insert, reorder, rename, or change type. Type changes from arithmetic (bare
+  `numeric` vs `numeric(12,2)`) also trigger it — fix with explicit cast:
+  `(case … end)::numeric(12,2)`. Verify type with `format_type(atttypid,atttypmod)`
+  on `pg_attribute`, not by reading the view body.
+- **Immutable keys** on lookup tables (`water_stations.key`) — rename updates
+  name only.
+- **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew.
 
 ---
-
 
 ## 7. Current state & what's next
 
