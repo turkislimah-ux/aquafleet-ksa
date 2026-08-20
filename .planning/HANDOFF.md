@@ -1,11 +1,46 @@
-# SESSION HANDOFF — 2026-08-20 (netting + customer restore landed; UI is next)
+# SESSION HANDOFF — 2026-08-20 (customer restore COMPLETE, all three units)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
 
-## 0a. LATEST — UNIT 2 OF 3 IS DONE (2026-08-20)
+## 0. LATEST — THE CUSTOMER-RESTORE FEATURE IS COMPLETE (2026-08-20)
+
+**All three units are done, applied, verified and pushed.** Nothing about customer
+restore is outstanding.
+
+| unit | what | commit |
+|---|---|---|
+| 1 | `0142` — a balance return is a DEBIT (netting fix, 16 files) | `1f11997` |
+| 2 | `0141` — `restore_customer_guarded` + ACTIVE-only write-off suppression | `3d09a54` |
+| 3 | The Restore UI in the Archive page — row + detail popup | `ea07dbc` |
+
+**The durable rules are in §7 and stay there.** Unit 3 added no new rule: it is UI
+wiring over the RPC that unit 2 shipped, so §7 was deliberately NOT touched for it.
+
+Unit 3, briefly (details are in the commit body, which is long on purpose):
+- Restore in BOTH the archived-customer row and the detail popup, calling
+  `restore_customer_guarded` with the actor from `actorEmail()` — server-side, never
+  a form field.
+- The confirm dialog NAMES the consequences before the click: a written-off
+  customer's debt comes back (amount read at click time, not from the render
+  capture), a refunded customer returns with no spendable credit.
+- **23514 (not-archived) is treated as a STALE ROW, not a bug** — shows the RPC's
+  message and refreshes so the dead row leaves the list. Structural drift raises
+  plainly and is shown as-is.
+- Both entry points gated on `archived_at` being set; the list also admits
+  merely-inactive rows, for which the RPC could only ever raise 23514.
+- Turki verified all six test groups in-browser, then asked for two colour changes
+  (row Restore tinted brand-blue, write-off caption amber) — both from the existing
+  palette, both in the same commit.
+
+**Two stale comments were corrected in that commit rather than left to rot:**
+`ArchiveCustomerTab`'s note that Restore deliberately did NOT exist, and
+`app/archive/actions.ts`'s header claim that the file contains no RPC. Both were
+true when written and both had been made false by the work above.
+
+## 0a. UNIT 2 OF 3 IS DONE (2026-08-20)
 
 **Migration 0141 is APPLIED to the live DB and committed (`3d09a54`).** Customer
 restore exists. **The rules live in §7, not here.**
@@ -24,9 +59,10 @@ restore exists. **The rules live in §7, not here.**
 - **0141 sits BELOW 0142 on purpose.** Drafted first, parked, landed second. Not a
   numbering mistake — do not renumber either file.
 
-**NEXT — UNIT 3: the restore UI.** Nothing is built for it yet. `restore_customer_guarded`
-is live and grant-executable by `authenticated`, with no caller. Archive tab needs the
-entry point. Do NOT start without Turki saying so.
+*(**Superseded by §0** — unit 3 shipped in `ea07dbc`, so
+`restore_customer_guarded` now has a caller. This section's "NEXT — UNIT 3, nothing
+is built for it yet" has been removed rather than left standing, because a stale
+NEXT is the one kind of stale that gets acted on.)*
 
 ## 0b. UNIT 1 OF 3 IS DONE (2026-08-20, earlier)
 
@@ -355,10 +391,15 @@ re-measure AFTER they say they are done.**
 
 1. **`0139` IS CLOSED — every path clicked, recorded in §7 and the JSON. Do not
    re-open it.** Block, force-archive with override, plain archive on a credit
-   customer, an abandoned override, and the Return flow. **RECORDING IS NOT
-   DEDUCTING** stays a live rule though: nothing in the balance chain reads
-   `customer_balance_returns`, so a negative top-up written to "finish the job"
-   double-counts against a balance that was already correct.
+   customer, an abandoned override, and the Return flow.
+   - **"RECORDING IS NOT DEDUCTING" IS DEAD — 0142 REVERSED IT.** It used to say
+     nothing in the balance chain read `customer_balance_returns`. That was true
+     when written and is now the opposite of the rule: a recorded return IS a
+     debit, in both `lib/prepaid.ts` and `v_customer_prepaid_balance`. **§7's
+     MONEY RULE (0142) is the authority.** The half that survives is the half
+     that was never about deduction: still never post a negative top-up to
+     "finish the job" — `topups_sar` means money paid IN, and a refund is netted
+     at face value, not multiplied by 1.15.
 4. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
    in §7 carries nothing blocked-and-actionable — RBAC + the app-wide security pass,
    effective-dated customer rates, multi-project customers, Route Optimization /
