@@ -113,10 +113,22 @@ afterwards:
 `v_customer_amount_payable`, down from −20,056.00. The write-off flows through
 `v_receivables_open`'s `written_off` basis and **zeroes the guard's own input.**
 
-### Still never clicked
+### The Return Balance flow — ALSO DONE, and block G passed exactly
 
-- **The Return Balance flow.** Now **REACHABLE** — the credit customer is archived —
-  and `customer_balance_returns` is at **0 rows**.
+One `customer_balance_returns` row, Seder Facility Mang. Co. `de4b1ffc…`,
+`2026-08-20 00:15:09`, **11,895.00 = the whole credit**, `bank_transfer`, ref
+`FT-547516842`, `photo_path` in storage, `returned_on` / `note` / `returned_by` all
+populated.
+
+**AND THE BALANCE DID NOT MOVE.** `v_customer_prepaid_balance.balance_sar` and
+`amount_payable_sar` both still read **11,895.00**, identical to before. The only
+change is `balance_returned` → **true**. That is **RECORDING IS NOT DEDUCTING** proven
+on live data, not asserted.
+
+The second-call raise is **structural**: `customer_balance_returns_customer_id_key` is
+a **UNIQUE index on `customer_id`**. One return per customer, enforced by the DB.
+
+**EVERY PATH IN `0139` IS NOW EXERCISED. Nothing here needs re-verifying.**
 
 ### DO NOT, without asking Turki first
 
@@ -294,16 +306,12 @@ re-measure AFTER they say they are done.**
 
 ## 6. NEXT
 
-1. **THE RETURN BALANCE FLOW — the one path left, and it is now reachable.** Turki's
-   to click. `Seder Facility Mang. Co.` (`de4b1ffc-fbc6-435b-a803-9dc116233003`) is
-   archived holding **+11,895.00** credit; `customer_balance_returns` is at 0 rows.
-   The rehearsal is `0139`'s own block G: **`balance_sar` must be IDENTICAL before and
-   after**, only `balance_returned` may change, and a **second** call must raise
-   "already been returned". **RECORDING IS NOT DEDUCTING** — nothing in the balance
-   chain reads `customer_balance_returns`, so a negative top-up written to "finish the
-   job" double-counts against a balance that was already correct.
-2. **Archiving needs no further verification.** All three paths are clicked and
-   recorded in §7 (`0139` and `0140` entries) and in the JSON. Do not re-open it.
+1. **`0139` IS CLOSED — every path clicked, recorded in §7 and the JSON. Do not
+   re-open it.** Block, force-archive with override, plain archive on a credit
+   customer, an abandoned override, and the Return flow. **RECORDING IS NOT
+   DEDUCTING** stays a live rule though: nothing in the balance chain reads
+   `customer_balance_returns`, so a negative top-up written to "finish the job"
+   double-counts against a balance that was already correct.
 4. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
    in §7 carries nothing blocked-and-actionable — RBAC + the app-wide security pass,
    effective-dated customer rates, multi-project customers, Route Optimization /

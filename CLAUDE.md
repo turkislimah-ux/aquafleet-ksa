@@ -3284,8 +3284,18 @@ relevant skill(s) **when the task calls for it**:
       NOTHING behind:** `archived_at` still null and `customer_write_offs` still at
       exactly ONE row. **A block, and an override the user walks away from, are both
       completely inert.**
-    - **STILL UNEXERCISED: the Return flow.** It is now REACHABLE — the credit
-      customer is archived — and `customer_balance_returns` is at **0 rows**.
+    - **RETURN FLOW — CLICKED AND PASSED, and it satisfies block G exactly.** One
+      `customer_balance_returns` row for Seder Facility Mang. Co. at
+      `2026-08-20 00:15:09`, **11,895.00 = the whole credit**, `bank_transfer`, ref
+      `FT-547516842`, a `photo_path` in storage, `returned_on`, `note` and
+      `returned_by` all populated. **AND THE BALANCE DID NOT MOVE:**
+      `v_customer_prepaid_balance.balance_sar` and `amount_payable_sar` both still read
+      **`11,895.00`**, identical to before the return; the ONLY thing that flipped is
+      `balance_returned` → **true**. **That is `RECORDING IS NOT DEDUCTING` proven on
+      live data, not asserted.** The second-call raise is structural, not just
+      app-level: `customer_balance_returns_customer_id_key` is a **UNIQUE index on
+      `customer_id`**, so one return per customer is enforced by the database.
+      **EVERY PATH IN THIS FEATURE IS NOW EXERCISED.**
     - **MEASUREMENT AGES, and this is the cleanest example the repo has.** A read
       taken at `00:01:58` correctly showed `Airport facilities` unarchived; the archive
       landed **43 seconds later** at `00:02:41`. The measurement was not wrong, it went
@@ -3330,10 +3340,10 @@ relevant skill(s) **when the task calls for it**:
       letter's case and are two distinct customers with two distinct projects.
       **Match projects and customers by id. The name on screen is not a key.**
 
-    The return rehearsal is the
-    migration's own block G: **`balance_sar` must be IDENTICAL before and after**,
-    only `balance_returned` may change, and a second call must raise "already been
-    returned".
+    The return rehearsal was the
+    migration's own block G — **`balance_sar` IDENTICAL before and after**, only
+    `balance_returned` may change, a second call must raise "already been returned" —
+    and it **PASSED in the browser on 2026-08-20**, measured above.
 
 - **THE UNGUARDED BACK DOOR IS CLOSED — migration `0140`, applied clean, commits
   `e42c233` (the migration) and `35d0946` (the stale comment it left behind).**
