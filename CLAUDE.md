@@ -174,10 +174,27 @@ relevant skill(s) **when the task calls for it**:
 **Do NOT append build history to this file.** CLAUDE.md holds rules only.
 Current state lives in `.planning/HANDOFF.md` — read it at session start.
 
-- **DB:** migration 0142. 73+ tables RLS-enabled, 40 views security_invoker, 0 anon-readable.
+- **DB:** migration 0143. 73+ tables RLS-enabled, 40 views security_invoker, 0 anon-readable.
 - **Built:** Dashboard, Fleet, Drivers & People, Finance/Invoice, Inventory,
   Maintenance, Archive, Consumption, Search/Header, Reports, Water Station Cost,
   Driver Payslips — all verified, no open bugs.
+- **A WRITE-OFF ROW CARRIES NO PAYMENT MODE (0143).**
+  `archive_project_guarded` records exactly **customer, project, amount, reason,
+  actor** — nothing else. `customer_write_offs.payment_mode` existed from 0139 to
+  0143: written on every forced archive, **read by nothing** (no view, no other
+  routine, no app code). Do not re-add it. A write-off is a frozen AMOUNT; the
+  mode the debt was owed under is still resolvable live from the project, and
+  `invoices.payment_mode` remains the one snapshot that is genuinely read.
+  - **DROPPING A COLUMN AN RPC WRITES IS ONE TRANSACTION, NOT TWO.** plpgsql
+    bodies are **not** dependency-tracked, so `drop column` succeeds against a
+    live writer and reports nothing — the failure lands as 42703 at the next
+    forced archive, mid-override. Recreate the writer and drop the column in the
+    same transaction, then assert the body with `pg_get_functiondef` afterwards.
+    Prefer a bare drop over CASCADE: an unexpected dependent should fail loudly.
+  - **Rewriting `archive_project_guarded` re-risks 0141.** Its
+    `on conflict (customer_id) where reversed_at is null` target must be read back
+    after any body change, or a bare `on conflict (customer_id)` returns and the
+    next forced archive dies with 42P10.
 - **MONEY RULE (0142) — a recorded balance return is a DEBIT.** A row in
   `customer_balance_returns` REDUCES spendable prepaid credit, same class as
   consumption. Netted at FACE VALUE (a refund is a cash movement, not a taxable

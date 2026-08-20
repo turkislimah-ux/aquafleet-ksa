@@ -1,11 +1,48 @@
-# SESSION HANDOFF — 2026-08-20 (customer restore COMPLETE, all three units)
+# SESSION HANDOFF — 2026-08-20 (0143 applied + committed — stored-status cleanup item 1 done)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
 
-## 0. LATEST — THE CUSTOMER-RESTORE FEATURE IS COMPLETE (2026-08-20)
+## 0. LATEST — STORED-STATUS CLEANUP, ITEM 1 IS DONE (0143)
+
+**`0143_drop_write_off_payment_mode.sql` is applied, live-verified and committed
+(`7849641`).** SQL only — no TS, no UI, `tsc --noEmit` clean.
+
+It dropped `customer_write_offs.payment_mode` and, in the SAME transaction,
+recreated `archive_project_guarded` without it (the write-off INSERT lost the
+column, and the coupled `v_mode` local went with it). Signature and behaviour
+otherwise identical, including 0141's `on conflict ... where reversed_at is null`
+target. Four self-asserts at the foot: column gone, one signature, body clean,
+conflict target intact — any failure rolls back both changes.
+
+**The durable rule is in §7, not here.** Two things future sessions need from it:
+a write-off row carries no payment mode, and dropping a column an RPC writes is
+ONE transaction because plpgsql bodies are not dependency-tracked.
+
+Verified before drafting, on the live DB: zero readers — no view selects it, no
+other routine names it (`restore_customer_guarded` touches the table and does
+not), no app code reads it. Its only two `pg_depend` entries were its own CHECK,
+which drops with the column. Turki applied it and rehearsed a forced archive
+rolled back: the write-off row still writes with the column gone, and the 3
+pre-existing rows are untouched.
+
+**What the diagnosis behind item 1 found, and deliberately did NOT change:**
+
+| column | verdict |
+|---|---|
+| `customer_write_offs.payment_mode` | dead → **dropped (0143)** |
+| `invoices.payment_mode` | **LOAD-BEARING — leave it.** A deliberate snapshot; 0035 lets a project switch mode after confirm, so stored ≠ live is CORRECT. 7 non-null / 16 null, 0 disagreements today |
+| `invoices.status` | **LOAD-BEARING, but a second encoding** of the same lifecycle as `confirmed_at/paid_at/voided_at`. 0 drift across 23 rows, held only by RPC discipline — no trigger, no CHECK ties them. `v_invoice_outstanding_live` reads the TIMESTAMPS and never `status`, while `v_customer_amount_payable` and 0142 read `status`. A reconciliation job, **not** a drop |
+| `v_invoice_outstanding_live.effective_payment_mode` / `.outstanding_basis` | computed, **zero app readers** — app takes only `invoice_id, outstanding_sar` |
+
+**OPEN, and worth closing before the next drop:** `0135` and `0136` do not exist
+on disk — 140 files, `0134` jumps to `0137`. Nothing proves what they did. Given
+0141 was applied via MCP under an auto-timestamp rather than its filename (§0b),
+the remote migration history and the disk are not known to agree.
+
+## 0a. CUSTOMER RESTORE IS COMPLETE, ALL THREE UNITS (2026-08-20)
 
 **All three units are done, applied, verified and pushed.** Nothing about customer
 restore is outstanding.
@@ -40,7 +77,7 @@ Unit 3, briefly (details are in the commit body, which is long on purpose):
 `app/archive/actions.ts`'s header claim that the file contains no RPC. Both were
 true when written and both had been made false by the work above.
 
-## 0a. UNIT 2 OF 3 IS DONE (2026-08-20)
+## 0b. UNIT 2 OF 3 IS DONE (2026-08-20)
 
 **Migration 0141 is APPLIED to the live DB and committed (`3d09a54`).** Customer
 restore exists. **The rules live in §7, not here.**
@@ -59,12 +96,12 @@ restore exists. **The rules live in §7, not here.**
 - **0141 sits BELOW 0142 on purpose.** Drafted first, parked, landed second. Not a
   numbering mistake — do not renumber either file.
 
-*(**Superseded by §0** — unit 3 shipped in `ea07dbc`, so
+*(**Superseded by §0a** — unit 3 shipped in `ea07dbc`, so
 `restore_customer_guarded` now has a caller. This section's "NEXT — UNIT 3, nothing
 is built for it yet" has been removed rather than left standing, because a stale
 NEXT is the one kind of stale that gets acted on.)*
 
-## 0b. UNIT 1 OF 3 IS DONE (2026-08-20, earlier)
+## 0c. UNIT 1 OF 3 IS DONE (2026-08-20, earlier)
 
 **Migration 0142 is APPLIED to the live DB and the netting fix is committed
 (`1f11997`).** A recorded balance return is now a DEBIT against spendable prepaid
@@ -81,7 +118,7 @@ things stand.
   `tsc --noEmit` clean. `prepaid-check`, `covered-unpaid-check` and `invoice-check`
   all pass, with 16 new cases covering refunds.
 
-*(Written while 0141 was still held back. **Superseded by §0a** — 0141 is now applied
+*(Written while 0141 was still held back. **Superseded by §0b** — 0141 is now applied
 and committed. Left in place rather than rewritten, because the sequencing is the
 point: the netting shipped on its own, without the restore work riding along.)*
 
@@ -99,12 +136,20 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-Two commits pushed this session. `f23ca2f..e65d980`, then `e65d980..0adbab1`.
+Two commits this session, one logical unit each (§5).
 
 | hash | what |
 |---|---|
-| `e65d980` | Previous session's handoff — committed there, **pushed here** |
-| `0adbab1` | Record the in-browser archive block verification in §7 + the JSON |
+| `7849641` | `0143` — drop the never-read `payment_mode` from customer write-offs |
+| *(this file's commit)* | Record the 0143 rule in `CLAUDE.md` §7 + update this pointer |
+
+`7849641` is SQL only, +215/−0, staged by explicit path, staged blob inspected
+with `git show :<path>` before committing. The docs commit carries `CLAUDE.md`
+and `.planning/HANDOFF.md` only — no code, deliberately separate from the
+migration.
+
+**Kept from the previous session, still true:** `e65d980` and `0adbab1` are in
+and pushed.
 
 `e65d980` was already committed but **unpushed** when this session opened, while the
 handoff's own §2 asserted "Nothing unpushed." `git status -sb` read
@@ -128,12 +173,20 @@ $ git diff --stat            (empty)
 $ git diff --stat --cached   (empty)
 ```
 
-**Working tree clean. Nothing uncommitted. Nothing unpushed. `main` level with
-`origin/main`.** `npx tsc --noEmit` clean at session end.
+**Working tree clean, nothing uncommitted.** `npx tsc --noEmit` clean at session
+end. **Push state is NOT asserted here** — this file is written before the push
+that carries it, so the claim could only ever be a guess. `git status -sb` is the
+authority; §1's lesson is that the handoff's self-claim about push is the one
+claim it cannot verify about itself.
 
 **`git` needs `-C /Users/turkislimah/aquafleet-ksa`.** The Bash tool's cwd is
 `/Users/turkislimah`, which is NOT a repo — a bare `git push` died with
-`fatal: not a git repository`. Shell cwd did not persist across turns this session.
+`fatal: not a git repository`. Shell cwd did not persist across turns this
+session either: the session opened in `/Users/turkislimah` and the FIRST act of
+real work had to be re-confirming the repo root with `git rev-parse --show-toplevel`.
+**`~/.planning/HANDOFF.md` does not exist; `~/.planning/HANDOFF.json` is the gsd
+stub and is EMPTY** — reading it at session start reports "no state" for a
+project that has plenty. The real handoff is the one you are reading.
 Same family as the wrong-directory grep in §5: **a command that ran somewhere else
 does not report that it ran somewhere else.**
 
@@ -270,12 +323,17 @@ because an archive stamps the CUSTOMER and there is no customer restore.
 
 ## 4. DB STATE
 
-- **Highest migration: `0140_drop_archive_project.sql` — applied clean and
-  committed (`e42c233`).** 4,526 bytes / 93 lines.
+- **Highest migration: `0143_drop_write_off_payment_mode.sql` — applied clean and
+  committed (`7849641`).** 10,463 bytes / 215 lines. `0141` and `0142` landed
+  between this line's previous value (`0140`) and now; see §0, §0a, §0b.
 - Nothing drafted-but-unapplied. Nothing applied-but-uncommitted. (The `0101`
   incident: **an applied-but-uncommitted migration is exactly what a db reset
   drops.**)
-- **No DB writes this session.** Every query above was read-only.
+- **`0135` and `0136` are MISSING from disk** — 140 files for a 0142 top number,
+  `0134` jumps straight to `0137`. Unexplained. Reconcile disk against the remote
+  migration history before the next drop.
+- **DB writes this session: `0143` only, applied by Turki.** Every query Claude
+  Code ran was read-only `execute_sql`.
 - View posture unchanged: **47 views / 47 security_invoker / 0 anon-readable**
   (last measured 2026-08-19). §6 carries the re-measure query — *the two counts
   matching is the check, not the number.*
