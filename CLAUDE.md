@@ -3262,13 +3262,37 @@ relevant skill(s) **when the task calls for it**:
       code.
     - `lib/db-types.ts` — `CustomerAmountPayableRow` (the 11 columns the app actually
       reads).
-  - **THE BLOCK PATH IS VERIFIED IN-BROWSER — Turki clicked it himself on 2026-08-20
-    and archiving blocked with the figure.** `2c9103e` was pushed ahead of that check,
-    which inverted §5's normal order and is recorded here for that reason. **Two paths
-    remain never-clicked:** the OVERRIDE (force-archive) on a project with money owed,
-    and the Return flow on the one prepaid customer in credit — the latter unreachable
-    until that customer is archived. Measured at apply time, Amount Payable for the six
-    active customers was:
+  - **THIS FEATURE IS VERIFIED IN-BROWSER — Turki clicked every path himself on
+    2026-08-20.** `2c9103e` was pushed ahead of that check, which inverted §5's normal
+    order and is recorded here for that reason.
+    - **BLOCK** — archiving a project whose customer owes money refused with the
+      figure. Nothing changed. That is also what proves `0140` did not break archiving
+      from the APP side: the call still resolves and executes through PostgREST.
+    - **FORCE-ARCHIVE (override)** — `RRR T` / TEST 111 Co., 20,056.00 owed. The
+      project's `archived_at`, the CUSTOMER's `archived_at` and the
+      `customer_write_offs` row all carry the **IDENTICAL** timestamp
+      (`2026-08-19 23:32:29.473557+00`) — one transaction, exactly as `0139` wrote it.
+      The frozen `amount_sar` is **20,056.00, equal to the measured owed to the
+      halala**, with `reason` and `written_off_by` both populated.
+    - **PLAIN ARCHIVE, NO OVERRIDE NEEDED** — `Airport facilities` / Seder Facility
+      Mang. Co., **+11,895.00 CREDIT**, archived clean at
+      `2026-08-20 00:02:41.959339+00`, project and customer again on one stamp. **A
+      POSITIVE payable does not block** — the sign convention holds in the UI, not
+      just in the view.
+    - **THE OVERRIDE IS ROLE-GATED — it is offered to MANAGERS.** Turki also tried
+      `VVV Test 2` (46,460.00 owed) and abandoned it at the override. **That left
+      NOTHING behind:** `archived_at` still null and `customer_write_offs` still at
+      exactly ONE row. **A block, and an override the user walks away from, are both
+      completely inert.**
+    - **STILL UNEXERCISED: the Return flow.** It is now REACHABLE — the credit
+      customer is archived — and `customer_balance_returns` is at **0 rows**.
+    - **MEASUREMENT AGES, and this is the cleanest example the repo has.** A read
+      taken at `00:01:58` correctly showed `Airport facilities` unarchived; the archive
+      landed **43 seconds later** at `00:02:41`. The measurement was not wrong, it went
+      stale while being reported. **When a human is acting in parallel, re-measure
+      AFTER they say they are done, not before.**
+
+    Measured at apply time, Amount Payable for the six active customers was:
 
     | customer | mode | amount payable |
     |---|---|---|
@@ -3282,9 +3306,30 @@ relevant skill(s) **when the task calls for it**:
     **Those are APPLY-TIME figures, not standing expectations** — they move with
     every delivery and invoice, same caveat as `0122`'s. Re-measured 2026-08-20 the six
     were unchanged, but the view returned a **SEVENTH** row this table omits:
-    **`Turki 1` — `payment_mode` NULL, no active project, −1,035.00, blocked.** That is
-    `0139`'s Q1 fail-closed rule working: an unresolvable payment mode is treated as
-    postpaid and still blocks. **A customer with no project still appears in this view.**
+    **`Turki 1` — `payment_mode` NULL, −1,035.00, blocked.** That is `0139`'s Q1
+    fail-closed rule working: an unresolvable payment mode is treated as postpaid and
+    still blocks.
+    - **`v_customer_amount_payable` INCLUDES ARCHIVED CUSTOMERS.** `Turki 1` was
+      archived **2026-06-28** and is still in the view; TEST 111 Co. was archived
+      2026-08-19 and is still in it too, now reading **0.00 / not blocked** because the
+      write-off zeroed its own input. **A surface that lists this view and calls the
+      rows "active customers" is wrong** — filter on `customers.archived_at` if that is
+      what is meant. **This corrects a line written one commit earlier (`0adbab1`),
+      which said a customer with NO PROJECT appears in the view — `Turki 1` HAS a
+      project** (`King Salman Park`, `1bbf496e…`, archived the same 2026-06-28 second).
+      **Fourth §7 note found wrong rather than merely stale, and the freshest one yet.**
+    - **ARCHIVE IS `archived_at` AND NOTHING ELSE.** On all three archived projects
+      `projects.status` is still `'active'` and `customers.active` is still `true`.
+      **Neither column tracks archiving, so filtering on either does NOT exclude
+      archived rows** — a fail-open of exactly the shape §7 already records for the
+      multi-project resolution.
+    - **NAME COLLISION, SECOND INSTANCE.** Two projects are called
+      `King Salman Park`: `7a94e22e…` (Turki Contraction Co., ACTIVE, 38,295.00 owed)
+      and `1bbf496e…` (Turki 1, archived 2026-06-28). Same trap as
+      `Seder Facility mang. Co.` vs `Seder Facility Mang. Co.`, which differ by ONE
+      letter's case and are two distinct customers with two distinct projects.
+      **Match projects and customers by id. The name on screen is not a key.**
+
     The return rehearsal is the
     migration's own block G: **`balance_sar` must be IDENTICAL before and after**,
     only `balance_returned` may change, and a second call must raise "already been
@@ -3344,6 +3389,10 @@ relevant skill(s) **when the task calls for it**:
     resolved AND executed `archive_project_guarded` through PostgREST after the bare
     name was gone. **Prefer the refused write** whenever the alternative writes
     irreversible data — it exercises the same resolution path at zero cost.
+    **Both WRITING paths were clicked afterwards too and both landed** — a completed
+    archive on the credit customer and a force-archive with an override on a debtor —
+    so the drop is confirmed against every branch, not just the refused one. Details on
+    the `0139` entry above; **nothing here needs re-verifying.**
 
 - **AMOUNT PAYABLE HAS ONE AUTHORITY, AND IT IS TYPESCRIPT — `app/trips/amountPayable.ts`,
   commit `629a1a9`.** The rule was written inline in `FinanceTab.tsx` for the Finance

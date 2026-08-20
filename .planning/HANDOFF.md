@@ -96,14 +96,27 @@ The app branches on `const CHECK_VIOLATION = "23514"` and the figure is formatte
 the RPC (`to_char(v_owed, 'FM999,999,990.00')`). **Branch on the code, never the
 message text.**
 
+### The two write paths — ALSO DONE, by Turki, same night
+
+He ran both himself after saying "i will do the archives my self". Verified read-only
+afterwards:
+
+| path | project | evidence |
+|---|---|---|
+| force-archive w/ override | RRR T `fd408e6e…` | project `archived_at`, **customer** `archived_at` and the `customer_write_offs` row all on **one identical stamp** `2026-08-19 23:32:29.473557+00`; frozen `amount_sar` **20,056.00** = the measured owed exactly; `reason` and `written_off_by` populated |
+| plain archive, no override | Airport facilities `42941279…` | archived clean at `2026-08-20 00:02:41.959339+00`, project + customer one stamp, **+11,895.00 CREDIT** — a positive payable does not block |
+| override ABANDONED | VVV Test 2 `70dcb451…` | `archived_at` still null, `customer_write_offs` still at **exactly 1 row** — **a block and a walked-away override are both completely inert** |
+
+**The override is ROLE-GATED — offered to MANAGERS.** Turki's words.
+
+**After the write-off, TEST 111 Co. reads `0.00` / `archive_blocked = false`** in
+`v_customer_amount_payable`, down from −20,056.00. The write-off flows through
+`v_receivables_open`'s `written_off` basis and **zeroes the guard's own input.**
+
 ### Still never clicked
 
-- **The OVERRIDE / force-archive path.**
-- **A COMPLETED archive.**
-- **The Return Balance flow** — unreachable until the one credit customer is archived.
-
-**Turki said on 2026-08-20: "i will do the archives my self."** Both are in
-`human_actions_pending` in the JSON. Do not perform them.
+- **The Return Balance flow.** Now **REACHABLE** — the credit customer is archived —
+  and `customer_balance_returns` is at **0 rows**.
 
 ### DO NOT, without asking Turki first
 
@@ -240,6 +253,28 @@ executes the function end-to-end and changes nothing. Reach for that shape first
 the alternative writes irreversible data. **This is no longer theory — it is how the
 `0140` question was actually answered.**
 
+### Three traps measured live while verifying the archive feature
+
+1. **`v_customer_amount_payable` INCLUDES ARCHIVED CUSTOMERS.** `Turki 1` (archived
+   2026-06-28) and TEST 111 Co. (archived 2026-08-19) are both still in it. **A
+   surface that lists this view and calls the rows "active customers" is wrong** —
+   filter on `customers.archived_at`. **This corrected a §7 line written ONE COMMIT
+   earlier** (`0adbab1` said a customer with *no project* appears in the view; `Turki
+   1` HAS one — `King Salman Park` `1bbf496e…`, archived the same second). **Fourth §7
+   note found wrong rather than stale, and it was 20 minutes old.**
+2. **ARCHIVE IS `archived_at` AND NOTHING ELSE.** On all three archived projects
+   `projects.status` is still `'active'` and `customers.active` is still `true`.
+   **Neither column tracks archiving — filtering on either does NOT exclude archived
+   rows.**
+3. **NAME COLLISION, SECOND INSTANCE.** Two projects named `King Salman Park`:
+   `7a94e22e…` (Turki Contraction Co., active, 38,295.00 owed) and `1bbf496e…`
+   (Turki 1, archived June). Beside the two case-differing Seders. **Match by id.**
+
+**MEASUREMENT AGES.** A read at `00:01:58` correctly showed `Airport facilities`
+unarchived; the archive landed **43 seconds later** at `00:02:41`. The measurement was
+not wrong — it went stale while being reported. **When a human is acting in parallel,
+re-measure AFTER they say they are done.**
+
 ### Grep traps — and the ToolSearch one
 
 - **`archive_project` MATCHES `archive_project_guarded`** — any sweep for the bare
@@ -259,22 +294,16 @@ the alternative writes irreversible data. **This is no longer theory — it is h
 
 ## 6. NEXT
 
-1. **Turki does the two archives himself** — he said so on 2026-08-20. Do not perform
-   them. Targets confirmed by measurement, both irreversible:
-   - **Complete an archive:** `Airport facilities`
-     (`42941279-747b-4fb8-b511-5d9c380766a6`, customer `de4b1ffc…`, +11,895.00
-     credit) — the ONLY project that archives without an override, and doing it is
-     what makes the never-clicked **Return Balance** flow reachable.
-   - **Force-archive with an override reason:** `RRR T`
-     (`fd408e6e-5acf-4109-b474-28ae1b7e8e92`, TEST 111 Co., 20,056.00) — smallest
-     stake, most obviously test data.
-2. **When he reports back, record it in §7** — the `0139` entry already tracks which
-   paths are clicked and which are not; update that, then
-   `.planning/AQUAFLEET-HANDOFF.json`. §7 is the durable record; the JSON points at
-   it, never the reverse.
-3. **The Return rehearsal, when it becomes reachable, is `0139`'s own block G:**
-   **`balance_sar` must be IDENTICAL before and after**, only `balance_returned` may
-   change, and a second call must raise "already been returned".
+1. **THE RETURN BALANCE FLOW — the one path left, and it is now reachable.** Turki's
+   to click. `Seder Facility Mang. Co.` (`de4b1ffc-fbc6-435b-a803-9dc116233003`) is
+   archived holding **+11,895.00** credit; `customer_balance_returns` is at 0 rows.
+   The rehearsal is `0139`'s own block G: **`balance_sar` must be IDENTICAL before and
+   after**, only `balance_returned` may change, and a **second** call must raise
+   "already been returned". **RECORDING IS NOT DEDUCTING** — nothing in the balance
+   chain reads `customer_balance_returns`, so a negative top-up written to "finish the
+   job" double-counts against a balance that was already correct.
+2. **Archiving needs no further verification.** All three paths are clicked and
+   recorded in §7 (`0139` and `0140` entries) and in the JSON. Do not re-open it.
 4. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
    in §7 carries nothing blocked-and-actionable — RBAC + the app-wide security pass,
    effective-dated customer rates, multi-project customers, Route Optimization /
