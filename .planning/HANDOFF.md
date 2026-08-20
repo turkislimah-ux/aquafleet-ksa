@@ -140,14 +140,15 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-Four commits this session, one logical unit each (§5).
+Five commits this session, one logical unit each (§5).
 
 | hash | what |
 |---|---|
 | `7849641` | `0143` — drop the never-read `payment_mode` from customer write-offs |
 | `688628c` | Record the 0143 rule in `CLAUDE.md` §7 + update this pointer |
 | `2c13e0c` | Correct the stale view count in §7 (40 → 47) |
-| *(this file's commit)* | Record the 0135/0136 reconciliation and the ledger finding |
+| `e5c0356` | Record the 0135/0136 reconciliation and the ledger finding |
+| *(this file's commit)* | Check the last two remote-only rows; record the `0101` divergence |
 
 `7849641` is SQL only, +215/−0, staged by explicit path, staged blob inspected
 with `git show :<path>` before committing. The docs commits carry `CLAUDE.md` and
@@ -355,16 +356,67 @@ because an archive stamps the CUSTOMER and there is no customer restore.
 - **FOUR rows are remote-only — applied, never committed as files:**
   `0101_operations_by_driver_reapply`, `0103_dashboard_views_fix`,
   `0103_restore_invoker_action_items`, `0134b_fix_balance_guard_customer_join`.
+  **ALL FOUR ARE NOW CHECKED (2026-08-20). None is dangerous. Three are ledger
+  artifacts; `0101`'s is a genuine file-vs-DB divergence that is still open.**
   - **`0134b` CHECKED, SAFE.** It repaired `pay_invoice`: the first 0134 guard
     joined `projects` on `i.project_id`, a column invoices do not have, so every
     `balance` settlement would have raised 42703. On-disk `0134` already carries
     the fixed `pr.customer_id = i.customer_id` join (line 196) and live
     `pay_invoice` matches it — the file was corrected in place after the hotfix.
     A ledger artifact, not a divergence. Disk replay reproduces correct behaviour.
-  - **`0103_restore_invoker_action_items` CHECKED, SAFE** — disk `0103` defines
-    `v_dashboard_action_items` and restates `security_invoker`; posture below.
-  - **`0101_operations_by_driver_reapply` and `0103_dashboard_views_fix` NOT
-    checked.** Neither sits in a money or security path.
+  - **`0103_dashboard_views_fix` CHECKED, SAFE — and it is the reason
+    `0103_restore_invoker_action_items` exists.** Its content is two corrections
+    to `v_dashboard_action_items`: `invoice_unpaid` reads `v_receivables_open`
+    directly instead of restating its predicate (the old branch counted 5,
+    including 3 prepaid-settled invoices at `amount_due_sar = 0`), and
+    `trip_overdue` moved from the denylist `stage <> 'delivered'` to the
+    allowlist `stage in ('scheduled','loading','in_transit')`. Disk `0103`
+    already carries **both** (lines 103 and 119) plus the full security footer
+    (lines 494–503), so disk is a superset and replay reproduces live.
+    - **IT IS ALSO A LIVE DEMONSTRATION OF THE §6 RULE.** The patch is a bare
+      `create or replace view` with **no footer**, so it silently dropped
+      `security_invoker` off a view sitting over 20+ RLS-enabled tables. The
+      ledger timestamps are `0103_dashboard_views_fix` at `20260811000538` and
+      `0103_restore_invoker_action_items` at `20260811000604` — **26 seconds
+      apart.** The second row is not a migration, it is the repair for the
+      first. §6 is not theory; this is what it costs.
+    - Live end state re-measured: invoker `true` / anon `false` / auth `true`,
+      reads `v_receivables_open`, old denylist gone, and dashboard
+      `invoice_unpaid` = `v_receivables_open` count = **1 = 1** — the invariant
+      the fix exists to hold.
+  - **`0101_operations_by_driver_reapply` CHECKED — SAFE, but a REAL DIVERGENCE.
+    Do not treat this one as a ledger artifact the way `0134b` was.**
+    - **Its own header is wrong.** It says `re-apply — identical to the
+      reviewed+verified file`. It is not: ledger sizes differ (base 3132 chars,
+      reapply 2886) and the two disagree on the dictionary in **opposite
+      directions**. Disk `0101` runs `update report_metrics ... where
+      metric_key = 'operations'`, amending the existing key, and its header
+      argues the case — a finer cut of one metric does not earn a second key
+      (0100's precedent). The reapply instead **inserts a new key**,
+      `operations_by_driver`.
+    - **Live follows the reapply.** `operations_by_driver` exists; `operations`
+      still reads `source_view = 'v_operations_monthly'`, `grain = 'one month'`,
+      i.e. the disk UPDATE never ran. Confirmed one-directional: exactly one
+      disk file touches `metric_key='operations'` (0101 itself) and **zero** disk
+      files insert `operations_by_driver`, so **that live key cannot be
+      reproduced from the repo.**
+    - **The VIEW is fine** — live `pg_get_viewdef` matches disk exactly, invoker
+      `true` / anon `false` / auth `true`. Divergence is dictionary rows only.
+    - **Impact: nothing is broken today**, and it touches no money or security
+      path. `app/reports/page.tsx:111` selects all of `report_metrics` and the
+      glossary renders whatever rows exist, so the driver metric currently has a
+      definition. A rebuild from migrations loses that glossary entry and
+      changes the `operations` entry. **OPEN DECISION for Turki, not for a
+      future session to settle on its own:** keep live's separate
+      `operations_by_driver` key, or keep disk's amended `operations`. Whichever
+      wins needs a migration so file and DB finally agree.
+    - **THE LESSON, which generalises past this file.** Disk `0101`'s header
+      declares it "RECONCILED TO WHAT IS ACTUALLY APPLIED ... verified against
+      `pg_get_viewdef`". That verification was honest and it passed —
+      `pg_get_viewdef` simply cannot see `report_metrics` rows. **A file
+      reconciled by viewdef is reconciled in its VIEW, not in its data writes.**
+      A migration that both defines an object and writes rows needs both halves
+      checked; the loud header covered only the half that was easy to measure.
 - **DB writes this session: `0143` only, applied by Turki.** Every query Claude
   Code ran was read-only `execute_sql`.
 - View posture **re-measured 2026-08-20: 47 views / 47 security_invoker / 0
@@ -498,6 +550,14 @@ re-measure AFTER they say they are done.**
      that was never about deduction: still never post a negative top-up to
      "finish the job" — `topups_sar` means money paid IN, and a refund is netted
      at face value, not multiplied by 1.15.
+2. **ONE OPEN DECISION, and it is Turki's — the `0101` metrics-dictionary
+   divergence.** File and DB disagree about whether the driver cut of the
+   Operations metric earns its own dictionary key. Live says yes
+   (`operations_by_driver` exists, inserted by the remote-only reapply); disk
+   `0101` says no and amends `operations` instead. Full evidence in §4. Nothing
+   is broken, no money or security path is involved, and **a future session must
+   NOT pick a side on its own** — the losing side needs a migration written so
+   file and DB finally agree. Until then the repo cannot rebuild live.
 4. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
    in §7 carries nothing blocked-and-actionable — RBAC + the app-wide security pass,
    effective-dated customer rates, multi-project customers, Route Optimization /
