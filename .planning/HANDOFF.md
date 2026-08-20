@@ -1,9 +1,36 @@
-# SESSION HANDOFF — 2026-08-20 (archive block verified)
+# SESSION HANDOFF — 2026-08-20 (balance-return netting landed; archive block verified)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
+
+## 0. LATEST — UNIT 1 OF 3 IS DONE (2026-08-20, later in the day)
+
+**Migration 0142 is APPLIED to the live DB and the netting fix is committed
+(`1f11997`).** A recorded balance return is now a DEBIT against spendable prepaid
+credit. **The rule itself lives in §7, not here** — this section only says where
+things stand.
+
+- DB is at **0142** (§7's DB line updated to match).
+- Applied on live data: the one refunded customer nets to exactly **0.00** in BOTH
+  the TS engine and the SQL view; all six un-refunded customers unchanged to the
+  halala. All four in-migration assertions passed at apply time.
+- Turki browser-verified the TS side before the commit.
+- 16 files: the migration, `lib/prepaid.ts`, `lib/invoice.ts`, `lib/db-types.ts`,
+  six `app/trips/*`, `app/archive/ArchiveCustomerTab.tsx`, two check harnesses.
+  `tsc --noEmit` clean. `prepaid-check`, `covered-unpaid-check` and `invoice-check`
+  all pass, with 16 new cases covering refunds.
+
+**NEXT UNIT — DO NOT START IT WITHOUT TURKI SAYING SO.**
+`supabase/migrations/0141_restore_customer_reverse_write_off.sql` is on disk,
+**UNTRACKED and UNAPPLIED** (55,823 bytes), plus the restore UI it needs. It was
+deliberately held out of this session and out of this commit. It is Unit 2. Note the
+number is BELOW 0142 — 0141 was drafted first and parked, so it is out of order on
+purpose, not a mistake to "fix" by renumbering.
+
+`CLAUDE.md.backup` is an untracked stray in the repo root. It is not ours to commit;
+delete it or leave it, but never stage it.
 
 **Naming note:** this file is `.planning/HANDOFF.md`. It is NOT gitignored (only
 `.planning/HANDOFF.json` and `preview/.planning/HANDOFF.json` are — those belong to

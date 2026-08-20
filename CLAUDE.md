@@ -174,10 +174,22 @@ relevant skill(s) **when the task calls for it**:
 **Do NOT append build history to this file.** CLAUDE.md holds rules only.
 Current state lives in `.planning/HANDOFF.md` — read it at session start.
 
-- **DB:** migration 0140. 73+ tables RLS-enabled, 40 views security_invoker, 0 anon-readable.
+- **DB:** migration 0142. 73+ tables RLS-enabled, 40 views security_invoker, 0 anon-readable.
 - **Built:** Dashboard, Fleet, Drivers & People, Finance/Invoice, Inventory,
   Maintenance, Archive, Consumption, Search/Header, Reports, Water Station Cost,
   Driver Payslips — all verified, no open bugs.
+- **MONEY RULE (0142) — a recorded balance return is a DEBIT.** A row in
+  `customer_balance_returns` REDUCES spendable prepaid credit, same class as
+  consumption. Netted at FACE VALUE (a refund is a cash movement, not a taxable
+  supply — do not multiply by 1.15) and never modelled as a negative top-up
+  (`topups_sar` means "money paid in"). The rule has **exactly two expressions**
+  and both were changed together: `lib/prepaid.ts` (`returnedTotal()` is the ONE
+  returns summation, threaded into `derivedBalanceItems`,
+  `splitCoveredUnpaidItems` and `buildStatementItems`) and
+  `v_customer_prepaid_balance`. `v_customer_amount_payable` and
+  `v_invoice_outstanding_live` inherit it through `balance_sar` — do not add a
+  third expression. Before 0142 nothing subtracted a return: a refunded
+  customer's credit stayed spendable after the money was gone.
 - **Current work:** Fleet page cleanup batch (Trips/Finance items). See HANDOFF.md.
 - **Deferred:** effective-dated rates, Route Optimization, Predictive AI, IoT,
   drivers/staff table unification (v2).
