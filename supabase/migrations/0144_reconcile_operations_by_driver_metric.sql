@@ -4,6 +4,29 @@
 -- Turki's decision (2026-08-21): KEEP the live shape — the driver cut of the
 -- Operations metric gets its OWN dictionary key, `operations_by_driver`.
 --
+-- ===========================================================================
+-- STOP -- DO NOT RUN THIS FILE AGAINST LIVE. (Added 2026-08-21, after 0145.)
+-- ===========================================================================
+-- Everything below was written BEFORE 0145 was applied, and the "no-op" claim
+-- it makes was true then. IT IS NOT TRUE NOW.
+--
+-- 0145 put a 569-char caveat on the `operations` row. Step 2 of this file sets
+-- `caveat = null`. Live already matches this file on grain, source_view and the
+-- operations_by_driver upsert -- so running it today changes exactly ONE column:
+-- it deletes 0145's warning and the glossary silently renders nothing again.
+--
+-- AND IT WILL TELL YOU IT SUCCEEDED. Assertion (2) below checks `caveat is null`
+-- because that is 0098's shape, which is what this file restores. After the wipe
+-- that assertion PASSES and the transaction COMMITS.
+--
+-- The file is still correct where it matters: on a REBUILD it runs 0144 -> 0145
+-- and the end state is 0145's text. Order is the safety property. Applying it by
+-- hand today runs 0145 -> 0144, reversed, and the last writer wins.
+--
+-- Turki's decision 2026-08-21: LEAVE IT UNAPPLIED. It needs no ledger row to do
+-- its job. If it ever must go in, run 0145 again IMMEDIATELY after it.
+-- ===========================================================================
+--
 -- THIS MIGRATION IS A NO-OP AGAINST PRODUCTION TODAY. That is not an argument
 -- against writing it — it is the whole reason it exists. Same shape as 0140:
 -- MIGRATION HISTORY ON DISK IS THE RESET PATH. Replaying from scratch today

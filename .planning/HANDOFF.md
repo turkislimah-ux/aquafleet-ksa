@@ -349,18 +349,36 @@ because an archive stamps the CUSTOMER and there is no customer restore.
   present exactly once. `0141`/`0142`/`0143` landed between this line's previous
   value (`0140`) and now; see §0, §0a, §0b.
 - **Highest migration ON DISK: `0145` — the same file. The gap is `0144`, which
-  is committed (`485b3a2`) but NOT applied, deliberately, because it is a no-op
-  against live.** So the numbering INVERTS: an unapplied `0144` sits under an
-  applied `0145`. That looks wrong to anyone diffing the ledger against disk and
-  is not. Read the two apart before acting:
-  - `0144_reconcile_operations_by_driver_metric.sql` — reconciliation only.
-    Changes nothing in production; exists so a REBUILD reproduces live. Safe to
-    apply at any time, and equally safe to leave unapplied. See §6 item 2.
+  is committed (`485b3a2`) and STAYS UNAPPLIED — Turki's call, 2026-08-21.** So
+  the numbering INVERTS: an unapplied `0144` sits under an applied `0145`. That
+  looks wrong to anyone diffing the ledger against disk and is not. Read the two
+  apart before acting:
+  - **DO NOT APPLY `0144` TO LIVE. IT IS NO LONGER A NO-OP, AND IT FAILS SILENTLY.**
+    It was a no-op against the database as it stood BEFORE `0145`. It is not one
+    now. Its step 2 sets `operations.caveat = null`, and `grain` / `source_view` /
+    the `operations_by_driver` upsert all already match live — so **the only
+    column it would change today is `caveat`, wiping the 569 chars `0145` just
+    installed.** Its own assertion (2) checks `caveat is null`, which is `0098`'s
+    shape, so after the wipe **the assertion passes and the transaction commits
+    reporting success.** The glossary silently goes back to rendering nothing.
+    Verified read-only 2026-08-21 before the decision; nothing was applied.
+  - `0144_reconcile_operations_by_driver_metric.sql` — reconciliation only, and
+    its value is ENTIRELY on the reset path: without it a rebuilt database has no
+    `operations_by_driver` key at all. It does not need a ledger row to do that
+    job. See §6 item 2.
   - `0145_operations_metric_caveat.sql` — the CONTENT change, applied. On a
     rebuild the two run in order: `0144` nulls the caveat back to `0098`'s shape,
     `0145` then writes the text. **They do not contradict each other** — `0144`'s
     assertion that the caveat is null is true at `0144`'s moment, which is the
-    only moment it claims anything about.
+    only moment it claims anything about. **Order is the whole safety property.**
+    On disk it is `0144 → 0145`. Applying `0144` today runs it `0145 → 0144`,
+    reversed, and last writer wins. If it ever must go into the ledger, the only
+    safe sequence is `0144` then IMMEDIATELY re-run `0145`, same sitting.
+  - **The general rule this earns: a migration's "no-op" status is a claim about
+    one MOMENT, not a property of the file.** Every later migration that touches
+    the same row can revoke it, silently, and an assertion written to defend the
+    old moment will happily certify the damage. Re-verify against live before
+    applying any migration that has been sitting unapplied.
 - "Nothing applied-but-uncommitted" is **not** true of the ledger — four rows
   below. (The `0101` incident: **an applied-but-uncommitted migration is exactly
   what a db reset drops.**) The inverse now also holds: `0144` is
