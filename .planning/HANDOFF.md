@@ -1,11 +1,14 @@
-# SESSION HANDOFF — 2026-08-20 (0143 applied + committed — stored-status cleanup item 1 done)
+# SESSION HANDOFF — 2026-08-21 (0144 + 0145 committed; 0145 applied — Operations glossary reconciled)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
 
-## 0. LATEST — STORED-STATUS CLEANUP, ITEM 1 IS DONE (0143)
+**NEWEST: `0145` is applied and committed; `0144` is committed and deliberately
+NOT applied. Both are the Operations glossary — see §6 item 2, then §4.**
+
+## 0. STORED-STATUS CLEANUP, ITEM 1 IS DONE (0143)
 
 **`0143_drop_write_off_payment_mode.sql` is applied, live-verified and committed
 (`7849641`).** SQL only — no TS, no UI, `tsc --noEmit` clean.
@@ -140,7 +143,7 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-Seven commits this session, one logical unit each (§5).
+Nine commits this session, one logical unit each (§5).
 
 | hash | what |
 |---|---|
@@ -150,7 +153,9 @@ Seven commits this session, one logical unit each (§5).
 | `e5c0356` | Record the 0135/0136 reconciliation and the ledger finding |
 | `6be5464` | Check the last two remote-only rows; record the `0101` divergence |
 | `485b3a2` | `0144` — reconcile the repo to live for the Operations glossary |
-| *(this file's commit)* | Record the `0101` decision as RESOLVED; `0145` drafted |
+| `eac5ec8` | Record the `0101` decision as RESOLVED; `0145` drafted |
+| `bcb9ed6` | `0145` — add the non-additivity caveat to the `operations` metric |
+| *(this file's commit)* | Record `0145` as applied + committed; re-measure the ledger |
 
 `7849641` is SQL only, +215/−0, staged by explicit path, staged blob inspected
 with `git show :<path>` before committing. The docs commits carry `CLAUDE.md` and
@@ -336,31 +341,49 @@ because an archive stamps the CUSTOMER and there is no customer restore.
 
 ## 4. DB STATE
 
-- **Highest migration APPLIED: `0143_drop_write_off_payment_mode.sql` — clean and
-  committed (`7849641`).** 10,463 bytes / 215 lines. `0141` and `0142` landed
-  between this line's previous value (`0140`) and now; see §0, §0a, §0b.
-- **Highest migration ON DISK: `0145` (drafted). `0144` is committed (`485b3a2`)
-  but NOT yet applied — deliberately, because it is a no-op against live.**
-  Read the two apart before acting:
+- **Highest migration APPLIED: `0145_operations_metric_caveat.sql` — applied by
+  Turki, live-verified and committed (`bcb9ed6`).** 9,015 bytes / 166 lines.
+  Ledger row `operations_metric_caveat` @ `20260820214605`. Re-verified read-only
+  2026-08-21: `operations.caveat` is 569 chars, carries both phrases its own
+  assertion checks, `report_metrics` still holds 30 rows, `operations_by_driver`
+  present exactly once. `0141`/`0142`/`0143` landed between this line's previous
+  value (`0140`) and now; see §0, §0a, §0b.
+- **Highest migration ON DISK: `0145` — the same file. The gap is `0144`, which
+  is committed (`485b3a2`) but NOT applied, deliberately, because it is a no-op
+  against live.** So the numbering INVERTS: an unapplied `0144` sits under an
+  applied `0145`. That looks wrong to anyone diffing the ledger against disk and
+  is not. Read the two apart before acting:
   - `0144_reconcile_operations_by_driver_metric.sql` — reconciliation only.
     Changes nothing in production; exists so a REBUILD reproduces live. Safe to
     apply at any time, and equally safe to leave unapplied. See §6 item 2.
-  - `0145` — adds the non-additivity caveat to `operations`. **A REAL WRITE
-    against live**, drafted and awaiting Turki's rehearsal + apply, uncommitted.
+  - `0145_operations_metric_caveat.sql` — the CONTENT change, applied. On a
+    rebuild the two run in order: `0144` nulls the caveat back to `0098`'s shape,
+    `0145` then writes the text. **They do not contradict each other** — `0144`'s
+    assertion that the caveat is null is true at `0144`'s moment, which is the
+    only moment it claims anything about.
 - "Nothing applied-but-uncommitted" is **not** true of the ledger — four rows
   below. (The `0101` incident: **an applied-but-uncommitted migration is exactly
   what a db reset drops.**) The inverse now also holds: `0144` is
   committed-but-unapplied, which is the safe direction of the same asymmetry.
 - **`0135`/`0136` never existed — CLOSED, see §0.** Do not re-reconcile.
-- **THE REMOTE LEDGER IS NOT A MIRROR OF DISK: 141 files against 93 rows in
-  `supabase_migrations.schema_migrations`. Do not use it to audit what is
-  applied — the DB itself is the authority.**
+- **THE REMOTE LEDGER IS NOT A MIRROR OF DISK: 143 files against 93 rows in
+  `supabase_migrations.schema_migrations` (both re-measured 2026-08-21). Do not
+  use it to audit what is applied — the DB itself is the authority.**
   - It records `0036`, `0037`, `0058`, then nothing until `0060`, after which it
     runs near-continuous. `0001–0035` and most of `0038–0059` are simply absent:
     applied before history tracking, or through the SQL Editor, which writes no
     row. Absence from the ledger is NOT evidence a migration did not run.
-  - **8 rows carry no number** — 0036, 0037, 0121, 0122, 0131, 0141, 0142, 0143,
-    all MCP-applied under auto-timestamps. **Map by NAME, never by number.**
+  - **10 rows carry no number**, all MCP-applied under auto-timestamps, measured
+    2026-08-21 by `name !~ '^[0-9]'`: `v3_ledger_totals_and_hide_amount_due`,
+    `invoice_payment_mode_snapshot`, `receipt_vote_approvals_and_lot_fix`,
+    `retire_customers_payment_model`, `retire_water_stations_fill_cost`,
+    `pay_commission_monthly`, `net_balance_returns` (0142),
+    `restore_customer_reverse_write_off` (0141),
+    `drop_write_off_payment_mode` (0143), `operations_metric_caveat` (0145).
+    **Map by NAME, never by number** — and this line is itself the proof: it
+    previously said 8 and listed disk numbers, which was one short even before
+    `0145`, because six of those names map onto five remembered numbers. Count
+    the ledger's own `name` column; do not translate it first.
   - `0141` sorts AFTER `0142` by timestamp, matching §0a's "0141 sits BELOW 0142
     on purpose". `0063/0064/0089/0097` each applied twice. `0140`'s remote name
     (`drop_unguarded_archive_project`) differs from its disk name.
@@ -432,8 +455,9 @@ because an archive stamps the CUSTOMER and there is no customer restore.
       reconciled by viewdef is reconciled in its VIEW, not in its data writes.**
       A migration that both defines an object and writes rows needs both halves
       checked; the loud header covered only the half that was easy to measure.
-- **DB writes this session: `0143` only, applied by Turki.** Every query Claude
-  Code ran was read-only `execute_sql`.
+- **DB writes this session: `0143` and `0145`, both applied by Turki.** Every
+  query Claude Code ran was read-only `execute_sql`, including the post-apply
+  verification of `0145`.
 - View posture **re-measured 2026-08-20: 47 views / 47 security_invoker / 0
   anon-readable.** §7 claimed 40 until `2c13e0c`. §6 carries the query — *the two
   counts matching is the check, not the number.*
@@ -574,11 +598,14 @@ re-measure AFTER they say they are done.**
    argument: disk history is the reset path, and before `0144` no migration on
    disk inserted `operations_by_driver`, so live could not be rebuilt from the
    repo at all. Background evidence stays in §4; do not re-litigate it.
-   - **Still to apply — `0145` is DRAFTED, NOT APPLIED, NOT COMMITTED.** It adds
-     the non-additivity caveat to `operations`, which `0144` deliberately leaves
-     null. Kept separate because that is a CONTENT change, not a reconciliation
-     (§5). Unlike `0144` it is a real write against live. Turki reviews,
-     rehearses rolled-back, applies, verifies — then it gets committed.
+   - **DONE — `0145_operations_metric_caveat.sql` is APPLIED and COMMITTED
+     (`bcb9ed6`).** It adds the non-additivity caveat to `operations`, which
+     `0144` deliberately leaves null. Kept separate because that is a CONTENT
+     change, not a reconciliation (§5), and ordered after `0144` so a rebuild
+     ends on this text. Unlike `0144` it is a real write against live: the
+     `operations` row has been different since it landed, and `caveat` had been
+     null since `0098`. All four of its own assertions passed at apply; §4
+     carries the independent read-only re-verification.
    - **The warning is a GLOSSARY gap only — the product already carries it.**
      Traced read-only before drafting `0145`, so nobody re-runs this: Overview's
      "Trucks active" tile is single-month by construction (`rowFor`,
