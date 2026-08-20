@@ -37,10 +37,14 @@ pre-existing rows are untouched.
 | `invoices.status` | **LOAD-BEARING, but a second encoding** of the same lifecycle as `confirmed_at/paid_at/voided_at`. 0 drift across 23 rows, held only by RPC discipline — no trigger, no CHECK ties them. `v_invoice_outstanding_live` reads the TIMESTAMPS and never `status`, while `v_customer_amount_payable` and 0142 read `status`. A reconciliation job, **not** a drop |
 | `v_invoice_outstanding_live.effective_payment_mode` / `.outstanding_basis` | computed, **zero app readers** — app takes only `invoice_id, outstanding_sar` |
 
-**OPEN, and worth closing before the next drop:** `0135` and `0136` do not exist
-on disk — 140 files, `0134` jumps to `0137`. Nothing proves what they did. Given
-0141 was applied via MCP under an auto-timestamp rather than its filename (§0b),
-the remote migration history and the disk are not known to agree.
+**CLOSED — `0135` and `0136` NEVER EXISTED. Do not re-open this.** Three
+independent proofs: they are the only gaps in `0001..0143` on disk (141 files);
+no file matching them was ever added on any branch (`git log --all
+--diff-filter=A`); and the remote ledger jumps `0134b` (`20260818202229`)
+straight to `0137` (`20260819104705`), ~14h apart with nothing between. The
+numbers were skipped while drafting. Nothing is lost and nothing is recoverable
+because there is nothing to recover. **What that reconciliation DID turn up is in
+§4 — the ledger is not a mirror of disk.**
 
 ## 0a. CUSTOMER RESTORE IS COMPLETE, ALL THREE UNITS (2026-08-20)
 
@@ -136,17 +140,23 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-Two commits this session, one logical unit each (§5).
+Four commits this session, one logical unit each (§5).
 
 | hash | what |
 |---|---|
 | `7849641` | `0143` — drop the never-read `payment_mode` from customer write-offs |
-| *(this file's commit)* | Record the 0143 rule in `CLAUDE.md` §7 + update this pointer |
+| `688628c` | Record the 0143 rule in `CLAUDE.md` §7 + update this pointer |
+| `2c13e0c` | Correct the stale view count in §7 (40 → 47) |
+| *(this file's commit)* | Record the 0135/0136 reconciliation and the ledger finding |
 
 `7849641` is SQL only, +215/−0, staged by explicit path, staged blob inspected
-with `git show :<path>` before committing. The docs commit carries `CLAUDE.md`
-and `.planning/HANDOFF.md` only — no code, deliberately separate from the
-migration.
+with `git show :<path>` before committing. The docs commits carry `CLAUDE.md` and
+`.planning/HANDOFF.md` only — no code, deliberately separate from the migration.
+
+`2c13e0c` exists because `688628c` edited the §7 DB line to bump the migration
+number and left the stale view count sitting on the same line. **Editing one fact
+on a line does not verify the others on it** — re-measure the whole line or leave
+it alone.
 
 **Kept from the previous session, still true:** `e65d980` and `0adbab1` are in
 and pushed.
@@ -326,17 +336,47 @@ because an archive stamps the CUSTOMER and there is no customer restore.
 - **Highest migration: `0143_drop_write_off_payment_mode.sql` — applied clean and
   committed (`7849641`).** 10,463 bytes / 215 lines. `0141` and `0142` landed
   between this line's previous value (`0140`) and now; see §0, §0a, §0b.
-- Nothing drafted-but-unapplied. Nothing applied-but-uncommitted. (The `0101`
-  incident: **an applied-but-uncommitted migration is exactly what a db reset
-  drops.**)
-- **`0135` and `0136` are MISSING from disk** — 140 files for a 0142 top number,
-  `0134` jumps straight to `0137`. Unexplained. Reconcile disk against the remote
-  migration history before the next drop.
+- Nothing drafted-but-unapplied. "Nothing applied-but-uncommitted" is **not**
+  true of the ledger — four rows below. (The `0101` incident: **an
+  applied-but-uncommitted migration is exactly what a db reset drops.**)
+- **`0135`/`0136` never existed — CLOSED, see §0.** Do not re-reconcile.
+- **THE REMOTE LEDGER IS NOT A MIRROR OF DISK: 141 files against 93 rows in
+  `supabase_migrations.schema_migrations`. Do not use it to audit what is
+  applied — the DB itself is the authority.**
+  - It records `0036`, `0037`, `0058`, then nothing until `0060`, after which it
+    runs near-continuous. `0001–0035` and most of `0038–0059` are simply absent:
+    applied before history tracking, or through the SQL Editor, which writes no
+    row. Absence from the ledger is NOT evidence a migration did not run.
+  - **8 rows carry no number** — 0036, 0037, 0121, 0122, 0131, 0141, 0142, 0143,
+    all MCP-applied under auto-timestamps. **Map by NAME, never by number.**
+  - `0141` sorts AFTER `0142` by timestamp, matching §0a's "0141 sits BELOW 0142
+    on purpose". `0063/0064/0089/0097` each applied twice. `0140`'s remote name
+    (`drop_unguarded_archive_project`) differs from its disk name.
+- **FOUR rows are remote-only — applied, never committed as files:**
+  `0101_operations_by_driver_reapply`, `0103_dashboard_views_fix`,
+  `0103_restore_invoker_action_items`, `0134b_fix_balance_guard_customer_join`.
+  - **`0134b` CHECKED, SAFE.** It repaired `pay_invoice`: the first 0134 guard
+    joined `projects` on `i.project_id`, a column invoices do not have, so every
+    `balance` settlement would have raised 42703. On-disk `0134` already carries
+    the fixed `pr.customer_id = i.customer_id` join (line 196) and live
+    `pay_invoice` matches it — the file was corrected in place after the hotfix.
+    A ledger artifact, not a divergence. Disk replay reproduces correct behaviour.
+  - **`0103_restore_invoker_action_items` CHECKED, SAFE** — disk `0103` defines
+    `v_dashboard_action_items` and restates `security_invoker`; posture below.
+  - **`0101_operations_by_driver_reapply` and `0103_dashboard_views_fix` NOT
+    checked.** Neither sits in a money or security path.
 - **DB writes this session: `0143` only, applied by Turki.** Every query Claude
   Code ran was read-only `execute_sql`.
-- View posture unchanged: **47 views / 47 security_invoker / 0 anon-readable**
-  (last measured 2026-08-19). §6 carries the re-measure query — *the two counts
-  matching is the check, not the number.*
+- View posture **re-measured 2026-08-20: 47 views / 47 security_invoker / 0
+  anon-readable.** §7 claimed 40 until `2c13e0c`. §6 carries the query — *the two
+  counts matching is the check, not the number.*
+- **Tables: 76, all 76 RLS-enabled** (the §7 "73+" is deliberately open-ended).
+  `anon` holds a table-level SELECT grant on all 76, but it is **inert**: 75
+  policies exist, every one names `authenticated` only, none names `anon` or
+  `public`, so RLS denies anon by default. **The table posture rests on the
+  policies, not on the grants — do not "tidy" a policy away.** Note 76 tables
+  against 75 policies: one table has RLS on with no policy at all. That fails
+  closed and is safe; whether it is intentional is unverified.
 - **Migrations are DRAFTED to disk for Turki to run in the Supabase SQL Editor —
   never self-applied through the MCP.** Read-only `execute_sql` queries ARE allowed
   and are the standard proof mechanism; that is all this session used.
