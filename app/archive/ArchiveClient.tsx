@@ -66,7 +66,7 @@ import type { CommPayout, DriverLite } from "@/lib/commission-rows";
 import { linkedFieldFor, linkedFieldForDoc, readPersonLink, PERSON_ID_LABEL } from "@/lib/archive";
 import {
   deleteArchiveGroup, deleteArchiveDocument, getArchiveFileSignedUrls,
-  restoreDriver, restoreStaff, restoreTruck,
+  restoreCustomer, restoreDriver, restoreStaff, restoreTruck,
 } from "./actions";
 import { GroupModal, DocumentModal, RenewModal, DocumentDetailModal } from "./ArchiveModals";
 import ArchiveStaffTab, { STAFF_SUB_TABS, type StaffSubTab } from "./ArchiveStaffTab";
@@ -133,6 +133,14 @@ const TABS: { key: PageTab; label: string }[] = [
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso + "T00:00:00").toLocaleDateString();
+}
+
+// Only used inside a confirm() string, which is plain text — no formatting
+// component can reach in there. Matches ArchiveCustomerTab's money() output
+// so the figure the dialog quotes reads identically to the one on the row
+// the user clicked.
+function moneySar(n: number): string {
+  return `${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SAR`;
 }
 
 export default function ArchiveClient({
@@ -474,6 +482,69 @@ export default function ArchiveClient({
     router.refresh();
   }
 
+  // Restoring a customer can hand back a debt, so the confirm has to say so
+  // BEFORE the click, not report it after. The message is ASSEMBLED from a
+  // base line plus at most two consequence lines rather than branched into
+  // four hand-written variants — there are two independent flags
+  // (is_written_off, balance_returned) and a customer can carry both.
+  //
+  // The payable row is looked up HERE, at click time, for the same reason
+  // ReturnBalanceModal does it: the tab captured its copy at render, and
+  // quoting a figure from a stale capture is exactly how a confirm dialog
+  // ends up promising the wrong number.
+  //
+  // Returns whether the restore went through, so the detail popup can close
+  // itself. The truck popup does not do this and stays open on a truck it has
+  // just un-terminated; a modal headed "Archived customer" describing a
+  // customer who is no longer archived is a worse version of the same thing,
+  // because this one also quotes money that has just changed.
+  async function onRestoreCustomer(c: ArchiveCustomerRow): Promise<boolean> {
+    const payable = amountPayable.find((r) => r.customer_id === c.id) ?? null;
+
+    const lines = [
+      `Restore ${c.name}?`,
+      "",
+      "The customer and its project both come back to active.",
+    ];
+    if (payable?.is_written_off) {
+      // is_written_off is ACTIVE-only as of 0141 — a write-off already
+      // reversed by a previous restore does not set it, so this line cannot
+      // fire twice for the same forgiveness.
+      //
+      // written_off_sar is nullable on the row type even though a write-off
+      // always records one. If it is ever missing, the warning still has to
+      // fire — dropping the whole line because the amount is unknown would
+      // hide the consequence, so the amount is what degrades, not the fact.
+      const amount = payable.written_off_sar;
+      lines.push(
+        "",
+        amount != null
+          ? `THIS UN-FORGIVES THEIR DEBT. The ${moneySar(amount)} write-off is reversed and they owe it again. The write-off record is kept and marked reversed, not deleted.`
+          : "THIS UN-FORGIVES THEIR DEBT. The write-off is reversed and the amount becomes owed again. The write-off record is kept and marked reversed, not deleted.",
+      );
+    }
+    if (payable?.balance_returned) {
+      lines.push(
+        "",
+        "Their prepaid balance was already refunded, so they return with no spendable credit. No money moves either way.",
+      );
+    }
+
+    if (!confirm(lines.join("\n"))) return false;
+
+    const res = await restoreCustomer(c.id);
+    if (res.error) {
+      setActionError(res.error);
+      // Stale row — someone else restored this customer already. Refresh so
+      // the list drops it instead of leaving a dead button to click again.
+      if (res.stale) router.refresh();
+      return false;
+    }
+    setActionError(null);
+    router.refresh();
+    return true;
+  }
+
   async function openFile(path: string) {
     const res = await getArchiveFileSignedUrls([path]);
     if (res.error || !res.urls?.[path]) {
@@ -715,6 +786,7 @@ export default function ArchiveClient({
             amountPayable={amountPayable}
             onOpenInvoice={(id, email) => setOpenInvoice({ id, email })}
             onReturnBalance={(c) => setReturningCustomer(c)}
+            onRestoreCustomer={onRestoreCustomer}
           />
         </div>
       ) : tab === "ledger" ? (

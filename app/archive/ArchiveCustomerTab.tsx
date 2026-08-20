@@ -14,7 +14,7 @@
 // reached for.
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, FileText, Eye, X, Archive, Undo2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, Eye, X, Archive, Undo2, RotateCcw } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { SubTabItem } from "./SubTabPicker";
@@ -134,6 +134,7 @@ export default function ArchiveCustomerTab({
   amountPayable,
   onOpenInvoice,
   onReturnBalance,
+  onRestoreCustomer,
 }: {
   subTab: CustomerSubTab;
   customers: ArchiveCustomerRow[];
@@ -151,6 +152,11 @@ export default function ArchiveCustomerTab({
   // LEAF contract: the return popup is owned by ArchiveClient, same as the
   // invoice popup above. This tab asks; it does not reach for a modal.
   onReturnBalance: (customer: ArchiveCustomerRow) => void;
+  // Same leaf contract for restore: ArchiveClient owns the confirm, the RPC
+  // call and the error banner. Resolves true when the customer really was
+  // restored (false if the confirm was dismissed or the RPC refused), which
+  // is the detail popup's cue to close.
+  onRestoreCustomer: (customer: ArchiveCustomerRow) => Promise<boolean>;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [detailCustomer, setDetailCustomer] = useState<ArchiveCustomerRow | null>(null);
@@ -309,16 +315,20 @@ export default function ArchiveCustomerTab({
   }
 
   // -------------------------------------------------------------------------
-  // SOFT-DELETED — READ-ONLY, and deliberately WITHOUT a Restore action.
+  // SOFT-DELETED — read-only apart from the two money/lifecycle actions.
   //
-  // The other tabs restore a person or a truck by clearing their own
-  // termination fields, which is self-contained. A customer is NOT: 0019
-  // archives a customer as a side effect of archiving its 1:1 PROJECT, so
-  // clearing customers.archived_at alone would leave a live customer attached
-  // to an archived project — a half-restored state neither page would agree
-  // about. Un-archiving belongs with the project, where the pairing is
-  // visible, not here. Flagged rather than guessed: if you want it, it should
-  // restore BOTH, and that is a decision about the projects flow.
+  // This block used to say a Restore action deliberately did NOT exist,
+  // because clearing customers.archived_at alone would leave a live customer
+  // attached to an archived project (0019 archives the customer as a side
+  // effect of archiving its 1:1 project). That objection was correct and it
+  // has been answered rather than dropped: restore_customer_guarded (0141)
+  // un-archives BOTH on one timestamp in one transaction, so the half-restored
+  // state the note warned about is not reachable from this button.
+  //
+  // The Restore button is gated on archived_at being set. The list below also
+  // admits rows that are merely inactive (`!c.active`), and for those the RPC
+  // could only ever raise 23514 — showing a button whose sole outcome is an
+  // error is worse than showing none.
   // -------------------------------------------------------------------------
   return (
     <div className="space-y-3">
@@ -351,13 +361,25 @@ export default function ArchiveCustomerTab({
                 // the figure and the mark, and loses the button — there is no
                 // second return to record.
                 const canReturn = !!payable && payable.amount_payable_sar > 0 && !payable.balance_returned;
+                // See the block comment above the table: archived_at is what
+                // the RPC un-sets, so a row that reached this list on the
+                // `!active` leg alone has nothing for it to do.
+                const canRestore = c.archived_at != null;
                 return (
                   <tr key={c.id}>
                     <TD>
                       <span className="font-medium">{c.name}</span>
                       {c.name_ar && <div className="text-[11px] muted">{c.name_ar}</div>}
+                      {/* AMBER, not muted. A write-off is the one caption in
+                          this table that reports a decision rather than a
+                          fact, and it is the caption that changes what the
+                          Restore button next to it will do. Muted grey filed
+                          it with the contact details. The tone is this file's
+                          existing amber (the same pair the Written-off pill
+                          and the detail block use), so the row, the pill and
+                          the popup all say "write-off" in one colour. */}
                       {payable?.is_written_off && (
-                        <div className="text-[11px] muted mt-0.5">
+                        <div className="text-[11px] mt-0.5 text-amber-700 dark:text-amber-300">
                           Written off{payable.written_off_sar != null ? ` · ${money(payable.written_off_sar)}` : ""}
                         </div>
                       )}
@@ -382,6 +404,31 @@ export default function ArchiveCustomerTab({
                         <Btn variant="outline" onClick={() => setDetailCustomer(c)}>
                           <Eye className="h-3.5 w-3.5" />View
                         </Btn>
+                        {/* BRAND-TINTED, not the neutral outline View wears.
+                            Restore is the row's consequential action and has
+                            to read as distinct from the inspect-only one
+                            beside it — but a SOLID brand fill would tie with
+                            Return balance, which is already solid primary and
+                            can appear in this same cell. A tint carries the
+                            colour without claiming the row's top rank.
+
+                            variant="ghost", NOT "outline": Btn's outline arm
+                            sets borderColor inline (components/ui.tsx), and an
+                            inline style beats border-brand-600, so an outline
+                            Restore would keep the grey border no matter what
+                            class it was given. The border is declared here
+                            instead. Both hover arms are overridden because
+                            ghost's dark hover is a separate variant key that
+                            twMerge does not fold into the light one. */}
+                        {canRestore && (
+                          <Btn
+                            variant="ghost"
+                            className="border border-brand-600 bg-brand-500/10 text-brand-700 dark:text-brand-300 hover:bg-brand-500/20 dark:hover:bg-brand-500/20"
+                            onClick={() => { void onRestoreCustomer(c); }}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />Restore
+                          </Btn>
+                        )}
                       </div>
                     </TD>
                   </tr>
@@ -400,6 +447,9 @@ export default function ArchiveCustomerTab({
           payable={payableByCustomer.get(detailCustomer.id) ?? null}
           onOpenInvoice={onOpenInvoice}
           onReturnBalance={onReturnBalance}
+          onRestore={async () => {
+            if (await onRestoreCustomer(detailCustomer)) setDetailCustomer(null);
+          }}
           onClose={() => setDetailCustomer(null)}
         />
       )}
@@ -414,6 +464,7 @@ function ArchivedCustomerDetail({
   payable,
   onOpenInvoice,
   onReturnBalance,
+  onRestore,
   onClose,
 }: {
   customer: ArchiveCustomerRow;
@@ -422,6 +473,9 @@ function ArchivedCustomerDetail({
   payable: CustomerAmountPayableRow | null;
   onOpenInvoice: (invoiceId: string, customerEmail: string | null) => void;
   onReturnBalance: (customer: ArchiveCustomerRow) => void;
+  // Already bound to this customer by the caller, and already closes this
+  // popup on success — the popup does not decide either.
+  onRestore: () => void;
   onClose: () => void;
 }) {
   // REVENUE — collected means PAID. status 'paid' is the settled state
@@ -536,11 +590,19 @@ function ArchivedCustomerDetail({
             </div>
           )}
 
-          {/* WRITE-OFF — audit only. owed_sar is already 0 by the time this
-              row exists (0139), so this is the record of WHO forced the
-              archive and WHY, not a live figure. Shown because a forced
-              archive that leaves no visible trace is the thing the override
-              was built to avoid. */}
+          {/* WRITE-OFF — audit, plus the one consequence of the Restore button
+              in this popup's footer. owed_sar is already 0 by the time this
+              row exists (0139), so the figure is the record of WHO forced the
+              archive and WHY, not a live debt. Shown because a forced archive
+              that leaves no visible trace is the thing the override was built
+              to avoid.
+
+              is_written_off is ACTIVE-only (0141): a write-off a previous
+              restore already reversed does not set it, so this block cannot
+              warn about undoing a forgiveness that is already undone. The
+              warning lives HERE as well as in the confirm dialog because this
+              is where someone decides whether to restore — a dialog only
+              catches them after they have decided. */}
           {payable?.is_written_off && (
             <div className="rounded-xl border p-3 bg-amber-500/5" style={{ borderColor: "rgb(var(--border))" }}>
               <div className="text-[11px] muted uppercase tracking-wide">Written off on archive</div>
@@ -552,6 +614,11 @@ function ArchivedCustomerDetail({
                 <Field label="By" value={payable.written_off_by || "—"} />
                 <Field label="On" value={fmtDate(payable.written_off_at)} />
               </div>
+              {customer.archived_at != null && (
+                <div className="text-[11px] mt-2 pt-2 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                  Restoring this customer reverses the write-off — the amount above becomes owed again. The record is kept and marked reversed, not deleted.
+                </div>
+              )}
             </div>
           )}
 
@@ -659,6 +726,11 @@ function ArchivedCustomerDetail({
           style={{ borderColor: "rgb(var(--border))" }}
         >
           <Btn variant="outline" onClick={onClose}>Close</Btn>
+          {customer.archived_at != null && (
+            <Btn variant="primary" onClick={onRestore}>
+              <RotateCcw className="h-4 w-4" />Restore
+            </Btn>
+          )}
         </div>
       </div>
     </div>

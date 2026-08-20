@@ -2,13 +2,21 @@
 
 // Archive — server actions (migration 0084).
 //
-// NO RPC anywhere in this file, deliberately: every mutation here is plain
-// single-table CRUD with no cross-table invariant to protect — no counter/
-// gap-free number, no stock, no money. Same "plain write, no RPC" precedent
-// as updateRepairer/deleteRepairer (osActions.ts), the part-photo path
-// (maintenance/actions.ts), and staff_commissions (0080). See 0084's own
-// footer note for the full reasoning, including what would change if the
-// renew path ever needs to become atomic.
+// ONE RPC in this file: restoreCustomer, and the reason it is the exception
+// states the rule. Every OTHER mutation here is plain single-table CRUD with
+// no cross-table invariant to protect — no counter/gap-free number, no stock,
+// no money — the same "plain write, no RPC" precedent as updateRepairer/
+// deleteRepairer (osActions.ts), the part-photo path (maintenance/actions.ts),
+// and staff_commissions (0080). See 0084's own footer note for the full
+// reasoning, including what would change if the renew path ever needs to
+// become atomic.
+//
+// Restoring a customer breaks all three of those conditions at once: it
+// touches customers AND projects AND customer_write_offs, and reversing a
+// write-off is a money-visible act. So it goes through
+// restore_customer_guarded (0141) and never through .from().update() here.
+// The other three restores below (driver, truck, staff) are plain updates
+// because they genuinely are single-table.
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -754,6 +762,61 @@ export async function restoreStaff(staffId: string): Promise<{ error: string | n
   if (error) return { error: error.message };
   revalidatePath("/archive");
   revalidatePath("/drivers");
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// RESTORE an archived CUSTOMER — the one RPC call in this file (0141).
+//
+// Unlike the three restores above, this is NOT a single-table update, and the
+// difference is not cosmetic. Clearing customers.archived_at on its own would
+// leave a live customer attached to an archived project — a half-restored
+// state the Archive page and the Projects page would disagree about. And if
+// the customer was written off at archive time, the debt has to come BACK:
+// restore_customer_guarded marks the write-off reversed (reversed_at,
+// reversed_by) and KEEPS the row, so the amount/reason/actor stay frozen as
+// the audit record of a forgiveness that was later undone.
+//
+// The RPC does all of that on ONE timestamp inside ONE transaction, and it
+// writes NO balance — restoring never moves money. A customer whose balance
+// was refunded comes back with no spendable credit, because the money really
+// did leave. Do not "helpfully" post a compensating top-up here.
+//
+// `stale` is the interesting failure. The RPC raises check_violation when the
+// customer is not archived, which in practice means this browser tab was
+// showing a list someone else has already acted on. That is a refresh, not a
+// bug, so it is reported separately from the structural failures (customer
+// missing, more than one project, project not archived, multiple active
+// write-offs) which all raise plainly and mean the data drifted from what
+// 0141 assumes.
+// ---------------------------------------------------------------------------
+const CHECK_VIOLATION = "23514";
+
+export type RestoreCustomerResult = {
+  error: string | null;
+  // True when the row was already restored by someone else — the caller
+  // should refresh rather than invite a second click on a dead row.
+  stale?: boolean;
+};
+
+export async function restoreCustomer(customerId: string): Promise<RestoreCustomerResult> {
+  const id = customerId?.trim() ?? "";
+  if (!id) return { error: "Customer is required." };
+  const supabase = createClient();
+  // Actor is captured server-side from the session, never sent from the
+  // client — same convention as archiveProject and returnCustomerBalance.
+  // With no role gate yet this is attribution, not authorisation.
+  const { error } = await supabase.rpc("restore_customer_guarded", {
+    p_customer_id: id,
+    p_actor: await actorEmail(supabase),
+  });
+  if (error) return { error: error.message, stale: error.code === CHECK_VIOLATION };
+  // The customer and its project both come back live, so every page that
+  // filters on archived_at is now wrong until it re-reads.
+  revalidatePath("/archive");
+  revalidatePath("/trips");
+  revalidatePath("/projects");
+  revalidatePath("/customers");
   return { error: null };
 }
 
