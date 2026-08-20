@@ -140,7 +140,7 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-Five commits this session, one logical unit each (§5).
+Seven commits this session, one logical unit each (§5).
 
 | hash | what |
 |---|---|
@@ -148,7 +148,9 @@ Five commits this session, one logical unit each (§5).
 | `688628c` | Record the 0143 rule in `CLAUDE.md` §7 + update this pointer |
 | `2c13e0c` | Correct the stale view count in §7 (40 → 47) |
 | `e5c0356` | Record the 0135/0136 reconciliation and the ledger finding |
-| *(this file's commit)* | Check the last two remote-only rows; record the `0101` divergence |
+| `6be5464` | Check the last two remote-only rows; record the `0101` divergence |
+| `485b3a2` | `0144` — reconcile the repo to live for the Operations glossary |
+| *(this file's commit)* | Record the `0101` decision as RESOLVED; `0145` drafted |
 
 `7849641` is SQL only, +215/−0, staged by explicit path, staged blob inspected
 with `git show :<path>` before committing. The docs commits carry `CLAUDE.md` and
@@ -334,12 +336,21 @@ because an archive stamps the CUSTOMER and there is no customer restore.
 
 ## 4. DB STATE
 
-- **Highest migration: `0143_drop_write_off_payment_mode.sql` — applied clean and
+- **Highest migration APPLIED: `0143_drop_write_off_payment_mode.sql` — clean and
   committed (`7849641`).** 10,463 bytes / 215 lines. `0141` and `0142` landed
   between this line's previous value (`0140`) and now; see §0, §0a, §0b.
-- Nothing drafted-but-unapplied. "Nothing applied-but-uncommitted" is **not**
-  true of the ledger — four rows below. (The `0101` incident: **an
-  applied-but-uncommitted migration is exactly what a db reset drops.**)
+- **Highest migration ON DISK: `0145` (drafted). `0144` is committed (`485b3a2`)
+  but NOT yet applied — deliberately, because it is a no-op against live.**
+  Read the two apart before acting:
+  - `0144_reconcile_operations_by_driver_metric.sql` — reconciliation only.
+    Changes nothing in production; exists so a REBUILD reproduces live. Safe to
+    apply at any time, and equally safe to leave unapplied. See §6 item 2.
+  - `0145` — adds the non-additivity caveat to `operations`. **A REAL WRITE
+    against live**, drafted and awaiting Turki's rehearsal + apply, uncommitted.
+- "Nothing applied-but-uncommitted" is **not** true of the ledger — four rows
+  below. (The `0101` incident: **an applied-but-uncommitted migration is exactly
+  what a db reset drops.**) The inverse now also holds: `0144` is
+  committed-but-unapplied, which is the safe direction of the same asymmetry.
 - **`0135`/`0136` never existed — CLOSED, see §0.** Do not re-reconcile.
 - **THE REMOTE LEDGER IS NOT A MIRROR OF DISK: 141 files against 93 rows in
   `supabase_migrations.schema_migrations`. Do not use it to audit what is
@@ -357,7 +368,8 @@ because an archive stamps the CUSTOMER and there is no customer restore.
   `0101_operations_by_driver_reapply`, `0103_dashboard_views_fix`,
   `0103_restore_invoker_action_items`, `0134b_fix_balance_guard_customer_join`.
   **ALL FOUR ARE NOW CHECKED (2026-08-20). None is dangerous. Three are ledger
-  artifacts; `0101`'s is a genuine file-vs-DB divergence that is still open.**
+  artifacts; `0101`'s was a genuine file-vs-DB divergence, now RESOLVED by
+  `0144` — §6 item 2.**
   - **`0134b` CHECKED, SAFE.** It repaired `pay_invoice`: the first 0134 guard
     joined `projects` on `i.project_id`, a column invoices do not have, so every
     `balance` settlement would have raised 42703. On-disk `0134` already carries
@@ -406,8 +418,11 @@ because an archive stamps the CUSTOMER and there is no customer restore.
       path. `app/reports/page.tsx:111` selects all of `report_metrics` and the
       glossary renders whatever rows exist, so the driver metric currently has a
       definition. A rebuild from migrations loses that glossary entry and
-      changes the `operations` entry. **OPEN DECISION for Turki, not for a
-      future session to settle on its own:** keep live's separate
+      changes the `operations` entry. **DECIDED 2026-08-21 — Turki kept live's
+      separate `operations_by_driver` key; `0144` writes that choice to disk.
+      This bullet is now HISTORY, not an open question.** The evidence is kept
+      because it is what the decision rests on. Old wording follows for the
+      record: keep live's separate
       `operations_by_driver` key, or keep disk's amended `operations`. Whichever
       wins needs a migration so file and DB finally agree.
     - **THE LESSON, which generalises past this file.** Disk `0101`'s header
@@ -550,14 +565,32 @@ re-measure AFTER they say they are done.**
      that was never about deduction: still never post a negative top-up to
      "finish the job" — `topups_sar` means money paid IN, and a refund is netted
      at face value, not multiplied by 1.15.
-2. **ONE OPEN DECISION, and it is Turki's — the `0101` metrics-dictionary
-   divergence.** File and DB disagree about whether the driver cut of the
-   Operations metric earns its own dictionary key. Live says yes
-   (`operations_by_driver` exists, inserted by the remote-only reapply); disk
-   `0101` says no and amends `operations` instead. Full evidence in §4. Nothing
-   is broken, no money or security path is involved, and **a future session must
-   NOT pick a side on its own** — the losing side needs a migration written so
-   file and DB finally agree. Until then the repo cannot rebuild live.
+2. **RESOLVED (2026-08-21) — the `0101` metrics-dictionary divergence. Turki
+   ruled: KEEP the live shape, `operations_by_driver` stays as its own key.**
+   Written as `0144_reconcile_operations_by_driver_metric.sql` (`485b3a2`).
+   It upserts the driver key and restores `operations` to `0098`'s `grain` /
+   `source_view` / null `caveat`, undoing the amendment disk `0101` applies on
+   replay. **No-op against production, corrective on rebuild** — the 0140
+   argument: disk history is the reset path, and before `0144` no migration on
+   disk inserted `operations_by_driver`, so live could not be rebuilt from the
+   repo at all. Background evidence stays in §4; do not re-litigate it.
+   - **Still to apply — `0145` is DRAFTED, NOT APPLIED, NOT COMMITTED.** It adds
+     the non-additivity caveat to `operations`, which `0144` deliberately leaves
+     null. Kept separate because that is a CONTENT change, not a reconciliation
+     (§5). Unlike `0144` it is a real write against live. Turki reviews,
+     rehearses rolled-back, applies, verifies — then it gets committed.
+   - **The warning is a GLOSSARY gap only — the product already carries it.**
+     Traced read-only before drafting `0145`, so nobody re-runs this: Overview's
+     "Trucks active" tile is single-month by construction (`rowFor`,
+     `lib/reports.ts:450`). Only the Statements tab spans months (Monthly /
+     Quarterly / Yearly, `PERIOD_TYPES`), and there `trucks_active` is
+     `peakOver` — **highest single month, never summed** — and labelled in three
+     places: the row suffix "most in any one month" when `multiMonth`
+     (`StatementViews.tsx:934-938`), a `<Note>` carrying the full warning
+     (`:997-1003`), and the narrative "at most N trucks in any single month"
+     (`lib/reports.ts:653`). **No surface anywhere sums it.** `0145` makes the
+     glossary say what the statement already says; it does not fix a wrong
+     number, because there is no wrong number.
 4. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
    in §7 carries nothing blocked-and-actionable — RBAC + the app-wide security pass,
    effective-dated customer rates, multi-project customers, Route Optimization /
