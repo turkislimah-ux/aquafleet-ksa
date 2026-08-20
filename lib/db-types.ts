@@ -1331,11 +1331,24 @@ export type ArchiveCustomerRow = {
 export type CustomerAmountPayableRow = {
   customer_id: string;
   amount_payable_sar: number;
-  // Balance return (customer_balance_returns). balance_returned is the MARK —
-  // it records that the money went back; it does NOT move amount_payable_sar.
-  // A positive balance without this mark is a live liability; with it, it is a
-  // settled one. Rendering the two apart is what makes that readable.
+  // Balance return (customer_balance_returns). balance_returned is the MARK.
+  //
+  // IT DOES MOVE amount_payable_sar, AS OF 0142 — the note here used to say the
+  // opposite, and that was true only while a refunded customer stayed archived
+  // and inert. A recorded return is now a DEBIT against the prepaid pool in
+  // both the TS engine (lib/prepaid.ts) and v_customer_prepaid_balance, which
+  // this view's prepaid arm reads, so a fully refunded customer computes 0
+  // here. Before 0142 nothing subtracted it and the credit stayed spendable —
+  // the double-spend the netting closes.
+  //
+  // The mark therefore no longer disambiguates a standing figure; it says WHY
+  // the figure fell to zero. Consumers that want the amount handed back read
+  // returned_sar, which the RPC recorded, and never reconstruct it by adding
+  // the refund back onto the payable.
   balance_returned: boolean;
+  // The amount the return RPC actually recorded. This is the figure the Archive
+  // tab renders once balance_returned is true (see BalanceWithMark) — a stored
+  // fact, not a derived one.
   returned_sar: number | null;
   returned_method: "cash" | "bank_transfer" | null;
   returned_on: string | null;

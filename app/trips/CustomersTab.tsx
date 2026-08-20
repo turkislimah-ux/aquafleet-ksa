@@ -14,7 +14,7 @@ import type { CommissionMode, WaterType, PaymentMode } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
 import ProjectModal, { type ProjectInitial } from "./ProjectModal";
 import BreakdownReport from "./BreakdownReport";
-import type { TopupRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
 
 // Minimal shapes — the page passes wider objects (assignable to these). These
 // carry every field the edit form pre-fills.
@@ -105,6 +105,7 @@ export type CustomersTabProps = {
   // fetched by app/trips/page.tsx for the Finance tab and handed to both tabs
   // by TripsTabs — this tab itself reads none of them.
   topups: TopupRow[];
+  balanceReturns: BalanceReturnRow[];
   specialCharges: SpecialChargeRow[];
   paidInvoices: PaidInvoiceRow[];
 };
@@ -149,6 +150,7 @@ export default function CustomersTab({
   driverStateById,
   leaveUnavailable,
   topups,
+  balanceReturns,
   specialCharges,
   paidInvoices,
 }: CustomersTabProps) {
@@ -402,6 +404,7 @@ export default function CustomersTab({
         drivers={drivers}
         stations={stations}
         topups={topups}
+        balanceReturns={balanceReturns}
         specialCharges={specialCharges}
         paidInvoices={paidInvoices}
       />

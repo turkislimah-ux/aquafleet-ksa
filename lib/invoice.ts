@@ -131,8 +131,10 @@
 import {
   splitCoveredUnpaidItems,
   consumingItems,
+  returnedTotal,
   VAT_RATE,
   round2,
+  type BalanceReturnLite,
   type ConsumingTrip,
   type ConsumingCharge,
   type ConsumedItem,
@@ -273,6 +275,20 @@ export type AssembleInvoiceInput = {
   trips: ConsumingTrip[];
   // ALL topups for this customer, any date. Ignored entirely for postpaid.
   topups: TopupLite[];
+  // ALL recorded refunds of prepaid credit for this customer, any date (0142).
+  // Prepaid only — a postpaid customer has no pool to refund from, so the
+  // postpaid arm never reads it.
+  //
+  // A refund SHRINKS THE POOL, which moves the FIFO wall backwards: work that
+  // the pool covered before the refund can fall into Unpaid after it. That is
+  // the correct invoice, not a defect — the customer no longer holds the money
+  // that was covering it. Defaulted to [] so the harness and any caller with no
+  // refunds assemble byte-identically to before.
+  //
+  // It never becomes a LINE. lib/invoice.ts maps covered/unpaid ConsumedItems
+  // straight into billable lines, and a refund is not a supply we can bill for;
+  // it only ever changes where the covered/unpaid boundary sits.
+  returns?: BalanceReturnLite[];
   // v3: for prepaid this must be the customer's FULL non-void-invoice charge
   // history (every charge on a draft/review/confirmed/paid invoice, any
   // invoice) — NOT just this invoice's own charges — so the FIFO walk sees
@@ -311,6 +327,7 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     periodEnd,
     trips,
     topups,
+    returns = [],
     specialCharges,
     sellerSnapshot = null,
     buyerSnapshot = null,
@@ -392,7 +409,7 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     label: c.label,
   }));
 
-  const split = splitCoveredUnpaidItems(topups, trips, chargesForEngine, periodEnd);
+  const split = splitCoveredUnpaidItems(topups, trips, chargesForEngine, periodEnd, returns);
 
   const coveredTripEntries = split.covered
     .filter((e): e is ConsumedItem & { kind: "trip" } => e.kind === "trip")
@@ -433,7 +450,14 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   // split's frozen remainingBalance: once the FIFO wall is hit the pool
   // never moves again, so every unpaid item (this invoice's or another's)
   // shares that same entering value.
-  const startingPool = round2(topups.filter((t) => t.topup_date <= periodEnd).reduce((s, t) => s + t.amount_sar, 0));
+  // MUST match splitCoveredUnpaidItems' own starting pool exactly, because the
+  // walk below re-derives the entering balance from it. Refunds net out here
+  // for that reason and no other — same filter (<= periodEnd), same summation
+  // helper (returnedTotal, imported rather than restated), same rounding.
+  const startingPool = round2(
+    round2(topups.filter((t) => t.topup_date <= periodEnd).reduce((s, t) => s + t.amount_sar, 0)) -
+      returnedTotal(returns, periodEnd),
+  );
   const coveredLineIds = new Set(coveredTripEntries.map((e) => e.id));
   let poolWalk = startingPool;
   let coveredBalance = poolWalk;

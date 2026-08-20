@@ -22,7 +22,7 @@ import CustomersTab from "./CustomersTab";
 import FinanceTab from "./FinanceTab";
 import NewProjectModal from "./NewProjectModal";
 import WaterStationsModal from "./WaterStationsModal";
-import type { TopupRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
 
 type Tab = "projects" | "customers" | "finance";
 
@@ -44,12 +44,14 @@ const HEADER: Record<Tab, { title: string; subtitle: string }> = {
 export default function TripsTabs({
   error,
   topups,
+  balanceReturns,
   specialCharges,
   paidInvoices,
   ...boardProps
 }: ProjectsBoardProps & {
   error: string | null;
   topups: TopupRow[];
+  balanceReturns: BalanceReturnRow[];
   specialCharges: SpecialChargeRow[];
   paidInvoices: PaidInvoiceRow[];
 }) {
@@ -146,6 +148,7 @@ export default function TripsTabs({
           driverStateById={boardProps.driverStateById}
           leaveUnavailable={boardProps.leaveLoadFailed}
           topups={topups}
+          balanceReturns={balanceReturns}
           specialCharges={specialCharges}
           paidInvoices={paidInvoices}
         />
@@ -157,6 +160,7 @@ export default function TripsTabs({
           projects={boardProps.projects}
           trips={boardProps.trips}
           topups={topups}
+          balanceReturns={balanceReturns}
           specialCharges={specialCharges}
           paidInvoices={paidInvoices}
         />

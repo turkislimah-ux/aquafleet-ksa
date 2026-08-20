@@ -79,30 +79,49 @@ const PILL = "text-[11px] px-2 py-0.5 rounded-full ring-1 ring-inset font-medium
 // THE MARK RENDERS BESIDE THE FIGURE. NEVER IN ITS OWN COLUMN, NEVER A ROW
 // DOWN, NEVER BEHIND A CLICK.
 //
-// Recording a return does NOT move amount_payable_sar — the RPC writes the
-// mark and deliberately leaves the balance alone (0139's own header calls
-// this load-bearing, and lib/db-types.ts repeats it on the type). So the bare
-// figure is ambiguous by construction: the same number means "we still owe
-// this" before the return and "this was paid back" after it. Only the
-// adjacent mark tells the two apart, which is why they are rendered as one
-// unit rather than as two facts a reader has to pair up.
+// Recording a return now DOES move amount_payable_sar. Migration 0142 made a
+// balance return a debit against the pool in both the TS engine and
+// v_customer_prepaid_balance, which this view's prepaid arm reads — so a fully
+// refunded customer computes 0, not the figure they held before.
+//
+// WHAT THAT BREAKS, AND WHY THE FIX IS A DIFFERENT FIGURE RATHER THAN THE OLD
+// ONE. The pre-0142 rule was "the number stands still, the mark disambiguates
+// it", and this component existed to keep the two together. With the number now
+// netting to zero, `amount_payable_sar <= 0` would take the early return and the
+// Returned mark would disappear from a customer whose whole story is that they
+// were refunded. So the returned case is answered FIRST, and it renders
+// `returned_sar` — the amount the RPC actually recorded when it wrote the
+// refund. That is a stored fact about this customer, not the stale payable and
+// not a figure reconstructed to look like it: nothing is added back to any
+// balance to produce it.
+//
+// The mark still renders beside the figure. NEVER in its own column, never a
+// row down, never behind a click — the number alone cannot say whether it is
+// owed or already handed back.
 function BalanceWithMark({ row }: { row: CustomerAmountPayableRow | null }) {
-  if (!row || row.amount_payable_sar <= 0) return <span className="muted">—</span>;
-  return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="tabular-nums font-medium">{money(row.amount_payable_sar)}</span>
-      {row.balance_returned ? (
+  if (!row) return <span className="muted">—</span>;
+  // REFUNDED — checked before the zero test, because netting is exactly what
+  // drives this row's payable to zero.
+  if (row.balance_returned) {
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="tabular-nums font-medium">{row.returned_sar != null ? money(row.returned_sar) : "—"}</span>
         <span
           className={cn(PILL, "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20")}
           title={`Returned${row.returned_on ? ` on ${fmtDate(row.returned_on)}` : ""}`}
         >
           Returned
         </span>
-      ) : (
-        <span className={cn(PILL, "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/25")}>
-          To return
-        </span>
-      )}
+      </div>
+    );
+  }
+  if (row.amount_payable_sar <= 0) return <span className="muted">—</span>;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="tabular-nums font-medium">{money(row.amount_payable_sar)}</span>
+      <span className={cn(PILL, "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/25")}>
+        To return
+      </span>
     </div>
   );
 }
@@ -467,8 +486,15 @@ function ArchivedCustomerDetail({
               opposite direction to the three figures above. It gets its own
               block rather than a fourth Stat for exactly that reason: a
               liability sitting in a row of receipts reads as more revenue.
-              The mark travels with the figure (see BalanceWithMark). */}
-          {payable && payable.amount_payable_sar > 0 && (
+              The mark travels with the figure (see BalanceWithMark).
+
+              THE `balance_returned` LEG OF THE GATE IS LOAD-BEARING AFTER 0142.
+              Netting drives a refunded customer's amount_payable_sar to zero,
+              so the payable test alone would take this whole block away — and
+              with it the Returned / Method / Returned-on record below, which is
+              the only place the refund's method and date are ever shown. The
+              block has to survive the very event it documents. */}
+          {payable && (payable.amount_payable_sar > 0 || payable.balance_returned) && (
             <div className="rounded-xl border p-3" style={{ borderColor: "rgb(var(--border))" }}>
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
@@ -478,7 +504,7 @@ function ArchivedCustomerDetail({
                   </div>
                   <div className="text-[11px] muted mt-0.5">
                     {payable.balance_returned
-                      ? "Paid back to the customer. The figure is kept as the record of what was returned."
+                      ? "Paid back to the customer. The figure above is the amount that was returned — their spendable balance is now nil."
                       : "Prepaid credit left over at archive — owed to the customer."}
                   </div>
                 </div>

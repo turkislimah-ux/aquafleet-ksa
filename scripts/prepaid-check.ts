@@ -14,6 +14,7 @@ import {
   consumingItems,
   derivedBalanceItems,
   buildStatementItems,
+  type BalanceReturnLite,
   type ConsumingTrip,
   type TopupLite,
   type ConsumingCharge,
@@ -297,6 +298,90 @@ check(
     "settlement",
   ]);
   check("settlement same-day: running balances", stmt.map((e) => e.runningBalance), [500, 270, 270]);
+}
+
+// --- Balance returns: a DEBIT, same class as consumption (0142) -------------
+// The rule this locks down: a recorded refund must REDUCE spendable credit.
+// Before 0142 nothing subtracted it, so a refunded customer kept spending
+// money already handed back — the double-spend these cases exist to catch if
+// anyone ever removes the netting.
+{
+  const topups: TopupStatementInput[] = [
+    { id: "u1", amount_sar: 1000, topup_date: "2026-06-01", note: null, reference: null },
+  ];
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", rate_sar: 400 },
+  ];
+  const returns: BalanceReturnLite[] = [{ id: "r1", amount_sar: 540, returned_on: "2026-06-10" }];
+
+  // 1000 - 460 = 540 standing, refunded in full -> exactly nil.
+  check("return: fully refunded prepaid balance nets to 0", derivedBalanceItems(topups, trips, [], undefined, returns), 0);
+  // THE REGRESSION GUARD. Same inputs, returns omitted = the pre-0142 answer.
+  check("return: omitting returns reproduces the old un-netted figure", derivedBalanceItems(topups, trips), 540);
+
+  // asOfDate must gate a refund the same way it gates a top-up: a refund that
+  // has not happened yet cannot have reduced anything.
+  check("return: dated AFTER asOfDate is not yet netted", derivedBalanceItems(topups, trips, [], "2026-06-09", returns), 540);
+  check("return: dated ON asOfDate is netted (inclusive, same as topup_date)", derivedBalanceItems(topups, trips, [], "2026-06-10", returns), 0);
+
+  // Partial refund — the pool keeps the remainder, it is not all-or-nothing.
+  check(
+    "return: partial refund leaves the remainder spendable",
+    derivedBalanceItems(topups, trips, [], undefined, [{ id: "r1", amount_sar: 200, returned_on: "2026-06-10" }]),
+    340,
+  );
+
+  // A refund can push the pool NEGATIVE — nothing clamps it, deliberately, so
+  // the over-refund shows as owed-to-us instead of silently vanishing.
+  check(
+    "return: over-refund goes negative rather than clamping at 0",
+    derivedBalanceItems(topups, trips, [], undefined, [{ id: "r1", amount_sar: 600, returned_on: "2026-06-10" }]),
+    -60,
+  );
+}
+
+// --- Balance returns on the statement: a real, signed, balance-moving row ----
+// Unlike a settlement (which RECORDS and holds flat), a return MOVES the
+// running balance — that is the whole point of the rule.
+{
+  const topups: TopupStatementInput[] = [
+    { id: "u1", amount_sar: 1000, topup_date: "2026-06-01", note: null, reference: null },
+  ];
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", rate_sar: 400 },
+  ];
+  const returns: BalanceReturnLite[] = [{ id: "r1", amount_sar: 540, returned_on: "2026-06-05" }];
+  const stmt = buildStatementItems(topups, trips, [], undefined, [], returns);
+
+  check("return row: interleaved in date order", stmt.map((e) => e.kind), ["topup", "trip", "return"]);
+  check("return row: signed NEGATIVE (a debit, not a credit)", stmt[2].amount, -540);
+  check("return row: MOVES the running balance (unlike a settlement)", stmt.map((e) => e.runningBalance), [1000, 540, 0]);
+  check(
+    "return row: statement still closes on derivedBalanceItems",
+    stmt[stmt.length - 1].runningBalance,
+    derivedBalanceItems(topups, trips, [], undefined, returns),
+  );
+}
+
+// --- Balance-return same-day rank: after trips and charges, before settlement -
+{
+  const stmt = buildStatementItems(
+    [{ id: "u1", amount_sar: 500, topup_date: "2026-06-03", note: null, reference: null }],
+    [{ id: "t1", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", rate_sar: 100 }],
+    [{ id: "ch1", charge_date: "2026-06-03", amount_sar: 100, label: "Fee" }],
+    undefined,
+    [{ id: "inv1", date: "2026-06-03", invoice_number: "026-000001", amount: 230 }],
+    [{ id: "r1", amount_sar: 50, returned_on: "2026-06-03" }],
+  );
+  check("return same-day: topup, trip, charge, return, settlement", stmt.map((e) => e.kind), [
+    "topup",
+    "trip",
+    "charge",
+    "return",
+    "settlement",
+  ]);
+  // 500 -> -115 (t1) -> -115 (ch1) -> -50 (refund) -> FLAT (settlement).
+  check("return same-day: running balances", stmt.map((e) => e.runningBalance), [500, 385, 270, 220, 220]);
 }
 
 console.log("");

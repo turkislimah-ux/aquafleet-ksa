@@ -13,7 +13,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type SpecialChargeInput } from "@/lib/invoice";
-import type { ConsumingTrip, TopupLite } from "@/lib/prepaid";
+import type { BalanceReturnLite, ConsumingTrip, TopupLite } from "@/lib/prepaid";
 import type { Invoice, CompanySettings, Customer, WaterType, PaymentMode } from "@/lib/db-types";
 import { generateInvoicePdf, PdfServiceNotConfiguredError } from "@/lib/pdf";
 import { buildInvoicePdfHtml, type PdfInvoiceData, type PdfIdentity } from "@/lib/invoicePdfTemplate";
@@ -120,6 +120,18 @@ async function assembleForCustomerPeriod(params: {
   if (topupErr) return { error: topupErr.message };
   const topups: TopupLite[] = topupRows ?? [];
 
+  // Refunds of prepaid credit (0142) — customer-wide, any date, same shape as
+  // the top-up fetch above because they are the same pool's other side. Fails
+  // LOUD like every other fetch here: falling back to [] would assemble an
+  // invoice whose pool still holds money the customer has already been handed
+  // back, and that invoice would show work as Covered that nothing covers.
+  const { data: returnRows, error: returnErr } = await supabase
+    .from("customer_balance_returns")
+    .select("id, amount_sar, returned_on")
+    .eq("customer_id", customerId);
+  if (returnErr) return { error: returnErr.message };
+  const returns: BalanceReturnLite[] = returnRows ?? [];
+
   // v3: customer-wide, non-void-invoice charges only — see header note.
   // Two-step (no nested-join precedent elsewhere in this codebase, kept
   // consistent): fetch this customer's non-void invoice ids, then every
@@ -180,6 +192,7 @@ async function assembleForCustomerPeriod(params: {
     periodEnd,
     trips,
     topups,
+    returns,
     specialCharges,
     sellerSnapshot: seller ?? null,
     buyerSnapshot: {

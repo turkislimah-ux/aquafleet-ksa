@@ -59,7 +59,7 @@ import {
 } from "@/lib/db-types";
 import DeliveriesReportBand, { buildDeliveriesReport } from "./DeliveriesReportBand";
 import { computeAmountPayable } from "./amountPayable";
-import type { TopupRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
 
 // Chart palette — emerald for money (consistent with the report), slate/amber for
 // the rest. Hex (not Tailwind tokens) so the SVG fills survive print.
@@ -140,6 +140,7 @@ export default function BreakdownReport({
   drivers,
   stations,
   topups,
+  balanceReturns,
   specialCharges,
   paidInvoices,
 }: {
@@ -157,6 +158,7 @@ export default function BreakdownReport({
   // — this report adds no query of its own, and deliberately does NOT read
   // v_customer_amount_payable (0139): see ./amountPayable's header.
   topups: TopupRow[];
+  balanceReturns: BalanceReturnRow[];
   specialCharges: SpecialChargeRow[];
   paidInvoices: PaidInvoiceRow[];
 }) {
@@ -229,6 +231,12 @@ export default function BreakdownReport({
     () => (customerId ? topups.filter((t) => t.customer_id === customerId) : []),
     [topups, customerId],
   );
+  // Refunds of prepaid credit (0142) — a DEBIT on the pool, so Amount Payable
+  // must see them or this report would still count money already handed back.
+  const customerReturns = useMemo(
+    () => (customerId ? balanceReturns.filter((r) => r.customer_id === customerId) : []),
+    [balanceReturns, customerId],
+  );
 
   // AMOUNT PAYABLE — DELIBERATELY NOT MONTH-SLICED. Every other figure in the
   // Financial section is a slice of selMonth; this one is a running total as of
@@ -249,8 +257,9 @@ export default function BreakdownReport({
         trips: projectTrips,
         charges: customerCharges,
         topups: customerTopups,
+        returns: customerReturns,
       }),
-    [project, rate, projectTrips, customerCharges, customerTopups],
+    [project, rate, projectTrips, customerCharges, customerTopups, customerReturns],
   );
 
   // payment_date is a plain date (user-entered); paid_at is a full timestamp

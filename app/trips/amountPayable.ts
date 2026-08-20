@@ -27,7 +27,13 @@
 // "fix" the mismatch by slicing the inputs, because a month-sliced payable is a
 // different number than the one the Finance tab's column renders.
 
-import { derivedBalanceItems, type ConsumingTrip, type ConsumingCharge, type TopupStatementInput } from "@/lib/prepaid";
+import {
+  derivedBalanceItems,
+  type BalanceReturnLite,
+  type ConsumingTrip,
+  type ConsumingCharge,
+  type TopupStatementInput,
+} from "@/lib/prepaid";
 import type { PaymentMode, WaterType } from "@/lib/db-types";
 
 // Structural inputs — deliberately WIDER than either caller's own row type so
@@ -105,13 +111,14 @@ export function toConsumingCharge(ch: PayableCharge): ConsumingCharge {
  * thing migration 0137 exists to prevent. Renderers show that as an em dash.
  *
  * `prepaidBalance` is the caller's ALREADY-COMPUTED running balance
- * (`derivedBalanceItems(topups, allConsuming, allCharges)`) when it happens to
- * have one, purely so the Finance tab does not compute the identical figure
- * twice per row — it drives that tab's "Total running balance" KPI and
- * over-balance banner as well. Pass null and the prepaid arm computes it here
- * from `topups`/`trips`/`charges` instead. BOTH PATHS ARE THE SAME CALL with
- * the same inputs; this is a reuse hatch, not a second formula, and a caller
- * that passes a DIFFERENT number here is misusing it.
+ * (`derivedBalanceItems(topups, allConsuming, allCharges, undefined, returns)`)
+ * when it happens to have one, purely so the Finance tab does not compute the
+ * identical figure twice per row — it drives that tab's "Total running balance"
+ * KPI and over-balance banner as well. Pass null and the prepaid arm computes it
+ * here from `topups`/`trips`/`charges`/`returns` instead. BOTH PATHS ARE THE
+ * SAME CALL with the same inputs; this is a reuse hatch, not a second formula,
+ * and a caller that passes a DIFFERENT number here is misusing it — including a
+ * caller that hands over a balance computed WITHOUT its refunds.
  */
 export function computeAmountPayable(args: {
   mode: PaymentMode | null;
@@ -120,22 +127,32 @@ export function computeAmountPayable(args: {
   trips: PayableTrip[];
   charges: PayableCharge[];
   topups: TopupStatementInput[];
+  // Recorded refunds of prepaid credit (0142). Defaulted so a caller with none
+  // reads unchanged; a caller that HAS them and omits them would compute a
+  // payable that still counts money already handed back.
+  returns?: BalanceReturnLite[];
   prepaidBalance?: number | null;
 }): number | null {
-  const { mode, hasProject, projectRate, trips, charges, topups } = args;
+  const { mode, hasProject, projectRate, trips, charges, topups, returns = [] } = args;
   if (!hasProject) return null;
 
   if (mode === "prepaid") {
     // PREPAID — the answer IS the running balance: top-ups minus the
     // VAT-inclusive consumption of every delivered trip and every non-void
-    // charge, so the part their pool does not cover is exactly its negative
-    // side. Charges from draft/review/confirmed invoices are in there by
-    // construction (page.tsx excludes only void).
+    // charge, LESS anything already refunded, so the part their pool does not
+    // cover is exactly its negative side. Charges from draft/review/confirmed
+    // invoices are in there by construction (page.tsx excludes only void).
+    //
+    // Refunds net here for the same reason they net in the engine (0142): once
+    // the money has physically gone back, treating it as still payable would
+    // say we owe it twice.
     if (args.prepaidBalance != null) return args.prepaidBalance;
     return derivedBalanceItems(
       topups,
       trips.map((t) => toConsumingTrip(t, projectRate)),
       charges.map(toConsumingCharge),
+      undefined,
+      returns,
     );
   }
 
@@ -150,6 +167,12 @@ export function computeAmountPayable(args: {
     // consumption of exactly this slice. It reuses consumingItems()'s
     // delivered-only filter and per-item rounding rather than restating either —
     // there is no second summation of money anywhere in this file.
+    //
+    // NO RETURNS TERM, and that is not an omission. A balance return refunds
+    // PREPAID CREDIT, and return_customer_balance can only fire when
+    // amount_payable_sar > 0, which the line below shows is impossible here:
+    // postpaid has no pool, so its payable is <= 0 by construction. A postpaid
+    // customer therefore has no refunds to net.
     return derivedBalanceItems(
       [],
       trips.filter((t) => !t.invoiceLocked).map((t) => toConsumingTrip(t, projectRate)),

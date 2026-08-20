@@ -25,10 +25,18 @@ import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { currentMonthKey, formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import { PAYMENT_MODE_LABELS, type PaymentMode } from "@/lib/db-types";
-import { derivedBalanceItems, round2, VAT_RATE, type ConsumingTrip, type ConsumingCharge, type TopupStatementInput } from "@/lib/prepaid";
+import {
+  derivedBalanceItems,
+  round2,
+  VAT_RATE,
+  type BalanceReturnLite,
+  type ConsumingTrip,
+  type ConsumingCharge,
+  type TopupStatementInput,
+} from "@/lib/prepaid";
 import { computeAmountPayable, toConsumingTrip, toConsumingCharge } from "./amountPayable";
 import type { WaterType } from "@/lib/db-types";
-import type { SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
 import AddBalanceModal, { type AddBalanceCustomerOption } from "./AddBalanceModal";
 import StatementModal, { type TripMeta } from "./StatementModal";
 import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
@@ -102,6 +110,10 @@ export type FinanceTabProps = {
   projects: ProjectLite[];
   trips: TripLite[];
   topups: TopupRow[];
+  // Recorded refunds of prepaid credit (0139), a DEBIT on the pool since 0142.
+  // Every balance derived below nets them; see lib/prepaid.ts's BALANCE RETURNS
+  // note for why a refund is a debit and not a negative top-up.
+  balanceReturns: BalanceReturnRow[];
   specialCharges: SpecialChargeRow[];
   // Statement rebuild (Batch 3) — paid invoices, customer-tagged, feeding the
   // postpaid statement's Payment rows. See page.tsx's PaidInvoiceRow comment.
@@ -110,7 +122,15 @@ export type FinanceTabProps = {
 
 type ModeFilter = "all" | "prepaid" | "postpaid";
 
-export default function FinanceTab({ customers, projects, trips, topups, specialCharges, paidInvoices }: FinanceTabProps) {
+export default function FinanceTab({
+  customers,
+  projects,
+  trips,
+  topups,
+  balanceReturns,
+  specialCharges,
+  paidInvoices,
+}: FinanceTabProps) {
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
   const [topupTarget, setTopupTarget] = useState<AddBalanceCustomerOption | null | "global">(null);
   const [statementFor, setStatementFor] = useState<{ customerId: string; customerName: string } | null>(null);
@@ -168,6 +188,14 @@ export default function FinanceTab({ customers, projects, trips, topups, special
     return m;
   }, [topups]);
 
+  const returnsByCustomer = useMemo(() => {
+    const m = new Map<string, BalanceReturnRow[]>();
+    for (const r of balanceReturns) {
+      (m.get(r.customer_id) ?? m.set(r.customer_id, []).get(r.customer_id)!).push(r);
+    }
+    return m;
+  }, [balanceReturns]);
+
   const chargesByCustomer = useMemo(() => {
     const m = new Map<string, SpecialChargeRow[]>();
     for (const c of specialCharges) {
@@ -222,6 +250,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
       let consuming: ConsumingTrip[] = [];
       let customerTopups: TopupStatementInput[] = [];
       let customerCharges: ConsumingCharge[] = [];
+      let customerReturns: BalanceReturnLite[] = [];
       // consuming is built for BOTH prepaid and postpaid — prepaid needs it
       // for derivedBalanceItems/buildStatementItems; postpaid needs it for
       // the itemized-trips statement view (no balance, no top-ups involved).
@@ -240,7 +269,16 @@ export default function FinanceTab({ customers, projects, trips, topups, special
         // v3: every non-void charge consumes balance too (void charges are
         // already excluded upstream in page.tsx).
         customerCharges = (chargesByCustomer.get(c.id) ?? []).map(toConsumingCharge);
-        balance = derivedBalanceItems(customerTopups, consuming, customerCharges);
+        // Refunds already paid back (0142). A DEBIT, so it nets out of BOTH
+        // balances below — money that has left the business is not credit this
+        // customer can spend, and Running Balance is the figure every downstream
+        // alert, KPI and invoice ledger reads.
+        customerReturns = (returnsByCustomer.get(c.id) ?? []).map((r) => ({
+          id: r.id,
+          amount_sar: r.amount_sar,
+          returned_on: r.returned_on,
+        }));
+        balance = derivedBalanceItems(customerTopups, consuming, customerCharges, undefined, customerReturns);
 
         // Settled balance: same engine call, paid-only slice. `invoiceLocked`
         // (page.tsx) already means "this trip's invoice is status='paid'";
@@ -251,7 +289,16 @@ export default function FinanceTab({ customers, projects, trips, topups, special
         const customerChargesPaidOnly: ConsumingCharge[] = (chargesByCustomer.get(c.id) ?? [])
           .filter((ch) => ch.paid)
           .map(toConsumingCharge);
-        settledBalance = derivedBalanceItems(customerTopups, consumingPaidOnly, customerChargesPaidOnly);
+        // Returns net here too: a refund is cash out of the pool whether or not
+        // the work it once backed has been invoiced, so leaving it out would let
+        // Settled Balance keep reporting money the customer no longer holds.
+        settledBalance = derivedBalanceItems(
+          customerTopups,
+          consumingPaidOnly,
+          customerChargesPaidOnly,
+          undefined,
+          customerReturns,
+        );
       }
       // Paid invoices for this customer — read in BOTH modes now. Postpaid
       // renders them as Payment rows; prepaid renders them as record-only
@@ -293,6 +340,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
         trips: project ? (tripsByProject.get(project.id) ?? []) : [],
         charges: chargesByCustomer.get(c.id) ?? [],
         topups: customerTopups,
+        returns: customerReturns,
         prepaidBalance: balance,
       });
 
@@ -304,6 +352,7 @@ export default function FinanceTab({ customers, projects, trips, topups, special
         settledBalance,
         consuming,
         customerTopups,
+        customerReturns,
         customerCharges,
         customerPaidInvoices,
         unsettledTripsCount,
@@ -311,7 +360,15 @@ export default function FinanceTab({ customers, projects, trips, topups, special
         amountPayable,
       };
     });
-  }, [customers, projectByCustomer, tripsByProject, topupsByCustomer, chargesByCustomer, paidInvoicesByCustomer]);
+  }, [
+    customers,
+    projectByCustomer,
+    tripsByProject,
+    topupsByCustomer,
+    returnsByCustomer,
+    chargesByCustomer,
+    paidInvoicesByCustomer,
+  ]);
 
   const filteredRows = useMemo(() => {
     if (modeFilter === "all") return rows;
@@ -547,6 +604,11 @@ export default function FinanceTab({ customers, projects, trips, topups, special
         topups={activeStatementRow?.customerTopups ?? []}
         trips={activeStatementRow?.consuming ?? []}
         charges={activeStatementRow?.customerCharges ?? []}
+        // Refunds of prepaid credit (0142). The statement's closing running
+        // balance must equal derivedBalanceItems() over the same inputs, and
+        // that call now nets returns — so omitting them here would make the
+        // statement close on a figure the Balance column contradicts.
+        returns={activeStatementRow?.customerReturns ?? []}
         projectWaterType={activeStatementRow?.project?.water_type ?? null}
         projectInitials={activeStatementRow?.project?.initials ?? null}
         projectName={activeStatementRow?.project?.name ?? null}

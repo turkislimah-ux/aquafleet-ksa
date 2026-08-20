@@ -71,6 +71,7 @@ import {
   buildStatementItems,
   consumingItems,
   round2,
+  type BalanceReturnLite,
   type ConsumedItem,
   type ConsumingTrip,
   type ConsumingCharge,
@@ -100,6 +101,15 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 // colour, so font-medium survives print deliberately.
 const SETTLEMENT_ROW_CLS = "statement-settlement-row bg-emerald-500/[0.07]";
 const SETTLEMENT_INK_CLS = "statement-settlement-ink text-emerald-700 dark:text-emerald-400 font-medium";
+
+// Balance-return ink (0142). A refund is money LEAVING the pool, so it reads
+// as a debit like a trip or a charge — the distinction it needs is WHY, not
+// whether it subtracts, so only the Type label is coloured and the row itself
+// stays untinted. It reuses the settlement row's print hook deliberately: the
+// same @media print rule in app/globals.css that strips the settlement's green
+// ink also strips this, so a printed statement renders it in plain ink instead
+// of amber-on-paper. No new CSS.
+const RETURN_INK_CLS = "statement-settlement-ink text-amber-700 dark:text-amber-400 font-medium";
 
 // Statement rebuild (Batch 3) — per-trip display metadata (truck + paid-
 // lock), keyed by trip id. Built once in FinanceTab from the FULL trips
@@ -149,6 +159,7 @@ export default function StatementModal({
   topups,
   trips,
   charges,
+  returns,
   projectWaterType,
   projectInitials,
   projectName,
@@ -163,6 +174,11 @@ export default function StatementModal({
   trips: ConsumingTrip[];
   // v3 — prepaid only. Always [] for postpaid (no coverage/balance concept).
   charges: ConsumingCharge[];
+  // Recorded refunds of prepaid credit (0142) — prepaid only, and defaulted so
+  // the postpaid caller and any future one read unchanged. These are DEBITS in
+  // the engine, so the closing running balance below only agrees with the
+  // Finance tab's Balance column while they are threaded through.
+  returns?: BalanceReturnLite[];
   // Display-only fallback (Finance polish batch C) — project's CURRENT
   // water_type, used when an entry/trip's own water_type is null (pre-
   // water_type-field data). Never mutates any stored record.
@@ -227,7 +243,8 @@ export default function StatementModal({
       : [];
   // Full (unfiltered) sequence — running balance must reflect true
   // cumulative history even when the visible rows are period-filtered.
-  const allEntries = mode === "prepaid" ? buildStatementItems(topups, trips, charges, undefined, settlements) : [];
+  const allEntries =
+    mode === "prepaid" ? buildStatementItems(topups, trips, charges, undefined, settlements, returns ?? []) : [];
   const entries = allEntries.filter((e) => inPeriod(e.date));
   const balance = allEntries.length > 0 ? allEntries[allEntries.length - 1].runningBalance : 0;
   // Pre-VAT/VAT breakdown for trip+charge debit rows — a second, already-
@@ -369,6 +386,12 @@ export default function StatementModal({
                             <span className="text-emerald-600 dark:text-emerald-400 font-medium">Add Balance</span>
                           ) : e.kind === "settlement" ? (
                             <span className={SETTLEMENT_INK_CLS}>Invoice payable</span>
+                          ) : e.kind === "return" ? (
+                            // Says WHY the balance dropped. Without this label
+                            // the row would fall through to the water-type
+                            // branch below and a refund would be presented as
+                            // a delivery.
+                            <span className={RETURN_INK_CLS}>Balance returned</span>
                           ) : e.kind === "charge" ? (
                             <span className="muted">Special charge</span>
                           ) : (
@@ -404,6 +427,14 @@ export default function StatementModal({
                             // Neither a credit nor a debit — no sign, no VAT
                             // split. The document's own total, for the record.
                             <span className={SETTLEMENT_INK_CLS}>{formatSar(e.amount)}</span>
+                          ) : e.kind === "return" ? (
+                            // A real debit — signed, and the running balance
+                            // to the right moves with it. NO VAT SPLIT: a
+                            // refund of credit is a cash movement, not a
+                            // taxable supply (lib/prepaid.ts's returns note),
+                            // so the "+ VAT" sub-line the fallback branch
+                            // renders would be inventing a tax line here.
+                            <span className={RETURN_INK_CLS}>−{formatSar(Math.abs(e.amount))}</span>
                           ) : (
                             <span className="flex flex-col items-end">
                               <span className="tabular-nums font-medium">−{formatSar(Math.abs(e.amount))}</span>

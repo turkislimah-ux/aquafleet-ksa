@@ -65,6 +65,61 @@ export type TopupLite = {
 
 export type TopupStatementInput = TopupLite & { note?: string | null; reference?: string | null };
 
+// ---------------------------------------------------------------------------
+// BALANCE RETURNS — a refund of prepaid credit (customer_balance_returns,
+// migration 0139) is a DEBIT of the same class as consumption (migration 0142).
+//
+// WHY THE RULE CHANGED. 0139 recorded a return as a MARK and deliberately left
+// balance_sar alone: "recording is not deducting". That held only because a
+// returned-balance customer was always archived, and an archived customer
+// cannot create new work — the untouched figure was inert. It is not inert
+// once such a customer can be active again: every balance/coverage path here
+// read top-ups raw, so money that had physically been paid back still read as
+// spendable credit and could cover a second set of trips. Turki's ruling: a
+// recorded return REDUCES spendable prepaid credit. This module now nets it.
+//
+// NOT A NEGATIVE TOP-UP, and never modelled as one. A top-up is money arriving;
+// a return is money leaving. Folding a return into the credits side would make
+// `topups_sar` lie about what was ever paid in, and the statement could no
+// longer show the refund as its own event.
+//
+// NOT PART OF consumingItems(). A return is not a billable supply — it must
+// never surface as an invoice line, and lib/invoice.ts maps
+// splitCoveredUnpaidItems()'s covered/unpaid entries straight into lines. So
+// returns are threaded as a SEPARATE debit input to the three balance-bearing
+// functions rather than as a fourth ConsumedItem kind.
+//
+// NO VAT. Consumption is grossed up by VAT_RATE because it mirrors what the
+// invoice will bill. A refund is a cash movement, not a taxable supply: the
+// amount returned is exactly the amount that leaves the pool.
+// ---------------------------------------------------------------------------
+export type BalanceReturnLite = {
+  id: string;
+  amount_sar: number;
+  // Caller-resolved calendar date of the refund (customer_balance_returns
+  // .returned_on, NOT NULL). Same asOfDate-filter convention as topup_date.
+  returned_on: string;
+};
+
+// THE ONE returns summation. derivedBalanceItems, splitCoveredUnpaidItems and
+// buildStatementItems all route through this (buildStatementItems via the rows
+// it builds, whose amounts sum to exactly this), so no two of them can total
+// returns differently — the same single-source-of-truth discipline
+// consumingItems() enforces for the consumption side.
+//
+// EXPORTED for exactly one outside caller: lib/invoice.ts recomputes the
+// starting pool locally (`startingPool`, to walk the covered ledger's entering
+// balance) instead of reading it off the split, so it has to net returns with
+// the SAME filter and the SAME rounding this uses. Importing the function is
+// how that stays true; restating the reduce over there is how it drifts.
+export function returnedTotal(returns: BalanceReturnLite[], asOfDate?: string): number {
+  return round2(
+    returns
+      .filter((r) => asOfDate == null || r.returned_on <= asOfDate)
+      .reduce((s, r) => s + r.amount_sar, 0),
+  );
+}
+
 // Internal only — trip-side half of consumingItems()'s combined queue.
 // NOT exported: v2's standalone consumingTrips() export was retired in the
 // v3 cutover (see file header). This helper survives only as a private
@@ -114,8 +169,11 @@ function deliveredTripsSorted(trips: ConsumingTrip[], asOfDate?: string): Delive
 //   customer's balance bears the VAT, matching what the invoice will
 //   eventually bill for that item.
 //
-//   balance = sum(top-ups) - sum(VAT-inclusive consumption). Can go negative
-//   (over-balance), same as v2.
+//   balance = sum(top-ups) - sum(VAT-inclusive consumption) - sum(balance
+//   returns). Can go negative (over-balance), same as v2. The returns term
+//   arrived with 0142 — see the BALANCE RETURNS note above TopupLite for why a
+//   refund is a debit and why it is the one debit that does NOT flow through
+//   consumingItems().
 //
 //   IMPORTANT — this VAT-inclusive multiplier is a CONSUMPTION/bookkeeping
 //   concern only, computed per item. It is NOT the same computation as
@@ -158,6 +216,12 @@ function deliveredTripsSorted(trips: ConsumingTrip[], asOfDate?: string): Delive
 // can never disagree on which items count, their consumedAmount, or their
 // order. Never re-implement item selection/ordering/VAT-inclusive math
 // anywhere else.
+//
+// BALANCE RETURNS are the ONE debit outside this queue, because they are the
+// one debit that is not a billable supply (see the note above TopupLite). They
+// get the same treatment one level up: returnedTotal() is their single
+// summation, and all three functions below route through it, so they cannot
+// disagree about refunds either.
 // ============================================================================
 
 export type ConsumingCharge = {
@@ -251,21 +315,34 @@ export function consumingItems(
 
 /**
  * v3 derived balance = sum(top-ups up to asOfDate) - sum(VAT-inclusive
- * consumption up to asOfDate, via consumingItems). Pure; recomputed fresh
- * every call. `charges` defaults to `[]` so a trips-only caller still gets
- * correct VAT-inclusive trip consumption without needing to pass charges.
+ * consumption up to asOfDate, via consumingItems) - sum(balance returns up to
+ * asOfDate). Pure; recomputed fresh every call. `charges` defaults to `[]` so a
+ * trips-only caller still gets correct VAT-inclusive trip consumption without
+ * needing to pass charges.
+ *
+ * `returns` (0142) defaults to `[]` — a caller with no refunds to report gets
+ * byte-identical numbers to before. It is the LAST parameter for that reason:
+ * every existing positional call still compiles and still means the same thing.
+ * A caller that CAN have refunds must pass them; see the BALANCE RETURNS note
+ * above for why a refund is a debit rather than a negative credit.
+ *
+ * This is the ONE expression of a customer's spendable prepaid credit on the
+ * app side. Its SQL counterpart is v_customer_prepaid_balance.balance_sar,
+ * which nets returns the same way (migration 0142) so the two cannot disagree.
  */
 export function derivedBalanceItems(
   topups: TopupLite[],
   trips: ConsumingTrip[],
   charges: ConsumingCharge[] = [],
   asOfDate?: string,
+  returns: BalanceReturnLite[] = [],
 ): number {
   const credits = round2(
     topups.filter((t) => asOfDate == null || t.topup_date <= asOfDate).reduce((s, t) => s + t.amount_sar, 0),
   );
   const debits = round2(consumingItems(trips, charges, asOfDate).reduce((s, e) => s + e.consumedAmount, 0));
-  return round2(credits - debits);
+  const returned = returnedTotal(returns, asOfDate);
+  return round2(credits - debits - returned);
 }
 
 /**
@@ -284,13 +361,15 @@ export type SettlementStatementInput = {
 };
 
 export type StatementItemEntry = {
-  kind: "topup" | "trip" | "charge" | "settlement";
+  kind: "topup" | "trip" | "charge" | "settlement" | "return";
   id: string;
   date: string;
   // Positive for a top-up credit, NEGATIVE VAT-INCLUSIVE consumedAmount for
   // a trip/charge debit — the statement shows the true draw on balance, not
   // the pre-VAT item amount. A "settlement" row carries the paid invoice's
-  // positive grand total for DISPLAY ONLY and never moves runningBalance.
+  // positive grand total for DISPLAY ONLY and never moves runningBalance. A
+  // "return" row is a NEGATIVE plain amount (no VAT gross-up — a refund is a
+  // cash movement, not a taxable supply) and DOES move runningBalance.
   amount: number;
   runningBalance: number;
   note?: string | null;
@@ -299,10 +378,29 @@ export type StatementItemEntry = {
   water_type?: "potable" | "non_potable" | null; // trip debits only
 };
 
+// SAME-DAY ORDER, as one explicit rank rather than a chain of pairwise tests.
+//
+//   0 topup       money in, first — a credit always precedes the debits it funded
+//   1 trip        consumption, trips before charges (matches
+//   2 charge       compareConsumedItems' own same-day tiebreak exactly)
+//   3 return       the refund of whatever survived the day's consumption
+//   4 settlement  record-only, always last so it can never split a credit/debit pair
+//
+// The previous form asked `a.kind === "topup" ? -1 : 1`, which answered 1 in
+// BOTH directions for a same-day trip-vs-charge pair — an inconsistent
+// comparator, so that ordering was whatever the sort implementation happened to
+// do. A rank cannot be inconsistent, and it puts the statement in step with
+// compareConsumedItems instead of merely near it. Credit-before-debit and
+// settlement-last are unchanged; no figure moves, only the order of two rows
+// that share a date.
+function sameDayRank(kind: StatementItemEntry["kind"]): number {
+  return kind === "topup" ? 0 : kind === "trip" ? 1 : kind === "charge" ? 2 : kind === "return" ? 3 : 4;
+}
+
 /**
  * v3 bank-statement-style ledger: every top-up credit + every trip/charge
- * VAT-inclusive debit, chronological (date asc; same-day tie: credit before
- * debit, then consumingItems'/compareConsumedItems' own tiebreak, then id),
+ * VAT-inclusive debit + every balance return, chronological (date asc;
+ * same-day tie: sameDayRank above, then id),
  * with a running balance. The final entry's runningBalance always equals
  * derivedBalanceItems(...) for the same inputs — both derive from the same
  * consumingItems() core.
@@ -314,6 +412,12 @@ export type StatementItemEntry = {
  * settlement sorts LAST within its own date so it can never split a same-day
  * credit/debit pair, and the credit-before-debit tiebreak below is unchanged
  * for every non-settlement pair.
+ *
+ * BALANCE RETURNS (0142) are REAL DEBITS, unlike settlements: the money left
+ * the business, so the row carries a negative amount and moves the running
+ * balance. They must appear here or the statement's closing figure would stop
+ * matching derivedBalanceItems — the invariant above is the whole reason this
+ * function cannot opt out of the netting rule.
  */
 export function buildStatementItems(
   topups: TopupStatementInput[],
@@ -321,6 +425,7 @@ export function buildStatementItems(
   charges: ConsumingCharge[] = [],
   asOfDate?: string,
   settlements: SettlementStatementInput[] = [],
+  returns: BalanceReturnLite[] = [],
 ): StatementItemEntry[] {
   const credits = topups
     .filter((t) => asOfDate == null || t.topup_date <= asOfDate)
@@ -354,14 +459,22 @@ export function buildStatementItems(
       reference: s.invoice_number,
     }));
 
-  const merged = [...credits, ...debits, ...settlementRows].sort((a, b) => {
+  const returnRows = returns
+    .filter((r) => asOfDate == null || r.returned_on <= asOfDate)
+    .map((r) => ({
+      kind: "return" as const,
+      id: r.id,
+      date: r.returned_on,
+      // NEGATIVE, and NOT grossed up by VAT_RATE — a refund is cash leaving,
+      // not a supply. See the BALANCE RETURNS note at the top of this file.
+      amount: round2(-r.amount_sar),
+      note: null as string | null,
+      reference: null as string | null,
+    }));
+
+  const merged = [...credits, ...debits, ...settlementRows, ...returnRows].sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-    // Record-only rows sort last within their own day, so a settlement can
-    // never land between a same-day credit and the debit it funded.
-    const aSettlement = a.kind === "settlement";
-    const bSettlement = b.kind === "settlement";
-    if (aSettlement !== bSettlement) return aSettlement ? 1 : -1;
-    if (a.kind !== b.kind) return a.kind === "topup" ? -1 : 1; // same-day: credit before debit
+    if (a.kind !== b.kind) return sameDayRank(a.kind) - sameDayRank(b.kind);
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
 
@@ -379,9 +492,19 @@ export type CoveredUnpaidItemsResult = {
   unpaid: ConsumedItem[];
   coveredTotal: number; // VAT-inclusive sum (consumedAmount)
   unpaidTotal: number; // VAT-inclusive sum (consumedAmount)
-  // Leftover pool after only-covered items subtracted. Always >= 0 — never
-  // driven negative (unlike derivedBalanceItems, which subtracts every
-  // consumed item unconditionally and can go negative to show over-balance).
+  // Leftover pool after balance returns and only-covered items are subtracted.
+  // Never driven negative BY CONSUMPTION (unlike derivedBalanceItems, which
+  // subtracts every consumed item unconditionally and can go negative to show
+  // over-balance): an item that does not fit is left uncovered rather than
+  // overdrawing.
+  //
+  // It CAN start below zero if returns exceed top-ups, because returns are
+  // netted off the pool up front rather than walked item by item. That does not
+  // arise from the app: return_customer_balance refunds exactly the balance
+  // then standing, so top-ups - returns lands on the consumption recorded at
+  // refund time, i.e. >= 0. It is left unclamped deliberately — clamping would
+  // buy a tidier floor at the cost of the reconciliation invariant below, which
+  // is the property the harness actually checks.
   remainingBalance: number;
 };
 
@@ -393,19 +516,31 @@ export type CoveredUnpaidItemsResult = {
  * it in queue order, goes Unpaid and rolls forward — identical rule to v2's
  * whole-trip coverage, just walking the mixed queue instead of trips only.
  *
+ * BALANCE RETURNS (0142) come off the POOL, not the queue. A refund is not a
+ * billable item — lib/invoice.ts maps this function's covered/unpaid entries
+ * straight into invoice lines, so a return appearing among them would be
+ * billed to the customer. Netting it into the starting pool instead produces
+ * the correct split with no new item kind: the pool left after a refund is
+ * exactly the consumption it had already paid for, so work up to the refund
+ * stays Covered and everything after it falls Unpaid — which is precisely the
+ * position a refunded customer is in.
+ *
  * Invariant (enforced by the harness on every case): coveredTotal +
  * unpaidTotal === sum of every consumingItems() consumedAmount, and
  * remainingBalance − unpaidTotal === derivedBalanceItems(topups, trips,
- * charges, asOfDate) for the same inputs.
+ * charges, asOfDate, returns) for the same inputs. Netting returns into the
+ * pool preserves the second identity exactly — both sides lose the same term.
  */
 export function splitCoveredUnpaidItems(
   topups: TopupLite[],
   trips: ConsumingTrip[],
   charges: ConsumingCharge[] = [],
   asOfDate?: string,
+  returns: BalanceReturnLite[] = [],
 ): CoveredUnpaidItemsResult {
   let pool = round2(
-    topups.filter((t) => asOfDate == null || t.topup_date <= asOfDate).reduce((s, t) => s + t.amount_sar, 0),
+    round2(topups.filter((t) => asOfDate == null || t.topup_date <= asOfDate).reduce((s, t) => s + t.amount_sar, 0)) -
+      returnedTotal(returns, asOfDate),
   );
 
   const items = consumingItems(trips, charges, asOfDate);

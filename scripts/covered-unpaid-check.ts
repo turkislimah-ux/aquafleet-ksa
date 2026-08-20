@@ -19,6 +19,7 @@ import {
   splitCoveredUnpaidItems,
   consumingItems,
   derivedBalanceItems,
+  type BalanceReturnLite,
   type ConsumingTrip,
   type TopupLite,
   type ConsumingCharge,
@@ -45,8 +46,12 @@ function checkInvariant(
   trips: ConsumingTrip[],
   charges: ConsumingCharge[] = [],
   asOfDate?: string,
+  // Refunds of prepaid credit (0142). Threaded into BOTH calls below or
+  // invariant 2 would compare a netted split against an un-netted balance and
+  // fail for a reason that is the harness's fault, not the engine's.
+  returns: BalanceReturnLite[] = [],
 ) {
-  const r = splitCoveredUnpaidItems(topups, trips, charges, asOfDate);
+  const r = splitCoveredUnpaidItems(topups, trips, charges, asOfDate, returns);
   const allItemsTotal = Math.round(
     consumingItems(trips, charges, asOfDate).reduce((s, e) => s + e.consumedAmount, 0) * 100,
   ) / 100;
@@ -54,7 +59,7 @@ function checkInvariant(
   check(`${name} — invariant: coveredTotal + unpaidTotal = sum(all consumedAmount)`, sumTotals, allItemsTotal);
 
   const reconciled = Math.round((r.remainingBalance - r.unpaidTotal) * 100) / 100;
-  const balance = derivedBalanceItems(topups, trips, charges, asOfDate);
+  const balance = derivedBalanceItems(topups, trips, charges, asOfDate, returns);
   check(`${name} — invariant: remainingBalance - unpaidTotal = derivedBalanceItems`, reconciled, balance);
 
   const splitIds = [...r.covered.map((e) => e.id), ...r.unpaid.map((e) => e.id)].sort();
@@ -368,6 +373,59 @@ function checkInvariant(
     "interleaved: t1,ch1 covered (date order), ch2 unpaid, remainingBalance = 27.5",
     [r.covered.map((e) => e.id), r.unpaid.map((e) => e.id), r.remainingBalance],
     [["t1", "ch1"], ["ch2"], 27.5],
+  );
+}
+
+// --- Balance returns come off the POOL, moving the FIFO wall (0142) ----------
+// A refund shrinks the starting pool, so work that WAS covered can fall into
+// Unpaid. That is the correct reading, not a defect: the customer no longer
+// holds the money that was covering it. The invariants must survive it — both
+// sides of invariant 2 lose the same term, which is exactly why the refund
+// nets into the pool rather than being injected into the queue.
+{
+  const topups: TopupLite[] = [{ id: "u1", amount_sar: 1000, topup_date: "2026-06-01" }];
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", rate_sar: 400 }, // 460
+    { id: "t2", trip_date: "2026-06-04", delivered_at: "2026-06-04T08:00:00.000Z", rate_sar: 400 }, // 460
+  ];
+
+  // No refund: pool 1000 covers t1(460) + t2(460), 80 left.
+  const before = checkInvariant("refund — BEFORE", topups, trips);
+  check(
+    "refund before: both trips covered, remainingBalance = 80",
+    [before.covered.map((e) => e.id), before.unpaid.map((e) => e.id), before.remainingBalance],
+    [["t1", "t2"], [], 80],
+  );
+
+  // 300 refunded: pool 700 covers t1(460) only; t2 no longer fits.
+  const after = checkInvariant("refund — AFTER (300 returned)", topups, trips, [], undefined, [
+    { id: "r1", amount_sar: 300, returned_on: "2026-06-10" },
+  ]);
+  check(
+    "refund after: pool shrinks, t2 falls from covered to unpaid",
+    [after.covered.map((e) => e.id), after.unpaid.map((e) => e.id), after.remainingBalance],
+    [["t1"], ["t2"], 240],
+  );
+
+  // Refunding the ENTIRE pool leaves nothing covered — the position a fully
+  // refunded customer is actually in.
+  const emptied = checkInvariant("refund — full pool returned", topups, trips, [], undefined, [
+    { id: "r1", amount_sar: 1000, returned_on: "2026-06-10" },
+  ]);
+  check(
+    "refund full: nothing covered, everything unpaid, pool at 0",
+    [emptied.covered.map((e) => e.id), emptied.unpaid.map((e) => e.id), emptied.remainingBalance],
+    [[], ["t1", "t2"], 0],
+  );
+
+  // asOfDate gates a refund the same way it gates a top-up.
+  const notYet = checkInvariant("refund — dated after asOfDate", topups, trips, [], "2026-06-09", [
+    { id: "r1", amount_sar: 300, returned_on: "2026-06-10" },
+  ]);
+  check(
+    "refund not yet dated: pool untouched, both trips still covered",
+    [notYet.covered.map((e) => e.id), notYet.unpaid.map((e) => e.id), notYet.remainingBalance],
+    [["t1", "t2"], [], 80],
   );
 }
 

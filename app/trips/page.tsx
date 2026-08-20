@@ -54,6 +54,21 @@ export type TopupRow = {
   photo_path: string | null;
 };
 
+// customer_balance_returns row (0139), customer-tagged for the Finance tab.
+// Narrow on purpose — only what the money engine needs. The Archive surface
+// reads the richer set (method, reference, photo, note) off
+// v_customer_amount_payable; nothing on Trips renders those, and carrying a
+// field nothing renders is how two versions of one number start to drift.
+//
+// Since 0142 this is a DEBIT input to lib/prepaid.ts, not a display flag: a
+// refund that is not passed into the balance math reads as spendable credit.
+export type BalanceReturnRow = {
+  id: string;
+  customer_id: string;
+  amount_sar: number;
+  returned_on: string;
+};
+
 // v3 cutover — every special charge belonging to a NON-VOID invoice, across
 // the whole app (not just one invoice's own charges): every charge from a
 // draft/review/confirmed/paid invoice consumes prepaid balance the instant
@@ -107,7 +122,7 @@ export default async function TripsPage() {
   const [
     tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes,
     stationsRes, allStationsRes, leavePeriodsRes, terminatedDriversRes, topupsRes,
-    paidInvoicesRes, specialChargesRes,
+    paidInvoicesRes, specialChargesRes, balanceReturnsRes,
   ] =
     await Promise.all([
       supabase
@@ -203,6 +218,14 @@ export default async function TripsPage() {
       supabase
         .from("invoice_special_charges")
         .select("id, label, amount_sar, charge_date, created_at, invoice:invoices(customer_id, status)"),
+      // v3 Finance ledger source (3 of 3) — recorded refunds of prepaid credit
+      // (customer_balance_returns, 0139). Since 0142 a refund is a DEBIT on the
+      // pool, so every balance the Finance tab derives needs it; without it a
+      // refunded customer's money would read as spendable a second time. Small
+      // table — at most one row per customer, enforced by a unique index.
+      supabase
+        .from("customer_balance_returns")
+        .select("id, customer_id, amount_sar, returned_on"),
     ]);
 
   // Paid-invoice lock (Finance bug fix): a trip is LOCKED when its invoice_id
@@ -286,6 +309,7 @@ export default async function TripsPage() {
   }[];
   const drivers = (driversRes.data ?? []) as { id: string; name: string; status: DriverStatus; active: boolean }[];
   const topups = (topupsRes.data ?? []) as TopupRow[];
+  const balanceReturns = (balanceReturnsRes.data ?? []) as BalanceReturnRow[];
 
   // v3 — flatten the invoice-joined charge rows into customer-tagged,
   // void-excluded entries. `invoice` comes back as a single joined object
@@ -353,7 +377,12 @@ export default async function TripsPage() {
     // leaveLoadFailed above, and the Dashboard's "a failed read must never claim
     // an empty queue".
     paidInvoicesRes.error ||
-    specialChargesRes.error;
+    specialChargesRes.error ||
+    // Same rule as paidInvoicesRes above, and it bites harder here: falling back
+    // to [] would drop every refund from the balance math, so a refunded
+    // customer would silently render the money we already paid back as credit
+    // they can still spend. A read failure must surface, never degrade.
+    balanceReturnsRes.error;
 
   return (
     <TripsTabs
@@ -371,6 +400,7 @@ export default async function TripsPage() {
       leavePeriods={leavePeriods}
       leaveLoadFailed={leaveLoadFailed}
       topups={topups}
+      balanceReturns={balanceReturns}
       specialCharges={specialCharges}
       paidInvoices={paidInvoices}
     />

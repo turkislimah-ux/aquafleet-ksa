@@ -27,7 +27,13 @@ import {
 } from "@/lib/db-types";
 import { commissionForDelivery, commissionForNthTrip } from "@/lib/commission";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
-import { derivedBalanceItems, type ConsumingTrip, type ConsumingCharge, type TopupLite } from "@/lib/prepaid";
+import {
+  derivedBalanceItems,
+  type BalanceReturnLite,
+  type ConsumingTrip,
+  type ConsumingCharge,
+  type TopupLite,
+} from "@/lib/prepaid";
 
 export type ActionResult = { error: string | null };
 
@@ -815,10 +821,16 @@ async function fetchProjectBalance(
   customerId: string,
   ratePerTrip: number,
 ): Promise<number> {
-  const [{ data: tripRows }, { data: topupRows }, { data: invoiceRows }] = await Promise.all([
+  const [{ data: tripRows }, { data: topupRows }, { data: invoiceRows }, { data: returnRows }] = await Promise.all([
     supabase.from("trips").select("id, trip_date, delivered_at, rate_sar").eq("project_id", projectId),
     supabase.from("customer_topups").select("id, amount_sar, topup_date").eq("customer_id", customerId),
     supabase.from("invoices").select("id, status").eq("customer_id", customerId),
+    // Refunds of prepaid credit (0142) — a DEBIT, so this guard has to see
+    // them. The rule it feeds is "switching away from prepaid requires an
+    // exactly-zero balance"; a fully-refunded customer nets to exactly zero,
+    // and omitting this fetch would leave them reading as still holding the
+    // credit and block a switch that should now be allowed.
+    supabase.from("customer_balance_returns").select("id, amount_sar, returned_on").eq("customer_id", customerId),
   ]);
   const trips: ConsumingTrip[] = (tripRows ?? []).map((t) => ({
     id: t.id,
@@ -832,6 +844,7 @@ async function fetchProjectBalance(
     rate_sar: t.rate_sar ?? ratePerTrip,
   }));
   const topups: TopupLite[] = (topupRows ?? []) as TopupLite[];
+  const returns: BalanceReturnLite[] = (returnRows ?? []) as BalanceReturnLite[];
 
   const nonVoidInvoiceIds = (invoiceRows ?? []).filter((i) => i.status !== "void").map((i) => i.id);
   let charges: ConsumingCharge[] = [];
@@ -847,7 +860,7 @@ async function fetchProjectBalance(
     }));
   }
 
-  return derivedBalanceItems(topups, trips, charges);
+  return derivedBalanceItems(topups, trips, charges, undefined, returns);
 }
 
 // Finance C3 (0035) — proactive client-side check, called from ProjectModal
