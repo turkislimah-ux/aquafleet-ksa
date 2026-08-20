@@ -1,11 +1,34 @@
-# SESSION HANDOFF — 2026-08-20 (balance-return netting landed; archive block verified)
+# SESSION HANDOFF — 2026-08-20 (netting + customer restore landed; UI is next)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
 
-## 0. LATEST — UNIT 1 OF 3 IS DONE (2026-08-20, later in the day)
+## 0a. LATEST — UNIT 2 OF 3 IS DONE (2026-08-20)
+
+**Migration 0141 is APPLIED to the live DB and committed (`3d09a54`).** Customer
+restore exists. **The rules live in §7, not here.**
+
+- **Turki applied 0141 himself via MCP this session**, so it is recorded remotely
+  under the MCP auto-timestamp, NOT under the `0141_` filename. **The file on disk is
+  the authoritative artifact.** Do not re-apply it and do not "re-push" it to fix the
+  remote name.
+- Live-verified with rolled-back rehearsals before the commit: write-off reversal
+  returns TEST 111's debt to **−20,056** from live inputs with the row kept and
+  marked; a returned-balance customer restores with its money untouched; re-archive
+  after restore writes a fresh ACTIVE write-off. All 7 in-migration assertions passed
+  at apply, including the two that read `pg_get_functiondef` / `pg_get_viewdef` back
+  to prove the conflict target and both `reversed_at` predicates survived.
+- SQL only — one file, +1,132 lines. No TS changed. `tsc --noEmit` clean.
+- **0141 sits BELOW 0142 on purpose.** Drafted first, parked, landed second. Not a
+  numbering mistake — do not renumber either file.
+
+**NEXT — UNIT 3: the restore UI.** Nothing is built for it yet. `restore_customer_guarded`
+is live and grant-executable by `authenticated`, with no caller. Archive tab needs the
+entry point. Do NOT start without Turki saying so.
+
+## 0b. UNIT 1 OF 3 IS DONE (2026-08-20, earlier)
 
 **Migration 0142 is APPLIED to the live DB and the netting fix is committed
 (`1f11997`).** A recorded balance return is now a DEBIT against spendable prepaid
@@ -22,12 +45,9 @@ things stand.
   `tsc --noEmit` clean. `prepaid-check`, `covered-unpaid-check` and `invoice-check`
   all pass, with 16 new cases covering refunds.
 
-**NEXT UNIT — DO NOT START IT WITHOUT TURKI SAYING SO.**
-`supabase/migrations/0141_restore_customer_reverse_write_off.sql` is on disk,
-**UNTRACKED and UNAPPLIED** (55,823 bytes), plus the restore UI it needs. It was
-deliberately held out of this session and out of this commit. It is Unit 2. Note the
-number is BELOW 0142 — 0141 was drafted first and parked, so it is out of order on
-purpose, not a mistake to "fix" by renumbering.
+*(Written while 0141 was still held back. **Superseded by §0a** — 0141 is now applied
+and committed. Left in place rather than rewritten, because the sequencing is the
+point: the netting shipped on its own, without the restore work riding along.)*
 
 `CLAUDE.md.backup` is an untracked stray in the repo root. It is not ours to commit;
 delete it or leave it, but never stage it.

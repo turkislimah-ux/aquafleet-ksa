@@ -190,6 +190,22 @@ Current state lives in `.planning/HANDOFF.md` — read it at session start.
   `v_invoice_outstanding_live` inherit it through `balance_sar` — do not add a
   third expression. Before 0142 nothing subtracted a return: a refunded
   customer's credit stayed spendable after the money was gone.
+- **ARCHIVE IS NO LONGER A ONE-WAY DOOR (0141).** `restore_customer_guarded`
+  un-archives a customer AND its project in one transaction on one timestamp,
+  and reverses an active write-off by **marking** it (`reversed_at`,
+  `reversed_by`) and KEEPING the row — amount/reason/actor stay frozen. It
+  writes **no balance**: never delete a `customer_balance_returns` row and never
+  post a compensating negative top-up to "undo" an archive.
+  - **Write-off suppression is ACTIVE-only.** `v_customer_amount_payable` and
+    `v_invoice_outstanding_live` both carry `and w.reversed_at is null` **in the
+    JOIN condition**. In a WHERE clause it turns the LEFT JOIN inner and drops
+    every customer who never had a write-off.
+  - **The partial index and the conflict target are ONE change.**
+    `customer_write_offs` has a partial unique index on active rows (not a
+    table-wide `UNIQUE(customer_id)`), and `archive_project_guarded` uses
+    `on conflict (customer_id) where reversed_at is null`. Split them and you
+    get either 42P10 or — worse, silently — a re-archived debtor whose insert
+    collides with the old reversed row and writes nothing.
 - **Current work:** Fleet page cleanup batch (Trips/Finance items). See HANDOFF.md.
 - **Deferred:** effective-dated rates, Route Optimization, Predictive AI, IoT,
   drivers/staff table unification (v2).
