@@ -22,6 +22,7 @@ import {
   STAGE_TIMESTAMP,
   MAX_BATCH_TRIPS,
   WATER_TYPE_LABELS,
+  type CommissionMode,
   type TripStage,
   type WaterType,
 } from "@/lib/db-types";
@@ -292,7 +293,11 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
   // Only (re)price unpaid trips. Paid trips keep their frozen commission_sar.
   if (trip && trip.payout_id == null) {
     if (stage === "delivered") {
-      row.commission_sar = await priceDelivery(supabase, id, trip.driver_id, trip.project_id, trip.trip_date);
+      const priced = await priceDelivery(supabase, id, trip.driver_id, trip.project_id, trip.trip_date);
+      // FAILS CLOSED, like the rate freeze below. A delivery whose terms cannot
+      // be resolved must not complete at a guessed price — refuse the stage move.
+      if (priced.error) return { error: priced.error };
+      row.commission_sar = priced.commission;
     } else {
       // Leaving delivered (correction / re-route) → no base pay for a non-delivered trip.
       row.commission_sar = null;
@@ -548,24 +553,101 @@ export async function deleteTrip(id: string): Promise<ActionResult> {
   return { error: null };
 }
 
+// ---------------------------------------------------------------------------
+// THE COMMISSION TERMS A TRIP IS PRICED ON (0146 + 0147, step 2b).
+//
+// A trip is priced on the config that was IN FORCE ON ITS trip_date — the day
+// the trip is FOR — not on whatever `projects.commission_*` happens to say
+// right now. Before this, both pricing paths re-read the live project columns,
+// so editing a project's commission and then touching ANY old trip in a bucket
+// (an ordinary stage change is enough) silently repriced that whole day at
+// today's terms. `payout_id` was the only thing that froze anything.
+//
+// ONE RESOLVER, NOT A SECOND LOOKUP HERE. `commission_config_at(project, date)`
+// is the single definition of "which terms applied on this date" and it lives
+// in the database (0146). Re-implementing the descending-effective_from pick in
+// TypeScript would give us two definitions of a money rule that can drift apart
+// without anything failing — and the app would be the copy nobody re-reads.
+//
+// NO ROW IS A HARD ERROR, NEVER A FALLBACK. Zero rows means "no terms are on
+// record for this date", which is NOT the same fact as "the commission is zero"
+// and must not look like it in the money path. Falling back to
+// `projects.commission_*` would silently reintroduce the exact defect this
+// removes, on the one path nobody watches. It cannot fire on today's data —
+// every project-bearing trip is reachable from its baseline, and 0147's
+// triggers keep that true for projects created from now on. The way in is a
+// trip BACKDATED before its project's floor: `trip_date` is free entry and no
+// constraint ties it to the project. That is a data-entry error and it should
+// stop, loudly.
+// ---------------------------------------------------------------------------
+type CommissionConfig = { value: number; mode: CommissionMode; bumpPct: number };
+
+async function commissionConfigFor(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+  onDate: string,
+): Promise<{ config: CommissionConfig; error: null } | { config: null; error: string }> {
+  const { data, error } = await supabase
+    .rpc("commission_config_at", { p_project_id: projectId, p_on: onDate })
+    .maybeSingle();
+
+  if (error) return { config: null, error: error.message };
+  if (!data) {
+    return {
+      config: null,
+      error:
+        `No commission terms are on record for this project on ${onDate}, so this trip cannot be priced. ` +
+        `The trip date is earlier than the project's commission history begins. ` +
+        `Correct the trip date, or add a commission record covering that date.`,
+    };
+  }
+
+  // The resolver is a Postgres function, so its result is NOT covered by the
+  // row types in lib/db-types — coerce the two numerics at this boundary rather
+  // than trusting the serializer. A string would sail through
+  // commissionForNthTrip's `Number.isFinite(base)` guard as a silent 0.
+  const row = data as {
+    commission_mode: CommissionMode;
+    commission_value: number | string;
+    commission_bump_pct: number | string;
+  };
+  return {
+    config: {
+      value: Number(row.commission_value),
+      mode: row.commission_mode,
+      bumpPct: Number(row.commission_bump_pct),
+    },
+    error: null,
+  };
+}
+
 // Price a trip being delivered NOW. Ad-hoc trips (no driver or no project) earn
 // base 0 — only project trips carry a driver commission. PURE math lives in
 // lib/commission; this just gathers the inputs from the DB.
+//
+// THE NO-PROJECT BRANCH COMES FIRST, and it must: a trip with no project has no
+// commission history by construction and never will (there is one delivered such
+// trip, stamped 0.00), so calling the resolver for it would hard-error on a row
+// that is already correct.
+//
+// It no longer tolerates a MISSING PROJECT ROW by pricing 0. `trips.project_id`
+// carries a foreign key, so a non-null project id resolves or the row could not
+// exist; silently paying 0 for an id that failed to read was a guess, and this
+// path now has a real error channel to say so instead.
 async function priceDelivery(
   supabase: ReturnType<typeof createClient>,
   tripId: string,
   driverId: string | null,
   projectId: string | null,
   tripDate: string,
-): Promise<number> {
-  if (!driverId || !projectId) return 0;
+): Promise<{ commission: number; error: null } | { commission: null; error: string }> {
+  if (!driverId || !projectId) return { commission: 0, error: null };
 
-  const { data: project } = await supabase
-    .from("projects")
-    .select("commission_value, commission_mode, commission_bump_pct")
-    .eq("id", projectId)
-    .maybeSingle();
-  if (!project) return 0;
+  // Narrow on `config`, not on `error`: `error: string` includes "", so a
+  // truthiness check on it does not discriminate the union.
+  const resolved = await commissionConfigFor(supabase, projectId, tripDate);
+  if (!resolved.config) return { commission: null, error: resolved.error };
+  const config = resolved.config;
 
   // How many of this driver's trips on this project were ALREADY delivered
   // for this same SCHEDULED day (trip_date — excluding this one), regardless
@@ -582,12 +664,15 @@ async function priceDelivery(
     .neq("id", tripId);
   const priorToday = (prior ?? []).length;
 
-  return commissionForDelivery(
-    project.commission_value,
-    project.commission_mode,
-    project.commission_bump_pct,
-    priorToday,
-  );
+  return {
+    commission: commissionForDelivery(
+      config.value,
+      config.mode,
+      config.bumpPct,
+      priorToday,
+    ),
+    error: null,
+  };
 }
 
 // Re-derive commission_sar for an ENTIRE driver+project+DAY ramp and write
@@ -604,19 +689,19 @@ async function priceDelivery(
 // economics and keeps a driver's later unpaid trips priced consistently with
 // what was already paid out. Only the WRITE is skipped for paid trips: their
 // commission_sar is a frozen History snapshot and is never touched here.
+//
+// TERMS COME FROM THE DAY, NOT FROM TODAY (step 2b). The whole bucket shares one
+// `trip_date`, so it resolves ONE config through `commissionConfigFor` and prices
+// every position on it. This is the leak this feature exists to close: this
+// function fires on ordinary stage churn, so before the change, editing a
+// project's commission and then nudging any old trip repriced that entire past
+// day at the new terms.
 async function recomputeDailyCommission(
   supabase: ReturnType<typeof createClient>,
   driverId: string,
   projectId: string,
   dayKey: string,
 ): Promise<string | null> {
-  const { data: project } = await supabase
-    .from("projects")
-    .select("commission_value, commission_mode, commission_bump_pct")
-    .eq("id", projectId)
-    .maybeSingle();
-  if (!project) return null;
-
   // Scope to the SCHEDULED day IN SQL via a direct trip_date equality filter
   // (a plain date column — no timezone bounds needed) rather than fetching
   // this driver+project's all-time trips and filtering in JS — keeps the
@@ -630,6 +715,20 @@ async function recomputeDailyCommission(
     .not("delivered_at", "is", null);
 
   const rows = (trips ?? []) as { id: string; delivered_at: string; payout_id: string | null }[];
+
+  // NOTHING DELIVERED IN THIS BUCKET -> NOTHING TO PRICE, so return before
+  // resolving terms. This ordering is deliberate: the hard error must guard a
+  // WRITE, not an empty pass. The bucket empties on the push-back out of
+  // `delivered` — which is exactly the correction a mis-dated trip needs — and
+  // erroring there would block the fix for the bad data the error is complaining
+  // about. Every path that actually stamps a figure still goes through the
+  // resolver below.
+  if (rows.length === 0) return null;
+
+  const resolved = await commissionConfigFor(supabase, projectId, dayKey);
+  if (!resolved.config) return resolved.error;
+  const config = resolved.config;
+
   // Within-day order: delivered_at ascending (actual completion order — the
   // only sub-day signal, since trip_date has no time component), tiebreak id
   // ascending for determinism.
@@ -646,9 +745,9 @@ async function recomputeDailyCommission(
       id: t.id,
       payout_id: t.payout_id,
       commission_sar: commissionForNthTrip(
-        project.commission_value,
-        project.commission_mode,
-        project.commission_bump_pct,
+        config.value,
+        config.mode,
+        config.bumpPct,
         i + 1,
       ),
     }))
