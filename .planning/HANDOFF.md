@@ -1,16 +1,25 @@
-# SESSION HANDOFF — 2026-08-21 (0147 applied — effective-dated commission, steps 1 + 2a of 3; 0144 + 0145 before it)
+# SESSION HANDOFF — 2026-08-21 (effective-dated commission LIVE — steps 1, 2a and 2b of 3; 0144 + 0145 before it)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
 
-**NEWEST: `0147` is applied, verified and committed (`7cb8847`) — step 2a of 3 of
-effective-dated driver commission, the SYNC. `projects.commission_*` now writes
-itself into `project_commission_history` by trigger, so the table stops going
-stale. It still moves NO commission figure: no call site, no trip touched.
-**RULING (b) IS SHIPPED. RULING (a) IS NOT — step 2b, the read rewire, is the
-next unit. See §6 item 3.**
+**NEWEST: STEP 2b IS SHIPPED (`bc92d18`) — the READ REWIRE, and the point of the
+whole feature. `priceDelivery` and `recomputeDailyCommission` now take their
+commission terms from `commission_config_at(project_id, trip_date)` — the config
+in force on the day the trip is FOR — instead of re-reading the live
+`projects.commission_*`. A no-row answer is a HARD ERROR that fails closed; it
+never falls back. BOTH RULINGS ARE NOW SHIPPED. Proven a no-op before it landed:
+new path equals old path on all 677 unpaid delivered trips.
+**UNVERIFIED IN-BROWSER — it deploys on push and nobody has clicked it yet. The
+checklist is §6 item 3.** Step 3 (the ProjectForm / guarded-RPC cleanup) is all
+that is left.**
+
+**Before it: `0147` is applied, verified and committed (`7cb8847`) — step 2a, the
+SYNC. `projects.commission_*` writes itself into `project_commission_history` by
+trigger, so the table stops going stale. It moved NO commission figure on its
+own; `bc92d18` is what made the history readable.**
 
 **Before it: `0146` is applied, verified and committed (`6f7ad60`) — step 1, the
 table + baselines + resolver. Still INERT on its own; `commission_config_at()`
@@ -154,7 +163,7 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-Sixteen commits this session, one logical unit each (§5). Listed oldest-first.
+Eighteen commits this session, one logical unit each (§5). Listed oldest-first.
 
 | hash | what |
 |---|---|
@@ -173,7 +182,9 @@ Sixteen commits this session, one logical unit each (§5). Listed oldest-first.
 | `5e759a3` | Record `0146` as applied; write down the two step-2 rulings |
 | `c3067a0` | Bump the §7 DB pointer to `0146` |
 | `7cb8847` | `0147` — sync `projects.commission_*` into the history table by trigger (step 2a) |
-| *(this file's commit)* | Record `0147` as applied; mark ruling (b) shipped |
+| `fee8504` | Record `0147` as applied; mark ruling (b) shipped |
+| `bc92d18` | Price from `commission_config_at(project, trip_date)`, hard-error on no terms (step 2b) |
+| *(this file's commit)* | Record step 2b as shipped; the feature is code-complete |
 
 **The count and the last two rows of this table were both wrong before `6f7ad60`.**
 It read "Nine commits" and stopped at `bcb9ed6`, missing `6217ef3` and `8a3605a` —
@@ -221,11 +232,14 @@ that carries it, so the claim could only ever be a guess. `git status -sb` is th
 authority; §1's lesson is that the handoff's self-claim about push is the one
 claim it cannot verify about itself.
 
-**`git` needs `-C /Users/turkislimah/aquafleet-ksa`.** The Bash tool's cwd is
-`/Users/turkislimah`, which is NOT a repo — a bare `git push` died with
-`fatal: not a git repository`. Shell cwd did not persist across turns this
-session either: the session opened in `/Users/turkislimah` and the FIRST act of
-real work had to be re-confirming the repo root with `git rev-parse --show-toplevel`.
+**`git` needs `-C /Users/turkislimah/aquafleet-ksa` — ASSUME IT DOES, CHECK IF IT
+MATTERS.** The Bash tool's cwd opened at `/Users/turkislimah`, which is NOT a
+repo, and a bare `git push` died with `fatal: not a git repository`. It did NOT
+stay that way: by the end of the session `pwd` reported the repo root and bare
+`git commit` / `git push` worked. **So the cwd is not a constant and neither
+answer is safe to carry** — `-C` costs nothing and is right either way; a bare
+git command is a coin flip on which turn you are in. Re-confirm with
+`git rev-parse --show-toplevel` before trusting a bare one.
 **`~/.planning/HANDOFF.md` does not exist; `~/.planning/HANDOFF.json` is the gsd
 stub and is EMPTY** — reading it at session start reports "no state" for a
 project that has plenty. The real handoff is the one you are reading.
@@ -725,11 +739,38 @@ re-measure AFTER they say they are done.**
      (`lib/reports.ts:653`). **No surface anywhere sums it.** `0145` makes the
      glossary say what the statement already says; it does not fix a wrong
      number, because there is no wrong number.
-3. **EFFECTIVE-DATED DRIVER COMMISSION — STEP 1 (`0146`, `6f7ad60`) AND STEP 2a
-   (`0147`, `7cb8847`) ARE DONE AND APPLIED. RULING (b) BELOW IS SHIPPED; RULING
-   (a) IS NOT. THE NEXT UNIT IS STEP 2b, THE READ REWIRE, AND ITS ONE OPEN
-   QUESTION — ruling (a) — IS ALREADY DECIDED. Do not re-litigate it —
-   implement it.**
+3. **EFFECTIVE-DATED DRIVER COMMISSION — STEPS 1 (`0146`, `6f7ad60`), 2a
+   (`0147`, `7cb8847`) AND 2b (`bc92d18`) ARE ALL SHIPPED. BOTH RULINGS BELOW
+   ARE IMPLEMENTED. What is left is (i) the in-browser verification, which has
+   NOT happened, and (ii) step 3, the ProjectForm / guarded-RPC cleanup.**
+
+   **THE IN-BROWSER CHECKLIST, still owed.** `bc92d18` deployed on push and
+   nobody has clicked it. Use a TEST project (`VVV Test 2`), not a live one:
+   1. Note 3–4 delivered trips' figures on two different past days.
+   2. Edit the project's `commission_value` (e.g. 10 → 25) and save. **No trip
+      figure anywhere should change yet.**
+   3. Create a trip dated TODAY and deliver it → expect the NEW base (25.00 at
+      position 1); deliver a second today → expect the position-2 price on the
+      new base.
+   4. Re-check step 1's figures → **identical**.
+   5. **The real leak test.** Push a PAST day's delivered trip back out of
+      `delivered`, then deliver it again → it must return to its ORIGINAL figure
+      on the OLD base, and the rest of that day must not move. Before `bc92d18`
+      this repriced the whole day at 25.00.
+   6. On a past day with 3+ delivered trips, push the MIDDLE one back → later
+      trips reprice DOWN one position, still on the old base.
+   7. The no-project trip (`2bf32c2d-6747-400b-bb8b-9e5db37c7317`) still reads
+      0.00 and its stage churn still succeeds.
+   8. **The hard error.** Give a trip on that project a `trip_date` before the
+      project's floor (e.g. 2020-01-01) and try to deliver it → refused with
+      "No commission terms are on record for this project on 2020-01-01…", trip
+      stays undelivered. Then fix the date and confirm the correction is NOT
+      blocked.
+   9. Any trip with a `payout_id` never moves through any of the above.
+
+   Reverting step 2's edit the same day upserts onto `0147`'s existing
+   today-dated row rather than adding a third — expected, last edit of the day
+   wins.
 
    **The gap the feature closes,** so step 2 is built against the real problem:
    commission config lives on `projects` as three mutable, undated columns, and
@@ -740,8 +781,9 @@ re-measure AFTER they say they are done.**
    fires on ordinary stage churn. **`payout_id is not null` is the only true
    freeze.** So today the past can move.
 
-   **RULING (a) — the resolver returning NOTHING is a HARD ERROR. It must NEVER
-   fall back to `projects.commission_*`.** `commission_config_at()` returns ZERO
+   **RULING (a) — SHIPPED IN `bc92d18`. The resolver returning NOTHING is a HARD
+   ERROR. It must NEVER fall back to `projects.commission_*`.**
+   `commission_config_at()` returns ZERO
    ROWS when no config is in force on the date asked for; that is the designed
    signal and it is not the same thing as zero commission. Falling back to the
    live columns would silently reintroduce the exact defect the feature removes —
@@ -789,21 +831,62 @@ re-measure AFTER they say they are done.**
    - Follow `record_salary_change()` for shape: `language plpgsql`,
      `security definer`, `set search_path = public`.
 
-   **STEP 2b, the one still open,** is the read side: `priceDelivery`
-   (`app/trips/actions.ts:554-591`) and `recomputeDailyCommission` both currently
-   re-read `projects.commission_*` independently. Both must call
+   **STEP 2b — SHIPPED (`bc92d18`, `app/trips/actions.ts` only, +124/−25).** The
+   read side. `priceDelivery` and `recomputeDailyCommission` both re-read
+   `projects.commission_*` independently before this; both now go through ONE new
+   helper, `commissionConfigFor()`, which calls
    `commission_config_at(project_id, trip_date)` — keyed on `trip_date`, the day
    the trip is FOR, matching `dailyDriverProjectCommission`'s bucketing in
-   `lib/commission.ts:107`. **One resolver, two callers, so they cannot drift the
-   way they can today.** `lib/commission.ts` itself stays pure and unchanged; it
-   already takes base/mode/bump as arguments.
-   - **Landing it is provably a no-op** — `0146`'s assertion (3) showed the
-     resolver equals `projects.commission_*` for all 7 projects today. Re-measure
-     the trip fingerprint before and after anyway (`0146`'s VERIFICATION block A
-     carries the query and the 15,820.16 figure).
-   - Two stale docstrings to fix while in `lib/commission.ts`: `:26` and `:46`
-     still say "this month". The logic has been per-scheduled-day since the ramp
-     moved to `trip_date`.
+   `lib/commission.ts:107`. **One resolver, two callers, so they cannot drift.**
+   `lib/commission.ts` is untouched and still pure; only the SOURCE of
+   base/mode/bump moved.
+   - **`priceDelivery` gained an error channel** — `Promise<number>` became
+     `Promise<{commission, error}>`, and `setTripStage` refuses the whole stage
+     move on an error, the same fail-closed posture as `0128`'s rate freeze
+     directly below it. The old `if (!project) return 0` is GONE: silently paying
+     0 for a project id that failed to read was a guess, and `trips.project_id`
+     is FK'd anyway.
+   - **The no-project branch runs FIRST**, before any resolver call — ruling (a)'s
+     carve-out for `2bf32c2d-…`.
+   - **Ordering call in `recomputeDailyCommission`, worth knowing:** the
+     `rows.length === 0` early return sits ABOVE the resolver call, so an empty
+     bucket returns clean instead of hard-erroring. The hard error must guard a
+     WRITE, not an empty pass — the bucket empties on the push-back out of
+     `delivered`, which is exactly the correction a mis-dated trip needs, and
+     erroring there would block the fix for the data the error is complaining
+     about. Every path that stamps a figure still resolves.
+   - **The union narrows on `config`, not on `error`.** `error: string` includes
+     `""`, so a truthiness check on it does not discriminate — that is six
+     TS18047s. `if (!resolved.config)` is the working form.
+   - **Numerics are coerced at the RPC boundary** with `Number()`. The resolver is
+     a function, so its result is not covered by `lib/db-types`; a string would
+     pass `commissionForNthTrip`'s `Number.isFinite(base)` guard as a silent 0.
+   - **PROVEN A NO-OP BEFORE IT LANDED, read-only.** Over all **677** unpaid
+     delivered driver+project trips: **new path vs old path = 0 differences**,
+     and **resolver-returned-no-row = 0**, so ruling (a) cannot fire on today's
+     data. `scripts/commission-check.ts` 36 PASS / 0 FAIL, `tsc --noEmit` clean,
+     full `next build` clean.
+     - **Six rows differ from the STORED `commission_sar` — and the OLD code
+       disagrees with the same six identically.** Pre-existing drift, not caused
+       or fixed by 2b: five on `VVV Test 2`, one on `King Salman Park`, all
+       stamped when those bases were higher (15/14/19/10.30…) and never churned
+       since. Today's code would rewrite them the moment anyone touches those
+       days. **After 2b they can no longer be rewritten to today's terms**, which
+       is the point.
+     - The re-run query is worth keeping: partition `row_number()` over ALL
+       delivered trips in the bucket and only THEN filter to unpaid. Filtering
+       first gets `n` wrong, because a PAID trip still occupies a slot. The first
+       pass got this wrong and reported the wrong six.
+   - **It could not be a repo script.** The only credential on disk is the anon
+     key; `anon` has EXECUTE revoked on the resolver and RLS blocks `trips`. It
+     ran as read-only `execute_sql`, per §4.
+   - Two stale docstrings NOT fixed, deliberately out of scope for a money commit:
+     `lib/commission.ts:26` and `:46` still say "this month". The logic has been
+     per-scheduled-day since the ramp moved to `trip_date`.
+   - **`BreakdownReport` still reads `projects.commission_*` (`:104-106`) for
+     DISPLAY**, so it narrates today's terms beside trips priced on historical
+     ones. No money moves through it. Not touched — it was on the do-not-touch
+     list — but it is now inconsistent and should be looked at.
    - Unrelated but adjacent, found during the read-only trace and NOT fixed:
      `ProjectsBoard:1060` does
      `getRate={(t) => t.commission_sar ?? project.rate_per_trip_sar}` — an
