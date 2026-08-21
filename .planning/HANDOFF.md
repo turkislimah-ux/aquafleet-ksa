@@ -1,14 +1,20 @@
-# SESSION HANDOFF — 2026-08-21 (0146 applied — effective-dated commission, step 1 of 3; 0144 + 0145 before it)
+# SESSION HANDOFF — 2026-08-21 (0147 applied — effective-dated commission, steps 1 + 2a of 3; 0144 + 0145 before it)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
 
-**NEWEST: `0146` is applied, verified and committed (`6f7ad60`) — step 1 of 3 of
-effective-dated driver commission. It is INERT: no call site, no trigger, no
-trip touched. STEP 2 IS SPECIFIED AND ITS TWO OPEN QUESTIONS ARE ALREADY RULED
-ON — see §6 item 3 before writing a line of it.**
+**NEWEST: `0147` is applied, verified and committed (`7cb8847`) — step 2a of 3 of
+effective-dated driver commission, the SYNC. `projects.commission_*` now writes
+itself into `project_commission_history` by trigger, so the table stops going
+stale. It still moves NO commission figure: no call site, no trip touched.
+**RULING (b) IS SHIPPED. RULING (a) IS NOT — step 2b, the read rewire, is the
+next unit. See §6 item 3.**
+
+**Before it: `0146` is applied, verified and committed (`6f7ad60`) — step 1, the
+table + baselines + resolver. Still INERT on its own; `commission_config_at()`
+has zero callers until 2b.**
 
 **Before it: `0145` is applied and committed; `0144` is committed and deliberately
 NOT applied. Both are the Operations glossary — see §6 item 2, then §4.**
@@ -148,7 +154,7 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-Thirteen commits this session, one logical unit each (§5). Listed oldest-first.
+Sixteen commits this session, one logical unit each (§5). Listed oldest-first.
 
 | hash | what |
 |---|---|
@@ -164,7 +170,10 @@ Thirteen commits this session, one logical unit each (§5). Listed oldest-first.
 | `6217ef3` | Bump the §7 DB pointer to `0145` |
 | `8a3605a` | Mark `0144` do-not-apply — it stopped being a no-op when `0145` landed |
 | `6f7ad60` | `0146` — effective-dated commission config table + resolver (step 1 of 3) |
-| *(this file's commit)* | Record `0146` as applied; write down the two step-2 rulings |
+| `5e759a3` | Record `0146` as applied; write down the two step-2 rulings |
+| `c3067a0` | Bump the §7 DB pointer to `0146` |
+| `7cb8847` | `0147` — sync `projects.commission_*` into the history table by trigger (step 2a) |
+| *(this file's commit)* | Record `0147` as applied; mark ruling (b) shipped |
 
 **The count and the last two rows of this table were both wrong before `6f7ad60`.**
 It read "Nine commits" and stopped at `bcb9ed6`, missing `6217ef3` and `8a3605a` —
@@ -356,8 +365,35 @@ because an archive stamps the CUSTOMER and there is no customer restore.
 
 ## 4. DB STATE
 
-- **Highest migration APPLIED: `0146_project_commission_history.sql` — applied by
-  the architect, verified and committed (`6f7ad60`).** 586 lines. Additive: one
+- **Highest migration APPLIED: `0147_project_commission_sync_trigger.sql` —
+  applied by the architect via MCP, verified and committed (`7cb8847`).** 675
+  lines. Additive: one new trigger function
+  (`record_project_commission_change()`), two new triggers on `projects`
+  (`projects_commission_history_ins` AFTER INSERT, `projects_commission_history_upd`
+  AFTER UPDATE with a WHEN on all three commission columns), plus a catch-up
+  backfill that matched ZERO rows. No view, no change to `projects`, no write to
+  `trips`. All seven of its own assertions passed at apply, and the architect
+  rehearsed **both trigger paths rolled back on the live triggers** — a config
+  edit (baseline untouched, one today-dated non-baseline row, second same-day
+  edit upserts rather than adding a third) and a new-project insert (exactly one
+  floor-dated baseline row).
+  - **It is ruling (b) from §6 item 3, shipped.** The history table no longer
+    goes stale: every writer of `projects.commission_*` is caught by
+    construction, including `app/projects/actions.ts`, which never reads
+    `commission_bump_pct`.
+  - **It still moves NO commission figure.** `commission_config_at()` has zero
+    callers; `priceDelivery` and `recomputeDailyCommission` both still read
+    `projects.commission_*`. That is step 2b.
+  - `projects` now carries **three** triggers — the two above plus the
+    pre-existing `projects_set_initials_trigger` (BEFORE INSERT). Order on an
+    insert is set_initials → row written → baseline recorded.
+  - Deliberate divergence from `record_salary_change()`, defended in the file's
+    header: its INSERT branch writes a **floor-dated `is_baseline = true`** row,
+    not a today-dated one, because a project can be entered with a backdated
+    `start_date` and a today-dated baseline would strand every trip before it.
+  - Do not re-apply it.
+- **Highest migration APPLIED before it: `0146_project_commission_history.sql` —
+  applied by the architect, verified and committed (`6f7ad60`).** 586 lines. Additive: one
   new table (`project_commission_history`), one new function
   (`commission_config_at(uuid, date)`), no view, no change to `projects`, no
   write to `trips`. All six of its own assertions passed at apply:
@@ -375,16 +411,18 @@ because an archive stamps the CUSTOMER and there is no customer restore.
     every base table in this schema is gated by RLS instead (§6's revoke rule is
     about VIEWS);
   - the resolver is `security invoker` + `stable`, `anon` EXECUTE revoked.
-  **It is INERT — zero call sites, no trigger.** Do not re-apply it.
-- **Highest migration APPLIED before it: `0145_operations_metric_caveat.sql` —
+  **It was INERT when it landed — zero call sites, no trigger.** `0147` has since
+  given its table a trigger; the resolver still has zero callers. Do not
+  re-apply it.
+- **Highest migration APPLIED before those: `0145_operations_metric_caveat.sql` —
   applied by Turki, live-verified and committed (`bcb9ed6`).** 9,015 bytes / 166 lines.
   Ledger row `operations_metric_caveat` @ `20260820214605`. Re-verified read-only
   2026-08-21: `operations.caveat` is 569 chars, carries both phrases its own
   assertion checks, `report_metrics` still holds 30 rows, `operations_by_driver`
   present exactly once. `0141`/`0142`/`0143` landed between this line's previous
   value (`0140`) and now; see §0, §0a, §0b.
-- **Highest migration ON DISK: `0146` — the same file as the applied one. The
-  only gap in `0001..0146` other than the closed `0135`/`0136` is `0144`, which
+- **Highest migration ON DISK: `0147` — the same file as the applied one. The
+  only gap in `0001..0147` other than the closed `0135`/`0136` is `0144`, which
   is committed (`485b3a2`) and STAYS UNAPPLIED — Turki's call, 2026-08-21.** So
   the numbering INVERTS: an unapplied `0144` sits under an applied `0145`. That
   looks wrong to anyone diffing the ledger against disk and is not. Read the two
@@ -420,22 +458,23 @@ because an archive stamps the CUSTOMER and there is no customer restore.
   what a db reset drops.**) The inverse now also holds: `0144` is
   committed-but-unapplied, which is the safe direction of the same asymmetry.
 - **`0135`/`0136` never existed — CLOSED, see §0.** Do not re-reconcile.
-- **THE REMOTE LEDGER IS NOT A MIRROR OF DISK: 144 files against 94 rows in
+- **THE REMOTE LEDGER IS NOT A MIRROR OF DISK: 145 files against 95 rows in
   `supabase_migrations.schema_migrations` (both re-measured 2026-08-21 after
-  `0146`). Do not
+  `0147`). Do not
   use it to audit what is applied — the DB itself is the authority.**
   - It records `0036`, `0037`, `0058`, then nothing until `0060`, after which it
     runs near-continuous. `0001–0035` and most of `0038–0059` are simply absent:
     applied before history tracking, or through the SQL Editor, which writes no
     row. Absence from the ledger is NOT evidence a migration did not run.
-  - **11 rows carry no number**, all MCP-applied under auto-timestamps, measured
+  - **12 rows carry no number**, all MCP-applied under auto-timestamps, measured
     2026-08-21 by `name !~ '^[0-9]'`: `v3_ledger_totals_and_hide_amount_due`,
     `invoice_payment_mode_snapshot`, `receipt_vote_approvals_and_lot_fix`,
     `retire_customers_payment_model`, `retire_water_stations_fill_cost`,
     `pay_commission_monthly`, `net_balance_returns` (0142),
     `restore_customer_reverse_write_off` (0141),
     `drop_write_off_payment_mode` (0143), `operations_metric_caveat` (0145),
-    `project_commission_history` (0146, `20260821104801`).
+    `project_commission_history` (0146, `20260821104801`),
+    `project_commission_sync_trigger` (0147, `20260821112212`).
     **Map by NAME, never by number** — and this line is itself the proof: it
     previously said 8 and listed disk numbers, which was one short even before
     `0145`, because six of those names map onto five remembered numbers. Count
@@ -511,24 +550,34 @@ because an archive stamps the CUSTOMER and there is no customer restore.
       reconciled by viewdef is reconciled in its VIEW, not in its data writes.**
       A migration that both defines an object and writes rows needs both halves
       checked; the loud header covered only the half that was easy to measure.
-- **DB writes this session: `0143`, `0145` and `0146` — none of them by Claude
-  Code.** Every query Claude Code ran was read-only `execute_sql`, including the
-  post-apply verification of `0145` and the live measurements `0146` was drafted
-  against (the `projects` CHECK domain, the per-project floors, the trip
-  fingerprint, and the sibling security posture it mirrors).
+- **DB writes this session: `0143`, `0145`, `0146` and `0147` — none of them by
+  Claude Code.** Every query Claude Code ran was read-only `execute_sql`,
+  including the post-apply verification of `0145`, the live measurements `0146`
+  was drafted against (the `projects` CHECK domain, the per-project floors, the
+  trip fingerprint, and the sibling security posture it mirrors), and those
+  `0147` was drafted against (the three commission columns' nullability, the
+  pre-existing `projects` trigger, and `claim_project_initials`' body — which is
+  pure reads plus a `pg_advisory_xact_lock`, so a rolled-back rehearsal project
+  consumes no sequence and no counter).
 - View posture **re-measured 2026-08-20: 47 views / 47 security_invoker / 0
   anon-readable.** §7 claimed 40 until `2c13e0c`. §6 carries the query — *the two
   counts matching is the check, not the number.*
-- **Tables: 76, all 76 RLS-enabled** (the §7 "73+" is deliberately open-ended).
-  `anon` holds a table-level SELECT grant on all 76, but it is **inert**: 75
-  policies exist, every one names `authenticated` only, none names `anon` or
-  `public`, so RLS denies anon by default. **The table posture rests on the
-  policies, not on the grants — do not "tidy" a policy away.** Note 76 tables
-  against 75 policies: one table has RLS on with no policy at all. That fails
-  closed and is safe; whether it is intentional is unverified.
+- **Tables re-measured 2026-08-21: 77, all 77 RLS-enabled** (the §7 "73+" is
+  deliberately open-ended; `0146`'s `project_commission_history` is the 77th).
+  `anon` holds a table-level SELECT grant on all 77, but it is **inert**: 76
+  tables carry a policy, every one names `authenticated` only, none names `anon`
+  or `public`, so RLS denies anon by default. **The table posture rests on the
+  policies, not on the grants — do not "tidy" a policy away.** Note 77 tables
+  against 76 policied: **still exactly one** table has RLS on with no policy at
+  all. That fails closed and is safe; whether it is intentional is unverified.
 - **Migrations are DRAFTED to disk for Turki to run in the Supabase SQL Editor —
   never self-applied through the MCP.** Read-only `execute_sql` queries ARE allowed
   and are the standard proof mechanism; that is all this session used.
+- **SOMEDAY, not now:** the `DRAFTED TO DISK. NOT APPLIED.` header line is stale on
+  every applied migration in the repo (`0146` and `0147` included) — it records the
+  state at drafting, never at applying, so it means nothing today; making it mean
+  something is a set-wide convention change plus a backfill of every file, not a
+  per-file edit, and nothing depends on it in the meantime.
 
 ## 5. DECISIONS / CONSTRAINTS
 
@@ -676,9 +725,11 @@ re-measure AFTER they say they are done.**
      (`lib/reports.ts:653`). **No surface anywhere sums it.** `0145` makes the
      glossary say what the statement already says; it does not fix a wrong
      number, because there is no wrong number.
-3. **EFFECTIVE-DATED DRIVER COMMISSION — STEP 1 OF 3 IS DONE AND APPLIED
-   (`0146`, `6f7ad60`). STEP 2 IS THE NEXT UNIT, AND ITS TWO OPEN QUESTIONS ARE
-   ALREADY DECIDED. Do not re-litigate them — implement them.**
+3. **EFFECTIVE-DATED DRIVER COMMISSION — STEP 1 (`0146`, `6f7ad60`) AND STEP 2a
+   (`0147`, `7cb8847`) ARE DONE AND APPLIED. RULING (b) BELOW IS SHIPPED; RULING
+   (a) IS NOT. THE NEXT UNIT IS STEP 2b, THE READ REWIRE, AND ITS ONE OPEN
+   QUESTION — ruling (a) — IS ALREADY DECIDED. Do not re-litigate it —
+   implement it.**
 
    **The gap the feature closes,** so step 2 is built against the real problem:
    commission config lives on `projects` as three mutable, undated columns, and
@@ -708,12 +759,23 @@ re-measure AFTER they say they are done.**
      `project_id is null` BEFORE calling the resolver, or it will hard-error on a
      row that is already correct.
 
-   **RULING (b) — sync via an AFTER UPDATE TRIGGER on `projects`, mirroring
-   `salary_history`.** Fires only when `commission_mode`, `commission_value` or
-   `commission_bump_pct` actually change; upserts a row with
+   **RULING (b) — SHIPPED IN `0147`, NOT PENDING. Sync via an AFTER UPDATE
+   TRIGGER on `projects`, mirroring `salary_history`.** Fires only when
+   `commission_mode`, `commission_value` or `commission_bump_pct` actually
+   change; upserts a row with
    `effective_from = (now() at time zone 'Asia/Riyadh')::date` onto the
    `(project_id, effective_from)` unique index. `0146` created that index as
    UNIQUE precisely so this upsert has a conflict target.
+   - **`0147` shipped it as TWO triggers, not one, and added the INSERT half the
+     ruling did not name.** `projects_commission_history_upd` is the ruling
+     above verbatim. `projects_commission_history_ins` (AFTER INSERT) writes a
+     `is_baseline = true` row at the new project's floor, because a project
+     created after `0146` and before `0147` would otherwise have no history at
+     all and ruling (a)'s hard error would then block delivering its trips.
+     They cannot be one trigger: `OLD` is unavailable in an INSERT trigger's
+     `WHEN` clause (the `0114` lesson). See §4's `0147` bullet.
+   - **`0147` moved no commission figure.** It only writes history; both call
+     sites still read `projects.commission_*` until step 2b lands.
    - **A trigger, not app-side writes, because there are TWO edit surfaces.**
      `update_project_with_customer` (the RPC the project modal calls) and
      `app/projects/actions.ts` both overwrite the columns — and the second one
@@ -727,7 +789,7 @@ re-measure AFTER they say they are done.**
    - Follow `record_salary_change()` for shape: `language plpgsql`,
      `security definer`, `set search_path = public`.
 
-   **Step 2's other half** is the read side: `priceDelivery`
+   **STEP 2b, the one still open,** is the read side: `priceDelivery`
    (`app/trips/actions.ts:554-591`) and `recomputeDailyCommission` both currently
    re-read `projects.commission_*` independently. Both must call
    `commission_config_at(project_id, trip_date)` — keyed on `trip_date`, the day
