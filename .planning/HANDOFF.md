@@ -1,11 +1,16 @@
-# SESSION HANDOFF — 2026-08-21 (0144 + 0145 committed; 0145 applied — Operations glossary reconciled)
+# SESSION HANDOFF — 2026-08-21 (0146 applied — effective-dated commission, step 1 of 3; 0144 + 0145 before it)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
 
-**NEWEST: `0145` is applied and committed; `0144` is committed and deliberately
+**NEWEST: `0146` is applied, verified and committed (`6f7ad60`) — step 1 of 3 of
+effective-dated driver commission. It is INERT: no call site, no trigger, no
+trip touched. STEP 2 IS SPECIFIED AND ITS TWO OPEN QUESTIONS ARE ALREADY RULED
+ON — see §6 item 3 before writing a line of it.**
+
+**Before it: `0145` is applied and committed; `0144` is committed and deliberately
 NOT applied. Both are the Operations glossary — see §6 item 2, then §4.**
 
 ## 0. STORED-STATUS CLEANUP, ITEM 1 IS DONE (0143)
@@ -143,7 +148,7 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-Nine commits this session, one logical unit each (§5).
+Thirteen commits this session, one logical unit each (§5). Listed oldest-first.
 
 | hash | what |
 |---|---|
@@ -155,7 +160,17 @@ Nine commits this session, one logical unit each (§5).
 | `485b3a2` | `0144` — reconcile the repo to live for the Operations glossary |
 | `eac5ec8` | Record the `0101` decision as RESOLVED; `0145` drafted |
 | `bcb9ed6` | `0145` — add the non-additivity caveat to the `operations` metric |
-| *(this file's commit)* | Record `0145` as applied + committed; re-measure the ledger |
+| `7a4d3be` | Record `0145` as applied + committed; re-measure the ledger |
+| `6217ef3` | Bump the §7 DB pointer to `0145` |
+| `8a3605a` | Mark `0144` do-not-apply — it stopped being a no-op when `0145` landed |
+| `6f7ad60` | `0146` — effective-dated commission config table + resolver (step 1 of 3) |
+| *(this file's commit)* | Record `0146` as applied; write down the two step-2 rulings |
+
+**The count and the last two rows of this table were both wrong before `6f7ad60`.**
+It read "Nine commits" and stopped at `bcb9ed6`, missing `6217ef3` and `8a3605a` —
+two commits that had already been made by the session that wrote the line. Same
+family as `2c13e0c`: **a list you are appending to is not a list you have
+verified.** Re-read `git log` rather than incrementing what is there.
 
 `7849641` is SQL only, +215/−0, staged by explicit path, staged blob inspected
 with `git show :<path>` before committing. The docs commits carry `CLAUDE.md` and
@@ -341,14 +356,35 @@ because an archive stamps the CUSTOMER and there is no customer restore.
 
 ## 4. DB STATE
 
-- **Highest migration APPLIED: `0145_operations_metric_caveat.sql` — applied by
-  Turki, live-verified and committed (`bcb9ed6`).** 9,015 bytes / 166 lines.
+- **Highest migration APPLIED: `0146_project_commission_history.sql` — applied by
+  the architect, verified and committed (`6f7ad60`).** 586 lines. Additive: one
+  new table (`project_commission_history`), one new function
+  (`commission_config_at(uuid, date)`), no view, no change to `projects`, no
+  write to `trips`. All six of its own assertions passed at apply:
+  - 7 baselines, exactly one per project, values COPIED from
+    `projects.commission_*` and dated at each project's floor;
+  - the resolver equals `projects.commission_*` for every project today —
+    **0 mismatches, and this is the step-2 no-op proof**, so wiring it in cannot
+    move a figure;
+  - 818 trips and the **15,820.16 SAR** commission total untouched, checked by a
+    fingerprint captured at the top of the transaction and re-computed at the
+    foot (captured, never hardcoded, so the file survives a rebuild);
+  - every project-bearing trip reachable from its baseline;
+  - RLS on with exactly one `authenticated` policy — same posture as
+    `salary_history`, and deliberately with no table-level `anon` revoke, because
+    every base table in this schema is gated by RLS instead (§6's revoke rule is
+    about VIEWS);
+  - the resolver is `security invoker` + `stable`, `anon` EXECUTE revoked.
+  **It is INERT — zero call sites, no trigger.** Do not re-apply it.
+- **Highest migration APPLIED before it: `0145_operations_metric_caveat.sql` —
+  applied by Turki, live-verified and committed (`bcb9ed6`).** 9,015 bytes / 166 lines.
   Ledger row `operations_metric_caveat` @ `20260820214605`. Re-verified read-only
   2026-08-21: `operations.caveat` is 569 chars, carries both phrases its own
   assertion checks, `report_metrics` still holds 30 rows, `operations_by_driver`
   present exactly once. `0141`/`0142`/`0143` landed between this line's previous
   value (`0140`) and now; see §0, §0a, §0b.
-- **Highest migration ON DISK: `0145` — the same file. The gap is `0144`, which
+- **Highest migration ON DISK: `0146` — the same file as the applied one. The
+  only gap in `0001..0146` other than the closed `0135`/`0136` is `0144`, which
   is committed (`485b3a2`) and STAYS UNAPPLIED — Turki's call, 2026-08-21.** So
   the numbering INVERTS: an unapplied `0144` sits under an applied `0145`. That
   looks wrong to anyone diffing the ledger against disk and is not. Read the two
@@ -384,20 +420,22 @@ because an archive stamps the CUSTOMER and there is no customer restore.
   what a db reset drops.**) The inverse now also holds: `0144` is
   committed-but-unapplied, which is the safe direction of the same asymmetry.
 - **`0135`/`0136` never existed — CLOSED, see §0.** Do not re-reconcile.
-- **THE REMOTE LEDGER IS NOT A MIRROR OF DISK: 143 files against 93 rows in
-  `supabase_migrations.schema_migrations` (both re-measured 2026-08-21). Do not
+- **THE REMOTE LEDGER IS NOT A MIRROR OF DISK: 144 files against 94 rows in
+  `supabase_migrations.schema_migrations` (both re-measured 2026-08-21 after
+  `0146`). Do not
   use it to audit what is applied — the DB itself is the authority.**
   - It records `0036`, `0037`, `0058`, then nothing until `0060`, after which it
     runs near-continuous. `0001–0035` and most of `0038–0059` are simply absent:
     applied before history tracking, or through the SQL Editor, which writes no
     row. Absence from the ledger is NOT evidence a migration did not run.
-  - **10 rows carry no number**, all MCP-applied under auto-timestamps, measured
+  - **11 rows carry no number**, all MCP-applied under auto-timestamps, measured
     2026-08-21 by `name !~ '^[0-9]'`: `v3_ledger_totals_and_hide_amount_due`,
     `invoice_payment_mode_snapshot`, `receipt_vote_approvals_and_lot_fix`,
     `retire_customers_payment_model`, `retire_water_stations_fill_cost`,
     `pay_commission_monthly`, `net_balance_returns` (0142),
     `restore_customer_reverse_write_off` (0141),
-    `drop_write_off_payment_mode` (0143), `operations_metric_caveat` (0145).
+    `drop_write_off_payment_mode` (0143), `operations_metric_caveat` (0145),
+    `project_commission_history` (0146, `20260821104801`).
     **Map by NAME, never by number** — and this line is itself the proof: it
     previously said 8 and listed disk numbers, which was one short even before
     `0145`, because six of those names map onto five remembered numbers. Count
@@ -473,9 +511,11 @@ because an archive stamps the CUSTOMER and there is no customer restore.
       reconciled by viewdef is reconciled in its VIEW, not in its data writes.**
       A migration that both defines an object and writes rows needs both halves
       checked; the loud header covered only the half that was easy to measure.
-- **DB writes this session: `0143` and `0145`, both applied by Turki.** Every
-  query Claude Code ran was read-only `execute_sql`, including the post-apply
-  verification of `0145`.
+- **DB writes this session: `0143`, `0145` and `0146` — none of them by Claude
+  Code.** Every query Claude Code ran was read-only `execute_sql`, including the
+  post-apply verification of `0145` and the live measurements `0146` was drafted
+  against (the `projects` CHECK domain, the per-project floors, the trip
+  fingerprint, and the sibling security posture it mirrors).
 - View posture **re-measured 2026-08-20: 47 views / 47 security_invoker / 0
   anon-readable.** §7 claimed 40 until `2c13e0c`. §6 carries the query — *the two
   counts matching is the check, not the number.*
@@ -636,10 +676,88 @@ re-measure AFTER they say they are done.**
      (`lib/reports.ts:653`). **No surface anywhere sums it.** `0145` makes the
      glossary say what the statement already says; it does not fix a wrong
      number, because there is no wrong number.
+3. **EFFECTIVE-DATED DRIVER COMMISSION — STEP 1 OF 3 IS DONE AND APPLIED
+   (`0146`, `6f7ad60`). STEP 2 IS THE NEXT UNIT, AND ITS TWO OPEN QUESTIONS ARE
+   ALREADY DECIDED. Do not re-litigate them — implement them.**
+
+   **The gap the feature closes,** so step 2 is built against the real problem:
+   commission config lives on `projects` as three mutable, undated columns, and
+   `trips.commission_sar` is stamped at delivery from them as they read at that
+   moment. Editing the project does NOT re-stamp — but `recomputeDailyCommission`
+   (`app/trips/actions.ts:607-675`) re-reads the CURRENT config and reprices
+   every UNPAID delivered trip in that driver+project+`trip_date` bucket, and it
+   fires on ordinary stage churn. **`payout_id is not null` is the only true
+   freeze.** So today the past can move.
+
+   **RULING (a) — the resolver returning NOTHING is a HARD ERROR. It must NEVER
+   fall back to `projects.commission_*`.** `commission_config_at()` returns ZERO
+   ROWS when no config is in force on the date asked for; that is the designed
+   signal and it is not the same thing as zero commission. Falling back to the
+   live columns would silently reintroduce the exact defect the feature removes —
+   pricing a past trip at today's rate — and it would do it on the one code path
+   nobody watches. Raise. **A 0 SAR commission and "there is no config for this
+   date" must not look alike in the money path.**
+   - It cannot fire on today's data: `0146`'s assertion (4) proved every
+     project-bearing trip is reachable from its baseline. The reachable way in is
+     a trip BACKDATED before its project's floor — `trip_date` is free-entry and
+     no constraint ties it to the project. **That is a data-entry error and it
+     should stop, loudly, not be papered over.**
+   - The one delivered trip with **no project at all**
+     (`2bf32c2d-6747-400b-bb8b-9e5db37c7317`, 2026-07-15, stamped `0.00`) has no
+     baseline by construction and never will. Step 2 must branch on
+     `project_id is null` BEFORE calling the resolver, or it will hard-error on a
+     row that is already correct.
+
+   **RULING (b) — sync via an AFTER UPDATE TRIGGER on `projects`, mirroring
+   `salary_history`.** Fires only when `commission_mode`, `commission_value` or
+   `commission_bump_pct` actually change; upserts a row with
+   `effective_from = (now() at time zone 'Asia/Riyadh')::date` onto the
+   `(project_id, effective_from)` unique index. `0146` created that index as
+   UNIQUE precisely so this upsert has a conflict target.
+   - **A trigger, not app-side writes, because there are TWO edit surfaces.**
+     `update_project_with_customer` (the RPC the project modal calls) and
+     `app/projects/actions.ts` both overwrite the columns — and the second one
+     **never even reads `commission_bump_pct`**. Anything written in app code
+     would have to be written twice and would still miss a direct SQL edit. The
+     trigger catches every writer by construction.
+   - **A same-day edit CANNOT corrupt the past.** Baselines sit at the project
+     floor (2026-06-27 … 2026-07-16, all in the past), the trigger writes
+     today-dated rows, so an upsert can never land on a baseline. That is 0126's
+     structural fix, and it is why `0146` refused a today-dated baseline.
+   - Follow `record_salary_change()` for shape: `language plpgsql`,
+     `security definer`, `set search_path = public`.
+
+   **Step 2's other half** is the read side: `priceDelivery`
+   (`app/trips/actions.ts:554-591`) and `recomputeDailyCommission` both currently
+   re-read `projects.commission_*` independently. Both must call
+   `commission_config_at(project_id, trip_date)` — keyed on `trip_date`, the day
+   the trip is FOR, matching `dailyDriverProjectCommission`'s bucketing in
+   `lib/commission.ts:107`. **One resolver, two callers, so they cannot drift the
+   way they can today.** `lib/commission.ts` itself stays pure and unchanged; it
+   already takes base/mode/bump as arguments.
+   - **Landing it is provably a no-op** — `0146`'s assertion (3) showed the
+     resolver equals `projects.commission_*` for all 7 projects today. Re-measure
+     the trip fingerprint before and after anyway (`0146`'s VERIFICATION block A
+     carries the query and the 15,820.16 figure).
+   - Two stale docstrings to fix while in `lib/commission.ts`: `:26` and `:46`
+     still say "this month". The logic has been per-scheduled-day since the ramp
+     moved to `trip_date`.
+   - Unrelated but adjacent, found during the read-only trace and NOT fixed:
+     `ProjectsBoard:1060` does
+     `getRate={(t) => t.commission_sar ?? project.rate_per_trip_sar}` — an
+     undelivered card falls back to the **customer** rate in the DRIVER
+     commission slot. Two different kinds of money in one expression.
 4. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
    in §7 carries nothing blocked-and-actionable — RBAC + the app-wide security pass,
    effective-dated customer rates, multi-project customers, Route Optimization /
    Predictive / IoT are all parked deliberately.
+   - **"Effective-dated rates" in §7's Deferred list means the CUSTOMER rate
+     (`projects.rate_per_trip_sar`, stamped onto `trips.rate_sar`). It is a
+     DIFFERENT column and a different money path from the driver commission that
+     item 3 is about.** Both are per-trip figures frozen at delivery off an
+     undated project column, so the two problems rhyme and the customer side
+     could reuse `0146`'s shape — but nothing has been built for it and it stays
+     parked. Do not read item 3 as having closed it.
 5. **Still owed from much earlier, unrelated and still true:** an end-to-end
    in-browser "Download PDF" check against the live PDFShift API — nobody has
    confirmed a real PDF came back since `PDF_API_KEY` landed in `.env.local`.
