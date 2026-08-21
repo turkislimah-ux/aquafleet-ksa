@@ -174,7 +174,7 @@ relevant skill(s) **when the task calls for it**:
 **Do NOT append build history to this file.** CLAUDE.md holds rules only.
 Current state lives in `.planning/HANDOFF.md` — read it at session start.
 
-- **DB:** migration 0145. 73+ tables RLS-enabled, 47 views security_invoker, 0 anon-readable.
+- **DB:** migration 0146. 73+ tables RLS-enabled, 47 views security_invoker, 0 anon-readable.
 - **Built:** Dashboard, Fleet, Drivers & People, Finance/Invoice, Inventory,
   Maintenance, Archive, Consumption, Search/Header, Reports, Water Station Cost,
   Driver Payslips — all verified, no open bugs.
