@@ -5,16 +5,34 @@ This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
 
-**NEWEST: STEP 2b IS SHIPPED (`bc92d18`) — the READ REWIRE, and the point of the
+**NEWEST: STEP 3's WRITE SIDE IS LIVE — `0148`, `0149` and `0150` are applied,
+all self-asserts passed, every path rehearsed rolled back on live, and all three
+are committed (`a0b2566`, `35391c7`).**
+`set_project_commission(project, effective_from, mode, value, bump, note)` is now
+the ONLY path by which a commission figure changes on an existing project. It
+writes `project_commission_history` FIRST and UNCONDITIONALLY, then mirrors into
+`projects.commission_*` ONLY when the change is dated today — so a future-dated
+change never touches the live columns, and an edit can never be swallowed by a
+no-op UPDATE once those columns have gone stale. `cancel_project_commission`
+withdraws a STRICTLY future change and refuses everything else with a raise, never
+a silent no-op. `v_project_commission_now` (`0149`) is the display source and
+carries `projects_column_is_stale`. `0150` deleted the three commission columns
+from `update_project_with_customer`'s SET list — its 24-param signature is
+unchanged and those three params are now ignored.
+**What is left is 3c, the app rewire:** modal pre-fill onto
+`commission_config_at(project, today)` (`CustomersTab:131-133`), the date picker +
+re-editing card in `ProjectModal`, removing commission + rate from `/projects`, and
+repointing the Class B displays at the view.
+
+**Before it: STEP 2b IS SHIPPED (`bc92d18`) — the READ REWIRE, and the point of the
 whole feature. `priceDelivery` and `recomputeDailyCommission` now take their
 commission terms from `commission_config_at(project_id, trip_date)` — the config
 in force on the day the trip is FOR — instead of re-reading the live
 `projects.commission_*`. A no-row answer is a HARD ERROR that fails closed; it
 never falls back. BOTH RULINGS ARE NOW SHIPPED. Proven a no-op before it landed:
 new path equals old path on all 677 unpaid delivered trips.
-**UNVERIFIED IN-BROWSER — it deploys on push and nobody has clicked it yet. The
-checklist is §6 item 3.** Step 3 (the ProjectForm / guarded-RPC cleanup) is all
-that is left.**
+**VERIFIED IN-BROWSER — Turki ran all nine checks in §6 item 3 against the deployed
+build and they passed. Closed, not owed, not a blocker.**
 
 **Before it: `0147` is applied, verified and committed (`7cb8847`) — step 2a, the
 SYNC. `projects.commission_*` writes itself into `project_commission_history` by
@@ -379,8 +397,86 @@ because an archive stamps the CUSTOMER and there is no customer restore.
 
 ## 4. DB STATE
 
-- **Highest migration APPLIED: `0147_project_commission_sync_trigger.sql` —
-  applied by the architect via MCP, verified and committed (`7cb8847`).** 675
+- **Highest migration APPLIED: `0150_update_project_stops_writing_commission.sql`
+  — applied by the architect via MCP, all six of its own assertions passed,
+  committed (`35391c7`).** 488 lines / 25,998 bytes. It replaces exactly one
+  function, `update_project_with_customer`, and adds nothing: no table, no view,
+  no trigger, no column. The whole change is the DELETION of three lines from
+  that function's `update public.projects … set` list — `commission_mode`,
+  `commission_value`, `commission_bump_pct`. **The 24-param signature is
+  unchanged and the three params are still accepted and now ignored**, on
+  purpose: dropping them would have meant a PGRST202 window on a live money RPC
+  between the SQL-editor run and the app deploy, and DEFAULTs are impossible at
+  positions 11–13 of 24. Dropping them is owed LATER, after 3c ships — and note
+  the `customer_write_offs.payment_mode` precedent in CLAUDE.md §7 before doing
+  it. The surgical claim is ASSERTED, not promised: the file captures
+  `pg_get_functiondef` before the replace, computes the expected after-image by
+  `replace()`-ing those three lines out, raises if the needle was not found, and
+  raises again if the live definition differs from the expected one by a single
+  byte. Post-apply the architect confirmed the definition matches the drafting
+  pin exactly — **deflen 2701, md5 `6eefccefbe0b9d8d5f8630b4a0f5d4bc`** (down
+  from 2858, the 157 chars being those three lines). Posture and ACL asserted
+  byte-identical; `create_project_with_customer` untouched; the payment-mode
+  guard still in the body. Rollback is re-running the captured before-definition
+  — there is no DROP in either direction. Do not re-apply it.
+  - **This is RULING 2 from §6 item 3, settled: ONE WRITER.**
+    `set_project_commission` is now the only path in the database by which a
+    commission figure changes. The alternative — letting the modal keep passing
+    `update_project_with_customer` the in-force figures — was rejected on three
+    grounds, all recorded in `0150`'s header: it makes the two RPCs
+    non-commutative (last writer wins, and the loser silently reverts the edit in
+    BOTH the column and the history via `0147`'s upsert, while the screen says
+    saved); it makes a money invariant a property of one React component, when
+    the RPC is `security invoker` granted to `authenticated` and any session can
+    pass any figures; and a pre-fill is a SNAPSHOT while "in force" is
+    time-varying, so a tab left open overnight would stamp a today-dated reversal
+    of terms nobody touched.
+- **Applied with it: `0148_set_project_commission.sql` (1,068 lines / 56,539
+  bytes) and `0149_v_project_commission_now.sql` (350 lines / 18,855 bytes) —
+  both applied by the architect via MCP, every self-assertion passed, both
+  rehearsed rolled back on live, committed together (`a0b2566`).** This is step
+  3's write side.
+  - **`set_project_commission(project, mode, value, bump, effective_from, note)`
+    — the sole writer.** Order inside it is load-bearing and must not be
+    reordered: **history FIRST and UNCONDITIONAL, mirror into
+    `projects.commission_*` SECOND and TODAY-ONLY.** A future-dated change writes
+    history and leaves the columns alone; a today-dated one writes both.
+    - **It closes the STALE-COLUMN TRAP, which is the whole reason the order is
+      that way round.** `0147`'s trigger fires on a DIFFERENCE. Once a
+      future-dated change has made `projects.commission_*` stale, an edit back to
+      the stale value is a no-op UPDATE — the trigger never fires, no history row
+      is ever written, and the edit is confirmed on screen having done nothing.
+      Writing history first and unconditionally means the RPC never depends on
+      the trigger firing.
+    - Same-date edits UPSERT onto the existing row rather than adding a second.
+    - Backdating is REFUSED. Archived projects are REFUSED.
+  - **`cancel_project_commission(project, effective_from)` — withdraws a
+    scheduled change, and only a STRICTLY FUTURE one.** A today-dated entry is
+    already in force and may have priced trips delivered today, so it is REFUSED,
+    not clamped onto some other row. A `is_baseline` row is NEVER cancellable at
+    any date — every past trip resolves against it, and deleting it makes
+    `commission_config_at` return zero rows, which is a hard error at delivery.
+    The baseline guard is deliberately checked BEFORE the date guard, so a
+    future-dated baseline cannot fall through. It touches `projects.commission_*`
+    not at all — a future entry never wrote there. It DELETEs rather than
+    soft-flagging, because `0146`'s resolver ignores unknown columns and a
+    `cancelled_at` row would still win the ORDER BY and still price trips.
+    **Archived projects ARE allowed here** — the asymmetry with
+    `set_project_commission` is deliberate and defended in the header: refusing
+    would strand a queued change that fires the moment the project is restored.
+    Every refusal RAISES; nothing silently no-ops.
+  - **`v_project_commission_now`** — the display view. Per project: the in-force
+    mode/value/bump resolved through `commission_config_at(p.id, riyadh_today)`,
+    the `next_*` columns from the earliest strictly-future history row, and
+    `projects_column_is_stale`, a drift flag comparing the resolver against
+    `projects.commission_*`. Its own assertions proved the flag reads 0 for every
+    project at apply — **that is the no-op proof for the 3c display rewire.**
+  - Dates are floored Riyadh-local, `(now() at time zone 'Asia/Riyadh')::date`.
+    A UTC floor is YESTERDAY between 00:00 and 02:59 Riyadh.
+  - None of the three moved a commission figure, and none touched
+    `trips.commission_sar`. Do not re-apply any of them.
+- **Highest migration APPLIED before them: `0147_project_commission_sync_trigger.sql`
+  — applied by the architect via MCP, verified and committed (`7cb8847`).** 675
   lines. Additive: one new trigger function
   (`record_project_commission_change()`), two new triggers on `projects`
   (`projects_commission_history_ins` AFTER INSERT, `projects_commission_history_upd`
@@ -395,9 +491,11 @@ because an archive stamps the CUSTOMER and there is no customer restore.
     goes stale: every writer of `projects.commission_*` is caught by
     construction, including `app/projects/actions.ts`, which never reads
     `commission_bump_pct`.
-  - **It still moves NO commission figure.** `commission_config_at()` has zero
-    callers; `priceDelivery` and `recomputeDailyCommission` both still read
-    `projects.commission_*`. That is step 2b.
+  - **It moved no commission figure when it landed, and it still moves none** —
+    it only writes history. The "zero callers" half of this bullet is DEAD:
+    `commission_config_at()` was wired into `priceDelivery` and
+    `recomputeDailyCommission` by step 2b (`bc92d18`), which is shipped and
+    browser-verified.
   - `projects` now carries **three** triggers — the two above plus the
     pre-existing `projects_set_initials_trigger` (BEFORE INSERT). Order on an
     insert is set_initials → row written → baseline recorded.
@@ -406,7 +504,7 @@ because an archive stamps the CUSTOMER and there is no customer restore.
     not a today-dated one, because a project can be entered with a backdated
     `start_date` and a today-dated baseline would strand every trip before it.
   - Do not re-apply it.
-- **Highest migration APPLIED before it: `0146_project_commission_history.sql` —
+- **Highest migration APPLIED before that: `0146_project_commission_history.sql` —
   applied by the architect, verified and committed (`6f7ad60`).** 586 lines. Additive: one
   new table (`project_commission_history`), one new function
   (`commission_config_at(uuid, date)`), no view, no change to `projects`, no
@@ -425,9 +523,10 @@ because an archive stamps the CUSTOMER and there is no customer restore.
     every base table in this schema is gated by RLS instead (§6's revoke rule is
     about VIEWS);
   - the resolver is `security invoker` + `stable`, `anon` EXECUTE revoked.
-  **It was INERT when it landed — zero call sites, no trigger.** `0147` has since
-  given its table a trigger; the resolver still has zero callers. Do not
-  re-apply it.
+  **It was INERT when it landed — zero call sites, no trigger.** It is not inert
+  now: `0147` gave its table two triggers, 2b (`bc92d18`) made the resolver the
+  pricing path, and `0148`/`0149` made the table the thing that is written and
+  read. Do not re-apply it.
 - **Highest migration APPLIED before those: `0145_operations_metric_caveat.sql` —
   applied by Turki, live-verified and committed (`bcb9ed6`).** 9,015 bytes / 166 lines.
   Ledger row `operations_metric_caveat` @ `20260820214605`. Re-verified read-only
@@ -435,8 +534,8 @@ because an archive stamps the CUSTOMER and there is no customer restore.
   assertion checks, `report_metrics` still holds 30 rows, `operations_by_driver`
   present exactly once. `0141`/`0142`/`0143` landed between this line's previous
   value (`0140`) and now; see §0, §0a, §0b.
-- **Highest migration ON DISK: `0147` — the same file as the applied one. The
-  only gap in `0001..0147` other than the closed `0135`/`0136` is `0144`, which
+- **Highest migration ON DISK: `0150` — the same file as the applied one. The
+  only gap in `0001..0150` other than the closed `0135`/`0136` is `0144`, which
   is committed (`485b3a2`) and STAYS UNAPPLIED — Turki's call, 2026-08-21.** So
   the numbering INVERTS: an unapplied `0144` sits under an applied `0145`. That
   looks wrong to anyone diffing the ledger against disk and is not. Read the two
@@ -740,12 +839,17 @@ re-measure AFTER they say they are done.**
      glossary say what the statement already says; it does not fix a wrong
      number, because there is no wrong number.
 3. **EFFECTIVE-DATED DRIVER COMMISSION — STEPS 1 (`0146`, `6f7ad60`), 2a
-   (`0147`, `7cb8847`) AND 2b (`bc92d18`) ARE ALL SHIPPED. BOTH RULINGS BELOW
-   ARE IMPLEMENTED. What is left is (i) the in-browser verification, which has
-   NOT happened, and (ii) step 3, the ProjectForm / guarded-RPC cleanup.**
+   (`0147`, `7cb8847`), 2b (`bc92d18`) AND STEP 3's WRITE SIDE (`0148`/`0149`,
+   `a0b2566`; `0150`, `35391c7`) ARE ALL SHIPPED. BOTH RULINGS BELOW ARE
+   IMPLEMENTED, AND SO IS RULING 2 (see §4's `0150` entry — one writer). What is
+   left is 3c ONLY: the app rewire.**
 
-   **THE IN-BROWSER CHECKLIST, still owed.** `bc92d18` deployed on push and
-   nobody has clicked it. Use a TEST project (`VVV Test 2`), not a live one:
+   **THE IN-BROWSER CHECKLIST — RUN AND PASSED, NOT OWED.** Turki ran all nine
+   checks below against the deployed `bc92d18` build and every one passed. 2b is
+   closed: it is not owed, and it is not a blocker on anything. The list stays
+   here as the REGRESSION suite — re-run it after 3c, because 3c changes who
+   writes the config that these checks price against. Use a TEST project
+   (`VVV Test 2`), not a live one:
    1. Note 3–4 delivered trips' figures on two different past days.
    2. Edit the project's `commission_value` (e.g. 10 → 25) and save. **No trip
       figure anywhere should change yet.**
@@ -817,7 +921,8 @@ re-measure AFTER they say they are done.**
      They cannot be one trigger: `OLD` is unavailable in an INSERT trigger's
      `WHEN` clause (the `0114` lesson). See §4's `0147` bullet.
    - **`0147` moved no commission figure.** It only writes history; both call
-     sites still read `projects.commission_*` until step 2b lands.
+     sites still read `projects.commission_*` at the time it landed. 2b
+     (`bc92d18`) has since moved both onto the resolver.
    - **A trigger, not app-side writes, because there are TWO edit surfaces.**
      `update_project_with_customer` (the RPC the project modal calls) and
      `app/projects/actions.ts` both overwrite the columns — and the second one
@@ -892,6 +997,32 @@ re-measure AFTER they say they are done.**
      `getRate={(t) => t.commission_sar ?? project.rate_per_trip_sar}` — an
      undelivered card falls back to the **customer** rate in the DRIVER
      commission slot. Two different kinds of money in one expression.
+
+   **STEP 3c — THE ONLY THING LEFT ON THIS FEATURE. Not started. App-side only,
+   no migration.** The database is finished; nothing below needs new SQL.
+   - **Modal pre-fill moves onto `commission_config_at(project, today)`**
+     (`CustomersTab:131-133` currently pre-fills from `projects.commission_*`,
+     which `0148` can legitimately leave stale).
+   - **`ProjectModal.tsx` gains the write surface.** Turki's placement, verbatim:
+     "a date picker next to the 'Bump %' field, and below the 'Driver commission
+     mode' section a re-editing card with its features. Shape, labels and layout
+     are yours — I'm not speccing them." Design is Claude Code's, per §2.
+   - **`/projects` LOSES commission and rate entirely** — form and
+     `app/projects/actions.ts` — and becomes the lifecycle surface only
+     (customer, name, dates, status). Turki: "No third write path, no
+     `update_project_lifecycle` RPC. This kills the missing-bump bug by
+     deletion." **Project CREATION stays exactly as it is.**
+   - **Class B displays repoint at `v_project_commission_now`** (`0149`), whose
+     drift flag was proved 0 everywhere at apply — that is the no-op proof.
+     Archive stays on `commission_config_at(project, archived_date)`.
+   - **CALL ORDER when the modal saves: `update_project_with_customer` FIRST,
+     `set_project_commission` SECOND.** After `0150` the two commute, so this is
+     defence in depth — the commission writer runs last and wins even if `0150`
+     were ever reverted.
+   - **Call `set_project_commission` ONLY when the commission form actually
+     differs from its pre-fill, or a date was picked.** Firing it on every save
+     stamps a today-dated "commission change" history row every time somebody
+     renames a project.
 4. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
    in §7 carries nothing blocked-and-actionable — RBAC + the app-wide security pass,
    effective-dated customer rates, multi-project customers, Route Optimization /
