@@ -1010,7 +1010,11 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
 
   const norm = normalizeProjectInput(input);
   if (!norm.ok) return { error: norm.error };
-  const { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue, paymentMode } = norm.value;
+  // mode / bump / commissionValue are deliberately NOT destructured here, unlike
+  // in createProjectWithCustomer — the RPC below no longer takes them. They are
+  // still normalized and still validated by normalizeProjectInput above; this
+  // function just has nothing to send them to.
+  const { custName, projName, station, waterType, driverIds, rate, paymentMode } = norm.value;
 
   const supabase = createClient();
 
@@ -1040,9 +1044,16 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
     p_delivery_lng: input.delivery_lng,
     p_proj_name: projName,
     p_rate: rate,
-    p_commission_mode: mode,
-    p_commission_value: commissionValue,
-    p_commission_bump: bump,
+    // NO p_commission_mode / p_commission_value / p_commission_bump. This RPC
+    // stopped WRITING the three commission columns in 0150, so sending them was
+    // already a no-op; 0151 moved the parameters to the end and defaulted them
+    // null so this call could stop sending them, and the next migration removes
+    // them from the signature entirely — at which point passing them again is a
+    // PGRST202, not a no-op. setProjectCommission is the only path that moves a
+    // commission figure on an existing project. createProjectWithCustomer above
+    // still sends its three: creation genuinely writes them, and the 0147 INSERT
+    // trigger turns that into the baseline history row. Different function,
+    // different signature, deliberately not in this change.
     p_default_water_station: station,
     p_water_type: waterType,
     p_description: input.description?.trim() || null,
