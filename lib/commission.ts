@@ -41,8 +41,10 @@ function round2(n: number): number {
  * Guards: n is clamped to >= 1; a non-finite/negative base yields 0.
  *
  * `n` is supplied by the caller; this function does no bucketing of its own.
- * `dailyDriverProjectCommission` below is what turns a day's trips into
- * positions, and it is the definition of the window.
+ * WHAT SHIPS assigns positions in `recomputeDailyCommission`
+ * (app/trips/actions.ts): it sorts the bucket by `delivered_at` and calls this
+ * once per trip with that trip's OWN frozen terms. `dailyDriverProjectCommission`
+ * below is a test-only model of the same ordering — see its own note.
  */
 export function commissionForNthTrip(
   base: number,
@@ -125,6 +127,19 @@ export type DailyCommission = {
  * day it was FOR, not the day it was clicked.
  *
  * Trips with a null delivered_at are ignored (not yet delivered = no commission).
+ *
+ * TEST-ONLY, AND SAY SO RATHER THAN LET IT READ AS AUTHORITY. Its only consumer
+ * is scripts/commission-check.ts; no app code calls it. What actually prices a
+ * day is `recomputeDailyCommission` in app/trips/actions.ts, and the harness
+ * uses this to cross-check that function's ordering.
+ *
+ * IT ALSO MODELS A NARROWER CASE THAN REALITY. It takes ONE base/mode/bumpPct
+ * for the whole bucket, which stopped being the general case in 0152: a trip
+ * freezes the terms it was DELIVERED under, so a same-day rate change leaves one
+ * bucket holding trips at different bases and this function cannot express that.
+ * The harness covers the per-trip case separately with its own loop. Do not
+ * "fix" a disagreement between this and the recompute by changing the recompute
+ * — this is the narrower model, not the specification.
  */
 export function dailyDriverProjectCommission(
   trips: DeliveredLite[],

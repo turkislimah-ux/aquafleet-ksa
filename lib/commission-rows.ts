@@ -118,8 +118,13 @@ export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
-// A denied item never counts toward money. PURE predicate, used everywhere.
-export function isActive(x: { status?: ItemStatus }): boolean {
+// A denied item never counts toward money. PURE predicate.
+//
+// MODULE-PRIVATE. Its two callers are both in this file (buildCommissionRows).
+// It was exported and imported by nothing — an export on a money predicate is
+// an invitation to apply the denied rule in a fourth place, and the rule is
+// meant to have one expression that the sums here all route through.
+function isActive(x: { status?: ItemStatus }): boolean {
   return (x.status ?? "active") !== "denied";
 }
 
@@ -160,31 +165,17 @@ export function monthLabel(monthKey: string): string {
   return name ? `${name} ${monthKey.slice(0, 4)}` : monthKey;
 }
 
-// Per-project base lines for one driver+month (delivered trips only). PURE.
-export function buildBaseLines(
-  trips: CommTrip[],
-  driverId: string,
-  monthKey: string,
-  projectsById: Record<string, string>,
-): BaseLine[] {
-  const map = new Map<string, BaseLine>();
-  for (const t of trips) {
-    if (t.driver_id !== driverId || !t.delivered_at || monthKeyOf(t.delivered_at) !== monthKey) continue;
-    const key = t.project_id ?? "—";
-    const cur =
-      map.get(key) ??
-      {
-        projectId: t.project_id,
-        projectName: t.project_id ? projectsById[t.project_id] ?? t.project_id : "Ad-hoc · no project",
-        trips: 0,
-        amount: 0,
-      };
-    cur.trips += 1;
-    cur.amount = round2(cur.amount + (t.commission_sar ?? 0));
-    map.set(key, cur);
-  }
-  return [...map.values()];
-}
+// `buildBaseLines` USED TO LIVE HERE and was deleted: zero call sites, in app
+// code, scripts and tests alike. It bucketed a driver+month's delivered trips by
+// project keyed on `delivered_at`, which is the WRONG WINDOW for pay — the money
+// path keys on `payout_id` + `trip_date`. `buildCurrentBaseLines` below is the
+// one that ships, and its own header used to read "like buildBaseLines", naming
+// an uncalled function as if it were the reference implementation.
+//
+// Do not reintroduce a delivered_at-keyed base-line builder beside the pay-time
+// one. Two functions producing per-project base lines over two different windows
+// is how a snapshot starts describing a different set of trips than the payment
+// it is attached to.
 
 // Build per-driver commission rows for one month. PURE — reused by the tab body
 // and by the Commissions tab badge (current-month pending count) in DriversClient.
@@ -456,8 +447,8 @@ export function buildCurrentRows(p: {
 }
 
 // Per-project base lines for one driver's CURRENT (unpaid) cycle, optionally
-// scoped to one month. Like buildBaseLines but keyed on payout_id + trip_date
-// rather than on delivered_at. PURE.
+// scoped to one month. Keyed on payout_id + trip_date — the pay window, not
+// delivered_at. PURE.
 //
 // THIS IS A PAY-TIME FUNCTION: its output becomes snapshot.baseLines and the
 // `base` total the driver is paid. When it feeds payCommission the monthKey is
