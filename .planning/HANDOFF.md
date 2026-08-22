@@ -17,13 +17,18 @@ Turki ran all ten browser checks against the deployed build and they passed.
 Nothing about commission is outstanding. `0144` remains the only
 committed-but-unapplied migration and it is unrelated (Operations glossary, §4).
 
-**NEXT SESSION STARTS AT §6 ITEM 4.** With commission closed there is no large
-feature in flight, and §6 item 5 is still right that nothing big is
-scheduled-but-undone. What IS actionable is the two remaining leftovers 2b
-flagged — the `getRate` rate/commission conflation on undelivered board cards,
-and two rotted docstrings in `lib/commission.ts`. Both are small, both are
-described with their fix in §6 item 4, and the first one is easier now than it
-was then because `commissionNow` already reaches the card.
+**NEXT SESSION HAS NOTHING QUEUED — ASK TURKI.** With commission closed there is
+no large feature in flight, and §6 item 5 is still right that nothing big is
+scheduled-but-undone. Of the three leftovers 2b flagged, two are now closed
+(`BreakdownReport` by 3c, the `getRate` conflation by `0bf75d6`) and the only
+survivor is comment rot in `lib/commission.ts` — §6 item 4. That is a
+five-minute job, not a plan for a session.
+
+**`0bf75d6` is also a warning about this file.** Its §6 entry had described the
+`getRate` bug wrongly in two separate ways, and both errors were mine, written
+from reading the expression instead of tracing where its value was consumed.
+Before acting on any "OPEN" item here, re-derive it from the code. The entry
+tells you where to look; it is not evidence.
 
 **Then `b753a20` — the commission pill on the project board. Verified in-browser.**
 Turki asked for a "Commission / trip" pill beside the existing "Rate / trip" pill
@@ -271,10 +276,10 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-### This session (2026-08-22) — four commits, oldest-first
+### This session (2026-08-22) — six commits, oldest-first
 
 Read off `git log 520c6a9..HEAD` at session end, not incremented from the block
-below. All four pushed; `git status -sb` read `## main...origin/main` after the
+below. All pushed; `git status -sb` read `## main...origin/main` after the
 last one.
 
 | hash | what |
@@ -283,8 +288,10 @@ last one.
 | `a094805` | Record 3c as shipped; correct the ledger line to 148/98/15 |
 | `b753a20` | Commission pill on the project board. 3 files, +60/−17 |
 | `037c40d` | Record the pill and the display-vs-seedable rule it tested |
+| `577850a` | Close out item 3; promote 2b's leftovers to their own §6 item |
+| `0bf75d6` | Delete the `getRate` prop chain — the badge reads `trip.commission_sar`. 1 file, +21/−8 |
 
-`0a21b59` was verified in-browser against a ten-item checklist before commit.
+`0a21b59` and `0bf75d6` were both verified in-browser before commit.
 `b753a20` was committed on `tsc --noEmit` alone at Turki's instruction and
 verified in-browser immediately after — the order was inverted from §5's rule
 deliberately and with his say-so, not by drift.
@@ -344,7 +351,7 @@ last element. §5's shrinking-diff-is-a-stop-signal did not fire.
 
 ## 2. CURRENT STATE
 
-Re-measured at the end of the 2026-08-22 session, at `037c40d`:
+Re-measured at the end of the 2026-08-22 session, at `0bf75d6`:
 
 ```
 $ git -C /Users/turkislimah/aquafleet-ksa status -sb
@@ -370,6 +377,10 @@ stay that way: by the end of the session `pwd` reported the repo root and bare
 answer is safe to carry** — `-C` costs nothing and is right either way; a bare
 git command is a coin flip on which turn you are in. Re-confirm with
 `git rev-parse --show-toplevel` before trusting a bare one.
+**CONFIRMED AGAIN, same session, after the paragraph above was written:** a bare
+`git status -sb` died with `fatal: not a git repository` on the very next turn,
+having worked minutes earlier. The drift is real and it is per-turn. `cd
+/Users/turkislimah/aquafleet-ksa && …` or `-C` on every git and every `npx`.
 **`~/.planning/HANDOFF.md` does not exist; `~/.planning/HANDOFF.json` is the gsd
 stub and is EMPTY** — reading it at session start reports "no state" for a
 project that has plenty. The real handoff is the one you are reading.
@@ -1197,28 +1208,49 @@ re-measure AFTER they say they are done.**
      differs from its pre-fill, or a date was picked.** Firing it on every save
      stamps a today-dated "commission change" history row every time somebody
      renames a project.
-4. **THE THREE LEFTOVERS 2b FLAGGED — one is now fixed, two are still open, and
-   with item 3 closed these are the smallest real work on the board.** All three
-   were found during 2b's read-only trace and deliberately left out of a money
-   commit. Re-checked at `037c40d`:
+4. **THE THREE LEFTOVERS 2b FLAGGED — TWO ARE NOW CLOSED, ONE COSMETIC ONE IS
+   LEFT.** All three were found during 2b's read-only trace and deliberately
+   left out of a money commit. Re-checked at `037c40d`, then the second one
+   fixed in `0bf75d6`:
    - **CLOSED. `BreakdownReport` no longer reads `projects.commission_*`.** 3c
      repointed it at the `commissionNow` prop (`v_project_commission_now`), and
      its header comment now states the distinction outright: the header line is
      TERMS IN FORCE TODAY, while every commission NUMBER in the report body sums
      `trips.commission_sar`, frozen at delivery. Those two are allowed to
      disagree and the file says so. Nothing owed.
-   - **OPEN. `ProjectsBoard.tsx:1091` —
-     `getRate={(t) => t.commission_sar ?? project.rate_per_trip_sar}`.** An
-     undelivered card has no `commission_sar` yet, so it falls back to the
-     CUSTOMER rate and prints it in the DRIVER commission slot. Two different
-     kinds of money in one expression. It is display-only — no figure is
-     written from it — which is why it was never urgent, but it is now the last
-     place on the board where the two are conflated. **The fix has a source
-     now that it did not have during 2b:** `commissionNow` is already threaded
-     into `ProjectCard` for the pill, so an undelivered card can show today's
-     resolved commission (or nothing) instead of borrowing the rate. Compare
-     `:1743`, which does the honest thing for the customer-money column:
-     `getRate={(t) => t.rate_sar ?? 0}`.
+   - **CLOSED in `0bf75d6`. The `getRate` conflation — and it was BOTH call
+     sites, not one.** Verified in-browser by Turki before commit.
+     - **The description above this fix was wrong twice, so read the shape and
+       not the old summary.** It said the leak was `:1091`'s
+       `t.commission_sar ?? project.rate_per_trip_sar` firing on UNDELIVERED
+       cards, and it praised `:1743`'s `t.rate_sar ?? 0` as "the honest thing
+       for the customer-money column." Both claims were false.
+       `ratePerTrip` was read in EXACTLY ONE place — the
+       `stage === "delivered"` branch's "Commission paid" badge. So the
+       fallback could never render on an undelivered card, and `:1743` was not
+       a customer-money column at all: it passed the customer rate,
+       unconditionally, into the same driver-commission label. The
+       direct-customer board was the WORSE of the two.
+     - **Measured, not reasoned: the bug was LATENT.** Live counts —
+       delivered trips **757, of which 0 have a null `commission_sar`**; the 77
+       undelivered rows are all null but never reach the badge. So the `??`
+       never fired, and the single no-project delivered trip
+       (`rate_sar` null, `commission_sar` 0) rendered the same `0.00` from the
+       wrong source by coincidence. **No figure on screen was ever wrong.**
+     - **The fix removes the seam, it does not correct the arguments.** The
+       figure lives on the trip row, so `TripCard` now reads
+       `trip.commission_sar` and the whole `getRate` / `ratePerTrip` prop chain
+       is deleted from `StageColumn` and both mounts. There is no longer a
+       parameter through which revenue can reach a commission label. Zero
+       rendered change on current data — that was the acceptance test.
+     - A null commission on a delivered row now reads **"Delivered — no
+       commission recorded"** rather than a fabricated `+0.00 SAR`. Unreachable
+       today; kept because "nothing was stamped" and "zero" must not look alike
+       on a money surface, which is ruling (a)'s distinction carried into the UI.
+     - **`commissionNow` was NOT the answer, though the old note assumed it
+       would be.** Today's resolved terms are a forecast; the badge states what
+       was actually paid. Putting the pill's live figure on a delivered card
+       would have reintroduced exactly the stale-vs-frozen mixup 2b removed.
    - **OPEN, cosmetic. `lib/commission.ts:26` and `:46` still say "this month".**
      Both docstrings describe the ramp as monthly; it has been per-scheduled-day
      since the bucketing moved to `trip_date`. The CODE is correct — this is
