@@ -22,7 +22,9 @@ type JoinedTrip = Trip & {
 // activates (0148/0149), so no screen resolves current terms from them any
 // more. The current terms travel separately, as v_project_commission_now rows —
 // see commissionNow below. Do not re-add the three columns to this select:
-// carrying them is what made a stale figure reachable in the first place.
+// carrying them is what made a stale figure reachable in the first place. The
+// board's own commission pill reads the view through that separate prop, so
+// "a screen shows commission" is never a reason to put them back here.
 type ProjectHeader = {
   id: string;
   name: string;

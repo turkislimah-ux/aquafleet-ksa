@@ -32,6 +32,7 @@ import {
   type WaterType,
   type ProjectStatus,
   type DriverStatus,
+  type ProjectCommissionNowRow,
   STAGE_ORDER,
   STAGE_STYLES,
   TRIP_STAGE_LABELS,
@@ -77,11 +78,15 @@ type ProjectHeader = {
   name: string;
   customer_id: string;
   rate_per_trip_sar: number;
-  // NO commission_* here. Current terms are effective-dated (0148/0149) and
-  // resolve through v_project_commission_now, which travels as its own prop
-  // from page.tsx into CustomersTab. projects.commission_* is a write-side
-  // mirror that goes stale the moment a future-dated change activates — it
-  // must not be readable from a shape this many surfaces pass through.
+  // NO commission_* here — and note that this board DOES now display a
+  // commission figure (the amber pill in ProjectCard's header). It reads it
+  // from the `commissionNow` prop, not from here, and the separation is the
+  // whole defence: current terms are effective-dated (0148/0149) and resolve
+  // through v_project_commission_now, while projects.commission_* is a
+  // write-side mirror that goes stale the moment a future-dated change
+  // activates. Displaying commission is fine; making it reachable from a shape
+  // this many surfaces pass through is what put a stale figure one edit-form
+  // seed away from being written back.
   status: ProjectStatus;
   water_type: WaterType | null;
   // Finance (0025). Not used on this board — carried through so the prop
@@ -952,8 +957,16 @@ function PhasePickerModal({
   );
 }
 
+// Shared shape for the two money pills in the card header. Tinted ring-inset
+// rather than the neutral `border` the rate pill used to carry: sitting in a
+// `muted` metadata row, a bordered pill reads as another grey chip, and the
+// whole point of pairing these is that the eye separates them at a glance.
+const MONEY_PILL =
+  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ring-inset font-medium";
+
 function ProjectCard({
   project,
+  commissionNow,
   trips,
   report,
   driverRows,
@@ -973,6 +986,8 @@ function ProjectCard({
   onHighlightHover,
 }: {
   project: ProjectHeader;
+  // Today's terms, or null when the view has no row for this project.
+  commissionNow: ProjectCommissionNowRow | null;
   trips: TripRow[];
   report: DeliveriesReportWindow[];
   driverRows: DriverRow[];
@@ -1015,12 +1030,27 @@ function ProjectCard({
               </>
             )}
             <span>·</span>
-            <span
-              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5"
-              style={{ borderColor: "rgb(var(--border))" }}
-            >
+            {/* THE TWO SIDES OF ONE TRIP, side by side. Rate is what the
+                customer pays us; commission is what we pay the driver. The
+                colours carry that split — emerald for money in, amber for money
+                out — which is the same in/out language the Finance tab already
+                uses, so this is not decoration.
+
+                Commission comes from v_project_commission_now, never from
+                projects.commission_*. On a scalable project the pill shows the
+                BASE plus its step, because the base alone would read as the
+                whole story when trip 6 of the day earns more than trip 1. */}
+            <span className={cn(MONEY_PILL, "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20")}>
               Rate / trip <b>{formatSar(project.rate_per_trip_sar)}</b>
             </span>
+            {commissionNow?.commission_mode && (
+              <span className={cn(MONEY_PILL, "bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20")}>
+                Commission / trip <b>{formatSar(commissionNow.commission_value ?? 0)}</b>
+                {commissionNow.commission_mode === "scalable" && (
+                  <span className="opacity-75">+{commissionNow.commission_bump_pct ?? 0}%</span>
+                )}
+              </span>
+            )}
             <span>·</span>
             <span>{assignedCount} {assignedCount === 1 ? "driver" : "drivers"}</span>
           </div>
@@ -1190,6 +1220,13 @@ export function buildDriverProjectNames(
 export type ProjectsBoardProps = {
   trips: TripRow[];
   projects: ProjectHeader[];
+  // Driver commission terms IN FORCE TODAY, one row per project, straight from
+  // v_project_commission_now. The board shows the figure but never edits it —
+  // ProjectModal is the only writer (3c). Deliberately NOT re-added to
+  // ProjectHeader: projects.commission_* is a write-side mirror that goes stale
+  // the moment a future-dated change activates, and a header field is exactly
+  // the kind of thing a later edit form seeds itself from.
+  commissionNow: ProjectCommissionNowRow[];
   customers: CustomerOption[];
   trucks: TruckOption[];
   drivers: DriverOption[];
@@ -1210,6 +1247,7 @@ export type ProjectsBoardProps = {
 export default function ProjectsBoard({
   trips,
   projects,
+  commissionNow,
   customers,
   trucks,
   drivers,
@@ -1372,6 +1410,14 @@ export default function ProjectsBoard({
   // Customer name lookup (id -> name) — resolves each project's 1:1 customer
   // for the Kanban card's customer-name display.
   const customersById = useMemo(() => new Map(customers.map((c) => [c.id, c.name] as const)), [customers]);
+
+  // A project with no row here renders no commission pill at all. That is the
+  // right failure: a missing row means the view could not resolve terms for
+  // today, and printing "0 SAR" would state a figure nobody set.
+  const commissionByProject = useMemo(
+    () => new Map(commissionNow.map((r) => [r.project_id, r] as const)),
+    [commissionNow],
+  );
 
   // driver_id -> [project name…] for the project form's driver roster (which
   // projects each driver already serves). See buildDriverProjectNames.
@@ -1653,6 +1699,7 @@ export default function ProjectsBoard({
             <ProjectCard
               key={p.id}
               project={p}
+              commissionNow={commissionByProject.get(p.id) ?? null}
               trips={byProject.get(p.id) ?? []}
               report={reportByProject.get(p.id) ?? EMPTY_DELIVERIES_REPORT}
               driverRows={driverRowsByProject.get(p.id) ?? []}
