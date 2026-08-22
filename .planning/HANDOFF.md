@@ -1,4 +1,4 @@
-# SESSION HANDOFF — 2026-08-23 (DELIVERY-MOMENT COMMISSION FREEZE SHIPPED, BOTH HALVES. The three-step parameter drop is also finished — 0153 applied. NOTHING IS IN FLIGHT.)
+# SESSION HANDOFF — 2026-08-23 (DELIVERY-MOMENT COMMISSION FREEZE SHIPPED, BOTH HALVES. Three-step parameter drop finished — 0153 applied. Trips-page cleanup B2/B3 shipped. NOTHING IS OPEN.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -69,14 +69,59 @@ carries the durable rule and the two traps worth keeping: the create RPC keeps
 its three and its argument block is byte-identical around `p_rate`, so a blind
 find-replace breaks project creation; and DROP discards the ACL.
 
-**THE ONE THING STILL OPEN**, unrelated to the above: the one-off correction for
-trip `804a6a54-c958-4a77-9d00-8ae2c24369da` (King Salman Park, driver
-`a9157ee2`, `trip_date 2026-07-08`, stamped 10.30, expected 10.00). It is one of
-**12 PAID legacy rows** whose stored figure disagrees with the current ramp —
-recompute never writes paid trips, so it will not self-heal, and the freeze work
-did not touch it. Option A (push back + re-deliver in-browser) vs option B
-(equivalent SQL UPDATE) has still never been chosen. Ask before assuming it was
-dropped.
+**NOTHING IS OPEN.** The last item on this list is closed — see below.
+
+**CLOSED: trip `804a6a54-c958-4a77-9d00-8ae2c24369da`.** The architect corrected
+it directly via MCP, from a stale position-2 stamp of 10.30 to **10.00**.
+Re-measured live before writing this line:
+
+    project      King Salman Park
+    trip_date    2026-07-08
+    position     1
+    stored       10.00      terms  scalable 10.00 / bump 3.00
+    recomputed   10.00      paid   NO (payout_id NULL)
+
+Stored equals recomputed, so it is ramp-consistent with its own frozen terms and
+carries no mismatch. It is not 10.30, not paid, and not a legacy row.
+
+**THIS ENTRY WAS WRONG TWICE, WHICH IS THE POINT OF RECORDING IT.** It described
+the trip as PAID when it is unpaid, and it called the paid-mismatch set "12"
+when the live count is **18** — 12 was the real-project subset (King Salman Park
+8 + Royal Court 4) quoted as if it were the total, with AAA Test 6's 6 missing.
+Both errors were written confidently, and both survived several sessions because
+the note kept being re-read instead of the database.
+
+**THE PAID MISMATCHES ARE SETTLED, NOT OPEN.** 18 paid trips carry a
+`commission_sar` that disagrees with what today's ramp would compute. That is
+CORRECT and requires no action: those figures are what money actually left the
+business against. `recomputeDailyCommission` never rewrites a trip with a
+`payout_id`, by design — rewriting one would falsify a settled payout. Record
+them as known and settled. Do not "fix" them, and do not re-open them as a
+cleanup item.
+
+Current live mismatch picture, for reference rather than as a task list:
+25 total — 18 paid (settled, above) and 7 unpaid, all on the test projects
+AAA Test 6 (5) and R TTT (2). **Unpaid mismatches on real projects: 0.**
+
+---
+
+## STANDING INSTRUCTION — THE DATABASE OUTRANKS THIS FILE
+
+For any question of DB STATE, the architect's live confirmation is
+**authoritative** over anything written here. The architect applies corrections
+through MCP, which touches the database and **never touches the repo** — so a
+correction is invisible to Claude Code, and a note written before it goes stale
+the instant it lands with nothing in git to signal that.
+
+If the DB and a line in this file disagree, **the DB won.** Do not re-raise a
+closed item because a note still lists it; re-measure, then fix the note. The
+804a6a54 entry above is exactly this failure and cost several re-raises.
+
+The same applies to numbers: re-measure before quoting one, including the ones
+in this file. See the header's own warning — an entry here tells you where to
+look, it is not evidence.
+
+---
 
 **File transfer, for next session:** an inline attachment arrives blank on the
 architect's end. A file UPLOADED to the chat is readable. Upload, do not attach.

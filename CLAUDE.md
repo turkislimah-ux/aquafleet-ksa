@@ -125,6 +125,17 @@ relevant skill(s) **when the task calls for it**:
   schema, run migration, verify in-browser, commit both together. Additive
   migrations (new nullable/defaulted columns) are lower-risk.
 - **Turki verifies in-browser before every commit.** Nothing commits unverified.
+- **THE DATABASE OUTRANKS THE NOTES, for any question of DB state.** The
+  architect applies corrections through MCP — those touch the database and
+  **never touch the repo**, so they are invisible to Claude Code and leave
+  nothing in git to signal that a note went stale. If the live DB and a line in
+  `HANDOFF.md`/§7 disagree, **the DB won**: re-measure, act on the measurement,
+  then fix the note. Never re-raise an item because a note still lists it as
+  open. This is not hypothetical — one corrected trip was re-raised as an open
+  action across several sessions, and the note describing it was wrong about
+  both its paid status and its count.
+- **Re-measure a number before quoting it, including numbers already written in
+  our own files.** A figure in a handoff is a pointer, not evidence.
 - Migrations numbered sequentially (`00NN_name.sql`).
 - **Migrations DRAFTED to disk** — never self-applied by Claude Code through
   Supabase MCP. Draft the file, stop, let Turki run it.
