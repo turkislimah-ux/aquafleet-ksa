@@ -7,11 +7,23 @@ stale and actively wrong for two commits.
 
 ## ITEM 4 IS DONE. EFFECTIVE-DATED COMMISSION IS COMPLETE END TO END.
 
+*("Item 4" here is the cleanup-batch work item, the one §6 item 3 tracks. It is
+NOT §6's item 4, which is a different and much smaller thing. The two collide
+only in the numeral.)*
+
 **`3c` — the app rewire — is committed and pushed (`0a21b59`). 13 files, app-only,
 no migration. The DB was already at `0150` and this touched nothing in it.**
 Turki ran all ten browser checks against the deployed build and they passed.
 Nothing about commission is outstanding. `0144` remains the only
 committed-but-unapplied migration and it is unrelated (Operations glossary, §4).
+
+**NEXT SESSION STARTS AT §6 ITEM 4.** With commission closed there is no large
+feature in flight, and §6 item 5 is still right that nothing big is
+scheduled-but-undone. What IS actionable is the two remaining leftovers 2b
+flagged — the `getRate` rate/commission conflation on undelivered board cards,
+and two rotted docstrings in `lib/commission.ts`. Both are small, both are
+described with their fix in §6 item 4, and the first one is easier now than it
+was then because `commissionNow` already reaches the card.
 
 **Then `b753a20` — the commission pill on the project board. Verified in-browser.**
 Turki asked for a "Commission / trip" pill beside the existing "Rate / trip" pill
@@ -259,7 +271,25 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-Eighteen commits this session, one logical unit each (§5). Listed oldest-first.
+### This session (2026-08-22) — four commits, oldest-first
+
+Read off `git log 520c6a9..HEAD` at session end, not incremented from the block
+below. All four pushed; `git status -sb` read `## main...origin/main` after the
+last one.
+
+| hash | what |
+|---|---|
+| `0a21b59` | 3c — the commission UI. 13 files, +956/−163, app-only, no migration |
+| `a094805` | Record 3c as shipped; correct the ledger line to 148/98/15 |
+| `b753a20` | Commission pill on the project board. 3 files, +60/−17 |
+| `037c40d` | Record the pill and the display-vs-seedable rule it tested |
+
+`0a21b59` was verified in-browser against a ten-item checklist before commit.
+`b753a20` was committed on `tsc --noEmit` alone at Turki's instruction and
+verified in-browser immediately after — the order was inverted from §5's rule
+deliberately and with his say-so, not by drift.
+
+### The session before it (2026-08-21) — eighteen commits, oldest-first
 
 | hash | what |
 |---|---|
@@ -314,12 +344,16 @@ last element. §5's shrinking-diff-is-a-stop-signal did not fire.
 
 ## 2. CURRENT STATE
 
+Re-measured at the end of the 2026-08-22 session, at `037c40d`:
+
 ```
 $ git -C /Users/turkislimah/aquafleet-ksa status -sb
 ## main...origin/main
 
 $ git diff --stat            (empty)
 $ git diff --stat --cached   (empty)
+$ npx tsc --noEmit           (clean, exit 0)
+$ ls supabase/migrations | wc -l    148   (last: 0150)
 ```
 
 **Working tree clean, nothing uncommitted.** `npx tsc --noEmit` clean at session
@@ -794,8 +828,52 @@ because an archive stamps the CUSTOMER and there is no customer restore.
 **`preview_start` is NOT the workaround.** A second server lands on `/login` with no
 Supabase session, so it proves nothing about archiving, and it writes to the same
 `.next` as the running pid — **the exact thing that took this repo down twice.**
-**Do not touch `.next`.** Dev server: `next dev -p 3002` (NOT 3000), pid 4638,
-next-server v14.2.5; `/login` 200, everything else 307 behind auth.
+**Do not touch `.next`.** Dev server: `next dev -p 3002` (NOT 3000),
+next-server v14.2.5; `/login` 200, everything else 307 behind auth. The pid is
+not stable across sessions — read it with `lsof -nP -iTCP:3002 -sTCP:LISTEN`.
+
+**AMENDED 2026-08-22 — a HEADLESS PLAYWRIGHT CHANNEL DOES EXIST, and it is how
+the CSS outage below was proved fixed.** Tiers 1 and 2 above still fail, but
+`@playwright/test` is a devDependency and `chromium.launch()` works. **Run the
+script FROM THE REPO ROOT** — an `.mjs` in `/tmp` cannot resolve
+`@playwright/test` and dies with `ERR_MODULE_NOT_FOUND`; the Bash tool's cwd has
+drifted to `$HOME` mid-session before, so `cd` explicitly rather than assuming.
+It reaches `/login` only (everything else is 307 behind auth), which is enough to
+assert the CSS pipeline: count `document.styleSheets` rules, read
+`getComputedStyle(document.body)`, and listen for `/_next/` responses `>= 400`.
+A healthy build reads 800 rules and `rgb(248, 250, 252)` — the `--bg` from
+globals.css, NOT a browser default, which is what makes it an assertion rather
+than a screenshot. It cannot verify anything behind auth; Turki still does that.
+
+### `next build` AGAINST A LIVE DEV SERVER IS THE THIRD WAY TO BREAK `.next`
+
+**It took the whole app down to unstyled HTML this session, and the symptom does
+not point at the cause.** `next build` and `next dev` write the SAME `.next`
+directory. Running the build while the dev server is up wipes the dev server's
+compiled CSS chunk; the dev server keeps running on the wreckage and keeps
+serving. Data loads, every route renders, and the browser gets no stylesheet.
+
+**The tell is `.next/static/css/app/` being EMPTY** while production-only
+artifacts (`BUILD_ID`, `export-marker.json`, `prerender-manifest.js`, `*.nft.json`)
+sit alongside a hashed production CSS file the dev-mode HTML never references.
+
+**Why it misdiagnoses:** "server healthy, queries fine, no styles" reads as a
+Tailwind/PostCSS problem, and the session that caused it had just finished a
+13-file UI change — so the obvious suspect is the uncommitted work. It was not.
+`globals.css`, `tailwind.config.ts` and `postcss.config.js` were never touched;
+`git status` proved it in one command. **Check `git status` for config/CSS files
+BEFORE reaching for the diff of whatever you just wrote.**
+
+Fix is `rm -rf .next` plus a dev restart. No reinstall, no regeneration, no code
+change. **Standing rule: do not run `next build` while `next dev` is up.**
+`npx tsc --noEmit` gives type safety without touching `.next`; if a real
+production build is needed, stop the dev server first and expect to restart it.
+
+**Restarting it detaches it.** A dev server started from the Bash tool is not in
+Turki's terminal — check the parent chain (`ps -o pid,ppid,tty,command`) before
+assuming who owns the running one, and do not kill a `-zsh`-parented pid on
+`ttysNNN` to "restart" it. Computer-use grants terminals **click-only**: typing
+is blocked, so an agent cannot start one in his terminal either. Ask him.
 
 **Calling `archive_project_guarded` through the Supabase MCP is NOT the fallback.**
 It is a WRITE through the MCP, which §5 forbids, AND it bypasses the
@@ -925,17 +1003,24 @@ re-measure AFTER they say they are done.**
      (`lib/reports.ts:653`). **No surface anywhere sums it.** `0145` makes the
      glossary say what the statement already says; it does not fix a wrong
      number, because there is no wrong number.
-3. **EFFECTIVE-DATED DRIVER COMMISSION — STEPS 1 (`0146`, `6f7ad60`), 2a
-   (`0147`, `7cb8847`), 2b (`bc92d18`) AND STEP 3's WRITE SIDE (`0148`/`0149`,
-   `a0b2566`; `0150`, `35391c7`) ARE ALL SHIPPED. BOTH RULINGS BELOW ARE
-   IMPLEMENTED, AND SO IS RULING 2 (see §4's `0150` entry — one writer). What is
-   left is 3c ONLY: the app rewire.**
+3. **EFFECTIVE-DATED DRIVER COMMISSION IS COMPLETE — NOTHING IS LEFT ON IT.**
+   STEPS 1 (`0146`, `6f7ad60`), 2a (`0147`, `7cb8847`), 2b (`bc92d18`), STEP 3's
+   WRITE SIDE (`0148`/`0149`, `a0b2566`; `0150`, `35391c7`) **and 3c, the app
+   rewire (`0a21b59`)** are all shipped. Both rulings below are implemented, and
+   so is ruling 2 (see §4's `0150` entry — one writer). The board's commission
+   pill (`b753a20`) landed after the feature closed and is not part of it.
+   **The section below is now HISTORY — kept because the rulings and the
+   regression checklist are still load-bearing, not because anything is owed.
+   The authority on what 3c actually shipped is the ITEM 4 IS DONE section at
+   the top of this file; read that first and this only for the why.**
 
    **THE IN-BROWSER CHECKLIST — RUN AND PASSED, NOT OWED.** Turki ran all nine
    checks below against the deployed `bc92d18` build and every one passed. 2b is
-   closed: it is not owed, and it is not a blocker on anything. The list stays
-   here as the REGRESSION suite — re-run it after 3c, because 3c changes who
-   writes the config that these checks price against. Use a TEST project
+   closed: it is not owed, and it is not a blocker on anything. **The re-run
+   after 3c is also DONE** — Turki ran 3c's own ten-item checklist against the
+   working build and every item passed, which is what `0a21b59` was committed
+   on. The list stays here as the standing REGRESSION suite for anything that
+   touches who writes the config these checks price against. Use a TEST project
    (`VVV Test 2`), not a live one:
    1. Note 3–4 delivered trips' figures on two different past days.
    2. Edit the project's `commission_value` (e.g. 10 → 25) and save. **No trip
@@ -1085,8 +1170,10 @@ re-measure AFTER they say they are done.**
      undelivered card falls back to the **customer** rate in the DRIVER
      commission slot. Two different kinds of money in one expression.
 
-   **STEP 3c — THE ONLY THING LEFT ON THIS FEATURE. Not started. App-side only,
-   no migration.** The database is finished; nothing below needs new SQL.
+   **STEP 3c — SHIPPED (`0a21b59`, app-side only, no migration).** What follows
+   was the SPEC it was built to, kept verbatim because each bullet records a
+   decision Turki made; every one of them was implemented as written. Do not
+   read it as a to-do list. The as-built account is in ITEM 4 IS DONE at the top.
    - **Modal pre-fill moves onto `commission_config_at(project, today)`**
      (`CustomersTab:131-133` currently pre-fills from `projects.commission_*`,
      which `0148` can legitimately leave stale).
@@ -1110,7 +1197,34 @@ re-measure AFTER they say they are done.**
      differs from its pre-fill, or a date was picked.** Firing it on every save
      stamps a today-dated "commission change" history row every time somebody
      renames a project.
-4. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
+4. **THE THREE LEFTOVERS 2b FLAGGED — one is now fixed, two are still open, and
+   with item 3 closed these are the smallest real work on the board.** All three
+   were found during 2b's read-only trace and deliberately left out of a money
+   commit. Re-checked at `037c40d`:
+   - **CLOSED. `BreakdownReport` no longer reads `projects.commission_*`.** 3c
+     repointed it at the `commissionNow` prop (`v_project_commission_now`), and
+     its header comment now states the distinction outright: the header line is
+     TERMS IN FORCE TODAY, while every commission NUMBER in the report body sums
+     `trips.commission_sar`, frozen at delivery. Those two are allowed to
+     disagree and the file says so. Nothing owed.
+   - **OPEN. `ProjectsBoard.tsx:1091` —
+     `getRate={(t) => t.commission_sar ?? project.rate_per_trip_sar}`.** An
+     undelivered card has no `commission_sar` yet, so it falls back to the
+     CUSTOMER rate and prints it in the DRIVER commission slot. Two different
+     kinds of money in one expression. It is display-only — no figure is
+     written from it — which is why it was never urgent, but it is now the last
+     place on the board where the two are conflated. **The fix has a source
+     now that it did not have during 2b:** `commissionNow` is already threaded
+     into `ProjectCard` for the pill, so an undelivered card can show today's
+     resolved commission (or nothing) instead of borrowing the rate. Compare
+     `:1743`, which does the honest thing for the customer-money column:
+     `getRate={(t) => t.rate_sar ?? 0}`.
+   - **OPEN, cosmetic. `lib/commission.ts:26` and `:46` still say "this month".**
+     Both docstrings describe the ramp as monthly; it has been per-scheduled-day
+     since the bucketing moved to `trip_date`. The CODE is correct — this is
+     comment rot only, and `monthKeyOf` still exists and is still used
+     elsewhere, so do not "fix" the logic to match the comment. Fix the comment.
+5. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
    in §7 carries nothing blocked-and-actionable — RBAC + the app-wide security pass,
    effective-dated customer rates, multi-project customers, Route Optimization /
    Predictive / IoT are all parked deliberately.
@@ -1121,7 +1235,7 @@ re-measure AFTER they say they are done.**
      undated project column, so the two problems rhyme and the customer side
      could reuse `0146`'s shape — but nothing has been built for it and it stays
      parked. Do not read item 3 as having closed it.
-5. **Still owed from much earlier, unrelated and still true:** an end-to-end
+6. **Still owed from much earlier, unrelated and still true:** an end-to-end
    in-browser "Download PDF" check against the live PDFShift API — nobody has
    confirmed a real PDF came back since `PDF_API_KEY` landed in `.env.local`.
    **Blocked on the same missing browser channel as §5.**
