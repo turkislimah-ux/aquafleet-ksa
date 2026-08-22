@@ -1,4 +1,4 @@
-# SESSION HANDOFF — 2026-08-23 (DELIVERY-MOMENT COMMISSION FREEZE SHIPPED, BOTH HALVES. Three-step parameter drop finished — 0153 applied. Trips-page cleanup B2/B3 shipped. NOTHING IS OPEN.)
+# SESSION HANDOFF — 2026-08-23 (DELIVERY-MOMENT COMMISSION FREEZE SHIPPED, BOTH HALVES. Parameter drop finished at 0153. Trips-page cleanup audit executed. DB at 0153. NOTHING IS OPEN, NOTHING IS QUEUED — ASK TURKI.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -69,6 +69,65 @@ carries the durable rule and the two traps worth keeping: the create RPC keeps
 its three and its argument block is byte-identical around `p_rate`, so a blind
 find-replace breaks project creation; and DROP discards the ACL.
 
+---
+
+## SHIPPED: TRIPS-PAGE CLEANUP AUDIT
+
+A read-only audit of `app/trips/*` and its imports once the freeze and the param
+drop had settled, categorised by risk. Two findings executed (`8d4f76e`), three
+hygiene items executed (`e1a8596`), three deliberately parked.
+
+**The two standing flags carried into the audit were both already fixed** —
+`ProjectsBoard`'s `getRate` (zero occurrences repo-wide; closed by `0bf75d6`) and
+`lib/commission.ts`'s "this month" docstrings (closed by `627dbae`). Worth
+noting as a pattern: the flags had been carried in a note for several sessions
+after the code stopped matching them. Same failure mode as 804a6a54 below.
+
+**B2 — the dead update-path commission, removed (`8d4f76e`).** `ProjectModal`
+computed a `liveCommission`, chose between the edited figures and the terms
+already in force, and shipped all three through `UpdateProjectInput` to an action
+that normalized and dropped them. That branch was a clobber-guard against
+`update_project_with_customer` writing the three columns — impossible since 0150,
+and the parameters are gone since 0153. `UpdateProjectInput` is now
+`ProjectInputBase & { project_id }`, so handing it a commission field is a
+compile error rather than a silent no-op. Create is unchanged and provably so:
+`liveCommission`'s first disjunct was `!isEdit`, so create short-circuited to
+`editedCommission` every time, which is what it now passes directly.
+
+**B3 — `Project.commission_mode/value/bump_pct` dropped from the type
+(`8d4f76e`).** The columns still exist on `public.projects` as the write-side
+mirror; they were not part of the shape the app reads. `tsc` is the proof —
+removing fields breaks readers, not constructors, and it compiled clean. Nuance
+recorded in the commit: `app/projects/page.tsx` uses `select("*")`, so the
+columns still arrive over the wire; what changed is that nothing can reference
+them without a compile error.
+
+**Hygiene (`e1a8596`).** `buildBaseLines` turned out to have ZERO call sites, not
+"one" as the audit said — the one hit was a comment — so it was DELETED rather
+than un-exported. It keyed on `delivered_at`, the wrong window for pay
+(`payout_id` + `trip_date`), and `buildCurrentBaseLines`'s header pointed at it
+as though it were the reference implementation. `isActive` is now module-private.
+`dailyDriverProjectCommission`'s docstring stops claiming to be "the definition
+of the window" and now says what matters: it models ONE base per bucket, which
+stopped being the general case in 0152, so a disagreement between it and the
+recompute must never be resolved by changing the recompute.
+
+**PARKED DELIBERATELY — do not re-raise these as findings.** All three are
+recorded as intentional in `8d4f76e`'s commit body:
+- **`priceDelivery`'s redundant arithmetic (B1/C1).** Its result is always
+  overwritten by `recomputeDailyCommission`, but it is a CRASH-CONSISTENT
+  FALLBACK: if the recompute errors mid-action the row already holds the right
+  figure. Removing it makes a failed recompute leave a wrong one. Kept on
+  purpose.
+- **`ProjectsBoardProps.allStations` (A1).** Never read by `ProjectsBoard`;
+  `TripsTabs` pulls it out of the props bag and forwards it to
+  `WaterStationsModal`. Misfiled, not dead — deleting it breaks the modal.
+- **`projects_column_is_stale` (B4).** Selected, rendered in one place, and
+  nothing branches on it — which is exactly the intent stated in `db-types.ts`.
+  It looks unused and is not.
+
+---
+
 **NOTHING IS OPEN.** The last item on this list is closed — see below.
 
 **CLOSED: trip `804a6a54-c958-4a77-9d00-8ae2c24369da`.** The architect corrected
@@ -125,6 +184,61 @@ look, it is not evidence.
 
 **File transfer, for next session:** an inline attachment arrives blank on the
 architect's end. A file UPLOADED to the chat is readable. Upload, do not attach.
+
+---
+
+## SESSION LEDGER — 2026-08-23
+
+Ten commits, in order. DB went 0150 → 0153; three migrations applied by the
+architect, none self-applied.
+
+    0f5cddc  0151 param reorder (fix to the RAISE-arity bug, then committed)
+    ccab13c  0152 trip commission terms + backfill (757 trips stamped)
+    a348f67  docs: CLAUDE.md -> 0152, freeze rule recorded
+    44b461d  step 2 — caller stops sending the three args
+    a76726c  the freeze rewire (stamp point + per-trip recompute)
+    a7a2b86  0153 — the three params dropped for real
+    ff4a3e6  docs: CLAUDE.md -> 0153, freeze and param drop closed out
+    8d4f76e  trips cleanup B2/B3
+    8fd0a4e  docs: 804a6a54 closed, paid mismatches reframed, DB-outranks rule
+    e1a8596  hygiene — buildBaseLines deleted, isActive private, docstring fixed
+
+**Three lessons, all the same shape: a note outlived the thing it described.**
+1. My own 0151 assertion machinery carried a compile error (`%%` is a literal
+   percent, so a three-arg RAISE on a two-placeholder format aborts the DO
+   block). It aborted the architect's first apply. Every migration since has had
+   its RAISE arity audited with a PAREN-AWARE parser — a naive comma split
+   reports false mismatches on `array_to_string(v_names, ', ')`.
+2. The two standing audit flags were fixed in code sessions before anyone
+   re-read the flags.
+3. 804a6a54 was corrected in the DB and re-raised from a note three times.
+
+The rule that came out of it is now in `CLAUDE.md` §5 and is the one to actually
+carry forward: **the database outranks the notes, and re-measure a number before
+quoting it — including numbers in our own files.**
+
+**End state, measured at session end (before the commit that carries this file):**
+
+    working tree           clean, nothing uncommitted, nothing untracked
+    npx tsc --noEmit       clean, exit 0
+    commission-check       41 PASS / 0 FAIL
+    commission-rows-check  ALL PASS
+    supabase/migrations    151 files, last 0153_update_project_drop_commission_params.sql
+    live DB                0153. 77/77 tables RLS-enabled, 48/48 views
+                           security_invoker, 0 anon-readable (re-measured)
+
+Push state is deliberately NOT claimed here — this file is written before the
+push that carries it, so the claim could only be a guess. `git status -sb` is the
+authority.
+
+**Next session has nothing queued.** No migration drafted-but-unapplied, no code
+uncommitted, audit backlog empty apart from the three parked items above. Ask
+Turki.
+
+**Housekeeping flag:** `CLAUDE.md` is now **17.7 KB**. §5 sets 20 KB as the
+"check for appended diary" threshold, so it is approaching but not over. If it
+crosses, the §7 commission entries are the ones to compress — several of them now
+describe rules that are settled and could collapse to one line each.
 
 ---
 
