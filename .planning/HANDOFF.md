@@ -1,4 +1,4 @@
-# SESSION HANDOFF — 2026-08-22 (EFFECTIVE-DATED COMMISSION IS COMPLETE — 3c shipped; item 4 closed)
+# SESSION HANDOFF — 2026-08-22 (EFFECTIVE-DATED COMMISSION IS COMPLETE — 3c shipped; item 4 closed; board commission pill after it)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -12,6 +12,40 @@ no migration. The DB was already at `0150` and this touched nothing in it.**
 Turki ran all ten browser checks against the deployed build and they passed.
 Nothing about commission is outstanding. `0144` remains the only
 committed-but-unapplied migration and it is unrelated (Operations glossary, §4).
+
+**Then `b753a20` — the commission pill on the project board. Verified in-browser.**
+Turki asked for a "Commission / trip" pill beside the existing "Rate / trip" pill
+in each project card's header on the Trips board, emerald for the rate and amber
+for the commission. Built with the codebase's existing tinted-pill tokens
+(`bg-emerald-500/10 … ring-emerald-500/20`, same shape for amber) rather than new
+shades, so it matches Maintenance, Fleet and FinanceTab. The rate pill's neutral
+`border` became a tint in the same move: in a `muted` metadata row a bordered
+pill reads as another grey chip, and pairing the two only works if the eye
+separates them. Colour carries meaning here — emerald is money in (the customer
+pays us), amber is money out (we pay the driver).
+
+**This is the first real test of 3c's separation, and it is the pattern to copy.**
+3c had kept `commissionNow` OUT of `ProjectsBoard` entirely, with a comment
+saying the board "renders no commission figure, so it has no business receiving
+the terms." This request falsified that premise — but NOT the rule underneath it.
+The cheap fix would have been re-adding the three columns to `page.tsx`'s
+`ProjectHeader` select. That was refused. `commissionNow` moved into
+`ProjectsBoardProps` and reaches the card as its own prop, so the board displays
+commission while `projects.commission_*` stays unreachable from the shape every
+trips surface passes through.
+
+**The rule, stated once so the next request does not re-litigate it: DISPLAYING a
+commission figure is harmless. Making it SEEDABLE is the hazard.** A figure
+carried on `ProjectHeader`/`ProjectLite` is one edit-form default away from being
+written back stale. A figure that arrives as its own view-sourced prop is not.
+"A screen needs to show commission" is never a reason to put the columns back in
+that select — this is recorded in `page.tsx` at the select itself.
+
+Two smaller calls worth keeping: a project with no row in the view renders NO
+pill rather than `0 SAR` (a missing row means today's terms could not be
+resolved; a zero would state a figure nobody set), and a scalable project's pill
+carries the base plus its step, because the base alone reads as the whole story
+when trip 6 of the day earns more than trip 1.
 
 What 3c actually locked, and why each piece is not cosmetic:
 
