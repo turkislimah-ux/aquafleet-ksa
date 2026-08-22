@@ -1,4 +1,4 @@
-# SESSION HANDOFF — 2026-08-22 (DELIVERY-MOMENT COMMISSION FREEZE — 0151 and 0152 applied and committed. THE APP REWIRE IS THE OTHER HALF AND IS NOT YET DEPLOYED.)
+# SESSION HANDOFF — 2026-08-23 (DELIVERY-MOMENT COMMISSION FREEZE SHIPPED, BOTH HALVES. The three-step parameter drop is also finished — 0153 applied. NOTHING IS IN FLIGHT.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -7,7 +7,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## IN FLIGHT: DELIVERY-MOMENT COMMISSION FREEZE (Option B). HALF SHIPPED.
+## SHIPPED: DELIVERY-MOMENT COMMISSION FREEZE (Option B). BOTH HALVES.
 
 **The bug, reproduced in testing:** a driver has trips delivered TODAY at the old
 rate; a today-dated `set_project_commission` runs; a NEW trip for the same
@@ -41,33 +41,45 @@ statement — it is a money rule and it lives there, not here.
   **NOT RE-RUNNABLE — no `if not exists` on the adds, by design.** It IS safe to
   re-run only the backfill UPDATE on its own (block e), which is guarded by
   `commission_mode is null`; that is the gap-window sweep.
-- **THE APP REWIRE — NOT DEPLOYED.** Until it ships, the three new columns are
-  written by the migration and **read by nobody**, and pricing behaves exactly as
-  before. That is deliberate: it is what made 0152 inert.
+- **THE APP REWIRE** — committed `a76726c`, deployed. `priceDelivery` returns the
+  config it priced with; `setTripStage` freezes it onto the trip beside
+  `commission_sar` on every entry to `delivered` and clears all four on the way
+  out; `recomputeDailyCommission` no longer resolves a config for the bucket at
+  all — it prices each trip from its own columns at its live position, and its
+  write set names only `commission_sar`. A null-only self-heal fills any row
+  delivered in the gap between the 0152 backfill and the deploy.
 
-**Two things queued behind it, both touching `app/trips/actions.ts`:**
+  **The proof, before it landed:** all 192 existing buckets re-ranked and repriced
+  from the stored columns; the `commission_sar` fingerprint over the 358 unpaid
+  real-project trips is byte-identical either side
+  (`a1c2b3a32645263b24d189fce556b363`), zero change on all real projects. The only
+  divergences are the two accepted classes, neither in the write set: 12 paid
+  legacy payout snapshots, and the test projects. `commission-check` went 35 → 41
+  cases.
+- **`0153`** — applied, committed `a7a2b86`. Drops the three parameters from
+  `update_project_with_customer` for real. Signature-only: `prosrc` md5 is
+  `e0a731881696673fac355ab5269dc5c8` before and after, `functiondef` 2764 → 2622
+  (exactly the 142-byte parameter suffix), ACL identical, `anon` still cannot
+  execute. The param drop is finished; there is no step 4.
 
-1. **Step 2 of the param drop is CODED AND UNCOMMITTED** — the removal of
-   `p_commission_mode` / `_value` / `_bump` from the single
-   `update_project_with_customer` caller. `tsc --noEmit` and an isolated
-   `next build` both clean. It was waiting on Turki's smoke check (manage modal →
-   rename a project → save sticks; a commission change still works through its
-   own path) and never got one. **The rewire edits the same file, so commit step 2
-   FIRST or the two logical units land in one commit.**
-2. **Step 3** — drop the three parameters from `update_project_with_customer` for
-   real. Not started. The single caller is the server action in
-   `app/trips/actions.ts`; `ProjectModal` is NOT a caller, which is worth knowing
-   before a find-replace. Note the trap found in step 2: the five-line block
-   `p_rate` + the three commission args + `p_default_water_station` is
-   BYTE-IDENTICAL between the create and update RPC calls, so a blind
-   find-replace breaks project creation. Disambiguate with `p_project_id`.
+**The three-step parameter drop, closed.** 0151 (`0f5cddc`) widened, step 2
+(`44b461d`) stopped the caller sending, 0153 (`a7a2b86`) removed. Passing a
+commission argument to that RPC is now a PGRST202, deliberately. `CLAUDE.md` §7
+carries the durable rule and the two traps worth keeping: the create RPC keeps
+its three and its argument block is byte-identical around `p_rate`, so a blind
+find-replace breaks project creation; and DROP discards the ACL.
 
-**Still open, unrelated to the above:** the one-off correction for trip
-`804a6a54-c958-4a77-9d00-8ae2c24369da` (King Salman Park, driver `a9157ee2`,
-`trip_date 2026-07-08`, stamped 10.30, expected 10.00). It is one of 12 PAID
-legacy rows whose stored figure disagrees with the current ramp — recompute never
-writes paid trips, so it will not self-heal. Option A (push back + re-deliver
-in-browser) vs option B (equivalent SQL UPDATE) was never chosen.
+**THE ONE THING STILL OPEN**, unrelated to the above: the one-off correction for
+trip `804a6a54-c958-4a77-9d00-8ae2c24369da` (King Salman Park, driver
+`a9157ee2`, `trip_date 2026-07-08`, stamped 10.30, expected 10.00). It is one of
+**12 PAID legacy rows** whose stored figure disagrees with the current ramp —
+recompute never writes paid trips, so it will not self-heal, and the freeze work
+did not touch it. Option A (push back + re-deliver in-browser) vs option B
+(equivalent SQL UPDATE) has still never been chosen. Ask before assuming it was
+dropped.
+
+**File transfer, for next session:** an inline attachment arrives blank on the
+architect's end. A file UPLOADED to the chat is readable. Upload, do not attach.
 
 ---
 

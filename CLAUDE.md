@@ -174,10 +174,9 @@ relevant skill(s) **when the task calls for it**:
 **Do NOT append build history to this file.** CLAUDE.md holds rules only.
 Current state lives in `.planning/HANDOFF.md` — read it at session start.
 
-- **DB:** migration 0152. 77/77 tables RLS-enabled, 48 views security_invoker, 0 anon-readable.
-  (Re-measured after 0152. It adds columns and a check constraint — no view, no
-  table — so the view counts are unchanged by construction, and were confirmed
-  rather than assumed.)
+- **DB:** migration 0153. 77/77 tables RLS-enabled, 48 views security_invoker, 0 anon-readable.
+  (Re-measured after 0153. It replaces one function — no view, no table — so the
+  counts are unchanged by construction, and were confirmed rather than assumed.)
 - **Built:** Dashboard, Fleet, Drivers & People, Finance/Invoice, Inventory,
   Maintenance, Archive, Consumption, Search/Header, Reports, Water Station Cost,
   Driver Payslips — all verified, no open bugs.
@@ -254,8 +253,24 @@ Current state lives in `.planning/HANDOFF.md` — read it at session start.
   - **`commission_base_sar` is the INPUT rate; `commission_sar` is the MONEY.**
     One letter apart in the obvious naming, which is why the base column is not
     called `commission_value`. Do not swap them in a select.
-- **Current work:** delivery-moment commission freeze. `0151` and `0152` applied;
-  the app rewire (stamp point + recompute) is the other half. See HANDOFF.md.
+- **`update_project_with_customer` DOES NOT TAKE A COMMISSION (0150 → 0153).**
+  The three parameters are gone from the signature. Passing one is now a
+  PGRST202, which is the intended outcome — the mistake fails loudly instead of
+  being ignored. `set_project_commission` (0148) is the ONLY path that changes a
+  commission figure on an existing project, so a change cannot be reverted by an
+  unrelated save carrying a stale pre-fill. Do not re-add them.
+  - **`create_project_with_customer` IS A DIFFERENT FUNCTION and keeps its
+    three.** Creation genuinely writes them, and 0147's INSERT trigger turns that
+    into the baseline history row. The two RPCs' argument blocks are
+    byte-identical around `p_rate`, so a blind find-replace across the file
+    breaks project creation — disambiguate on `p_project_id`.
+  - **DROPPING A PARAMETER IS A DROP+CREATE, AND DROP DISCARDS THE ACL.**
+    Postgres allows only TRAILING defaults, which is why 0151 had to MOVE the
+    three before 0153 could remove them. A fresh function is EXECUTE-to-PUBLIC:
+    re-issue the grants in the same transaction and read the ACL back, or a
+    money RPC silently widens to anon.
+- **Current work:** none. The delivery-moment commission freeze and the
+  three-step parameter drop both shipped. See HANDOFF.md.
 - **Deferred:** effective-dated rates, Route Optimization, Predictive AI, IoT,
   drivers/staff table unification (v2).
 
