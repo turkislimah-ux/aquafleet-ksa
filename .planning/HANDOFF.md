@@ -1,11 +1,58 @@
-# SESSION HANDOFF — 2026-08-21 (effective-dated commission LIVE — steps 1, 2a and 2b of 3; 0144 + 0145 before it)
+# SESSION HANDOFF — 2026-08-22 (EFFECTIVE-DATED COMMISSION IS COMPLETE — 3c shipped; item 4 closed)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
 
-**NEWEST: STEP 3's WRITE SIDE IS LIVE — `0148`, `0149` and `0150` are applied,
+## ITEM 4 IS DONE. EFFECTIVE-DATED COMMISSION IS COMPLETE END TO END.
+
+**`3c` — the app rewire — is committed and pushed (`0a21b59`). 13 files, app-only,
+no migration. The DB was already at `0150` and this touched nothing in it.**
+Turki ran all ten browser checks against the deployed build and they passed.
+Nothing about commission is outstanding. `0144` remains the only
+committed-but-unapplied migration and it is unrelated (Operations glossary, §4).
+
+What 3c actually locked, and why each piece is not cosmetic:
+
+- **`ProjectModal` is the one place a commission figure moves.** It pre-fills from
+  `v_project_commission_now` — the terms in force TODAY — and the stale
+  `projects.commission_*` columns were REMOVED from `ProjectHeader` and
+  `ProjectLite` rather than left available to seed from. That is the whole
+  defence: a pre-fill that becomes a save is how a stale value gets written back,
+  and you cannot seed from a field that is no longer in the type.
+- **`set_project_commission` fires only when the commission fields differ from
+  their pre-fill OR a date was picked.** A rename must not stamp a today-dated
+  change — that would republish superseded terms and silently supersede a change
+  scheduled for next month. On a combined save `update_project_with_customer`
+  runs FIRST and the commission writer LAST. They commute under `0150`; the order
+  is kept anyway so the invariant survives a revert.
+- **A partial failure says so.** If the lifecycle update lands and the commission
+  write refuses, the error appends "The rest of the project was saved." The two
+  writes are separate statements by design and nothing rolls back — a bare
+  refusal would read as a full rollback while the renamed project sat on screen.
+- **`/projects` lost money entirely** — it is now customer, name, dates, status.
+  Its `updateProject` was the LAST direct-write path to the commission columns
+  and `0150` did not touch it, so once a future-dated change could activate, a
+  stale save there would have written it live. It also never carried
+  `commission_bump_pct`, so every save zeroed the bump on a scalable project.
+  Both bugs died with the fields. Creation is unchanged: the columns are
+  `not null default` (0001) and `0147`'s INSERT trigger writes the opening row.
+- **The Archive exception is deliberate and must survive future edits.** Every
+  other surface answers "what are the terms today" from the view. Archive
+  resolves `commission_config_at(project, archived_at)`, because "what terms did
+  this dead project run on" is a question about its archive date — a change
+  scheduled after it was archived is not part of its history. If Archive is ever
+  "fixed" to agree with `/trips`, that is the regression.
+- **`ArchiveCustomerTab` imports `getProjectCommissionAt` from `../trips/actions`,
+  breaking its own leaf-module rule on purpose.** `commission_config_at` has
+  exactly ONE app-side wrapper. Re-declaring it to keep the leaf rule intact
+  would give the resolver two call sites to drift apart — the §6 "exactly two
+  expressions" trap. The exception is recorded in the file's header.
+- **`formatDayKey` (lib/utils)** parses the date parts instead of `new Date(key)`,
+  which reads UTC midnight and shifts the day on a negative-offset machine.
+
+**Before it: STEP 3's WRITE SIDE — `0148`, `0149` and `0150` are applied,
 all self-asserts passed, every path rehearsed rolled back on live, and all three
 are committed (`a0b2566`, `35391c7`).**
 `set_project_commission(project, effective_from, mode, value, bump, note)` is now
@@ -19,10 +66,7 @@ a silent no-op. `v_project_commission_now` (`0149`) is the display source and
 carries `projects_column_is_stale`. `0150` deleted the three commission columns
 from `update_project_with_customer`'s SET list — its 24-param signature is
 unchanged and those three params are now ignored.
-**What is left is 3c, the app rewire:** modal pre-fill onto
-`commission_config_at(project, today)` (`CustomersTab:131-133`), the date picker +
-re-editing card in `ProjectModal`, removing commission + rate from `/projects`, and
-repointing the Class B displays at the view.
+**3c is no longer outstanding — see the top of this file.**
 
 **Before it: STEP 2b IS SHIPPED (`bc92d18`) — the READ REWIRE, and the point of the
 whole feature. `priceDelivery` and `recomputeDailyCommission` now take their
@@ -571,16 +615,25 @@ because an archive stamps the CUSTOMER and there is no customer restore.
   what a db reset drops.**) The inverse now also holds: `0144` is
   committed-but-unapplied, which is the safe direction of the same asymmetry.
 - **`0135`/`0136` never existed — CLOSED, see §0.** Do not re-reconcile.
-- **THE REMOTE LEDGER IS NOT A MIRROR OF DISK: 145 files against 95 rows in
-  `supabase_migrations.schema_migrations` (both re-measured 2026-08-21 after
-  `0147`). Do not
-  use it to audit what is applied — the DB itself is the authority.**
+- **THE REMOTE LEDGER IS NOT A MIRROR OF DISK: 148 files against 98 rows in
+  `supabase_migrations.schema_migrations` (disk counted 2026-08-22 after `0150`;
+  the row count measured by the architect on live). Do not use it to audit what
+  is applied — the DB itself is the authority.**
+  - **These numbers are a SNAPSHOT, not a constant. Re-measure both sides before
+    citing them.** The gap moved from 145/95 to 148/98 across `0148`–`0150`
+    without anything being reconciled — the spread happens to have held at 50,
+    which is coincidence and not a rule. This line has already been wrong once
+    (the name-versioned count below), from being carried forward instead of
+    counted.
   - It records `0036`, `0037`, `0058`, then nothing until `0060`, after which it
     runs near-continuous. `0001–0035` and most of `0038–0059` are simply absent:
     applied before history tracking, or through the SQL Editor, which writes no
     row. Absence from the ledger is NOT evidence a migration did not run.
-  - **12 rows carry no number**, all MCP-applied under auto-timestamps, measured
-    2026-08-21 by `name !~ '^[0-9]'`: `v3_ledger_totals_and_hide_amount_due`,
+  - **15 rows carry no number**, all MCP-applied under auto-timestamps, measured
+    2026-08-22 by `name !~ '^[0-9]'`. The three added since the 2026-08-21 count
+    are `0148`, `0149` and `0150`, which went in through MCP like the rest and so
+    landed name-versioned too — the numbering on disk is ours, not the ledger's.
+    The twelve before them: `v3_ledger_totals_and_hide_amount_due`,
     `invoice_payment_mode_snapshot`, `receipt_vote_approvals_and_lot_fix`,
     `retire_customers_payment_model`, `retire_water_stations_fill_cost`,
     `pay_commission_monthly`, `net_balance_returns` (0142),
