@@ -30,7 +30,6 @@ import {
   type Trip,
   type TripStage,
   type WaterType,
-  type CommissionMode,
   type ProjectStatus,
   type DriverStatus,
   STAGE_ORDER,
@@ -78,9 +77,11 @@ type ProjectHeader = {
   name: string;
   customer_id: string;
   rate_per_trip_sar: number;
-  commission_mode: CommissionMode;
-  commission_value: number;
-  commission_bump_pct: number;
+  // NO commission_* here. Current terms are effective-dated (0148/0149) and
+  // resolve through v_project_commission_now, which travels as its own prop
+  // from page.tsx into CustomersTab. projects.commission_* is a write-side
+  // mirror that goes stale the moment a future-dated change activates — it
+  // must not be readable from a shape this many surfaces pass through.
   status: ProjectStatus;
   water_type: WaterType | null;
   // Finance (0025). Not used on this board — carried through so the prop

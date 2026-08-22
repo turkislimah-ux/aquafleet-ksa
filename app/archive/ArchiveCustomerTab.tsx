@@ -12,18 +12,28 @@
 // A LEAF module, same contract as the Staff and Truck tabs: imports from lib/
 // and components/ only, and the one popup it needs is passed down rather than
 // reached for.
+//
+// ONE EXCEPTION, and it is deliberate: getProjectCommissionAt from
+// ../trips/actions. Commission at a date is resolved by commission_config_at,
+// and that RPC has exactly ONE app-side wrapper. Re-declaring it here to keep
+// the leaf rule intact would give the resolver two call sites to drift apart —
+// the same "exactly two expressions" trap CLAUDE.md §6 warns about. Sharing the
+// one wrapper is the cheaper mistake. It is a server action, not a component,
+// so nothing about the tab's rendering reaches upward.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, Eye, X, Archive, Undo2, RotateCcw } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import { cn, todayKey, formatDayKey } from "@/lib/utils";
 import type { SubTabItem } from "./SubTabPicker";
 import {
   PROJECT_STATUS_LABELS, PAYMENT_MODE_LABELS, COMMISSION_MODE_LABELS,
 } from "@/lib/db-types";
 import type {
   ArchiveCustomerRow, ArchiveInvoiceRow, ArchiveProjectRow, CustomerAmountPayableRow,
+  CommissionMode,
 } from "@/lib/db-types";
+import { getProjectCommissionAt } from "../trips/actions";
 
 export type CustomerSubTab = "invoices" | "deleted";
 
@@ -478,6 +488,47 @@ function ArchivedCustomerDetail({
   onRestore: () => void;
   onClose: () => void;
 }) {
+  // COMMISSION TERMS AS OF THE ARCHIVE DATE — the Archive exception.
+  //
+  // Every other surface in the app answers "what are the terms today" from
+  // v_project_commission_now. This one must not: a dead project's record is a
+  // statement about how it OPERATED, and resolving it at today's date would
+  // narrate terms it never ran under (a change scheduled after it was archived
+  // is not part of its history). commission_config_at is the same resolver the
+  // pricing path uses, so this reads exactly what those trips were priced on.
+  //
+  // The date: the project's own archived_at, falling back to the customer's
+  // (0019/0141 flip both on ONE timestamp, so they agree) and finally to today
+  // for a project that is not archived at all.
+  const asOf = (project?.archived_at ?? customer.archived_at ?? "").slice(0, 10) || todayKey();
+  const projectId = project?.id ?? null;
+  const [terms, setTerms] = useState<{
+    state: "loading" | "ready" | "failed";
+    config: { mode: CommissionMode; value: number; bumpPct: number } | null;
+  }>({ state: "loading", config: null });
+
+  useEffect(() => {
+    if (!projectId) {
+      setTerms({ state: "ready", config: null });
+      return;
+    }
+    // Guards against a late response from a previously-open customer landing on
+    // this one — the popup can be closed and reopened faster than the round trip.
+    let live = true;
+    setTerms({ state: "loading", config: null });
+    getProjectCommissionAt(projectId, asOf).then((res) => {
+      if (!live) return;
+      if (res.error) {
+        setTerms({ state: "failed", config: null });
+        return;
+      }
+      setTerms({ state: "ready", config: res.config ?? null });
+    });
+    return () => {
+      live = false;
+    };
+  }, [projectId, asOf]);
+
   // REVENUE — collected means PAID. status 'paid' is the settled state
   // (paid_at is stamped with it), so this counts what actually came in, not
   // what was billed: a confirmed-but-unpaid invoice is a receivable, and
@@ -642,39 +693,70 @@ function ArchivedCustomerDetail({
               archived alongside one.
             </p>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <Field label="Project name" value={project.name} />
-              <Field label="Trip-ref prefix" value={project.initials} />
-              <Field label="Status" value={PROJECT_STATUS_LABELS[project.status] ?? project.status} />
-              <Field
-                label="Payment method"
-                value={project.payment_mode ? PAYMENT_MODE_LABELS[project.payment_mode] : "—"}
-              />
-              <Field label="Rate per trip" value={money(Number(project.rate_per_trip_sar))} />
-              <Field
-                label="Water type"
-                value={project.water_type === "potable" ? "Potable"
-                  : project.water_type === "non_potable" ? "Non-potable" : "—"}
-              />
-              <Field
-                label="Commission mode"
-                value={COMMISSION_MODE_LABELS[project.commission_mode] ?? project.commission_mode}
-              />
-              <Field label="Commission per trip" value={money(Number(project.commission_value))} />
-              <Field
-                label="Bump % per trip"
-                value={project.commission_mode === "scalable" ? `${project.commission_bump_pct}%` : "—"}
-              />
-              <Field label="Start date" value={fmtDate(project.start_date)} />
-              <Field label="End date" value={fmtDate(project.end_date)} />
-              <Field label="Location" value={project.location || "—"} />
-              {project.description && (
-                <div className="col-span-2 md:col-span-3">
-                  <div className="text-[11px] muted mb-0.5">Description</div>
-                  <div className="text-sm whitespace-pre-wrap">{project.description}</div>
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <Field label="Project name" value={project.name} />
+                <Field label="Trip-ref prefix" value={project.initials} />
+                <Field
+                  label="Status"
+                  value={PROJECT_STATUS_LABELS[project.status] ?? project.status}
+                />
+                <Field
+                  label="Payment method"
+                  value={project.payment_mode ? PAYMENT_MODE_LABELS[project.payment_mode] : "—"}
+                />
+                <Field label="Rate per trip" value={money(Number(project.rate_per_trip_sar))} />
+                <Field
+                  label="Water type"
+                  value={project.water_type === "potable" ? "Potable"
+                    : project.water_type === "non_potable" ? "Non-potable" : "—"}
+                />
+                <Field label="Start date" value={fmtDate(project.start_date)} />
+                <Field label="End date" value={fmtDate(project.end_date)} />
+                <Field label="Location" value={project.location || "—"} />
+                {project.description && (
+                  <div className="col-span-2 md:col-span-3">
+                    <div className="text-[11px] muted mb-0.5">Description</div>
+                    <div className="text-sm whitespace-pre-wrap">{project.description}</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Its own box, not three more cells in the grid above: every
+                  other field there is a plain column read, and these are
+                  resolved at a date. Saying which date is the point. */}
+              <div className="rounded-xl border p-3" style={{ borderColor: "rgb(var(--border))" }}>
+                <div className="flex items-baseline justify-between gap-3 mb-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide muted">
+                    Driver commission
+                  </div>
+                  <div className="text-[11px] muted">
+                    Terms in force {formatDayKey(asOf)}
+                  </div>
                 </div>
-              )}
-            </div>
+                {terms.state === "loading" ? (
+                  <p className="text-sm muted">Loading terms…</p>
+                ) : terms.state === "failed" ? (
+                  <p className="text-sm muted">
+                    Could not resolve the terms for this date.
+                  </p>
+                ) : !terms.config ? (
+                  <p className="text-sm muted">No commission terms on record for this date.</p>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <Field
+                      label="Commission mode"
+                      value={COMMISSION_MODE_LABELS[terms.config.mode] ?? terms.config.mode}
+                    />
+                    <Field label="Commission per trip" value={money(terms.config.value)} />
+                    <Field
+                      label="Bump % per trip"
+                      value={terms.config.mode === "scalable" ? `${terms.config.bumpPct}%` : "—"}
+                    />
+                  </div>
+                )}
+              </div>
+            </>
           )}
 
           <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">

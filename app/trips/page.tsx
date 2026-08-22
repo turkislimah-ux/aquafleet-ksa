@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { type SelectableStation, type WaterStationRow } from "@/lib/station-pricing";
-import type { Trip, WaterType, CommissionMode, ProjectStatus, DriverStatus, ProjectDriver, PaymentMode, InvoicePaymentMethod } from "@/lib/db-types";
+import type { Trip, WaterType, ProjectStatus, DriverStatus, ProjectDriver, PaymentMode, InvoicePaymentMethod, ProjectCommissionNowRow } from "@/lib/db-types";
 import type { LeavePeriod } from "@/lib/leave";
 import { buildDriverStateMap, type DriverState } from "@/lib/driver-state";
 import { todayKey } from "@/lib/utils";
@@ -15,15 +15,19 @@ type JoinedTrip = Trip & {
   driver: { name: string } | null;
 };
 
-// Project header fields the board needs (header + commission + location).
+// Project header fields the board needs (header + location).
+//
+// COMMISSION IS DELIBERATELY ABSENT. projects.commission_mode/value/bump_pct are
+// a write-side mirror that goes stale the moment a future-dated change
+// activates (0148/0149), so no screen resolves current terms from them any
+// more. The current terms travel separately, as v_project_commission_now rows —
+// see commissionNow below. Do not re-add the three columns to this select:
+// carrying them is what made a stale figure reachable in the first place.
 type ProjectHeader = {
   id: string;
   name: string;
   customer_id: string;
   rate_per_trip_sar: number;
-  commission_mode: CommissionMode;
-  commission_value: number;
-  commission_bump_pct: number;
   status: ProjectStatus;
   water_type: WaterType | null;
   // Finance (0025). NULL = unset.
@@ -120,9 +124,10 @@ export default async function TripsPage() {
 
   const today = todayKey(); // local (matches trip day-math), not UTC
   const [
-    tripsRes, projectsRes, customersRes, trucksRes, driversRes, assignmentsRes,
-    stationsRes, allStationsRes, leavePeriodsRes, terminatedDriversRes, topupsRes,
-    paidInvoicesRes, specialChargesRes, balanceReturnsRes,
+    tripsRes, projectsRes, commissionNowRes, customersRes, trucksRes, driversRes,
+    assignmentsRes, stationsRes, allStationsRes, leavePeriodsRes,
+    terminatedDriversRes, topupsRes, paidInvoicesRes, specialChargesRes,
+    balanceReturnsRes,
   ] =
     await Promise.all([
       supabase
@@ -134,10 +139,23 @@ export default async function TripsPage() {
       supabase
         .from("projects")
         .select(
-          "id, name, customer_id, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, status, water_type, payment_mode, initials, default_station, default_water_station, location, location_lat, location_lng, description"
+          "id, name, customer_id, rate_per_trip_sar, status, water_type, payment_mode, initials, default_station, default_water_station, location, location_lat, location_lng, description"
         )
         .is("archived_at", null)
         .order("name", { ascending: true }),
+      // CURRENT driver-commission terms, per project (v_project_commission_now,
+      // 0149) — resolved through commission_config_at(), the same definition the
+      // pricing path uses, plus the next scheduled change if one is queued.
+      // THIS IS THE DISPLAY SOURCE; the projects select above no longer carries
+      // the commission columns at all. Not filtered to active projects: the view
+      // publishes archived_at and the join below is by project id, so the extra
+      // rows cost nothing and a project archived between the two reads still
+      // resolves rather than disappearing.
+      supabase
+        .from("v_project_commission_now")
+        .select(
+          "project_id, archived_at, commission_mode, commission_value, commission_bump_pct, next_effective_from, next_commission_mode, next_commission_value, next_commission_bump_pct, projects_column_is_stale",
+        ),
       supabase
         .from("customers")
         .select(
@@ -264,6 +282,13 @@ export default async function TripsPage() {
 
   const projects = (projectsRes.data ?? []) as ProjectHeader[];
 
+  // The commission terms in force TODAY, keyed by project. Every commission
+  // figure rendered under /trips — the customers table cell, the breakdown
+  // report, the edit modal's pre-fill — resolves through this map. Nothing
+  // reads projects.commission_* any more; that column is a write-side mirror
+  // that goes stale the moment a future-dated change activates.
+  const commissionNow = (commissionNowRes.data ?? []) as ProjectCommissionNowRow[];
+
   // Hide trips whose project was archived (the projects query above is already
   // active-only). Trips with NO project (ad-hoc / customer-only) are kept — they
   // have no project lifecycle to follow.
@@ -362,6 +387,10 @@ export default async function TripsPage() {
   const error =
     tripsRes.error ||
     projectsRes.error ||
+    // Same rule as paidInvoicesRes below. Falling back to [] here would render
+    // every project's commission as "—" and, worse, seed the edit modal with
+    // blanks — a pre-fill that becomes a save. A read failure must surface.
+    commissionNowRes.error ||
     customersRes.error ||
     trucksRes.error ||
     driversRes.error ||
@@ -389,6 +418,7 @@ export default async function TripsPage() {
       error={error ? error.message : null}
       trips={visibleTrips}
       projects={projects}
+      commissionNow={commissionNow}
       customers={customers}
       trucks={trucks}
       drivers={drivers}

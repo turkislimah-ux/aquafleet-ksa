@@ -23,6 +23,7 @@ import FinanceTab from "./FinanceTab";
 import NewProjectModal from "./NewProjectModal";
 import WaterStationsModal from "./WaterStationsModal";
 import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { ProjectCommissionNowRow } from "@/lib/db-types";
 
 type Tab = "projects" | "customers" | "finance";
 
@@ -47,6 +48,7 @@ export default function TripsTabs({
   balanceReturns,
   specialCharges,
   paidInvoices,
+  commissionNow,
   ...boardProps
 }: ProjectsBoardProps & {
   error: string | null;
@@ -54,6 +56,10 @@ export default function TripsTabs({
   balanceReturns: BalanceReturnRow[];
   specialCharges: SpecialChargeRow[];
   paidInvoices: PaidInvoiceRow[];
+  // Destructured OUT of boardProps on purpose: ProjectsBoard renders no
+  // commission figure, so it has no business receiving the terms. Only the
+  // Customers tab (table cell, edit modal, breakdown) reads these.
+  commissionNow: ProjectCommissionNowRow[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -140,6 +146,7 @@ export default function TripsTabs({
         <CustomersTab
           customers={boardProps.customers}
           projects={boardProps.projects}
+          commissionNow={commissionNow}
           assignmentsByProject={boardProps.assignmentsByProject}
           trips={boardProps.trips}
           drivers={boardProps.drivers}

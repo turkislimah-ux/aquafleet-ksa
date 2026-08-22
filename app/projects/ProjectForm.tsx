@@ -3,17 +3,31 @@
 // Client island for the Projects page: table plus New/Edit modal wired to the
 // createProject / updateProject server actions. Needs the customer list for
 // the customer dropdown.
+//
+// THIS SURFACE CARRIES NO MONEY. It is the project LIFECYCLE only — customer,
+// name, dates, status. Rate per trip and the three commission fields were
+// removed together, and neither is coming back here:
+//
+//   - Commission is EFFECTIVE-DATED (0146-0150). set_project_commission is the
+//     one thing allowed to move a commission figure on an existing project,
+//     because it is the only writer that knows WHEN the change takes effect.
+//     This form wrote projects.commission_* directly through updateProject,
+//     which had no date at all — so once a future-dated change could activate,
+//     an unrelated Save here would have republished a superseded figure as
+//     today's terms. It also never carried a bump field, so every save through
+//     it silently zeroed the bump on a scalable project.
+//   - Rate went with it because the same argument is coming for rates
+//     (effective-dated rates are on the roadmap) and because a form that edits
+//     one price and not the other is a trap, not a simplification.
+//
+// Both live in ProjectModal on /trips (Customers tab -> Manage project), which
+// reads the terms in force today and writes through the single writer.
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Users } from "lucide-react";
 import { Btn, Table, TH, TD, StatusPill } from "@/components/ui";
-import { formatSar } from "@/lib/utils";
-import {
-  type Project,
-  COMMISSION_MODE_LABELS,
-  PROJECT_STATUS_LABELS,
-} from "@/lib/db-types";
+import { type Project, PROJECT_STATUS_LABELS } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
 import { createProject, updateProject } from "./actions";
 import ManageDriversModal, { type DriverOption } from "./ManageDriversModal";
@@ -119,8 +133,6 @@ export default function ProjectForm({
             <tr>
               <TH>Project</TH>
               <TH>Customer</TH>
-              <TH>Rate / trip</TH>
-              <TH>Commission</TH>
               <TH>Dates</TH>
               <TH>Status</TH>
               <TH className="text-end">Actions</TH>
@@ -129,7 +141,7 @@ export default function ProjectForm({
           <tbody>
             {projects.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                <td colSpan={5} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                   No projects yet.
                 </td>
               </tr>
@@ -138,8 +150,6 @@ export default function ProjectForm({
               <tr key={p.id}>
                 <TD className="font-medium">{p.name}</TD>
                 <TD>{p.customerName}</TD>
-                <TD className="tabular-nums">{formatSar(p.rate_per_trip_sar)}</TD>
-                <TD>{COMMISSION_MODE_LABELS[p.commission_mode]} · {p.commission_value}</TD>
                 <TD>{p.start_date ?? "—"} → {p.end_date ?? "open"}</TD>
                 <TD><StatusPill status={p.status === "active" ? "active" : p.status === "paused" ? "warning" : "out_of_service"} label={PROJECT_STATUS_LABELS[p.status]} /></TD>
                 <TD className="text-end">
@@ -178,28 +188,12 @@ export default function ProjectForm({
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Rate per trip (SAR)</span>
-                <input name="rate_per_trip_sar" type="number" step="any" min="0" defaultValue={editing?.rate_per_trip_sar ?? 0} className={INPUT} style={INPUT_STYLE} />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">Status</span>
                 <select name="status" defaultValue={editing?.status ?? "active"} className={INPUT} style={INPUT_STYLE}>
                   {Object.entries(PROJECT_STATUS_LABELS).map(([v, l]) => (
                     <option key={v} value={v}>{l}</option>
                   ))}
                 </select>
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Commission mode</span>
-                <select name="commission_mode" defaultValue={editing?.commission_mode ?? "fixed"} className={INPUT} style={INPUT_STYLE}>
-                  {Object.entries(COMMISSION_MODE_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Commission value</span>
-                <input name="commission_value" type="number" step="any" min="0" defaultValue={editing?.commission_value ?? 0} className={INPUT} style={INPUT_STYLE} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="muted">Start date</span>

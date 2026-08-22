@@ -82,6 +82,28 @@ export function addDaysToKey(key: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Render a "YYYY-MM-DD" day key as a readable label ("1 Sep 2026").
+ *
+ * PARSES THE PARTS, NEVER `new Date(key)`. That constructor reads a bare date
+ * string as UTC midnight, and toLocaleDateString then re-renders it in the
+ * viewer's zone — so on any negative-offset machine the label lands on the day
+ * BEFORE the one stored. These keys are calendar dates (commission
+ * effective_from, trip_date), not instants; they carry no time and must not
+ * acquire one on the way to the screen. Passing the parts to the Date
+ * constructor builds it in local terms, so the digits survive the round trip
+ * whatever zone the browser is in.
+ */
+export function formatDayKey(key: string): string {
+  const [y, m, d] = key.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return key;
+  return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 export function addYearsToKey(key: string, years: number): string {
   const d = new Date(`${key}T00:00:00Z`);
   d.setUTCFullYear(d.getUTCFullYear() + years);

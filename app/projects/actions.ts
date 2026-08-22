@@ -12,19 +12,30 @@ function nullable(v: FormDataEntryValue | null) {
   const s = str(v);
   return s === "" ? null : s;
 }
-function num(v: FormDataEntryValue | null) {
-  const s = str(v);
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-}
 
+// LIFECYCLE FIELDS ONLY — no money. rate_per_trip_sar, commission_mode and
+// commission_value used to be parsed here and written straight into `projects`
+// by updateProject below. That was the last direct-write path to the commission
+// columns, and it was a real hazard rather than a tidiness complaint:
+//
+//   - It carried NO effective date. 0148 made commission effective-dated, so an
+//     undated write lands as "today" through 0147's trigger — meaning a save on
+//     this form could republish a superseded figure as today's terms and
+//     silently supersede a change scheduled for next month.
+//   - It never carried commission_bump_pct at all, so every save through this
+//     form zeroed the bump on a scalable project.
+//
+// Both columns are `not null default` (0001), so leaving them out of the INSERT
+// below is safe: a project created here opens on 0 SAR fixed, which is exactly
+// what the removed inputs defaulted to anyway. 0147's INSERT trigger writes the
+// matching opening history row either way.
+//
+// To change a commission figure, use ProjectModal on /trips — it goes through
+// set_project_commission, which is the single writer.
 function parse(formData: FormData) {
   return {
     customer_id: str(formData.get("customer_id")),
     name: str(formData.get("name")),
-    rate_per_trip_sar: num(formData.get("rate_per_trip_sar")),
-    commission_mode: str(formData.get("commission_mode")) || "fixed",
-    commission_value: num(formData.get("commission_value")),
     start_date: nullable(formData.get("start_date")),
     end_date: nullable(formData.get("end_date")),
     status: str(formData.get("status")) || "active",

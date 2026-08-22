@@ -1062,6 +1062,180 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
   return { error: null };
 }
 
+// ---------------------------------------------------------------------------
+// EFFECTIVE-DATED DRIVER COMMISSION — the write side (0148/0150).
+//
+// setProjectCommission IS THE ONLY WAY A COMMISSION FIGURE MOVES on an existing
+// project. update_project_with_customer stopped writing the three commission
+// columns in 0150; app/projects no longer sends them at all. Do not add a
+// second writer — a `.from("projects").update({ commission_... })` anywhere is
+// a bug, not a shortcut, because it bypasses the effective date entirely and
+// lands as an undated "today" change through 0147's trigger.
+//
+// The RPC writes history FIRST and unconditionally, then mirrors into
+// projects.commission_* ONLY when the change is in force today. Everything
+// below is a thin pass-through: no date maths, no clamping, no message
+// rewriting. Its refusals (backdating, archived project, bad shape) are RAISED,
+// and the raised text names the project and the dates, so it is surfaced
+// verbatim rather than replaced with a generic failure.
+// ---------------------------------------------------------------------------
+
+export type AppliedCommission = {
+  // The date the change takes effect (echoed back — never re-derived here).
+  effectiveFrom: string;
+  mode: CommissionMode;
+  value: number;
+  bumpPct: number;
+  // false = queued for a future date, and today's terms did NOT move.
+  appliesNow: boolean;
+  // Unpaid delivered trips on this project dated today, which the next stage
+  // churn in that bucket may re-price at the new terms. Expected, not a
+  // warning — but it is money, so it is shown rather than hidden.
+  repriceableTrips: number;
+};
+
+export type SetCommissionResult = { error: string | null; applied?: AppliedCommission };
+
+export async function setProjectCommission(input: {
+  project_id: string;
+  effective_from: string;
+  commission_mode: string;
+  commission_value: number;
+  commission_bump: number;
+  note?: string | null;
+}): Promise<SetCommissionResult> {
+  const projectId = input.project_id?.trim() ?? "";
+  if (!projectId) return { error: "Missing project id." };
+
+  const effectiveFrom = input.effective_from?.trim() ?? "";
+  if (!effectiveFrom) return { error: "Pick the date this commission change takes effect." };
+
+  // Same normalization the create/update path already applies, so a change made
+  // here and a project created there cannot store different shapes for the same
+  // intent. The RPC restates both rules at the write boundary — this is the
+  // friendly copy, not the gate.
+  const mode = input.commission_mode === "scalable" ? "scalable" : "fixed";
+  const bump = mode === "scalable" ? Math.min(50, Math.max(0, input.commission_bump || 0)) : 0;
+  const value = Number.isFinite(input.commission_value) ? input.commission_value : 0;
+  if (value < 0) return { error: "Commission value must be zero or more." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("set_project_commission", {
+    p_project_id: projectId,
+    p_effective_from: effectiveFrom,
+    p_mode: mode,
+    p_value: value,
+    p_bump_pct: bump,
+    p_note: input.note?.trim() || null,
+  });
+  // The message is the one the RPC RAISED. It names the project and the dates,
+  // so it is worth more on screen than anything this layer could substitute.
+  if (error) return { error: error.message };
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return { error: "The commission change did not report back. Reload and check before retrying." };
+
+  revalidatePath("/trips");
+  return {
+    error: null,
+    applied: {
+      effectiveFrom: String(row.applied_from),
+      mode: row.applied_mode === "scalable" ? "scalable" : "fixed",
+      value: Number(row.applied_value),
+      bumpPct: Number(row.applied_bump_pct),
+      appliesNow: !!row.applies_now,
+      repriceableTrips: Number(row.repriceable_trips ?? 0),
+    },
+  };
+}
+
+export type CancelledCommission = {
+  effectiveFrom: string;
+  mode: CommissionMode;
+  value: number;
+  bumpPct: number;
+  // How many scheduled changes are still queued after this one was withdrawn.
+  remainingScheduled: number;
+};
+
+export type CancelCommissionResult = { error: string | null; cancelled?: CancelledCommission };
+
+// Withdraws a SCHEDULED change. Only a strictly-future one can be cancelled —
+// today's terms are already in force and may have priced today's trips, and a
+// baseline is what every past trip resolves against. Both refusals are the
+// RPC's, raised with a message that says which rule applied and what to do
+// instead; this function does not pre-judge them, because "future" is a
+// question about the Riyadh date on the server, not the one in the browser.
+export async function cancelProjectCommission(
+  projectId: string,
+  effectiveFrom: string,
+): Promise<CancelCommissionResult> {
+  const id = projectId?.trim() ?? "";
+  if (!id) return { error: "Missing project id." };
+  const from = effectiveFrom?.trim() ?? "";
+  if (!from) return { error: "Missing the date of the scheduled change to cancel." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("cancel_project_commission", {
+    p_project_id: id,
+    p_effective_from: from,
+  });
+  if (error) return { error: error.message };
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return { error: "The cancellation did not report back. Reload and check before retrying." };
+
+  revalidatePath("/trips");
+  return {
+    error: null,
+    cancelled: {
+      effectiveFrom: String(row.cancelled_from),
+      mode: row.cancelled_mode === "scalable" ? "scalable" : "fixed",
+      value: Number(row.cancelled_value),
+      bumpPct: Number(row.cancelled_bump_pct),
+      remainingScheduled: Number(row.remaining_scheduled ?? 0),
+    },
+  };
+}
+
+// The terms a project ran on at a GIVEN DATE — the Archive surface's question,
+// which is never "what are the terms today". An archived project's record must
+// read as it did on the day it was archived; resolving it at today's date would
+// narrate terms that project never operated under.
+export type CommissionAtResult = {
+  error: string | null;
+  // null = the resolver returned no row for that date. That is the same signal
+  // the pricing path hard-errors on; here it renders as "—", never as zero.
+  config?: { mode: CommissionMode; value: number; bumpPct: number } | null;
+};
+
+export async function getProjectCommissionAt(
+  projectId: string,
+  onDate: string,
+): Promise<CommissionAtResult> {
+  const id = projectId?.trim() ?? "";
+  const date = onDate?.trim() ?? "";
+  if (!id || !date) return { error: "Missing project or date." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("commission_config_at", {
+    p_project_id: id,
+    p_on: date,
+  });
+  if (error) return { error: error.message };
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return { error: null, config: null };
+  return {
+    error: null,
+    config: {
+      mode: row.commission_mode === "scalable" ? "scalable" : "fixed",
+      value: Number(row.commission_value),
+      bumpPct: Number(row.commission_bump_pct),
+    },
+  };
+}
+
 // The guard refused: money is still owed TO US. archive_project_guarded raises
 // with errcode check_violation (23514), so `blocked` is set from the SQLSTATE
 // rather than by matching the message text — the wording of a raised message is

@@ -47,15 +47,15 @@ import {
   Legend,
 } from "recharts";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { currentMonthKey, formatSar, todayKey } from "@/lib/utils";
+import { currentMonthKey, formatSar, todayKey, formatDayKey } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import {
   WATER_TYPE_LABELS,
   PAYMENT_MODE_LABELS,
   PAYMENT_METHOD_LABELS,
-  type CommissionMode,
   type PaymentMode,
   type WaterType,
+  type ProjectCommissionNowRow,
 } from "@/lib/db-types";
 import DeliveriesReportBand, { buildDeliveriesReport } from "./DeliveriesReportBand";
 import { computeAmountPayable } from "./amountPayable";
@@ -101,9 +101,16 @@ type ProjectLite = {
   id: string;
   name: string;
   rate_per_trip_sar: number;
-  commission_value: number;
-  commission_mode: CommissionMode;
-  commission_bump_pct: number;
+  // NO commission_*. The header's commission line states the terms IN FORCE
+  // TODAY, which resolve from v_project_commission_now (the commissionNow prop)
+  // — not from the projects mirror, which is superseded the moment a
+  // future-dated change activates.
+  //
+  // This is a HEADER line, not a report figure: every commission NUMBER below
+  // (the Commission paid stat, the per-driver table, the monthly trend) sums
+  // trips.commission_sar, the amount frozen at delivery. Those do not move when
+  // terms change, and must not.
+
   // Financial section additions. The customer is how the payable rule and the
   // payments table reach their rows (invoices and charges key off customer_id,
   // never project_id — migration 0025), and payment_mode selects which arm of
@@ -133,6 +140,7 @@ export default function BreakdownReport({
   open,
   onClose,
   project,
+  commissionNow,
   customerName,
   contactName,
   phone,
@@ -147,6 +155,9 @@ export default function BreakdownReport({
   open: boolean;
   onClose: () => void;
   project: ProjectLite | null;
+  // Terms in force today for this project (v_project_commission_now, 0149).
+  // null when the report is closed, or if the view had no row.
+  commissionNow: ProjectCommissionNowRow | null;
   customerName: string;
   contactName: string | null;
   phone: string | null;
@@ -466,10 +477,12 @@ export default function BreakdownReport({
   if (!open || !project || !mounted) return null;
 
   const monthInProgress = selMonth === currentMonth;
+  // Terms in force TODAY. Null mode = the view had no row (or the report opened
+  // before the read landed) — render an em dash, never a zero: "0 SAR fixed" is
+  // a claim about the contract, "—" is an admission we do not have it.
+  const commMode = commissionNow?.commission_mode ?? null;
   const commType =
-    project.commission_mode === "scalable"
-      ? `Scalable +${project.commission_bump_pct}%`
-      : "Fixed";
+    commMode === "scalable" ? `Scalable +${commissionNow?.commission_bump_pct ?? 0}%` : "Fixed";
   const generatedOn = new Date().toLocaleDateString(undefined, {
     year: "numeric",
     month: "short",
@@ -566,10 +579,15 @@ export default function BreakdownReport({
               <div className="mt-1">
                 <span>Commission </span>
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                  {formatSar(project.commission_value)}
+                  {commMode ? formatSar(commissionNow?.commission_value ?? 0) : "—"}
                 </span>
               </div>
-              <div className="text-[11px] muted">{commType}</div>
+              {commMode && <div className="text-[11px] muted">{commType}</div>}
+              {commissionNow?.next_effective_from && (
+                <div className="text-[11px] text-amber-600 dark:text-amber-400">
+                  Changes {formatDayKey(commissionNow.next_effective_from)}
+                </div>
+              )}
             </div>
           </div>
 

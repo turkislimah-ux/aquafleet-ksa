@@ -159,7 +159,12 @@ export default async function ArchivePage() {
     // project IS the rest of that record.
     supabase
       .from("projects")
-      .select("id, customer_id, name, initials, rate_per_trip_sar, commission_mode, commission_value, commission_bump_pct, payment_mode, water_type, default_station, start_date, end_date, status, location, description, created_at"),
+      // archived_at REPLACED the three commission columns here. The archived
+      // record must state the terms the project actually ran on, which is a
+      // question about its archive date — so the date is what travels, and the
+      // detail popup resolves the figures with commission_config_at(). See
+      // ArchiveProjectRow.
+      .select("id, customer_id, name, initials, rate_per_trip_sar, archived_at, payment_mode, water_type, default_station, start_date, end_date, status, location, description, created_at"),
     // v_customer_amount_payable (0139) — the one definition of "does this
     // customer owe us, or do we owe them". Columns are named explicitly and
     // stop at the eleven CustomerAmountPayableRow declares: the view publishes

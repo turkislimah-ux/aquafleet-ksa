@@ -75,6 +75,44 @@ export type Project = {
   created_at: string;
 };
 
+// ---------------------------------------------------------------------------
+// EFFECTIVE-DATED DRIVER COMMISSION — the DISPLAY row (view v_project_commission_now,
+// migration 0149).
+//
+// READ THIS BEFORE RENDERING A COMMISSION FIGURE ANYWHERE.
+// `Project.commission_mode/value/bump_pct` above are a WRITE-SIDE MIRROR of the
+// last change that took effect TODAY. The moment a future-dated change
+// activates they are stale, and they stay stale until something writes them
+// again. They are NOT the current terms and must not be shown as such.
+//
+// The current terms are this row, resolved through commission_config_at() —
+// the one definition, shared with the pricing path. Everything on screen that
+// says "this project's commission" reads from here.
+//
+// It is NOT a pricing source either: a trip is priced at
+// commission_config_at(project, trip_date), never at today. See lib/commission.ts.
+// ---------------------------------------------------------------------------
+export type ProjectCommissionNowRow = {
+  project_id: string;
+  archived_at: string | null;
+  // In force TODAY (Riyadh). NULL only when no history row exists on or before
+  // today — the same no-row signal the pricing path hard-errors on, so a NULL
+  // here is a real anomaly and renders as "—" rather than as zero.
+  commission_mode: CommissionMode | null;
+  commission_value: number | null;
+  commission_bump_pct: number | null;
+  // The earliest STRICTLY FUTURE change, if one is queued. All NULL when
+  // nothing is pending.
+  next_effective_from: string | null;
+  next_commission_mode: CommissionMode | null;
+  next_commission_value: number | null;
+  next_commission_bump_pct: number | null;
+  // True once projects.commission_* has drifted from the resolved terms — i.e.
+  // a future-dated change has activated. Expected false until then. Nothing
+  // should BRANCH on this; it exists so drift is observable instead of silent.
+  projects_column_is_stale: boolean;
+};
+
 // project_drivers join row — which drivers staff which project (0004).
 export type ProjectDriver = {
   project_id: string;
@@ -1389,9 +1427,14 @@ export type ArchiveProjectRow = {
   name: string;
   initials: string;
   rate_per_trip_sar: number;
-  commission_mode: CommissionMode;
-  commission_value: number;
-  commission_bump_pct: number;
+  // NO commission_*. THE ARCHIVE ASKS A DIFFERENT QUESTION FROM EVERY OTHER
+  // SURFACE: "what terms did this dead project run on", which is answered at
+  // its ARCHIVE DATE, never at today's. Carrying the projects columns here
+  // would have answered it with whatever figure happened to be mirrored last —
+  // and after a future-dated change activated, not even that. The detail popup
+  // resolves the terms with commission_config_at(project, archived_at); this is
+  // the date it passes.
+  archived_at: string | null;
   payment_mode: PaymentMode | null;
   water_type: WaterType | null;
   default_station: string | null;
