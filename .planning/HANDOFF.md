@@ -1,4 +1,4 @@
-# SESSION HANDOFF — 2026-08-22 (EFFECTIVE-DATED COMMISSION IS COMPLETE — 3c shipped; item 4 closed; board commission pill after it)
+# SESSION HANDOFF — 2026-08-22 (EFFECTIVE-DATED COMMISSION IS COMPLETE — 3c shipped, item 4 closed, commission pill added, and all three of 2b's leftovers cleaned up. NOTHING IS QUEUED FOR NEXT SESSION.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -23,11 +23,24 @@ scheduled-but-undone, and **all three of 2b's leftovers are now closed too**
 (`BreakdownReport` by 3c, the `getRate` conflation by `0bf75d6`, the
 `lib/commission.ts` docstrings by `627dbae`). The board is genuinely empty.
 
-**`0bf75d6` is also a warning about this file.** Its §6 entry had described the
-`getRate` bug wrongly in two separate ways, and both errors were mine, written
-from reading the expression instead of tracing where its value was consumed.
-Before acting on any "OPEN" item here, re-derive it from the code. The entry
-tells you where to look; it is not evidence.
+**THE SESSION'S REAL LESSON IS ABOUT THIS FILE, NOT ABOUT COMMISSION.** Both
+cleanup commits began by finding that the handoff entry describing the work was
+WRONG, and in both cases the error had been written confidently by me:
+- **`0bf75d6`** — its §6 entry described the `getRate` bug in two ways that were
+  both false: it claimed the leak fired on undelivered cards (the value is read
+  only in the delivered branch) and it praised the second call site as honest
+  (it passed the customer rate into a commission label unconditionally — the
+  worse of the two). Written from reading the expression instead of tracing
+  where its value was CONSUMED.
+- **`a248d40`** — the "36 PASS" count recorded against `bc92d18` was 35 all
+  along. Re-counting before AND after the change is what proved the discrepancy
+  was pre-existing rather than a regression I had just caused.
+
+**So: an entry here tells you where to look. It is not evidence.** Re-derive
+from the code before acting on it, and re-measure a number before quoting it —
+including the numbers in this file. Both errors were caught only because the
+fix started with a trace rather than with the description. Neither was caught
+by review, and neither would have been caught by `tsc`.
 
 **Then `b753a20` — the commission pill on the project board. Verified in-browser.**
 Turki asked for a "Commission / trip" pill beside the existing "Rate / trip" pill
@@ -275,11 +288,12 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-### This session (2026-08-22) — eight commits, oldest-first
+### This session (2026-08-22) — nine commits, oldest-first
 
 Read off `git log 520c6a9..HEAD` at session end, not incremented from the block
-below. All pushed; `git status -sb` read `## main...origin/main` after the
-last one.
+below. **Four code commits, five documenting them** — the ratio is honest, not a
+smell: three of the four were small by design and the doc commits carry two
+corrections to this file that were worth more than the code they describe.
 
 | hash | what |
 |---|---|
@@ -291,6 +305,11 @@ last one.
 | `0bf75d6` | Delete the `getRate` prop chain — the badge reads `trip.commission_sar`. 1 file, +21/−8 |
 | `38201ed` | Record `0bf75d6`; correct what this file had said about the bug |
 | `627dbae` | `lib/commission.ts` docstrings + `priorThisMonth` → `priorSameDay`. 1 file, +30/−8 |
+| `a248d40` | Close §6 item 4 entirely; correct the 36-vs-35 check count |
+
+**This block cannot list the commit that carries it** — the one written after
+`a248d40` is the session's tail and is a docs-only wrap. `git log` is the
+authority on the count; this table is the authority on what each one was FOR.
 
 `0a21b59` and `0bf75d6` were both verified in-browser before commit. `627dbae`
 changes no behaviour — comments and one positional parameter name — and was
@@ -355,7 +374,7 @@ last element. §5's shrinking-diff-is-a-stop-signal did not fire.
 
 ## 2. CURRENT STATE
 
-Re-measured at the end of the 2026-08-22 session, at `627dbae`:
+Re-measured at the end of the 2026-08-22 session, at `a248d40`:
 
 ```
 $ git -C /Users/turkislimah/aquafleet-ksa status -sb
