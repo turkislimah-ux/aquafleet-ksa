@@ -18,11 +18,10 @@ Nothing about commission is outstanding. `0144` remains the only
 committed-but-unapplied migration and it is unrelated (Operations glossary, §4).
 
 **NEXT SESSION HAS NOTHING QUEUED — ASK TURKI.** With commission closed there is
-no large feature in flight, and §6 item 5 is still right that nothing big is
-scheduled-but-undone. Of the three leftovers 2b flagged, two are now closed
-(`BreakdownReport` by 3c, the `getRate` conflation by `0bf75d6`) and the only
-survivor is comment rot in `lib/commission.ts` — §6 item 4. That is a
-five-minute job, not a plan for a session.
+no large feature in flight, §6 item 5 is still right that nothing big is
+scheduled-but-undone, and **all three of 2b's leftovers are now closed too**
+(`BreakdownReport` by 3c, the `getRate` conflation by `0bf75d6`, the
+`lib/commission.ts` docstrings by `627dbae`). The board is genuinely empty.
 
 **`0bf75d6` is also a warning about this file.** Its §6 entry had described the
 `getRate` bug wrongly in two separate ways, and both errors were mine, written
@@ -276,7 +275,7 @@ three blanked files. Our durable JSON snapshot remains
 
 ## 1. RECENT COMMITS
 
-### This session (2026-08-22) — six commits, oldest-first
+### This session (2026-08-22) — eight commits, oldest-first
 
 Read off `git log 520c6a9..HEAD` at session end, not incremented from the block
 below. All pushed; `git status -sb` read `## main...origin/main` after the
@@ -290,8 +289,13 @@ last one.
 | `037c40d` | Record the pill and the display-vs-seedable rule it tested |
 | `577850a` | Close out item 3; promote 2b's leftovers to their own §6 item |
 | `0bf75d6` | Delete the `getRate` prop chain — the badge reads `trip.commission_sar`. 1 file, +21/−8 |
+| `38201ed` | Record `0bf75d6`; correct what this file had said about the bug |
+| `627dbae` | `lib/commission.ts` docstrings + `priorThisMonth` → `priorSameDay`. 1 file, +30/−8 |
 
-`0a21b59` and `0bf75d6` were both verified in-browser before commit.
+`0a21b59` and `0bf75d6` were both verified in-browser before commit. `627dbae`
+changes no behaviour — comments and one positional parameter name — and was
+committed on `tsc --noEmit` plus the 35-check suite, with no browser step,
+because there is nothing on screen for it to change.
 `b753a20` was committed on `tsc --noEmit` alone at Turki's instruction and
 verified in-browser immediately after — the order was inverted from §5's rule
 deliberately and with his say-so, not by drift.
@@ -351,7 +355,7 @@ last element. §5's shrinking-diff-is-a-stop-signal did not fire.
 
 ## 2. CURRENT STATE
 
-Re-measured at the end of the 2026-08-22 session, at `0bf75d6`:
+Re-measured at the end of the 2026-08-22 session, at `627dbae`:
 
 ```
 $ git -C /Users/turkislimah/aquafleet-ksa status -sb
@@ -1154,6 +1158,13 @@ re-measure AFTER they say they are done.**
      and **resolver-returned-no-row = 0**, so ruling (a) cannot fire on today's
      data. `scripts/commission-check.ts` 36 PASS / 0 FAIL, `tsc --noEmit` clean,
      full `next build` clean.
+     - **The suite emits 35 `[PASS]` lines, not 36 — corrected 2026-08-22.**
+       Re-counted at `38201ed` (before `627dbae` touched the file) and again
+       after: 35 both times, 0 FAIL. So the count above was already off when
+       written and `627dbae` did not remove a check. Quoting it as 36 is how a
+       later session would "discover" a regression that never happened. Count
+       with `npx tsx scripts/commission-check.ts | grep -c '^\[PASS\]'` from the
+       repo root rather than trusting either number.
      - **Six rows differ from the STORED `commission_sar` — and the OLD code
        disagrees with the same six identically.** Pre-existing drift, not caused
        or fixed by 2b: five on `VVV Test 2`, one on `King Salman Park`, all
@@ -1208,10 +1219,10 @@ re-measure AFTER they say they are done.**
      differs from its pre-fill, or a date was picked.** Firing it on every save
      stamps a today-dated "commission change" history row every time somebody
      renames a project.
-4. **THE THREE LEFTOVERS 2b FLAGGED — TWO ARE NOW CLOSED, ONE COSMETIC ONE IS
-   LEFT.** All three were found during 2b's read-only trace and deliberately
-   left out of a money commit. Re-checked at `037c40d`, then the second one
-   fixed in `0bf75d6`:
+4. **THE THREE LEFTOVERS 2b FLAGGED ARE ALL CLOSED. Nothing here is owed.**
+   Found during 2b's read-only trace and deliberately left out of a money
+   commit; re-checked at `037c40d`, then fixed in `0bf75d6` and `627dbae`. Kept
+   as a record of what was wrong, not as a queue:
    - **CLOSED. `BreakdownReport` no longer reads `projects.commission_*`.** 3c
      repointed it at the `commissionNow` prop (`v_project_commission_now`), and
      its header comment now states the distinction outright: the header line is
@@ -1251,11 +1262,27 @@ re-measure AFTER they say they are done.**
        would be.** Today's resolved terms are a forecast; the badge states what
        was actually paid. Putting the pill's live figure on a delivered card
        would have reintroduced exactly the stale-vs-frozen mixup 2b removed.
-   - **OPEN, cosmetic. `lib/commission.ts:26` and `:46` still say "this month".**
-     Both docstrings describe the ramp as monthly; it has been per-scheduled-day
-     since the bucketing moved to `trip_date`. The CODE is correct — this is
-     comment rot only, and `monthKeyOf` still exists and is still used
-     elsewhere, so do not "fix" the logic to match the comment. Fix the comment.
+   - **CLOSED in `627dbae`. The "this month" docstrings — and a THIRD rot in the
+     same file that this item never listed.** The code was correct and is
+     unchanged; all **35** checks in `scripts/commission-check.ts` pass before
+     and after, the month-window regression guard among them.
+     - **It was not only a comment fix.** `commissionForDelivery`'s fourth
+       parameter was literally named `priorThisMonth`. Renamed `priorSameDay`.
+       The argument is positional so no caller could break — but a parameter
+       naming the wrong window is an instruction to compute the wrong number,
+       and the next caller is the one it would catch. Every existing caller was
+       already per-day (`priceDelivery` computes a local `priorToday`).
+     - **The third rot: the module header's model block named
+       `projects.commission_value` / `_mode` / `_bump_pct` as the SOURCE of
+       base/mode/bump.** Wrong since `bc92d18` moved both callers onto
+       `commission_config_at(project_id, trip_date)`. Worse than the docstrings,
+       because `lib/commission.ts` is PURE — it prices whatever base it is
+       handed and must not name a source at all. Naming the stale mirror there
+       is how a future caller talks itself into reading it. The block now says
+       the three are arguments and says why it refuses to name an origin.
+     - `monthKeyOf` was left alone and is still correct: it is for
+       REPORTING/payroll-period grouping, not scaling position, and its own
+       comment already says so at length.
 5. **Nothing else is scheduled-but-undone.** `0139`'s Q5 is closed. The Deferred list
    in §7 carries nothing blocked-and-actionable — RBAC + the app-wide security pass,
    effective-dated customer rates, multi-project customers, Route Optimization /
