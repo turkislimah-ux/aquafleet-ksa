@@ -182,6 +182,91 @@ check(
   priced.map((p) => p.commission),
 );
 
+// --- DELIVERY-MOMENT RATE FREEZE (0152): each trip prices at ITS OWN stamped
+// base, at its LIVE position. Mirrors the rewired recomputeDailyCommission,
+// which no longer resolves one config for the bucket — it reads the
+// commission_mode / commission_base_sar / commission_bump_pct frozen onto each
+// trip at delivery and feeds them to commissionForNthTrip individually.
+//
+// This is the reported bug, as a test: two trips are delivered at base 60, the
+// project's commission is changed the SAME DAY to 100, then two more are
+// delivered. Under the old bucket-wide resolve, all four repriced at 100. The
+// first two must now hold 60.
+type StampedTrip = LiteTrip & { base: number; mode: "fixed" | "scalable"; bump: number };
+
+const sameDayChange: StampedTrip[] = [
+  { id: "s1", trip_date: "2026-06-03", delivered_at: "2026-06-03T06:00:00.000Z", payout_id: null, base: 60,  mode: "scalable", bump: 5 },
+  { id: "s2", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", payout_id: null, base: 60,  mode: "scalable", bump: 5 },
+  // --- commission changed to 100 here, mid-day ---
+  { id: "s3", trip_date: "2026-06-03", delivered_at: "2026-06-03T10:00:00.000Z", payout_id: null, base: 100, mode: "scalable", bump: 5 },
+  { id: "s4", trip_date: "2026-06-03", delivered_at: "2026-06-03T14:00:00.000Z", payout_id: null, base: 100, mode: "scalable", bump: 5 },
+];
+
+// The recompute's exact loop: sort, then price each at its own frozen terms.
+function repriceOwnTerms(trips: StampedTrip[]): { id: string; commission: number }[] {
+  return [...trips]
+    .sort((a, b) =>
+      (a.delivered_at ?? "") !== (b.delivered_at ?? "")
+        ? (a.delivered_at ?? "") < (b.delivered_at ?? "") ? -1 : 1
+        : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    )
+    .map((t, i) => ({ id: t.id, commission: commissionForNthTrip(t.base, t.mode, t.bump, i + 1) }));
+}
+
+// n = 1,2,3,4 — but the base is per trip: 60, 60*1.05, 100*1.10, 100*1.15.
+check(
+  "own-terms: same-day change reaches only trips stamped after it = [60,63,110,115]",
+  repriceOwnTerms(sameDayChange).map((p) => p.commission),
+  [60, 63, 110, 115],
+);
+
+// The freeze must NOT freeze position. Push s2 out and everyone after it moves
+// down a slot — still priced at their own rates. This is the "re-ranks, does not
+// re-rate" property in one assertion: s3 goes 110 -> 105 (position 3 -> 2, base
+// still 100) while s1 stays 60 (position unchanged, base unchanged).
+check(
+  "own-terms: pushback re-ranks but does not re-rate = [60,105,110]",
+  repriceOwnTerms(sameDayChange.filter((t) => t.id !== "s2")).map((p) => p.commission),
+  [60, 105, 110],
+);
+
+// A bucket-wide resolve would have produced this instead. Pin the delta so a
+// regression back to one-config-per-bucket fails loudly rather than quietly
+// paying the new rate for old work.
+check(
+  "own-terms regression guard: NOT the bucket-wide-at-100 answer [100,105,110,115]",
+  repriceOwnTerms(sameDayChange).map((p) => p.commission).join(",") !==
+    [1, 2, 3, 4].map((n) => commissionForNthTrip(100, "scalable", 5, n)).join(","),
+  true,
+);
+
+// --- FIXED IS POSITION-INDEPENDENT. commissionForNthTrip returns the base
+// before it reads n or bumpPct, so re-ranking a fixed bucket cannot move a
+// figure — which is why the freeze is inert for fixed projects. Measured on
+// live data too: King Saud University, fixed 20.00, 149 delivered trips,
+// stored total 2,980.00 = 149 x 20 exactly.
+const fixedBucket: StampedTrip[] = [
+  { id: "f1", trip_date: "2026-06-03", delivered_at: "2026-06-03T06:00:00.000Z", payout_id: null, base: 45, mode: "fixed", bump: 10 },
+  { id: "f2", trip_date: "2026-06-03", delivered_at: "2026-06-03T08:00:00.000Z", payout_id: null, base: 45, mode: "fixed", bump: 10 },
+  { id: "f3", trip_date: "2026-06-03", delivered_at: "2026-06-03T10:00:00.000Z", payout_id: null, base: 45, mode: "fixed", bump: 10 },
+  { id: "f4", trip_date: "2026-06-03", delivered_at: "2026-06-03T14:00:00.000Z", payout_id: null, base: 45, mode: "fixed", bump: 10 },
+];
+check(
+  "fixed: same at every position = [45,45,45,45]",
+  repriceOwnTerms(fixedBucket).map((p) => p.commission),
+  [45, 45, 45, 45],
+);
+check(
+  "fixed: pushback moves positions and changes nothing = [45,45,45]",
+  repriceOwnTerms(fixedBucket.filter((t) => t.id !== "f2")).map((p) => p.commission),
+  [45, 45, 45],
+);
+check(
+  "fixed: a bump stamped on the trip is still ignored at every n",
+  [1, 2, 3, 4, 5].map((n) => commissionForNthTrip(45, "fixed", 10, n)),
+  [45, 45, 45, 45, 45],
+);
+
 console.log("");
 if (failures === 0) {
   console.log("All commission checks PASSED ✓");

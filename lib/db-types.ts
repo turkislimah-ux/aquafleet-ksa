@@ -370,6 +370,19 @@ export type Trip = {
   rate_sar: number | null;
   // Driver commission actually paid for this trip, stamped on Delivered.
   commission_sar: number | null;
+  // THE TERMS THIS TRIP WAS DELIVERED UNDER (0152) — a COPY of
+  // commission_config_at(project_id, trip_date) taken at the delivery moment,
+  // never a live read and never a reference to project_commission_history
+  // (that row is edited in place by a same-day change). All three or none;
+  // NULL until delivered, and NULL forever for a trip with no project or no
+  // driver. Re-stamped on every re-delivery.
+  //
+  // commission_base_sar is the INPUT rate, commission_sar above is the MONEY:
+  // the base priced at this trip's live position in its
+  // (driver, project, trip_date) bucket. Do not read one for the other.
+  commission_mode: CommissionMode | null;
+  commission_base_sar: number | null;
+  commission_bump_pct: number | null;
   stage: TripStage;
   trip_date: string;
   scheduled_at: string | null;

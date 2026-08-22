@@ -291,6 +291,24 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
   }
 
   // Only (re)price unpaid trips. Paid trips keep their frozen commission_sar.
+  //
+  // FREEZE THE TERMS, NOT ONLY THE FIGURE (0152). The three commission_* term
+  // columns are written HERE and nowhere else on the normal path, from the
+  // config priceDelivery just resolved. That makes the rate a property of the
+  // DELIVERY MOMENT: a later same-day commission change writes a new history row
+  // but cannot reach a trip that already carries its own copy.
+  //
+  // RE-STAMPED ON EVERY ENTRY TO `delivered`, which is the re-delivery rule and
+  // needs no code of its own — this branch runs on each move into the stage, and
+  // priceDelivery re-reads the resolver each time. A pushed-back-then-
+  // re-delivered trip is a NEW delivery and correctly takes the then-current
+  // rate. That is also why leaving `delivered` clears all four together: the
+  // terms belong to a delivery, so with no delivery there are no terms.
+  //
+  // ALL FOUR MOVE AS A UNIT in both directions. Writing commission_sar without
+  // the terms (or vice versa) would violate trips_commission_terms_all_or_none,
+  // and the constraint is the point: a half-stamped row prices a silent zero
+  // through commissionForNthTrip's `base <= 0` guard.
   if (trip && trip.payout_id == null) {
     if (stage === "delivered") {
       const priced = await priceDelivery(supabase, id, trip.driver_id, trip.project_id, trip.trip_date);
@@ -298,9 +316,17 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
       // be resolved must not complete at a guessed price — refuse the stage move.
       if (priced.error) return { error: priced.error };
       row.commission_sar = priced.commission;
+      // config is null only for a trip with no driver or no project — no terms
+      // apply, so all three stamp NULL beside a commission of 0.
+      row.commission_mode = priced.config?.mode ?? null;
+      row.commission_base_sar = priced.config?.value ?? null;
+      row.commission_bump_pct = priced.config?.bumpPct ?? null;
     } else {
       // Leaving delivered (correction / re-route) → no base pay for a non-delivered trip.
       row.commission_sar = null;
+      row.commission_mode = null;
+      row.commission_base_sar = null;
+      row.commission_bump_pct = null;
     }
   }
 
@@ -579,6 +605,14 @@ export async function deleteTrip(id: string): Promise<ActionResult> {
 // trip BACKDATED before its project's floor: `trip_date` is free entry and no
 // constraint ties it to the project. That is a data-entry error and it should
 // stop, loudly.
+//
+// WHO STILL CALLS THIS, AFTER 0152. Two callers, both of which FREEZE the answer
+// onto the trip rather than re-reading it later: `priceDelivery` at the delivery
+// stamp, and `recomputeDailyCommission`'s null-only self-heal for rows delivered
+// in the gap between the 0152 backfill and this code deploying. The recompute
+// does NOT resolve terms for a bucket any more — it prices each trip on the
+// columns the trip carries. Resolving per bucket is what let a same-day change
+// reach trips that were already delivered.
 // ---------------------------------------------------------------------------
 type CommissionConfig = { value: number; mode: CommissionMode; bumpPct: number };
 
@@ -634,19 +668,32 @@ async function commissionConfigFor(
 // carries a foreign key, so a non-null project id resolves or the row could not
 // exist; silently paying 0 for an id that failed to read was a guess, and this
 // path now has a real error channel to say so instead.
+//
+// IT ALSO RETURNS THE CONFIG IT PRICED WITH (0152), and that is the whole point
+// of this signature change: the caller stamps those three values onto the trip
+// so the rate is frozen at the DELIVERY MOMENT, not re-resolved later. This is
+// the ONE place commission_config_at is read on the write path now —
+// recomputeDailyCommission no longer resolves terms for a bucket.
+//
+// `config: null` on the no-driver/no-project branch is deliberate and load-
+// bearing: those trips have no terms to freeze, so the caller must stamp all
+// three columns NULL. Half a config would trip trips_commission_terms_all_or_none.
 async function priceDelivery(
   supabase: ReturnType<typeof createClient>,
   tripId: string,
   driverId: string | null,
   projectId: string | null,
   tripDate: string,
-): Promise<{ commission: number; error: null } | { commission: null; error: string }> {
-  if (!driverId || !projectId) return { commission: 0, error: null };
+): Promise<
+  | { commission: number; config: CommissionConfig | null; error: null }
+  | { commission: null; config: null; error: string }
+> {
+  if (!driverId || !projectId) return { commission: 0, config: null, error: null };
 
   // Narrow on `config`, not on `error`: `error: string` includes "", so a
   // truthiness check on it does not discriminate the union.
   const resolved = await commissionConfigFor(supabase, projectId, tripDate);
-  if (!resolved.config) return { commission: null, error: resolved.error };
+  if (!resolved.config) return { commission: null, config: null, error: resolved.error };
   const config = resolved.config;
 
   // How many of this driver's trips on this project were ALREADY delivered
@@ -671,6 +718,7 @@ async function priceDelivery(
       config.bumpPct,
       priorToday,
     ),
+    config,
     error: null,
   };
 }
@@ -690,12 +738,18 @@ async function priceDelivery(
 // what was already paid out. Only the WRITE is skipped for paid trips: their
 // commission_sar is a frozen History snapshot and is never touched here.
 //
-// TERMS COME FROM THE DAY, NOT FROM TODAY (step 2b). The whole bucket shares one
-// `trip_date`, so it resolves ONE config through `commissionConfigFor` and prices
-// every position on it. This is the leak this feature exists to close: this
-// function fires on ordinary stage churn, so before the change, editing a
-// project's commission and then nudging any old trip repriced that entire past
-// day at the new terms.
+// IT RE-RANKS, IT DOES NOT RE-RATE (0152). Each trip is priced at ITS OWN
+// frozen terms — the commission_* columns stamped onto it at its delivery
+// moment — placed at its LIVE position in the bucket. `commissionConfigFor` is
+// deliberately NOT called here any more: resolving one config for the whole
+// bucket is exactly the leak this closes. Before, a today-dated commission
+// change plus any stage churn repriced every trip already delivered that day at
+// the new rate; now a rate change reaches only trips stamped after it, while a
+// pushback still renumbers everyone correctly at their own rates.
+//
+// THE WRITE SET NAMES ONLY commission_sar. The three term columns are read here
+// and never written on this path (except the null-only self-heal below, which
+// fills a blank rather than overwriting a rate). A frozen rate is frozen.
 async function recomputeDailyCommission(
   supabase: ReturnType<typeof createClient>,
   driverId: string,
@@ -708,26 +762,71 @@ async function recomputeDailyCommission(
   // round trip small regardless of trip history length.
   const { data: trips } = await supabase
     .from("trips")
-    .select("id, delivered_at, payout_id")
+    .select("id, delivered_at, payout_id, commission_mode, commission_base_sar, commission_bump_pct")
     .eq("driver_id", driverId)
     .eq("project_id", projectId)
     .eq("trip_date", dayKey)
     .not("delivered_at", "is", null);
 
-  const rows = (trips ?? []) as { id: string; delivered_at: string; payout_id: string | null }[];
+  const rows = (trips ?? []) as {
+    id: string;
+    delivered_at: string;
+    payout_id: string | null;
+    commission_mode: CommissionMode | null;
+    commission_base_sar: number | string | null;
+    commission_bump_pct: number | string | null;
+  }[];
 
   // NOTHING DELIVERED IN THIS BUCKET -> NOTHING TO PRICE, so return before
-  // resolving terms. This ordering is deliberate: the hard error must guard a
+  // resolving anything. This ordering is deliberate: the hard error must guard a
   // WRITE, not an empty pass. The bucket empties on the push-back out of
   // `delivered` — which is exactly the correction a mis-dated trip needs — and
   // erroring there would block the fix for the bad data the error is complaining
-  // about. Every path that actually stamps a figure still goes through the
-  // resolver below.
+  // about. Every path that actually stamps a figure still resolves terms.
   if (rows.length === 0) return null;
 
-  const resolved = await commissionConfigFor(supabase, projectId, dayKey);
-  if (!resolved.config) return resolved.error;
-  const config = resolved.config;
+  // GAP-WINDOW SELF-HEAL. 0152 stamped every trip delivered before it ran, and
+  // the stamp point above stamps every trip delivered after this code deploys —
+  // but a trip delivered in BETWEEN carries no terms, and an unstamped base
+  // reaches commissionForNthTrip's `base <= 0` guard as a SILENT ZERO. So fill
+  // the blank from the same source the backfill used, then price from it.
+  //
+  // WRITES ONLY WHERE NULL, which is why this is not a re-rate: it fills a row
+  // that has no frozen rate at all. A trip that already carries terms is never
+  // touched here, whatever the resolver would say today.
+  //
+  // Fails closed, like the delivery path — an unstamped trip whose terms cannot
+  // be resolved must not be priced at a guess.
+  const unstamped = rows.filter((t) => t.commission_mode == null);
+  if (unstamped.length > 0) {
+    const resolved = await commissionConfigFor(supabase, projectId, dayKey);
+    if (!resolved.config) return resolved.error;
+    const heal = resolved.config;
+
+    const healed = await Promise.all(
+      unstamped.map((t) =>
+        supabase
+          .from("trips")
+          .update({
+            commission_mode: heal.mode,
+            commission_base_sar: heal.value,
+            commission_bump_pct: heal.bumpPct,
+          })
+          .eq("id", t.id)
+          // Belt and braces against a concurrent stamp: only fill a row that is
+          // still blank. The in-memory rows were read before this await.
+          .is("commission_mode", null),
+      ),
+    );
+    const healFailed = healed.find((r) => r.error);
+    if (healFailed?.error) return healFailed.error.message;
+
+    for (const t of unstamped) {
+      t.commission_mode = heal.mode;
+      t.commission_base_sar = heal.value;
+      t.commission_bump_pct = heal.bumpPct;
+    }
+  }
 
   // Within-day order: delivered_at ascending (actual completion order — the
   // only sub-day signal, since trip_date has no time component), tiebreak id
@@ -740,14 +839,18 @@ async function recomputeDailyCommission(
 
   // Skip the write for paid trips (payout_id != null) — their slot still
   // counts toward n above, it just isn't re-stamped.
+  //
+  // Number() at this boundary for the same reason commissionConfigFor coerces:
+  // PostgREST serializes numeric as a STRING, and a string base sails through
+  // `Number.isFinite(base)` as a silent 0.
   const updates = sorted
     .map((t, i) => ({
       id: t.id,
       payout_id: t.payout_id,
       commission_sar: commissionForNthTrip(
-        config.value,
-        config.mode,
-        config.bumpPct,
+        Number(t.commission_base_sar),
+        t.commission_mode as CommissionMode,
+        Number(t.commission_bump_pct),
         i + 1,
       ),
     }))
