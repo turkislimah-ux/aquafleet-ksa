@@ -918,24 +918,36 @@ export type NewProjectInput = {
   payment_mode: string;
 };
 
+// The fields BOTH project writes share. Commission is not among them: only
+// create sends it, so it is normalized separately below and does not travel
+// through the update path at all.
+type ProjectInputBase = Omit<
+  NewProjectInput,
+  "commission_mode" | "commission_value" | "commission_bump"
+>;
+
 // Shared validate + normalize for the create AND update paths. The server is the
 // real gate (client validation is UX only). Returns either a friendly error or
-// the cleaned values; both actions feed the same shape to their RPC.
+// the cleaned values.
+//
+// COMMISSION LEFT THIS FUNCTION when 0153 removed the three parameters from
+// update_project_with_customer. It normalized mode/bump/commissionValue for
+// both callers, but the update caller had nothing to send them to — it was
+// validating figures it then dropped. Create's normalization moved to
+// normalizeCommissionInput below, unchanged; the update path no longer computes
+// them at all.
 type NormalizedProject = {
   custName: string;
   projName: string;
   station: string;
   waterType: "potable" | "non_potable";
   driverIds: string[];
-  mode: "fixed" | "scalable";
-  bump: number;
   rate: number;
-  commissionValue: number;
   paymentMode: "postpaid" | "prepaid";
 };
 
 function normalizeProjectInput(
-  input: NewProjectInput,
+  input: ProjectInputBase,
 ): { ok: false; error: string } | { ok: true; value: NormalizedProject } {
   const custName = input.cust_name?.trim() ?? "";
   const projName = input.proj_name?.trim() ?? "";
@@ -954,19 +966,37 @@ function normalizeProjectInput(
   }
   const paymentMode = input.payment_mode;
 
+  const rate = Number.isFinite(input.rate) ? input.rate : 0;
+
+  return { ok: true, value: { custName, projName, station, waterType, driverIds, rate, paymentMode } };
+}
+
+// CREATE ONLY. The commission half of what normalizeProjectInput used to do,
+// byte-for-byte the same rules — mode coerced to a known value, bump clamped to
+// 0–50 and forced to 0 outside scalable mode, value guarded against NaN. It has
+// one caller because creation is the one path that writes a commission figure
+// without going through set_project_commission: the 0147 INSERT trigger turns
+// what this returns into the project's baseline history row.
+//
+// An EXISTING project's commission never comes through here. That is
+// setProjectCommission, which re-validates server-side in the RPC.
+function normalizeCommissionInput(
+  input: Pick<NewProjectInput, "commission_mode" | "commission_value" | "commission_bump">,
+): { mode: "fixed" | "scalable"; bump: number; commissionValue: number } {
   const mode = input.commission_mode === "scalable" ? "scalable" : "fixed";
   // Bump only applies in scalable mode; clamp 0–50.
   const bump = mode === "scalable" ? Math.min(50, Math.max(0, input.commission_bump || 0)) : 0;
-  const rate = Number.isFinite(input.rate) ? input.rate : 0;
   const commissionValue = Number.isFinite(input.commission_value) ? input.commission_value : 0;
-
-  return { ok: true, value: { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue, paymentMode } };
+  return { mode, bump, commissionValue };
 }
 
 export async function createProjectWithCustomer(input: NewProjectInput): Promise<ActionResult> {
   const norm = normalizeProjectInput(input);
   if (!norm.ok) return { error: norm.error };
-  const { custName, projName, station, waterType, driverIds, mode, bump, rate, commissionValue, paymentMode } = norm.value;
+  const { custName, projName, station, waterType, driverIds, rate, paymentMode } = norm.value;
+  // Create is the ONLY path that sends a commission to an RPC. See
+  // normalizeCommissionInput.
+  const { mode, bump, commissionValue } = normalizeCommissionInput(input);
 
   const supabase = createClient();
   const { error } = await supabase.rpc("create_project_with_customer", {
@@ -1103,9 +1133,19 @@ export async function checkPaymentModeSwitch(
 
 // Edit half (Manage project). Atomic update via the update_project_with_customer
 // RPC (migration 0017): customer + project + driver-diff in ONE transaction.
-// Same validation/normalization as create; only adds the project id. Deliberately
-// separate from the shared parse()/updateProject in app/projects.
-export type UpdateProjectInput = NewProjectInput & { project_id: string };
+// Same validation/normalization as create, minus commission; only adds the
+// project id. Deliberately separate from the shared parse()/updateProject in
+// app/projects.
+//
+// IT DOES NOT ACCEPT A COMMISSION, and the type is what enforces that. It used
+// to be `NewProjectInput & { project_id }`, so callers handed it three
+// commission fields that were normalized and then dropped on the floor — 0150
+// stopped the RPC writing them and 0153 removed the parameters, but the shape
+// still asked for them. Building on ProjectInputBase makes the dead field a
+// compile error instead of a silent no-op, which matters because the next
+// person to see `commission_value` in a project-save payload will reasonably
+// assume it saves. setProjectCommission is the one writer.
+export type UpdateProjectInput = ProjectInputBase & { project_id: string };
 
 export async function updateProjectWithCustomer(input: UpdateProjectInput): Promise<ActionResult> {
   const projectId = input.project_id?.trim() ?? "";
@@ -1113,10 +1153,6 @@ export async function updateProjectWithCustomer(input: UpdateProjectInput): Prom
 
   const norm = normalizeProjectInput(input);
   if (!norm.ok) return { error: norm.error };
-  // mode / bump / commissionValue are deliberately NOT destructured here, unlike
-  // in createProjectWithCustomer — the RPC below no longer takes them. They are
-  // still normalized and still validated by normalizeProjectInput above; this
-  // function just has nothing to send them to.
   const { custName, projName, station, waterType, driverIds, rate, paymentMode } = norm.value;
 
   const supabase = createClient();

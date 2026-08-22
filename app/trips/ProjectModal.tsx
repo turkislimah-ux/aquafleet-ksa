@@ -428,23 +428,20 @@ export default function ProjectModal({
     setError(null);
     setCommissionNote(null);
 
-    // What update_project_with_customer is told the commission is.
+    // NO COMMISSION IN THIS PAYLOAD. It is the shape both project writes share,
+    // and only ONE of them carries commission now: create.
     //
-    // UNDER 0150 THESE THREE PARAMS ARE IGNORED — the RPC kept them for
-    // signature shape and dropped them from its SET list, precisely so there is
-    // one writer. They are still filled honestly rather than with the edited
-    // values, because "honestly" here means "what should be live TODAY": the
-    // edited figures only when the change takes effect today, otherwise the
-    // terms already in force. If 0150 were ever reverted, this keeps the mirror
-    // correct instead of publishing a future-dated figure as today's.
+    // There used to be a `liveCommission` here that chose between the edited
+    // figures and the terms already in force, so that an edit saving a
+    // future-dated change would not publish it as today's mirror. That guard
+    // protected against update_project_with_customer writing the three columns
+    // — which it stopped doing in 0150, and whose parameters 0153 removed
+    // outright. There is no longer a door for it to guard: passing a commission
+    // argument to that RPC is a PGRST202, not a stale write. Removed rather
+    // than left as reassurance.
     //
-    // Create mode always sends the edited values — there is nothing in force to
-    // defer to, and the INSERT trigger reads exactly these.
-    const liveCommission =
-      !isEdit || commissionBaseline === null || effectiveFrom === today
-        ? editedCommission
-        : commissionBaseline;
-
+    // The commission edit path is unchanged and is below: setProjectCommission,
+    // the one writer for an existing project.
     const payload = {
       cust_name: custName,
       cust_type: custType,
@@ -460,9 +457,6 @@ export default function ProjectModal({
       delivery_lng: deliveryLng === "" ? null : Number(deliveryLng),
       proj_name: projName,
       rate: Number(rate) || 0,
-      commission_mode: liveCommission.mode,
-      commission_value: liveCommission.value,
-      commission_bump: liveCommission.bump,
       default_water_station: station,
       water_type: waterType,
       description: description || null,
@@ -471,10 +465,21 @@ export default function ProjectModal({
     };
 
     // RULE 3 — the lifecycle write goes FIRST, the commission writer LAST.
+    //
+    // ONLY THE CREATE CALL CARRIES COMMISSION, and it sends the EDITED figures:
+    // a new project has nothing in force to defer to, and 0147's INSERT trigger
+    // turns exactly these into its baseline history row. This is identical to
+    // what the old `liveCommission` resolved to on the create path, which always
+    // took the `!isEdit` branch.
     const res =
       isEdit && initial
         ? await updateProjectWithCustomer({ project_id: initial.project_id, ...payload })
-        : await createProjectWithCustomer(payload);
+        : await createProjectWithCustomer({
+            ...payload,
+            commission_mode: editedCommission.mode,
+            commission_value: editedCommission.value,
+            commission_bump: editedCommission.bump,
+          });
 
     if (res.error) {
       setSaving(false);

@@ -55,11 +55,15 @@ export type Project = {
   initials: string;
   // Customer billing rate per trip — kept SEPARATE from driver commission.
   rate_per_trip_sar: number;
-  commission_mode: CommissionMode;
-  // Driver BASE commission per trip (SAR). Fixed pays this flat; scalable uses
-  // it as the base for the per-trip bump (commission_bump_pct).
-  commission_value: number;
-  commission_bump_pct: number;
+  // NO commission_mode / commission_value / commission_bump_pct. The columns
+  // still exist on public.projects as a WRITE-SIDE MIRROR, but they are not
+  // part of the shape the app reads: nothing selects them, and the one writer
+  // is set_project_commission (0148). Current terms are ProjectCommissionNowRow
+  // below, resolved through commission_config_at(); a trip is priced from the
+  // terms frozen onto it at delivery (Trip.commission_base_sar). Declaring the
+  // three here made a stale figure LOOK reachable and one pre-fill away from
+  // being written back — see the warning at app/trips/page.tsx's project select.
+  // Do not re-add them.
   start_date: string | null;
   end_date: string | null;
   status: ProjectStatus;
@@ -80,10 +84,11 @@ export type Project = {
 // migration 0149).
 //
 // READ THIS BEFORE RENDERING A COMMISSION FIGURE ANYWHERE.
-// `Project.commission_mode/value/bump_pct` above are a WRITE-SIDE MIRROR of the
-// last change that took effect TODAY. The moment a future-dated change
-// activates they are stale, and they stay stale until something writes them
-// again. They are NOT the current terms and must not be shown as such.
+// `projects.commission_mode/value/bump_pct` are a WRITE-SIDE MIRROR of the last
+// change that took effect TODAY. The moment a future-dated change activates they
+// are stale, and they stay stale until something writes them again. They are NOT
+// the current terms and must not be shown as such — which is why the `Project`
+// type above no longer declares them at all.
 //
 // The current terms are this row, resolved through commission_config_at() —
 // the one definition, shared with the pricing path. Everything on screen that
