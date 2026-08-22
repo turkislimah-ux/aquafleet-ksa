@@ -174,7 +174,10 @@ relevant skill(s) **when the task calls for it**:
 **Do NOT append build history to this file.** CLAUDE.md holds rules only.
 Current state lives in `.planning/HANDOFF.md` — read it at session start.
 
-- **DB:** migration 0150. 73+ tables RLS-enabled, 48 views security_invoker, 0 anon-readable.
+- **DB:** migration 0152. 77/77 tables RLS-enabled, 48 views security_invoker, 0 anon-readable.
+  (Re-measured after 0152. It adds columns and a check constraint — no view, no
+  table — so the view counts are unchanged by construction, and were confirmed
+  rather than assumed.)
 - **Built:** Dashboard, Fleet, Drivers & People, Finance/Invoice, Inventory,
   Maintenance, Archive, Consumption, Search/Header, Reports, Water Station Cost,
   Driver Payslips — all verified, no open bugs.
@@ -223,7 +226,36 @@ Current state lives in `.planning/HANDOFF.md` — read it at session start.
     `on conflict (customer_id) where reversed_at is null`. Split them and you
     get either 42P10 or — worse, silently — a re-archived debtor whose insert
     collides with the old reversed row and writes nothing.
-- **Current work:** Fleet page cleanup batch (Trips/Finance items). See HANDOFF.md.
+- **A TRIP OWNS THE COMMISSION TERMS IT WAS DELIVERED UNDER (0152).**
+  `trips.commission_mode` / `.commission_base_sar` / `.commission_bump_pct` hold
+  a COPY of `commission_config_at(project_id, trip_date)` taken at the delivery
+  moment. All three or none (`trips_commission_terms_all_or_none`); NULL until
+  delivered, NULL forever for a trip with no project or no driver; **re-stamped
+  on every re-delivery** (a pushback-then-re-deliver is a new delivery at the
+  then-current rate).
+  - **VALUES, NEVER A REFERENCE TO `project_commission_history`.** That row is
+    mutable in place — `set_project_commission` upserts on
+    `(project_id, effective_from)` and `created_at` is NOT in the SET list, so it
+    dates the FIRST write and not the current values. Measured on R TTT /
+    2026-08-22: one row was written at 11:48:48 holding 15.00, upserted to 20.00,
+    upserted back to 15.00, `created_at` never moved, and the six trips delivered
+    against it carry 15/15/20/20/15/15. A FK would have repriced two delivered
+    trips twice that afternoon. **Do not "normalise" these three columns into a
+    foreign key.**
+  - **A CONSEQUENCE THAT IS EASY TO MISS:** `created_at` on a history row is NOT
+    a usable change-moment signal, because a same-day re-edit keeps the old one.
+    Do not build a freeze rule on it.
+  - **`recomputeDailyCommission` re-ranks, it does not re-rate.** It re-derives
+    `commission_sar` from EACH trip's own frozen terms at that trip's live
+    position; it must never read `commission_config_at` for the bucket and must
+    never write the three term columns. `commission_config_at` is read at ONE
+    place now — the delivery stamp in `priceDelivery`. Paid trips still occupy a
+    position but are never re-stamped.
+  - **`commission_base_sar` is the INPUT rate; `commission_sar` is the MONEY.**
+    One letter apart in the obvious naming, which is why the base column is not
+    called `commission_value`. Do not swap them in a select.
+- **Current work:** delivery-moment commission freeze. `0151` and `0152` applied;
+  the app rewire (stamp point + recompute) is the other half. See HANDOFF.md.
 - **Deferred:** effective-dated rates, Route Optimization, Predictive AI, IoT,
   drivers/staff table unification (v2).
 

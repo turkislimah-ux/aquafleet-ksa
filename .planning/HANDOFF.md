@@ -1,9 +1,75 @@
-# SESSION HANDOFF — 2026-08-22 (EFFECTIVE-DATED COMMISSION IS COMPLETE — 3c shipped, item 4 closed, commission pill added, and all three of 2b's leftovers cleaned up. NOTHING IS QUEUED FOR NEXT SESSION.)
+# SESSION HANDOFF — 2026-08-22 (DELIVERY-MOMENT COMMISSION FREEZE — 0151 and 0152 applied and committed. THE APP REWIRE IS THE OTHER HALF AND IS NOT YET DEPLOYED.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
+
+---
+
+## IN FLIGHT: DELIVERY-MOMENT COMMISSION FREEZE (Option B). HALF SHIPPED.
+
+**The bug, reproduced in testing:** a driver has trips delivered TODAY at the old
+rate; a today-dated `set_project_commission` runs; a NEW trip for the same
+driver/project/today is delivered — and the ALREADY-DELIVERED trips reprice to
+the new rate.
+
+**The cause, traced:** `recomputeDailyCommission` fires on ordinary stage churn
+(its only call site is `setTripStage`), selects EVERY delivered trip in the
+`(driver, project, trip_date)` bucket, and resolves **ONE**
+`commission_config_at(project, trip_date)` for all of them. `trip_date` is today
+and the change is effective today, so the whole day reprices. The 2b fix stopped
+a PAST day repricing at TODAY's terms; it is a no-op on the same-day case because
+the day-key and the change-date are the same date.
+
+**The rule, decided:** a trip freezes the commission RATE it was delivered under.
+Recompute keeps re-ranking positions by `delivered_at`, but prices each trip at
+**its own** frozen rate at its live position. See `CLAUDE.md` §7 for the durable
+statement — it is a money rule and it lives there, not here.
+
+**Where it stands:**
+
+- **`0151`** — applied, committed `0f5cddc`. `update_project_with_customer` now
+  accepts the call with or without the three commission args (moved to the end,
+  defaulted null) so the app can stop sending them without a broken-save window.
+- **`0152`** — applied, verified, committed `ccab13c`. Adds
+  `trips.commission_mode` / `.commission_base_sar` / `.commission_bump_pct` plus
+  the all-or-none check constraint, and backfills 757 stampable delivered trips
+  from `commission_config_at(project_id, trip_date)`. Turki confirmed: 757
+  stamped, the two no-project/no-driver trips left null, constraint present, zero
+  stamp-vs-resolver drift, `commission_sar` unmoved.
+  **NOT RE-RUNNABLE — no `if not exists` on the adds, by design.** It IS safe to
+  re-run only the backfill UPDATE on its own (block e), which is guarded by
+  `commission_mode is null`; that is the gap-window sweep.
+- **THE APP REWIRE — NOT DEPLOYED.** Until it ships, the three new columns are
+  written by the migration and **read by nobody**, and pricing behaves exactly as
+  before. That is deliberate: it is what made 0152 inert.
+
+**Two things queued behind it, both touching `app/trips/actions.ts`:**
+
+1. **Step 2 of the param drop is CODED AND UNCOMMITTED** — the removal of
+   `p_commission_mode` / `_value` / `_bump` from the single
+   `update_project_with_customer` caller. `tsc --noEmit` and an isolated
+   `next build` both clean. It was waiting on Turki's smoke check (manage modal →
+   rename a project → save sticks; a commission change still works through its
+   own path) and never got one. **The rewire edits the same file, so commit step 2
+   FIRST or the two logical units land in one commit.**
+2. **Step 3** — drop the three parameters from `update_project_with_customer` for
+   real. Not started. The single caller is the server action in
+   `app/trips/actions.ts`; `ProjectModal` is NOT a caller, which is worth knowing
+   before a find-replace. Note the trap found in step 2: the five-line block
+   `p_rate` + the three commission args + `p_default_water_station` is
+   BYTE-IDENTICAL between the create and update RPC calls, so a blind
+   find-replace breaks project creation. Disambiguate with `p_project_id`.
+
+**Still open, unrelated to the above:** the one-off correction for trip
+`804a6a54-c958-4a77-9d00-8ae2c24369da` (King Salman Park, driver `a9157ee2`,
+`trip_date 2026-07-08`, stamped 10.30, expected 10.00). It is one of 12 PAID
+legacy rows whose stored figure disagrees with the current ramp — recompute never
+writes paid trips, so it will not self-heal. Option A (push back + re-deliver
+in-browser) vs option B (equivalent SQL UPDATE) was never chosen.
+
+---
 
 ## ITEM 4 IS DONE. EFFECTIVE-DATED COMMISSION IS COMPLETE END TO END.
 
