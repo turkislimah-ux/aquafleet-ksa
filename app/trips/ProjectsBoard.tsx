@@ -232,7 +232,6 @@ const ACTION_SOLID_ORANGE = "bg-orange-600 hover:bg-orange-700 text-white";
 
 function TripCard({
   trip,
-  ratePerTrip,
   stationName,
   busy,
   onAdvance,
@@ -245,7 +244,6 @@ function TripCard({
   onHighlightHover,
 }: {
   trip: TripRow;
-  ratePerTrip: number;
   stationName: string | null;
   busy: boolean;
   onAdvance: (to: TripStage) => void;
@@ -425,9 +423,29 @@ function TripCard({
       </button>
     );
   } else if (trip.stage === "delivered") {
+    // THE FIGURE IS trips.commission_sar AND NOTHING ELSE — the DRIVER's
+    // commission, frozen at delivery. It is read straight off the row rather
+    // than handed in by the caller, because this badge used to take a
+    // `ratePerTrip` prop and the two call sites fed it two different kinds of
+    // money: the project board passed
+    // `t.commission_sar ?? project.rate_per_trip_sar` (the CUSTOMER rate as a
+    // fallback) and the direct-customer board passed `t.rate_sar ?? 0` (the
+    // customer rate outright). Neither was visible — delivered rows always
+    // carry a commission, so the fallback never fired and the direct-customer
+    // trip's null rate happened to render the same 0.00 its commission holds —
+    // but a label reading "Commission paid" must not be able to print revenue.
+    // Sourcing it here removes the injection point instead of correcting the
+    // two arguments.
     action = (
       <span className={cn(ACTION_BTN, s.chip, "cursor-default")}>
-        <Check className="h-3.5 w-3.5" /> Commission paid +{formatSar(ratePerTrip)}
+        <Check className="h-3.5 w-3.5" />{" "}
+        {trip.commission_sar == null
+          ? // Unreachable on today's data (0 of 757 delivered rows). Kept as a
+            // statement of fact rather than a fabricated +0.00 SAR, which would
+            // claim a figure nobody stamped — the same distinction ruling (a)
+            // draws in the money path between "no config" and "zero".
+            "Delivered — no commission recorded"
+          : `Commission paid +${formatSar(trip.commission_sar)}`}
       </span>
     );
   }
@@ -519,7 +537,6 @@ function TripCard({
 function StageColumn({
   stage,
   cards,
-  getRate,
   stationsByKey,
   advancingId,
   activeTruckIds,
@@ -533,7 +550,6 @@ function StageColumn({
 }: {
   stage: TripStage;
   cards: TripRow[];
-  getRate: (t: TripRow) => number;
   stationsByKey: Record<string, string>;
   advancingId: string | null;
   activeTruckIds: Set<string>;
@@ -572,7 +588,6 @@ function StageColumn({
             <TripCard
               key={t.id}
               trip={t}
-              ratePerTrip={getRate(t)}
               stationName={stationsByKey[t.water_station] ?? t.water_station}
               busy={advancingId === t.id}
               onAdvance={(to) => onAdvance(t.id, to)}
@@ -1088,7 +1103,6 @@ function ProjectCard({
               key={stage}
               stage={stage}
               cards={cards}
-              getRate={(t) => t.commission_sar ?? project.rate_per_trip_sar}
               stationsByKey={stationsByKey}
               advancingId={advancingId}
               activeTruckIds={activeTruckIds}
@@ -1740,7 +1754,6 @@ export default function ProjectsBoard({
                       key={stage}
                       stage={stage}
                       cards={cards}
-                      getRate={(t) => t.rate_sar ?? 0}
                       stationsByKey={stationsByKey}
                       advancingId={advancingId}
                       activeTruckIds={activeTruckIds}
