@@ -507,6 +507,25 @@ export async function removeAvatar(): Promise<{ error: string | null }> {
 export async function fetchMyAvatarUrl(): Promise<string | null> {
   try {
     const supabase = createClient();
+
+    // NO SESSION -> NO QUERY. This runs from AppShell's mount effect, which is
+    // registered ABOVE the `pathname === "/login"` early return and therefore
+    // fires on the login page too, with no session. Without this check it hits
+    // user_profiles as `anon`, which since 0161 holds no privileges on any
+    // public table and answers 42501.
+    //
+    // It already failed safe — the error is not destructured, so a refusal
+    // arrives as `data = null` exactly like the empty result RLS used to give —
+    // but "safe because nobody reads the error" is a property that survives
+    // only until someone adds error handling. Not asking is better than asking
+    // and ignoring the answer, and it drops a pointless round trip on the one
+    // page that can never have an avatar to show.
+    //
+    // NOT fixed by re-granting user_profiles to anon: that would undo the
+    // hardening for a call that should not be made at all.
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth?.user) return null;
+
     const { data: row } = await supabase
       .from("user_profiles")
       .select("avatar_path")
