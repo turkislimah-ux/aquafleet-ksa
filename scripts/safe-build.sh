@@ -41,8 +41,7 @@ A production build would overwrite .next underneath it and every asset would
 Do one of:
   1. Stop dev, then build:      pkill -f "next dev" && ./scripts/safe-build.sh
   2. Build somewhere else:      ./scripts/safe-build.sh --dist-dir .next-verify
-     (leaves dev untouched; remember next build rewrites tsconfig.json, so
-      git checkout -- tsconfig.json afterwards)
+     (leaves dev untouched, and restores tsconfig.json for you afterwards)
 EOF
     exit 1
   fi
@@ -50,5 +49,65 @@ EOF
   exec npx next build
 fi
 
+# ---------------------------------------------------------------------------
+# tsconfig.json IS RESTORED AFTERWARDS, BECAUSE next build REWRITES IT.
+#
+# `next build` normalises tsconfig.json in place: it expands every inline array
+# to one-item-per-line, and it APPENDS "<distDir>/types/**/*.ts" to `include`.
+# With --dist-dir that added path points at a directory that is temporary by
+# definition, so the moment the build output is deleted the entry is a reference
+# to nothing — permanently, in a tracked file.
+#
+# WHY THAT IS WORSE THAN IT SOUNDS: the reformatting turns it into a ~30-line
+# diff on a file nobody edited, which is easy to wave through, and it lands in
+# `git status` alongside real work. Phase 2.2c collected two of these
+# (.next-profile-check and .next-profile-check2) and they were caught only
+# because the status output was read line by line before staging. A batch using
+# `git add -A` would have committed them silently.
+#
+# This script used to PRINT a reminder to run `git checkout -- tsconfig.json`.
+# That is precisely the failure mode described at the top of this file — a guard
+# that documents the hazard and then lets it happen. So it does it instead.
+#
+# ONLY ON THE --dist-dir PATH. A plain build into .next is left alone on
+# purpose: ".next/types/**/*.ts" is already in the committed include list, and
+# on a fresh clone Next may legitimately need to add it. Reverting that would
+# strip the generated route types the build just produced.
+# ---------------------------------------------------------------------------
+
+# Anchored to the repo root, not the caller's cwd, so the snapshot is taken of
+# the right file no matter where this is invoked from.
+TSCONFIG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tsconfig.json"
+SNAPSHOT=""
+
+restore_tsconfig() {
+  local status=$?
+  if [[ -n "$SNAPSHOT" && -f "$SNAPSHOT" ]]; then
+    if ! cmp -s "$SNAPSHOT" "$TSCONFIG"; then
+      cp "$SNAPSHOT" "$TSCONFIG"
+      echo "restored tsconfig.json — next build had rewritten it" >&2
+    fi
+    rm -f "$SNAPSHOT"
+  fi
+  return $status
+}
+
+if [[ -f "$TSCONFIG" ]]; then
+  SNAPSHOT="$(mktemp "${TMPDIR:-/tmp}/tsconfig.safe-build.XXXXXX")"
+  cp "$TSCONFIG" "$SNAPSHOT"
+fi
+
+# EXIT covers success and, under `set -e`, failure. INT and TERM route through
+# `exit` so they reach the EXIT trap too — an interrupted build is exactly when
+# a stale tsconfig would otherwise be left behind and blamed on something else.
+trap restore_tsconfig EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 echo "building into $DIST — dev on port $PORT is left alone"
-NEXT_DIST_DIR="$DIST" exec npx next build
+
+# NOT `exec`. exec replaces this shell, so no trap could ever fire and the
+# restore above would be dead code. The build's exit status still propagates:
+# `set -e` exits on failure, and the EXIT trap preserves the status rather than
+# overwriting it.
+NEXT_DIST_DIR="$DIST" npx next build

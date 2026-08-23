@@ -2,6 +2,12 @@
 .DS_Store
 .env*.local
 .next
+# scripts/safe-build.sh --dist-dir writes here. Its own error message suggests
+# `--dist-dir .next-verify`, and without this line that build leaves ~400
+# untracked files in `git status` — the same "swept up by git add -A" hazard the
+# script's tsconfig restore exists to prevent. Matches .next-anything; the
+# tracked next-env.d.ts has no leading dot, so it is unaffected.
+.next-*
 .tunnel.log
 .turbo
 .vercel
