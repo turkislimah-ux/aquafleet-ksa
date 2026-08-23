@@ -273,8 +273,12 @@ Current state lives in `.planning/HANDOFF.md` — read it at session start.
     widens to anon.
 - **Current work:** none. The delivery-moment commission freeze and the
   three-step parameter drop both shipped. See HANDOFF.md.
-- **Deferred:** effective-dated rates, Route Optimization, Predictive AI, IoT,
-  drivers/staff table unification (v2).
+- **Deferred:** effective-dated CUSTOMER rates (`projects.rate_per_trip_sar` is
+  still a single live column — no history table, no `rate_at()` resolver;
+  **driver COMMISSION is already effective-dated**, 0146–0149, so this item is
+  the rate half only, and 0128's `trips.rate_sar` freeze is a per-trip snapshot,
+  not a rate history), Route Optimization, Predictive AI, IoT, drivers/staff
+  table unification (v2).
 
 **Session discipline:**
 - Read `.planning/HANDOFF.md` for what's in progress — do NOT ask CLAUDE.md.
