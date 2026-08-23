@@ -237,49 +237,40 @@ Current state lives in `.planning/HANDOFF.md` — read it at session start.
     get either 42P10 or — worse, silently — a re-archived debtor whose insert
     collides with the old reversed row and writes nothing.
 - **A TRIP OWNS THE COMMISSION TERMS IT WAS DELIVERED UNDER (0152).**
-  `trips.commission_mode` / `.commission_base_sar` / `.commission_bump_pct` hold
-  a COPY of `commission_config_at(project_id, trip_date)` taken at the delivery
-  moment. All three or none (`trips_commission_terms_all_or_none`); NULL until
-  delivered, NULL forever for a trip with no project or no driver; **re-stamped
-  on every re-delivery** (a pushback-then-re-deliver is a new delivery at the
-  then-current rate).
-  - **VALUES, NEVER A REFERENCE TO `project_commission_history`.** That row is
-    mutable in place — `set_project_commission` upserts on
-    `(project_id, effective_from)` and `created_at` is NOT in the SET list, so it
-    dates the FIRST write and not the current values. Measured on R TTT /
-    2026-08-22: one row was written at 11:48:48 holding 15.00, upserted to 20.00,
-    upserted back to 15.00, `created_at` never moved, and the six trips delivered
-    against it carry 15/15/20/20/15/15. A FK would have repriced two delivered
-    trips twice that afternoon. **Do not "normalise" these three columns into a
-    foreign key.**
-  - **A CONSEQUENCE THAT IS EASY TO MISS:** `created_at` on a history row is NOT
-    a usable change-moment signal, because a same-day re-edit keeps the old one.
-    Do not build a freeze rule on it.
+  `trips.commission_mode` / `.commission_base_sar` / `.commission_bump_pct` are a
+  COPY of `commission_config_at(project_id, trip_date)` taken at the delivery
+  moment: all three or none (`trips_commission_terms_all_or_none`), NULL until
+  delivered and NULL forever for a trip with no project or no driver, re-stamped
+  on every re-delivery. `commission_base_sar` is the INPUT rate and
+  `commission_sar` is the MONEY — do not swap them in a select, which is why the
+  base column is not called `commission_value`.
+  - **VALUES, NEVER A FK TO `project_commission_history`.** That row is mutable in
+    place: `set_project_commission` upserts on `(project_id, effective_from)` and
+    `created_at` is not in the SET list, so it dates the FIRST write. Measured on
+    R TTT, one row went 15.00 → 20.00 → 15.00 in an afternoon with `created_at`
+    frozen and its six trips carry 15/15/20/20/15/15 — a FK would have repriced
+    two delivered trips twice. Full trace in 0152's header. Corollary:
+    `created_at` is NOT a change-moment signal; never build a freeze rule on it.
   - **`recomputeDailyCommission` re-ranks, it does not re-rate.** It re-derives
     `commission_sar` from EACH trip's own frozen terms at that trip's live
-    position; it must never read `commission_config_at` for the bucket and must
-    never write the three term columns. `commission_config_at` is read at ONE
-    place now — the delivery stamp in `priceDelivery`. Paid trips still occupy a
-    position but are never re-stamped.
-  - **`commission_base_sar` is the INPUT rate; `commission_sar` is the MONEY.**
-    One letter apart in the obvious naming, which is why the base column is not
-    called `commission_value`. Do not swap them in a select.
+    position — never reads `commission_config_at` for the bucket, never writes the
+    three term columns. That resolver is read at ONE place: the delivery stamp in
+    `priceDelivery`. Paid trips hold a position but are never re-stamped.
 - **`update_project_with_customer` DOES NOT TAKE A COMMISSION (0150 → 0153).**
-  The three parameters are gone from the signature. Passing one is now a
-  PGRST202, which is the intended outcome — the mistake fails loudly instead of
-  being ignored. `set_project_commission` (0148) is the ONLY path that changes a
-  commission figure on an existing project, so a change cannot be reverted by an
-  unrelated save carrying a stale pre-fill. Do not re-add them.
-  - **`create_project_with_customer` IS A DIFFERENT FUNCTION and keeps its
-    three.** Creation genuinely writes them, and 0147's INSERT trigger turns that
-    into the baseline history row. The two RPCs' argument blocks are
-    byte-identical around `p_rate`, so a blind find-replace across the file
-    breaks project creation — disambiguate on `p_project_id`.
-  - **DROPPING A PARAMETER IS A DROP+CREATE, AND DROP DISCARDS THE ACL.**
-    Postgres allows only TRAILING defaults, which is why 0151 had to MOVE the
-    three before 0153 could remove them. A fresh function is EXECUTE-to-PUBLIC:
-    re-issue the grants in the same transaction and read the ACL back, or a
-    money RPC silently widens to anon.
+  The three parameters are gone; passing one is a PGRST202, which is the intended
+  loud failure. `set_project_commission` (0148) is the ONLY path that moves a
+  commission figure on an existing project, so no unrelated save can revert one
+  with a stale pre-fill. Do not re-add them.
+  - **`create_project_with_customer` is a DIFFERENT function and keeps its three**
+    — creation writes them and 0147's INSERT trigger makes them the baseline
+    history row. The two RPCs' argument blocks are byte-identical around `p_rate`,
+    so a blind find-replace breaks project creation: disambiguate on
+    `p_project_id`.
+  - **Dropping a parameter is a DROP+CREATE, and DROP DISCARDS THE ACL.** Postgres
+    allows only TRAILING defaults, which is why 0151 had to MOVE the three before
+    0153 could remove them. A fresh function is EXECUTE-to-PUBLIC — re-issue the
+    grants in the same transaction and read the ACL back, or a money RPC silently
+    widens to anon.
 - **Current work:** none. The delivery-moment commission freeze and the
   three-step parameter drop both shipped. See HANDOFF.md.
 - **Deferred:** effective-dated rates, Route Optimization, Predictive AI, IoT,
