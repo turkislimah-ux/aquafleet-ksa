@@ -189,8 +189,8 @@ architect's end. A file UPLOADED to the chat is readable. Upload, do not attach.
 
 ## SESSION LEDGER — 2026-08-23
 
-Thirteen commits, in order. DB went 0150 → 0153; three migrations applied by the
-architect, none self-applied.
+Fifteen commits plus the one carrying this file, in order. DB went 0150 → 0153;
+three migrations applied by the architect, none self-applied.
 
     0f5cddc  0151 param reorder (fix to the RAISE-arity bug, then committed)
     ccab13c  0152 trip commission terms + backfill (757 trips stamped)
@@ -205,6 +205,8 @@ architect, none self-applied.
     ede05a0  docs: this session handoff
     84e9ad8  docs: §7 commission entries compressed
     e9b83e1  docs: deferred "effective-dated rates" disambiguated
+    0235d05  docs: compression recorded in the handoff
+    13e6212  docs: §7 0141/0142/0143 compressed, one drifted claim corrected
 
 **Three lessons, all the same shape: a note outlived the thing it described.**
 1. My own 0151 assertion machinery carried a compile error (`%%` is a literal
@@ -220,8 +222,8 @@ The rule that came out of it is now in `CLAUDE.md` §5 and is the one to actuall
 carry forward: **the database outranks the notes, and re-measure a number before
 quoting it — including numbers in our own files.**
 
-**End state, measured at `ede05a0`.** The three commits after it are docs-only
-and move none of these figures:
+**End state, measured at `ede05a0`.** Every commit after it is docs-only and
+moves none of these figures:
 
     working tree           clean, nothing uncommitted, nothing untracked
     npx tsc --noEmit       clean, exit 0
@@ -240,9 +242,10 @@ uncommitted, audit backlog empty apart from the three parked items above. Ask
 Turki.
 
 **Housekeeping — DONE this session, not deferred.** `CLAUDE.md` had grown to
-**17.7 KB** against §5's 20 KB "check for appended diary" threshold, so the §7
-commission entries were compressed (`84e9ad8`) and the deferred-rates line
-disambiguated (`e9b83e1`). Now **17.5 KB**.
+**17.7 KB** against §5's 20 KB "check for appended diary" threshold. All of §7's
+money entries were compressed: the commission ones (`84e9ad8`), the
+deferred-rates line disambiguated (`e9b83e1`), and 0141/0142/0143 (`13e6212`).
+Now **17.4 KB**.
 
 - **Compression was prose density, NOT rule removal.** The two commission entries
   went 44 lines → 34 with every load-bearing fact checked present afterwards
@@ -267,9 +270,32 @@ disambiguated (`e9b83e1`). Now **17.5 KB**.
   near-miss — 0128's `trips.rate_sar` freeze is a PER-TRIP SNAPSHOT, not a rate
   history, and does not satisfy the deferred item.
 
-**If CLAUDE.md needs shrinking again,** the commission entries are already dense;
-look at §7's 0141/0142/0143 money entries next, or move settled ones into the
-migration headers that own them and leave a pointer.
+- **0141/0142/0143 (`13e6212`) — 45 lines → 41, 32 facts checked, 0 lost.** Tiny
+  byte saving; these were already dense. The value was two other things:
+  - **A DRIFTED CLAIM, CORRECTED.** The 0142 entry said `returnedTotal()` was
+    "threaded into `derivedBalanceItems`, `splitCoveredUnpaidItems` and
+    `buildStatementItems`". Traced live: the callers are `derivedBalanceItems`,
+    `splitCoveredUnpaidItems` and **`assembleInvoice`** in `lib/invoice.ts`, which
+    the entry never mentioned. `buildStatementItems` is NOT a caller — it consumes
+    the return ROWS for the ledger, not the summation, a distinction
+    `lib/prepaid.ts:105` draws and CLAUDE.md had flattened. So the entry named a
+    non-consumer and omitted a real one. It now states the RULE that does not
+    drift (one summation, every consumer IMPORTS it rather than restating it)
+    instead of enumerating call sites, which is the part that rotted. The
+    load-bearing claim survives: still exactly TWO expressions.
+  - **A RULE STATED TWICE, DEDUPLICATED.** The conflict-target hazard appeared
+    under both 0143 and 0141. Now stated once, on the 0141 bullet that owns the
+    partial index, with the rewrite warning folded in.
+
+**Lesson from the compression passes, worth more than the bytes:** BOTH passes
+found a stale fact. Compressing a rules file forces you to re-read every claim,
+and re-reading is what catches drift — the size cleanup was the pretext, the
+audit was the payoff. Verify against the DB and the code as you go; do not
+compress from the prose alone.
+
+**If CLAUDE.md needs shrinking again,** §7's money entries are all dense now.
+The remaining lever is moving settled rules into the migration headers that own
+them and leaving a pointer — the R TTT block is the worked example of that.
 
 ---
 
