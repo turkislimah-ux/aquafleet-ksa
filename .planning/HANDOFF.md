@@ -1,9 +1,133 @@
-# SESSION HANDOFF — 2026-08-23 (DELIVERY-MOMENT COMMISSION FREEZE SHIPPED, BOTH HALVES. Parameter drop finished at 0153. Trips-page cleanup audit executed, and report revenue moved onto the frozen per-trip rate. A CUSTOMER RATE HAS NOW MOVED — see the LIVE FACT section. DB at 0153. NOTHING IS OPEN, NOTHING IS QUEUED — ASK TURKI.)
+# SESSION HANDOFF — closes at `7f0be9e` (NOTIFICATIONS FEATURE COMPLETE: data layer 0154/0155/0156 + bell UI. DB at 0156. NEXT: Feature 2 Settings, starting with migration 0157 `issue_reports`.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
 `amountPayable.ts` entry exists because a rule that lived only in the handoff went
 stale and actively wrong for two commits.
+
+---
+
+## CURRENT STATE — MEASURED at `7f0be9e`, not recalled
+
+Every figure below was re-read from git and the live database while writing this
+line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
+this file.
+
+    HEAD              7f0be9e   branch main   tree clean   in sync with origin
+    migration files   154, highest 0156_leave_return_yellow_excludes_today.sql
+    live DB           0156
+    views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
+    tables            81, all 81 RLS-enabled
+    v_active_alerts   9 rows, 9 distinct identities
+
+Notification tables, live:
+
+    notification_thresholds   1 row (the seeded singleton)
+    notification_prefs        0 rows  <- no row = all severities shown. CORRECT:
+                                         the prefs editor is phase 2.2.
+    notification_dismissals   2 rows  <- written by Turki's browser testing, so
+                                         the per-user write path is proven in
+                                         production, not just in a harness.
+    notification_events       0 rows  <- has NO writer. See OPEN below.
+    issue_reports             does not exist yet (migration 0157)
+
+---
+
+## SHIPPED THIS SESSION — THE NOTIFICATIONS FEATURE, COMPLETE
+
+Four commits, `d153cf0..7f0be9e`. (The brief for this refresh said six; it is
+four — counted, not assumed.)
+
+    22a2008  0154  notifications data layer (six objects)
+    dd06c3b  0155  three derived BLUE branches appended to v_active_alerts
+    93cad61  0156  yellow leave_return narrowed to end_date > today
+    7f0be9e        bell + panel UI, per-user dismiss
+
+**`0154` — the data layer.** `notification_thresholds`, `notification_prefs`,
+`notification_dismissals`, `notification_events`, `v_active_alerts`,
+`v_my_notifications`. STATE alerts are DERIVED LIVE and never stored, because a
+stored state alert survives the restock/renewal/payment/top-up that resolved it
+and nothing remembers to delete it.
+
+**`0155` — three BLUE branches, derived not stored.** Truck entered maintenance,
+truck back in service, employee returned today — all from timestamps the source
+tables already carry (`work_orders.opened_at` / `.closed_at`,
+`leave_periods.end_date`). A stored event needs a writer on every path that can
+cause the fact, and a fact with two write paths eventually has one that forgets.
+Shipped with ZERO app code as a result.
+
+**`0156` — overlap removed.** The yellow `leave_return` branch matched
+`end_date >= today`, which included the day the blue `employee_returned` branch
+owns, so one returning employee produced two rows. Narrowed to `> today`. One
+character; the rest of the view is a byte-identical prefix, asserted at build
+time in each migration rather than eyeballed.
+
+**`7f0be9e` — the bell.** `lib/actions/notifications.ts`,
+`lib/notification-format.ts`, `components/AppShell.tsx`,
+`scripts/notification-format-check.ts`. Reads ONLY `v_my_notifications`;
+dismissal upserts `notification_dismissals`. Badge counts red + yellow.
+
+---
+
+## ARCHITECTURE FACTS — future sessions will need these
+
+- **THE VIEW OWNS THE RULES, THE APP OWNS THE WORDS.** No filtering, no
+  dismiss-timing, no resurfacing arithmetic anywhere in the client. There is ONE
+  definition of "dismissed" and it lives in `v_my_notifications`. Re-deriving any
+  of it in the app would give the product two definitions that drift the first
+  time either side changes. If a future change makes the bell behave oddly, fix
+  the view, not the component.
+
+- **PREPAID ALERTS ARE KEYED PER CUSTOMER WALLET, NOT PER PROJECT.** A customer
+  has ONE balance; per-project keying would fire the same wallet twice and demand
+  two dismissals for one fact. All three prepaid customers hold exactly one
+  prepaid project today, so this changes no count right now — it is structural,
+  for the day one gets a second.
+
+- **`alert_identity` IS STABLE AND IS BUILT FROM IDS + REASON ONLY** — never the
+  computed value, never the date. Dismissals key on it, so an identity carrying a
+  day count would make every dismissal evaporate at midnight.
+
+- **DO NOT RENAME THE `document` ENTITY LABEL IN THE VIEW.** `v_active_alerts`
+  emits `entity_type = 'document'` for archive documents, while
+  `lib/search-routes.ts` calls the same thing `archive_document`. That string is
+  baked into live `alert_identity` values that dismissal rows already reference —
+  renaming it in SQL would orphan every existing dismissal. The APP maps
+  `document -> archive_document` for routing instead, in
+  `lib/notification-format.ts`'s `routeEntity()`.
+
+- **Blue never inflates the badge.** `actionableCount()` is red + yellow only. A
+  routine "truck went in for service" must not make the bell look urgent, and a
+  badge that is always lit stops being read at all.
+
+---
+
+## OPEN / CARRIED FORWARD
+
+1. **`notification_events` is live, empty, and has NO WRITER.** 0155's ruling made
+   all three blue facts derived, so nothing writes to this table. It is DORMANT BY
+   DESIGN — the place a blue fact goes when it has no column to derive from — not
+   an oversight. **It needs a deliberate keep-or-drop decision if the settings
+   phase does not claim it.** Do not delete it casually, and do not "fix" it by
+   inventing a writer.
+
+2. **Arabic notification copy is unreviewed by a native speaker.** It renders
+   correctly and the day-counts decline properly (`pluralDays()` handles 1 يوم /
+   2 يومان / 3-10 أيام / 11+ يومًا), but the wording is my best effort and Turki
+   has not done a pass. Cheap to correct now, awkward once it is muscle memory.
+
+3. **NEXT — FEATURE 2, SETTINGS.** Migration **0157** (`issue_reports` — drafted
+   once already in an earlier 0154 draft and deliberately removed from it, so the
+   design work exists), then the settings popup: relocate company settings, the
+   notification prefs + threshold editor (phase 2.2), a lean profile, and
+   issue-reporting.
+
+---
+
+## PREVIOUS SESSION (same day) — COMMISSION FREEZE + PARAMETER DROP, closed at `d153cf0`
+
+Everything below this line is the earlier 2026-08-23 session and remains accurate.
+It is kept because its architecture facts are still load-bearing.
 
 ---
 
@@ -183,7 +307,9 @@ delivered under).
 
 ---
 
-**NOTHING IS OPEN.** The last item on this list is closed — see below.
+**NOTHING IS OPEN** *(as of `d153cf0` — superseded; see OPEN / CARRIED FORWARD
+at the top of this file for the current list).* The last item on this list is
+closed — see below.
 
 **CLOSED: trip `804a6a54-c958-4a77-9d00-8ae2c24369da`.** The architect corrected
 it directly via MCP, from a stale position-2 stamp of 10.30 to **10.00**.
@@ -307,9 +433,10 @@ Push state is deliberately NOT claimed here — this file is written before the
 push that carries it, so the claim could only be a guess. `git status -sb` is the
 authority.
 
-**Next session has nothing queued.** No migration drafted-but-unapplied, no code
-uncommitted, audit backlog empty apart from the three parked items above. Ask
-Turki.
+**Next session has nothing queued** *(true at `d153cf0`; SUPERSEDED — the
+notifications feature and then Feature 2 Settings followed. See the top of this
+file).* No migration drafted-but-unapplied, no code uncommitted, audit backlog
+empty apart from the three parked items above.
 
 **Housekeeping — DONE this session, not deferred.** `CLAUDE.md` had grown to
 **17.7 KB** against §5's 20 KB "check for appended diary" threshold. All of §7's
