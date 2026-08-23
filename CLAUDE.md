@@ -191,51 +191,50 @@ Current state lives in `.planning/HANDOFF.md` — read it at session start.
 - **Built:** Dashboard, Fleet, Drivers & People, Finance/Invoice, Inventory,
   Maintenance, Archive, Consumption, Search/Header, Reports, Water Station Cost,
   Driver Payslips — all verified, no open bugs.
-- **A WRITE-OFF ROW CARRIES NO PAYMENT MODE (0143).**
-  `archive_project_guarded` records exactly **customer, project, amount, reason,
-  actor** — nothing else. `customer_write_offs.payment_mode` existed from 0139 to
-  0143: written on every forced archive, **read by nothing** (no view, no other
-  routine, no app code). Do not re-add it. A write-off is a frozen AMOUNT; the
-  mode the debt was owed under is still resolvable live from the project, and
-  `invoices.payment_mode` remains the one snapshot that is genuinely read.
-  - **DROPPING A COLUMN AN RPC WRITES IS ONE TRANSACTION, NOT TWO.** plpgsql
-    bodies are **not** dependency-tracked, so `drop column` succeeds against a
-    live writer and reports nothing — the failure lands as 42703 at the next
-    forced archive, mid-override. Recreate the writer and drop the column in the
-    same transaction, then assert the body with `pg_get_functiondef` afterwards.
-    Prefer a bare drop over CASCADE: an unexpected dependent should fail loudly.
-  - **Rewriting `archive_project_guarded` re-risks 0141.** Its
-    `on conflict (customer_id) where reversed_at is null` target must be read back
-    after any body change, or a bare `on conflict (customer_id)` returns and the
-    next forced archive dies with 42P10.
+- **A WRITE-OFF ROW CARRIES NO PAYMENT MODE (0143).** `archive_project_guarded`
+  records exactly **customer, project, amount, reason, actor**.
+  `customer_write_offs.payment_mode` existed 0139→0143, written on every forced
+  archive and **read by nothing**. Do not re-add it: a write-off is a frozen
+  AMOUNT, the mode the debt was owed under stays resolvable live from the
+  project, and `invoices.payment_mode` is the one snapshot genuinely read.
+  - **Dropping a column an RPC writes is ONE transaction, not two.** plpgsql
+    bodies are not dependency-tracked, so `drop column` succeeds silently against
+    a live writer and the failure lands as 42703 at the next forced archive,
+    mid-override. Recreate the writer and drop the column together, then assert
+    the body with `pg_get_functiondef`. Bare drop over CASCADE — an unexpected
+    dependent should fail loudly.
 - **MONEY RULE (0142) — a recorded balance return is a DEBIT.** A row in
   `customer_balance_returns` REDUCES spendable prepaid credit, same class as
-  consumption. Netted at FACE VALUE (a refund is a cash movement, not a taxable
-  supply — do not multiply by 1.15) and never modelled as a negative top-up
-  (`topups_sar` means "money paid in"). The rule has **exactly two expressions**
-  and both were changed together: `lib/prepaid.ts` (`returnedTotal()` is the ONE
-  returns summation, threaded into `derivedBalanceItems`,
-  `splitCoveredUnpaidItems` and `buildStatementItems`) and
-  `v_customer_prepaid_balance`. `v_customer_amount_payable` and
-  `v_invoice_outstanding_live` inherit it through `balance_sar` — do not add a
-  third expression. Before 0142 nothing subtracted a return: a refunded
-  customer's credit stayed spendable after the money was gone.
+  consumption. Netted at FACE VALUE — a refund is cash leaving, not a taxable
+  supply, so no `× 1.15` — and never modelled as a negative top-up
+  (`topups_sar` means "money paid in"). Before 0142 nothing subtracted a return
+  and a refunded customer's credit stayed spendable after the money was gone.
+  - **EXACTLY TWO EXPRESSIONS, and it stays two:** `returnedTotal()` in
+    `lib/prepaid.ts` is the ONE returns summation on the TS side — every consumer
+    IMPORTS it rather than restating it, including `lib/invoice.ts` — and
+    `v_customer_prepaid_balance` is the SQL side. `v_customer_amount_payable` and
+    `v_invoice_outstanding_live` inherit through `balance_sar`. Do not add a
+    third. (`buildStatementItems` consumes the return ROWS for the ledger, not
+    the summation — a different use of the same data, not a second expression.)
 - **ARCHIVE IS NO LONGER A ONE-WAY DOOR (0141).** `restore_customer_guarded`
   un-archives a customer AND its project in one transaction on one timestamp,
   and reverses an active write-off by **marking** it (`reversed_at`,
-  `reversed_by`) and KEEPING the row — amount/reason/actor stay frozen. It
-  writes **no balance**: never delete a `customer_balance_returns` row and never
-  post a compensating negative top-up to "undo" an archive.
-  - **Write-off suppression is ACTIVE-only.** `v_customer_amount_payable` and
-    `v_invoice_outstanding_live` both carry `and w.reversed_at is null` **in the
-    JOIN condition**. In a WHERE clause it turns the LEFT JOIN inner and drops
-    every customer who never had a write-off.
+  `reversed_by`) and KEEPING the row — amount/reason/actor stay frozen. It writes
+  **no balance**: never delete a `customer_balance_returns` row, never post a
+  compensating negative top-up to "undo" an archive.
+  - **Write-off suppression is ACTIVE-only, and the `and w.reversed_at is null`
+    belongs in the JOIN condition** of `v_customer_amount_payable` and
+    `v_invoice_outstanding_live`. In a WHERE clause it turns the LEFT JOIN inner
+    and drops every customer who never had a write-off.
   - **The partial index and the conflict target are ONE change.**
-    `customer_write_offs` has a partial unique index on active rows (not a
-    table-wide `UNIQUE(customer_id)`), and `archive_project_guarded` uses
-    `on conflict (customer_id) where reversed_at is null`. Split them and you
-    get either 42P10 or — worse, silently — a re-archived debtor whose insert
-    collides with the old reversed row and writes nothing.
+    `customer_write_offs` has a partial unique index on active rows
+    (`(customer_id) where reversed_at is null`, not a table-wide
+    `UNIQUE(customer_id)`), matched by `archive_project_guarded`'s
+    `on conflict (customer_id) where reversed_at is null`. Split them and you get
+    42P10, or — worse, silently — a re-archived debtor whose insert collides with
+    the old reversed row and writes nothing. **Any rewrite of that RPC must read
+    the conflict target back afterwards;** a body change that drops the `where`
+    clause is the easiest way to reintroduce this.
 - **A TRIP OWNS THE COMMISSION TERMS IT WAS DELIVERED UNDER (0152).**
   `trips.commission_mode` / `.commission_base_sar` / `.commission_bump_pct` are a
   COPY of `commission_config_at(project_id, trip_date)` taken at the delivery
