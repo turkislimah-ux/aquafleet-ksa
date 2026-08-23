@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at `7f0be9e` (NOTIFICATIONS FEATURE COMPLETE: data layer 0154/0155/0156 + bell UI. DB at 0156. NEXT: Feature 2 Settings, starting with migration 0157 `issue_reports`.)
+# SESSION HANDOFF — closes at `787a43d` (FEATURE 2 SETTINGS COMPLETE, all four sections. DB at 0159. NEXT: nothing queued — ask Turki. See OPEN / CARRIED FORWARD.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -7,35 +7,201 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `7f0be9e`, not recalled
+## CURRENT STATE — MEASURED at `787a43d`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
 this file.
 
-    HEAD              7f0be9e   branch main   tree clean   in sync with origin
-    migration files   154, highest 0156_leave_return_yellow_excludes_today.sql
-    live DB           0156
+    HEAD              787a43d   branch main   tree clean   in sync with origin
+    migration files   157, highest 0159_user_profiles.sql
+    live DB           0159
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
-    tables            81, all 81 RLS-enabled
+    tables            84, all 84 RLS-enabled
+    storage buckets   12
     v_active_alerts   9 rows, 9 distinct identities
+    tsc --noEmit      clean
 
-Notification tables, live:
+**That alert count is now VIEWER-DEPENDENT, which it was not before 0158.**
+`v_active_alerts` resolves thresholds through `auth.uid()`, and in the SQL editor
+`auth.uid()` is NULL — so the 9 above is the count under the SHARED defaults, with
+no user override applied. A signed-in user with an override can legitimately see a
+different number. Do not treat "9" as a fixed fact about the data; re-measure as
+the user whose view you care about.
 
-    notification_thresholds   1 row (the seeded singleton)
-    notification_prefs        0 rows  <- no row = all severities shown. CORRECT:
-                                         the prefs editor is phase 2.2.
-    notification_dismissals   2 rows  <- written by Turki's browser testing, so
-                                         the per-user write path is proven in
-                                         production, not just in a harness.
-    notification_events       0 rows  <- has NO writer. See OPEN below.
-    issue_reports             does not exist yet (migration 0157)
+**The view count did NOT move across 0157/0158/0159.** 0157 and 0159 add tables
+and buckets only; 0158 does `create or replace` on `v_active_alerts`, which
+replaces a view rather than adding one — and restates the security footer,
+because `create or replace view` silently drops `reloptions` (§6).
+
+`set_updated_at()` — the generic BEFORE UPDATE trigger function introduced by
+0157 — is now attached to **three** tables: `issue_reports`,
+`notification_thresholds_user`, `user_profiles`. Verified live. Anything that
+drops that function must check `pg_trigger` first; it is no longer single-use.
+
+Per-user / feature tables, live:
+
+    notification_thresholds        1 row   <- the seeded SHARED default singleton
+    notification_thresholds_user   2 rows  <- per-user overrides (0158). A NULL
+                                              column means "inherit the shared
+                                              default for THIS field", resolved
+                                              per column, not per row.
+    notification_prefs             2 rows  <- written by the prefs editor
+                                              (94d62a8). Still true: NO ROW =
+                                              all severities shown, so absent
+                                              and all-on are the same state.
+    notification_dismissals        2 rows
+    notification_events            0 rows  <- STILL has NO writer. See OPEN.
+    issue_reports                  2 rows  <- live since 0157, filed through the
+                                              UI (787a43d)
+    user_profiles                  2 rows  <- live since 0159 (688cb9c)
+
+Every one of those row counts is Turki's own browser testing, which means each
+write path is proven in production rather than only in a harness.
 
 ---
 
-## SHIPPED THIS SESSION — THE NOTIFICATIONS FEATURE, COMPLETE
+## SHIPPED THIS SESSION — FEATURE 2, SETTINGS. COMPLETE, ALL FOUR SECTIONS.
 
-Four commits, `d153cf0..7f0be9e`. (The brief for this refresh said six; it is
+Nine commits, `ec3d293..787a43d`, across 2026-08-23/24. Three migrations, all
+applied by the architect, none self-applied. **Each hash below was verified
+against its own diff, not recalled** — see the correction at the foot of this
+section for why that mattered.
+
+    4ee4bb0  0157  issue_reports + issue-report-images bucket   MIGRATION ONLY
+    04f4750        settings popup shell + company settings relocated
+    f5825db  0158  per-user notification thresholds             MIGRATION ONLY
+    94d62a8        notifications settings section (+ bell narrowing fix)
+    f18b94f        setTripStage fail-closed commission guard
+    8f4b5b7  0159  user_profiles + profile-images bucket        MIGRATION ONLY
+    688cb9c        profile section (+ header name source, landing route)
+    53cf80c        safe-build.sh tsconfig trap + gitignore .next-*
+    787a43d        issue reporting section (+ shared-helper promotion)
+
+**THE MIGRATION AND ITS UI ARE ALWAYS SEPARATE COMMITS HERE.** 0157/0158/0159
+each landed alone, were applied and verified live, and only then did the app code
+that consumes them land. So `94d62a8` contains no SQL, `688cb9c` contains no SQL,
+and `787a43d` contains no SQL — a future reader looking for "where did
+issue_reports come from" must go to `4ee4bb0`, not to the section that uses it.
+
+### The four sections
+
+- **Company** (`04f4750`) — MOVED, not rebuilt. `app/trips/CompanySettingsModal.tsx`
+  became `components/settings/CompanySettingsSection.tsx` via `git mv` (git records
+  it R071). The fields, validation and the `getCompanySettings`/
+  `updateCompanySettings` write path are untouched — those hunks do not appear in
+  the diff at all. What DID change is chrome and post-save UX: it lost its own
+  overlay, title, X, Cancel and `onClose`, because inside the popup those would be
+  a modal on a modal; and closing-on-save became an inline "Saved" tick, since
+  there is no longer a modal of its own to close. The entry point also moved from a
+  Finance-tab button to a global sidebar item, reachable from every page.
+- **Notifications** (`f5825db` + `94d62a8`) — per-user severity toggles writing
+  `notification_prefs`, and four threshold overrides writing
+  `notification_thresholds_user`. Blank input = NULL = inherit the shared default
+  for that ONE field.
+- **Profile** (`8f4b5b7` + `688cb9c`) — account display name and password, the
+  self-entered `user_profiles` fields, landing page, language label, avatar.
+- **Report a problem** (`4ee4bb0` + `787a43d`) — file a ticket, and a shared
+  triage queue. `ComingSoon`, the per-section `ready` flag and the unbuilt-section
+  dot were all deleted here, because every rail entry now leads somewhere.
+
+**KNOWN NIT IN 0157, recorded so nobody trips on it later.** That migration's
+commented-out ROLLBACK block drops only the `_select` and `_insert` storage
+policies and omits `_update` and `_delete` — which the same migration creates.
+Following it verbatim would leave two orphaned policies on `storage.objects`. It
+is a comment, so nothing is executed and nothing is wrong in the live database;
+0159's rollback block does list all four. Fix it if 0157 is ever edited for
+another reason; it is not worth a commit on its own.
+
+### Rules that outlived their commits — future sessions need these
+
+- **THREE-LAYER THRESHOLD RESOLUTION, PER COLUMN (0158).** user override →
+  shared singleton → hardcoded constant, resolved **per column**, so a NULL in one
+  column inherits that one field without disturbing the other three. It is one CTE
+  in `v_active_alerts`; the app never recomputes or filters an alert. **The app
+  writes the row and the view does the rest.**
+- **`user_profiles` IS NOT AN EMPLOYEE RECORD, AND THAT IS LOAD-BEARING (0159).**
+  No FK to `staff`/`drivers`/`leave_periods`, no iqama, salary, leave or
+  employment data, and none may be added. There is currently NO path from "who is
+  logged in" to "which employee record is this", and that absence is what stops any
+  query widening from a cosmetic profile into payroll. The table comment says so in
+  the database itself, and the migration asserts it as a WHITELIST — the only
+  foreign key must be to `auth.users`, so ANY future link trips it.
+- **`job_title` there is a cosmetic label, never a role.** Nothing may branch on
+  it. When RBAC lands, the role lives in RBAC; if the two disagree this column is
+  simply wrong and harmless.
+- **`preferred_language` is a LABEL, not the i18n switch.** The real switch is
+  `localStorage["lang"]` in `AppShell.tsx` — per-device, while the column is
+  per-account. They are ALLOWED to disagree. Do not "sync" them; that would fight
+  the user every time they change machine.
+- **`default_route` is validated at BOTH ends, and neither substitutes for the
+  other.** Write-time validation against `NAV` stops a bad value going in;
+  read-time fallback handles a value that was valid when written and stopped being
+  valid later. A landing page that 404s on login is the one broken state with no
+  way out — it happens before the user can reach Settings to fix it.
+  `resolveLandingRoute` is total: null, "", whitespace, a removed route and a
+  failed read all resolve to the dashboard.
+- **`lib/routes.ts` HAS ZERO IMPORTS ON PURPOSE.** `lib/nav.ts` imports
+  `lucide-react` and `NAV` holds live references to the icon components, so
+  nothing tree-shakes them. `lib/supabase/middleware.ts` runs on the EDGE runtime
+  and needs the route resolver — importing it through `nav.ts` put the icon
+  library in the middleware bundle. **This was measured in the built
+  `middleware.js`, not reasoned about: the first attempt did exactly that.** Import
+  the resolver from `lib/routes`, never from `lib/nav`, in any Edge context.
+- **THE HEADER NAME NO LONGER COMES ONLY FROM `staff`.** `getViewer` now prefers
+  `auth.user_metadata.display_name` when set, falling back to `staff.name`. When
+  the account name wins it also NULLs `nameAr`, because the header renders
+  `nameAr || name` in Arabic and a self-chosen name must apply in both languages.
+  A user who never opens Profile is unaffected. Note `identity.ts` still reads
+  `public.staff` for the ROLE label — that predates the profile feature, answers a
+  different question, and is not a boundary breach: nothing joins the two.
+- **THE ISSUE QUEUE CANNOT NAME ANOTHER REPORTER, BY DESIGN.** `reporter_id`
+  points at `auth.users`, which a normal client cannot read, and `user_profiles`
+  is RLS'd own-row. So there is no path from someone else's uuid to their name.
+  The UI says "You" / "Someone else", which is complete information for two
+  people. A real name needs a deliberate, explicit policy change — do not add one
+  casually to "improve" the queue.
+- **THE RESOLVED STAMP IS DERIVED FROM THE TRANSITION, SERVER-SIDE.** Into
+  resolved → stamp `resolved_by`/`resolved_at`. Off resolved → clear BOTH, or a
+  reopened ticket claims to be open and closed at once. Already resolved and
+  merely edited → touch NEITHER, or "resolved at" silently becomes "last touched
+  at". The action reads the current status first for exactly this reason. The
+  client sends a status and a note and nothing else.
+- **`''` → NULL IS NOW ONE SHARED HELPER**, `blankToNull` in `lib/utils.ts`,
+  promoted there when issue reporting became its second consumer (the same
+  promote-on-second-consumer precedent that file already documents). An empty
+  string is FALSY BUT NOT NULLISH — that has cost this repo three separate bugs in
+  one week. Storing NULL means both `??` and `||` behave.
+- **THE IMAGE ALLOW-LIST IS ONE LIST BECAUSE IT IS A SECURITY DECISION.**
+  `ALLOWED_IMAGE_MIME` in `lib/utils.ts` excludes `image/svg+xml`, which is an
+  image that can carry script and would sail through a `startsWith("image/")`
+  test. Avatars and issue screenshots share it; only the SIZE cap differs (2 MB vs
+  5 MB — a full-screen PNG screenshot routinely passes 2 MB, and a refused
+  screenshot means the ticket gets filed without its evidence). **Two copies of
+  that list is how SVG comes back.**
+
+### A CORRECTION THIS REFRESH HAD TO MAKE ABOUT ITS OWN COMMIT
+
+**`f18b94f` does NOT change `priceDelivery`.** It changes `setTripStage`, the
+CALLER, at the point where it guards `priceDelivery`'s RESULT — one executable
+line, from `if (priced.error)` to `if (priced.commission === null)`. The other 14
+added lines are comment.
+
+This matters because `priceDelivery` has its own narrowing (`if (!resolved.config)`
+against `commissionConfigFor`'s result) which is **untouched and correct as-is** —
+so "priceDelivery now narrows on commission" points at the one narrowing in that
+file that did NOT change. The description was written that way twice, in this
+session's own summaries, before a verification pass against the diff caught it.
+
+**Behaviour today is unchanged**; the empty-string arm is not currently reachable.
+It is a latent money-path guard, not a live fix. Same family as the bell narrowing
+fix folded into `94d62a8`, which WAS live.
+
+---
+
+## PREVIOUS — THE NOTIFICATIONS FEATURE, COMPLETE, closed at `7f0be9e`
+
+Four commits, `d153cf0..7f0be9e`. (The brief for that refresh said six; it is
 four — counted, not assumed.)
 
     22a2008  0154  notifications data layer (six objects)
@@ -69,7 +235,10 @@ dismissal upserts `notification_dismissals`. Badge counts red + yellow.
 
 ---
 
-## ARCHITECTURE FACTS — future sessions will need these
+## ARCHITECTURE FACTS — NOTIFICATIONS
+
+*(Feature 2's own durable rules are in the SHIPPED section above, not here. This
+section is notifications only — do not read it as the complete set.)*
 
 - **THE VIEW OWNS THE RULES, THE APP OWNS THE WORDS.** No filtering, no
   dismiss-timing, no resurfacing arithmetic anywhere in the client. There is ONE
@@ -104,23 +273,49 @@ dismissal upserts `notification_dismissals`. Badge counts red + yellow.
 
 ## OPEN / CARRIED FORWARD
 
-1. **`notification_events` is live, empty, and has NO WRITER.** 0155's ruling made
-   all three blue facts derived, so nothing writes to this table. It is DORMANT BY
-   DESIGN — the place a blue fact goes when it has no column to derive from — not
-   an oversight. **It needs a deliberate keep-or-drop decision if the settings
-   phase does not claim it.** Do not delete it casually, and do not "fix" it by
-   inventing a writer.
+**Nothing is in flight.** No migration is drafted-but-unapplied, no code is
+uncommitted, and no feature is half-built. The four items below are decisions and
+reviews, not work in progress.
 
-2. **Arabic notification copy is unreviewed by a native speaker.** It renders
-   correctly and the day-counts decline properly (`pluralDays()` handles 1 يوم /
-   2 يومان / 3-10 أيام / 11+ يومًا), but the wording is my best effort and Turki
-   has not done a pass. Cheap to correct now, awkward once it is muscle memory.
+1. **`notification_events` is live, empty, and has NO WRITER — the decision is now
+   DUE, not contingent.** 0155's ruling made all three blue facts derived, so
+   nothing writes to this table. It is DORMANT BY DESIGN — the place a blue fact
+   goes when it has no column to derive from — not an oversight. The previous entry
+   made the decision conditional on whether the settings phase claimed it.
+   **Settings has now fully shipped and did NOT claim it.** Re-verified while
+   writing this line: 0 rows, and zero writers — no `insert into
+   notification_events` in any migration, and no reference to it in any `.ts`/
+   `.tsx` file. So: **keep or drop, deliberately.** Do not delete it casually, and
+   do not "fix" it by inventing a writer.
 
-3. **NEXT — FEATURE 2, SETTINGS.** Migration **0157** (`issue_reports` — drafted
-   once already in an earlier 0154 draft and deliberately removed from it, so the
-   design work exists), then the settings popup: relocate company settings, the
-   notification prefs + threshold editor (phase 2.2), a lean profile, and
-   issue-reporting.
+2. **Arabic copy across notifications, profile AND issues is unreviewed by a
+   native speaker.** It renders correctly and the notification day-counts decline
+   properly (`pluralDays()` handles 1 يوم / 2 يومان / 3-10 أيام / 11+ يومًا), but
+   every Arabic string in all three surfaces is Claude Code's best effort and Turki
+   has not done a wording pass. It grew a lot in this session — the whole settings
+   popup is bilingual. Cheap to correct now, awkward once it is muscle memory.
+
+3. **LEAVE HISTORY IN THE PROFILE IS DEFERRED TO RBAC. Do not re-raise it as a
+   gap.** It was asked for during 2.2c and deliberately not built. The reason is
+   structural, not scheduling: there is no auth-to-employee link, by design (see
+   0159 and the profile rules above), and building one to satisfy a display would
+   create exactly the path from "who is logged in" to payroll and identity
+   documents that the boundary exists to prevent. Showing someone their leave
+   history is a PERMISSION question, so it belongs to RBAC and goes through a real
+   permission model. **The absence of the link is the feature working, not a
+   missing piece.**
+
+4. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
+   `leave_periods` is readable by any authenticated user, and there is no per-user
+   wall today. Nothing in this session changed that, and nothing in this session
+   should be read as a step toward it — the per-user tables (`notification_prefs`,
+   `notification_thresholds_user`, `user_profiles`) are RLS'd to `auth.uid()` for
+   PREFERENCES, which is not the same thing as a permission model. Note the one
+   deliberate asymmetry: `issue_reports` is select-ALL / update-ALL on purpose,
+   because a two-person queue where only the reporter can act is a queue where the
+   person who cannot fix it owns the ticket.
+
+**NEXT SESSION HAS NOTHING QUEUED — ASK TURKI.**
 
 ---
 
