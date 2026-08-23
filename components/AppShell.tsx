@@ -16,6 +16,7 @@ import type { Viewer } from "@/lib/actions/identity";
 import { PILL_TONE_CLS } from "@/components/ui";
 import { hrefForHit } from "@/lib/search-routes";
 import { fetchMyNotifications, dismissNotification } from "@/lib/actions/notifications";
+import { fetchMyAvatarUrl } from "@/lib/actions/profile";
 import SettingsModal from "@/components/settings/SettingsModal";
 import {
   SEVERITY_TONE, SEVERITY_RANK, actionableCount, badgeTone, detailLine, routeEntity, nt,
@@ -56,6 +57,31 @@ export default function AppShell({
   // Settings lives in the shell, not on a route: it is reachable from every
   // page and must not lose the page underneath it.
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // THE HEADER AVATAR, FETCHED CLIENT-SIDE AND DELIBERATELY NOT IN getViewer.
+  //
+  // getViewer runs in app/layout.tsx, which renders on EVERY request. Adding a
+  // user_profiles read plus a signed-URL round trip there would put a storage
+  // API call on the critical path of every page load in the app, to render a
+  // decoration. Fetching it here costs nothing visible: the initials render
+  // immediately and the photo replaces them when it arrives.
+  //
+  // Re-fetched when the Settings dialog CLOSES, which is the only moment the
+  // photo can have changed. No event bus, no polling — the dialog closing is
+  // already the signal. `router.refresh()` would not do this on its own, because
+  // it re-runs the server tree and this state is client-side.
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (settingsOpen) return;
+    let cancelled = false;
+    // Never throws past here: the action already returns null for every failure,
+    // and the catch covers the module itself failing to load. A missing photo is
+    // not worth an error state in the top bar.
+    fetchMyAvatarUrl()
+      .then((url) => { if (!cancelled) setAvatarUrl(url); })
+      .catch(() => { if (!cancelled) setAvatarUrl(null); });
+    return () => { cancelled = true; };
+  }, [settingsOpen]);
 
   useEffect(() => {
     const savedLang = (typeof window !== "undefined" && localStorage.getItem("lang")) as Lang | null;
@@ -276,7 +302,7 @@ export default function AppShell({
                   {theme === "light" ? <Moon className="h-4 w-4" aria-hidden /> : <Sun className="h-4 w-4" aria-hidden />}
                 </button>
 
-                <AccountMenu viewer={viewer ?? null} lang={lang} />
+                <AccountMenu viewer={viewer ?? null} lang={lang} avatarUrl={avatarUrl} />
               </div>
             </header>
 
@@ -583,12 +609,21 @@ function NotificationItem({
  *    Nested <button> is invalid HTML, so the pill is a flex row containing
  *    two siblings rather than a button wrapping a button.
  *
- * 2. The name comes from public.staff via lib/actions/identity.ts, and falls
- *    back to the email's local part when the signed-in user has no staff row.
- *    Inventing a display name from an email would be a guess presented as
- *    fact; showing the raw email is honest about what is actually known.
+ * 2. The name comes from lib/actions/identity.ts — the account display name set
+ *    in Settings → Profile when there is one, otherwise public.staff — and falls
+ *    back to the email's local part when neither exists. Inventing a display
+ *    name from an email would be a guess presented as fact; showing the raw
+ *    email is honest about what is actually known.
+ *
+ * 3. The avatar shows the user's uploaded photo when there is one and their
+ *    initials when there is not. Initials are the FIRST paint either way: the
+ *    photo arrives from a client-side fetch (see AppShell) and swaps in, so the
+ *    header never waits on a storage round trip and never shows a hole where an
+ *    image is loading.
  */
-function AccountMenu({ viewer, lang }: { viewer: Viewer | null; lang: Lang }) {
+function AccountMenu({
+  viewer, lang, avatarUrl,
+}: { viewer: Viewer | null; lang: Lang; avatarUrl: string | null }) {
   const emailLocal = viewer?.email?.split("@")[0] ?? null;
   const displayName =
     (lang === "ar" ? viewer?.nameAr || viewer?.name : viewer?.name) || emailLocal || "—";
@@ -611,12 +646,26 @@ function AccountMenu({ viewer, lang }: { viewer: Viewer | null; lang: Lang }) {
       className="flex items-center gap-2 rounded-full border ps-1 pe-1 py-1 backdrop-blur-md"
       style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card) / 0.6)" }}
     >
-      <span
-        aria-hidden
-        className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-600 text-[12px] font-semibold text-white"
-      >
-        {initials}
-      </span>
+      {avatarUrl ? (
+        // Plain <img>, not next/image: the src is a signed URL with a query
+        // string and a five-minute life, on a host that would need a
+        // remotePatterns entry, and the optimiser cannot usefully cache
+        // something that expires. alt is empty because the name sits beside it —
+        // announcing it twice is noise for a screen reader.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={avatarUrl}
+          alt=""
+          className="h-8 w-8 shrink-0 rounded-full object-cover"
+        />
+      ) : (
+        <span
+          aria-hidden
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-600 text-[12px] font-semibold text-white"
+        >
+          {initials}
+        </span>
+      )}
 
       {/* min-w-0 + truncate: a long name must shorten, not widen the header
           and shove the centred search bar off centre. */}

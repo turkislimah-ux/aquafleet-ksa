@@ -38,13 +38,14 @@ import { X, Building2, BellRing, UserRound, LifeBuoy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import CompanySettingsSection from "./CompanySettingsSection";
 import NotificationsSection from "./NotificationsSection";
+import ProfileSection from "./ProfileSection";
 
 type SectionKey = "company" | "notifications" | "profile" | "issues";
 
 const SECTIONS: { key: SectionKey; label: string; labelAr: string; icon: typeof Building2; ready: boolean }[] = [
   { key: "company",       label: "Company",       labelAr: "الشركة",    icon: Building2, ready: true  },
   { key: "notifications", label: "Notifications", labelAr: "الإشعارات", icon: BellRing,  ready: true  },
-  { key: "profile",       label: "Profile",       labelAr: "الملف",     icon: UserRound, ready: false },
+  { key: "profile",       label: "Profile",       labelAr: "الملف",     icon: UserRound, ready: true  },
   { key: "issues",        label: "Report a problem", labelAr: "الإبلاغ عن مشكلة", icon: LifeBuoy, ready: false },
 ];
 
@@ -192,7 +193,7 @@ export default function SettingsModal({
           <div className="min-w-0 flex-1 overflow-y-auto scrollbar-thin p-6">
             <CompanySettingsSection open={section === "company"} />
             <NotificationsSection open={section === "notifications"} lang={lang} />
-            {section === "profile" && <ComingSoon label="Profile" batch="2.2c" />}
+            <ProfileSection open={section === "profile"} lang={lang} />
             {section === "issues" && <ComingSoon label="Report a problem" batch="2.2d" />}
           </div>
         </div>

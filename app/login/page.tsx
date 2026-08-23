@@ -4,6 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Btn } from "@/components/ui";
+// From lib/routes rather than lib/nav: the login page has no sidebar and no
+// need for twelve icon components in its bundle.
+import { resolveLandingRoute } from "@/lib/routes";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,7 +26,21 @@ export default function LoginPage() {
       setLoading(false);
       return;
     }
-    router.push("/");
+
+    // WHERE TO LAND — the user's own preference (0159), or the dashboard.
+    //
+    // The session exists by this point, so this select is RLS-scoped to the user
+    // who just signed in. A missing row, a null column and a failed read all
+    // resolve to "/" through resolveLandingRoute, which is total by construction
+    // — nobody is left on the login screen because a preference could not be
+    // read, and a route removed by a later release cannot 404 someone out of the
+    // app at the one moment they have no way to reach Settings and fix it.
+    const { data: profile } = await supabase
+      .from("user_profiles")
+      .select("default_route")
+      .maybeSingle();
+
+    router.push(resolveLandingRoute(profile?.default_route ?? null));
     router.refresh();
   }
 

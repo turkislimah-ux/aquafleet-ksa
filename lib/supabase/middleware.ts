@@ -1,5 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+// FROM lib/routes, NOT lib/nav — and that is not interchangeable even though
+// nav re-exports this function. nav.ts imports lucide-react for the sidebar
+// icons, and NAV holds live references to them, so importing through it pulls
+// the icon library into the EDGE bundle. Measured, not assumed: routing this
+// import through nav.ts put lucide in middleware.js.
+import { resolveLandingRoute } from "@/lib/routes";
 
 // Refreshes the auth session on every request and gates access:
 //  - not logged in + not on /login  -> redirect to /login
@@ -42,8 +48,30 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (user && isLogin) {
+    // The user's own landing preference (0159), same as app/login/page.tsx.
+    //
+    // THE QUERY IS INSIDE THIS BRANCH ON PURPOSE. This middleware runs on EVERY
+    // request; a signed-in user arriving at /login is the rare case. Hoisting
+    // the read above the `if` would add a database round trip to every page load
+    // in the app to serve a redirect that almost never fires.
+    //
+    // A failed read is not a failure: resolveLandingRoute is total, so this
+    // falls through to "/" rather than trapping someone on /login — which, given
+    // this branch exists precisely because they are ALREADY signed in, would be
+    // a redirect loop.
+    let stored: string | null = null;
+    try {
+      const { data } = await supabase
+        .from("user_profiles")
+        .select("default_route")
+        .maybeSingle();
+      stored = data?.default_route ?? null;
+    } catch {
+      /* fall through to the dashboard */
+    }
+
     const url = request.nextUrl.clone();
-    url.pathname = "/";
+    url.pathname = resolveLandingRoute(stored);
     return NextResponse.redirect(url);
   }
 

@@ -19,9 +19,15 @@ import {
   Boxes, FileBarChart, Activity, MapPin, Archive, PackageMinus,
   type LucideIcon,
 } from "lucide-react";
+import { NAV_HREFS, type NavHref } from "@/lib/routes";
 
 export type NavItem = {
-  href: string;
+  /**
+   * Typed NavHref, not string — so a nav entry pointing at a route missing from
+   * lib/routes.ts is a compile error rather than a landing preference that
+   * validates today and 404s after the page is renamed.
+   */
+  href: NavHref;
   /** i18n key under `nav.` — every key below exists in lib/i18n.ts. */
   key?: string;
   /** Overrides the i18n lookup when set. */
@@ -43,6 +49,44 @@ export const NAV: NavItem[] = [
   { href: "/reports", key: "reports", icon: FileBarChart },
   { href: "/archive", key: "archive", icon: Archive },
 ];
+
+// ---------------------------------------------------------------------------
+// ROUTE STRINGS AND THE LANDING RESOLVER LIVE IN lib/routes.ts, NOT HERE.
+//
+// The resolver has three callers: the Profile editor (validates before writing),
+// app/login/page.tsx (redirects after sign-in) and lib/supabase/middleware.ts
+// (redirects an already-signed-in user off /login). That third one runs on the
+// EDGE RUNTIME, and this module imports lucide-react — NAV holds live references
+// to the icon components, so nothing tree-shakes them away. Importing the
+// resolver from here would drag an icon library into the middleware bundle to
+// answer a question about strings.
+//
+// So the strings live in a leaf module with no imports, and this file depends on
+// IT. Re-exported below so UI code still has a single nav import.
+// ---------------------------------------------------------------------------
+export { NAV_HREFS, type NavHref };
+export { DEFAULT_LANDING_ROUTE, isNavRoute, resolveLandingRoute } from "@/lib/routes";
+
+// BOTH DIRECTIONS OF THE NAV / NAV_HREFS AGREEMENT ARE CHECKED.
+//
+// NAV cannot hold a route missing from NAV_HREFS: NavItem types `href` as
+// NavHref, so that is a compile error.
+//
+// The reverse is not expressible while NAV stays a mutable NavItem[], so it is
+// asserted at module load in development instead. It is the direction that
+// matters: an orphan in NAV_HREFS passes isNavRoute for a page that no longer
+// renders, which would defeat the read-side fallback and 404 someone at login —
+// the one failure with no way out, since it happens before they can reach
+// Settings to change the preference.
+if (process.env.NODE_ENV !== "production") {
+  const orphans = NAV_HREFS.filter((h) => !NAV.some((n) => n.href === h));
+  if (orphans.length) {
+    console.error(
+      `[nav] NAV_HREFS lists ${orphans.join(", ")} but NAV does not render them. ` +
+        `A stored landing preference could resolve to a page that no longer exists.`,
+    );
+  }
+}
 
 /**
  * Named destinations INSIDE a page — the tabs a person actually thinks of
