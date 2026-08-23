@@ -37,12 +37,13 @@ import { useEffect, useRef, useState } from "react";
 import { X, Building2, BellRing, UserRound, LifeBuoy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import CompanySettingsSection from "./CompanySettingsSection";
+import NotificationsSection from "./NotificationsSection";
 
 type SectionKey = "company" | "notifications" | "profile" | "issues";
 
 const SECTIONS: { key: SectionKey; label: string; labelAr: string; icon: typeof Building2; ready: boolean }[] = [
   { key: "company",       label: "Company",       labelAr: "الشركة",    icon: Building2, ready: true  },
-  { key: "notifications", label: "Notifications", labelAr: "الإشعارات", icon: BellRing,  ready: false },
+  { key: "notifications", label: "Notifications", labelAr: "الإشعارات", icon: BellRing,  ready: true  },
   { key: "profile",       label: "Profile",       labelAr: "الملف",     icon: UserRound, ready: false },
   { key: "issues",        label: "Report a problem", labelAr: "الإبلاغ عن مشكلة", icon: LifeBuoy, ready: false },
 ];
@@ -190,7 +191,7 @@ export default function SettingsModal({
           {/* The one scrolling region. */}
           <div className="min-w-0 flex-1 overflow-y-auto scrollbar-thin p-6">
             <CompanySettingsSection open={section === "company"} />
-            {section === "notifications" && <ComingSoon label="Notifications" batch="2.2b" />}
+            <NotificationsSection open={section === "notifications"} lang={lang} />
             {section === "profile" && <ComingSoon label="Profile" batch="2.2c" />}
             {section === "issues" && <ComingSoon label="Report a problem" batch="2.2d" />}
           </div>

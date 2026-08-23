@@ -28,6 +28,19 @@
 import { createClient } from "@/lib/supabase/server";
 import type { NotificationRow } from "@/lib/notification-format";
 
+/**
+ * NO ERROR IS EVER RETURNED EMPTY.
+ *
+ * Both shapes below are read with a truthiness or null check, and an empty
+ * string is FALSY — so a blank message would read as success at every call site
+ * and fail silently. Supabase always supplies a non-empty `message`, so this is
+ * belt-and-braces rather than a live fix, but it is the reason the callers are
+ * allowed to keep their simple checks.
+ */
+function msg(e: { message?: string } | null | undefined, fallback: string): string {
+  return e?.message?.trim() ? e.message : fallback;
+}
+
 export type NotificationsResult =
   | { rows: NotificationRow[]; error: null }
   | { rows: null; error: string };
@@ -52,7 +65,7 @@ export async function fetchMyNotifications(): Promise<NotificationsResult> {
       "alert_identity, severity, category, entity_type, entity_id, entity_label, value_num, value_date, payload, source, occurred_at, dismissed_at",
     );
 
-  if (error) return { rows: null, error: error.message };
+  if (error) return { rows: null, error: msg(error, "Could not load notifications.") };
   return { rows: (data ?? []) as NotificationRow[], error: null };
 }
 
@@ -82,7 +95,7 @@ export async function dismissNotification(
   const supabase = createClient();
 
   const { data: auth, error: authErr } = await supabase.auth.getUser();
-  if (authErr) return { error: authErr.message };
+  if (authErr) return { error: msg(authErr, "Could not read the session.") };
   const userId = auth?.user?.id;
   if (!userId) return { error: "Not signed in." };
 
@@ -93,7 +106,7 @@ export async function dismissNotification(
       { onConflict: "user_id,alert_identity" },
     );
 
-  if (error) return { error: error.message };
+  if (error) return { error: msg(error, "Could not dismiss the notification.") };
 
   // NO revalidatePath. The bell lives in AppShell on every route, and the panel
   // refetches through fetchMyNotifications the moment this resolves — busting

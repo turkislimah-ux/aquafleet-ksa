@@ -344,9 +344,25 @@ function NotificationsMenu({ lang }: { lang: Lang }) {
   const ref = useDismissable<HTMLDivElement>(open, () => setOpen(false));
 
   const load = useCallback(async () => {
-    const res = await fetchMyNotifications();
-    if (res.error) {
-      setLoadError(res.error);
+    // NARROW ON `rows`, NOT ON `error`. The union is
+    // { rows: NotificationRow[]; error: null } | { rows: null; error: string },
+    // and `error: string` includes "", which is FALSY — so `if (res.error)` does
+    // not discriminate it. On an empty message the failure path fell straight
+    // through to setRows(null), and because `rows` is null while loading, the
+    // panel sat on "Loading…" forever instead of showing its error state.
+    // TypeScript never caught it: setRows accepts null quite happily.
+    //
+    // Same trap app/trips/actions.ts's priceDelivery already documents:
+    // "Narrow on `config`, not on `error`."
+    let res: Awaited<ReturnType<typeof fetchMyNotifications>>;
+    try {
+      res = await fetchMyNotifications();
+    } catch (e) {
+      setLoadError(e instanceof Error && e.message ? e.message : "Could not load notifications.");
+      return;
+    }
+    if (!res.rows) {
+      setLoadError(res.error || "Could not load notifications.");
       return;
     }
     setLoadError(null);
