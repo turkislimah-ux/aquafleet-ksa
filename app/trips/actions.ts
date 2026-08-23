@@ -314,7 +314,21 @@ export async function setTripStage(id: string, stage: TripStage, waterStation?: 
       const priced = await priceDelivery(supabase, id, trip.driver_id, trip.project_id, trip.trip_date);
       // FAILS CLOSED, like the rate freeze below. A delivery whose terms cannot
       // be resolved must not complete at a guessed price — refuse the stage move.
-      if (priced.error) return { error: priced.error };
+      //
+      // NARROW ON `commission`, NOT ON `error`. `error: string` includes "",
+      // which is FALSY, so `if (priced.error)` does not discriminate this union:
+      // an empty message would fall straight through and stamp commission_sar
+      // NULL onto a DELIVERED trip — the exact opposite of the fails-closed
+      // invariant this comment promises.
+      //
+      // AND NOT ON `config` EITHER, which is the difference from
+      // commissionConfigFor's callers below (~696, ~803, both already correct).
+      // There, `config` IS the discriminant. Here it cannot be: config is
+      // legitimately NULL on the SUCCESS arm too, for a trip with no driver or
+      // no project — that trip prices at 0 and stamps no terms. `commission` is
+      // the only field that actually splits the two arms: number on success,
+      // null on failure.
+      if (priced.commission === null) return { error: priced.error };
       row.commission_sar = priced.commission;
       // config is null only for a trip with no driver or no project — no terms
       // apply, so all three stamp NULL beside a commission of 0.
