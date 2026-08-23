@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at `787a43d` (FEATURE 2 SETTINGS COMPLETE, all four sections. DB at 0159. NEXT: nothing queued — ask Turki. See OPEN / CARRIED FORWARD.)
+# SESSION HANDOFF — closes at the `0160` commit (FEATURE 2 SETTINGS COMPLETE, all four sections. DB at 0160. NEXT: nothing queued — ask Turki. See OPEN / CARRIED FORWARD.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -13,11 +13,12 @@ Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
 this file.
 
-    HEAD              787a43d   branch main   tree clean   in sync with origin
-    migration files   157, highest 0159_user_profiles.sql
-    live DB           0159
+    HEAD              787a43d + the 0160 commit that carries this file
+    branch main   tree clean   in sync with origin
+    migration files   158, highest 0160_drop_notification_events.sql
+    live DB           0160
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
-    tables            84, all 84 RLS-enabled
+    tables            83, all 83 RLS-enabled
     storage buckets   12
     v_active_alerts   9 rows, 9 distinct identities
     tsc --noEmit      clean
@@ -51,13 +52,24 @@ Per-user / feature tables, live:
                                               all severities shown, so absent
                                               and all-on are the same state.
     notification_dismissals        2 rows
-    notification_events            0 rows  <- STILL has NO writer. See OPEN.
+    notification_events            DROPPED by 0160 — see below
     issue_reports                  2 rows  <- live since 0157, filed through the
                                               UI (787a43d)
     user_profiles                  2 rows  <- live since 0159 (688cb9c)
 
 Every one of those row counts is Turki's own browser testing, which means each
 write path is proven in production rather than only in a harness.
+
+**`notification_events` IS GONE (0160), AND THE DECISION IS CLOSED.** It was
+0154's seam for a BLUE alert that could not be derived; 0155 made all three blue
+facts derived, so it was never written to. Dropped at 0 rows with 0 writers, after
+the whole notifications feature shipped without it. `v_my_notifications` lost the
+always-empty events branch in the same migration — same twelve columns, same
+behaviour, because `X union all (empty)` is `X`. **The architect applied it via
+MCP and the file was written afterwards to match**; the view body in 0160 was
+pulled with `pg_get_viewdef` and checksum-matched against live rather than
+reconstructed. If a non-derivable event is ever needed, re-add it deliberately —
+0154 still holds the definition.
 
 ---
 
@@ -210,10 +222,11 @@ four — counted, not assumed.)
     7f0be9e        bell + panel UI, per-user dismiss
 
 **`0154` — the data layer.** `notification_thresholds`, `notification_prefs`,
-`notification_dismissals`, `notification_events`, `v_active_alerts`,
-`v_my_notifications`. STATE alerts are DERIVED LIVE and never stored, because a
-stored state alert survives the restock/renewal/payment/top-up that resolved it
-and nothing remembers to delete it.
+`notification_dismissals`, `notification_events` *(since DROPPED by 0160 — see
+CURRENT STATE)*, `v_active_alerts`, `v_my_notifications`. STATE alerts are DERIVED
+LIVE and never stored, because a stored state alert survives the
+restock/renewal/payment/top-up that resolved it and nothing remembers to delete
+it.
 
 **`0155` — three BLUE branches, derived not stored.** Truck entered maintenance,
 truck back in service, employee returned today — all from timestamps the source
@@ -277,25 +290,19 @@ section is notifications only — do not read it as the complete set.)*
 uncommitted, and no feature is half-built. The four items below are decisions and
 reviews, not work in progress.
 
-1. **`notification_events` is live, empty, and has NO WRITER — the decision is now
-   DUE, not contingent.** 0155's ruling made all three blue facts derived, so
-   nothing writes to this table. It is DORMANT BY DESIGN — the place a blue fact
-   goes when it has no column to derive from — not an oversight. The previous entry
-   made the decision conditional on whether the settings phase claimed it.
-   **Settings has now fully shipped and did NOT claim it.** Re-verified while
-   writing this line: 0 rows, and zero writers — no `insert into
-   notification_events` in any migration, and no reference to it in any `.ts`/
-   `.tsx` file. So: **keep or drop, deliberately.** Do not delete it casually, and
-   do not "fix" it by inventing a writer.
+*(The `notification_events` keep-or-drop item that stood here is CLOSED — dropped
+by 0160. Recorded in CURRENT STATE above, not carried as open work. Do not
+re-raise it: the table is gone deliberately, at 0 rows and 0 writers, and 0154
+still holds its definition if a non-derivable event is ever needed.)*
 
-2. **Arabic copy across notifications, profile AND issues is unreviewed by a
+1. **Arabic copy across notifications, profile AND issues is unreviewed by a
    native speaker.** It renders correctly and the notification day-counts decline
    properly (`pluralDays()` handles 1 يوم / 2 يومان / 3-10 أيام / 11+ يومًا), but
    every Arabic string in all three surfaces is Claude Code's best effort and Turki
    has not done a wording pass. It grew a lot in this session — the whole settings
    popup is bilingual. Cheap to correct now, awkward once it is muscle memory.
 
-3. **LEAVE HISTORY IN THE PROFILE IS DEFERRED TO RBAC. Do not re-raise it as a
+2. **LEAVE HISTORY IN THE PROFILE IS DEFERRED TO RBAC. Do not re-raise it as a
    gap.** It was asked for during 2.2c and deliberately not built. The reason is
    structural, not scheduling: there is no auth-to-employee link, by design (see
    0159 and the profile rules above), and building one to satisfy a display would
@@ -305,7 +312,7 @@ reviews, not work in progress.
    permission model. **The absence of the link is the feature working, not a
    missing piece.**
 
-4. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
+3. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
    `leave_periods` is readable by any authenticated user, and there is no per-user
    wall today. Nothing in this session changed that, and nothing in this session
    should be read as a step toward it — the per-user tables (`notification_prefs`,
