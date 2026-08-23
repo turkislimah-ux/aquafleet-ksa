@@ -5,6 +5,70 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * "" AND WHITESPACE BECOME NULL, for any optional text column.
+ *
+ * PROMOTED HERE FROM lib/profile.ts when the issue reporter became its second
+ * consumer — the same rule and the same precedent as daysAgoKey and
+ * currentMonthKey below. It is not profile logic; it is what every optional
+ * text field in this app has to do on the way to the database.
+ *
+ * An empty string is FALSY BUT NOT NULLISH, and that has now cost this repo
+ * three separate bugs in one week — the notification bell, the commission money
+ * path and the settings loader. `note ?? "None"` keeps "" and renders blank;
+ * `note || "None"` does not. Storing NULL means BOTH spellings behave, so no
+ * future reader has to know which one to reach for.
+ *
+ * It also makes "cleared" and "never filled in" the same state, which is what
+ * they mean to a person, and it is what the nonblank CHECK constraints in 0157
+ * and 0159 require — those reject '' outright with a 23514.
+ */
+export function blankToNull(v: string | null | undefined): string | null {
+  const t = v?.trim();
+  return t ? t : null;
+}
+
+/**
+ * Image types accepted by every upload in this app.
+ *
+ * ONE LIST, BECAUSE IT IS A SECURITY DECISION, AND THOSE MUST NOT BE EXPRESSED
+ * TWICE. Avatars (profile-images) and issue screenshots (issue-report-images)
+ * both read back through signed URLs, so the browser renders whatever the
+ * bucket hands it.
+ *
+ * NOTE WHAT IS ABSENT: `image/svg+xml`. An SVG is an image that can carry
+ * script, and it would sail straight through a `startsWith("image/")` test —
+ * which is exactly why this is an explicit allow-list rather than a prefix
+ * check. Keeping two copies of this list is how SVG quietly comes back.
+ */
+export const ALLOWED_IMAGE_MIME = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
+
+/** For an <input type="file"> accept attribute. */
+export const IMAGE_ACCEPT = ALLOWED_IMAGE_MIME.join(",");
+
+/**
+ * Null when the file is acceptable, else the reason. Shared client and server.
+ *
+ * The size cap is a PARAMETER rather than a constant because the two callers
+ * genuinely differ: an avatar is a head-and-shoulders photo, while an issue
+ * attachment is a full-screen screenshot, which as a PNG routinely runs to
+ * several megabytes. One shared number would either reject legitimate
+ * screenshots or let avatars be far larger than they ever need to be.
+ */
+export function validateImageFile(
+  file: { size: number; type: string },
+  maxBytes: number,
+): string | null {
+  if (file.size === 0) return "That file is empty.";
+  if (file.size > maxBytes) {
+    return `Image is too large — maximum ${Math.round(maxBytes / (1024 * 1024))} MB.`;
+  }
+  if (!(ALLOWED_IMAGE_MIME as readonly string[]).includes(file.type)) {
+    return "Use a JPEG, PNG, WebP or GIF image.";
+  }
+  return null;
+}
+
 export function formatSar(n: number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n) + " SAR";
 }

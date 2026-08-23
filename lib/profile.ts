@@ -13,6 +13,8 @@
 // It is also the one place the normalisation rule lives, so the editor and the
 // action cannot disagree about what an empty field means.
 
+import { IMAGE_ACCEPT, validateImageFile } from "@/lib/utils";
+
 /** The user_profiles columns this editor owns. Account email is NOT here. */
 export type ProfileFields = {
   display_name: string | null;
@@ -60,24 +62,11 @@ export const EMPTY_DRAFT: Record<ProfileTextKey, string> = {
   default_route: "",
 };
 
-/**
- * "" AND WHITESPACE BECOME NULL. This is the whole rule, in one function.
- *
- * An empty string is FALSY BUT NOT NULLISH, and this repo has been bitten by
- * that twice in one week — once in the notification bell, once on the commission
- * money path. `name ?? "Unknown"` keeps "" and renders blank; `name || "Unknown"`
- * does not. Storing NULL means BOTH spellings behave, so no future reader has to
- * know which one to reach for.
- *
- * It also makes "cleared" and "never filled in" the same state, which is what
- * they mean to a person, and what 0159's nonblank CHECK constraints require for
- * avatar_path and default_route — those two REJECT '' outright, so a form that
- * sent "" would get a 23514 instead of a save.
- */
-export function blankToNull(v: string | null | undefined): string | null {
-  const t = v?.trim();
-  return t ? t : null;
-}
+// blankToNull lived here until the issue reporter (2.2d) became its second
+// consumer. It is now in lib/utils.ts, on the same promote-on-second-consumer
+// precedent that file already documents for daysAgoKey and currentMonthKey —
+// it was never profile logic, it is what every optional text field does on the
+// way to the database. Import it from there.
 
 /** The two languages lib/i18n.ts can actually render. Matches 0159's CHECK. */
 export const LANGUAGE_VALUES = ["en", "ar"] as const;
@@ -94,26 +83,20 @@ export function isLanguageValue(v: string | null): boolean {
 // second rule nobody could explain.
 export const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 
+// The accepted image types are ALLOWED_IMAGE_MIME in lib/utils.ts — one list,
+// shared with the issue-report attachment, because excluding image/svg+xml is a
+// security decision and two copies of it is how SVG comes back.
+export const AVATAR_ACCEPT = IMAGE_ACCEPT;
+
 /**
- * An explicit allow-list, not a `startsWith("image/")` test.
+ * Null when the file is acceptable, else the reason. Shared client + server.
  *
- * The bucket is private and read through signed URLs, so the browser renders
- * whatever comes back. `image/svg+xml` is an IMAGE that can carry script, and it
- * would pass a prefix check — so it is deliberately absent here. These four are
- * what a phone or a laptop actually produces from a photo.
+ * Same list and same 2 MB cap as before it was promoted; only the location of
+ * the rule changed. Avatars keep their own, tighter budget — a head-and-
+ * shoulders photo has no business being screenshot-sized.
  */
-export const ALLOWED_AVATAR_MIME = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
-
-export const AVATAR_ACCEPT = ALLOWED_AVATAR_MIME.join(",");
-
-/** Null when the file is acceptable, else the reason. Shared client + server. */
 export function validateAvatarFile(file: { size: number; type: string }): string | null {
-  if (file.size === 0) return "That file is empty.";
-  if (file.size > MAX_AVATAR_BYTES) return "Image is too large — maximum 2 MB.";
-  if (!(ALLOWED_AVATAR_MIME as readonly string[]).includes(file.type)) {
-    return "Use a JPEG, PNG, WebP or GIF image.";
-  }
-  return null;
+  return validateImageFile(file, MAX_AVATAR_BYTES);
 }
 
 // --------------------------------------------------------------------------

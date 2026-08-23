@@ -48,9 +48,10 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createPlainClient } from "@supabase/supabase-js";
 import { isNavRoute } from "@/lib/nav";
 import {
-  blankToNull, isLanguageValue, validateAvatarFile, validateNewPassword,
+  isLanguageValue, validateAvatarFile, validateNewPassword,
   type ProfileFields,
 } from "@/lib/profile";
+import { blankToNull } from "@/lib/utils";
 
 const AVATAR_BUCKET = "profile-images";
 

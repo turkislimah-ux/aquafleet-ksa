@@ -1,7 +1,8 @@
 "use client";
 
-// The Settings popup — phase 2.2a: the shell, plus the relocated company
-// settings section. The other three sections are stubs until 2.2b/c/d.
+// The Settings popup. All four sections are built: company settings (2.2a,
+// relocated from the Finance tab), notifications (2.2b), profile (2.2c) and
+// issue reporting (2.2d).
 //
 // ==========================================================================
 // WHY A LEFT RAIL AND NOT TABS
@@ -39,33 +40,23 @@ import { cn } from "@/lib/utils";
 import CompanySettingsSection from "./CompanySettingsSection";
 import NotificationsSection from "./NotificationsSection";
 import ProfileSection from "./ProfileSection";
+import IssuesSection from "./IssuesSection";
 
 type SectionKey = "company" | "notifications" | "profile" | "issues";
 
-const SECTIONS: { key: SectionKey; label: string; labelAr: string; icon: typeof Building2; ready: boolean }[] = [
-  { key: "company",       label: "Company",       labelAr: "الشركة",    icon: Building2, ready: true  },
-  { key: "notifications", label: "Notifications", labelAr: "الإشعارات", icon: BellRing,  ready: true  },
-  { key: "profile",       label: "Profile",       labelAr: "الملف",     icon: UserRound, ready: true  },
-  { key: "issues",        label: "Report a problem", labelAr: "الإبلاغ عن مشكلة", icon: LifeBuoy, ready: false },
+const SECTIONS: { key: SectionKey; label: string; labelAr: string; icon: typeof Building2 }[] = [
+  { key: "company",       label: "Company",          labelAr: "الشركة",           icon: Building2 },
+  { key: "notifications", label: "Notifications",    labelAr: "الإشعارات",        icon: BellRing  },
+  { key: "profile",       label: "Profile",          labelAr: "الملف",            icon: UserRound },
+  { key: "issues",        label: "Report a problem", labelAr: "الإبلاغ عن مشكلة", icon: LifeBuoy  },
 ];
 
-/**
- * A section that exists in the rail but not yet in code.
- *
- * SHOWN RATHER THAN HIDDEN, deliberately. The four sections were specified
- * together, so a rail with one item would misrepresent what Settings is and
- * would visibly change shape three more times. Each stub says which batch fills
- * it, so it reads as "not yet" rather than "broken" — the same reasoning the old
- * notifications placeholder used when it stated plainly that it was not wired.
- */
-function ComingSoon({ label, batch }: { label: string; batch: string }) {
-  return (
-    <div>
-      <h2 className="text-lg font-semibold">{label}</h2>
-      <p className="mt-1 text-sm muted">Not built yet — arrives in {batch}.</p>
-    </div>
-  );
-}
+// The ComingSoon stub that used to live here is gone, along with the `ready`
+// flag on each rail item and the dot that marked an unbuilt section. 2.2d fills
+// the last one, so every rail entry now leads somewhere and a "not yet" marker
+// would be a promise about nothing. Deleting it is also forced rather than
+// optional: `noUnusedLocals` is enforced, so a stub component with no callers
+// fails the build.
 
 export default function SettingsModal({
   open, onClose, lang,
@@ -175,15 +166,6 @@ export default function SettingsModal({
                   <span className="min-w-0 flex-1 truncate">
                     {lang === "ar" ? s.labelAr : s.label}
                   </span>
-                  {/* A quiet dot, not the word "soon": the label already reads
-                      as a destination, and this only has to say "nothing here
-                      yet" to someone deciding whether to click. */}
-                  {!s.ready && (
-                    <span
-                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", active ? "bg-white/60" : "bg-slate-400/60")}
-                      aria-hidden
-                    />
-                  )}
                 </button>
               );
             })}
@@ -194,7 +176,7 @@ export default function SettingsModal({
             <CompanySettingsSection open={section === "company"} />
             <NotificationsSection open={section === "notifications"} lang={lang} />
             <ProfileSection open={section === "profile"} lang={lang} />
-            {section === "issues" && <ComingSoon label="Report a problem" batch="2.2d" />}
+            <IssuesSection open={section === "issues"} lang={lang} />
           </div>
         </div>
       </div>
