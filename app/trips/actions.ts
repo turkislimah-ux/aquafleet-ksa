@@ -1031,9 +1031,9 @@ export async function createProjectWithCustomer(input: NewProjectInput): Promise
 }
 
 // Finance C3 (0035) — the project's derived prepaid balance, computed the
-// SAME way FinanceTab.tsx does (project's CURRENT stored rate_per_trip_sar
-// applied to every trip, not a historical per-trip rate — that simplification
-// already exists app-wide, not new here). Feeds can_switch_payment_mode()'s
+// SAME way FinanceTab.tsx does: each trip priced FROZEN-FIRST from its own
+// trips.rate_sar, with the project's current rate_per_trip_sar only as the
+// not-yet-delivered fallback (see the mapping below). Feeds can_switch_payment_mode()'s
 // rule 3 (switching away from prepaid requires an exactly-zero balance) —
 // used by BOTH checkPaymentModeSwitch (client-proactive) and
 // updateProjectWithCustomer (server-authoritative) below, so the two never

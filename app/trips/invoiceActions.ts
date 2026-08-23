@@ -87,9 +87,10 @@ async function assembleForCustomerPeriod(params: {
   if (projErr || !project) return { error: projErr?.message ?? "No project found for this customer." };
 
   // Full trip history for the project (not period-filtered — see
-  // lib/invoice.ts's PERIOD-MEMBERSHIP RULE), rate resolved from the
-  // project's rate_per_trip_sar, never trips.rate_sar (same convention as
-  // app/trips/FinanceTab.tsx). invoice_id fetched to compute the
+  // lib/invoice.ts's PERIOD-MEMBERSHIP RULE), rate resolved FROZEN-FIRST from
+  // trips.rate_sar with the project's rate_per_trip_sar only as the
+  // not-yet-delivered fallback — see the mapping below, and the identical
+  // convention in ./amountPayable's toConsumingTrip. invoice_id fetched to compute the
   // reserved-elsewhere set (0030) — a trip reserved by ANY invoice other
   // than the one we're assembling for is excluded.
   const { data: tripRows, error: tripErr } = await supabase

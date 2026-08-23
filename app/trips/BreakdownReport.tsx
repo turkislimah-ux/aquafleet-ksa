@@ -25,10 +25,13 @@
 // can no longer exceed total and the completion rate is finally a real ratio.
 // The old clamps that existed to hide cross-month deliveries are gone.
 //
-// Revenue uses the project's CURRENT rate (no historical rate snapshot exists),
-// hence the disclaimer in the header.
+// Revenue is the SUM of each delivered trip's frozen `trips.rate_sar` (0128) —
+// what it was worth on the day — not a count times the project's current rate.
+// A rate change therefore prices new work only, and never re-prices a past
+// month. The project's current rate survives as a display figure and as the
+// fallback for a delivered trip with no frozen rate.
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Printer } from "lucide-react";
 import {
@@ -58,6 +61,9 @@ import {
   type ProjectCommissionNowRow,
 } from "@/lib/db-types";
 import DeliveriesReportBand, { buildDeliveriesReport } from "./DeliveriesReportBand";
+// round2 from the money engine, not a local copy — a revenue figure should round
+// the same way the balance it is compared against does.
+import { round2 } from "@/lib/prepaid";
 import { computeAmountPayable } from "./amountPayable";
 import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
 
@@ -86,10 +92,14 @@ export type BreakdownTrip = {
   // `Trip` in lib/db-types already declares WaterType — this shape was the wider
   // one, not the honest one.
   water_type: WaterType | null;
-  // Frozen customer rate (0128). Read ONLY by the Deliveries report band, which
-  // joins the four-surface invariant — see ./DeliveriesReportBand's PRICE BASIS
-  // note. Every OTHER figure in this report still prices at the project's
-  // CURRENT rate, which is what the header's disclaimer is about.
+  // Frozen customer rate (0128) — THE price basis for every revenue figure in
+  // this report: the KPI, the per-driver rows and the 6-month trend all SUM this
+  // per trip. See tripRevenue/sumRevenue below and ./DeliveriesReportBand's
+  // PRICE BASIS note, which joins the same four-surface invariant.
+  //
+  // It used to be read only by the Deliveries band while everything else priced
+  // at the project's CURRENT rate — which re-priced delivered work whenever the
+  // rate moved, and could not represent a band holding two frozen rates.
   rate_sar: number | null;
   // invoice_id set AND that invoice is status='paid' (app/trips/page.tsx).
   // Read ONLY by the Amount payable box, for the postpaid arm.
@@ -205,7 +215,33 @@ export default function BreakdownReport({
     window.print();
   }
 
+  // The project's CURRENT rate. It is a DISPLAY figure (the header money block)
+  // and a FALLBACK — it is no longer what any revenue number is computed from.
+  // See tripRevenue below.
   const rate = project?.rate_per_trip_sar ?? 0;
+
+  // REVENUE PRICES EACH TRIP AT ITS OWN FROZEN RATE (0128), SUMMED — never
+  // count × the project's current rate.
+  //
+  // `trips.rate_sar` is stamped at delivery, so a rate change re-prices only NEW
+  // work. Multiplying a count by one rate silently re-priced every delivered
+  // trip in the band the moment a rate moved, and it cannot even express a band
+  // holding trips at two different frozen rates — which is exactly what the
+  // first rate change produces.
+  //
+  // The `?? rate` fallback mirrors COALESCE(t.rate_sar, p.rate_per_trip_sar),
+  // the pattern every money path uses (lib/prepaid.ts's ConsumingTrip note; both
+  // v_customer_* views). It is unreachable for a delivered trip on a project:
+  // 0128 backfilled every one and setTripStage stamps every delivery since. The
+  // single delivered trip with a NULL rate_sar carries no project, so it never
+  // enters projectTrips.
+  //
+  // CALLERS MUST PASS DELIVERED TRIPS ONLY — an undelivered trip is not revenue.
+  const tripRevenue = useCallback((t: BreakdownTrip) => t.rate_sar ?? rate, [rate]);
+  const sumRevenue = useCallback(
+    (rows: BreakdownTrip[]) => round2(rows.reduce((s, t) => s + tripRevenue(t), 0)),
+    [tripRevenue],
+  );
 
   // This project's trips (id-driven; archived-safe).
   const projectTrips = useMemo(
@@ -344,7 +380,7 @@ export default function BreakdownReport({
 
   // --- Section 1: Financial (delivered_at basis) -------------------------
   const deliveredCount = deliveredInMonth.length;
-  const revenue = rate * deliveredCount;
+  const revenue = sumRevenue(deliveredInMonth);
   const commission = deliveredInMonth.reduce((s, t) => s + (t.commission_sar ?? 0), 0);
   const netMargin = revenue - commission;
   const avgRevenue = deliveredCount > 0 ? revenue / deliveredCount : null;
@@ -380,10 +416,14 @@ export default function BreakdownReport({
   const driverRows = useMemo(() => {
     const counts = new Map<string, number>();
     const comm = new Map<string, number>();
+    // Revenue accumulates PER TRIP at that trip's own frozen rate, alongside the
+    // count — it is not the count multiplied by anything afterwards.
+    const rev = new Map<string, number>();
     for (const t of deliveredInMonth) {
       const key = t.driver_id ?? UNASSIGNED;
       counts.set(key, (counts.get(key) ?? 0) + 1);
       comm.set(key, (comm.get(key) ?? 0) + (t.commission_sar ?? 0));
+      rev.set(key, (rev.get(key) ?? 0) + tripRevenue(t));
     }
     const rows = Array.from(counts.keys()).map((key) => {
       const tripsDelivered = counts.get(key) ?? 0;
@@ -392,11 +432,11 @@ export default function BreakdownReport({
         name: key === UNASSIGNED ? "Unassigned" : driverName.get(key) ?? "Unknown driver",
         tripsDelivered,
         commission: comm.get(key) ?? 0,
-        revenue: tripsDelivered * rate,
+        revenue: round2(rev.get(key) ?? 0),
       };
     });
     return rows;
-  }, [deliveredInMonth, driverName, rate]);
+  }, [deliveredInMonth, driverName, tripRevenue]);
 
   const commissionTable = useMemo(
     () => [...driverRows].sort((a, b) => b.commission - a.commission),
@@ -408,9 +448,14 @@ export default function BreakdownReport({
   );
 
   // --- Chart 1 data: 6-month trend, window ENDS at the selected month. -----
-  // Revenue = delivered-count(by delivered_at) × current rate; trips = total
-  // count (by trip_date). Same bases as the sections, so the selected month's
-  // bar reconciles with the Financial/Operational numbers. Empty months = 0.
+  // Revenue = SUM of each delivered trip's own frozen rate (bucketed by
+  // trip_date); trips = total count (by trip_date). Same bases as the sections,
+  // so the selected month's bar reconciles with the Financial/Operational
+  // numbers. Empty months = 0.
+  //
+  // The per-trip sum matters MOST here: this window spans six months, so it is
+  // the first place a past month would visibly re-price itself after a rate
+  // change if revenue were still count × today's rate.
   const trendData = useMemo(() => {
     const [sy, sm] = selMonth.split("-").map(Number);
     const keys: string[] = [];
@@ -423,6 +468,9 @@ export default function BreakdownReport({
       }
       keys.push(`${yy}-${String(mm).padStart(2, "0")}`);
     }
+    // `deliv` now accumulates REVENUE (summed per-trip frozen rate), not a
+    // delivered count — the count it used to hold was only ever multiplied by
+    // the rate one line later.
     const deliv = new Map<string, number>();
     const tot = new Map<string, number>();
     for (const t of projectTrips) {
@@ -432,7 +480,7 @@ export default function BreakdownReport({
       // month-to-month shape misleading.
       if (t.delivered_at && t.trip_date) {
         const k = monthKeyOf(t.trip_date);
-        deliv.set(k, (deliv.get(k) ?? 0) + 1);
+        deliv.set(k, (deliv.get(k) ?? 0) + tripRevenue(t));
       }
       if (t.trip_date) {
         const k = monthKeyOf(t.trip_date);
@@ -441,10 +489,10 @@ export default function BreakdownReport({
     }
     return keys.map((k) => ({
       label: shortMonthLabel(k),
-      revenue: (deliv.get(k) ?? 0) * rate,
+      revenue: round2(deliv.get(k) ?? 0),
       trips: tot.get(k) ?? 0,
     }));
-  }, [projectTrips, selMonth, rate]);
+  }, [projectTrips, selMonth, tripRevenue]);
 
   // --- Chart 2 data: trips per day in the selected month (by trip_date). ---
   // Current/incomplete month: only days up to today get bars.
@@ -561,8 +609,9 @@ export default function BreakdownReport({
                 </p>
               )}
               <p className="mt-1 text-[11px] muted">
-                Revenue uses the project&rsquo;s current rate ({formatSar(rate)}/trip) — there is no
-                historical rate snapshot, so past months recompute at today&rsquo;s rate.
+                Revenue prices each delivered trip at the rate frozen on it at delivery, so past
+                months keep what they were worth on the day. The project&rsquo;s current rate
+                ({formatSar(rate)}/trip) applies to new work only.
               </p>
             </div>
 
@@ -767,8 +816,8 @@ export default function BreakdownReport({
               </ResponsiveContainer>
             </div>
             <p className="text-[11px] muted">
-              Revenue = delivered trips × current rate (by delivery date). Trips = all scheduled
-              trips (by trip date). Months with no activity show as zero.
+              Revenue = sum of each delivered trip&rsquo;s frozen rate. Trips = all scheduled trips.
+              Both by trip date. Months with no activity show as zero.
             </p>
           </section>
 

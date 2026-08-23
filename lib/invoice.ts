@@ -269,9 +269,12 @@ export type AssembleInvoiceInput = {
   periodStart: string; // inclusive, trip_date
   periodEnd: string; // inclusive, trip_date
   // ALL delivered trips for this customer/project, any date — NOT
-  // pre-filtered to the period. See PERIOD-MEMBERSHIP RULE above. rate_sar
-  // must already be resolved to the project's rate_per_trip_sar (same
-  // convention as lib/prepaid.ts's ConsumingTrip — never trips.rate_sar).
+  // pre-filtered to the period. See PERIOD-MEMBERSHIP RULE above. rate_sar must
+  // already be RESOLVED BY THE CALLER, frozen-first: the trip's own
+  // trips.rate_sar, with the project's current rate_per_trip_sar only as the
+  // not-yet-delivered fallback (lib/prepaid.ts's ConsumingTrip note). An invoice
+  // bills each trip at what it was worth on the day it was delivered, so a rate
+  // change between delivery and invoicing cannot move an already-delivered line.
   trips: ConsumingTrip[];
   // ALL topups for this customer, any date. Ignored entirely for postpaid.
   topups: TopupLite[];
