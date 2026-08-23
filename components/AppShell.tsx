@@ -1,9 +1,9 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, Sun, Moon, Globe, LogOut } from "lucide-react";
+import { Bell, Sun, Moon, Globe, LogOut, X, Check } from "lucide-react";
 import type { Lang } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,13 @@ import { SearchDockProvider } from "@/components/SearchDock";
 import GlobalSearch from "@/components/GlobalSearch";
 import { searchRecords } from "@/lib/actions/search";
 import type { Viewer } from "@/lib/actions/identity";
+import { PILL_TONE_CLS } from "@/components/ui";
+import { hrefForHit } from "@/lib/search-routes";
+import { fetchMyNotifications, dismissNotification } from "@/lib/actions/notifications";
+import {
+  SEVERITY_TONE, SEVERITY_RANK, actionableCount, badgeTone, detailLine, routeEntity, nt,
+  type NotificationRow,
+} from "@/lib/notification-format";
 
 type AppCtx = { lang: Lang; setLang: (l: Lang) => void; theme: "light" | "dark"; setTheme: (m: "light" | "dark") => void };
 const Ctx = createContext<AppCtx>({ lang: "en", setLang: () => {}, theme: "light", setTheme: () => {} });
@@ -278,49 +285,240 @@ function useDismissable<T extends HTMLElement>(open: boolean, onClose: () => voi
 }
 
 /**
- * Notifications — VISUAL REDESIGN ONLY this batch, functionality deferred to
- * its own later batch (Turki's explicit scoping).
+ * Notifications — now wired to v_my_notifications (0154/0155/0156).
  *
- * So there is no unread dot. The old header had one, hardcoded, permanently
- * lit, with nothing behind it — a red badge that always claims unread news
- * and never has any is worse than no badge. The panel states plainly that
- * notifications are not wired rather than showing invented rows.
+ * THE BADGE IS EARNED NOW, AND ONLY BY SOME ROWS. The previous version of this
+ * component deliberately had no dot: the old header carried one that was
+ * hardcoded, permanently lit, and backed by nothing, and a badge that always
+ * claims news and never has any stops being read at all. Real rows exist now,
+ * so a badge is honest — but it counts RED + YELLOW only. Blue is FYI ("truck
+ * went in for service") and must never make the bell look urgent, which is the
+ * same principle that justified having no badge before, applied to what the
+ * badge is allowed to count. See actionableCount().
+ *
+ * THE VIEW OWNS EVERY RULE. It has already applied this user's severity
+ * preferences and the dismiss-visibility rule; whatever it returns, renders.
+ * There is no filtering, no "unread" state and no resurfacing arithmetic in
+ * this component — "seen" IS "dismissed", and when a dismissed alert comes back
+ * (red next day, yellow/blue after 7) it comes back because the view says so.
+ *
+ * Fetches on mount so the badge is truthful before the panel is ever opened,
+ * and again on open and after each dismiss. No polling: a fleet office does not
+ * need second-by-second alerting, and a background timer on every route is a
+ * cost paid on every page for a number that changes a few times a day.
  */
 function NotificationsMenu({ lang }: { lang: Lang }) {
   const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<NotificationRow[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const ref = useDismissable<HTMLDivElement>(open, () => setOpen(false));
+
+  const load = useCallback(async () => {
+    const res = await fetchMyNotifications();
+    if (res.error) {
+      setLoadError(res.error);
+      return;
+    }
+    setLoadError(null);
+    setRows(res.rows);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Refetch when the panel opens, so a bell left mounted for hours is not
+  // showing this morning's list.
+  useEffect(() => {
+    if (open) void load();
+  }, [open, load]);
+
+  async function onDismiss(identity: string) {
+    setBusy(identity);
+    // OPTIMISTIC, then reconciled. The row leaves immediately because the click
+    // should feel resolved, but the authoritative list is refetched right after
+    // — the view decides what is visible, and a local guess about that would be
+    // the second definition of "dismissed" this design exists to avoid.
+    setRows((prev) => prev?.filter((r) => r.alert_identity !== identity) ?? prev);
+    const res = await dismissNotification(identity);
+    if (res.error) setLoadError(res.error);
+    await load();
+    setBusy(null);
+  }
+
+  const visible = (rows ?? [])
+    .slice()
+    .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+  const count = actionableCount(rows ?? []);
+  const tone = badgeTone(rows ?? []);
 
   return (
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        aria-label="Notifications"
-        className="focus-ring transition-colors [touch-action:manipulation] h-9 w-9 rounded-xl border backdrop-blur-md hover:border-brand-500/40 grid place-items-center"
+        aria-label={
+          count > 0
+            ? `${nt("title", lang)} — ${count} ${nt("countAria", lang)}`
+            : nt("title", lang)
+        }
+        className="focus-ring transition-colors [touch-action:manipulation] relative h-9 w-9 rounded-xl border backdrop-blur-md hover:border-brand-500/40 grid place-items-center"
         style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card) / 0.6)" }}
       >
         <Bell className="h-4 w-4" aria-hidden />
+        {count > 0 && tone && (
+          // Sits in the same corner the preview's dot occupied, but carries the
+          // number: a bare dot cannot distinguish one overdue invoice from
+          // eleven, and "how much" is the first thing you want from a bell.
+          // Colour follows the WORST thing being counted.
+          <span
+            aria-hidden
+            className={cn(
+              "absolute -top-1 -end-1 min-w-[1.05rem] h-[1.05rem] px-1 rounded-full",
+              "text-[10px] font-semibold leading-[1.05rem] text-center tabular-nums",
+              "ring-2 shadow-sm",
+              PILL_TONE_CLS[tone].dot,
+              "text-white",
+            )}
+            style={{ ["--tw-ring-color" as string]: "rgb(var(--bg))" }}
+          >
+            {count > 9 ? "9+" : count}
+          </span>
+        )}
       </button>
 
       {open && (
         <div
-          className="card absolute end-0 top-full mt-2 w-[min(20rem,90vw)] p-0 shadow-lg"
+          className="card absolute end-0 top-full mt-2 w-[min(23rem,92vw)] p-0 shadow-lg overflow-hidden"
           style={{ zIndex: 50 }}
         >
           <div
-            className="border-b px-3 py-2 text-sm font-medium"
+            className="flex items-center justify-between gap-2 border-b px-3 py-2"
             style={{ borderColor: "rgb(var(--border))" }}
           >
-            {lang === "ar" ? "الإشعارات" : "Notifications"}
+            <span className="text-sm font-medium">{nt("title", lang)}</span>
+            {count > 0 && tone && (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset tabular-nums",
+                  PILL_TONE_CLS[tone].chip,
+                )}
+              >
+                {count}
+              </span>
+            )}
           </div>
-          <div className="px-3 py-6 text-center text-sm muted">
-            {lang === "ar"
-              ? "لا توجد إشعارات. لم تُفعَّل بعد."
-              : "No notifications. Not wired up yet."}
+
+          <div className="max-h-[min(26rem,60vh)] overflow-y-auto">
+            {loadError ? (
+              <div className="px-3 py-6 text-center">
+                <p className="text-sm text-rose-600 dark:text-rose-400">{nt("failed", lang)}</p>
+                <button
+                  onClick={() => void load()}
+                  className="focus-ring mt-2 text-xs underline underline-offset-2 muted hover:text-brand-600"
+                >
+                  {nt("retry", lang)}
+                </button>
+              </div>
+            ) : rows === null ? (
+              <div className="px-3 py-6 text-center text-sm muted">{nt("loading", lang)}</div>
+            ) : visible.length === 0 ? (
+              // EMPTY IS A RESULT, NOT A BLANK. "All clear" states that the
+              // system looked and found nothing, which is the reassurance this
+              // panel exists to give; an empty box only says the panel opened.
+              <div className="px-3 py-8 text-center">
+                <div
+                  className="mx-auto grid h-9 w-9 place-items-center rounded-full ring-1 ring-inset ring-emerald-500/20 bg-emerald-500/10"
+                  aria-hidden
+                >
+                  <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <p className="mt-2 text-sm font-medium">{nt("emptyTitle", lang)}</p>
+                <p className="text-xs muted">{nt("emptyBody", lang)}</p>
+              </div>
+            ) : (
+              <ul className="divide-y" style={{ borderColor: "rgb(var(--border))" }}>
+                {visible.map((r) => (
+                  <NotificationItem
+                    key={r.alert_identity}
+                    row={r}
+                    lang={lang}
+                    busy={busy === r.alert_identity}
+                    onDismiss={() => void onDismiss(r.alert_identity)}
+                    onNavigate={() => setOpen(false)}
+                  />
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * One row. Severity is carried by a dot rather than by a section header —
+ * with a typical list well under twenty items, headers cost more vertical
+ * space than they save, and sorting already groups the severities together.
+ *
+ * The BODY is a link and the DISMISS is a separate button, never nested: a row
+ * that both navigates and dismisses from the same click is a row that
+ * eventually does the wrong one. Deep links reuse hrefForHit — the app's one
+ * route resolver — rather than a second navigation channel, which
+ * lib/search-routes.ts explicitly warns against. An entity the router does not
+ * know renders as plain text instead of a link to nowhere.
+ */
+function NotificationItem({
+  row, lang, busy, onDismiss, onNavigate,
+}: {
+  row: NotificationRow;
+  lang: Lang;
+  busy: boolean;
+  onDismiss: () => void;
+  onNavigate: () => void;
+}) {
+  const tone = SEVERITY_TONE[row.severity];
+  const detail = detailLine(row, lang);
+  const routable = row.entity_id ? routeEntity(row.entity_type) : null;
+  const href = routable && row.entity_id ? hrefForHit(routable, row.entity_id) : null;
+
+  const inner = (
+    <>
+      <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", PILL_TONE_CLS[tone].dot)} aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm">{row.entity_label ?? row.entity_type}</span>
+        {detail && <span className="mt-0.5 block truncate text-xs muted">{detail}</span>}
+      </span>
+    </>
+  );
+
+  return (
+    <li className={cn("group flex items-start gap-2 px-3 py-2.5 transition-opacity", busy && "opacity-50")}>
+      {href ? (
+        <Link
+          href={href}
+          onClick={onNavigate}
+          className="focus-ring flex min-w-0 flex-1 items-start gap-2 rounded-lg -m-1 p-1 hover:bg-brand-500/5"
+        >
+          {inner}
+        </Link>
+      ) : (
+        <span className="flex min-w-0 flex-1 items-start gap-2">{inner}</span>
+      )}
+      <button
+        onClick={onDismiss}
+        disabled={busy}
+        aria-label={`${nt("dismiss", lang)} — ${row.entity_label ?? row.entity_type}`}
+        title={nt("dismiss", lang)}
+        // Visible on hover/focus on pointer devices, always visible on touch
+        // where there is no hover to reveal it.
+        className="focus-ring mt-0.5 shrink-0 rounded-md p-1 muted opacity-100 transition md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 hover:text-rose-600 disabled:opacity-40"
+      >
+        <X className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    </li>
   );
 }
 
