@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, Sun, Moon, Globe, LogOut, X, Check } from "lucide-react";
+import { Bell, Sun, Moon, Globe, LogOut, X, Check, Settings } from "lucide-react";
 import type { Lang } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ import type { Viewer } from "@/lib/actions/identity";
 import { PILL_TONE_CLS } from "@/components/ui";
 import { hrefForHit } from "@/lib/search-routes";
 import { fetchMyNotifications, dismissNotification } from "@/lib/actions/notifications";
+import SettingsModal from "@/components/settings/SettingsModal";
 import {
   SEVERITY_TONE, SEVERITY_RANK, actionableCount, badgeTone, detailLine, routeEntity, nt,
   type NotificationRow,
@@ -51,6 +52,10 @@ export default function AppShell({
   // the deps of both persist effects on purpose: flipping it true re-runs
   // them, which is what writes the now-correct restored value back.
   const [hydrated, setHydrated] = useState(false);
+
+  // Settings lives in the shell, not on a route: it is reachable from every
+  // page and must not lose the page underneath it.
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     const savedLang = (typeof window !== "undefined" && localStorage.getItem("lang")) as Lang | null;
@@ -128,6 +133,26 @@ export default function AppShell({
                 );
               })}
             </nav>
+            {/*
+              Settings sits BELOW the page buttons and is deliberately NOT one
+              of them: NAV items are routes, this opens a dialog. It gets a
+              hairline above it and a quieter resting state so the nav reads as
+              "places to go" and this reads as "a thing to open" — same row
+              rhythm, different weight, no active-route highlight it can never
+              earn.
+            */}
+            <div className="mt-3 border-t pt-3" style={{ borderColor: "rgb(var(--border))" }}>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                aria-haspopup="dialog"
+                className="focus-ring flex w-full items-center gap-3 rounded-lg px-3 py-2 text-start text-sm transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <Settings className="h-4 w-4 shrink-0" aria-hidden />
+                <span>{lang === "ar" ? "الإعدادات" : "Settings"}</span>
+              </button>
+            </div>
+
             <div className="mt-auto pt-4 text-[11px] muted px-2">
               <div>v0.1 · MVP</div>
               <div>© 2026 Bousla · Bin Slimah Group</div>
@@ -258,6 +283,10 @@ export default function AppShell({
             <main className="p-4 md:p-6 flex-1 min-w-0">{children}</main>
           </div>
         </div>
+
+        {/* Mounted at shell level, outside <main>, so the overlay covers the
+            whole app rather than sitting inside the page's padding. */}
+        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} lang={lang} />
       </SearchDockProvider>
     </Ctx.Provider>
   );

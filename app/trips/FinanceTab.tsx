@@ -42,7 +42,6 @@ import StatementModal, { type TripMeta } from "./StatementModal";
 import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
 import { useRecordFocus } from "@/lib/useRecordFocus";
 import { resolveInvoiceCustomer } from "@/lib/actions/search";
-import CompanySettingsModal from "./CompanySettingsModal";
 
 type CustomerLite = { id: string; name: string; email: string | null };
 type ProjectLite = {
@@ -163,7 +162,6 @@ export default function FinanceTab({
       });
     })();
   });
-  const [companySettingsOpen, setCompanySettingsOpen] = useState(false);
 
   const projectByCustomer = useMemo(() => {
     const m = new Map<string, ProjectLite>();
@@ -478,9 +476,6 @@ export default function FinanceTab({
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Btn variant="outline" onClick={() => setCompanySettingsOpen(true)}>
-            Company settings
-          </Btn>
           <Btn
             variant="primary"
             onClick={() => setTopupTarget("global")}
@@ -625,8 +620,6 @@ export default function FinanceTab({
         customer={invoicesFor}
         initialInvoiceId={focusInvoiceId}
       />
-
-      <CompanySettingsModal open={companySettingsOpen} onClose={() => setCompanySettingsOpen(false)} />
     </div>
   );
 }
