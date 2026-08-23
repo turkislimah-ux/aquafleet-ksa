@@ -1,4 +1,4 @@
-# SESSION HANDOFF — 2026-08-23 (DELIVERY-MOMENT COMMISSION FREEZE SHIPPED, BOTH HALVES. Parameter drop finished at 0153. Trips-page cleanup audit executed. DB at 0153. NOTHING IS OPEN, NOTHING IS QUEUED — ASK TURKI.)
+# SESSION HANDOFF — 2026-08-23 (DELIVERY-MOMENT COMMISSION FREEZE SHIPPED, BOTH HALVES. Parameter drop finished at 0153. Trips-page cleanup audit executed, and report revenue moved onto the frozen per-trip rate. A CUSTOMER RATE HAS NOW MOVED — see the LIVE FACT section. DB at 0153. NOTHING IS OPEN, NOTHING IS QUEUED — ASK TURKI.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -128,6 +128,61 @@ recorded as intentional in `8d4f76e`'s commit body:
 
 ---
 
+## SHIPPED: REVENUE PRICES DELIVERED TRIPS AT THE FROZEN RATE (`09f4ac6`)
+
+A read-only trace asked whether invoice generation bills a trip at the frozen
+`trips.rate_sar` or the live `projects.rate_per_trip_sar`. **Invoices are safe** —
+`invoiceActions.ts` resolves `t.rate_sar ?? project.rate_per_trip_sar` and the
+line amount flows from there into `confirm_invoice`, which freezes it. So do
+prepaid consumption, the payment-mode balance guard, statements, and both
+`v_customer_*` views (all `COALESCE(t.rate_sar, p.rate_per_trip_sar)`).
+
+**`BreakdownReport` was the one gap.** It computed revenue as
+`delivered count × projects.rate_per_trip_sar` in three places — the Revenue KPI,
+the per-driver rows and the 6-month trend — so a rate change re-priced already
+delivered work, including past months. Each figure now SUMS each delivered trip's
+own frozen rate, with the live rate kept only as the null-`rate_sar` fallback.
+It had to be a per-trip sum: after a rate change one band holds trips at two
+different frozen rates, which `count × one rate` cannot express.
+
+Also corrected three comments that each asserted the money path uses the live
+rate while the code beside them did the opposite (`invoiceActions.ts`,
+`AssembleInvoiceInput.trips` in `lib/invoice.ts`, `fetchProjectBalance`'s
+header), the user-facing disclaimer that claimed "there is no historical rate
+snapshot", and a trend legend that was wrong on the date basis too.
+
+`priceDelivery`'s Amount payable box is untouched — it already routed through
+`toConsumingTrip`'s frozen-first resolution.
+
+---
+
+## LIVE FACT ABOUT THE DATA: A CUSTOMER RATE HAS MOVED
+
+**"No rate has ever moved" is FALSE as of 2026-08-22.** It was true when 0128 was
+written, and that sentence is quoted in 0128's own header as the evidence for its
+backfill — so it is exactly the kind of claim that gets reused after it expires.
+
+    project  R TTT
+    rate     160.00 -> 180.00   on 2026-08-22, between 11:49:39 and 11:50:28
+    122 delivered trips frozen at 160.00   (2026-06-29 .. 2026-08-22 11:49:39)
+      5 delivered trips frozen at 180.00   (2026-08-22 11:50:28 .. 18:45:42)
+
+The freeze behaved correctly: trips delivered before the change kept 160, trips
+after got 180. **The data now contains genuine rate divergence.**
+
+**Consequence for any future work: `trips.rate_sar` and
+`projects.rate_per_trip_sar` are NO LONGER interchangeable, and code or a proof
+that assumes they are will be wrong on R TTT.** Re-measure; do not assume. The
+same applies to any "this refactor is inert because the two rates agree"
+argument — that was true for every project except this one.
+
+R TTT is test data with no customer money attached, which is why the
+BreakdownReport fix shipped with its figure moving (22,860.00 -> 20,420.00,
+delta -2,440.00 — the old number billed 122 trips at a rate they were never
+delivered under).
+
+---
+
 **NOTHING IS OPEN.** The last item on this list is closed — see below.
 
 **CLOSED: trip `804a6a54-c958-4a77-9d00-8ae2c24369da`.** The architect corrected
@@ -189,7 +244,7 @@ architect's end. A file UPLOADED to the chat is readable. Upload, do not attach.
 
 ## SESSION LEDGER — 2026-08-23
 
-Fifteen commits plus the one carrying this file, in order. DB went 0150 → 0153;
+Seventeen commits plus the one carrying this file, in order. DB went 0150 → 0153;
 three migrations applied by the architect, none self-applied.
 
     0f5cddc  0151 param reorder (fix to the RAISE-arity bug, then committed)
@@ -207,8 +262,10 @@ three migrations applied by the architect, none self-applied.
     e9b83e1  docs: deferred "effective-dated rates" disambiguated
     0235d05  docs: compression recorded in the handoff
     13e6212  docs: §7 0141/0142/0143 compressed, one drifted claim corrected
+    65a0277  docs: that compression folded into the handoff
+    09f4ac6  report: BreakdownReport revenue -> frozen rate_sar (+ 4 stale comments)
 
-**Three lessons, all the same shape: a note outlived the thing it described.**
+**Four lessons, all the same shape: a note outlived the thing it described.**
 1. My own 0151 assertion machinery carried a compile error (`%%` is a literal
    percent, so a three-arg RAISE on a two-placeholder format aborts the DO
    block). It aborted the architect's first apply. Every migration since has had
@@ -217,13 +274,22 @@ three migrations applied by the architect, none self-applied.
 2. The two standing audit flags were fixed in code sessions before anyone
    re-read the flags.
 3. 804a6a54 was corrected in the DB and re-raised from a note three times.
+4. The BreakdownReport fix was drafted expecting a PURE NO-OP, on the recorded
+   premise that no rate had ever moved. The premise had expired the day before
+   (R TTT, above). **The before/after proof on real data is what caught it — no
+   amount of reasoning about whether the refactor was inert would have.** So:
+   when a change is justified by "this is equivalent today", compute both sides
+   on live rows and diff them. Treat a moving figure as a question, not
+   automatically as a defect: here the movement WAS the fix, and the premise was
+   the broken thing.
 
 The rule that came out of it is now in `CLAUDE.md` §5 and is the one to actually
 carry forward: **the database outranks the notes, and re-measure a number before
 quoting it — including numbers in our own files.**
 
-**End state, measured at `ede05a0`.** Every commit after it is docs-only and
-moves none of these figures:
+**End state, re-measured at `09f4ac6`** (the earlier reading was taken at
+`ede05a0`; everything between was docs-only, and `09f4ac6` is app+report with no
+migration, so the DB figures are unchanged and were confirmed anyway):
 
     working tree           clean, nothing uncommitted, nothing untracked
     npx tsc --noEmit       clean, exit 0
@@ -232,6 +298,10 @@ moves none of these figures:
     supabase/migrations    151 files, last 0153_update_project_drop_commission_params.sql
     live DB                0153. 77/77 tables RLS-enabled, 48/48 views
                            security_invoker, 0 anon-readable (re-measured)
+    CLAUDE.md              17,437 bytes (§5 threshold 20 KB)
+
+**§7's DB pointer stays at 0153** — the last stretch was app and report code
+only. No migration ran after 0153 and none is drafted-but-unapplied.
 
 Push state is deliberately NOT claimed here — this file is written before the
 push that carries it, so the claim could only be a guess. `git status -sb` is the
