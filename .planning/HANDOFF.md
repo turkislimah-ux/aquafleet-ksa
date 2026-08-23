@@ -189,7 +189,7 @@ architect's end. A file UPLOADED to the chat is readable. Upload, do not attach.
 
 ## SESSION LEDGER — 2026-08-23
 
-Ten commits, in order. DB went 0150 → 0153; three migrations applied by the
+Thirteen commits, in order. DB went 0150 → 0153; three migrations applied by the
 architect, none self-applied.
 
     0f5cddc  0151 param reorder (fix to the RAISE-arity bug, then committed)
@@ -202,6 +202,9 @@ architect, none self-applied.
     8d4f76e  trips cleanup B2/B3
     8fd0a4e  docs: 804a6a54 closed, paid mismatches reframed, DB-outranks rule
     e1a8596  hygiene — buildBaseLines deleted, isActive private, docstring fixed
+    ede05a0  docs: this session handoff
+    84e9ad8  docs: §7 commission entries compressed
+    e9b83e1  docs: deferred "effective-dated rates" disambiguated
 
 **Three lessons, all the same shape: a note outlived the thing it described.**
 1. My own 0151 assertion machinery carried a compile error (`%%` is a literal
@@ -217,7 +220,8 @@ The rule that came out of it is now in `CLAUDE.md` §5 and is the one to actuall
 carry forward: **the database outranks the notes, and re-measure a number before
 quoting it — including numbers in our own files.**
 
-**End state, measured at session end (before the commit that carries this file):**
+**End state, measured at `ede05a0`.** The three commits after it are docs-only
+and move none of these figures:
 
     working tree           clean, nothing uncommitted, nothing untracked
     npx tsc --noEmit       clean, exit 0
@@ -235,10 +239,37 @@ authority.
 uncommitted, audit backlog empty apart from the three parked items above. Ask
 Turki.
 
-**Housekeeping flag:** `CLAUDE.md` is now **17.7 KB**. §5 sets 20 KB as the
-"check for appended diary" threshold, so it is approaching but not over. If it
-crosses, the §7 commission entries are the ones to compress — several of them now
-describe rules that are settled and could collapse to one line each.
+**Housekeeping — DONE this session, not deferred.** `CLAUDE.md` had grown to
+**17.7 KB** against §5's 20 KB "check for appended diary" threshold, so the §7
+commission entries were compressed (`84e9ad8`) and the deferred-rates line
+disambiguated (`e9b83e1`). Now **17.5 KB**.
+
+- **Compression was prose density, NOT rule removal.** The two commission entries
+  went 44 lines → 34 with every load-bearing fact checked present afterwards
+  against a written checklist — all-or-none constraint, the NULL rules,
+  re-stamp-on-re-delivery, base_sar-vs-commission_sar, values-not-a-FK,
+  `created_at` dating the first write and not being a change-moment signal,
+  re-rank-not-re-rate, the resolver's single call site, paid trips holding a
+  position, PGRST202, `set_project_commission` as sole writer, the create RPC
+  keeping its three, the byte-identical argument block, DROP discarding the ACL,
+  trailing-defaults, EXECUTE-to-PUBLIC. Do the same check if you compress again:
+  a rules file that loses a rule during a size cleanup is worse than a big one.
+- **What was actually cut:** the R TTT evidence block, from nine timestamped
+  lines to one clause plus a pointer to 0152's header, which holds the full
+  trace. Enough evidence stays in §7 that nobody re-litigates the FK; the
+  measurement itself belongs in the migration. Two sub-bullets were MERGED into
+  the parents they followed from rather than deleted.
+- **`Deferred: effective-dated rates` was misleading** and now reads
+  `effective-dated CUSTOMER rates`. Commission has been effective-dated since
+  0146–0149, so the old wording implied this session's work was outstanding.
+  Verified live before rewording: zero rate-history tables, zero `rate_at()`
+  resolvers, one rate column on `projects`. The entry also now names the
+  near-miss — 0128's `trips.rate_sar` freeze is a PER-TRIP SNAPSHOT, not a rate
+  history, and does not satisfy the deferred item.
+
+**If CLAUDE.md needs shrinking again,** the commission entries are already dense;
+look at §7's 0141/0142/0143 money entries next, or move settled ones into the
+migration headers that own them and leave a pointer.
 
 ---
 
