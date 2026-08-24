@@ -17,6 +17,7 @@ import type {
   OutsourcedJobTask,
   WorkshopPayment,
   WorkshopPaymentFile,
+  Warehouse,
 } from "@/lib/db-types";
 import { todayKey } from "@/lib/utils";
 import { onLeaveTodaySet, type LeavePeriod } from "@/lib/leave";
@@ -35,6 +36,7 @@ export default async function MaintenancePage() {
     mechanicsRes,
     leavePeriodsRes,
     partsRes,
+    warehousesRes,
     repairDescriptionsRes,
     workOrdersRes,
     workOrderTasksRes,
@@ -85,6 +87,16 @@ export default async function MaintenancePage() {
       .eq("active", true)
       .order("category", { ascending: true })
       .order("name", { ascending: true }),
+    // Warehouse NAMES only — `parts` above already carries `warehouse_id`, so
+    // this is purely the id -> label lookup the work-order parts picker needs
+    // to offer a warehouse filter. Two columns, mirroring app/consumption/
+    // page.tsx's identical read; nothing else on this page uses it.
+    //
+    // Deliberately NOT filtered to `active` — the filter is display-only and
+    // always offers "All warehouses", so an inactive warehouse holding parts
+    // still needs an option to isolate it. An empty one renders with a 0 count
+    // rather than vanishing, which is the less surprising of the two.
+    supabase.from("warehouses").select("id, name").order("name"),
     supabase
       .from("repair_descriptions")
       .select("id, en, ar, active, created_at")
@@ -161,6 +173,9 @@ export default async function MaintenancePage() {
   const leavePeriods = (leavePeriodsRes.data ?? []) as unknown as LeavePeriod[];
   const onLeaveMechanicIds = Array.from(onLeaveTodaySet(leavePeriods, today).staff);
   const parts = (partsRes.data ?? []) as Part[];
+  // Partial row (id + name) — cast through unknown rather than widening the
+  // shared Warehouse type, since the picker needs nothing else.
+  const warehouses = (warehousesRes.data ?? []) as unknown as Pick<Warehouse, "id" | "name">[];
   const repairDescriptions = (repairDescriptionsRes.data ?? []) as RepairDescription[];
   const workOrders = (workOrdersRes.data ?? []) as WorkOrder[];
   const workOrderTasks = (workOrderTasksRes.data ?? []) as WorkOrderTask[];
@@ -181,6 +196,7 @@ export default async function MaintenancePage() {
     mechanicsRes.error?.message ??
     leavePeriodsRes.error?.message ??
     partsRes.error?.message ??
+    warehousesRes.error?.message ??
     repairDescriptionsRes.error?.message ??
     workOrdersRes.error?.message ??
     workOrderTasksRes.error?.message ??
@@ -203,6 +219,7 @@ export default async function MaintenancePage() {
       mechanics={mechanics}
       onLeaveMechanicIds={onLeaveMechanicIds}
       parts={parts}
+      warehouses={warehouses}
       repairDescriptions={repairDescriptions}
       workOrders={workOrders}
       workOrderTasks={workOrderTasks}

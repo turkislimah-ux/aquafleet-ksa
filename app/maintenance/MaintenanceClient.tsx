@@ -51,6 +51,7 @@ import type {
   OutsourcedJobTask,
   WorkshopPayment,
   WorkshopPaymentFile,
+  Warehouse,
 } from "@/lib/db-types";
 import MaintenanceCalendar, { woCalendarKey } from "./MaintenanceCalendar";
 import NewWorkOrderModal from "./NewWorkOrderModal";
@@ -201,6 +202,7 @@ export default function MaintenanceClient({
   mechanics,
   onLeaveMechanicIds,
   parts,
+  warehouses,
   repairDescriptions,
   workOrders,
   workOrderTasks,
@@ -221,6 +223,12 @@ export default function MaintenanceClient({
   mechanics: Staff[];
   onLeaveMechanicIds: string[];
   parts: Part[];
+  /**
+   * Warehouse labels for the work-order parts picker's display filter.
+   * `Pick<...>` rather than the full row because page.tsx selects two columns —
+   * typing it as `Warehouse[]` would be a lie the compiler could not catch.
+   */
+  warehouses: Pick<Warehouse, "id" | "name">[];
   repairDescriptions: RepairDescription[];
   workOrders: WorkOrder[];
   workOrderTasks: WorkOrderTask[];
@@ -689,6 +697,7 @@ export default function MaintenanceClient({
           mechanics={mechanics}
           onLeaveMechanicIds={onLeaveMechanicIdSet}
           parts={parts}
+          warehouses={warehouses}
           repairDescriptions={repairDescriptions}
           companySettings={companySettings}
           onClose={() => setNewWOOpen(false)}
@@ -706,6 +715,7 @@ export default function MaintenanceClient({
           mechanics={mechanics}
           onLeaveMechanicIds={onLeaveMechanicIdSet}
           parts={parts}
+          warehouses={warehouses}
           repairDescriptions={repairDescriptions}
           companySettings={companySettings}
           editingWorkOrder={editingWo}

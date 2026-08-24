@@ -44,7 +44,7 @@ import { Plus, Minus, X } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
-import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings } from "@/lib/db-types";
+import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings, Warehouse } from "@/lib/db-types";
 import { createWorkOrder, editWorkOrder, saveWorkOrderTitle, addRepairDescription } from "./actions";
 import { hourlyLaborCost } from "./laborCost";
 import { MechanicPicker } from "./MechanicPicker";
@@ -79,6 +79,7 @@ export default function NewWorkOrderModal({
   mechanics,
   onLeaveMechanicIds,
   parts,
+  warehouses,
   repairDescriptions,
   companySettings,
   editingWorkOrder,
@@ -96,6 +97,14 @@ export default function NewWorkOrderModal({
   // edit_work_order.
   onLeaveMechanicIds: Set<string>;
   parts: Part[];
+  /**
+   * Labels ONLY, for the parts picker's display filter below. `Pick<...>`
+   * rather than the full row because page.tsx selects two columns — typing it
+   * as `Warehouse[]` would be a lie tsc could not catch. Every part already
+   * carries its own `warehouse_id`, so this never gates or joins anything;
+   * it just turns an id into something a human can read.
+   */
+  warehouses: Pick<Warehouse, "id" | "name">[];
   repairDescriptions: RepairDescription[];
   companySettings: CompanySettings | null;
   // When set, the modal opens in EDIT mode for this WO instead of create.
@@ -150,6 +159,22 @@ export default function NewWorkOrderModal({
   // selected/toggled, it's just not shown while the search doesn't match).
   const [chipSearch, setChipSearch] = useState("");
 
+  // WAREHOUSE FILTER on the parts picker — DISPLAY ONLY, exactly the same
+  // contract as chipSearch above: it changes which rows are VISIBLE and
+  // nothing else. Selection lives in `qtyByPart` (keyed by part id) and
+  // `lines` derives from that, never from the visible list, so a filtered-out
+  // part stays reserved, keeps its qty, and still prices into estimatedCost.
+  // Nothing about a saved work-order line changes.
+  //
+  // "all" is the default and it means ALL — nothing is hidden until the user
+  // chooses to hide it.
+  //
+  // NO RESET EFFECT NEEDED: both call sites in MaintenanceClient render this
+  // modal conditionally ({newWOOpen && …} / {editingWo && …}), so closing
+  // unmounts it and reopening runs this initialiser again. An effect keyed on
+  // `open` would be dead code here.
+  const [warehouseFilter, setWarehouseFilter] = useState<string>("all");
+
   const [qtyByPart, setQtyByPart] = useState<Record<string, number>>(() => {
     const seed: Record<string, number> = {};
     for (const l of editingLines ?? []) seed[l.part_id] = l.qty;
@@ -174,8 +199,35 @@ export default function NewWorkOrderModal({
   const selectedMechanic = mechanics.find((m) => m.id === mechanicId) ?? null;
   const previewLaborCost = hourlyLaborCost(selectedMechanic, companySettings);
 
+  // id -> name, so a row can say "Manfuha Station" instead of a UUID.
+  // Warehouse names are English-only by type design (db-types.ts: "no name_ar
+  // — internal-only, never customer-facing"), so this is NOT lang-dependent
+  // and deliberately has no Arabic branch to fall back through.
+  const warehouseNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const w of warehouses) m.set(w.id, w.name);
+    return m;
+  }, [warehouses]);
+
+  // Counts shown on the filter pills, computed off ALL parts (not off the
+  // visible list) so each pill states a fixed fact about the catalog rather
+  // than a number that changes depending on which pill is currently active.
+  const partCountByWarehouse = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of parts) m.set(p.warehouse_id, (m.get(p.warehouse_id) ?? 0) + 1);
+    return m;
+  }, [parts]);
+
+  // THE display filter. One line, and it is the only place `warehouseFilter`
+  // is read for data purposes — everything downstream that matters to a SAVE
+  // (`lines`, `partsById`, `partsCost`) keeps reading the full `parts` array.
+  const visibleParts = useMemo(
+    () => (warehouseFilter === "all" ? parts : parts.filter((p) => p.warehouse_id === warehouseFilter)),
+    [parts, warehouseFilter],
+  );
+
   const partsByCategory = useMemo(() => {
-    const sorted = [...parts].sort((a, b) => (a.category ?? "").localeCompare(b.category ?? "") || a.name.localeCompare(b.name));
+    const sorted = [...visibleParts].sort((a, b) => (a.category ?? "").localeCompare(b.category ?? "") || a.name.localeCompare(b.name));
     const groups = new Map<string, Part[]>();
     for (const p of sorted) {
       const cat = p.category || (lang === "en" ? "Uncategorized" : "غير مصنف");
@@ -184,7 +236,7 @@ export default function NewWorkOrderModal({
       groups.set(cat, arr);
     }
     return Array.from(groups.entries());
-  }, [parts, lang]);
+  }, [visibleParts, lang]);
 
   // Existing (pre-edit) qty per part, for the "already-held stock counts
   // toward headroom" rule — only meaningful once the WO has left 'open'.
@@ -247,6 +299,17 @@ export default function NewWorkOrderModal({
     for (const p of parts) m.set(p.id, p);
     return m;
   }, [parts]);
+
+  // How many RESERVED parts the active filter is currently hiding. This is
+  // the honesty line: the filter deliberately does not drop a selection, so
+  // without this the total below could exceed the visible rows with no
+  // explanation. Declared AFTER `lines`/`partsById` on purpose — a useMemo
+  // reading a `const` declared further down throws at runtime (TDZ), which
+  // this repo has already been bitten by once.
+  const hiddenSelectedCount = useMemo(() => {
+    if (warehouseFilter === "all") return 0;
+    return lines.filter((l) => partsById.get(l.part_id)?.warehouse_id !== warehouseFilter).length;
+  }, [lines, partsById, warehouseFilter]);
 
   const partsCost = lines.reduce((s, l) => s + (partsById.get(l.part_id)?.unit_cost_sar ?? 0) * l.qty, 0);
   // Polish item 2 — parts-only total (labor is its own separate figure,
@@ -500,6 +563,57 @@ export default function NewWorkOrderModal({
             </div>
             <p className="text-[11px] muted mb-2">{t("mt.partsHelp", lang)}</p>
             <div className="rounded-lg border overflow-hidden" style={INPUT_STYLE}>
+              {/* WAREHOUSE FILTER — segmented pills, not a <select>, because
+                  there are two warehouses plus "All": a dropdown would hide
+                  a three-item list behind a click and give no count. Sits
+                  INSIDE the bordered box, above the scroll area, so it reads
+                  as a control belonging to this table rather than a form
+                  field of the work order — it saves nothing.
+
+                  Hidden entirely at <= 1 warehouse: a filter offering only
+                  "All" is a control that cannot do anything. */}
+              {warehouses.length > 1 && (
+                <div
+                  className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b"
+                  style={{ borderColor: "rgb(var(--border))" }}
+                >
+                  {/* Inline, not an i18n key — same convention as "No parts
+                      reserved yet" above; `common.warehouse` does not exist
+                      and one label does not justify widening that namespace. */}
+                  <span className="text-[11px] muted me-1">{lang === "en" ? "Warehouse" : "المستودع"}</span>
+                  {[
+                    { id: "all", label: lang === "en" ? "All warehouses" : "كل المستودعات", count: parts.length },
+                    // Warehouse names are English-only by design — see
+                    // warehouseNameById above.
+                    ...warehouses.map((w) => ({ id: w.id, label: w.name, count: partCountByWarehouse.get(w.id) ?? 0 })),
+                  ].map((opt) => {
+                    const on = warehouseFilter === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => setWarehouseFilter(opt.id)}
+                        className={cn(
+                          "inline-flex items-center text-xs rounded-full px-2.5 py-1 border transition",
+                          on ? "bg-brand-600 text-white border-brand-600" : "hover:bg-black/5 dark:hover:bg-white/5",
+                        )}
+                        style={on ? undefined : INPUT_STYLE}
+                      >
+                        {opt.label}
+                        <span
+                          className={cn(
+                            "ms-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                            on ? "bg-white/20" : "bg-black/[0.06] dark:bg-white/[0.08]",
+                          )}
+                        >
+                          {opt.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <div className="max-h-[280px] overflow-y-auto scrollbar-thin">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0" style={{ background: "rgb(var(--card))" }}>
@@ -511,6 +625,16 @@ export default function NewWorkOrderModal({
                     </tr>
                   </thead>
                   <tbody>
+                    {/* Only reachable via the filter — the unfiltered catalog
+                        is never empty in practice, but a warehouse with no
+                        parts must say so rather than render a bare header. */}
+                    {partsByCategory.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-6 text-center muted text-xs border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                          {lang === "en" ? "No parts in this warehouse" : "لا توجد قطع في هذا المستودع"}
+                        </td>
+                      </tr>
+                    )}
                     {partsByCategory.map(([cat, items]) => (
                       <Fragment key={cat}>
                         <tr>
@@ -526,7 +650,17 @@ export default function NewWorkOrderModal({
                             <tr key={p.id} className={cn(outOfStock ? "opacity-50" : "")}>
                               <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>
                                 <div className="font-medium text-sm">{lang === "ar" ? p.name_ar || p.name : p.name}</div>
-                                <div className="text-[11px] muted font-mono">{p.sku}</div>
+                                <div className="text-[11px] muted font-mono">
+                                  {p.sku}
+                                  {/* Location, shown ONLY while unfiltered —
+                                      once a warehouse pill is active every
+                                      visible row is in it and repeating the
+                                      name on each line is noise. Suppressed
+                                      at <= 1 warehouse for the same reason. */}
+                                  {warehouseFilter === "all" && warehouses.length > 1 && warehouseNameById.has(p.warehouse_id) && (
+                                    <span className="font-sans"> · {warehouseNameById.get(p.warehouse_id)}</span>
+                                  )}
+                                </div>
                               </td>
                               <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>
                                 <span className={outOfStock ? "text-rose-600 font-semibold" : (p.reorder_level != null && p.qty_on_hand <= p.reorder_level) ? "text-amber-600 font-semibold" : ""}>
@@ -581,6 +715,16 @@ export default function NewWorkOrderModal({
                 </table>
               </div>
             </div>
+            {/* The filter hides ROWS, not RESERVATIONS. Without this line the
+                estimate above could exceed everything on screen with no
+                explanation, which would read as a bug. */}
+            {hiddenSelectedCount > 0 && (
+              <p className="text-[11px] muted mt-1.5">
+                {lang === "en"
+                  ? `${hiddenSelectedCount} reserved ${hiddenSelectedCount === 1 ? "part is" : "parts are"} in another warehouse — still reserved, still in the estimate above.`
+                  : `${hiddenSelectedCount} من القطع المحجوزة في مستودع آخر — لا تزال محجوزة ومحتسبة في التقدير أعلاه.`}
+              </p>
+            )}
           </div>
         </div>
 
