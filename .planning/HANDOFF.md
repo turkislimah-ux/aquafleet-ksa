@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at `aaeb255` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER. DB at 0166, unchanged — the filter needed no migration. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
+# SESSION HANDOFF — closes at `810696d` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION. DB at 0166, unchanged — the last TWO shipped units needed no migration. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD, which now carries a live P&L defect for Turki to decide.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -7,7 +7,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `aaeb255`, not recalled
+## CURRENT STATE — MEASURED at `810696d`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
@@ -63,19 +63,40 @@ re-measure rule: `git log` is not a sufficient trigger for re-checking a number,
 because some numbers do not answer to git at all. Everything else came back
 identical, including all eight security counts.
 
-    HEAD              aaeb255 + the docs commits that carry this file
+**A FOURTH REFRESH RAN AFTER THE P&L ZAKAT + VAT WORK, and it settles the alert
+question above by OSCILLATING: `v_active_alerts` went back 10 → 9.** The previous
+paragraph recorded 9 → 10 with no commit behind it; this one records the return
+trip, again with nothing in the diff touching alerts. So that figure does not
+merely drift once — it MOVES BOTH WAYS as dates cross and expiries come due, which
+means a reader who sees "9" here and "10" in the browser has found nothing wrong.
+Do not chase it, and do not "fix" this line to whichever value was seen last.
+The licence rule was honoured again: this session touched five source files, so
+the exemption was void and **the full `./scripts/safe-build.sh --dist-dir
+.next-verify` was re-run — clean, 17 routes, middleware still 83 kB.**
+`tsc --noEmit` clean, all eight `scripts/*check*.ts` suites EXECUTED, 8/8 pass.
+Every other figure below came back identical, including all eight security counts
+and the 938 `authenticated` privilege rows.
+
+**`scripts/vat-check.ts` IS NOT NEW AND IS NOT THIS SESSION'S PANEL.** It dates
+from `9acf22f` ("finance: VAT math, 15% KSA, ZATCA document-level rounding") and
+covers INVOICE VAT arithmetic. The suite count stayed at eight because nothing was
+added — a name collision, not coverage. The new VAT panel does no arithmetic
+across sources, so there is no derived figure for a harness to check; what proves
+it is the per-source query in the section below, run against live data.
+
+    HEAD              810696d + the docs commit that carries this file
     branch main   tree clean   in sync with origin
-    migration files   164, highest 0166_deferred_deliveries.sql        (was 163 / 0165)
-    live DB           0166  (20260824111246 deferred_deliveries)       (was 0165)
-    CLAUDE.md         17,700 bytes (§5 threshold 20,480 — 2,780 of headroom)  (was 17,301)
+    migration files   164, highest 0166_deferred_deliveries.sql        (unchanged)
+    live DB           0166  (20260824111246 deferred_deliveries)       (unchanged)
+    CLAUDE.md         17,700 bytes (§5 threshold 20,480 — 2,780 of headroom)
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
-    tables            84, all 84 RLS-enabled                           (was 83 / 83)
+    tables            84, all 84 RLS-enabled
     anon table grants 0     anon-executable non-trigger functions 0
     storage buckets   12
-    v_active_alerts   10 rows, 10 distinct identities                  (was 9 / 9)
+    v_active_alerts   9 rows                                           (was 10, was 9)
     tsc --noEmit      clean;  8/8 check suites pass (scripts/*check*.ts)
     next build        clean, 17 routes + middleware;  middleware 83 kB
-                      (RE-RUN this session — source was touched, licence void)
+                      (RE-RUN at 810696d — source was touched, licence void)
 
 **A CLEAN TREE DOES NOT MEAN A PUSHED TREE, AND THIS IS THE SECOND OCCURRENCE.**
 For most of this refresh `de7174c` sat committed, verified and unpushed while
@@ -98,7 +119,8 @@ convention was already here and got briefly broken during this refresh.
 against after ANY change that touches `lib/nav.ts` — it re-exports `lib/routes.ts`,
 and routing an Edge import through it drags `lucide-react` into the middleware
 bundle. It was measured at 83 kB after the `lib/nav.ts` edit that introduced the
-guard, and re-measured at 83 kB at `aaeb255` — still unchanged. **"This session"
+guard, re-measured at 83 kB at `aaeb255`, and again at 83 kB at `810696d` —
+unchanged across both. **"This session"
 was the original wording and it rotted the moment a later session read it**, since
 every session is "this" one to whoever is reading; a guard value has to name the
 commit it was taken at or it cannot be compared against anything.
@@ -129,6 +151,17 @@ is an invariant worth re-checking rather than a coincidence. See the Daily Trips
 section below: **0 views read `deferred_deliveries`**, measured live at this
 refresh with `pg_get_viewdef(...) ilike '%deferred_deliveries%'`. The side-log is
 a manual record that must never reach revenue, commission or P&L.
+
+**AND THE VIEW COUNT DID NOT MOVE AT `810696d` EITHER — 50 IS NOW A DECISION,
+NOT AN ACCIDENT.** That commit added a Zakat estimate and a per-source VAT list to
+the P&L and created NO view, having first tried and abandoned one: an earlier cut
+read `v_zakat_by_period` and failed in Turki's browser with `Could not find the
+table 'public.v_zakat_by_period' in the schema cache`. The replacement is
+client-side, and the reasoning is in the section below — short version, the
+semantic-layer contract bars RE-DERIVING what SQL already owns, and no view
+returns Zakat or supplier VAT, so there is no second expression to drift from.
+**Do not "restore" either of these to a view.** The SQL route is the one that
+broke, and it would buy no behavioural change.
 
 `set_updated_at()` — the generic BEFORE UPDATE trigger function introduced by
 0157 — is now attached to **FOUR** tables: `deferred_deliveries` (0166),
@@ -179,9 +212,16 @@ null` as well, and anything showing 8 has dropped the pre-filter.
 
 ---
 
-## SECURITY POSTURE — CHANGED THIS SESSION. READ BEFORE TOUCHING GRANTS OR RPCs.
+## SECURITY POSTURE — SET BY 0161–0164. READ BEFORE TOUCHING GRANTS OR RPCs.
 
-The end state, all of it measured live, not recalled:
+**This heading read "CHANGED THIS SESSION" until `810696d` and it had rotted** —
+the hardening was the 2026-08-23/24 session's, and every session after it read
+"this session" as its own. Nothing since has touched grants or RPCs; the counts
+below have come back identical at three consecutive refreshes. Same lesson as the
+middleware guard above: a claim about WHEN has to name the commit, or the next
+reader inherits it. Do not restore the old wording.
+
+The end state, all of it measured live, not recalled — re-verified at `810696d`:
 
     anon on public tables          0 privileges (was 539 rows across 77 tables)
     future tables                  born anon-free (default privileges revoked)
@@ -260,6 +300,38 @@ MCP and the file was written afterwards to match**; the view body in 0160 was
 pulled with `pg_get_viewdef` and checksum-matched against live rather than
 reconstructed. If a non-derivable event is ever needed, re-add it deliberately —
 0154 still holds the definition.
+
+---
+
+## SESSION LEDGER — 2026-08-25
+
+ONE feature commit plus the docs commit carrying this file. No migration, no
+schema change, no RPC. DB stays at 0166 and views stay at 50.
+
+    810696d        P&L indicative Zakat line + per-source VAT section
+    (this file)    HANDOFF refreshed to 810696d
+
+**THE MEASUREMENT MISTAKE THIS SESSION IS WORTH MORE THAN THE FEATURE, because it
+is a NEW false-positive family for the list further down.** Verifying the VAT
+figures used `count(*)` over a LEFT JOIN from a two-row `values` period table. For
+August, rejected purchase orders and rejected stock receipts came back as **1
+document, 0.00 SAR** — and 1 document is not nothing: the panel's rejected block
+is gated on `count > 0`, so that reading meant a "Rejected" sub-head rendering in
+August with two zero lines under it, contradicting what had already been recorded.
+
+There are no such rows. **`count(*)` counts the UNMATCHED left-join row too**, so
+an empty result reports as one. `count(o.id)` returns 0 and the original figures
+stood. **A count that cannot express zero will never report zero,** and it fails in
+the safest-looking direction: it invents a row rather than losing one, so the
+number stays plausible and the check still passes. Use `count(<right-side column>)`
+in any outer join, and treat "exactly 1 with a zero total" as the signature of this
+bug rather than as data.
+
+The chain that caught it was cheap and is the one to repeat: the figure disagreed
+with a recorded fact, so **the underlying rows were listed instead of the summary
+re-read** — `select … where status='rejected' and request_date in August` returned
+`[]`. Listing the rows is what separates "my note is stale" from "my query is
+wrong", and those two have opposite fixes.
 
 ---
 
@@ -343,6 +415,139 @@ substring counted. Expect it on every future sweep.
 **AND ONE MEASUREMENT ERROR TO AVOID REPEATING:** `wc -c` is bytes, Python's
 `len()` on a decoded string is characters. CLAUDE.md carries multi-byte glyphs
 (`—`, `≠`, `بوصلة`), so the two disagree by ~180. Quote `wc -c` for a byte budget.
+
+---
+
+## SHIPPED — P&L INDICATIVE ZAKAT + PER-SOURCE VAT (`810696d`). NO MIGRATION.
+
+Five files, +647/−108, under the P&L statement in the Reports pack. Both additions
+are DISPLAY ONLY: neither one is added to, subtracted from, or netted against any
+existing P&L figure. Verified in-browser by Turki, including a print preview, then
+pushed.
+
+**IT TOOK TWO REDIRECTS TO GET HERE AND BOTH ARE LOAD-BEARING.** The first cut
+read a `v_zakat_by_period` view and died in Turki's browser — `Could not find the
+table 'public.v_zakat_by_period' in the schema cache`. The second cut was a VAT
+RECONCILIATION with output VAT, input VAT and a net "payable to ZATCA" row; that
+was rejected as a design, not as an implementation. What shipped is the third
+shape and the constraints that produced it are the section.
+
+### Zakat — client-side, and that is the CORRECT reading of the contract
+
+`indicativeZakat()` in `lib/reports.ts`, 2.5 % of net profit, floored at zero.
+
+The objection to answer is the semantic-layer contract at the top of that same
+file: every metric defined ONCE in SQL. **It does not apply, and its own test is
+what says so — "if the number could disagree with what the same view returns, it
+does not belong in this file."** No view returns Zakat. There is nothing for it to
+disagree with, so there is no second expression and no drift surface. The estimate
+is defined once, in the reports module, read once, displayed once.
+
+Going the other way was tried and is what produced the schema-cache error above,
+for zero behavioural gain. **Do not re-raise "this belongs in SQL" without first
+answering that test out loud** — it was raised once during this session, and the
+answer is that a view here would define nothing that is not already defined.
+
+### VAT — an ITEMISED LIST. No total, no net, no "payable to ZATCA".
+
+Four lines, each printed beside the source it came from and the date column it was
+filtered on, stacked, with no arithmetic across them:
+
+    Sales invoices              v_revenue_invoices.vat_sar   by confirmation date
+    Purchase orders raised      purchase_orders.vat_sar      by request_date
+    Stock received              stock_receipts.vat_sar       by received_on
+    Workshop — outsourced       workshop_payments.vat_sar    by invoice_date
+
+**THE ABSENCE OF A TOTAL IS THE DESIGN, NOT AN OMISSION, and there are two
+independent reasons — either one alone is sufficient.** Sales VAT is money
+collected FROM customers and the other three are VAT paid TO suppliers, so a sum
+across them is not a quantity of anything. And a delivered purchase order appears
+on BOTH the "ordered" and the "received" line — the same money at two stages.
+Measured, because the overlap is real and large:
+
+    purchase_orders with received_date   11
+    stock_receipts carrying a po_id      11
+    VAT on those linked receipts         13,991.25 SAR
+
+Labelling the two stages dissolves the double-counting question instead of
+answering it. Netting was rejected for that reason, not merely skipped. **Anyone
+who adds a total row re-opens it,** and the panel's own footnotes say so.
+
+Rejected documents get their OWN line under a "Rejected — listed separately, not
+included above" sub-head, gated on `count > 0`. Never dropped, never subtracted
+from another line: a rejected purchase is real VAT on a document the purchasing
+screens still show, and hiding it is how a reader ends up with a figure here they
+cannot reconcile against those screens.
+
+**SALES VAT IS THE ONE SOURCE THAT DOES GO THROUGH A VIEW,** and the asymmetry is
+the contract working rather than an inconsistency. `v_revenue_invoices.vat_sar`
+already defines it and the page already fetches those rows, so the panel sums the
+ones it holds. The other three have no view publishing supplier VAT — and a view
+holding a list that performs no arithmetic would define nothing.
+
+### The date basis per source was VERIFIED against the live view bodies
+
+Each source is filtered on the same date the statement that already reports those
+documents uses, so a document lands in the same period in both places. Read back
+from `pg_get_viewdef`, not assumed:
+
+    v_purchasing_spend_monthly   received_on                              <- matches
+    v_os_cost_monthly            coalesce(invoice_date, created_at::date) <- matches
+    purchase_orders              request_date — nothing else in the pack reports
+                                 POs, and it is the only NOT NULL date on the table
+
+`workshop_payments.invoice_date` is nullable so `created_at` is the fallback, and
+slicing the ISO timestamp takes its UTC date — which matches that view's
+`created_at::date` because the API role's session is UTC (`current_setting`
+confirms). **All 7 rows currently carry a non-null `invoice_date`, so the fallback
+is untested against real data.** It is correct by construction, not by observation.
+
+### `page.tsx` NOW HAS FOUR BASE-TABLE READS AND ITS HEADER SAYS SO
+
+That file's header used to claim it fetches views and nothing else. That became
+false — the expenses editor already read a base table, and this added three more.
+**The comment was rewritten rather than left standing,** because a contract
+comment that the file itself contradicts is worse than no comment. It now
+distinguishes METRICS (views only, no exceptions) from non-metric reads, marks
+each of the four at the point it happens, and requires a fifth to answer the
+contract's test in a comment right there. Ceiling, not a precedent.
+
+### TWO BOXES, ONE PRINT ID — and the alternative silently fails on paper
+
+Turki asked for the P&L and VAT as separate boxes. `#pnl-print` therefore moved
+off the card and onto a chrome-less flow WRAPPER whose two children are the boxes.
+
+**Both alternatives are worse and one of them fails invisibly.** A second print id
+under a single statement breaks the pack's one-id-per-statement rule. A sibling
+placed OUTSIDE the wrapper renders perfectly on screen and VANISHES on paper —
+`app/globals.css` hides `body *` and re-shows only an allowlist of ids, so
+anything outside a listed id is gone at print time and nobody notices until the
+statement has been filed. Print CSS strips the card borders (a sheet of A4 is
+already "a distinct thing"), so the 10 mm gap between the boxes is set explicitly:
+it replaces the border as the thing telling a reader the VAT list is not part of
+the P&L. **Verified by Turki in print preview** — both boxes present, VAT whole on
+one page.
+
+### Live figures, re-measured at `810696d`
+
+Replicating the component's exact filters. Every line non-zero in both months:
+
+                              Jul 2026            Aug 2026
+    Sales invoices            16 / 10,597.50       1 /  4,455.00
+    Purchase orders raised    11 /  1,021.20       1 / 10,500.00
+    Stock received            18 /  4,766.25       3 / 54,000.00
+    Workshop repairs           3 /  1,509.00       4 /  1,132.50
+    Rejected POs               2 /  2,666.25       0 — sub-head absent
+    Rejected receipts          3 /  2,345.25       0 — sub-head absent
+
+Jul sales VAT of 10,597.50 is the "10,598" Turki reported seeing on screen. The
+two August zeros are the ones the `count(*)` bug misreported as 1 — see the ledger
+above.
+
+**ONE DEFECT SHIPPED KNOWINGLY AND IS DISCLOSED, NOT FIXED:** `v_os_cost_monthly`
+expenses the VAT-INCLUSIVE `grand_total_sar`, so workshop VAT is both a cost in
+the P&L above and a listed reclaim below. Footnoted in the panel. Carried as an
+open item for Turki — it changes a live P&L total, so it is not a cleanup.
 
 ---
 
@@ -808,8 +1013,10 @@ section is notifications only — do not read it as the complete set.)*
 ## OPEN / CARRIED FORWARD
 
 **Nothing is in flight.** No migration is drafted-but-unapplied, no code is
-uncommitted, no feature is half-built, and origin is in sync. The four items below
-are decisions and reviews, not work in progress.
+uncommitted, no feature is half-built, and origin is in sync. The five items below
+are decisions and reviews, not work in progress — but **item 1 is new, it is a
+live defect in a number Turki reads, and it is the only one here that is waiting
+on him rather than parked.**
 
 *(The `notification_events` keep-or-drop item that stood here is CLOSED — dropped
 by 0160. Recorded in CURRENT STATE above, not carried as open work. Do not
@@ -831,7 +1038,24 @@ notification threshold — which would make a shared dashboard render different
 counts to different people. Do not "finish the job" by wiring those up; 0165's
 header carries the reasoning.)*
 
-1. **Arabic copy across notifications, profile AND issues is unreviewed by a
+1. **WORKSHOP VAT IS COUNTED TWICE — ONCE AS A COST, ONCE AS A RECLAIM. TURKI'S
+   CALL, AND IT MOVES A LIVE P&L TOTAL.** `v_os_cost_monthly` expenses the
+   VAT-INCLUSIVE `grand_total_sar` (verified live against `pg_get_viewdef`), so a
+   vendor repair invoice puts its VAT inside "Outsourced repairs" in the P&L — and
+   the new VAT list below prints that same VAT as recoverable. Both are defensible
+   in isolation and they cannot both be right.
+
+   Shipped disclosed-not-fixed on the architect's explicit instruction ("do not
+   touch existing P&L totals"), with a footnote in the panel. **The fix is a
+   migration to `v_os_cost_monthly`, not an app change** — and it would move a
+   cost figure Turki has been reading for months, which is exactly why it was not
+   taken quietly in a session about a display panel. Two questions before anything
+   moves: does outsourced-repair cost mean the cash paid or the net-of-VAT cost,
+   and does any other view expense a VAT-inclusive total the same way. **Check the
+   second one before touching the first** — a single-view fix that leaves siblings
+   inconsistent is worse than the current honest footnote.
+
+2. **Arabic copy across notifications, profile AND issues is unreviewed by a
    native speaker.** It renders correctly and the notification day-counts decline
    properly (`pluralDays()` handles 1 يوم / 2 يومان / 3-10 أيام / 11+ يومًا), but
    every Arabic string in all three surfaces is Claude Code's best effort and Turki
@@ -842,7 +1066,15 @@ header carries the reasoning.)*
    three surfaces; treat it as "every Arabic string Claude Code has written".**
    Cheap to correct now, awkward once it is muscle memory.
 
-2. **LEAVE HISTORY IN THE PROFILE IS DEFERRED TO RBAC. Do not re-raise it as a
+   **`810696d` ADDED NOTHING TO THIS LIST, and that was checked rather than
+   assumed.** `app/reports/StatementsTab.tsx` imports no i18n helper and contains
+   no `lang ===` branch — the whole Reports pack is English-only, because a
+   statement is an accounting document that gets printed, signed and filed. The
+   new diff contains zero Arabic characters. (The grep that first suggested
+   otherwise was `grep -c 't('`, which matches `.filter(`, `.split(` and every
+   other word ending in `t`. A substring is not a claim.)
+
+3. **LEAVE HISTORY IN THE PROFILE IS DEFERRED TO RBAC. Do not re-raise it as a
    gap.** It was asked for during 2.2c and deliberately not built. The reason is
    structural, not scheduling: there is no auth-to-employee link, by design (see
    0159 and the profile rules above), and building one to satisfy a display would
@@ -852,14 +1084,14 @@ header carries the reasoning.)*
    permission model. **The absence of the link is the feature working, not a
    missing piece.**
 
-3. **DUPLICATE `Seder` CUSTOMER RECORD.** Two rows for what is one customer.
+4. **DUPLICATE `Seder` CUSTOMER RECORD.** Two rows for what is one customer.
    Deferred for the same reason: merging or archiving one changes what the
    customer list, the statements and any balance rollup show. It is a DATA
    decision, not a code one — which row is authoritative, and what happens to
    anything referencing the other — so it needs Turki's call before anything
    moves. **Do not "tidy" this in a cleanup pass.**
 
-4. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
+5. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
    `leave_periods` is readable by any authenticated user, and there is no per-user
    wall today. Nothing in this session changed that, and nothing in this session
    should be read as a step toward it — the per-user tables (`notification_prefs`,
@@ -869,7 +1101,9 @@ header carries the reasoning.)*
    because a two-person queue where only the reporter can act is a queue where the
    person who cannot fix it owns the ticket.
 
-**NEXT SESSION HAS NOTHING QUEUED — ASK TURKI.**
+**NEXT SESSION HAS NOTHING QUEUED — ASK TURKI. But item 1 is a QUESTION FOR HIM,
+not a task to pick up:** whether outsourced-repair cost in the P&L should stay
+VAT-inclusive. Put it to him; do not start the migration off the back of this file.
 
 ---
 
