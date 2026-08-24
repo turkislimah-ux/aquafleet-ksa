@@ -198,7 +198,9 @@ export function alertKind(identity: string): string {
 export function detailLine(r: NotificationRow, lang: Lang): string | null {
   const p = r.payload ?? {};
   const kind = alertKind(r.alert_identity);
-  const ar = lang === "ar";
+  // No `ar` flag here: every branch below passes `lang` straight to nt(), and
+  // the one place that read a flag was `return ar ? null : null` — both arms
+  // identical, so it selected nothing. Removed with that expression.
 
   switch (kind) {
     case "prepaid_overdrawn": {
@@ -261,9 +263,11 @@ export function detailLine(r: NotificationRow, lang: Lang): string | null {
     case "employee_returned":
       return nt("returned", lang);
     default:
-      // Stored events (dormant today) and any branch added later render their
-      // label alone rather than a wrong guess.
-      return ar ? null : null;
+      // Any branch added later renders its label alone rather than a wrong
+      // guess. This used to also cover stored events from notification_events —
+      // that table and the view branch reading it were dropped in 0160, so the
+      // only rows reaching here now are kinds this formatter has not learned.
+      return null;
   }
 }
 
