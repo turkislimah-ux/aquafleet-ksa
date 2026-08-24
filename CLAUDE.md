@@ -174,6 +174,35 @@ relevant skill(s) **when the task calls for it**:
   `numeric` vs `numeric(12,2)`) also trigger it — fix with explicit cast:
   `(case … end)::numeric(12,2)`. Verify type with `format_type(atttypid,atttypmod)`
   on `pg_attribute`, not by reading the view body.
+- **A REDEFINED FUNCTION IS EXECUTE-TO-PUBLIC AGAIN. RE-REVOKE IN THE SAME
+  TRANSACTION.** Same class as the view footer above: what survives a
+  replacement is not obvious, and the thing that does not survive is a
+  permission. `create or replace function` and `drop`+`create` BOTH reset a
+  function's ACL to the Postgres default, which is `EXECUTE TO PUBLIC` — and
+  `anon` inherits PUBLIC, while the Supabase anon key ships in the client
+  bundle. **There is no default-privileges equivalent for functions** (0161's
+  `alter default privileges` covers TABLES only), so nothing makes this stick.
+
+  Every SECURITY DEFINER function, and every money or guarded RPC, must end with:
+```sql
+  revoke execute on function public.X(<exact identity args>) from public, anon;
+```
+  `from public, anon` — BOTH. The offending grant is the PUBLIC one (an ACL
+  entry with an EMPTY grantee, `=X/postgres`); revoking from `anon` alone leaves
+  it and changes nothing. Then read it back — `has_function_privilege('anon',
+  …, 'execute')` must be false. Never assert this by pattern-matching `proacl`:
+  `'%=X/%'` also matches `postgres=X/postgres` and reports every function as
+  leaking.
+
+  **This is not hypothetical.** 0115 defined `issue_driver_payslip`; 0118
+  replaced it and did not re-revoke, leaving a SECURITY DEFINER money RPC
+  callable by anyone with the anon key — it bypassed RLS *and* 0161's table
+  revoke, because a definer runs as its owner. Proven reachable by probe (a
+  business-logic 23514, not a permission 42501) and closed in **0163**; **0164**
+  locked the three guarded RPCs for the same reason. The invariant to hold is
+  **zero NON-TRIGGER functions anon-executable** — trigger functions cannot be
+  called through PostgREST and four legitimately remain.
+
 - **Immutable keys** on lookup tables (`water_stations.key`) — rename updates
   name only.
 - **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew.

@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at the `0160` commit (FEATURE 2 SETTINGS COMPLETE, all four sections. DB at 0160. NEXT: nothing queued — ask Turki. See OPEN / CARRIED FORWARD.)
+# SESSION HANDOFF — closes at the `0164` commit (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS. DB at 0164. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -13,10 +13,10 @@ Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
 this file.
 
-    HEAD              787a43d + the 0160 commit that carries this file
+    HEAD              149279f + the doc commit that carries this file
     branch main   tree clean   in sync with origin
-    migration files   158, highest 0160_drop_notification_events.sql
-    live DB           0160
+    migration files   162, highest 0164_revoke_public_execute_guarded_rpcs.sql
+    live DB           0164
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
     tables            83, all 83 RLS-enabled
     storage buckets   12
@@ -59,6 +59,71 @@ Per-user / feature tables, live:
 
 Every one of those row counts is Turki's own browser testing, which means each
 write path is proven in production rather than only in a harness.
+
+---
+
+## SECURITY POSTURE — CHANGED THIS SESSION. READ BEFORE TOUCHING GRANTS OR RPCs.
+
+The end state, all of it measured live, not recalled:
+
+    anon on public tables          0 privileges (was 539 rows across 77 tables)
+    future tables                  born anon-free (default privileges revoked)
+    anon-executable functions      4, ALL trigger-only, 0 non-trigger
+    anon-readable views            0
+    policies granting anon         none — no policy anywhere admits the anon role
+    authenticated                  UNTOUCHED throughout — 931 privilege rows
+
+**`0161` — anon lost every table grant, and future tables are born without
+them.** The 539 grants were INERT (RLS already refused anon zero rows), so this
+changed no working behaviour — it made the GRANTS agree with the RLS, so a
+mistake is now caught twice. It also ran `alter default privileges in schema
+public revoke all on tables from anon`, which is role-scoped to `postgres` — the
+correct scope, since every table here is postgres-owned and migrations run as
+postgres. **The per-migration `revoke all on public.<table> from anon` idiom
+STAYS MANDATORY** — that line only affects tables created after it, so on a fresh
+`db reset` every earlier migration creates its table first.
+
+**`0163` — A REAL HOLE, PROVEN REACHABLE, NOW CLOSED.** `issue_driver_payslip`
+is SECURITY DEFINER, so it ran as postgres and bypassed RLS *and* 0161's revoke.
+It still carried the default EXECUTE-to-PUBLIC grant, which anon inherits — and
+the anon key ships in the client bundle. Probed with a nonexistent driver: it
+answered **HTTP 400 / 23514, a business-logic error**, meaning anon was inside
+the function body. A correctly-locked sibling answered 401/42501, which is what
+proved the probe distinguished the two. Nothing was ever written through it.
+`next_payslip_number` and `pay_commission` were revoked with it.
+
+**Root cause, and it will recur: `create or replace` / `drop`+`create` RESET a
+function ACL to EXECUTE-to-PUBLIC.** 0115 defined `issue_driver_payslip`; 0118
+replaced it and did not re-revoke. There is **no default-privileges equivalent
+for functions**, so nothing makes it stick. This is now a rule in CLAUDE.md §6,
+next to the view-footer lesson — same class: what survives a replacement is not
+obvious, and the thing that does not survive is a permission.
+
+**`0164` — the three guarded RPCs locked too**, completing the sweep.
+`archive_project_guarded`, `restore_customer_guarded`, `return_customer_balance`
+are NOT definers, so 0161 already stopped them at their first table access and
+nothing was exploitable. They were locked because "safe" was a property of a
+DIFFERENT migration — the same shape that let the 0163 hole survive unnoticed.
+
+**THE INVARIANT TO HOLD IS "ZERO NON-TRIGGER FUNCTIONS ANON-EXECUTABLE", NOT
+ZERO.** Four trigger functions legitimately remain anon-executable
+(`record_project_commission_change`, `record_salary_change`,
+`trips_station_offers_water_type`, `set_updated_at`); PostgREST cannot call a
+function returning `trigger`. A check that expects 0 outright will fail on those
+four and read as a regression. 0164's self-assert encodes the correct form.
+
+**Never assert this by pattern-matching `proacl`.** `'%=X/%'` also matches
+`postgres=X/postgres` and reports every function as leaking — that false positive
+was hit for real while checking 0163. The PUBLIC entry has an EMPTY grantee, so
+the only correct string test is `'{=X/%'` or `'%,=X/%'`; better,
+`has_function_privilege('anon', …, 'execute')` sidesteps the question entirely.
+
+**One app change came out of this:** `fetchMyAvatarUrl` now returns null without
+querying when there is no session. It fires from AppShell's mount effect, which
+sits ABOVE the `/login` early return, so it was reaching `user_profiles` as anon
+on the login page. It already failed safe — the error is not destructured — but
+that is a property of nobody reading the error, which survives only until someone
+adds error handling.
 
 **`notification_events` IS GONE (0160), AND THE DECISION IS CLOSED.** It was
 0154's seam for a BLUE alert that could not be derived; 0155 made all three blue
@@ -312,7 +377,23 @@ still holds its definition if a non-derivable event is ever needed.)*
    permission model. **The absence of the link is the feature working, not a
    missing piece.**
 
-3. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
+3. **DASHBOARD ACTION QUEUE HARDCODES 30 DAYS INSTEAD OF THE CONFIGURED
+   `warning_days`.** Deferred to the polish stage DELIBERATELY, not overlooked:
+   fixing it CHANGES DISPLAYED DATA — items would appear or disappear from the
+   queue depending on each document type's configured lead time — and that is a
+   behaviour change Turki should see land on purpose rather than as a side effect
+   of a cleanup pass. Note the shape is the same one 0158 solved for
+   notifications (per-viewer threshold resolution); this surface never got the
+   equivalent treatment.
+
+4. **DUPLICATE `Seder` CUSTOMER RECORD.** Two rows for what is one customer.
+   Deferred for the same reason: merging or archiving one changes what the
+   customer list, the statements and any balance rollup show. It is a DATA
+   decision, not a code one — which row is authoritative, and what happens to
+   anything referencing the other — so it needs Turki's call before anything
+   moves. **Do not "tidy" this in a cleanup pass.**
+
+5. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
    `leave_periods` is readable by any authenticated user, and there is no per-user
    wall today. Nothing in this session changed that, and nothing in this session
    should be read as a step toward it — the per-user tables (`notification_prefs`,
