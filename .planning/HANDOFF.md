@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at `810696d` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION. DB at 0166, unchanged — the last TWO shipped units needed no migration. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD, which now carries a live P&L defect for Turki to decide.)
+# SESSION HANDOFF — closes at the 0167 migration commit (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE. DB at 0167 — nine views replaced, no table or column changed. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167; the one thing it leaves behind is a now-false on-screen footnote, item 1 under OPEN / CARRIED FORWARD.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -86,10 +86,12 @@ it is the per-source query in the section below, run against live data.
 
     HEAD              810696d + the docs commit that carries this file
     branch main   tree clean   in sync with origin
-    migration files   164, highest 0166_deferred_deliveries.sql        (unchanged)
-    live DB           0166  (20260824111246 deferred_deliveries)       (unchanged)
+    migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
+    live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
+                      — a TIMESTAMP version, not "0167"; see the 0167 section below)
     CLAUDE.md         17,700 bytes (§5 threshold 20,480 — 2,780 of headroom)
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
+                      re-measured AFTER 0167: nine views replaced, none added
     tables            84, all 84 RLS-enabled
     anon table grants 0     anon-executable non-trigger functions 0
     storage buckets   12
@@ -215,48 +217,92 @@ null` as well, and anything showing 8 has dropped the pre-filter.
 ## DURABLE REPORTING RULES — READ BEFORE BUILDING ANY REPORT OR FINANCE FEATURE
 
 Four rules that outlive any one feature. **Each was re-verified against the live
-database at `810696d`, and the first one came back DIFFERENT from how it was
-handed to me** — it is written below as it actually is, not as it was described,
-because a rule recorded wrong is worse than a rule not recorded.
+database, and rules 1 and 4 have both come back DIFFERENT from how they were
+handed over at least once** — they are written below as they actually are, not as
+they were described, because a rule recorded wrong is worse than a rule not
+recorded. Rules 1 and 4 were both rewritten when **0167** landed: the two defects
+they used to disclose are fixed, and what they now carry is the reasoning that
+must not be undone.
 
-### 1. Reporting scope vs archive — PARTIALLY enforced. Do NOT assume it holds.
+### 1. Reporting scope vs archive — DATE-AWARE since 0167. Read the rule, not a memory of it.
 
-The rule as stated to me was "soft-deleted/archived projects and customers NEVER
-appear in reports." **That is not true today, and a report built on the assumption
-will be wrong.** Measured: of the 11 views touching `projects` or `customers`,
-only 5 filter `archived_at` at all.
+**Turki's rule, and it is NOT "archived rows disappear":** a customer or project
+appears in reports for every period BEFORE it was archived, and drops out from
+`archived_at` forward. History stays forever. **Commission earned before the
+archive STAYS OWED.** Nothing is deleted and nothing is back-dated away.
 
-    FILTER archived_at   v_active_alerts, v_customer_amount_payable,
-                         v_driver_state_now, v_project_commission_now,
-                         v_project_trip_stages
-    DO NOT               v_revenue_invoices, v_revenue_monthly (via it),
-                         v_receivables_open, v_customer_prepaid_balance,
-                         v_invoice_outstanding_live, v_activity_feed,
-                         v_driver_commission_by_project_monthly
+0167 put that into SQL. NINE views were replaced; SIX carry the gate directly and
+TWO more inherit it by composition:
 
-The live counterexample, and it is in the Reports pack right now: project **King
-Salman Park** (customer **Turki 1**) was archived on 2026-06-28 and still carries
-5 trips, 3 of them delivered worth 900.00 SAR, and still reports **30.00 SAR of
-commission** through `v_driver_commission_by_project_monthly` — which
-StatementsTab renders. An archived project DOES appear in a report today.
+    GATED DIRECTLY   v_revenue_invoices, v_invoice_outstanding_live,
+                     v_revenue_sales_returns, v_topups_monthly,
+                     v_driver_commission_by_project_monthly, v_activity_feed
+                     (of v_activity_feed's 19 UNION branches, the FIVE touching a
+                     customer or project are gated; the other 14 touch neither)
+    INHERIT          v_revenue_monthly, v_receivables_open — they compose on the
+                     gated views and need no copy of the rule
+    UNTOUCHED        v_active_alerts, v_customer_amount_payable,
+                     v_driver_state_now, v_project_commission_now,
+                     v_project_trip_stages — CURRENT-STATE views. Their hard
+                     `archived_at is null` filter is correct and must stay: "what
+                     is true now" has no period to be before.
+    OUT OF SCOPE     v_customer_prepaid_balance — deliberately. It is a LIVE
+                     balance, not a period report, and §7 binds it to
+                     `returnedTotal()` in `lib/prepaid.ts` as EXACTLY TWO
+                     EXPRESSIONS. Gating the SQL half alone half-fixes a two-sided
+                     rule. If it is ever wanted it is a PAIRED SQL+TS migration,
+                     not a one-line view edit.
 
-**AND THE PLACES IT "HOLDS" MOSTLY HOLD BY ACCIDENT.** Revenue rows belonging to
-an archived customer count **0** — but not because anything filters them out. The
-one archived customer simply has no confirmed invoice. It is zero by data, not
-zero by construction, and it flips silently the first time an archived customer
-has an invoice confirmed against them.
+**THE GATE IS ON THE FINEST-GRAINED TIMESTAMP THE ROW HAS, AND THAT IS NOT A
+STYLE CHOICE — A DAY IS TOO COARSE TO SETTLE IT.** `archived_at` is a timestamptz:
+an INSTANT. A `date` column can only say "some time that day", so a date-against-
+instant comparison has to guess, and it guesses in the direction that DESTROYS
+MONEY.
 
-**The honest rule, and the one to build on:** archive is a PRE-FILTER that each
-consumer applies for itself (CLAUDE.md §6 — "archive is a pre-filter, never a
-state"). There is no global guarantee. **A new report filters `archived_at is
-null` explicitly, or states in a comment why it deliberately does not.** Daily
-Trips does filter, on Turki's explicit call ("Exclude archive — show 7").
+**THIS FILE HAD THE KING SALMAN PARK CASE WRONG, AND THE CORRECTION IS THE WHOLE
+POINT.** It recorded the 30.00 SAR of commission on the archived `King Salman
+Park` (`1bbf496e…`, customer `Turki 1`) as pre-archive **by `trip_date`**. It is
+not. Re-measured live:
 
-**Whether the commission case is a BUG is a real question, not an oversight to
-sweep up:** commission already earned on delivered trips is arguably still owed
-after the project is archived, and erasing it retroactively would be the worse
-failure. Do not "fix" it by adding a filter without asking Turki — it changes who
-gets paid.
+    WT-2026-0029 / 0030 / 0032   delivered_at  2026-06-29 01:51:54–01:52:05 Riyadh
+    project AND its customer     archived_at   2026-06-29 01:55:16   Riyadh
+    gap                                        3 minutes 20 seconds
+    trip_date on all three                     2026-06-29 — the SAME calendar day
+
+By `trip_date` those trips are NOT before the archive, and a date gate erases
+them: 3 delivered trips, 900.00 SAR of work, 30.00 SAR of a driver's earned
+commission, gone. By `delivered_at` they clear it by 200 seconds and the money
+stands. **0167's first draft used `trip_date` and the read-only dry-run caught it
+before it was applied** — that dry-run is why the fix exists rather than the bug.
+
+**Do not "simplify" the gate back to a date.** An archive is normally done minutes
+after the last piece of work, so same-day is the COMMON case, not the edge one.
+Shapes, in order of preference:
+
+    1. timestamptz column     <ts> < archived_at
+    2. date column WITH a     <d> <  (archived_at at time zone 'Asia/Riyadh')::date
+       timestamptz twin    or (<d> = (archived_at at time zone 'Asia/Riyadh')::date
+                               and <ts> < archived_at)
+    3. date, no twin          form 1 only — none exist today
+
+**`at time zone 'Asia/Riyadh'` is load-bearing, not decoration.** A bare
+`date < timestamptz` casts using the SESSION TimeZone, so the same view would
+answer differently for the API role than for a psql session on UTC. Same reason
+`todayKey()` exists on the TS side (§6).
+
+**A VIEW BUCKETS AND GATES ON DIFFERENT COLUMNS ON PURPOSE.**
+`v_driver_commission_by_project_monthly` buckets `month` on `trip_date` — which
+work month the commission belongs to — and gates on `delivered_at` — had this
+happened yet when the archive ran. Two questions, two columns. Collapsing them
+into one is exactly the bug above. Same split in `v_revenue_sales_returns`: it
+LISTS in the month it was voided but GATES on `confirmed_at`, so a reversal is
+always visible on the same side of the archive as the revenue row it cancels.
+
+**A NEW REPORT STILL DECIDES FOR ITSELF.** 0167 gated the views that existed; it
+did not install a global guarantee, and CLAUDE.md §6 still says archive is a
+PRE-FILTER each consumer applies. A new report gates on `archived_at` with the
+right stamp, or states in a comment why it deliberately does not. Daily Trips
+filters hard, on Turki's explicit call ("Exclude archive — show 7").
 
 ### 2. `deferred_deliveries` is ISOLATED. It feeds Daily Trips and nothing else.
 
@@ -300,25 +346,40 @@ already excludes it from revenue (`v_revenue_invoices.revenue_sar` is
 total, no net, no "payable to ZATCA". The reasoning is in the SHIPPED section
 below.
 
-### 4. Cost views: know which are VAT-INCLUSIVE. Most are, and one is wrong.
+### 4. Cost views: know which are VAT-INCLUSIVE. The P&L ones are not, since 0167.
 
-`grand_total_sar` is VAT-inclusive; `grand_subtotal_sar` is not. Six views touch
-the former and **the distinction between them is whether the name admits it**:
+`grand_total_sar` is VAT-inclusive; `grand_subtotal_sar` is not. **The line that
+matters is P&L COST vs CASH, and 0167 is where it was drawn:**
 
     v_revenue_invoices              revenue_sar = grand_subtotal_sar   CORRECT (net)
                                     vat_sar carried separately
-    v_collections_monthly           collected_gross_sar               CORRECT — cash
-                                    collected genuinely includes VAT, and the
-                                    name says "gross"
-    v_os_cost_monthly               os_cost_sar = grand_total_sar     ** DEFECT **
-    v_purchasing_spend_monthly      received_stock_value_sar          VAT-inclusive,
-                                    but NOT a P&L cost (not a v_pnl_monthly source)
+    v_os_cost_monthly               subtotal_sar - discount_sar        EX-VAT (0167)
+                                    the P&L cost line, and the one reaching Zakat
     v_maintenance_cost_per_truck_monthly / v_daily_operations
-                                    carry the same VAT-inclusive workshop figure
-                                    as per-truck / per-day stats, not P&L lines
+                                    the SAME expression, so per-truck and per-day
+                                    agree with the P&L instead of exceeding it by
+                                    the VAT                            EX-VAT (0167)
+    v_collections_monthly           collected_gross_sar               CASH — stays
+                                    VAT-inclusive; cash collected genuinely
+                                    includes VAT and the name says "gross"
+    v_purchasing_spend_monthly      received_stock_value_sar          CASH — stays
+                                    VAT-inclusive; NOT a v_pnl_monthly source, so
+                                    it never reaches profit
 
-`v_parts_cost_monthly` is **clean** — it sums `parts.cost_sar`, a stock cost with
-no VAT in it. Confirmed, so parts are not part of the defect below.
+**`subtotal_sar` ALONE IS NOT THE EX-VAT COST, and that is the trap in this fix.**
+`workshop_payments` also carries `discount_sar`, and `grand_total = subtotal −
+discount + vat` holds on all 7 live rows (checked, 0 mismatches). Bare
+`subtotal_sar` would have shifted only 2,061.50 and left 580.00 of granted
+discount expensed as if it had been paid. The correct expression shifts 2,641.50 —
+**exactly the VAT, which is how you know it is right.**
+
+**Which views may read `workshop_payments` is asserted, not assumed.** 0167 checks
+via `pg_depend`/`pg_rewrite` that exactly those three views depend on the table; a
+fourth one appearing fails the migration rather than quietly reintroducing the
+VAT-inclusive figure somewhere new.
+
+`v_parts_cost_monthly` is **clean** and always was — it sums `parts.cost_sar`, a
+stock cost with no VAT in it.
 
 ---
 
@@ -415,11 +476,12 @@ reconstructed. If a non-derivable event is ever needed, re-add it deliberately �
 
 ## SESSION LEDGER — 2026-08-25
 
-ONE feature commit plus the docs commit carrying this file. No migration, no
-schema change, no RPC. DB stays at 0166 and views stay at 50.
+ONE feature commit, then ONE migration commit that also carries this file. DB
+moves 0166 → 0167; views stay at **50**, because 0167 REPLACES nine and adds none.
+No table, column, RPC or grant changed.
 
     810696d        P&L indicative Zakat line + per-source VAT section
-    (this file)    HANDOFF refreshed to 810696d
+    (this file)    0167 migration + HANDOFF corrections, committed as one unit
 
 **THE MEASUREMENT MISTAKE THIS SESSION IS WORTH MORE THAN THE FEATURE, because it
 is a NEW false-positive family for the list further down.** Verifying the VAT
@@ -525,6 +587,97 @@ substring counted. Expect it on every future sweep.
 **AND ONE MEASUREMENT ERROR TO AVOID REPEATING:** `wc -c` is bytes, Python's
 `len()` on a decoded string is characters. CLAUDE.md carries multi-byte glyphs
 (`—`, `≠`, `بوصلة`), so the two disagree by ~180. Quote `wc -c` for a byte budget.
+
+---
+
+## SHIPPED — 0167: WORKSHOP COST EX-VAT + ARCHIVED REPORTING DATE-AWARE
+
+One migration, nine `create or replace view`, no table/column/RPC/grant change.
+Verified by the architect via MCP and by Turki in-browser before the commit.
+
+**TWO FIXES IN ONE FILE, AND THEY DO NOT OVERLAP ON A SINGLE VIEW.** The brief
+said `v_revenue_invoices` was the overlap; it is not — that view reads only
+`invoices` and `customers`, and its money columns were already correct. Proven
+from the other side with `pg_depend`, not grep: exactly three views read
+`workshop_payments`, and they are FIX 1's three. (The claim likely came from an
+older grep for `grand_total_sar`, which matches this view on its `gross_sar`
+alias — a substring is not a dependency.)
+
+    FIX 1  workshop cost ex-VAT and NET OF DISCOUNT in the 3 P&L cost views
+           v_os_cost_monthly, v_maintenance_cost_per_truck_monthly,
+           v_daily_operations  —  sum(subtotal_sar - discount_sar)
+           the 2 CASH views (v_collections_monthly, v_purchasing_spend_monthly)
+           deliberately LEFT VAT-inclusive
+    FIX 2  archived customers/projects made DATE-AWARE in the historical views
+           6 gated directly, 2 inherit, 5 current-state views untouched,
+           v_customer_prepaid_balance deliberately out of scope
+
+Rule 4 above carries FIX 1's reasoning and rule 1 carries FIX 2's, including the
+King Salman Park correction this file previously had wrong. **Read those two
+before changing any of the nine views.**
+
+### Measured before and after, live — not predicted
+
+    outsourced cost all-time      19,671.50  ->  17,030.00   shift 2,641.50
+                                                             = exactly the VAT
+    v_os_cost_monthly    2026-07  11,339.00  ->   9,830.00   (3 payments)
+                         2026-08   8,332.50  ->   7,200.00   (4 payments)
+    v_pnl_monthly net    2026-06 -25,698.00  -> -25,698.00   unmoved (no payments)
+                         2026-07       6.33  ->   1,515.33
+                         2026-08 -30,972.39  -> -29,839.89
+    indicative Zakat     2026-07       0.16  ->      37.88
+    views / invoker / anon           50/50/0 ->     50/50/0
+    FIX 2 rows moved on today's data                     ZERO, every gated view
+    King Salman Park commission        30.00 ->       30.00   preserved
+
+**FIX 2 MOVING NOTHING IS THE EXPECTED RESULT, NOT A NO-OP.** Only one archived
+entity exists and all of its work predates its archive, so the gate is correct and
+inactive today. It becomes load-bearing the first time a customer is archived
+mid-period — which is why the migration asserts the invariant instead of asserting
+a row count.
+
+### The self-asserts are the review, and one had to be rewritten to be falsifiable
+
+Seven asserts run inside the same transaction: security footer on all nine views,
+all nine present, FIX 1's total equals the source expression, no FOURTH view reads
+`workshop_payments`, both cash views still contain `grand_total_sar`, the archive
+gate is present in all six gated bodies, and a two-sided count invariant for
+commission.
+
+**The commission assert began as "some archived project still reports commission",
+which passes VACUOUSLY on data where no archived project has pre-archive trips —
+precisely today's data.** It now counts pre-archive delivered trips of archived
+entities and compares that to what the view reports, failing in either direction.
+**A check that cannot fail is not a check.**
+
+### `schema_migrations` shows a TIMESTAMP version, and TWO rows — expected, not drift
+
+    20260824230851  cost_views_ex_vat_and_archive_date_aware    678 chars — NO-OP
+    20260824231520  cost_views_ex_vat_and_archive_date_aware  35,253 chars — the real one
+
+MCP `apply_migration` stamps its own timestamp version and takes the NAME, so
+nothing in that table ever says "0167". **The repo file is the source of record**:
+it is create-or-replace throughout, so it replays idempotently on a `db reset` and
+the numbering stays canonical in `supabase/migrations/`.
+
+**The first row is a PHANTOM and is being kept rather than deleted.** The
+architect's apply landed as a header comment plus a `do $$ … null; end $$;` guard,
+because the SQL never rendered on their side — the attachment came through blank.
+It changed nothing (verified: 50 views, os_cost still 11,339.00 / 8,332.50, P&L
+July net still 6.33 immediately afterwards), but it claimed the migration name
+first. Deleting a migration-history row is the architect's call, not a cleanup
+task; **treat two rows with this name as known, and do not "reconcile" it by
+re-running anything.**
+
+### §5 WAS WAIVED ONCE, EXPLICITLY, AND THE WAIVER IS NOT A PRECEDENT
+
+CLAUDE.md §5 says migrations are drafted to disk and **never self-applied by Claude
+Code**. 0167 was applied BY Claude Code via MCP, on the architect's explicit
+written instruction, after the no-op above proved their paste channel was dropping
+the file. They had already reviewed the content — the decision to pull
+`v_customer_prepaid_balance` out of scope was made on it. The waiver was stated in
+chat before the apply, not assumed afterwards. **The rule stands. The next
+migration is drafted and stopped, like every other one.**
 
 ---
 
@@ -654,10 +807,18 @@ Jul sales VAT of 10,597.50 is the "10,598" Turki reported seeing on screen. The
 two August zeros are the ones the `count(*)` bug misreported as 1 — see the ledger
 above.
 
-**ONE DEFECT SHIPPED KNOWINGLY AND IS DISCLOSED, NOT FIXED:** `v_os_cost_monthly`
-expenses the VAT-INCLUSIVE `grand_total_sar`, so workshop VAT is both a cost in
-the P&L above and a listed reclaim below. Footnoted in the panel. Carried as an
-open item for Turki — it changes a live P&L total, so it is not a cleanup.
+**ONE DEFECT SHIPPED KNOWINGLY AND WAS DISCLOSED RATHER THAN FIXED — AND IT IS
+FIXED NOW, BY 0167.** As shipped at `810696d`, `v_os_cost_monthly` expensed the
+VAT-INCLUSIVE `grand_total_sar`, so workshop VAT was both a cost in the P&L above
+and a listed reclaim below; it was footnoted in the panel and carried as an open
+item, because it changes a live P&L total and was not a cleanup to do silently.
+**THE VAT TABLE ABOVE IS STILL CURRENT — 0167 DID NOT TOUCH THE VAT PANEL,** which
+reads `workshop_payments.vat_sar` directly and not through any view. Read the
+"Workshop repairs" row as the receipt for the fix: 1,509.00 (Jul) + 1,132.50 (Aug)
+= 2,641.50, and that is EXACTLY what 0167 removed from the P&L cost line. The
+COST figures elsewhere in this section are pre-0167 and must not be quoted as
+current — see the 0167 section above for the live ones. **The panel's footnote is
+now false and is item 1 under OPEN.**
 
 ---
 
@@ -1124,9 +1285,9 @@ section is notifications only — do not read it as the complete set.)*
 
 **Nothing is in flight.** No migration is drafted-but-unapplied, no code is
 uncommitted, no feature is half-built, and origin is in sync. The five items below
-are decisions and reviews, not work in progress — but **item 1 is new, it is a
-live defect in a number Turki reads, and it is the only one here that is waiting
-on him rather than parked.**
+are decisions and reviews, not work in progress — but **item 1 is new and it is
+the one loose end 0167 left: a paragraph on screen that describes a defect which
+no longer exists.** It is an app change, small, and it should not sit long.
 
 *(The `notification_events` keep-or-drop item that stood here is CLOSED — dropped
 by 0160. Recorded in CURRENT STATE above, not carried as open work. Do not
@@ -1148,51 +1309,39 @@ notification threshold — which would make a shared dashboard render different
 counts to different people. Do not "finish the job" by wiring those up; 0165's
 header carries the reasoning.)*
 
-1. **WORKSHOP VAT IS COUNTED TWICE — ONCE AS A P&L COST, ONCE AS A RECLAIM.
-   DISCLOSED, DELIBERATELY NOT FIXED. TURKI'S CALL.**
+*(The **WORKSHOP VAT DOUBLE-COUNT** item that stood here is CLOSED — fixed by
+**0167**, which is Turki's answer to the question this entry existed to ask.
+`v_os_cost_monthly` expensed the VAT-INCLUSIVE `grand_total_sar` while revenue on
+the other side of the same P&L was net, so a vendor's VAT was booked as a cost AND
+listed as recoverable in the VAT panel directly below it. **The answer was "cost
+net of reclaimable VAT."** The fix moved all THREE views that read
+`workshop_payments` — the P&L line plus the two siblings, so the per-truck and
+per-day figures still agree with it — and left the two CASH views VAT-inclusive on
+purpose. Effect and the full reasoning are in the 0167 section above and in
+DURABLE RULE 4. **Do not re-raise this as open**, and note that the blast-radius
+warning that used to live here was right about one thing worth keeping: this
+number reaches `net_profit_sar` and therefore the indicative Zakat, so any future
+change to it moves a figure Turki reads.)*
 
-   **Where it lives:** `v_os_cost_monthly`, one expression —
-   `os_cost_sar = coalesce(sum(wp.grand_total_sar), 0)`. `grand_total_sar` is
-   VAT-INCLUSIVE. Revenue on the other side of the same P&L is NET of VAT
-   (`v_revenue_invoices.revenue_sar = grand_subtotal_sar`). So a vendor repair
-   invoice puts its VAT inside "Outsourced repairs" as a cost, while the VAT panel
-   directly below lists that same VAT as recoverable. Both readings are defensible
-   alone; they cannot both be right at once.
+1. **THE VAT PANEL STILL TELLS TURKI, ON SCREEN, THAT WORKSHOP VAT IS DOUBLE-
+   COUNTED. IT IS NOT, SINCE 0167. THE PARAGRAPH IS NOW FALSE.**
 
-   **BLAST RADIUS — bigger than one view, and this is the part worth knowing
-   before touching it.** `os_cost_sar` is a source of `v_pnl_monthly`, where it
-   flows into FOUR published figures and then out again:
+   `app/reports/StatementsTab.tsx`, the footer under the per-source VAT list
+   (~line 727): *"Repair VAT is also already inside 'Outsourced repairs' above,
+   because the P&L expenses those invoices at their VAT-inclusive total."* That
+   sentence disclosed a real defect and was correct when it shipped at `810696d`.
+   0167 removed the defect and the disclosure outlived it.
 
-       os_cost_sar -> operating_cost_sar -> operating_profit_sar
-                                         -> net_profit_sar -> margin %
-       ... and v_pnl_by_period inherits all of them
-       ... and net_profit_sar is what indicativeZakat() multiplies by 2.5 %,
-           so FIXING THIS ALSO MOVES THE ZAKAT ESTIMATE
+   **This is the failure mode this whole file keeps recording, in its own UI copy:
+   the fix moved and the words describing it did not.** The second caveat in the
+   same paragraph — stock receipts carrying no supplier invoice date, so a purchase
+   falls in the month the goods arrived — is STILL TRUE and must stay.
 
-   Scale, measured: workshop VAT all-time is **2,641.50 SAR** against a
-   `grand_total` of 19,671.50 — **13.43 %** of everything the P&L books as
-   outsourced-repair cost. Correcting it would raise net profit by 2,641.50 and
-   the indicative Zakat by about 66.04 SAR, all-time.
-
-   **NOT in the blast radius, both checked:** `v_parts_cost_monthly` is clean (it
-   sums `parts.cost_sar`, VAT-free), and `v_purchasing_spend_monthly` is
-   VAT-inclusive but is **not a source of `v_pnl_monthly`** at all, so it does not
-   touch profit. Two other views — `v_maintenance_cost_per_truck_monthly` and
-   `v_daily_operations` — carry the same VAT-inclusive workshop figure as
-   standalone stats. **Decide whether they move too, or the per-truck maintenance
-   number will stop agreeing with the P&L.**
-
-   **The fix is a migration to `v_os_cost_monthly` (and a decision about those two
-   siblings), never an app change.** It was shipped disclosed rather than fixed on
-   the architect's explicit instruction — "do not touch existing P&L totals" — and
-   because a session about a display panel is the wrong place to silently move a
-   cost figure Turki has been reading for months. A footnote in the VAT panel says
-   so on screen.
-
-   **The question for Turki is not technical:** does "outsourced repair cost" mean
-   the cash he paid the vendor, or the cost net of reclaimable VAT? Both are real
-   answers. Note the `create or replace view` traps in CLAUDE.md §6 before editing
-   — column type and order are not freely changeable.
+   Not fixed in 0167's commit deliberately: that unit was the migration plus these
+   doc corrections, and changing on-screen copy is an app change Turki verifies
+   in-browser like any other. Small, isolated, one paragraph. **Do it as its own
+   commit, and re-read the surrounding copy rather than editing the one sentence
+   blind** — the section's opening lines also lean on the old reading.
 
 2. **Arabic copy across notifications, profile AND issues is unreviewed by a
    native speaker.** It renders correctly and the notification day-counts decline
@@ -1240,9 +1389,9 @@ header carries the reasoning.)*
    because a two-person queue where only the reporter can act is a queue where the
    person who cannot fix it owns the ticket.
 
-**NEXT SESSION HAS NOTHING QUEUED — ASK TURKI. But item 1 is a QUESTION FOR HIM,
-not a task to pick up:** whether outsourced-repair cost in the P&L should stay
-VAT-inclusive. Put it to him; do not start the migration off the back of this file.
+**NEXT SESSION HAS NOTHING QUEUED — ASK TURKI. Item 1 is the exception and it IS
+a task, not a question:** one now-false paragraph of on-screen copy, left behind by
+0167. Everything else here is parked on a decision.
 
 ---
 
