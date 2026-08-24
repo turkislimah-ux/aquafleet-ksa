@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at `bd37fad` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS. DB at 0165. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
+# SESSION HANDOFF — closes at `de7174c` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT. DB at 0166. `de7174c` IS COMMITTED BUT NOT PUSHED. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -7,22 +7,45 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `bd37fad`, not recalled
+## CURRENT STATE — MEASURED at `de7174c`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
-this file.
+this file. **Every figure that MOVED at this refresh carries its previous value in
+parentheses**, because the old value is the one a reader would otherwise carry
+forward. Four moved in this block (migration files, live DB, tables, origin sync)
+and a fifth below it — `set_updated_at()` went from three tables to four.
 
-    HEAD              bd37fad + the doc commit that carries this file
-    branch main   tree clean   in sync with origin
-    migration files   163, highest 0165_dashboard_action_items_respect_warning_days.sql
-    live DB           0165
+    HEAD              de7174c + the doc commit that carries this file
+    branch main   tree clean   AHEAD 1 OF ORIGIN — de7174c is unpushed
+    migration files   164, highest 0166_deferred_deliveries.sql        (was 163 / 0165)
+    live DB           0166  (20260824111246 deferred_deliveries)       (was 0165)
     CLAUDE.md         17,301 bytes (§5 threshold 20,480 — 3,179 of headroom)
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
-    tables            83, all 83 RLS-enabled
+    tables            84, all 84 RLS-enabled                           (was 83 / 83)
+    anon table grants 0     anon-executable non-trigger functions 0
     storage buckets   12
     v_active_alerts   9 rows, 9 distinct identities
-    tsc --noEmit      clean
+    tsc --noEmit      clean;  8/8 check suites pass (scripts/*check*.ts)
+    next build        clean, 17 routes + middleware;  middleware 83 kB
+
+**THE TREE IS CLEAN BUT ORIGIN IS BEHIND.** `de7174c` is committed and verified
+in-browser, and it has not been pushed. That is the one piece of state that a
+`git status` alone reads as finished. Push it or confirm with Turki first; do not
+build on top of it assuming origin has it.
+
+**The middleware figure is a GUARD, not trivia.** 83 kB is the number to compare
+against after ANY change that touches `lib/nav.ts` — it re-exports `lib/routes.ts`,
+and routing an Edge import through it drags `lucide-react` into the middleware
+bundle. Measured at 83 kB after this session's `lib/nav.ts` edit, unchanged.
+
+**The route count in this file said `18/18` until this refresh and it was WRONG —
+the build prints 17 routes plus a middleware line.** Whoever wrote it counted the
+middleware row as an eighteenth route. Trivial in itself, and kept as a note
+because it is the third figure this refresh caught by re-running the command
+instead of copying the previous line forward. `./scripts/safe-build.sh --dist-dir
+.next-verify` is the only safe build — it restores `tsconfig.json` through a trap,
+and it did so on this run ("restored tsconfig.json — next build had rewritten it").
 
 **That alert count is now VIEWER-DEPENDENT, which it was not before 0158.**
 `v_active_alerts` resolves thresholds through `auth.uid()`, and in the SQL editor
@@ -36,10 +59,20 @@ and buckets only; 0158 does `create or replace` on `v_active_alerts`, which
 replaces a view rather than adding one — and restates the security footer,
 because `create or replace view` silently drops `reloptions` (§6).
 
+**The view count did not move at 0166 either.** That migration adds ONE table
+(`deferred_deliveries`, taking 83 → 84) and no view — deliberately, and the zero
+is an invariant worth re-checking rather than a coincidence. See the Daily Trips
+section below: **0 views read `deferred_deliveries`**, measured live at this
+refresh with `pg_get_viewdef(...) ilike '%deferred_deliveries%'`. The side-log is
+a manual record that must never reach revenue, commission or P&L.
+
 `set_updated_at()` — the generic BEFORE UPDATE trigger function introduced by
-0157 — is now attached to **three** tables: `issue_reports`,
-`notification_thresholds_user`, `user_profiles`. Verified live. Anything that
-drops that function must check `pg_trigger` first; it is no longer single-use.
+0157 — is now attached to **FOUR** tables: `deferred_deliveries` (0166),
+`issue_reports`, `notification_thresholds_user`, `user_profiles`. Verified live.
+**This file said THREE until this refresh** — 0166 attached the fourth, and that
+is exactly the drift the next line guards against: anything that drops that
+function must check `pg_trigger` first, and must count rather than trust this
+sentence. It has been wrong once already.
 
 Per-user / feature tables, live:
 
@@ -57,9 +90,28 @@ Per-user / feature tables, live:
     issue_reports                  2 rows  <- live since 0157, filed through the
                                               UI (787a43d)
     user_profiles                  2 rows  <- live since 0159 (688cb9c)
+    deferred_deliveries            1 row   <- live since 0166 (807d28e), written
+                                              through the Daily Trips side-log.
+                                              READ BY 0 VIEWS, by design.
 
 Every one of those row counts is Turki's own browser testing, which means each
 write path is proven in production rather than only in a harness.
+
+Two operational figures the Daily Trips code comments quote, re-measured here so
+they are not taken on trust:
+
+    delivered trips   765   <- the figure quoted in DailyTripsTab's own comments,
+                               still exact. It is the reason that report fetches
+                               a date window through a server action instead of
+                               being handed rows by page.tsx.
+    projects          7 active-unarchived  vs  8 with status='active'
+
+**THAT GAP IS NOT A BUG AND MUST NOT BE "FIXED".** One project — `King Salman
+Park` — carries `status='active'` AND a non-null `archived_at`. Daily Trips shows
+**7**, on Turki's explicit call ("Exclude archive — show 7"). This is §6's rule
+in a concrete place: archive is a PRE-FILTER, never a state, so `status` alone is
+never the whole test. Any report that counts projects filters on `archived_at is
+null` as well, and anything showing 8 has dropped the pre-filter.
 
 ---
 
@@ -148,8 +200,8 @@ reconstructed. If a non-derivable event is ever needed, re-add it deliberately �
 
 ## SESSION LEDGER — 2026-08-23/24
 
-Twenty commits, `ec3d293..bd37fad`, read off `git log` rather than counted up
-from memory. Nine migrations (0157–0165), every one applied by the architect,
+Twenty-three commits, `ec3d293..de7174c`, read off `git log` rather than counted
+up from memory. Ten migrations (0157–0166), every one applied by the architect,
 none self-applied. Detail for each is in the sections below.
 
     4ee4bb0  0157  issue_reports + issue-report-images bucket    MIGRATION
@@ -172,6 +224,9 @@ none self-applied. Detail for each is in the sections below.
     f585a5f  docs  CLAUDE.md compressed, four stale claims corrected
     b91c93a  docs  session ledger
     bd37fad  0165  dashboard action queue respects warning_days   MIGRATION
+    16854d6  docs  close warning_days item; record it was a VIEW
+    807d28e  0166  deferred_deliveries side-log                   MIGRATION
+    de7174c        Daily Trips report in the Reports pack         NOT PUSHED
 
 **0163 landed BEFORE 0162 on purpose** — the security fix went first and got its
 own commit; the consistency fixes followed. The numbers are out of order in the
@@ -206,6 +261,86 @@ substring counted. Expect it on every future sweep.
 **AND ONE MEASUREMENT ERROR TO AVOID REPEATING:** `wc -c` is bytes, Python's
 `len()` on a decoded string is characters. CLAUDE.md carries multi-byte glyphs
 (`—`, `≠`, `بوصلة`), so the two disagree by ~180. Quote `wc -c` for a byte budget.
+
+---
+
+## SHIPPED — THE DAILY TRIPS REPORT (`807d28e` + `de7174c`). VERIFIED, UNPUSHED.
+
+A printable daily record: one table per active project (driver × truck × trips),
+then a manual side-log beneath it for deliveries made to a location other than the
+project's own. Turki verified the full checklist in-browser — 7 project tables, an
+empty project rendering with zero rows, two-truck grouping, sums matching Trips,
+the unpriced flag, side-log CRUD + validation, isolation against P&L / Revenue /
+commission, the period picker, print fully expanded, Arabic / dark / narrow.
+
+    supabase/migrations/0166_deferred_deliveries.sql   the side-log table
+    lib/daily-trips.ts             pure period maths + row assembly, no data access
+    lib/actions/daily-trips.ts     "use server" — the fetch + the three CRUD writes
+    app/reports/DailyTripsTab.tsx  the report UI (root #daily-trips-print)
+    app/reports/StatementsTab.tsx  where it mounts, `?statement=daily`
+    scripts/daily-trips-check.ts   35 assertions, all passing
+
+**IT IS A STATEMENT, NOT A TAB, AND THAT PLACEMENT IS LOAD-BEARING.** It was built
+first as a third top-level Reports tab and moved on Turki's call. It now sits
+INSIDE the Reports pack, directly after Operations — Operations is the period-level
+view of the same activity and Daily Trips is the day-level record underneath it, so
+the pack reads summary → source without a jump. Do not promote it back to a
+top-level tab: that puts one statement outside the pack that exists to hold
+statements, and splits "print a report" across two places.
+
+**TWO LEVELS, TWO URL PARAMS. Do not collapse them.** `?tab=` belongs to
+`ReportsClient` (which pack), `?statement=` belongs to `StatementsTab` (which
+statement). Daily Trips is `?tab=statements&statement=daily`. Reusing `tab` at the
+inner level collides with the outer one. Both `daily` and `payslips` are now in
+the `lib/nav.ts` search index; `payslips` had been live since 0115 and unindexed.
+
+**THE ISOLATION INVARIANT: `deferred_deliveries` IS READ BY 0 VIEWS.** Measured
+live at this refresh, not assumed. It is a MANUAL side-log — someone typing what
+happened — and it must never reach revenue, commission or P&L, all of which derive
+from `trips`. If a future view needs this data, that is a decision for Turki and
+the architect, not a convenience join. Re-check with:
+
+```sql
+select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+where c.relkind = 'v' and n.nspname = 'public'
+  and pg_get_viewdef(c.oid) ilike '%deferred_deliveries%';   -- expect 0
+```
+
+**TURKI'S DURABLE RULE, STATED THIS SESSION: soft-deleted projects and customers
+NEVER appear in reports.** This is `CLAUDE.md` §6's "a pre-filter, never a state"
+applied to the reporting surface, and the live data already exercises it — see the
+7-vs-8 project gap in CURRENT STATE above. Every report filters `archived_at is
+null` in addition to any status test.
+
+**THE HEADER BAND, AND THE ONE ROW THAT IS DELIBERATELY NOT BANDED.** Table
+headings and totals rows carry `background: rgb(var(--muted) / 0.12)`. The app's
+older tables use a flat `rgba(0,0,0,0.02)`, which was rejected on evidence rather
+than copied: it is nearly invisible on screen and points the WRONG WAY in dark
+mode. `--muted` is slate-500 in light and slate-400 in dark, so one expression
+darkens over the white card and lifts over the near-black one, with no `.dark:`
+branch. It deliberately does NOT print — browsers drop backgrounds without
+`print-color-adjust: exact`, and forcing it would wash every filed page grey.
+**The project TITLE strip is not banded (Turki's call, and it is right):** the band
+means "this row is chrome, the rows below are data", and a title is neither —
+greying it merged the section name into the table header instead of letting it sit
+above the table as its own line.
+
+**A NEAR-MISS WORTH KEEPING: the early return almost shipped a dead button.**
+Daily Trips returns early from `StatementsTab`, above the `!current` guard, because
+it reads none of the P&L spine and carries its own date/period/print controls. That
+early return renders the hoisted `selector` — which carries the "Custom report"
+button — so it must ALSO mount `CustomReportModal`, hoisted as `builder`. The first
+draft mounted the selector without the modal: a button that set state nothing read.
+**Any new early return in that component renders both or neither.**
+
+**AND A PROCESS ONE: a stale prompt would have produced a non-building commit.**
+The instruction to commit this work listed six files, written before the relocation
+— it omitted `app/reports/StatementsTab.tsx` (where the report now mounts, +158
+lines) and `lib/nav.ts`. Staging exactly those six would not have built. The work
+was already committed at `de7174c` with eight files, so it was reported rather than
+re-committed, and the differing commit message was left alone rather than amended
+(§5: new commits, never amend unless asked). **A file list in a prompt is a pointer,
+not evidence — same rule as a figure in this file.**
 
 ---
 
@@ -422,9 +557,14 @@ section is notifications only — do not read it as the complete set.)*
 
 ## OPEN / CARRIED FORWARD
 
-**Nothing is in flight.** No migration is drafted-but-unapplied, no code is
-uncommitted, and no feature is half-built. The four items below are decisions and
-reviews, not work in progress.
+**Nothing is in flight, with ONE loose end that is not work.** No migration is
+drafted-but-unapplied, no code is uncommitted, and no feature is half-built. The
+four items below are decisions and reviews, not work in progress.
+
+**The loose end: `de7174c` (Daily Trips) is committed and NOT PUSHED** —
+`main...origin/main [ahead 1]`. It is verified in-browser and complete; only the
+push is outstanding. A clean `git status` will not show this, which is why it is
+recorded here as well as in CURRENT STATE. Push it or check with Turki.
 
 *(The `notification_events` keep-or-drop item that stood here is CLOSED — dropped
 by 0160. Recorded in CURRENT STATE above, not carried as open work. Do not
