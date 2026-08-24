@@ -11,10 +11,17 @@ stale and actively wrong for two commits.
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
-this file. **Every figure that MOVED at this refresh carries its previous value in
-parentheses**, because the old value is the one a reader would otherwise carry
-forward. Four moved in this block (migration files, live DB, tables, origin sync)
-and a fifth below it — `set_updated_at()` went from three tables to four.
+this file. **Figures that MOVED carry their previous value in parentheses**,
+because the old value is the one a reader would otherwise carry forward.
+
+Re-measuring found FIVE figures in this file that no longer matched the database
+or the build. Four DRIFTED, all of them because 0166 landed: `migration files`,
+`live DB`, `tables` (83 → 84) in the block below, `set_updated_at()` (three tables
+→ four) further down this section, and `authenticated` (931 → 938 privilege rows —
+the new table's seven) in SECURITY POSTURE. **One was never right at all:** the
+build line read `18/18` routes when the build prints 17. Four drifted and one was
+simply wrong — which is the argument for re-running the command rather than
+copying the previous line forward.
 
     HEAD              de7174c + the docs commits that carry this file
     branch main   tree clean   in sync with origin
@@ -29,23 +36,22 @@ and a fifth below it — `set_updated_at()` went from three tables to four.
     tsc --noEmit      clean;  8/8 check suites pass (scripts/*check*.ts)
     next build        clean, 17 routes + middleware;  middleware 83 kB
 
-**A CLEAN TREE DOES NOT MEAN A PUSHED TREE — AND THIS IS THE SECOND TIME.** For
-most of this refresh `de7174c` sat committed, verified and UNPUSHED while
-`git status` said "working tree clean": that message is silent about `[ahead N]`.
-It is pushed now, so the block above is accurate.
+**A CLEAN TREE DOES NOT MEAN A PUSHED TREE, AND THIS IS THE SECOND OCCURRENCE.**
+For most of this refresh `de7174c` sat committed, verified and unpushed while
+`git status` said "working tree clean" — that message is silent about `[ahead N]`.
+It is pushed now, so the block above is accurate. **The same failure is recorded
+further down this file:** `e65d980` sat committed-but-unpushed at `[ahead 1]` while
+the handoff's own §2 asserted "Nothing unpushed." Two occurrences make it a
+pattern, not an incident — **push state is the one claim this file cannot verify
+about itself.** Read the BRANCH line of `git status -sb`, not just the tree line,
+and do not take this file's word for it. That applies to the sentence you are
+reading.
 
 **Which is also why the HEAD line names the FEATURE commit and absorbs the docs
 commits rather than naming them.** A line that quotes its own commit hash is wrong
-the instant it is committed, and correcting it needs another commit that is wrong
-the same way — the fix is phrasing that cannot go stale, not a faster chase. That
-convention was already here and was briefly broken during this refresh.
-
-**The identical thing happened once before and is recorded further down this file**
-— `e65d980` was committed-but-unpushed at `[ahead 1]` while the handoff's own §2
-asserted "Nothing unpushed." Two occurrences of one failure make it a pattern, not
-an incident: **push state is the one claim this file cannot verify about itself.**
-Read `git status -sb` — the BRANCH line, not just the tree line — and never take
-this file's word for it. That applies to the sentence you are reading.
+the instant it is committed, and correcting it takes another commit that is wrong
+the same way. The fix is phrasing that cannot go stale, not a faster chase. That
+convention was already here and got briefly broken during this refresh.
 
 **The middleware figure is a GUARD, not trivia.** 83 kB is the number to compare
 against after ANY change that touches `lib/nav.ts` — it re-exports `lib/routes.ts`,
@@ -54,9 +60,9 @@ bundle. Measured at 83 kB after this session's `lib/nav.ts` edit, unchanged.
 
 **The route count in this file said `18/18` until this refresh and it was WRONG —
 the build prints 17 routes plus a middleware line.** Whoever wrote it counted the
-middleware row as an eighteenth route. Trivial in itself, and kept as a note
-because it is the third figure this refresh caught by re-running the command
-instead of copying the previous line forward. `./scripts/safe-build.sh --dist-dir
+middleware row as an eighteenth route. Trivial on its own, and kept because it is
+the ONE figure here that never described reality, as opposed to the four that
+drifted when the schema moved under them. `./scripts/safe-build.sh --dist-dir
 .next-verify` is the only safe build — it restores `tsconfig.json` through a trap,
 and it did so on this run ("restored tsconfig.json — next build had rewritten it").
 
@@ -137,7 +143,8 @@ The end state, all of it measured live, not recalled:
     anon-executable functions      4, ALL trigger-only, 0 non-trigger
     anon-readable views            0
     policies granting anon         none — no policy anywhere admits the anon role
-    authenticated                  UNTOUCHED throughout — 931 privilege rows
+    authenticated                  UNTOUCHED by the sweep — 938 privilege rows
+                                   (was 931; 0166's new table added its own seven)
 
 **`0161` — anon lost every table grant, and future tables are born without
 them.** The 539 grants were INERT (RLS already refused anon zero rows), so this
@@ -250,7 +257,7 @@ own commit; the consistency fixes followed. The numbers are out of order in the
 log and that is intentional, not a mistake to "correct".
 
 **THE PATTERN THAT WORKED, AND IT IS THE ONE TO REPEAT: PROBE, DO NOT REASON.**
-Four things this session were caught only by measuring the artefact rather than
+Five things this session were caught only by measuring the artefact rather than
 arguing about it, and every one of them looked fine in prose:
 
 - **The Edge bundle.** `lib/routes.ts` was split out specifically to keep
@@ -267,6 +274,13 @@ arguing about it, and every one of them looked fine in prose:
 - **CLAUDE.md's own claims.** Compressing it meant re-reading every claim, which
   turned up four stale ones and a self-contradiction. Same finding as both prior
   compression passes: the audit is the payoff, the bytes are the pretext.
+- **THIS FILE's own figures, at the refresh that closed the session.** Five were
+  stale or wrong — see CURRENT STATE — including a `set_updated_at()` table count
+  that guards a `pg_trigger` check before dropping the function. **And the
+  clearance grep that "proved" no stale push-state claims remained was itself
+  wrong:** it was case-sensitive and walked straight past `UNPUSHED` in a section
+  heading. A case-sensitive grep used as an all-clear is a false-negative
+  generator; pass `-i` when the question is "is there any claim like this left".
 
 **A THIRD FALSE POSITIVE FAMILY WORTH NAMING: grepping for a bug string hits the
 comment documenting it.** `"use server"` in a file whose first line says "PLAIN
@@ -281,7 +295,7 @@ substring counted. Expect it on every future sweep.
 
 ---
 
-## SHIPPED — THE DAILY TRIPS REPORT (`807d28e` + `de7174c`). VERIFIED, UNPUSHED.
+## SHIPPED — THE DAILY TRIPS REPORT (`807d28e` + `de7174c`). VERIFIED AND PUSHED.
 
 A printable daily record: one table per active project (driver × truck × trips),
 then a manual side-log beneath it for deliveries made to a location other than the
@@ -575,8 +589,8 @@ section is notifications only — do not read it as the complete set.)*
 ## OPEN / CARRIED FORWARD
 
 **Nothing is in flight.** No migration is drafted-but-unapplied, no code is
-uncommitted, no feature is half-built, and origin is in sync. The
-four items below are decisions and reviews, not work in progress.
+uncommitted, no feature is half-built, and origin is in sync. The four items below
+are decisions and reviews, not work in progress.
 
 *(The `notification_events` keep-or-drop item that stood here is CLOSED — dropped
 by 0160. Recorded in CURRENT STATE above, not carried as open work. Do not
@@ -1289,7 +1303,23 @@ three blanked files. Our durable JSON snapshot remains
 
 ---
 
-## 1. RECENT COMMITS
+## ============ EVERYTHING BELOW IS ARCHIVE — A SUPERSEDED HANDOFF ============
+
+The numbered sections **1 through 6** that follow are an OLDER handoff
+(2026-08-22, at `a248d40`), kept verbatim for its REASONING, not its figures.
+**Every number in them is stale by many migrations** — that block reports 148
+migration files and DB 0150; the live figures are at the top of this file (164 and
+0166). Their headings say "CURRENT STATE", "DB STATE" and "NEXT", and each means
+*current as of then*. The last one directly contradicts the live answer, which is
+that nothing is queued.
+
+**Read this half for WHY a decision was made. Never for WHAT the state is.** Same
+rule as the STANDING INSTRUCTION above: if it disagrees with the database, the
+database won.
+
+---
+
+## 1. RECENT COMMITS  *(archive — 2026-08-22)*
 
 ### This session (2026-08-22) — nine commits, oldest-first
 
@@ -1375,7 +1405,7 @@ The JSON diff GREW (9 insertions / 6 deletions) — reasoned before committing: 
 changed scalar lines plus 3 array appends, each append adding a comma to the previous
 last element. §5's shrinking-diff-is-a-stop-signal did not fire.
 
-## 2. CURRENT STATE
+## 2. CURRENT STATE — AS OF 2026-08-22 (`a248d40`). SUPERSEDED, DO NOT QUOTE.
 
 Re-measured at the end of the 2026-08-22 session, at `a248d40`:
 
@@ -1544,7 +1574,7 @@ read-only before anything irreversible was proposed:
 **Archiving one cannot touch the other.** This check had to clear first precisely
 because an archive stamps the CUSTOMER and there is no customer restore.
 
-## 4. DB STATE
+## 4. DB STATE — AS OF 2026-08-22 (DB 0150). SUPERSEDED, DO NOT QUOTE.
 
 - **Highest migration APPLIED: `0150_update_project_stops_writing_commission.sql`
   — applied by the architect via MCP, all six of its own assertions passed,
@@ -1998,7 +2028,7 @@ re-measure AFTER they say they are done.**
 
 **An empty result is only evidence once you know the command ran.**
 
-## 6. NEXT
+## 6. NEXT — AS OF 2026-08-22. SUPERSEDED: the live answer is NOTHING QUEUED.
 
 1. **`0139` IS CLOSED — every path clicked, recorded in §7 and the JSON. Do not
    re-open it.** Block, force-archive with override, plain archive on a credit
