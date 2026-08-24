@@ -724,11 +724,11 @@ export default function StatementsTab({
               repairs&rdquo; above), sales invoices by confirmation date.
             </p>
             <p>
-              Two caveats worth knowing. Repair VAT is{" "}
-              <strong>also already inside &ldquo;Outsourced repairs&rdquo; above</strong>, because
-              the P&amp;L expenses those invoices at their VAT-inclusive total. And stock
-              receipts carry no supplier invoice date, so a purchase falls in the month
-              the goods arrived rather than the month the tax invoice was issued.
+              Repair VAT appears here and <strong>only</strong> here — the P&amp;L expenses
+              those invoices net of VAT, so &ldquo;Outsourced repairs&rdquo; above does not
+              carry it. One caveat does remain: stock receipts carry no supplier invoice
+              date, so a purchase falls in the month the goods arrived rather than the
+              month the tax invoice was issued.
             </p>
           </footer>
         </section>
