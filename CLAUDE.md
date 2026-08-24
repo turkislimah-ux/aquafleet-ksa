@@ -1,167 +1,156 @@
 # CLAUDE.md — AquaFleet KSA (Bousla / بوصلة)
 
-**Read this file first, every session, before doing anything else.** It defines how
-we work on this project. It changes rarely. For *current state* (what's built, what's
-next), read **§7 below** — that is the durable record — then
-`.planning/AQUAFLEET-HANDOFF.json` and recent `git log` for the short version. If the
-JSON and §7 disagree, §7 wins.
+**Read this file first, every session.** It is RULES ONLY and changes rarely.
+**Current state — what is built, what is in flight, what is open — lives in
+`.planning/HANDOFF.md`.** Read that second, then recent `git log`.
 
-**`.planning/HANDOFF.json` (no prefix) is NOT ours — it belongs to the gsd plugin,
-is gitignored, and is rewritten from an empty template after tool calls. Never read
-it for state and never stage it. See §5.**
+This file holds no state and no build history. §7 holds durable money and schema
+RULES, not a status report. If a state-looking line appears here, it is a bug.
+
+**`.planning/HANDOFF.json` (no prefix) is NOT ours** — gsd plugin's, gitignored,
+rewritten from an empty template after tool calls. Never read it for state, never
+stage it. Ours is `.planning/HANDOFF.md` (+ `AQUAFLEET-HANDOFF.json`). See §5.
 
 ---
 
 ## 1. What this project is
 
-AquaFleet KSA (internal: Bousla / بوصلة) — a fleet-management web app for Bin Slimah
-Group, a 50+ year-old family water-transport & treatment business in Riyadh (~40
-trucks, 3 stations). Non-technical founder (Turki) directs; the app manages trucks,
-drivers, staff, trips, projects, commissions, leave, stations, and (upcoming) finance/
-invoicing.
+AquaFleet KSA (internal: Bousla / بوصلة) — fleet management for Bin Slimah Group,
+a 50+ year-old family water-transport & treatment business in Riyadh (~40 trucks,
+3 stations). Non-technical founder (Turki) directs. Manages trucks, drivers,
+staff, trips, projects, commissions, leave, stations, finance/invoicing.
 
 - **Stack:** Next.js (App Router) + Supabase (Postgres) + Tailwind. TypeScript.
 - **Repo:** `~/aquafleet-ksa`, GitHub `turkislimah-ux/aquafleet-ksa`, branch `main`.
 - **Terminal:** macOS zsh. **Migrations run in the Supabase SQL Editor (browser).**
-  Supabase is also connected to Claude directly (use it for schema checks/queries).
+  Supabase is also connected to Claude directly — use it to verify schema/state.
 
 ---
 
-## 2. Roles — who does what (do NOT cross these lines)
+## 2. Roles — do NOT cross these lines
 
-**Two Claudes work on this project:**
-
-- **Claude the architect** (chat/planning instance): owns architecture, data model,
-  SQL review, git discipline, and *writing the prompts* that direct Claude Code.
-  Specifies **behavior, data, logic, constraints, and content/color MAPPING only**.
-  **NEVER specifies visual design** — not layout, styling, shapes, sizing, spacing,
-  or visual treatment. When the architect has interfered with design, the result has
-  been worse. Hard rule.
-
-- **Claude Code** (this executing instance): owns **ALL file edits** and **ALL design
-  decisions**. Builds from `preview/` as the spec. Reads and follows the relevant
-  skills. Makes every visual/UX choice.
-
-**Turki** directs and verifies every change in-browser before it's committed.
+- **Claude the architect** (chat instance): architecture, data model, SQL review,
+  git discipline, and writing the prompts that direct Claude Code. Specifies
+  **behavior, data, logic, constraints, and content/color MAPPING only.**
+  **NEVER visual design** — not layout, styling, shapes, sizing, spacing, or
+  treatment. When the architect has interfered with design the result was worse.
+  Hard rule.
+- **Claude Code** (executing instance): **ALL file edits, ALL design decisions.**
+  Builds from `preview/` as the spec. Reads the relevant skills.
+- **Turki** directs, and verifies every change in-browser before it is committed.
 
 ---
 
 ## 3. `preview/` is the authoritative design spec (READ-ONLY)
 
-The `preview/` directory is the original demo — the **ground-truth spec** for design
-and features. It is **read-only**; never edit it. Match it exactly for any UI work —
-pull real values (hex, class structure, layout) from it rather than eyeballing or
-reinterpreting. When design has failed here, it was because it was *described* instead
-of *pulled from `preview/`*. Always pull from `preview/`.
+The original demo, and the ground truth for design and features. **Never edit
+it.** For any UI work, pull real values (hex, class structure, layout) from it
+rather than eyeballing or reinterpreting — when design has failed here it was
+because it was *described* instead of *pulled from `preview/`*.
 
-**File → page/feature map:**
-- `preview/index.html` — entry; open in a browser to click through the live demo.
-- `preview/pages-1.js`, `preview/pages-2.js` — page markup/logic (Kanban is in pages-1).
-- `preview/app.css` — ALL styling (the design ground-truth).
-- `preview/archive.js` — the Archive page (not yet built in the app).
-- `preview/map.js` — the route/map feature (Route Optimization, deferred).
-- `preview/data.js` — mock data. `preview/components.js`, `icons.js`, `i18n.js`, `app.js`.
+- `index.html` entry · `pages-1.js` / `pages-2.js` page markup+logic (Kanban is
+  in pages-1) · `app.css` ALL styling · `archive.js` Archive · `map.js` route/map
+  (Route Optimization, deferred) · `data.js` mock data · `components.js`,
+  `icons.js`, `i18n.js`, `app.js`
 
-When building/restyling a page: read its `preview/` source + `app.css` FIRST, match it.
+Building or restyling a page: read its `preview/` source + `app.css` FIRST.
 
 ---
 
-## 4. Skills — invoke the right one per task (do NOT load all at once)
+## 4. Skills — invoke per task, do NOT load all at once
 
-Loading every skill at once wastes context and has crashed sessions. Invoke the
-relevant skill(s) **when the task calls for it**:
+Loading every skill at once wastes context and has crashed sessions.
 
-- **UI / design / restyling / new pages** → read & follow **`frontend-design`**
-  (its brainstorm → critique-vs-defaults → build process, not a mechanical pass) and
-  **`web-design-guidelines`**. This is the taste standard. Match `preview/` alongside.
-- **Database: migrations, schema, queries, RLS** → **`supabase-postgres-best-practices`**.
-  Supabase is connected — use it to verify schema/state.
-- **React components / composition / performance** → **`vercel-react-best-practices`**
-  + **`vercel-composition-patterns`**.
-- **Verifying UI behavior in-browser** → **`webapp-testing`** (Playwright).
-- **Planning / phases / roadmap** → the **`gsd` suite**. NOTE:
-  `.planning/AQUAFLEET-HANDOFF.json` uses gsd's schema and is POPULATED BY HAND (it
-  was all-null until 2026-08-07), but gsd itself is not driving this project —
-  `phase`/`plan`/`task` stay null deliberately, because we do not run gsd phases and
-  inventing a phase number would be fiction. **Before leaning on gsd, report how it
-  fits with this project's existing workflow (preview/-as-spec, the commit discipline
-  below, the handoff file) so we adopt it deliberately, not blindly.**
-  - **Borrowing gsd's SCHEMA is not the same as giving gsd the PATH, and conflating
-    the two cost us three blanked files.** gsd's PostToolUse checkpoint treats
-    `.planning/HANDOFF.json` as its own and overwrites it unconditionally. Our copy
-    lives at `.planning/AQUAFLEET-HANDOFF.json` for that reason — see §5.
-
-- **Domain rules (money, stock, RPCs, invariants)** → read
-  `.claude/skills/aquafleet-domain/SKILL.md` at session start. This encodes
-  business logic constraints (FIFO invariant, money-core boundary, one-SKU-one-
-  warehouse, RPC conventions, counter-table pattern) that CLAUDE.md does not cover.
-  **Read it before any migration, RPC, or server action work.**
+- **UI / design / new pages** → **`frontend-design`** (follow its brainstorm →
+  critique-vs-defaults → build process, not a mechanical pass) +
+  **`web-design-guidelines`**. The taste standard. Match `preview/` alongside.
+- **DB: migrations, schema, queries, RLS** → **`supabase-postgres-best-practices`**.
+- **React composition / performance** → **`vercel-react-best-practices`** +
+  **`vercel-composition-patterns`**.
+- **Verifying UI in-browser** → **`webapp-testing`** (Playwright).
+- **Domain rules (money, stock, RPCs, invariants)** →
+  `.claude/skills/aquafleet-domain/SKILL.md` — FIFO invariant, money-core
+  boundary, one-SKU-one-warehouse, RPC conventions, counter-table pattern.
+  **Read it before any migration, RPC, or server-action work.**
+- **Planning / phases** → the **`gsd`** suite, but it does NOT drive this project.
+  `.planning/AQUAFLEET-HANDOFF.json` borrows gsd's schema and is populated BY
+  HAND; `phase`/`plan`/`task` stay null deliberately, because we do not run gsd
+  phases and inventing a phase number would be fiction. Before leaning on gsd,
+  report how it fits the existing workflow (preview/-as-spec, §5's commit
+  discipline, the handoff file) so it is adopted deliberately.
+  - **Borrowing gsd's SCHEMA is not giving gsd the PATH — conflating them cost
+    three blanked files.** Its PostToolUse checkpoint overwrites
+    `.planning/HANDOFF.json` unconditionally. Ours lives elsewhere for that reason.
 
 ---
 
 ## 5. Workflow discipline (non-negotiable)
 
-- **One logical unit per commit.** Each commit tsc-clean. `noUnusedLocals` +
-  `noUnusedParameters` are enforced — unused = build failure. Required params
-  kept for signature shape get an `_` prefix, never deleted.
-- **Explicit-path `git add`** — list each file. **NEVER `git add .`**
-- **HANDOFF files:**
-  - `.planning/HANDOFF.md` — session handoff, committed. Read at session start,
-    write at session end. Current state lives HERE, not in CLAUDE.md §7.
-  - `.planning/HANDOFF.json` (no prefix) — gsd plugin's checkpoint. Gitignored.
-    Never read for state, never stage.
-  - `preview/.planning/HANDOFF.json` — same, inside read-only `preview/`. Gitignored.
-- **Quote dynamic-route paths** in git commands: `git add 'app/fleet/[id]/page.tsx'`
-  — zsh globs `[id]` silently.
-- **Avoid `!` in commit messages** (zsh history expansion).
-- **Stage with single-line `git add`, then `git status`** to confirm before
-  committing. Multi-line paste has silently staged nothing before.
-- **Inspect the staged blob, not the working tree.** `git show :<path>` reads
-  what would be committed. A file can be correct on disk and blank in the index.
-- **Verify migration files on disk** (`ls supabase/migrations/ | tail -3` + `cat`)
-  BEFORE running in Supabase. Migrations have been "drafted in conversation" but
-  never written to disk — always verify.
-- **Code-then-migrate** for breaking schema changes: build code against the new
-  schema, run migration, verify in-browser, commit both together. Additive
-  migrations (new nullable/defaulted columns) are lower-risk.
+- **One logical unit per commit**, each tsc-clean. `noUnusedLocals` +
+  `noUnusedParameters` are enforced — unused = build failure. A param kept for
+  signature shape gets an `_` prefix, never deletion.
+- **Explicit-path `git add`**, listing each file. **NEVER `git add .`** Stage
+  with a single-line `git add`, then `git status` to confirm — a multi-line paste
+  has silently staged nothing before.
+- **Inspect the staged blob, not the working tree:** `git show :<path>` is what
+  would actually be committed. A file can be correct on disk and blank in the index.
+- **Quote dynamic-route paths:** `git add 'app/fleet/[id]/page.tsx'` — zsh globs
+  `[id]` silently. **Avoid `!` in commit messages** (history expansion).
+- **HANDOFF files:** `.planning/HANDOFF.md` is ours and committed — read at
+  session start, write at session end; current state lives THERE, not here.
+  `.planning/HANDOFF.json` and `preview/.planning/HANDOFF.json` are gsd's,
+  gitignored — never read for state, never stage.
+- **Migrations:** numbered sequentially (`00NN_name.sql`), **DRAFTED to disk and
+  never self-applied by Claude Code** — draft, stop, let Turki/the architect run
+  it. **Verify the file exists on disk** (`ls supabase/migrations/ | tail -3` +
+  `cat`) before it is run; migrations have been "drafted in conversation" and
+  never written. **Code-then-migrate** for breaking schema changes: build against
+  the new schema, migrate, verify in-browser, commit together. Additive changes
+  (new nullable/defaulted columns) are lower-risk.
 - **Turki verifies in-browser before every commit.** Nothing commits unverified.
-- **THE DATABASE OUTRANKS THE NOTES, for any question of DB state.** The
-  architect applies corrections through MCP — those touch the database and
-  **never touch the repo**, so they are invisible to Claude Code and leave
-  nothing in git to signal that a note went stale. If the live DB and a line in
-  `HANDOFF.md`/§7 disagree, **the DB won**: re-measure, act on the measurement,
-  then fix the note. Never re-raise an item because a note still lists it as
-  open. This is not hypothetical — one corrected trip was re-raised as an open
-  action across several sessions, and the note describing it was wrong about
-  both its paid status and its count.
-- **Re-measure a number before quoting it, including numbers already written in
-  our own files.** A figure in a handoff is a pointer, not evidence.
-- Migrations numbered sequentially (`00NN_name.sql`).
-- **Migrations DRAFTED to disk** — never self-applied by Claude Code through
-  Supabase MCP. Draft the file, stop, let Turki run it.
-- **Do NOT append build history to CLAUDE.md.** Session state goes in HANDOFF.md.
-  If this file exceeds 20KB, check for appended diary.
+- **THE DATABASE OUTRANKS THE NOTES on any question of DB state.** The architect
+  applies corrections through MCP: those touch the database and **never touch the
+  repo**, so they are invisible here and leave nothing in git to signal a note
+  went stale. If the live DB and a note disagree, **the DB won** — re-measure, act
+  on the measurement, then fix the note. Never re-raise an item because a note
+  still lists it open. Not hypothetical: one corrected trip was re-raised across
+  several sessions, and the note was wrong about both its paid status and its count.
+- **Re-measure a number before quoting it, including numbers in our own files.**
+  A figure in a handoff is a pointer, not evidence.
+- **No build history in this file.** It is rules only; state goes to HANDOFF.md.
+  Past 20KB, check for appended diary — and compress by re-verifying every claim,
+  not by trimming prose blind. Both prior compression passes found a stale fact;
+  the audit is the payoff, the bytes are the pretext.
 
 ---
 
-## 6. Key architecture locks (persistent — do not violate)
+## 6. Architecture locks (persistent — do not violate)
 
-- **Soft-delete, not hard-delete** for operational records: `terminated_at`,
-  `archived_at`. Terminated = pre-filter, never a state.
-- **Derived driver state** (`lib/driver-state.ts`): 4 states (on_leave > off_duty
-  > idle > active), server-computed. **Exactly TWO expressions:** TS helper +
-  `v_driver_state_now` (0106). `v_fleet_state_now` and `v_drivers_ops_now` compose
-  on the view. Drift guard asserts agreement at Dashboard load. Do not add a third.
-- **Water stations ≠ Operation stations** (0014). Separate, do NOT unify.
-- **`lib/project-colors.ts`** = shared id-hashed project color palette.
-- **EVERY VIEW REPLACEMENT RESTATES ITS SECURITY FOOTER:**
+- **Soft-delete, not hard-delete** for operational records (`terminated_at`,
+  `archived_at`). Terminated = a pre-filter, never a state.
+- **Derived driver state** (`lib/driver-state.ts`): 4 states, on_leave > off_duty
+  > idle > active, server-computed. **EXACTLY TWO EXPRESSIONS:** the TS helper and
+  `v_driver_state_now` (0106). `v_fleet_state_now` / `v_drivers_ops_now` compose on
+  the view. A drift guard asserts agreement at Dashboard load. Do not add a third.
+- **Water stations ≠ Operation stations** (0014). Separate; do NOT unify.
+- **`lib/project-colors.ts`** = the shared id-hashed project colour palette.
+- **Immutable keys** on lookup tables (`water_stations.key`) — a rename updates
+  the name only.
+- **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew.
+
+**WHAT SURVIVES A REPLACEMENT IS NOT OBVIOUS — AND WHAT DOES NOT IS A PERMISSION.**
+The next three rules are one lesson in three places.
+
+- **EVERY VIEW REPLACEMENT RESTATES ITS SECURITY FOOTER.** `create or replace
+  view` silently drops reloptions, and it does NOT refresh the view's comment
+  (same OID), so a stale comment outlives the branch it described.
 ```sql
   alter view public.X set (security_invoker = true);
   revoke all on public.X from anon;
   grant select on public.X to authenticated;
 ```
-  `create or replace view` silently drops reloptions. Re-measure after every
-  view change — the two counts matching is the check, not the number:
+  Re-measure after every view change — the two counts MATCHING is the check, not
+  the number:
 ```sql
   select count(*) as views,
          count(*) filter (where c.reloptions::text[] @> array['security_invoker=true']) as security_invoker,
@@ -169,146 +158,124 @@ relevant skill(s) **when the task calls for it**:
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where c.relkind = 'v' and n.nspname = 'public';
 ```
-- **`create or replace view` can only APPEND a column** (error 42P16). Cannot
-  insert, reorder, rename, or change type. Type changes from arithmetic (bare
-  `numeric` vs `numeric(12,2)`) also trigger it — fix with explicit cast:
-  `(case … end)::numeric(12,2)`. Verify type with `format_type(atttypid,atttypmod)`
-  on `pg_attribute`, not by reading the view body.
-- **A REDEFINED FUNCTION IS EXECUTE-TO-PUBLIC AGAIN. RE-REVOKE IN THE SAME
-  TRANSACTION.** Same class as the view footer above: what survives a
-  replacement is not obvious, and the thing that does not survive is a
-  permission. `create or replace function` and `drop`+`create` BOTH reset a
-  function's ACL to the Postgres default, which is `EXECUTE TO PUBLIC` — and
-  `anon` inherits PUBLIC, while the Supabase anon key ships in the client
-  bundle. **There is no default-privileges equivalent for functions** (0161's
-  `alter default privileges` covers TABLES only), so nothing makes this stick.
-
-  Every SECURITY DEFINER function, and every money or guarded RPC, must end with:
+- **`create or replace view` can only APPEND a column** (42P16) — cannot insert,
+  reorder, rename or retype. Arithmetic retypes too (bare `numeric` vs
+  `numeric(12,2)`); fix with an explicit cast, `(case … end)::numeric(12,2)`.
+  Verify with `format_type(atttypid, atttypmod)` on `pg_attribute`, never by
+  reading the view body.
+- **A REDEFINED FUNCTION IS EXECUTE-TO-PUBLIC AGAIN — RE-REVOKE IN THE SAME
+  TRANSACTION.** `create or replace function` and `drop`+`create` both reset the
+  ACL to the Postgres default, `EXECUTE TO PUBLIC`; `anon` inherits PUBLIC, and
+  the Supabase anon key ships in the client bundle. **There is no
+  default-privileges equivalent for functions** (0161's covers TABLES only), so
+  nothing makes this stick. Every SECURITY DEFINER function and every money or
+  guarded RPC ends with:
 ```sql
   revoke execute on function public.X(<exact identity args>) from public, anon;
 ```
-  `from public, anon` — BOTH. The offending grant is the PUBLIC one (an ACL
+  **`from public, anon` — BOTH.** The offending grant is the PUBLIC one (an ACL
   entry with an EMPTY grantee, `=X/postgres`); revoking from `anon` alone leaves
-  it and changes nothing. Then read it back — `has_function_privilege('anon',
-  …, 'execute')` must be false. Never assert this by pattern-matching `proacl`:
-  `'%=X/%'` also matches `postgres=X/postgres` and reports every function as
-  leaking.
-
-  **This is not hypothetical.** 0115 defined `issue_driver_payslip`; 0118
-  replaced it and did not re-revoke, leaving a SECURITY DEFINER money RPC
-  callable by anyone with the anon key — it bypassed RLS *and* 0161's table
-  revoke, because a definer runs as its owner. Proven reachable by probe (a
-  business-logic 23514, not a permission 42501) and closed in **0163**; **0164**
-  locked the three guarded RPCs for the same reason. The invariant to hold is
-  **zero NON-TRIGGER functions anon-executable** — trigger functions cannot be
-  called through PostgREST and four legitimately remain.
-
-- **Immutable keys** on lookup tables (`water_stations.key`) — rename updates
-  name only.
-- **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew.
+  it and changes nothing. Read it back with `has_function_privilege('anon', …,
+  'execute')` = false. **Never assert via `proacl` matching** — `'%=X/%'` also
+  matches `postgres=X/postgres` and reports every function as leaking.
+  Not hypothetical: 0115 defined `issue_driver_payslip`, 0118 replaced it without
+  re-revoking, and a SECURITY DEFINER money RPC sat callable by anyone with the
+  anon key — bypassing RLS *and* 0161's table revoke, because a definer runs as
+  its owner. Proven by probe (business-logic 23514, not permission 42501), closed
+  in **0163**; **0164** locked the guarded RPCs. Invariant: **zero NON-TRIGGER
+  functions anon-executable** (trigger functions are unreachable via PostgREST and
+  several legitimately remain).
+- **New tables in `public` still end with `revoke all on public.X from anon`,**
+  even though 0161 revoked anon everywhere and stopped future tables inheriting
+  grants. That default-privileges change only affects tables created AFTER it, so
+  on a fresh `db reset` every earlier migration creates its table first — and the
+  per-table line is what makes each migration correct read on its own.
 
 ---
 
-## 7. Current state & what's next
+## 7. Durable money & schema rules
 
-**Do NOT append build history to this file.** CLAUDE.md holds rules only.
-Current state lives in `.planning/HANDOFF.md` — read it at session start.
+**Not a status report.** What is built / in flight / open lives in
+`.planning/HANDOFF.md`. These are the rules that must survive any future change.
 
-- **DB:** migration 0153. 77/77 tables RLS-enabled, 48 views security_invoker, 0 anon-readable.
-  (Re-measured after 0153. It replaces one function — no view, no table — so the
-  counts are unchanged by construction, and were confirmed rather than assumed.)
-- **Built:** Dashboard, Fleet, Drivers & People, Finance/Invoice, Inventory,
-  Maintenance, Archive, Consumption, Search/Header, Reports, Water Station Cost,
-  Driver Payslips — all verified, no open bugs.
 - **A WRITE-OFF ROW CARRIES NO PAYMENT MODE (0143).** `archive_project_guarded`
-  records exactly **customer, project, amount, reason, actor**.
-  `customer_write_offs.payment_mode` existed 0139→0143, written on every forced
-  archive and **read by nothing**. Do not re-add it: a write-off is a frozen
-  AMOUNT, the mode the debt was owed under stays resolvable live from the
-  project, and `invoices.payment_mode` is the one snapshot genuinely read.
+  records exactly customer, project, amount, reason, actor.
+  `customer_write_offs.payment_mode` existed 0139→0143, was written on every
+  forced archive and **read by nothing**. Do not re-add: a write-off is a frozen
+  AMOUNT, the mode the debt was owed under stays resolvable live from the project,
+  and `invoices.payment_mode` is the one snapshot genuinely read.
   - **Dropping a column an RPC writes is ONE transaction, not two.** plpgsql
     bodies are not dependency-tracked, so `drop column` succeeds silently against
-    a live writer and the failure lands as 42703 at the next forced archive,
-    mid-override. Recreate the writer and drop the column together, then assert
-    the body with `pg_get_functiondef`. Bare drop over CASCADE — an unexpected
-    dependent should fail loudly.
-- **MONEY RULE (0142) — a recorded balance return is a DEBIT.** A row in
-  `customer_balance_returns` REDUCES spendable prepaid credit, same class as
-  consumption. Netted at FACE VALUE — a refund is cash leaving, not a taxable
-  supply, so no `× 1.15` — and never modelled as a negative top-up
-  (`topups_sar` means "money paid in"). Before 0142 nothing subtracted a return
-  and a refunded customer's credit stayed spendable after the money was gone.
+    a live writer and fails as 42703 at the next forced archive, mid-override.
+    Recreate the writer and drop the column together, then assert the body with
+    `pg_get_functiondef`. Bare drop over CASCADE — an unexpected dependent should
+    fail loudly.
+- **A RECORDED BALANCE RETURN IS A DEBIT (0142).** A `customer_balance_returns`
+  row REDUCES spendable prepaid credit, same class as consumption. Netted at FACE
+  VALUE — a refund is cash leaving, not a taxable supply, so no `× 1.15` — and
+  never modelled as a negative top-up (`topups_sar` means "money paid in"). Before
+  0142 nothing subtracted a return, so a refunded customer's credit stayed
+  spendable after the money was gone.
   - **EXACTLY TWO EXPRESSIONS, and it stays two:** `returnedTotal()` in
-    `lib/prepaid.ts` is the ONE returns summation on the TS side — every consumer
-    IMPORTS it rather than restating it, including `lib/invoice.ts` — and
+    `lib/prepaid.ts` is the ONE TS-side summation — every consumer IMPORTS it
+    rather than restating it, including `lib/invoice.ts` — and
     `v_customer_prepaid_balance` is the SQL side. `v_customer_amount_payable` and
-    `v_invoice_outstanding_live` inherit through `balance_sar`. Do not add a
-    third. (`buildStatementItems` consumes the return ROWS for the ledger, not
-    the summation — a different use of the same data, not a second expression.)
-- **ARCHIVE IS NO LONGER A ONE-WAY DOOR (0141).** `restore_customer_guarded`
-  un-archives a customer AND its project in one transaction on one timestamp,
-  and reverses an active write-off by **marking** it (`reversed_at`,
-  `reversed_by`) and KEEPING the row — amount/reason/actor stay frozen. It writes
-  **no balance**: never delete a `customer_balance_returns` row, never post a
-  compensating negative top-up to "undo" an archive.
-  - **Write-off suppression is ACTIVE-only, and the `and w.reversed_at is null`
+    `v_invoice_outstanding_live` inherit through `balance_sar`. Do not add a third.
+    (`buildStatementItems` consumes the return ROWS for the ledger, not the
+    summation — a different use of the same data, not a second expression.)
+- **ARCHIVE IS NOT A ONE-WAY DOOR (0141).** `restore_customer_guarded` un-archives
+  a customer AND its project in one transaction on one timestamp, and reverses an
+  active write-off by **marking** it (`reversed_at`, `reversed_by`) while KEEPING
+  the row — amount/reason/actor stay frozen. It writes **no balance**: never delete
+  a `customer_balance_returns` row, never post a compensating negative top-up to
+  "undo" an archive.
+  - **Write-off suppression is ACTIVE-only, and `and w.reversed_at is null`
     belongs in the JOIN condition** of `v_customer_amount_payable` and
     `v_invoice_outstanding_live`. In a WHERE clause it turns the LEFT JOIN inner
     and drops every customer who never had a write-off.
   - **The partial index and the conflict target are ONE change.**
     `customer_write_offs` has a partial unique index on active rows
     (`(customer_id) where reversed_at is null`, not a table-wide
-    `UNIQUE(customer_id)`), matched by `archive_project_guarded`'s
-    `on conflict (customer_id) where reversed_at is null`. Split them and you get
-    42P10, or — worse, silently — a re-archived debtor whose insert collides with
-    the old reversed row and writes nothing. **Any rewrite of that RPC must read
-    the conflict target back afterwards;** a body change that drops the `where`
-    clause is the easiest way to reintroduce this.
+    `UNIQUE(customer_id)`), matched by `archive_project_guarded`'s `on conflict
+    (customer_id) where reversed_at is null`. Split them and you get 42P10 — or,
+    worse and silently, a re-archived debtor whose insert collides with the old
+    reversed row and writes nothing. **Any rewrite of that RPC must read the
+    conflict target back afterwards.**
 - **A TRIP OWNS THE COMMISSION TERMS IT WAS DELIVERED UNDER (0152).**
   `trips.commission_mode` / `.commission_base_sar` / `.commission_bump_pct` are a
   COPY of `commission_config_at(project_id, trip_date)` taken at the delivery
   moment: all three or none (`trips_commission_terms_all_or_none`), NULL until
-  delivered and NULL forever for a trip with no project or no driver, re-stamped
-  on every re-delivery. `commission_base_sar` is the INPUT rate and
-  `commission_sar` is the MONEY — do not swap them in a select, which is why the
-  base column is not called `commission_value`.
-  - **VALUES, NEVER A FK TO `project_commission_history`.** That row is mutable in
+  delivered, NULL forever for a trip with no project or no driver, re-stamped on
+  every re-delivery. `commission_base_sar` is the INPUT RATE and `commission_sar`
+  is the MONEY — do not swap them in a select, which is why the base column is not
+  called `commission_value`.
+  - **VALUES, NEVER A FK to `project_commission_history`.** That row is mutable in
     place: `set_project_commission` upserts on `(project_id, effective_from)` and
     `created_at` is not in the SET list, so it dates the FIRST write. Measured on
-    R TTT, one row went 15.00 → 20.00 → 15.00 in an afternoon with `created_at`
-    frozen and its six trips carry 15/15/20/20/15/15 — a FK would have repriced
+    R TTT: one row went 15.00 → 20.00 → 15.00 in an afternoon with `created_at`
+    frozen, and its six trips carry 15/15/20/20/15/15 — a FK would have repriced
     two delivered trips twice. Full trace in 0152's header. Corollary:
-    `created_at` is NOT a change-moment signal; never build a freeze rule on it.
-  - **`recomputeDailyCommission` re-ranks, it does not re-rate.** It re-derives
+    **`created_at` is NOT a change-moment signal;** never build a freeze rule on it.
+  - **`recomputeDailyCommission` RE-RANKS, it does not RE-RATE.** It re-derives
     `commission_sar` from EACH trip's own frozen terms at that trip's live
     position — never reads `commission_config_at` for the bucket, never writes the
     three term columns. That resolver is read at ONE place: the delivery stamp in
     `priceDelivery`. Paid trips hold a position but are never re-stamped.
 - **`update_project_with_customer` DOES NOT TAKE A COMMISSION (0150 → 0153).**
-  The three parameters are gone; passing one is a PGRST202, which is the intended
-  loud failure. `set_project_commission` (0148) is the ONLY path that moves a
-  commission figure on an existing project, so no unrelated save can revert one
-  with a stale pre-fill. Do not re-add them.
+  The three parameters are gone; passing one is a PGRST202, the intended loud
+  failure. `set_project_commission` (0148) is the ONLY path that moves a commission
+  figure on an existing project, so no unrelated save can revert one from a stale
+  pre-fill. Do not re-add them.
   - **`create_project_with_customer` is a DIFFERENT function and keeps its three**
     — creation writes them and 0147's INSERT trigger makes them the baseline
     history row. The two RPCs' argument blocks are byte-identical around `p_rate`,
-    so a blind find-replace breaks project creation: disambiguate on
-    `p_project_id`.
+    so a blind find-replace breaks project creation: disambiguate on `p_project_id`.
   - **Dropping a parameter is a DROP+CREATE, and DROP DISCARDS THE ACL.** Postgres
     allows only TRAILING defaults, which is why 0151 had to MOVE the three before
-    0153 could remove them. A fresh function is EXECUTE-to-PUBLIC — re-issue the
-    grants in the same transaction and read the ACL back, or a money RPC silently
-    widens to anon.
-- **Current work:** none. The delivery-moment commission freeze and the
-  three-step parameter drop both shipped. See HANDOFF.md.
-- **Deferred:** effective-dated CUSTOMER rates (`projects.rate_per_trip_sar` is
-  still a single live column — no history table, no `rate_at()` resolver;
-  **driver COMMISSION is already effective-dated**, 0146–0149, so this item is
-  the rate half only, and 0128's `trips.rate_sar` freeze is a per-trip snapshot,
-  not a rate history), Route Optimization, Predictive AI, IoT, drivers/staff
-  table unification (v2).
+    0153 could remove them. See §6's function rule — this is the same trap.
 
-**Session discipline:**
-- Read `.planning/HANDOFF.md` for what's in progress — do NOT ask CLAUDE.md.
-- Write `.planning/HANDOFF.md` at session end — do NOT append to this file.
-- If this file exceeds 20KB, something is wrong — check for appended build diary.
+**Deferred:** effective-dated CUSTOMER rates (`projects.rate_per_trip_sar` is
+still one live column — no history table, no `rate_at()` resolver; **driver
+COMMISSION is already effective-dated**, 0146–0149, so this is the rate half only,
+and 0128's `trips.rate_sar` freeze is a per-trip snapshot, not a rate history),
+Route Optimization, Predictive AI, IoT, drivers/staff table unification (v2).
