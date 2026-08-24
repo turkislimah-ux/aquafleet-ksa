@@ -20,6 +20,11 @@ a 50+ year-old family water-transport & treatment business in Riyadh (~40 trucks
 3 stations). Non-technical founder (Turki) directs. Manages trucks, drivers,
 staff, trips, projects, commissions, leave, stations, finance/invoicing.
 
+**Those two figures describe the BUSINESS, not the database.** The live rows are a
+partial working set and have never matched them. Do NOT "correct" this line from a
+`count(*)` — it is Turki's fact about his own fleet, not a measurement, and it is
+the one number in this file that re-measuring cannot settle. Ask him instead.
+
 - **Stack:** Next.js (App Router) + Supabase (Postgres) + Tailwind. TypeScript.
 - **Repo:** `~/aquafleet-ksa`, GitHub `turkislimah-ux/aquafleet-ksa`, branch `main`.
 - **Terminal:** macOS zsh. **Migrations run in the Supabase SQL Editor (browser).**
