@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at `de7174c` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT. DB at 0166. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
+# SESSION HANDOFF — closes at `aaeb255` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER. DB at 0166, unchanged — the filter needed no migration. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -7,7 +7,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `de7174c`, not recalled
+## CURRENT STATE — MEASURED at `aaeb255`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
@@ -42,7 +42,28 @@ files with `ls` is what had actually been done — while the block below claims 
 PASS. Existing and passing are different claims and `ls` only answers the first.
 They were then run. Counting artefacts is not the same as exercising them.
 
-    HEAD              de7174c + the docs commits that carry this file
+**A THIRD REFRESH RAN AFTER THE WAREHOUSE FILTER, and this one had to do more
+work — because the licence above says so.** That paragraph granted an exemption
+from the multi-minute build ON THE CONDITION that no source was touched, and
+ended "if a future session touches source, that licence is void — re-run the
+build." This session touched three `.tsx` files. The licence was therefore void
+and **the full `./scripts/safe-build.sh` was re-run: clean, 17 routes,
+middleware still 83 kB.** Recording this because a conditional exemption is only
+worth writing if the next session actually honours the condition rather than
+inheriting the conclusion; the value of that paragraph was tested here and it
+held. `tsc --noEmit` clean, and all eight `scripts/*check*.ts` suites EXECUTED,
+8/8 pass — run, not listed.
+
+**EXACTLY ONE FIGURE MOVED, AND NO COMMIT EXPLAINS IT:** `v_active_alerts` went
+9 rows → 10. Nothing in this session's diff touches alerts; the view derives from
+live operational data — a date crossed, an expiry came due — so the row count
+drifted on its own with the repo standing still. **A figure in this file can go
+stale with ZERO commits behind it,** which is the strongest version of §5's
+re-measure rule: `git log` is not a sufficient trigger for re-checking a number,
+because some numbers do not answer to git at all. Everything else came back
+identical, including all eight security counts.
+
+    HEAD              aaeb255 + the docs commits that carry this file
     branch main   tree clean   in sync with origin
     migration files   164, highest 0166_deferred_deliveries.sql        (was 163 / 0165)
     live DB           0166  (20260824111246 deferred_deliveries)       (was 0165)
@@ -51,9 +72,10 @@ They were then run. Counting artefacts is not the same as exercising them.
     tables            84, all 84 RLS-enabled                           (was 83 / 83)
     anon table grants 0     anon-executable non-trigger functions 0
     storage buckets   12
-    v_active_alerts   9 rows, 9 distinct identities
+    v_active_alerts   10 rows, 10 distinct identities                  (was 9 / 9)
     tsc --noEmit      clean;  8/8 check suites pass (scripts/*check*.ts)
     next build        clean, 17 routes + middleware;  middleware 83 kB
+                      (RE-RUN this session — source was touched, licence void)
 
 **A CLEAN TREE DOES NOT MEAN A PUSHED TREE, AND THIS IS THE SECOND OCCURRENCE.**
 For most of this refresh `de7174c` sat committed, verified and unpushed while
@@ -75,7 +97,11 @@ convention was already here and got briefly broken during this refresh.
 **The middleware figure is a GUARD, not trivia.** 83 kB is the number to compare
 against after ANY change that touches `lib/nav.ts` — it re-exports `lib/routes.ts`,
 and routing an Edge import through it drags `lucide-react` into the middleware
-bundle. Measured at 83 kB after this session's `lib/nav.ts` edit, unchanged.
+bundle. It was measured at 83 kB after the `lib/nav.ts` edit that introduced the
+guard, and re-measured at 83 kB at `aaeb255` — still unchanged. **"This session"
+was the original wording and it rotted the moment a later session read it**, since
+every session is "this" one to whoever is reading; a guard value has to name the
+commit it was taken at or it cannot be compared against anything.
 
 **The route count in this file said `18/18` until this refresh and it was WRONG —
 the build prints 17 routes plus a middleware line.** Whoever wrote it counted the
@@ -239,11 +265,12 @@ reconstructed. If a non-derivable event is ever needed, re-add it deliberately �
 
 ## SESSION LEDGER — 2026-08-23/24
 
-Twenty-three commits, `ec3d293..de7174c`, counted with `git rev-list --count`
-rather than added up from memory, plus the docs commits that carry this file —
-absorbed rather than enumerated, for the reason given in CURRENT STATE. Ten
-migrations (0157–0166), every one applied by the architect, none self-applied.
-Detail for each is in the sections below.
+Thirty-two commits, `ec3d293..aaeb255`, counted with `git rev-list --count`
+rather than added up from memory — 23 of them to `de7174c`, then 9 more (six
+docs, one of which is this file's own refresh, plus the warehouse filter). Ten
+migrations (0157–0166), every one applied by the architect, none self-applied;
+**the warehouse filter added none — it is the first shipped unit of this stretch
+with no schema change at all.** Detail for each is in the sections below.
 
     4ee4bb0  0157  issue_reports + issue-report-images bucket    MIGRATION
     04f4750        settings popup shell + company relocated
@@ -273,6 +300,8 @@ Detail for each is in the sections below.
     3799909  docs  HANDOFF read top-to-bottom: 4th stale figure, archive fenced
     b75daae  docs  CLAUDE.md audited claim-by-claim; §1's figures fenced
     44cfcdf  docs  §1 trucks/stations CLOSED — Turki confirmed them
+    08ad87d  docs  HANDOFF records the CLAUDE.md audit session
+    aaeb255        Maintenance warehouse filter on the WO parts picker
 
 **0163 landed BEFORE 0162 on purpose** — the security fix went first and got its
 own commit; the consistency fixes followed. The numbers are out of order in the
@@ -317,6 +346,85 @@ substring counted. Expect it on every future sweep.
 
 ---
 
+## SHIPPED — MAINTENANCE WAREHOUSE FILTER (`aaeb255`). NO MIGRATION, NO RPC.
+
+A display-only warehouse filter on the parts picker inside the in-house Work
+Order modal (`app/maintenance/NewWorkOrderModal.tsx` — one component serving both
+create AND edit, so the filter lands on both at once). Three files, +175/−4,
+verified in-browser by Turki against an 11-point checklist before commit.
+
+**THE WHOLE DESIGN IS ONE CONTRACT: FILTER WHAT IS VISIBLE, NEVER WHAT IS
+SELECTED.** And it is enforced structurally rather than by convention, which is
+the part worth carrying forward:
+
+- `visibleParts` (the filter) feeds `partsByCategory` and **nothing else**.
+- Selection stays in `qtyByPart`, keyed by part id. `lines` derives from that.
+- `partsById` is still built from the FULL `parts` array, so a filtered-out part
+  still prices into `partsCost` / `estimatedCost`.
+
+So a hidden part stays reserved, keeps its qty, and saves normally. The check
+that proves it is a grep, not a claim: every reference to `warehouseFilter` and
+`visibleParts` in that file lands in a `useMemo` or in JSX — **none reaches
+`lines`, `partsCost`, `estimatedCost`, or `submit()`.** Re-run that grep before
+touching this; it is the invariant, and it is cheap.
+
+**THE CONSEQUENCE OF THAT CONTRACT NEEDED ITS OWN UI, and this is the general
+lesson:** if a filter deliberately does not drop selections, the total can exceed
+the visible rows and read as a bug. `hiddenSelectedCount` drives a muted line —
+"N reserved parts are in another warehouse — still reserved, still in the
+estimate above." **A correct invariant that the user cannot see looks like a
+defect.** Declared AFTER `lines`/`partsById` on purpose: a `useMemo` reading a
+`const` declared below it throws at runtime (TDZ), which this repo has already
+been bitten by once.
+
+Design calls, all Claude Code's per `CLAUDE.md` §2:
+
+- **Segmented pills, not a `<select>`.** Two warehouses plus "All" is three
+  options; a dropdown hides a three-item list behind a click and shows no counts.
+- **Pill counts derive from the FULL catalog, not the visible list** — so a pill
+  states a fixed fact instead of a number that shifts with whichever pill is
+  active.
+- **The whole row is hidden at ≤ 1 warehouse.** A filter offering only "All"
+  cannot act.
+- **Warehouse name appended to the SKU line only while unfiltered.** Once a pill
+  is on, every visible row is in that warehouse and repeating it is noise.
+- **Names stay English in both languages** — `warehouses` has no `name_ar` by
+  schema design (db-types.ts: "internal-only, never customer-facing"). Not an
+  i18n gap; do not "fix" it.
+- **Inline `lang === "en" ? … : …` for the three new strings.** `common.warehouse`
+  does not exist in `lib/i18n.ts` and one label does not justify widening that
+  namespace — matches this file's existing "No parts reserved yet".
+
+**NO RESET EFFECT, and the reason is a fact about the CALLER, not the modal.**
+Both call sites in `MaintenanceClient.tsx` render conditionally (`{newWOOpen &&
+…}` / `{editingWo && …}`), so closing UNMOUNTS the component and reopening re-runs
+the `useState` initialiser at `"all"`. An `useEffect` keyed on an `open` prop
+would have been dead code. Verified by reading both call sites, not assumed.
+
+**DATA: NO MIGRATION WAS NEEDED, and that was established by measuring, not by
+being told.** `parts` already carried `warehouse_id` and `app/maintenance/page.tsx`
+already selected it, so the only addition is a two-column `warehouses` read
+mirroring `app/consumption/page.tsx`'s identical one. That read is **deliberately
+not filtered to `active`** — the filter always offers "All", so an inactive
+warehouse still holding parts needs a pill to isolate it; an empty one renders a
+0 count rather than vanishing.
+
+The brief stated the data facts; they were re-measured anyway, with page.tsx's own
+predicates (`parts` filtered to `active`, `warehouses` unfiltered) rather than a
+bare `count(*)` — §6's pre-filter rule:
+
+    warehouses          2, both active
+    active parts        10      Manfuha Station 3   Sultana Warehouse 7
+    null warehouse_id   0       orphan FK 0
+
+**3 + 7 = 10 is the check, not the individual numbers.** The per-warehouse counts
+summing to the "All" count is what proves no part is unreachable under every
+pill — a null or orphan `warehouse_id` would have produced a row visible only
+under "All", and the UI gives no hint that such a row exists. Re-run that sum if
+parts ever gain a nullable warehouse.
+
+---
+
 ## THE CLAUDE.md AUDIT (`b75daae` + `44cfcdf`). DOCS ONLY — NO CODE, NO SCHEMA.
 
 `CLAUDE.md` got the same top-to-bottom, claim-by-claim treatment this file got at
@@ -324,11 +432,13 @@ substring counted. Expect it on every future sweep.
 was not trimmed — §5 says compress by re-verifying, and the verifying is the
 payoff; it grew six lines and sits at 17,700 of its 20,480 budget.
 
-The header of this file still names `de7174c` and still says "nothing queued",
-both correct: these were docs commits, and the convention of naming the FEATURE
-commit and absorbing docs commits is what kept the header from needing a rewrite.
-That convention was broken and restored during the previous refresh; this is the
-first refresh where it simply worked.
+At the time this section was written the header still named `de7174c`, correctly:
+these were docs commits, and the convention of naming the FEATURE commit and
+absorbing docs commits is what kept the header from needing a rewrite. That
+convention was broken and restored during the previous refresh; this was the
+first refresh where it simply worked. **The header has since moved to `aaeb255`
+— a FEATURE commit, which is exactly when it is SUPPOSED to move.** The
+convention is not "never touch the header", it is "docs commits do not move it".
 
 What was checked, listed so the NEXT audit starts from a baseline instead of
 repeating this one:
@@ -725,8 +835,12 @@ header carries the reasoning.)*
    native speaker.** It renders correctly and the notification day-counts decline
    properly (`pluralDays()` handles 1 يوم / 2 يومان / 3-10 أيام / 11+ يومًا), but
    every Arabic string in all three surfaces is Claude Code's best effort and Turki
-   has not done a wording pass. It grew a lot in this session — the whole settings
-   popup is bilingual. Cheap to correct now, awkward once it is muscle memory.
+   has not done a wording pass. It grew a lot in the settings work — the whole
+   settings popup is bilingual — and `aaeb255` added three more strings in the
+   Maintenance parts picker ("كل المستودعات", "المستودع", "لا توجد قطع في هذا
+   المستودع", plus the hidden-reservations sentence). **The list is no longer
+   three surfaces; treat it as "every Arabic string Claude Code has written".**
+   Cheap to correct now, awkward once it is muscle memory.
 
 2. **LEAVE HISTORY IN THE PROFILE IS DEFERRED TO RBAC. Do not re-raise it as a
    gap.** It was asked for during 2.2c and deliberately not built. The reason is
