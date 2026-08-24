@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at `de7174c`, pushed at `6d4eb05` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT. DB at 0166. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
+# SESSION HANDOFF — closes at `de7174c` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT. DB at 0166. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -16,8 +16,8 @@ parentheses**, because the old value is the one a reader would otherwise carry
 forward. Four moved in this block (migration files, live DB, tables, origin sync)
 and a fifth below it — `set_updated_at()` went from three tables to four.
 
-    HEAD              6d4eb05 (de7174c + the doc commit that carries this file)
-    branch main   tree clean   IN SYNC with origin, pushed 807d28e..6d4eb05
+    HEAD              de7174c + the docs commits that carry this file
+    branch main   tree clean   in sync with origin
     migration files   164, highest 0166_deferred_deliveries.sql        (was 163 / 0165)
     live DB           0166  (20260824111246 deferred_deliveries)       (was 0165)
     CLAUDE.md         17,301 bytes (§5 threshold 20,480 — 3,179 of headroom)
@@ -32,7 +32,13 @@ and a fifth below it — `set_updated_at()` went from three tables to four.
 **A CLEAN TREE DOES NOT MEAN A PUSHED TREE — AND THIS IS THE SECOND TIME.** For
 most of this refresh `de7174c` sat committed, verified and UNPUSHED while
 `git status` said "working tree clean": that message is silent about `[ahead N]`.
-It is pushed now (`807d28e..6d4eb05`), so the block above is accurate.
+It is pushed now, so the block above is accurate.
+
+**Which is also why the HEAD line names the FEATURE commit and absorbs the docs
+commits rather than naming them.** A line that quotes its own commit hash is wrong
+the instant it is committed, and correcting it needs another commit that is wrong
+the same way — the fix is phrasing that cannot go stale, not a faster chase. That
+convention was already here and was briefly broken during this refresh.
 
 **The identical thing happened once before and is recorded further down this file**
 — `e65d980` was committed-but-unpushed at `[ahead 1]` while the handoff's own §2
@@ -207,9 +213,11 @@ reconstructed. If a non-derivable event is ever needed, re-add it deliberately �
 
 ## SESSION LEDGER — 2026-08-23/24
 
-Twenty-four commits, `ec3d293..6d4eb05`, counted with `git rev-list --count`
-rather than added up from memory. Ten migrations (0157–0166), every one applied by
-the architect, none self-applied. Detail for each is in the sections below.
+Twenty-three commits, `ec3d293..de7174c`, counted with `git rev-list --count`
+rather than added up from memory, plus the docs commits that carry this file —
+absorbed rather than enumerated, for the reason given in CURRENT STATE. Ten
+migrations (0157–0166), every one applied by the architect, none self-applied.
+Detail for each is in the sections below.
 
     4ee4bb0  0157  issue_reports + issue-report-images bucket    MIGRATION
     04f4750        settings popup shell + company relocated
@@ -234,7 +242,8 @@ the architect, none self-applied. Detail for each is in the sections below.
     16854d6  docs  close warning_days item; record it was a VIEW
     807d28e  0166  deferred_deliveries side-log                   MIGRATION
     de7174c        Daily Trips report in the Reports pack
-    6d4eb05  docs  HANDOFF refreshed to de7174c, 3 figures fixed
+    6d4eb05+ docs  HANDOFF refreshed to de7174c, 3 stale figures fixed
+                   (+ the follow-ups correcting this file's push state)
 
 **0163 landed BEFORE 0162 on purpose** — the security fix went first and got its
 own commit; the consistency fixes followed. The numbers are out of order in the
