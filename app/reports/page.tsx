@@ -1,13 +1,22 @@
 // Reports — server fetch, client island. Same split as every other page.
 //
-// EVERY NUMBER ON THIS PAGE COMES FROM A VIEW (migration 0098). That is the
+// EVERY METRIC ON THIS PAGE COMES FROM A VIEW (migration 0098). That is the
 // contract, not a style preference: the semantic layer defines each metric
 // once in SQL so this page, the statements tab, and a future AI agent reading
 // the same views cannot disagree about what "revenue" means. Nothing here
-// selects a base table and adds it up.
+// selects a base table and adds it up into a figure a view already publishes.
 //
-// Which is also why this file fetches views and nothing else — if a number is
-// missing, the fix is a migration, not a join added here.
+// So if a METRIC is missing, the fix is a migration, not a join added here.
+//
+// FOUR BASE-TABLE READS SIT BELOW, and each one is marked where it happens.
+// None of them is a metric. The expenses editor fetches the rows it EDITS
+// (every expense FIGURE still comes from a view), and the three VAT source
+// tables feed a LIST that prints each document's own vat_sar beside a label
+// saying where it came from — no total, no net, no arithmetic across rows, and
+// no view publishes supplier VAT in the first place. The contract's own test
+// is "could this number disagree with what the same view returns"; with
+// nothing derived and no competing view, there is nothing to disagree with.
+// Adding a fifth needs that test answered out loud, in a comment, right here.
 //
 // TWO TABS, both built: Overview (KPIs and charts) and Reports (the printable
 // statement pack). This file fetches every view both of them read, in one
@@ -34,6 +43,7 @@ import type {
   RevenueInvoiceRow, SalesReturnRow, CommissionsRow, CommissionsPaidRow,
   MetricDictionaryRow, OperationsByDriverRow, InvoiceOutstandingLiveRow,
   PayslipBasisRow, IssuedPayslipRow, DriverCommissionByProjectRow,
+  VatSourceDocRow,
 } from "@/lib/reports";
 import ReportsClient from "./ReportsClient";
 
@@ -61,6 +71,9 @@ export default async function ReportsPage() {
     issuedPayslipsRes,
     driverCommissionRes,
     outstandingLiveRes,
+    vatReceiptsRes,
+    vatOrdersRes,
+    vatWorkshopRes,
   ] = await Promise.all([
     supabase.from("v_pnl_monthly").select("*").order("month"),
     supabase.from("v_collections_monthly").select("*").order("month"),
@@ -80,7 +93,7 @@ export default async function ReportsPage() {
     // total, since that is the ranking the card presents.
     supabase.from("v_maintenance_cost_per_truck_monthly").select("*")
       .order("total_maintenance_sar", { ascending: false }),
-    // The ONE base-table read on this page. These are the SOURCE ROWS the
+    // BASE TABLE (1 of 4 — see the header). These are the SOURCE ROWS the
     // expenses editor manages, not a metric — every expense FIGURE shown still
     // comes from v_expenses_monthly / v_expenses_by_category. Editing records
     // and reporting totals stay separate paths on purpose.
@@ -137,6 +150,41 @@ export default async function ReportsPage() {
     // columns travelled unread for a year. No .order() either — every consumer
     // indexes this by invoice_id, so row order is not observable.
     supabase.from("v_invoice_outstanding_live").select("invoice_id, outstanding_sar"),
+    // VAT BY SOURCE — BASE TABLES (2, 3 and 4 of 4 — see the header).
+    //
+    // THE RULE AT THE TOP OF THIS FILE IS NOT BENT HERE. It bars adding base
+    // rows up to restate a metric SQL owns; the panel these back is an
+    // ITEMISED LIST — every VAT amount printed beside the source it came from,
+    // nothing summed across sources, nothing netted — so there is no derived
+    // figure at all. No view exposes supplier VAT in any case, and asking for
+    // one to hold a list that does no arithmetic would be a view that defines
+    // nothing.
+    //
+    // There is no Zakat fetch, deliberately: 2.5 % of a figure already on
+    // screen is arithmetic, not a metric, so it is computed by
+    // indicativeZakat() in lib/reports.ts. And no sales-VAT fetch —
+    // v_revenue_invoices.vat_sar already defines it and arrives as `invoices`
+    // below, so the panel sums those rather than restating them.
+    //
+    // THE DATE COLUMN PER SOURCE IS A DECISION, taken here so all three sit in
+    // one place, and each matches the statement that already reports the same
+    // documents:
+    //   stock_receipts.received_on   — v_purchasing_spend_monthly's own basis,
+    //       so this line and the Costs statement's purchasing spend cover the
+    //       same receipts.
+    //   purchase_orders.request_date — when the order was RAISED. Nothing else
+    //       in the pack reports POs, and request_date is the only NOT NULL
+    //       date on the table, so it is the one date every status has.
+    //   workshop_payments.invoice_date, created_at as fallback — exactly
+    //       v_os_cost_monthly's coalesce(invoice_date, created_at::date), so a
+    //       repair lands in the same period here as in "Outsourced repairs".
+    //
+    // No .order() on any of the three: the panel filters and sums, so row
+    // order is not observable. Explicit column lists because these are wide
+    // operational tables and the panel reads three fields from each.
+    supabase.from("stock_receipts").select("received_on, vat_sar, status"),
+    supabase.from("purchase_orders").select("request_date, vat_sar, status"),
+    supabase.from("workshop_payments").select("invoice_date, created_at, vat_sar"),
   ]);
 
   // One honest error line beats ten empty cards that look like real zeros.
@@ -152,7 +200,15 @@ export default async function ReportsPage() {
     commissionsPaidRes.error?.message ?? metricsRes.error?.message ??
     opsByDriverRes.error?.message ?? payslipBasisRes.error?.message ??
     issuedPayslipsRes.error?.message ?? driverCommissionRes.error?.message ??
-    outstandingLiveRes.error?.message ?? null;
+    outstandingLiveRes.error?.message ?? vatReceiptsRes.error?.message ??
+    vatOrdersRes.error?.message ?? vatWorkshopRes.error?.message ?? null;
+
+  // The three VAT sources ARE in the chain above, unlike an earlier attempt at
+  // this panel that carried an "unavailable" flag for them. That flag existed
+  // to cover a reporting view that had never been created; these are base
+  // tables the purchasing and workshop screens already read, so a failure here
+  // is a real fault and belongs in the page's one honest error line rather
+  // than in a per-panel empty state.
 
   const pnl: PnlRow[] = ((pnlRes.data ?? []) as Row[]).map((r) => ({
     month: String(r.month),
@@ -295,6 +351,36 @@ export default async function ReportsPage() {
     operating_margin_pct: nOrNull(r.operating_margin_pct),
     filling_cost_sar: n(r.filling_cost_sar),
     filling_uncosted_trips: n(r.filling_uncosted_trips),
+  }));
+
+  // The three VAT sources, normalised to ONE shape here at the boundary. Each
+  // table's own date column is resolved in this block and nowhere else, so the
+  // panel filters `on` without needing to know which table a row came from —
+  // and the basis for each source is stated once, at the fetch above.
+  const vatStockReceipts: VatSourceDocRow[] = ((vatReceiptsRes.data ?? []) as Row[]).map((r) => ({
+    on: String(r.received_on),
+    vat_sar: n(r.vat_sar),
+    rejected: r.status === "rejected",
+  }));
+
+  const vatPurchaseOrders: VatSourceDocRow[] = ((vatOrdersRes.data ?? []) as Row[]).map((r) => ({
+    on: String(r.request_date),
+    vat_sar: n(r.vat_sar),
+    rejected: r.status === "rejected",
+  }));
+
+  // invoice_date is nullable, so created_at is the fallback — the SAME rule
+  // v_os_cost_monthly applies, which is what keeps a repair in the same period
+  // here as in "Outsourced repairs" on the statement above. Slicing the ISO
+  // timestamp takes its UTC date, which is exactly what that view's
+  // `created_at::date` produces under the API role's UTC session.
+  //
+  // `rejected` is always false: workshop_payments has no status column, and a
+  // repair invoice is not something the workshop screens reject.
+  const vatWorkshopPayments: VatSourceDocRow[] = ((vatWorkshopRes.data ?? []) as Row[]).map((r) => ({
+    on: r.invoice_date ? String(r.invoice_date) : String(r.created_at).slice(0, 10),
+    vat_sar: n(r.vat_sar),
+    rejected: false,
   }));
 
   const expenseCategories: ExpenseCategoryPeriodRow[] = ((expCatPeriodRes.data ?? []) as Row[]).map((r) => ({
@@ -466,6 +552,9 @@ export default async function ReportsPage() {
       expenses={expenses}
       today={todayKey()}
       pnlPeriods={pnlPeriods}
+      vatStockReceipts={vatStockReceipts}
+      vatPurchaseOrders={vatPurchaseOrders}
+      vatWorkshopPayments={vatWorkshopPayments}
       expenseCategories={expenseCategories}
       pnl={pnl}
       collections={collections}

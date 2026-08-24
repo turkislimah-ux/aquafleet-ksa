@@ -15,15 +15,46 @@
 // StatementViews.tsx, a leaf module it imports one-way, except Daily Trips —
 // see the note on its entry below.
 //
-// READS v_pnl_by_period AND v_expenses_by_category_period, NOTHING ELSE. Both
-// carry all three grains (0100), so switching between monthly, quarterly and
-// yearly changes which rows are selected — it never changes how a figure is
-// computed. That is the point: the margin for a quarter is recomputed in SQL
-// from that quarter's own revenue, because averaging monthly margins flips the
-// sign on live data (Q3 2026 is -38.7% correctly, +20.5% if averaged).
+// The P&L reads v_pnl_by_period and v_expenses_by_category_period. Both carry
+// all three grains (0100), so switching between monthly, quarterly and yearly
+// changes which rows are selected — it never changes how a figure is computed.
+// That is the point: the margin for a quarter is recomputed in SQL from that
+// quarter's own revenue, because averaging monthly margins flips the sign on
+// live data (Q3 2026 is -38.7% correctly, +20.5% if averaged).
+//
+// TWO BLOCKS SIT UNDER IT, and neither touches a P&L figure. NEITHER HAS A
+// MIGRATION NUMBER, because neither needed a migration — that is the whole
+// shape of both: one is arithmetic on a figure already rendered, the other is
+// a list of rows read straight from the tables that record them.
+//
+//   * ZAKAT — an INDICATIVE 2.5% estimate, computed HERE by indicativeZakat()
+//     from the net profit this statement already displays. No view, no fetch:
+//     multiplying a number already on screen is arithmetic, not a metric, and
+//     there is no SQL expression of Zakat for it to disagree with. The estimate
+//     is not a measurement and must never be printed without its caveat.
+//     Corporate income tax is NOT modelled and must not be: it applies to
+//     foreign/mixed ownership, and this company is 100% Saudi-owned.
+//
+//   * VAT — an ITEMISED LIST, DISPLAY ONLY. VAT is a liability collected for
+//     ZATCA, never income or cost, so nothing in that panel is added to,
+//     subtracted from, or netted against the statement above it.
+//
+//     NOTHING IN IT IS TOTALLED OR NETTED EITHER, and that is the design
+//     rather than an omission. Sales VAT is money collected FROM customers and
+//     the other three sources are VAT paid TO suppliers, so a sum across them
+//     is not a quantity of anything; and a delivered purchase order appears on
+//     both the "ordered" and the "delivered" line, the same money at two
+//     stages. Listing each amount beside its source dissolves the
+//     double-counting question instead of answering it — which is why there is
+//     no net row, no total, and no "payable to ZATCA".
+//
+//     Sales VAT is summed from `invoices` (v_revenue_invoices.vat_sar), which
+//     already defines it. The three supplier sources are base-table rows
+//     normalised in page.tsx, because no view exposes supplier VAT — and a
+//     view holding a list that performs no arithmetic would define nothing.
 //
 // The only arithmetic here is variance between two periods — comparing two
-// figures the view produced, which is what lib/reports.ts delta() does
+// figures the views produced, which is what lib/reports.ts delta() does
 // everywhere else on this page.
 
 import { useEffect, useMemo, useState } from "react";
@@ -45,6 +76,7 @@ import {
   type OperationsByDriverRow,
   type PayslipBasisRow, type IssuedPayslipRow,
   type DriverCommissionByProjectRow,
+  type VatSourceDocRow, indicativeZakat,
 } from "@/lib/reports";
 import {
   RevenueStatement, ReceivablesStatement, CostStatement,
@@ -96,6 +128,14 @@ const STATEMENT_KEYS = [
 
 type Props = {
   pnlPeriods: PnlPeriodRow[];
+  /**
+   * VAT PAID TO SUPPLIERS, one array per source, document grain. Kept
+   * separate rather than concatenated: each renders its own line under its own
+   * label, and nothing is ever summed across two of them.
+   */
+  vatStockReceipts: VatSourceDocRow[];
+  vatPurchaseOrders: VatSourceDocRow[];
+  vatWorkshopPayments: VatSourceDocRow[];
   expenseCategories: ExpenseCategoryPeriodRow[];
   invoices: RevenueInvoiceRow[];
   /** 0137 — joined to `invoices` by invoice_id. Read by BOTH consumers below. */
@@ -123,7 +163,8 @@ type Props = {
 };
 
 export default function StatementsTab({
-  pnlPeriods, expenseCategories, invoices, outstandingLive, salesReturns, receivables, aging,
+  pnlPeriods, vatStockReceipts, vatPurchaseOrders, vatWorkshopPayments,
+  expenseCategories, invoices, outstandingLive, salesReturns, receivables, aging,
   maintPerTruck, purchasing, payroll, commissions, commissionsPaid, operations,
   filling, fillingByStation,
   collections, metrics, perTruck, opsByDriver, payslipBasis, issuedPayslips, driverCommission, today, onManageExpenses,
@@ -283,6 +324,53 @@ export default function StatementsTab({
   const monthsCovered = monthsIn(operations, current.period_start, current.period_end);
   const multiMonth = monthsCovered.length > 1;
 
+  // Indicative Zakat for this period and the one before it. Arithmetic
+  // on a figure this component already displays — see indicativeZakat() for why
+  // that does not breach the semantic-layer rule. Both sides come from the same
+  // function, so the variance column compares like with like.
+  const zakat = indicativeZakat(current.net_profit_sar);
+  const priorZakat = prior ? indicativeZakat(prior.net_profit_sar) : null;
+
+  // VAT for the period — FOUR INDEPENDENT PASSES, one per source, and
+  // deliberately not a reconciliation. Nothing below adds one source to
+  // another and there is no total: see the panel's own footnotes for why a sum
+  // across these lines would not be a quantity of anything.
+  //
+  // Plain calls, NOT useMemo: everything from here down runs after the
+  // `if (!current)` return above, so a hook here would be a conditional hook.
+  // The neighbouring monthsIn()/sumOver() calls are un-memoized for the same
+  // reason.
+  //
+  // `on` is a plain YYYY-MM-DD and so are period_start and period_end, so a
+  // string comparison IS a date comparison — the same filter RevenueStatement
+  // applies to `month`. Document grain rather than the monthly views: these
+  // rows carry their own dates, so a quarter or a year needs no month spine.
+  //
+  // REJECTED IS SPLIT OUT, NOT DROPPED. A rejected purchase is real VAT on a
+  // document the purchasing screens still show, so omitting it silently is how
+  // a reader ends up with a figure here they cannot reconcile against those
+  // screens. It gets its own line and is never subtracted from another.
+  const inPeriod = (rows: VatSourceDocRow[]) =>
+    rows.filter((r) => r.on >= current.period_start && r.on <= current.period_end);
+  const vatLine = (rows: VatSourceDocRow[], rejected: boolean) => {
+    const hit = inPeriod(rows).filter((r) => r.rejected === rejected);
+    return { total: sumOver(hit, (r) => r.vat_sar), count: hit.length };
+  };
+
+  // Sales VAT sums the `invoices` rows this component already holds — the same
+  // v_revenue_invoices rows the Revenue statement sums, filtered on `month`
+  // exactly as it does. Sales VAT already had a definition in SQL; the fix for
+  // a missing number was never to write a second one.
+  const vatSalesDocs = invoices.filter(
+    (i) => i.month >= current.period_start && i.month <= current.period_end,
+  );
+  const vatSales = { total: sumOver(vatSalesDocs, (i) => i.vat_sar), count: vatSalesDocs.length };
+  const vatOrdered = vatLine(vatPurchaseOrders, false);
+  const vatReceived = vatLine(vatStockReceipts, false);
+  const vatRepairs = vatLine(vatWorkshopPayments, false);
+  const vatOrderedRejected = vatLine(vatPurchaseOrders, true);
+  const vatReceivedRejected = vatLine(vatStockReceipts, true);
+
   // Narrative inputs. Every one is a selection or an additive sum over view
   // output — no ratio and no distinct count is computed here (see the rule in
   // lib/reports.ts). The margin quoted in the narrative comes from the view.
@@ -364,103 +452,286 @@ export default function StatementsTab({
 
       {selector}
 
-      {/* ---- The statement. This subtree is what prints. --------------- */}
+      {/* ---- The statement. This subtree is what prints. ---------------
+
+          THE P&L IS THE ONE STATEMENT THAT IS TWO BOXES: the statement itself
+          and the VAT list under it. #pnl-print sits on a WRAPPER rather than on
+          a card, because the wrapper is what the print stylesheet isolates and
+          both boxes have to land on the same printout — an accountant filing a
+          P&L wants the VAT the period touched attached to it.
+
+          The two alternatives were both worse. A second print id under one
+          statement breaks the pack's one-id-per-statement rule. A sibling
+          OUTSIDE this wrapper renders on screen and silently vanishes on paper,
+          which is the failure mode nobody notices until it is filed.
+
+          So the wrapper carries no card chrome of its own — it is a flow
+          container, and its two children are the boxes. */}
       {statement === "pnl" && (
-      <div id="pnl-print" className="card p-6">
-        <header className="mb-5">
-          <h2 className="text-lg font-semibold">Profit &amp; Loss</h2>
-          <p className="text-sm muted">
-            {current.label}
-            {prior && <> · compared with {prior.label}</>}
-          </p>
-          {inProgress && (
-            <p className="text-xs mt-1.5 text-amber-600 dark:text-amber-400">
-              This period is still in progress — costs accrue daily, while revenue is
-              recognised when invoices are confirmed.
+      <div id="pnl-print" className="space-y-5">
+        <div className="card p-6">
+          <header className="mb-5">
+            <h2 className="text-lg font-semibold">Profit &amp; Loss</h2>
+            <p className="text-sm muted">
+              {current.label}
+              {prior && <> · compared with {prior.label}</>}
             </p>
-          )}
-        </header>
-
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b" style={{ borderColor: "rgb(var(--border))" }}>
-              <th className="text-left font-medium muted pb-2">&nbsp;</th>
-              <th className="text-right font-medium muted pb-2 w-[150px]">{current.label}</th>
-              <th className="text-right font-medium muted pb-2 w-[150px]">{prior?.label ?? "—"}</th>
-              <th className="text-right font-medium muted pb-2 w-[130px]">Variance</th>
-              <th className="text-right font-medium muted pb-2 w-[90px]">%</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            <Line label="Revenue" cur={current.revenue_sar} pri={prior?.revenue_sar}
-              higherIsBetter bold />
-
-            <SectionHead>Cost of operations</SectionHead>
-            <Line label="Parts consumed" cur={current.parts_cost_sar} pri={prior?.parts_cost_sar} indent />
-            <Line label="Outsourced repairs" cur={current.os_cost_sar} pri={prior?.os_cost_sar} indent />
-            <Line label="Payroll" cur={current.payroll_sar} pri={prior?.payroll_sar} indent />
-            <Line label="Commissions" cur={current.commissions_sar} pri={prior?.commissions_sar} indent />
-            {/* The FIFTH bucket (0112/0113). Without it the four above do not
-                add up to the total below — the gap was exactly this. */}
-            <Line label="Station fill" cur={current.filling_cost_sar} pri={prior?.filling_cost_sar} indent />
-            <Line label="Total operating cost" cur={current.operating_cost_sar}
-              pri={prior?.operating_cost_sar} bold rule />
-            {current.filling_uncosted_trips > 0 && (
-              <tr>
-                <td colSpan={4} className="pb-2 pl-4 text-[11px] text-amber-700 dark:text-amber-300">
-                  {current.filling_uncosted_trips}{" "}
-                  {current.filling_uncosted_trips === 1 ? "fill has" : "fills have"} no price for
-                  {" "}{current.filling_uncosted_trips === 1 ? "its" : "their"} water type in this
-                  period — that cost is unknown, not zero, and is not in the figures above.
-                </td>
-              </tr>
+            {inProgress && (
+              <p className="text-xs mt-1.5 text-amber-600 dark:text-amber-400">
+                This period is still in progress — costs accrue daily, while revenue is
+                recognised when invoices are confirmed.
+              </p>
             )}
+          </header>
 
-            <Line label="Operating profit" cur={current.operating_profit_sar}
-              pri={prior?.operating_profit_sar} higherIsBetter bold rule signed />
-            <MarginLine cur={current.operating_margin_pct} pri={prior?.operating_margin_pct ?? null} />
-
-            {/* Expenses are their OWN section, never folded into the four
-                operational buckets. That separation is a rule from 0098, not a
-                layout preference — merging them would hide which costs the app
-                actually models and which were typed in by hand. */}
-            <SectionHead>Other expenses (recorded manually)</SectionHead>
-            {categories.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="py-2 pl-4 muted text-xs">
-                  None recorded for this period — net profit therefore equals operating profit.
-                </td>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b" style={{ borderColor: "rgb(var(--border))" }}>
+                <th className="text-left font-medium muted pb-2">&nbsp;</th>
+                <th className="text-right font-medium muted pb-2 w-[150px]">{current.label}</th>
+                <th className="text-right font-medium muted pb-2 w-[150px]">{prior?.label ?? "—"}</th>
+                <th className="text-right font-medium muted pb-2 w-[130px]">Variance</th>
+                <th className="text-right font-medium muted pb-2 w-[90px]">%</th>
               </tr>
-            ) : (
-              categories.map((c) => (
-                <tr key={c.category}>
-                  <td className="py-1.5 pl-4">{c.category}</td>
-                  <td className="py-1.5 text-right tabular-nums">{formatSar(c.expenses_sar)}</td>
-                  <td className="py-1.5 text-right tabular-nums muted">—</td>
-                  <td className="py-1.5 text-right tabular-nums muted">—</td>
-                  <td className="py-1.5 text-right tabular-nums muted">—</td>
+            </thead>
+
+            <tbody>
+              <Line label="Revenue" cur={current.revenue_sar} pri={prior?.revenue_sar}
+                higherIsBetter bold />
+
+              <SectionHead>Cost of operations</SectionHead>
+              <Line label="Parts consumed" cur={current.parts_cost_sar} pri={prior?.parts_cost_sar} indent />
+              <Line label="Outsourced repairs" cur={current.os_cost_sar} pri={prior?.os_cost_sar} indent />
+              <Line label="Payroll" cur={current.payroll_sar} pri={prior?.payroll_sar} indent />
+              <Line label="Commissions" cur={current.commissions_sar} pri={prior?.commissions_sar} indent />
+              {/* The FIFTH bucket (0112/0113). Without it the four above do not
+                  add up to the total below — the gap was exactly this. */}
+              <Line label="Station fill" cur={current.filling_cost_sar} pri={prior?.filling_cost_sar} indent />
+              <Line label="Total operating cost" cur={current.operating_cost_sar}
+                pri={prior?.operating_cost_sar} bold rule />
+              {current.filling_uncosted_trips > 0 && (
+                <tr>
+                  <td colSpan={4} className="pb-2 pl-4 text-[11px] text-amber-700 dark:text-amber-300">
+                    {current.filling_uncosted_trips}{" "}
+                    {current.filling_uncosted_trips === 1 ? "fill has" : "fills have"} no price for
+                    {" "}{current.filling_uncosted_trips === 1 ? "its" : "their"} water type in this
+                    period — that cost is unknown, not zero, and is not in the figures above.
+                  </td>
                 </tr>
-              ))
-            )}
-            <Line label="Total other expenses" cur={current.expenses_sar}
-              pri={prior?.expenses_sar} bold rule />
+              )}
 
-            <Line label="Net profit" cur={current.net_profit_sar} pri={prior?.net_profit_sar}
-              higherIsBetter bold rule signed />
-          </tbody>
-        </table>
+              <Line label="Operating profit" cur={current.operating_profit_sar}
+                pri={prior?.operating_profit_sar} higherIsBetter bold rule signed />
+              <MarginLine cur={current.operating_margin_pct} pri={prior?.operating_margin_pct ?? null} />
 
-        <footer className="mt-5 pt-3 border-t text-[11px] muted leading-relaxed"
-          style={{ borderColor: "rgb(var(--border))" }}>
-          <p>
-            Revenue is confirmed invoices net of VAT. Parts are costed FIFO at the moment
-            they leave stock — stock purchases are not a cost here, they become one when
-            consumed. Payroll applies current salaries to whoever was employed in the
-            period, as salaries are not effective-dated. Margin is computed from this
-            period&apos;s own revenue, never averaged from its months.
+              {/* Expenses are their OWN section, never folded into the four
+                  operational buckets. That separation is a rule from 0098, not a
+                  layout preference — merging them would hide which costs the app
+                  actually models and which were typed in by hand. */}
+              <SectionHead>Other expenses (recorded manually)</SectionHead>
+              {categories.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-2 pl-4 muted text-xs">
+                    None recorded for this period — net profit therefore equals operating profit.
+                  </td>
+                </tr>
+              ) : (
+                categories.map((c) => (
+                  <tr key={c.category}>
+                    <td className="py-1.5 pl-4">{c.category}</td>
+                    <td className="py-1.5 text-right tabular-nums">{formatSar(c.expenses_sar)}</td>
+                    <td className="py-1.5 text-right tabular-nums muted">—</td>
+                    <td className="py-1.5 text-right tabular-nums muted">—</td>
+                    <td className="py-1.5 text-right tabular-nums muted">—</td>
+                  </tr>
+                ))
+              )}
+              <Line label="Total other expenses" cur={current.expenses_sar}
+                pri={prior?.expenses_sar} bold rule />
+
+              {/* The metric is still `net_profit` — the dictionary defines it and
+                  the Narrative quotes it. The suffix is a POSITION marker, not a
+                  rename: everything above this line is the P&L, everything below
+                  it is an estimate. Showing "Profit before Zakat" as a second row
+                  carrying the identical figure would read as a mistake. */}
+              <Line label="Net profit — profit before Zakat" cur={current.net_profit_sar}
+                pri={prior?.net_profit_sar} higherIsBetter bold rule signed />
+
+              {/* ZAKAT. NO INCOME-TAX LINE BELONGS HERE OR ANYWHERE ON THIS PAGE:
+                  Saudi corporate income tax applies to foreign or mixed
+                  ownership, and Bin Slimah Group is 100% Saudi-owned. */}
+              <SectionHead>Zakat — indicative estimate</SectionHead>
+              <Line label="Zakat (2.5%, indicative)" cur={zakat.estimate}
+                pri={priorZakat?.estimate} indent estimate />
+              <Line label="Estimated profit after Zakat" cur={zakat.profitAfterZakat}
+                pri={priorZakat?.profitAfterZakat} higherIsBetter rule signed estimate />
+              <tr>
+                <td colSpan={5} className="pt-2 pl-4 text-[11px] muted italic leading-relaxed">
+                  Estimate only — actual Zakat is assessed on your ZATCA
+                  balance-sheet base (capital, reserves and long-term liabilities,
+                  less deductible long-term assets), not on profit.
+                  {!zakat.applies && (
+                    <> This period is a loss, so the estimate is shown as zero: a
+                    negative Zakat credit does not exist.</>
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <footer className="mt-5 pt-3 border-t text-[11px] muted leading-relaxed"
+            style={{ borderColor: "rgb(var(--border))" }}>
+            <p>
+              Revenue is confirmed invoices net of VAT. Parts are costed FIFO at the moment
+              they leave stock — stock purchases are not a cost here, they become one when
+              consumed. Payroll applies current salaries to whoever was employed in the
+              period, as salaries are not effective-dated. Margin is computed from this
+              period&apos;s own revenue, never averaged from its months.
+            </p>
+          </footer>
+        </div>
+
+        {/* ================================================================
+            VAT — A TRANSPARENCY LIST, NOT A STATEMENT AND NOT A RETURN.
+            ================================================================
+            Nothing in this box feeds anything in the one above it. VAT is money
+            collected on ZATCA's behalf and money paid to suppliers on theirs;
+            it is neither income nor cost, which is why 0098 rule 2 keeps it out
+            of revenue in the first place. If a figure here ever reaches the
+            P&L table, the P&L is wrong.
+
+            EVERY LINE STANDS ALONE. There is no total row, no net row and no
+            subtraction anywhere in this section, by design — the four sources
+            are not commensurable (one is collected, three are paid) and two of
+            them describe the same purchase at different stages. A reader can
+            take any single line to the screen it came from and find the
+            documents behind it; that is the whole job of this panel.
+
+            ITS OWN BOX, and that is the point rather than decoration. This was
+            a bordered block at the foot of the P&L card until Turki asked for
+            two boxes, and the box says what the border could not: a seam INSIDE
+            a card still reads as a continuation of that card, and this list is
+            not part of that statement. Two columns rather than the statement's
+            five, so it reads as a different kind of thing at a glance too.
+
+            STILL INSIDE the shared #pnl-print wrapper, so both boxes print
+            together — the VAT a period touched is exactly the page an
+            accountant wants attached to the P&L. A sibling OUTSIDE that wrapper
+            would render on screen and vanish on paper. */}
+        <section className="card p-6">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <h3 className="text-base font-semibold">VAT by source</h3>
+            <span className="text-xs muted">{current.label}</span>
+          </div>
+          <p className="text-xs muted mt-1 mb-4">
+            Every VAT amount the period recorded, listed beside where it came from.
+            Nothing here is totalled or netted, and none of it forms part of the
+            profit above.
           </p>
-        </footer>
+
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b" style={{ borderColor: "rgb(var(--border))" }}>
+                <th className="text-left font-medium muted pb-2">Source</th>
+                <th className="text-right font-medium muted pb-2 w-[170px]">VAT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* Flat and unweighted on purpose — no bold line, no indenting,
+                  no sub-heading grouping sales against the rest. Any of those
+                  would rank one source above another, and the point of the
+                  list is that they are four separate facts, not a hierarchy
+                  resolving to a figure. The hint carries the document count
+                  AND the date basis, so each line is auditable without the
+                  reader scrolling to the notes. */}
+              <VatRow
+                label="Sales invoices"
+                hint={`${vatSales.count} confirmed ${vatSales.count === 1 ? "invoice" : "invoices"} · by confirmation date`}
+                value={vatSales.total}
+              />
+              <VatRow
+                label="Purchase orders raised"
+                hint={`${vatOrdered.count} ${vatOrdered.count === 1 ? "order" : "orders"} · by request date`}
+                value={vatOrdered.total}
+              />
+              <VatRow
+                label="Stock received"
+                hint={`${vatReceived.count} ${vatReceived.count === 1 ? "receipt" : "receipts"} · by received date`}
+                value={vatReceived.total}
+              />
+              <VatRow
+                label="Workshop — outsourced repairs"
+                hint={`${vatRepairs.count} vendor ${vatRepairs.count === 1 ? "invoice" : "invoices"} · by invoice date`}
+                value={vatRepairs.total}
+              />
+
+              {/* Rejected documents get their OWN lines under their own seam,
+                  and are never subtracted from the lines above — this list
+                  nets nothing, including against itself. They appear at all
+                  because the purchasing screens still show them, so leaving
+                  them out silently would put a gap between this page and
+                  those. Hidden entirely when there are none: an empty
+                  "Rejected" heading reads as a fault. */}
+              {(vatOrderedRejected.count > 0 || vatReceivedRejected.count > 0) && (
+                <tr>
+                  <td colSpan={2} className="pt-4 pb-1 text-xs uppercase tracking-wide muted font-medium">
+                    Rejected — listed separately, not included above
+                  </td>
+                </tr>
+              )}
+              {vatOrderedRejected.count > 0 && (
+                <VatRow
+                  label="Rejected purchase orders"
+                  hint={`${vatOrderedRejected.count} ${vatOrderedRejected.count === 1 ? "order" : "orders"} · by request date`}
+                  value={vatOrderedRejected.total}
+                  indent
+                  muted
+                />
+              )}
+              {vatReceivedRejected.count > 0 && (
+                <VatRow
+                  label="Rejected stock receipts"
+                  hint={`${vatReceivedRejected.count} ${vatReceivedRejected.count === 1 ? "receipt" : "receipts"} · by received date`}
+                  value={vatReceivedRejected.total}
+                  indent
+                  muted
+                />
+              )}
+            </tbody>
+          </table>
+
+          <footer className="mt-5 pt-3 border-t text-[11px] muted leading-relaxed space-y-1.5"
+            style={{ borderColor: "rgb(var(--border))" }}>
+            <p>
+              <strong>These lines are not added together.</strong> Sales VAT is money
+              charged TO customers; the other three are VAT paid TO suppliers. And an
+              order that has since been delivered appears on both &ldquo;Purchase orders
+              raised&rdquo; and &ldquo;Stock received&rdquo; — the same purchase at two
+              stages, ordered and delivered, not two purchases. A total across this list
+              would be a number that means nothing.
+            </p>
+            <p>
+              <strong>Not a ZATCA return.</strong> Nothing here is netted and no amount
+              payable or reclaimable is computed. Sales VAT is the VAT on the same
+              confirmed invoices the Revenue statement reports, so those two always agree.
+            </p>
+            <p>
+              Each line is filtered on the date its own source records, matching the
+              statement that already reports those documents: purchase orders by request
+              date, stock receipts by received date (the Costs statement&apos;s basis for
+              purchasing spend), repair invoices by supplier invoice date and by entry
+              date where the supplier gave none (the basis behind &ldquo;Outsourced
+              repairs&rdquo; above), sales invoices by confirmation date.
+            </p>
+            <p>
+              Two caveats worth knowing. Repair VAT is{" "}
+              <strong>also already inside &ldquo;Outsourced repairs&rdquo; above</strong>, because
+              the P&amp;L expenses those invoices at their VAT-inclusive total. And stock
+              receipts carry no supplier invoice date, so a purchase falls in the month
+              the goods arrived rather than the month the tax invoice was issued.
+            </p>
+          </footer>
+        </section>
       </div>
       )}
 
@@ -577,12 +848,19 @@ function SectionHead({ children }: { children: React.ReactNode }) {
  *
  * `higherIsBetter` is per-line because direction is metric-specific: revenue
  * rising is good, payroll rising is not. Cost lines default to false.
+ *
+ * `estimate` marks a row that is NOT a measured figure — today only the two
+ * Zakat rows. It italicises the label and the amount and drops the bold weight,
+ * so an estimate can never be mistaken for a statement line at a glance. The
+ * variance columns still work, because both sides are estimates produced by the
+ * same view: comparing them is comparing like with like.
  */
 function Line({
-  label, cur, pri, higherIsBetter = false, bold, indent, rule, signed,
+  label, cur, pri, higherIsBetter = false, bold, indent, rule, signed, estimate,
 }: {
   label: string; cur: number; pri?: number;
-  higherIsBetter?: boolean; bold?: boolean; indent?: boolean; rule?: boolean; signed?: boolean;
+  higherIsBetter?: boolean; bold?: boolean; indent?: boolean; rule?: boolean;
+  signed?: boolean; estimate?: boolean;
 }) {
   const hasPrior = pri !== undefined;
   const d: Delta | null = hasPrior ? delta(cur, pri) : null;
@@ -592,12 +870,16 @@ function Line({
 
   return (
     <tr className={cn(rule && "border-t")} style={rule ? { borderColor: "rgb(var(--border))" } : undefined}>
-      <td className={cn("py-1.5", indent && "pl-4", bold && "font-semibold")}>{label}</td>
+      {/* twMerge resolves the weight, so `estimate` reliably wins over `bold`
+          on the two cells that carry both. */}
+      <td className={cn("py-1.5", indent && "pl-4", bold && "font-semibold",
+        estimate && "italic font-normal")}>{label}</td>
       <td className={cn("py-1.5 text-right tabular-nums", bold && "font-semibold",
+        estimate && "italic font-normal",
         signed && cur < 0 && "text-rose-600 dark:text-rose-400")}>
         {formatSar(cur)}
       </td>
-      <td className="py-1.5 text-right tabular-nums muted">
+      <td className={cn("py-1.5 text-right tabular-nums muted", estimate && "italic")}>
         {hasPrior ? formatSar(pri as number) : "—"}
       </td>
       <td className={cn("py-1.5 text-right tabular-nums",
@@ -610,6 +892,39 @@ function Line({
         tone === "bad" ? "text-rose-600 dark:text-rose-400" : "muted")}>
         {/* An em dash, not a fabricated percentage, when the base is zero. */}
         {d ? formatPct(d.pct) : "—"}
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * One line of the VAT list. TWO columns, not the statement's five, and
+ * deliberately no prior-period comparison: VAT is money held for someone else,
+ * and a variance column invites reading it as performance.
+ *
+ * NO `bold` AND NO `rule`. Both existed while this panel was a reconciliation,
+ * to weight a total and a net row against the lines feeding them. There are no
+ * such rows now and there must not be, so the props that would let one look
+ * like a conclusion are gone rather than left unused. `muted` marks the
+ * rejected lines as set aside; `indent` files them under their heading.
+ *
+ * The `hint` carries the document count and the date basis, so any line can be
+ * taken to the screen it came from and checked.
+ */
+function VatRow({
+  label, hint, value, indent, muted: isMuted,
+}: {
+  label: string; hint?: string; value: number;
+  indent?: boolean; muted?: boolean;
+}) {
+  return (
+    <tr>
+      <td className={cn("py-1.5", indent && "pl-4", isMuted && "muted")}>
+        <span>{label}</span>
+        {hint && <span className="ms-2 text-[11px] muted">{hint}</span>}
+      </td>
+      <td className={cn("py-1.5 text-right tabular-nums", isMuted && "muted")}>
+        {formatSar(value)}
       </td>
     </tr>
   );

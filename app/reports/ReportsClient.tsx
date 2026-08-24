@@ -32,6 +32,7 @@ import {
   type OperationsByDriverRow, type InvoiceOutstandingLiveRow,
   type PayslipBasisRow, type IssuedPayslipRow,
   type DriverCommissionByProjectRow,
+  type VatSourceDocRow,
 } from "@/lib/reports";
 import OverviewTab from "./OverviewTab";
 import StatementsTab from "./StatementsTab";
@@ -72,6 +73,23 @@ type ReportsClientProps = {
   /** Riyadh-local today, computed server-side to avoid UTC skew. */
   today: string;
   pnlPeriods: PnlPeriodRow[];
+  /**
+   * The VAT documents behind the itemised list printed under the P&L,
+   * one array per source, kept SEPARATE all the way down. Merging them into a
+   * single array would make a total the obvious next step, and a total across
+   * these sources is exactly the number the panel must not produce: sales VAT
+   * is collected from customers, supplier VAT is paid out, and an order that
+   * has been delivered appears in two of the three arrays.
+   *
+   * STATEMENTS TAB ONLY: VAT is a liability the business collects and pays on
+   * ZATCA's behalf, never a KPI, so it has no place on the Overview.
+   *
+   * There is no Zakat prop. That estimate is computed where it is rendered,
+   * from a figure StatementsTab already holds — see indicativeZakat().
+   */
+  vatStockReceipts: VatSourceDocRow[];
+  vatPurchaseOrders: VatSourceDocRow[];
+  vatWorkshopPayments: VatSourceDocRow[];
   expenseCategories: ExpenseCategoryPeriodRow[];
   invoices: RevenueInvoiceRow[];
   /**
@@ -194,6 +212,9 @@ export default function ReportsClient(props: ReportsClientProps) {
       ) : (
         <StatementsTab
           pnlPeriods={props.pnlPeriods}
+          vatStockReceipts={props.vatStockReceipts}
+          vatPurchaseOrders={props.vatPurchaseOrders}
+          vatWorkshopPayments={props.vatWorkshopPayments}
           expenseCategories={props.expenseCategories}
           invoices={props.invoices}
           outstandingLive={props.outstandingLive}

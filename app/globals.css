@@ -200,6 +200,25 @@ body {
     font-size: 10pt;
   }
 
+  /* #pnl-print is the ONE print id that wraps two cards rather than being one:
+     the P&L statement and the VAT list are separate boxes on screen, sharing a
+     print id so they land on the same printout. The reset above hits the
+     wrapper, which has no chrome anyway — these are the boxes that do.
+
+     A card is a screen metaphor for "this is a distinct thing on a page of
+     other things". A sheet of A4 is already that, so on paper the borders and
+     the shadow are noise, and two floating cards read as a slide rather than a
+     statement. What has to survive is the SEPARATION, which is why the gap
+     between them is set here rather than left to space-y-5 — it replaces the
+     border as the thing telling a reader the VAT list is not part of the P&L. */
+  #pnl-print > .card {
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+  #pnl-print > .card + .card { margin-top: 10mm !important; }
+
   /* Tables: full width, header row repeated on every page, and no row or
      section split across a page break. Without table-header-group a
      multi-page table loses its column headings after page one. */
@@ -240,8 +259,15 @@ body {
     page-break-inside: avoid;
   }
 
-  /* Keep each statement's closing note with the table it explains. */
-  #cost-print section, #revenue-print section {
+  /* Keep each statement's closing note with the table it explains.
+     #pnl-print's only <section> is the VAT list — the second of its two boxes,
+     four source lines plus its caveats. Split across a page it reads as two
+     unrelated fragments, and the second one loses both the heading that says it
+     is NOT part of the profit above and the note that says the lines are not to
+     be added up. That box is the reason this rule is worth the risk of an early
+     break: half a VAT list with no heading is the one fragment here that could
+     be mistaken for part of the statement. */
+  #cost-print section, #revenue-print section, #pnl-print section {
     break-inside: avoid;
     page-break-inside: avoid;
   }

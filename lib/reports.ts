@@ -176,6 +176,52 @@ export type ExpenseCategoryPeriodRow = {
   entry_count: number;
 };
 
+/** Indicative Zakat rate. An ESTIMATING convention, not a ZATCA assessment. */
+const ZAKAT_RATE = 0.025;
+
+export type IndicativeZakat = {
+  /** Echo of the input — the P&L's own net profit, under its Zakat name. */
+  profitBeforeZakat: number;
+  /** Clamped to 0 in a loss period: a negative Zakat credit does not exist. */
+  estimate: number;
+  profitAfterZakat: number;
+  /** False in a loss period, where the estimate is 0 rather than negative. */
+  applies: boolean;
+};
+
+/**
+ * Indicative Zakat — 2.5 % of profit before Zakat.
+ *
+ * THIS IS NOT A BREACH OF THE RULE AT THE TOP OF THIS FILE, and it is worth
+ * saying why, because it looks like one. That rule forbids RE-deriving a figure
+ * SQL already defines, and its test is "could this disagree with what the same
+ * view returns". No view returns Zakat. There is no second expression to
+ * disagree with — this function is the only one, which is the property the rule
+ * exists to protect.
+ *
+ * It is also not a measurement. Real Zakat is charged on a ZATCA balance-sheet
+ * base (capital, reserves and long-term liabilities, less deductible long-term
+ * assets) that this schema does not hold. Promoting an estimate into the
+ * semantic layer would dress it as a definition of the company's Zakat, which
+ * it is not. It belongs beside the number it annotates.
+ *
+ * Input is PnlPeriodRow.net_profit_sar at whatever grain is on screen, so this
+ * works for month, quarter and year without knowing which it was given.
+ *
+ * Callers MUST label the result as an estimate. See StatementsTab.
+ */
+export function indicativeZakat(profitBeforeZakat: number): IndicativeZakat {
+  // Round BEFORE subtracting so the printed figures foot exactly: at the 2dp
+  // the statement shows, after === before - estimate with no drifting cent.
+  const estimate = Math.round(Math.max(profitBeforeZakat, 0) * ZAKAT_RATE * 100) / 100;
+  return {
+    profitBeforeZakat,
+    estimate,
+    profitAfterZakat: profitBeforeZakat - estimate,
+    applies: profitBeforeZakat > 0,
+  };
+}
+
 /** Periods of one grain, newest first. */
 export function periodsOf<T extends { period_type: PeriodType; period_start: string }>(
   rows: T[], type: PeriodType,
@@ -396,6 +442,48 @@ export type PurchasingRow = {
   month: string;
   received_stock_value_sar: number;
   receipt_count: number;
+};
+
+/**
+ * ONE DOCUMENT THAT CARRIES VAT, normalised from a base table. Three arrays of
+ * this shape — stock receipts, purchase orders, workshop payments — back the
+ * ITEMISED VAT LIST printed under the P&L. page.tsx does the normalising.
+ *
+ * DISPLAY ONLY. VAT is a liability collected for ZATCA, not income and not
+ * cost, so no figure derived from these rows may ever be added to, subtracted
+ * from, or netted against a P&L figure. 0098 rule 2 already excludes VAT from
+ * revenue for the same reason.
+ *
+ * BASE TABLES, AND THAT IS NOT A HOLE IN THE CONTRACT AT THE TOP OF THIS FILE.
+ * The rule forbids RE-DERIVING a metric SQL already owns, and its test is
+ * "could this number disagree with what the same view returns". No view returns
+ * supplier VAT, so there is nothing to disagree with — and the panel does not
+ * aggregate across sources at all. It LISTS each source's own vat_sar beside a
+ * label saying where it came from. No total, no net, no netting anywhere, so
+ * there is no derived figure that could drift.
+ *
+ * SALES VAT IS NOT ONE OF THESE ARRAYS. v_revenue_invoices.vat_sar already
+ * defines it and the page already fetches those rows, so the panel sums the
+ * ones it holds rather than opening a second path to a number SQL owns.
+ */
+export type VatSourceDocRow = {
+  /**
+   * The date this document is reported under, a plain YYYY-MM-DD so a period
+   * filter is a string comparison. The BASIS differs per source, and each one
+   * matches the statement that already reports those documents — page.tsx
+   * resolves all three in one place and names them.
+   */
+  on: string;
+  vat_sar: number;
+  /**
+   * Rejected documents are listed on their OWN line, never inside a source's
+   * figure and never subtracted from one.
+   *
+   * A boolean, not the raw status: `rejected` is the only distinction the panel
+   * draws, and workshop_payments has no status column at all, so a status field
+   * would force every consumer to know which sources have one.
+   */
+  rejected: boolean;
 };
 
 // --- Period selection ------------------------------------------------------
