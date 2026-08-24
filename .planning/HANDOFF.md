@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at `f585a5f` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS. DB at 0164. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
+# SESSION HANDOFF — closes at `bd37fad` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS. DB at 0165. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -7,16 +7,16 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `f585a5f`, not recalled
+## CURRENT STATE — MEASURED at `bd37fad`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
 this file.
 
-    HEAD              f585a5f + the doc commit that carries this file
+    HEAD              bd37fad + the doc commit that carries this file
     branch main   tree clean   in sync with origin
-    migration files   162, highest 0164_revoke_public_execute_guarded_rpcs.sql
-    live DB           0164
+    migration files   163, highest 0165_dashboard_action_items_respect_warning_days.sql
+    live DB           0165
     CLAUDE.md         17,301 bytes (§5 threshold 20,480 — 3,179 of headroom)
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
     tables            83, all 83 RLS-enabled
@@ -148,8 +148,8 @@ reconstructed. If a non-derivable event is ever needed, re-add it deliberately �
 
 ## SESSION LEDGER — 2026-08-23/24
 
-Eighteen commits, `ec3d293..f585a5f`, read off `git log` rather than counted up
-from memory. Eight migrations (0157–0164), every one applied by the architect,
+Twenty commits, `ec3d293..bd37fad`, read off `git log` rather than counted up
+from memory. Nine migrations (0157–0165), every one applied by the architect,
 none self-applied. Detail for each is in the sections below.
 
     4ee4bb0  0157  issue_reports + issue-report-images bucket    MIGRATION
@@ -170,6 +170,8 @@ none self-applied. Detail for each is in the sections below.
     149279f  0164  revoke PUBLIC/anon EXECUTE, guarded RPCs        MIGRATION
     9d80fce  docs  function-ACL rule into CLAUDE.md §6; HANDOFF → 0164
     f585a5f  docs  CLAUDE.md compressed, four stale claims corrected
+    b91c93a  docs  session ledger
+    bd37fad  0165  dashboard action queue respects warning_days   MIGRATION
 
 **0163 landed BEFORE 0162 on purpose** — the security fix went first and got its
 own commit; the consistency fixes followed. The numbers are out of order in the
@@ -429,6 +431,21 @@ by 0160. Recorded in CURRENT STATE above, not carried as open work. Do not
 re-raise it: the table is gone deliberately, at 0 rows and 0 writers, and 0154
 still holds its definition if a non-derivable event is ever needed.)*
 
+*(The **dashboard action queue / `warning_days`** item is also CLOSED — fixed by
+**0165** (`bd37fad`). **AND THE ENTRY HERE WAS WRONG ABOUT WHERE THE BUG LIVED,
+which is why the correction is kept rather than the line just deleted.** It said
+"the dashboard action queue hardcodes 30 days", which reads as app code. It was
+in the VIEW `v_dashboard_action_items` — `app/page.tsx` only does `select("*")` —
+so the fix was a migration and no app file changed. Same failure mode this file
+keeps recording: an entry tells you where to look and is not evidence. The
+archive-documents branch now reads `coalesce(g.warning_days, 30)` through a LEFT
+JOIN; the four identity expiries (driver licence, driver iqama, staff iqama,
+truck registration) deliberately stay at 30 on Turki's call, because they belong
+to no group and the only configurable source for them is the PER-VIEWER
+notification threshold — which would make a shared dashboard render different
+counts to different people. Do not "finish the job" by wiring those up; 0165's
+header carries the reasoning.)*
+
 1. **Arabic copy across notifications, profile AND issues is unreviewed by a
    native speaker.** It renders correctly and the notification day-counts decline
    properly (`pluralDays()` handles 1 يوم / 2 يومان / 3-10 أيام / 11+ يومًا), but
@@ -446,23 +463,14 @@ still holds its definition if a non-derivable event is ever needed.)*
    permission model. **The absence of the link is the feature working, not a
    missing piece.**
 
-3. **DASHBOARD ACTION QUEUE HARDCODES 30 DAYS INSTEAD OF THE CONFIGURED
-   `warning_days`.** Deferred to the polish stage DELIBERATELY, not overlooked:
-   fixing it CHANGES DISPLAYED DATA — items would appear or disappear from the
-   queue depending on each document type's configured lead time — and that is a
-   behaviour change Turki should see land on purpose rather than as a side effect
-   of a cleanup pass. Note the shape is the same one 0158 solved for
-   notifications (per-viewer threshold resolution); this surface never got the
-   equivalent treatment.
-
-4. **DUPLICATE `Seder` CUSTOMER RECORD.** Two rows for what is one customer.
+3. **DUPLICATE `Seder` CUSTOMER RECORD.** Two rows for what is one customer.
    Deferred for the same reason: merging or archiving one changes what the
    customer list, the statements and any balance rollup show. It is a DATA
    decision, not a code one — which row is authoritative, and what happens to
    anything referencing the other — so it needs Turki's call before anything
    moves. **Do not "tidy" this in a cleanup pass.**
 
-5. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
+4. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
    `leave_periods` is readable by any authenticated user, and there is no per-user
    wall today. Nothing in this session changed that, and nothing in this session
    should be read as a step toward it — the per-user tables (`notification_prefs`,
