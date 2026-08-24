@@ -575,7 +575,7 @@ section is notifications only — do not read it as the complete set.)*
 ## OPEN / CARRIED FORWARD
 
 **Nothing is in flight.** No migration is drafted-but-unapplied, no code is
-uncommitted, no feature is half-built, and origin is in sync at `6d4eb05`. The
+uncommitted, no feature is half-built, and origin is in sync. The
 four items below are decisions and reviews, not work in progress.
 
 *(The `notification_events` keep-or-drop item that stood here is CLOSED — dropped
