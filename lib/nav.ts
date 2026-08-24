@@ -168,6 +168,26 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   { href: "/reports?tab=statements&statement=receivables", en: "Receivables statement", ar: "قائمة الذمم المدينة", parentKey: "reports", icon: FileBarChart },
   { href: "/reports?tab=statements&statement=cost", en: "Costs statement", ar: "قائمة التكاليف", parentKey: "reports", icon: FileBarChart },
   { href: "/reports?tab=statements&statement=operations", en: "Operations statement", ar: "قائمة العمليات", parentKey: "reports", icon: FileBarChart },
+  // Daily Trips indexes like any other statement, because it is one. The Arabic
+  // here matches the report's own print-band title rather than being coined
+  // separately — a search for "تقرير الرحلات اليومي" should land on the page
+  // that prints those exact words at the top.
+  { href: "/reports?tab=statements&statement=daily", en: "Daily Trips report", ar: "تقرير الرحلات اليومي", parentKey: "reports", icon: FileBarChart },
+  // Payslips was the ONE statement in the pack that was never indexed, while
+  // every sibling was — the destination has been live since 0115, just
+  // unreachable from search.
+  //
+  // Its Arabic is COINED, not reused, and that is a real difference from the
+  // Daily Trips line above. There was nothing to reuse: PayslipsStatement
+  // carries no Arabic at all, which is the English-only situation the note at
+  // the top of this block already describes. "قسائم الرواتب" is the plain term
+  // for the documents themselves.
+  //
+  // It is not "قائمة …" like the four accounting statements above it, on
+  // purpose: those are financial STATEMENTS, this is a register of issued
+  // documents — the same reason Daily Trips is a "تقرير". The block already
+  // varies the noun by what the thing actually is.
+  { href: "/reports?tab=statements&statement=payslips", en: "Payslips register", ar: "قسائم الرواتب", parentKey: "reports", icon: FileBarChart },
   { href: "/reports?tab=statements&statement=narrative", en: "Narrative statement", ar: "التقرير السردي", parentKey: "reports", icon: FileBarChart },
   // A custom report is not a stored object — there is nothing to deep-link
   // TO — so the builder itself is the destination, per Turki's own framing.

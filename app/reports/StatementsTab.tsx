@@ -5,14 +5,15 @@
 // TABLES, NOT CHARTS. These are statements you print, sign and file. Charts
 // belong on the Overview.
 //
-// Six statements plus a seventh that appears once the builder has generated
-// one: P&L, Revenue, Receivables, Costs, Operations, the computed Narrative,
-// and Custom. One is visible at a time, which is what makes "Print" mean
-// "print THIS statement" — each owns a print id, and only the mounted one
-// exists in the DOM when the print stylesheet runs.
+// Eight statements plus a ninth that appears once the builder has generated
+// one: P&L, Revenue, Receivables, Costs, Operations, Daily Trips, Payslips, the
+// computed Narrative, and Custom. One is visible at a time, which is what makes
+// "Print" mean "print THIS statement" — each owns a print id, and only the
+// mounted one exists in the DOM when the print stylesheet runs.
 //
-// This file owns the P&L and the period controls; the other five live in
-// StatementViews.tsx, a leaf module it imports one-way.
+// This file owns the P&L and the period controls; the rest live in
+// StatementViews.tsx, a leaf module it imports one-way, except Daily Trips —
+// see the note on its entry below.
 //
 // READS v_pnl_by_period AND v_expenses_by_category_period, NOTHING ELSE. Both
 // carry all three grains (0100), so switching between monthly, quarterly and
@@ -49,6 +50,14 @@ import {
   RevenueStatement, ReceivablesStatement, CostStatement,
   OperationsStatement, PayslipsStatement, NarrativeStatement, CustomStatement,
 } from "./StatementViews";
+// NOT from StatementViews, and not given data from page.tsx either. Every other
+// statement here renders rows this page already holds; Daily Trips fetches its
+// own window through a server action, because it is date-scoped over 765+
+// delivered trips and shipping the whole history to the browser to filter one
+// day out of it would get slower every week for no benefit. It owns its own
+// date picker, its own period control and its own Print button for the same
+// reason — the controls at the top of this tab cannot express a single day.
+import DailyTripsTab from "./DailyTripsTab";
 import { issueDriverPayslip } from "./actions";
 import { buildReport, GROUPING_LABELS, type BuilderSelection } from "@/lib/report-builder";
 import CustomReportModal from "./CustomReportModal";
@@ -56,7 +65,9 @@ import CustomReportModal from "./CustomReportModal";
 // One statement at a time. That keeps each print id the ONLY print subtree in
 // the DOM, so "Print" prints the statement you are looking at rather than the
 // whole pack — and it keeps a long tab from becoming a scroll marathon.
-type Statement = "pnl" | "revenue" | "receivables" | "cost" | "operations" | "payslips" | "narrative" | "custom";
+type Statement =
+  | "pnl" | "revenue" | "receivables" | "cost" | "operations"
+  | "daily" | "payslips" | "narrative" | "custom";
 
 const STATEMENTS: { key: Statement; label: string }[] = [
   { key: "pnl", label: "P&L" },
@@ -64,6 +75,12 @@ const STATEMENTS: { key: Statement; label: string }[] = [
   { key: "receivables", label: "Receivables" },
   { key: "cost", label: "Costs" },
   { key: "operations", label: "Operations" },
+  // DIRECTLY AFTER OPERATIONS, and that placement is the meaning: Operations is
+  // the period-level view of the same activity — trips, trucks, work orders
+  // aggregated — and Daily Trips is the day-level record underneath it, one line
+  // per driver per truck. Reading them adjacently is reading the same thing at
+  // two grains, so the pack goes from summary to source without a jump.
+  { key: "daily", label: "Daily Trips" },
   { key: "payslips", label: "Payslips" },
   { key: "narrative", label: "Narrative" },
 ];
@@ -72,7 +89,10 @@ const STATEMENTS: { key: Statement; label: string }[] = [
 // not a tab in STATEMENTS above: the tab only appears once a spec has been
 // generated, but the URL must still accept it so search can point at the
 // builder (see the effect in the component).
-const STATEMENT_KEYS = ["pnl", "revenue", "receivables", "cost", "operations", "payslips", "narrative", "custom"] as const;
+const STATEMENT_KEYS = [
+  "pnl", "revenue", "receivables", "cost", "operations",
+  "daily", "payslips", "narrative", "custom",
+] as const;
 
 type Props = {
   pnlPeriods: PnlPeriodRow[];
@@ -171,6 +191,83 @@ export default function StatementsTab({
     [expenseCategories, periodType, activeStart],
   );
 
+  // ---- Which statement. Excluded from print. ------------------------------
+  // Hoisted out of the return because it renders in TWO of them — the normal
+  // pack below, and the Daily Trips branch that has to come before the
+  // `!current` guard. Held as a value rather than a component so it does not
+  // remount, and so its state stays in this scope.
+  const selector = (
+    <div className="flex items-center gap-1 flex-wrap no-print">
+      {[...STATEMENTS, ...(customSpec ? [{ key: "custom" as Statement, label: "Custom" }] : [])].map((st) => (
+        <button
+          key={st.key}
+          onClick={() => setStatement(st.key)}
+          className={cn(
+            "px-3 py-1.5 rounded-lg text-sm font-medium transition border",
+            statement === st.key
+              ? "border-brand-600 text-brand-600 dark:text-brand-300 bg-brand-500/10"
+              : "border-transparent muted hover:text-[rgb(var(--fg))]",
+          )}
+        >
+          {st.label}
+        </button>
+      ))}
+
+      {/* The seam for AI-generated reports. Sits with the statements because
+          that is what it will eventually produce — one more statement. */}
+      <button
+        onClick={() => setCustomOpen(true)}
+        className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition
+                   border-transparent text-brand-600 dark:text-brand-300 hover:bg-brand-500/10"
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+        Custom report
+      </button>
+    </div>
+  );
+
+  // Hoisted for the same reason as `selector`, and it is not optional: the
+  // selector carries the "Custom report" button, so any return that renders the
+  // selector must also mount the modal that button opens. Rendering one without
+  // the other makes the button set state that nothing reads — a dead click.
+  const builder = (
+    <CustomReportModal
+      open={customOpen}
+      onClose={() => setCustomOpen(false)}
+      metrics={metrics}
+      pnlPeriods={pnlPeriods}
+      periodType={periodType}
+      periodStart={activeStart}
+      onGenerate={(spec) => {
+        setCustomSpec(spec);
+        setStatement("custom");
+        setCustomOpen(false);
+      }}
+    />
+  );
+
+  // DAILY TRIPS RETURNS EARLY, ABOVE THE `!current` GUARD AND ABOVE THE PERIOD
+  // CONTROLS, for two independent reasons.
+  //
+  // 1. It reads NONE of the P&L spine. `current` being null means "no period has
+  //    any activity to summarise" — true of the statements below it, and no
+  //    reason at all to hide a report that queries trips directly. Rendering
+  //    after the guard would make an empty spine take Daily Trips down with it.
+  // 2. The controls at the top of this tab (month/quarter/year plus a period
+  //    select, Manage expenses, Print) are the WRONG controls here and a second
+  //    Print button would be ambiguous. Daily Trips carries its own date input,
+  //    its own day/week/month/quarter/year segment and its own Print, so the
+  //    branch renders the statement selector and nothing else.
+  if (statement === "daily") {
+    return (
+      <div className="space-y-4">
+        {selector}
+        <DailyTripsTab today={today} />
+        {builder}
+      </div>
+    );
+  }
+
   if (!current) {
     return (
       <div className="card p-8 text-center">
@@ -265,34 +362,7 @@ export default function StatementsTab({
         </div>
       </div>
 
-      {/* ---- Which statement. Excluded from print. --------------------- */}
-      <div className="flex items-center gap-1 flex-wrap no-print">
-        {[...STATEMENTS, ...(customSpec ? [{ key: "custom" as Statement, label: "Custom" }] : [])].map((st) => (
-          <button
-            key={st.key}
-            onClick={() => setStatement(st.key)}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-sm font-medium transition border",
-              statement === st.key
-                ? "border-brand-600 text-brand-600 dark:text-brand-300 bg-brand-500/10"
-                : "border-transparent muted hover:text-[rgb(var(--fg))]",
-            )}
-          >
-            {st.label}
-          </button>
-        ))}
-
-        {/* The seam for AI-generated reports. Sits with the statements because
-            that is what it will eventually produce — one more statement. */}
-        <button
-          onClick={() => setCustomOpen(true)}
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition
-                     border-transparent text-brand-600 dark:text-brand-300 hover:bg-brand-500/10"
-        >
-          <Sparkles className="h-3.5 w-3.5" />
-          Custom report
-        </button>
-      </div>
+      {selector}
 
       {/* ---- The statement. This subtree is what prints. --------------- */}
       {statement === "pnl" && (
@@ -477,19 +547,7 @@ export default function StatementsTab({
       </div>
       )}
 
-      <CustomReportModal
-        open={customOpen}
-        onClose={() => setCustomOpen(false)}
-        metrics={metrics}
-        pnlPeriods={pnlPeriods}
-        periodType={periodType}
-        periodStart={activeStart}
-        onGenerate={(spec) => {
-          setCustomSpec(spec);
-          setStatement("custom");
-          setCustomOpen(false);
-        }}
-      />
+      {builder}
     </div>
   );
 }

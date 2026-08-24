@@ -38,6 +38,11 @@ import StatementsTab from "./StatementsTab";
 import MetricsGlossaryModal from "./MetricsGlossaryModal";
 import ExpensesModal, { type ExpenseRow } from "./ExpensesModal";
 
+// TWO tabs, and Daily Trips is deliberately not a third. It is a statement —
+// a table you print, sign and file — so it lives inside the Reports pack with
+// the other statements, selected by `?statement=daily` one level down. Adding a
+// top-level tab for it would have put one statement outside the pack that
+// exists to hold statements, and split "print a report" across two places.
 const REPORT_TABS = ["overview", "statements"] as const;
 
 type Tab = "overview" | "statements";

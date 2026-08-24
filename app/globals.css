@@ -148,7 +148,11 @@ body {
   #narrative-print, #narrative-print *,
   #payslips-print, #payslips-print *,
   #commission-review-print, #commission-review-print *,
-  #custom-print, #custom-print * { visibility: visible !important; }
+  #custom-print, #custom-print *,
+  /* Daily Trips — a statement in the same pack (?statement=daily), printed the
+     same way. Its own Print button is inside the report because it carries its
+     own date and period controls; the isolation rule here is unchanged. */
+  #daily-trips-print, #daily-trips-print * { visibility: visible !important; }
   /* THE PAYSLIPS SURFACE IS THE ONE PLACE TWO PRINT SUBTREES COEXIST.
      Every other statement is mounted alone, so "one id visible" is enough.
      Here the register and the commission review render together, so a body
@@ -184,7 +188,7 @@ body {
 
   #pnl-print, #revenue-print, #receivables-print,
   #cost-print, #ops-print, #narrative-print, #payslips-print,
-  #commission-review-print, #custom-print {
+  #commission-review-print, #custom-print, #daily-trips-print {
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
@@ -201,29 +205,41 @@ body {
      multi-page table loses its column headings after page one. */
   #pnl-print table, #revenue-print table, #receivables-print table,
   #cost-print table, #ops-print table, #narrative-print table,
-  #payslips-print table, #commission-review-print table, #custom-print table {
+  #payslips-print table, #commission-review-print table, #custom-print table,
+  #daily-trips-print table {
     width: 100% !important;
     border-collapse: collapse;
   }
   #pnl-print thead, #revenue-print thead, #receivables-print thead,
   #cost-print thead, #ops-print thead, #narrative-print thead,
-  #payslips-print thead, #commission-review-print thead, #custom-print thead {
+  #payslips-print thead, #commission-review-print thead, #custom-print thead,
+  #daily-trips-print thead {
     display: table-header-group;
   }
   #pnl-print tr, #revenue-print tr, #receivables-print tr,
   #cost-print tr, #ops-print tr, #narrative-print tr,
-  #payslips-print tr, #commission-review-print tr, #custom-print tr {
+  #payslips-print tr, #commission-review-print tr, #custom-print tr,
+  #daily-trips-print tr {
     break-inside: avoid;
     page-break-inside: avoid;
   }
   /* A section heading must never be the last thing on a page. */
   #pnl-print h3, #revenue-print h3, #receivables-print h3,
   #cost-print h3, #ops-print h3, #narrative-print h3,
-  #payslips-print h3, #commission-review-print h3, #custom-print h3 {
+  #payslips-print h3, #commission-review-print h3, #custom-print h3,
+  #daily-trips-print h3 {
     break-after: avoid;
     page-break-after: avoid;
     margin-top: 14pt;
   }
+  /* Daily Trips: each project's table must not split across a page. They are
+     short, and a project heading orphaned from its rows is unreadable on paper —
+     the whole point of this report is that it gets filed. */
+  #daily-trips-print section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
   /* Keep each statement's closing note with the table it explains. */
   #cost-print section, #revenue-print section {
     break-inside: avoid;
