@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at the `0164` commit (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS. DB at 0164. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
+# SESSION HANDOFF — closes at `f585a5f` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS. DB at 0164. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -7,16 +7,17 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `787a43d`, not recalled
+## CURRENT STATE — MEASURED at `f585a5f`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
 this file.
 
-    HEAD              149279f + the doc commit that carries this file
+    HEAD              f585a5f + the doc commit that carries this file
     branch main   tree clean   in sync with origin
     migration files   162, highest 0164_revoke_public_execute_guarded_rpcs.sql
     live DB           0164
+    CLAUDE.md         17,301 bytes (§5 threshold 20,480 — 3,179 of headroom)
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
     tables            83, all 83 RLS-enabled
     storage buckets   12
@@ -125,6 +126,13 @@ on the login page. It already failed safe — the error is not destructured — 
 that is a property of nobody reading the error, which survives only until someone
 adds error handling.
 
+**CLAUDE.md §6 now carries the function-ACL rule** (`f585a5f`/`9d80fce`), beside
+the view-footer lesson, because they are the same class: *what survives a
+replacement is not obvious, and what does not survive is a permission.* Three
+traps are grouped there — view footer, 42P16 append-only, function ACL — plus the
+rule that a new table STILL ends with `revoke all … from anon` despite 0161,
+since 0161's default-privileges change only covers tables created after it.
+
 **`notification_events` IS GONE (0160), AND THE DECISION IS CLOSED.** It was
 0154's seam for a BLUE alert that could not be derived; 0155 made all three blue
 facts derived, so it was never written to. Dropped at 0 rows with 0 writers, after
@@ -135,6 +143,67 @@ MCP and the file was written afterwards to match**; the view body in 0160 was
 pulled with `pg_get_viewdef` and checksum-matched against live rather than
 reconstructed. If a non-derivable event is ever needed, re-add it deliberately —
 0154 still holds the definition.
+
+---
+
+## SESSION LEDGER — 2026-08-23/24
+
+Eighteen commits, `ec3d293..f585a5f`, read off `git log` rather than counted up
+from memory. Eight migrations (0157–0164), every one applied by the architect,
+none self-applied. Detail for each is in the sections below.
+
+    4ee4bb0  0157  issue_reports + issue-report-images bucket    MIGRATION
+    04f4750        settings popup shell + company relocated
+    f5825db  0158  per-user notification thresholds              MIGRATION
+    94d62a8        notifications settings section (+ bell narrowing fix)
+    f18b94f        setTripStage fail-closed commission guard
+    8f4b5b7  0159  user_profiles + profile-images bucket         MIGRATION
+    688cb9c        profile section (+ header name source, landing route)
+    53cf80c        safe-build.sh tsconfig trap + gitignore .next-*
+    787a43d        issue reporting section (+ shared-helper promotion)
+    2b67411  docs  HANDOFF refreshed to 787a43d
+    5217540  0160  drop dormant notification_events + rewrite view  MIGRATION
+    8c26f1b  0161  revoke anon table grants + auto-harden future   MIGRATION
+    2f0a947  0163  revoke PUBLIC/anon EXECUTE, payslip+commission  MIGRATION
+    326897f  0162  payslip counter policy + exit_permits WITH CHECK MIGRATION
+    8b5e6d7        notification-format: dead ternary + stale comment
+    149279f  0164  revoke PUBLIC/anon EXECUTE, guarded RPCs        MIGRATION
+    9d80fce  docs  function-ACL rule into CLAUDE.md §6; HANDOFF → 0164
+    f585a5f  docs  CLAUDE.md compressed, four stale claims corrected
+
+**0163 landed BEFORE 0162 on purpose** — the security fix went first and got its
+own commit; the consistency fixes followed. The numbers are out of order in the
+log and that is intentional, not a mistake to "correct".
+
+**THE PATTERN THAT WORKED, AND IT IS THE ONE TO REPEAT: PROBE, DO NOT REASON.**
+Four things this session were caught only by measuring the artefact rather than
+arguing about it, and every one of them looked fine in prose:
+
+- **The Edge bundle.** `lib/routes.ts` was split out specifically to keep
+  `lucide-react` out of middleware — then the import was routed through
+  `lib/nav` anyway, which re-exports it and drags the icons along. Grepping the
+  BUILT `middleware.js` found lucide present. The reasoning was right and the
+  import was wrong; only the artefact showed it.
+- **The anon RPC hole.** Probed over PostgREST rather than read off a grant
+  table. A business-logic `23514` came back where a permission `42501` should
+  have — anon was inside a SECURITY DEFINER money function.
+- **The ACL check itself.** `proacl like '%=X/%'` also matches
+  `postgres=X/postgres`, so it reported the known-good control as leaking. A
+  check that flags everything is indistinguishable from a check that works.
+- **CLAUDE.md's own claims.** Compressing it meant re-reading every claim, which
+  turned up four stale ones and a self-contradiction. Same finding as both prior
+  compression passes: the audit is the payoff, the bytes are the pretext.
+
+**A THIRD FALSE POSITIVE FAMILY WORTH NAMING: grepping for a bug string hits the
+comment documenting it.** `"use server"` in a file whose first line says "PLAIN
+MODULE — no use server"; `if (priced.error)` in the comment explaining why it was
+wrong; `ComingSoon` in the note recording its deletion; `notification_events` in
+the sentence saying it was removed. Every one needed the claim checked, not the
+substring counted. Expect it on every future sweep.
+
+**AND ONE MEASUREMENT ERROR TO AVOID REPEATING:** `wc -c` is bytes, Python's
+`len()` on a decoded string is characters. CLAUDE.md carries multi-byte glyphs
+(`—`, `≠`, `بوصلة`), so the two disagree by ~180. Quote `wc -c` for a byte budget.
 
 ---
 
