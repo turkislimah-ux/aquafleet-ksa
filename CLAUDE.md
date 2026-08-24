@@ -257,10 +257,9 @@ The next three rules are one lesson in three places.
   called `commission_value`.
   - **VALUES, NEVER A FK to `project_commission_history`.** That row is mutable in
     place: `set_project_commission` upserts on `(project_id, effective_from)` and
-    `created_at` is not in the SET list, so it dates the FIRST write. Measured on
-    R TTT: one row went 15.00 → 20.00 → 15.00 in an afternoon with `created_at`
-    frozen, and its six trips carry 15/15/20/20/15/15 — a FK would have repriced
-    two delivered trips twice. Full trace in 0152's header. Corollary:
+    `created_at` is not in the SET list, so it dates the FIRST write — a FK would
+    reprice already-delivered trips. Measured trace (R TTT, 15 → 20 → 15 in one
+    afternoon, six trips stamped 15/15/20/20/15/15) in 0152's header. Corollary:
     **`created_at` is NOT a change-moment signal;** never build a freeze rule on it.
   - **`recomputeDailyCommission` RE-RANKS, it does not RE-RATE.** It re-derives
     `commission_sar` from EACH trip's own frozen terms at that trip's live
@@ -292,10 +291,14 @@ The next three rules are one lesson in three places.
   company, like §1's fleet figures. Do not "verify" it away.
   - **`grand_total_sar` is VAT-INCLUSIVE, `grand_subtotal_sar` is not,** and
     mixing them is how VAT re-enters profit through the back door. Revenue
-    correctly uses the subtotal. **`v_os_cost_monthly` expenses the VAT-INCLUSIVE
-    total and is a known open defect** — it reaches `net_profit_sar` and therefore
-    the Zakat estimate. Blast radius and the decision are in `.planning/HANDOFF.md`
-    under OPEN. Check which side of that line any new cost view lands on.
+    correctly uses the subtotal.
+  - **P&L COST views are VAT-EXCLUSIVE; CASH-MOVEMENT views are VAT-INCLUSIVE, and
+    the split is DELIBERATE — do not "make them consistent" (0167).** Cost:
+    `v_os_cost_monthly`, `v_maintenance_cost_per_truck_monthly`, `v_daily_operations`
+    expense workshop at `subtotal_sar - discount_sar`, because a cost that reaches
+    `net_profit_sar` also reaches the Zakat estimate. Cash: `v_collections_monthly`,
+    `v_purchasing_spend_monthly` use `grand_total_sar` — real money moved and VAT
+    moved with it. Check which side of that line any new view lands on.
 
 **Deferred:** effective-dated CUSTOMER rates (`projects.rate_per_trip_sar` is
 still one live column — no history table, no `rate_at()` resolver; **driver
