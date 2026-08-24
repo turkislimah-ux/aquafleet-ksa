@@ -212,6 +212,116 @@ null` as well, and anything showing 8 has dropped the pre-filter.
 
 ---
 
+## DURABLE REPORTING RULES — READ BEFORE BUILDING ANY REPORT OR FINANCE FEATURE
+
+Four rules that outlive any one feature. **Each was re-verified against the live
+database at `810696d`, and the first one came back DIFFERENT from how it was
+handed to me** — it is written below as it actually is, not as it was described,
+because a rule recorded wrong is worse than a rule not recorded.
+
+### 1. Reporting scope vs archive — PARTIALLY enforced. Do NOT assume it holds.
+
+The rule as stated to me was "soft-deleted/archived projects and customers NEVER
+appear in reports." **That is not true today, and a report built on the assumption
+will be wrong.** Measured: of the 11 views touching `projects` or `customers`,
+only 5 filter `archived_at` at all.
+
+    FILTER archived_at   v_active_alerts, v_customer_amount_payable,
+                         v_driver_state_now, v_project_commission_now,
+                         v_project_trip_stages
+    DO NOT               v_revenue_invoices, v_revenue_monthly (via it),
+                         v_receivables_open, v_customer_prepaid_balance,
+                         v_invoice_outstanding_live, v_activity_feed,
+                         v_driver_commission_by_project_monthly
+
+The live counterexample, and it is in the Reports pack right now: project **King
+Salman Park** (customer **Turki 1**) was archived on 2026-06-28 and still carries
+5 trips, 3 of them delivered worth 900.00 SAR, and still reports **30.00 SAR of
+commission** through `v_driver_commission_by_project_monthly` — which
+StatementsTab renders. An archived project DOES appear in a report today.
+
+**AND THE PLACES IT "HOLDS" MOSTLY HOLD BY ACCIDENT.** Revenue rows belonging to
+an archived customer count **0** — but not because anything filters them out. The
+one archived customer simply has no confirmed invoice. It is zero by data, not
+zero by construction, and it flips silently the first time an archived customer
+has an invoice confirmed against them.
+
+**The honest rule, and the one to build on:** archive is a PRE-FILTER that each
+consumer applies for itself (CLAUDE.md §6 — "archive is a pre-filter, never a
+state"). There is no global guarantee. **A new report filters `archived_at is
+null` explicitly, or states in a comment why it deliberately does not.** Daily
+Trips does filter, on Turki's explicit call ("Exclude archive — show 7").
+
+**Whether the commission case is a BUG is a real question, not an oversight to
+sweep up:** commission already earned on delivered trips is arguably still owed
+after the project is archived, and erasing it retroactively would be the worse
+failure. Do not "fix" it by adding a filter without asking Turki — it changes who
+gets paid.
+
+### 2. `deferred_deliveries` is ISOLATED. It feeds Daily Trips and nothing else.
+
+A manual side-log of out-of-scope deliveries (diesel transport, ad-hoc customer
+filling) that are NOT project trips. **It must NEVER be read by the P&L, any
+revenue view, commission payouts, invoicing, or anything reading `public.trips`.**
+
+The reason is provenance, not tidiness: these rows are typed by a human and carry
+no trip, project, rate or frozen commission terms — unlike `trips`, where
+`rate_sar` and `commission_*` exist precisely so a delivered trip owns the terms
+it was delivered under (§7). Mixing hand-entered figures into audited totals
+produces revenue with no invoice and commission with no rate, indistinguishable
+afterwards from the real thing.
+
+Two mechanisms carry this, and **neither is a constraint — know the difference.**
+0166 asserts via `pg_depend` that no view depends on the table, and the table
+COMMENT restates the rule so a schema dump repeats it. Currently **0 views read
+it**, re-verified at `810696d`. But the assert ran ONCE, inside 0166's
+transaction. **It does not stop a view added tomorrow.** If these numbers are ever
+wanted in a financial total, that is a deliberate change with its own migration
+and its own provenance rules.
+
+### 3. TAX: no income tax, Zakat indicative only, VAT display-only.
+
+Bin Slimah is 100 % Saudi-owned, so **no corporate income tax applies. Never add
+an income-tax line to the P&L or anywhere else.** (Verified: no view mentions
+`income_tax` or `corporate_tax`. Keep it that way.) *This ownership fact is
+Turki's and the architect's, recorded as given — it is not something the database
+can confirm, and it is the one input here that re-measuring cannot settle.*
+
+**Zakat in the P&L is INDICATIVE ONLY** — 2.5 % of profit-before-Zakat, clamped to
+0 on a loss, computed by `indicativeZakat()` in `lib/reports.ts`. Real Zakat is
+assessed on the ZATCA balance-sheet base (net worth: equity, adjusted assets and
+liabilities), which **this app holds no data for and cannot derive.** The line is
+a planning aid, not a filing figure, and it must keep saying so on screen.
+
+**VAT is DISPLAY-ONLY, itemised per source, never netted, never part of profit.**
+It is a liability collected on ZATCA's behalf — not income, not cost. 0098 rule 2
+already excludes it from revenue (`v_revenue_invoices.revenue_sar` is
+`grand_subtotal_sar`, net, with `vat_sar` carried separately — verified). No
+total, no net, no "payable to ZATCA". The reasoning is in the SHIPPED section
+below.
+
+### 4. Cost views: know which are VAT-INCLUSIVE. Most are, and one is wrong.
+
+`grand_total_sar` is VAT-inclusive; `grand_subtotal_sar` is not. Six views touch
+the former and **the distinction between them is whether the name admits it**:
+
+    v_revenue_invoices              revenue_sar = grand_subtotal_sar   CORRECT (net)
+                                    vat_sar carried separately
+    v_collections_monthly           collected_gross_sar               CORRECT — cash
+                                    collected genuinely includes VAT, and the
+                                    name says "gross"
+    v_os_cost_monthly               os_cost_sar = grand_total_sar     ** DEFECT **
+    v_purchasing_spend_monthly      received_stock_value_sar          VAT-inclusive,
+                                    but NOT a P&L cost (not a v_pnl_monthly source)
+    v_maintenance_cost_per_truck_monthly / v_daily_operations
+                                    carry the same VAT-inclusive workshop figure
+                                    as per-truck / per-day stats, not P&L lines
+
+`v_parts_cost_monthly` is **clean** — it sums `parts.cost_sar`, a stock cost with
+no VAT in it. Confirmed, so parts are not part of the defect below.
+
+---
+
 ## SECURITY POSTURE — SET BY 0161–0164. READ BEFORE TOUCHING GRANTS OR RPCs.
 
 **This heading read "CHANGED THIS SESSION" until `810696d` and it had rotted** —
@@ -1038,22 +1148,51 @@ notification threshold — which would make a shared dashboard render different
 counts to different people. Do not "finish the job" by wiring those up; 0165's
 header carries the reasoning.)*
 
-1. **WORKSHOP VAT IS COUNTED TWICE — ONCE AS A COST, ONCE AS A RECLAIM. TURKI'S
-   CALL, AND IT MOVES A LIVE P&L TOTAL.** `v_os_cost_monthly` expenses the
-   VAT-INCLUSIVE `grand_total_sar` (verified live against `pg_get_viewdef`), so a
-   vendor repair invoice puts its VAT inside "Outsourced repairs" in the P&L — and
-   the new VAT list below prints that same VAT as recoverable. Both are defensible
-   in isolation and they cannot both be right.
+1. **WORKSHOP VAT IS COUNTED TWICE — ONCE AS A P&L COST, ONCE AS A RECLAIM.
+   DISCLOSED, DELIBERATELY NOT FIXED. TURKI'S CALL.**
 
-   Shipped disclosed-not-fixed on the architect's explicit instruction ("do not
-   touch existing P&L totals"), with a footnote in the panel. **The fix is a
-   migration to `v_os_cost_monthly`, not an app change** — and it would move a
-   cost figure Turki has been reading for months, which is exactly why it was not
-   taken quietly in a session about a display panel. Two questions before anything
-   moves: does outsourced-repair cost mean the cash paid or the net-of-VAT cost,
-   and does any other view expense a VAT-inclusive total the same way. **Check the
-   second one before touching the first** — a single-view fix that leaves siblings
-   inconsistent is worse than the current honest footnote.
+   **Where it lives:** `v_os_cost_monthly`, one expression —
+   `os_cost_sar = coalesce(sum(wp.grand_total_sar), 0)`. `grand_total_sar` is
+   VAT-INCLUSIVE. Revenue on the other side of the same P&L is NET of VAT
+   (`v_revenue_invoices.revenue_sar = grand_subtotal_sar`). So a vendor repair
+   invoice puts its VAT inside "Outsourced repairs" as a cost, while the VAT panel
+   directly below lists that same VAT as recoverable. Both readings are defensible
+   alone; they cannot both be right at once.
+
+   **BLAST RADIUS — bigger than one view, and this is the part worth knowing
+   before touching it.** `os_cost_sar` is a source of `v_pnl_monthly`, where it
+   flows into FOUR published figures and then out again:
+
+       os_cost_sar -> operating_cost_sar -> operating_profit_sar
+                                         -> net_profit_sar -> margin %
+       ... and v_pnl_by_period inherits all of them
+       ... and net_profit_sar is what indicativeZakat() multiplies by 2.5 %,
+           so FIXING THIS ALSO MOVES THE ZAKAT ESTIMATE
+
+   Scale, measured: workshop VAT all-time is **2,641.50 SAR** against a
+   `grand_total` of 19,671.50 — **13.43 %** of everything the P&L books as
+   outsourced-repair cost. Correcting it would raise net profit by 2,641.50 and
+   the indicative Zakat by about 66.04 SAR, all-time.
+
+   **NOT in the blast radius, both checked:** `v_parts_cost_monthly` is clean (it
+   sums `parts.cost_sar`, VAT-free), and `v_purchasing_spend_monthly` is
+   VAT-inclusive but is **not a source of `v_pnl_monthly`** at all, so it does not
+   touch profit. Two other views — `v_maintenance_cost_per_truck_monthly` and
+   `v_daily_operations` — carry the same VAT-inclusive workshop figure as
+   standalone stats. **Decide whether they move too, or the per-truck maintenance
+   number will stop agreeing with the P&L.**
+
+   **The fix is a migration to `v_os_cost_monthly` (and a decision about those two
+   siblings), never an app change.** It was shipped disclosed rather than fixed on
+   the architect's explicit instruction — "do not touch existing P&L totals" — and
+   because a session about a display panel is the wrong place to silently move a
+   cost figure Turki has been reading for months. A footnote in the VAT panel says
+   so on screen.
+
+   **The question for Turki is not technical:** does "outsourced repair cost" mean
+   the cash he paid the vendor, or the cost net of reclaimable VAT? Both are real
+   answers. Note the `create or replace view` traps in CLAUDE.md §6 before editing
+   — column type and order are not freely changeable.
 
 2. **Arabic copy across notifications, profile AND issues is unreviewed by a
    native speaker.** It renders correctly and the notification day-counts decline

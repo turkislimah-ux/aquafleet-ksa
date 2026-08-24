@@ -280,6 +280,23 @@ The next three rules are one lesson in three places.
     allows only TRAILING defaults, which is why 0151 had to MOVE the three before
     0153 could remove them. See §6's function rule — this is the same trap.
 
+- **TAX: NO INCOME TAX. ZAKAT IS INDICATIVE. VAT IS NEVER PROFIT.** Bin Slimah is
+  100 % Saudi-owned, so no corporate income tax applies — **never add an
+  income-tax line.** Zakat shown in the P&L is an ESTIMATE only (2.5 % of
+  profit-before-Zakat, clamped to 0 on a loss, `indicativeZakat()` in
+  `lib/reports.ts`); real Zakat is assessed on the ZATCA balance-sheet base, which
+  this app has no data for — so it must keep saying "indicative" on screen. VAT is
+  a liability collected for ZATCA: display-only, itemised per source, **never
+  netted and never added to or subtracted from any profit figure.** This is the
+  one rule here the database cannot confirm — it is Turki's fact about his own
+  company, like §1's fleet figures. Do not "verify" it away.
+  - **`grand_total_sar` is VAT-INCLUSIVE, `grand_subtotal_sar` is not,** and
+    mixing them is how VAT re-enters profit through the back door. Revenue
+    correctly uses the subtotal. **`v_os_cost_monthly` expenses the VAT-INCLUSIVE
+    total and is a known open defect** — it reaches `net_profit_sar` and therefore
+    the Zakat estimate. Blast radius and the decision are in `.planning/HANDOFF.md`
+    under OPEN. Check which side of that line any new cost view lands on.
+
 **Deferred:** effective-dated CUSTOMER rates (`projects.rate_per_trip_sar` is
 still one live column — no history table, no `rate_at()` resolver; **driver
 COMMISSION is already effective-dated**, 0146–0149, so this is the rate half only,
