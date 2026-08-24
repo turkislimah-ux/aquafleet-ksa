@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at `de7174c` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT. DB at 0166. `de7174c` IS COMMITTED BUT NOT PUSHED. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
+# SESSION HANDOFF — closes at `de7174c`, pushed at `6d4eb05` (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT. DB at 0166. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. See SECURITY POSTURE and OPEN / CARRIED FORWARD.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -16,8 +16,8 @@ parentheses**, because the old value is the one a reader would otherwise carry
 forward. Four moved in this block (migration files, live DB, tables, origin sync)
 and a fifth below it — `set_updated_at()` went from three tables to four.
 
-    HEAD              de7174c + the doc commit that carries this file
-    branch main   tree clean   AHEAD 1 OF ORIGIN — de7174c is unpushed
+    HEAD              6d4eb05 (de7174c + the doc commit that carries this file)
+    branch main   tree clean   IN SYNC with origin, pushed 807d28e..6d4eb05
     migration files   164, highest 0166_deferred_deliveries.sql        (was 163 / 0165)
     live DB           0166  (20260824111246 deferred_deliveries)       (was 0165)
     CLAUDE.md         17,301 bytes (§5 threshold 20,480 — 3,179 of headroom)
@@ -29,10 +29,17 @@ and a fifth below it — `set_updated_at()` went from three tables to four.
     tsc --noEmit      clean;  8/8 check suites pass (scripts/*check*.ts)
     next build        clean, 17 routes + middleware;  middleware 83 kB
 
-**THE TREE IS CLEAN BUT ORIGIN IS BEHIND.** `de7174c` is committed and verified
-in-browser, and it has not been pushed. That is the one piece of state that a
-`git status` alone reads as finished. Push it or confirm with Turki first; do not
-build on top of it assuming origin has it.
+**A CLEAN TREE DOES NOT MEAN A PUSHED TREE — AND THIS IS THE SECOND TIME.** For
+most of this refresh `de7174c` sat committed, verified and UNPUSHED while
+`git status` said "working tree clean": that message is silent about `[ahead N]`.
+It is pushed now (`807d28e..6d4eb05`), so the block above is accurate.
+
+**The identical thing happened once before and is recorded further down this file**
+— `e65d980` was committed-but-unpushed at `[ahead 1]` while the handoff's own §2
+asserted "Nothing unpushed." Two occurrences of one failure make it a pattern, not
+an incident: **push state is the one claim this file cannot verify about itself.**
+Read `git status -sb` — the BRANCH line, not just the tree line — and never take
+this file's word for it. That applies to the sentence you are reading.
 
 **The middleware figure is a GUARD, not trivia.** 83 kB is the number to compare
 against after ANY change that touches `lib/nav.ts` — it re-exports `lib/routes.ts`,
@@ -200,9 +207,9 @@ reconstructed. If a non-derivable event is ever needed, re-add it deliberately �
 
 ## SESSION LEDGER — 2026-08-23/24
 
-Twenty-three commits, `ec3d293..de7174c`, read off `git log` rather than counted
-up from memory. Ten migrations (0157–0166), every one applied by the architect,
-none self-applied. Detail for each is in the sections below.
+Twenty-four commits, `ec3d293..6d4eb05`, counted with `git rev-list --count`
+rather than added up from memory. Ten migrations (0157–0166), every one applied by
+the architect, none self-applied. Detail for each is in the sections below.
 
     4ee4bb0  0157  issue_reports + issue-report-images bucket    MIGRATION
     04f4750        settings popup shell + company relocated
@@ -226,7 +233,8 @@ none self-applied. Detail for each is in the sections below.
     bd37fad  0165  dashboard action queue respects warning_days   MIGRATION
     16854d6  docs  close warning_days item; record it was a VIEW
     807d28e  0166  deferred_deliveries side-log                   MIGRATION
-    de7174c        Daily Trips report in the Reports pack         NOT PUSHED
+    de7174c        Daily Trips report in the Reports pack
+    6d4eb05  docs  HANDOFF refreshed to de7174c, 3 figures fixed
 
 **0163 landed BEFORE 0162 on purpose** — the security fix went first and got its
 own commit; the consistency fixes followed. The numbers are out of order in the
@@ -557,14 +565,9 @@ section is notifications only — do not read it as the complete set.)*
 
 ## OPEN / CARRIED FORWARD
 
-**Nothing is in flight, with ONE loose end that is not work.** No migration is
-drafted-but-unapplied, no code is uncommitted, and no feature is half-built. The
+**Nothing is in flight.** No migration is drafted-but-unapplied, no code is
+uncommitted, no feature is half-built, and origin is in sync at `6d4eb05`. The
 four items below are decisions and reviews, not work in progress.
-
-**The loose end: `de7174c` (Daily Trips) is committed and NOT PUSHED** —
-`main...origin/main [ahead 1]`. It is verified in-browser and complete; only the
-push is outstanding. A clean `git status` will not show this, which is why it is
-recorded here as well as in CURRENT STATE. Push it or check with Turki.
 
 *(The `notification_events` keep-or-drop item that stood here is CLOSED — dropped
 by 0160. Recorded in CURRENT STATE above, not carried as open work. Do not
