@@ -23,11 +23,30 @@ build line read `18/18` routes when the build prints 17. Four drifted and one wa
 simply wrong — which is the argument for re-running the command rather than
 copying the previous line forward.
 
+**A SECOND REFRESH RAN AFTER THAT ONE — the CLAUDE.md audit — and every figure
+below was measured again from scratch.** Exactly ONE moved: `CLAUDE.md` bytes,
+because that audit edited that file. Everything else came back identical. That is
+the expected result and it is worth stating, because "nothing moved" is only
+credible if the commands were actually re-run. **What licenses the two figures
+NOT re-run — the build's route count and the middleware size — is itself a
+measurement, not an assumption:** `git diff --stat 3799909..HEAD` reports ONE file
+changed, `CLAUDE.md`, six insertions. No `.ts`/`.tsx` was touched, so no build
+output can have moved. Cheap checks were re-run anyway — `tsc --noEmit` clean, and
+all eight suites in `scripts/*check*.ts` EXECUTED, 8/8 pass; the multi-minute build
+was not, on that evidence. If a future session touches source, that licence is
+void — re-run the build.
+
+**Mid-refresh catch, and it is the same lesson one level up:** the draft of the
+paragraph you are reading said "8 check suites present", because counting the
+files with `ls` is what had actually been done — while the block below claims they
+PASS. Existing and passing are different claims and `ls` only answers the first.
+They were then run. Counting artefacts is not the same as exercising them.
+
     HEAD              de7174c + the docs commits that carry this file
     branch main   tree clean   in sync with origin
     migration files   164, highest 0166_deferred_deliveries.sql        (was 163 / 0165)
     live DB           0166  (20260824111246 deferred_deliveries)       (was 0165)
-    CLAUDE.md         17,301 bytes (§5 threshold 20,480 — 3,179 of headroom)
+    CLAUDE.md         17,700 bytes (§5 threshold 20,480 — 2,780 of headroom)  (was 17,301)
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
     tables            84, all 84 RLS-enabled                           (was 83 / 83)
     anon table grants 0     anon-executable non-trigger functions 0
@@ -251,6 +270,9 @@ Detail for each is in the sections below.
     de7174c        Daily Trips report in the Reports pack
     6d4eb05+ docs  HANDOFF refreshed to de7174c, 3 stale figures fixed
                    (+ the follow-ups correcting this file's push state)
+    3799909  docs  HANDOFF read top-to-bottom: 4th stale figure, archive fenced
+    b75daae  docs  CLAUDE.md audited claim-by-claim; §1's figures fenced
+    44cfcdf  docs  §1 trucks/stations CLOSED — Turki confirmed them
 
 **0163 landed BEFORE 0162 on purpose** — the security fix went first and got its
 own commit; the consistency fixes followed. The numbers are out of order in the
@@ -292,6 +314,93 @@ substring counted. Expect it on every future sweep.
 **AND ONE MEASUREMENT ERROR TO AVOID REPEATING:** `wc -c` is bytes, Python's
 `len()` on a decoded string is characters. CLAUDE.md carries multi-byte glyphs
 (`—`, `≠`, `بوصلة`), so the two disagree by ~180. Quote `wc -c` for a byte budget.
+
+---
+
+## THE CLAUDE.md AUDIT (`b75daae` + `44cfcdf`). DOCS ONLY — NO CODE, NO SCHEMA.
+
+`CLAUDE.md` got the same top-to-bottom, claim-by-claim treatment this file got at
+`3799909`. **Every claim in it verified against the live artefact and holds.** It
+was not trimmed — §5 says compress by re-verifying, and the verifying is the
+payoff; it grew six lines and sits at 17,700 of its 20,480 budget.
+
+The header of this file still names `de7174c` and still says "nothing queued",
+both correct: these were docs commits, and the convention of naming the FEATURE
+commit and absorbing docs commits is what kept the header from needing a rewrite.
+That convention was broken and restored during the previous refresh; this is the
+first refresh where it simply worked.
+
+What was checked, listed so the NEXT audit starts from a baseline instead of
+repeating this one:
+
+    all 11 preview/ files                      exist
+    9 lib/ + skill + script paths named        exist
+    6 skills named in §4                       all resolve — four of them live
+                                               under the plugin dirs, NOT
+                                               ~/.claude, so a check that looks
+                                               only there reports them missing
+    20 migration numbers cited in §6/§7        all on disk, and each FILENAME
+                                               matches what the prose says it did
+    10 RPCs named in §7                        exist, signatures as documented,
+                                               ZERO anon-executable
+    create_project_with_customer               KEEPS its three commission params
+    update_project_with_customer               has NONE — and the two argument
+                                               blocks really are identical through
+                                               `p_rate`, so §7's find-replace
+                                               warning is a live hazard
+    `and w.reversed_at is null`                in the JOIN CONDITION of both
+                                               v_customer_amount_payable and
+                                               v_invoice_outstanding_live
+    archive_project_guarded                    conflict target carries the partial
+                                               predicate; writes no payment_mode
+    set_project_commission                     upserts on (project_id,
+                                               effective_from); created_at absent
+                                               from the SET list
+    v_fleet_state_now / v_drivers_ops_now      both compose on v_driver_state_now
+    driver-state drift guard                   runs at app/page.tsx:11
+    todayKey, recomputeDailyCommission,        all resolve
+      priceDelivery, buildStatementItems
+    state-looking lines                        none, bar the one below
+
+**THE ONE EXCEPTION IS CLOSED — DO NOT REOPEN IT.** §1 says the business runs
+"~40 trucks, 3 stations". The database does not agree and never has. It was NOT
+corrected from row counts: §1 describes Bin Slimah Group, the rows are a partial
+working set, and **Turki confirmed the figures directly.** `CLAUDE.md` now carries
+a fence saying exactly that, with a do-not-recount rule, because an unlabelled
+number in a rules file invites precisely that "fix" from the next reader.
+
+**THE REASON IT CAME UP IS THE LESSON WORTH KEEPING: A BARE `count(*)` IS NOT A
+MEASUREMENT ON THIS SCHEMA.** Both counts were taken with no soft-delete
+pre-filter — the thing §6 already requires ("Terminated = a pre-filter, never a
+state") — and the raw numbers went to Turki before the filter did:
+
+    trucks              raw 15   live 13   (terminated_at is null)
+    operation_stations  raw  4   live  2   (active)
+    water_stations      raw  5   live  5   (all real: Furaian, Manfuhah 2,
+                                            Olaya, Shas, Umm Al Hamam)
+
+Same mistake twice in one sitting, on the same schema, against a rule already
+written down. Apply the pre-filter BEFORE quoting a row count, not after someone
+questions it.
+
+**THE "Test" STATION ROWS WERE NOT JUNK TO CLEAN — THEY WERE ALREADY HANDLED.**
+`operation_stations` holds rows named `Test` and `test`; both are `active=false`
+already, deactivated on 2026-07-06 within thirty seconds of creation — a typo made
+through the UI and withdrawn through the same UI. They are invisible in every
+picker. Nothing was deleted and nothing should be:
+
+- **The table is documented SOFT-DELETE-ONLY** (`lib/actions/operation-stations.ts`
+  header, and `deactivateOperationStation`). A `delete` migration would break that
+  lock to remove rows no one can see.
+- **All three FKs into it are `ON DELETE SET NULL`** — `drivers.home_station`,
+  `trucks.home_station`, `staff.station`. A delete would not fail loudly; it would
+  silently blank live assignments. That is the trap if this is ever revisited.
+
+**AND THE TWO "Sultana" ROWS ARE NOT DUPLICATES.** They split by population and
+both are live. Merging them is Turki's business decision, not cleanup:
+
+    Sultana Station        11 drivers   13 trucks   0 staff   <- the ops side
+    Sultana Station (HQ)    0 drivers    0 trucks   8 staff   <- the office side
 
 ---
 
