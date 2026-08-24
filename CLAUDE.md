@@ -23,7 +23,8 @@ staff, trips, projects, commissions, leave, stations, finance/invoicing.
 **Those two figures describe the BUSINESS, not the database.** The live rows are a
 partial working set and have never matched them. Do NOT "correct" this line from a
 `count(*)` — it is Turki's fact about his own fleet, not a measurement, and it is
-the one number in this file that re-measuring cannot settle. Ask him instead.
+the one number in this file that re-measuring cannot settle. He has confirmed it
+and the gap to the seeded rows is expected — do not re-raise it.
 
 - **Stack:** Next.js (App Router) + Supabase (Postgres) + Tailwind. TypeScript.
 - **Repo:** `~/aquafleet-ksa`, GitHub `turkislimah-ux/aquafleet-ksa`, branch `main`.
