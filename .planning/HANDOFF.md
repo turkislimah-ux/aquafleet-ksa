@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at the 0167 migration commit (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE. DB at 0167 — nine views replaced, no table or column changed. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167; the one thing it leaves behind is a now-false on-screen footnote, item 1 under OPEN / CARRIED FORWARD.)
+# SESSION HANDOFF — closes at the 0167 migration commit (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE. DB at 0167 — nine views replaced, no table or column changed. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -89,7 +89,10 @@ it is the per-source query in the section below, run against live data.
     migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
                       — a TIMESTAMP version, not "0167"; see the 0167 section below)
-    CLAUDE.md         17,700 bytes (§5 threshold 20,480 — 2,780 of headroom)
+    CLAUDE.md         19,156 bytes (§5 threshold 20KB — 1,324 of headroom)
+                      re-measured after `9e0fd77`. The 17,700 this block used to
+                      carry was ALREADY wrong before that commit — 18,948 on disk
+                      at `810696d` — so it was never a measurement, only a memory
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
                       re-measured AFTER 0167: nine views replaced, none added
     tables            84, all 84 RLS-enabled
@@ -650,24 +653,26 @@ precisely today's data.** It now counts pre-archive delivered trips of archived
 entities and compares that to what the view reports, failing in either direction.
 **A check that cannot fail is not a check.**
 
-### `schema_migrations` shows a TIMESTAMP version, and TWO rows — expected, not drift
+### `schema_migrations` shows a TIMESTAMP version — expected, not drift
 
-    20260824230851  cost_views_ex_vat_and_archive_date_aware    678 chars — NO-OP
-    20260824231520  cost_views_ex_vat_and_archive_date_aware  35,253 chars — the real one
+    20260824231520  cost_views_ex_vat_and_archive_date_aware  35,253 chars
 
 MCP `apply_migration` stamps its own timestamp version and takes the NAME, so
 nothing in that table ever says "0167". **The repo file is the source of record**:
 it is create-or-replace throughout, so it replays idempotently on a `db reset` and
 the numbering stays canonical in `supabase/migrations/`.
 
-**The first row is a PHANTOM and is being kept rather than deleted.** The
-architect's apply landed as a header comment plus a `do $$ … null; end $$;` guard,
-because the SQL never rendered on their side — the attachment came through blank.
-It changed nothing (verified: 50 views, os_cost still 11,339.00 / 8,332.50, P&L
-July net still 6.33 immediately afterwards), but it claimed the migration name
-first. Deleting a migration-history row is the architect's call, not a cleanup
-task; **treat two rows with this name as known, and do not "reconcile" it by
-re-running anything.**
+**There was BRIEFLY a SECOND row under this name, and the architect has DELETED
+it.** Version `20260824230851`, 678 chars: their first apply landed as a header
+comment plus a `do $$ … null; end $$;` guard, because the SQL never rendered on
+their side — the attachment came through blank. It changed nothing (verified at
+the time: 50 views, os_cost still 11,339.00 / 8,332.50, P&L July net still 6.33
+immediately afterwards), but it claimed the migration name first. **Re-measured
+live after the deletion: exactly ONE row carries this name**, the 35,253-char one
+above. Kept in the record because the row itself is gone and this paragraph is the
+only trace — a no-op that takes a migration name is worth recognising if it
+recurs. Deleting a migration-history row was the architect's call, taken
+deliberately; it is not a cleanup task for Claude Code.
 
 ### §5 WAS WAIVED ONCE, EXPLICITLY, AND THE WAIVER IS NOT A PRECEDENT
 
@@ -906,7 +911,9 @@ parts ever gain a nullable warehouse.
 `CLAUDE.md` got the same top-to-bottom, claim-by-claim treatment this file got at
 `3799909`. **Every claim in it verified against the live artefact and holds.** It
 was not trimmed — §5 says compress by re-verifying, and the verifying is the
-payoff; it grew six lines and sits at 17,700 of its 20,480 budget.
+payoff; it grew six lines and sat at 17,700 of its 20,480 budget **at that
+commit** — a historical measurement, not a current one. The live figure is in
+CURRENT STATE at the top of this file.
 
 At the time this section was written the header still named `de7174c`, correctly:
 these were docs commits, and the convention of naming the FEATURE commit and
@@ -1284,10 +1291,10 @@ section is notifications only — do not read it as the complete set.)*
 ## OPEN / CARRIED FORWARD
 
 **Nothing is in flight.** No migration is drafted-but-unapplied, no code is
-uncommitted, no feature is half-built, and origin is in sync. The five items below
-are decisions and reviews, not work in progress — but **item 1 is new and it is
-the one loose end 0167 left: a paragraph on screen that describes a defect which
-no longer exists.** It is an app change, small, and it should not sit long.
+uncommitted, no feature is half-built, and origin is in sync. The four items below
+are decisions and reviews, not work in progress — **none of them is a task.** The
+one task 0167 left behind, a now-false paragraph of on-screen copy, was done and
+pushed in `cefcff8`; it is recorded as closed above rather than carried.
 
 *(The `notification_events` keep-or-drop item that stood here is CLOSED — dropped
 by 0160. Recorded in CURRENT STATE above, not carried as open work. Do not
@@ -1323,27 +1330,21 @@ warning that used to live here was right about one thing worth keeping: this
 number reaches `net_profit_sar` and therefore the indicative Zakat, so any future
 change to it moves a figure Turki reads.)*
 
-1. **THE VAT PANEL STILL TELLS TURKI, ON SCREEN, THAT WORKSHOP VAT IS DOUBLE-
-   COUNTED. IT IS NOT, SINCE 0167. THE PARAGRAPH IS NOW FALSE.**
+*(The **FALSE VAT-PANEL FOOTNOTE** that stood at position 1 is CLOSED — fixed in
+`cefcff8`, verified in-browser by Turki. The footer under the per-source VAT list
+in `app/reports/StatementsTab.tsx` said repair VAT was *"also already inside
+'Outsourced repairs' above, because the P&L expenses those invoices at their
+VAT-inclusive total"* — a true disclosure when it shipped at `810696d`, false from
+0167 onward. It now reads that repair VAT appears in that panel and only there.
+**It was REWORDED, not deleted:** the sentence answered a question the panel
+provokes — is this tax already counted in the P&L? — and removing it would have
+left that question unanswered beside a table of VAT figures. The second caveat in
+the same paragraph, stock receipts carrying no supplier invoice date, was correct
+throughout and is untouched. CLAUDE.md §7 was corrected in the same pass
+(`9e0fd77`): the line calling this a "known open defect" is now the durable
+cost-vs-cash VAT rule. Do not re-raise any of it.)*
 
-   `app/reports/StatementsTab.tsx`, the footer under the per-source VAT list
-   (~line 727): *"Repair VAT is also already inside 'Outsourced repairs' above,
-   because the P&L expenses those invoices at their VAT-inclusive total."* That
-   sentence disclosed a real defect and was correct when it shipped at `810696d`.
-   0167 removed the defect and the disclosure outlived it.
-
-   **This is the failure mode this whole file keeps recording, in its own UI copy:
-   the fix moved and the words describing it did not.** The second caveat in the
-   same paragraph — stock receipts carrying no supplier invoice date, so a purchase
-   falls in the month the goods arrived — is STILL TRUE and must stay.
-
-   Not fixed in 0167's commit deliberately: that unit was the migration plus these
-   doc corrections, and changing on-screen copy is an app change Turki verifies
-   in-browser like any other. Small, isolated, one paragraph. **Do it as its own
-   commit, and re-read the surrounding copy rather than editing the one sentence
-   blind** — the section's opening lines also lean on the old reading.
-
-2. **Arabic copy across notifications, profile AND issues is unreviewed by a
+1. **Arabic copy across notifications, profile AND issues is unreviewed by a
    native speaker.** It renders correctly and the notification day-counts decline
    properly (`pluralDays()` handles 1 يوم / 2 يومان / 3-10 أيام / 11+ يومًا), but
    every Arabic string in all three surfaces is Claude Code's best effort and Turki
@@ -1362,7 +1363,7 @@ change to it moves a figure Turki reads.)*
    otherwise was `grep -c 't('`, which matches `.filter(`, `.split(` and every
    other word ending in `t`. A substring is not a claim.)
 
-3. **LEAVE HISTORY IN THE PROFILE IS DEFERRED TO RBAC. Do not re-raise it as a
+2. **LEAVE HISTORY IN THE PROFILE IS DEFERRED TO RBAC. Do not re-raise it as a
    gap.** It was asked for during 2.2c and deliberately not built. The reason is
    structural, not scheduling: there is no auth-to-employee link, by design (see
    0159 and the profile rules above), and building one to satisfy a display would
@@ -1372,14 +1373,14 @@ change to it moves a figure Turki reads.)*
    permission model. **The absence of the link is the feature working, not a
    missing piece.**
 
-4. **DUPLICATE `Seder` CUSTOMER RECORD.** Two rows for what is one customer.
+3. **DUPLICATE `Seder` CUSTOMER RECORD.** Two rows for what is one customer.
    Deferred for the same reason: merging or archiving one changes what the
    customer list, the statements and any balance rollup show. It is a DATA
    decision, not a code one — which row is authoritative, and what happens to
    anything referencing the other — so it needs Turki's call before anything
    moves. **Do not "tidy" this in a cleanup pass.**
 
-5. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
+4. **RBAC ITSELF REMAINS PARKED.** Two users, both with full access;
    `leave_periods` is readable by any authenticated user, and there is no per-user
    wall today. Nothing in this session changed that, and nothing in this session
    should be read as a step toward it — the per-user tables (`notification_prefs`,
@@ -1389,9 +1390,9 @@ change to it moves a figure Turki reads.)*
    because a two-person queue where only the reporter can act is a queue where the
    person who cannot fix it owns the ticket.
 
-**NEXT SESSION HAS NOTHING QUEUED — ASK TURKI. Item 1 is the exception and it IS
-a task, not a question:** one now-false paragraph of on-screen copy, left behind by
-0167. Everything else here is parked on a decision.
+**NEXT SESSION HAS NOTHING QUEUED — ASK TURKI.** No exceptions this time: every
+item above is parked on a decision, not on work. 0167's one loose end closed in
+`cefcff8`.
 
 ---
 
