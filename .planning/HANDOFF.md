@@ -1,4 +1,6 @@
-# SESSION HANDOFF — closes at the UI POLISH PASS, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
+# SESSION HANDOFF — closes at WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. **TREE IS AHEAD 3 AND NOT PUSHED** — read that back from the BRANCH line of `git status -sb`, never the tree line. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE: the warehouse `Furian warehouse` was a Delete fixture and is now deletable from the very UI this unit shipped — remove it there, not in SQL, or keep it; either is fine, but it is not production data. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
+
+# PREVIOUS HEADER — the UI polish pass, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -7,7 +9,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `13389b7`, not recalled
+## CURRENT STATE — MEASURED at `41ea251`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
@@ -104,8 +106,30 @@ line itself rather than silently overwritten, because "17,700" appearing twice i
 one document — here and in the CLAUDE.md AUDIT section — is the shape this file
 exists to catch, and it was caught in this file.
 
-    HEAD              13389b7 (the feature commit; this file's own commit follows)
-    branch main   tree clean   in sync with origin — READ BACK from `status -sb`
+**A SIXTH REFRESH RAN AT THIS SESSION'S CLOSE, AND THE BUILD LICENCE WAS VOID
+AGAIN — three source files, three commits.** `./scripts/safe-build.sh --dist-dir
+.next-verify` was re-run: clean, 17 routes, middleware still 83 kB. `tsc --noEmit`
+clean, all eight `scripts/*check*.ts` suites EXECUTED, 8/8 pass. **All eleven
+database counts were re-queried in ONE statement and every one came back
+identical** — 50 / 50 / 0, 84 tables all RLS-enabled, 0 anon table grants, 0
+anon-executable non-trigger functions, 938 `authenticated` privilege rows, 12
+buckets, 116 applied migrations at `20260824231520`. That is the expected result
+and not a skipped check: this unit wrote no SQL at all. `v_active_alerts` reads 9
+for the fourth refresh running — still NOT evidence it has settled, see the
+oscillation paragraph above, and do not pin this line to it.
+
+**A `tsc` INVOCATION LIED CLEAN DURING THIS SESSION AND THE PIPELINE IS WHY.**
+`./node_modules/.bin/tsc --noEmit 2>&1 | head -20 && echo "TSC-CLEAN"` printed
+TSC-CLEAN while tsc had not run at all — the shell's cwd had reset to `$HOME`, the
+binary was not found, and `&&` was reading `head`'s exit status, not tsc's. A
+pipeline's status is its LAST command. Re-run as `cd <repo> && ./node_modules/.bin/tsc
+--noEmit; echo "tsc exit: $?"` and read the number. This is §5's re-measure rule
+pointed at the tooling instead of at a figure: the check that confirms the other
+checks can itself be the thing that is broken.
+
+    HEAD              41ea251 (the delete commit; this file's own commit follows)
+    branch main   AHEAD 3, NOT PUSHED — READ BACK from `status -sb`
+                      (was "in sync"; a2a4c7e + ed2c1f0 + 41ea251 are local only)
     migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
                       — a TIMESTAMP version, not "0167"; see the 0167 section below)
@@ -118,10 +142,12 @@ exists to catch, and it was caught in this file.
     anon table grants 0     anon-executable non-trigger functions 0
     authenticated     938 privilege rows
     storage buckets   12
-    v_active_alerts   9 rows                                    (was 10, was 9, was 9)
-    tsc --noEmit      clean;  8/8 check suites EXECUTED, 8/8 pass
+    v_active_alerts   9 rows                            (was 10, was 9, was 9, was 9)
+    tsc --noEmit      clean, exit 0 READ DIRECTLY;  8/8 check suites EXECUTED, 8/8 pass
     next build        clean, 17 routes + middleware;  middleware 83 kB
-                      (RE-RUN at 13389b7 — source was touched, licence void)
+                      (RE-RUN at 41ea251 — source was touched, licence void)
+    warehouses        4 rows, all active = true; three live, plus `Furian warehouse`
+                      which is leftover Delete-test data and is safely removable
 
 **EVERY DATABASE FIGURE ABOVE CAME BACK IDENTICAL, AND THAT IS THE EXPECTED
 RESULT, NOT A SKIPPED CHECK.** The UI pass wrote no SQL — no migration, no RPC, no
@@ -252,6 +278,94 @@ Park` — carries `status='active'` AND a non-null `archived_at`. Daily Trips sh
 in a concrete place: archive is a PRE-FILTER, never a state, so `status` alone is
 never the whole test. Any report that counts projects filters on `archived_at is
 null` as well, and anything showing 8 has dropped the pre-filter.
+
+---
+
+## SHIPPED — WAREHOUSE MANAGEMENT IN SETTINGS (`a2a4c7e` → `ed2c1f0` → `41ea251`)
+
+**NO MIGRATION, NO RPC, NO SOFT-DELETE.** Three commits, each browser-verified by
+Turki before it landed. The whole warehouse lifecycle — create, edit, delete —
+now lives in Settings → Warehouses, and nowhere else.
+
+`lib/actions/warehouses.ts` is the single action home (the `operation-stations.ts`
+precedent: a shared LOOKUP concept edited from a dialog that is not under `app/`).
+`components/settings/WarehousesSection.tsx` is the whole UI. `components/ui.tsx`
+gained one optional prop.
+
+**COMMIT 1 — RELOCATION, AND `createWarehouse` WAS NOT REWRITTEN.** It moved out
+of `app/inventory/actions.ts` byte-for-byte: same trim rules, same
+empty-string-to-null mapping, same select. The Inventory header's "Create
+Warehouse" button and `CreateWarehouseModal` (140 lines) were deleted, not
+duplicated, so there is exactly one create path and no second implementation to
+drift from the first. Changing behaviour mid-move was deliberately avoided — it
+would have hidden a change inside a diff that claimed to be a no-op.
+
+**THREE ROUTES READ WAREHOUSES, NOT ONE — and this cost a bug that was caught by
+grep, not by thinking.** `app/inventory/page.tsx` tabs by them; `app/consumption`
+and `app/maintenance` both select `id, name` for their pickers. A rename that
+revalidated `/inventory` alone would leave the old name showing on two other
+pages. `revalidateWarehouses()` covers all three, and commit 2 fixed create to use
+it too. **Before adding any warehouse write, re-run `grep -rn 'from("warehouses")'`
+— the count is the spec.**
+
+**`active` IS NEVER READ FOR A DECISION, NEVER WRITTEN, NEVER SHOWN.** The column
+exists (0043) and every row is true. `updateWarehouse`'s SET list names exactly
+the four editable columns, so `active` is STRUCTURALLY ABSENT from the write path
+rather than left alone by convention — it cannot be written by that path even by
+accident. There is no deactivate concept for a warehouse and no toggle was added:
+the four dependent tables are ON DELETE RESTRICT, and that restriction is the
+guard. Verified at close: 0 warehouses with `active` not true.
+
+**COMMIT 3 — DELETE IS HARD, AND THE PRE-CHECK IS NOT THE SAFETY.**
+`pg_constraint` reports exactly FOUR foreign keys onto `warehouses` — `parts`,
+`stock_receipts`, `purchase_orders`, `exit_permits` — every one `confdeltype='r'`
+on a **NOT NULL** `warehouse_id`. That NOT NULL matters: a dependent can never be
+orphaned into a null, so "has no dependents" is the whole of "safe to delete".
+All four carry a btree index on `warehouse_id`.
+
+  - `listWarehouses` annotates each row with `deletable` from an EXISTENCE probe
+    (`limit(1)`, not `count:"exact"` — a yes/no question should not walk every
+    part in the depot). It FAILS CLOSED: a probe error reports "in use", hiding
+    the control rather than offering destruction on evidence we do not have.
+  - That read is a COURTESY, for the MESSAGE. Stock can arrive between the read
+    and the click, and no amount of checking first closes that window because the
+    check and the delete are not one transaction. **What makes it safe is the
+    schema:** Postgres refuses the DELETE and raises **23503**. Both refusal paths
+    emit the same sentence, so the race and the ordinary case are
+    indistinguishable to whoever is reading them.
+  - **This is why no RPC was needed.** A guarded plpgsql function would
+    re-implement a rule the constraints already enforce, and could only get it
+    wrong. Turki specified this constraint up front and it held.
+  - The 23503 path was VERIFIED, not assumed — a `ZZ-RACE-TEST` part was inserted
+    into a deletable warehouse with the confirm strip already open. Cleaned up
+    after; 0 rows remain.
+  - `.delete().eq().select("id")` returns the id so "deleted it" is
+    distinguishable from "matched nothing" — Postgres reports a zero-row DELETE as
+    success, so without it a second click on a stale list reports a removal that
+    did not happen. Same class of trap as `PGRST116` on the update path.
+
+**DESIGN NOTES THAT ARE DECISIONS, NOT TASTE.** Delete is ABSENT rather than
+greyed when a warehouse is in use — greying advertises a removal that will never
+arrive while the depot holds stock. The asymmetry is explained once in a footnote
+under the list rather than by an "in use" badge per row, because a per-row badge
+would put a STATUS on the warehouse and this app already has one column that
+looks like a warehouse status and is not one. Add/edit/confirm share ONE state
+union, so "adding AND editing", or a confirm sitting open over a half-typed edit,
+are unreachable states rather than bugs waiting.
+
+**`Btn` GAINED `autoFocus?: boolean` — ADDITIVE, OFF BY DEFAULT.** A control that
+REPLACES the control you just clicked has to catch the focus that click left
+behind; without it focus falls to `<body>` and a keyboard user is dropped at the
+top of the page. It lands on Cancel, so Enter-twice cancels rather than destroys.
+
+**A LATENT DARK-MODE BUG WAS FOUND AND SCOPED OUT, NOT FIXED IN PASSING.**
+`divide-y` alone leaves row rules at Tailwind's preflight `#e5e7eb`, because
+`border-color` is not inherited and this repo sets no `borderColor.DEFAULT` — an
+inline `borderColor` reaches the `<ul>`'s own frame and nothing else. Invisible in
+light mode, a bright white hairline in dark. Fixed here with
+`divide-[rgb(var(--border))]` (confirmed generated in the built CSS).
+**`components/settings/NotificationsSection.tsx` still has it** and was spun out
+as its own task rather than smuggled into this diff.
 
 ---
 
@@ -642,6 +756,42 @@ MCP and the file was written afterwards to match**; the view body in 0160 was
 pulled with `pg_get_viewdef` and checksum-matched against live rather than
 reconstructed. If a non-derivable event is ever needed, re-add it deliberately —
 0154 still holds the definition.
+
+---
+
+## SESSION LEDGER — 2026-08-25 (WAREHOUSE MANAGEMENT — SAME DAY, SEPARATE SESSION)
+
+Three commits, seven files, 896 insertions / 209 deletions. No SQL.
+
+  - `a2a4c7e` relocate create out of Inventory into Settings (6 files)
+  - `ed2c1f0` edit (2 files)
+  - `41ea251` guarded hard delete (3 files)
+
+**WHAT WENT RIGHT, AND IT IS THE SAME THING THREE TIMES: THE DATABASE WAS ASKED
+INSTEAD OF REMEMBERED.** The FK count, the `confdeltype`, the NOT NULL on
+`warehouse_id`, the btree indexes, the RLS policy, the table grants, the absence
+of triggers on `parts` — every one was queried before it was relied on, and
+several of them changed a design decision. The NOT NULL is the clearest case: it
+is what makes "no dependents" equal "safe to delete", and assuming it would have
+been a guess that happened to be right.
+
+**A NOTE WENT STALE MID-SESSION AND THE DB CAUGHT IT.** The handoff carried `ZZ
+Test Depot` as a fixture name; the live row read `AA Test Depot 3`, because Turki
+had renamed it while browser-verifying the edit feature. §5's "the database
+outranks the notes" applied to a note written EARLIER IN THE SAME SESSION.
+
+**THREE SELF-REVIEW CATCHES, ALL IN OWN WORK, ALL BEFORE TURKI SAW THEM.** The
+header Add button vanished mid-edit — the exact behaviour the per-row Edit button
+had a written comment arguing against. Focus fell to `<body>` when the confirm
+strip replaced the Delete button. And the `tsc` pipeline that reported clean
+without running (see CURRENT STATE). Reviewing the diff as though someone else
+wrote it is what found all three.
+
+**STAGING DISCIPLINE HELD ON ALL THREE COMMITS:** single-line explicit-path
+`git add`, `git status --short` to confirm the set, then `git show :<path>` to
+read the STAGED BLOB — not the working tree — including grepping it for the
+specific symbols each commit claimed to add. `preview/.planning/HANDOFF.json` was
+never staged.
 
 ---
 
