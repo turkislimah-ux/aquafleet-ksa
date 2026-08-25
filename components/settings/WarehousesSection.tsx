@@ -1,6 +1,7 @@
 "use client";
 
-// Settings → Warehouses. The one place a warehouse is created and edited.
+// Settings → Warehouses. The one place a warehouse is created, edited and
+// deleted.
 //
 // ==========================================================================
 // WHY IT MOVED OUT OF INVENTORY
@@ -46,6 +47,20 @@
 // database itself refuses to lose history. Surfacing a toggle here would offer
 // a second, softer kind of removal that nothing else in the app understands.
 // updateWarehouse's SET list does not name the column at all — see its header.
+//
+// ==========================================================================
+// DELETE IS HARD, AND IT IS OFFERED RATHER THAN ATTEMPTED
+// ==========================================================================
+// A row is only removable while nothing references it, so there is no history
+// to preserve by keeping it — a soft-delete here would archive an empty shell.
+// The Delete control therefore appears only on a warehouse the database would
+// actually let go, which is a read of the four dependent tables done alongside
+// the list (listWarehouses returns `deletable` per row).
+//
+// That read is a courtesy, NOT the safety. Stock can arrive between the read
+// and the click, and the ON DELETE RESTRICT constraints are what refuse the
+// delete when it does — see deleteWarehouse's header. This component's job is
+// only to not offer an action that is already known to be impossible.
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -57,7 +72,9 @@ import {
   listWarehouses,
   createWarehouse,
   updateWarehouse,
+  deleteWarehouse,
   type WarehouseInput,
+  type WarehouseRow,
 } from "@/lib/actions/warehouses";
 
 const INPUT =
@@ -67,9 +84,18 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 const EMPTY_DRAFT = { name: "", location: "", type: "", note: "" };
 type Draft = typeof EMPTY_DRAFT;
 
-// The open form, if any. One value rather than an `adding` flag plus an
-// `editingId`, so "adding AND editing" is not a state the component can reach.
-type FormState = { kind: "none" } | { kind: "add" } | { kind: "edit"; id: string };
+// Whatever the list currently has open. One value rather than an `adding` flag
+// plus an `editingId` plus a `confirmingId`, so "adding AND editing", or
+// "confirming a delete while editing the row underneath it", are not states the
+// component can reach. Delete confirmation belongs in this union and not in a
+// flag of its own precisely because it has to be mutually exclusive with the
+// other two — a confirm strip open over a half-typed edit is how the wrong
+// button gets pressed.
+type PanelState =
+  | { kind: "none" }
+  | { kind: "add" }
+  | { kind: "edit"; id: string }
+  | { kind: "confirmDelete"; id: string };
 
 // Editing starts from what the database returned, not from a blank form: a
 // nullable column comes back null and an <input value> must be a string.
@@ -102,11 +128,14 @@ export default function WarehousesSection({
 }) {
   const ar = lang === "ar";
   const router = useRouter();
-  const [rows, setRows] = useState<Warehouse[] | null>(null);
+  const [rows, setRows] = useState<WarehouseRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [form, setForm] = useState<FormState>({ kind: "none" });
+  const [panel, setPanel] = useState<PanelState>({ kind: "none" });
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  // One in-flight flag for every write the section can start. Saving and
+  // deleting never overlap — PanelState makes them mutually exclusive — so a
+  // second flag would only ever be the first one under another name.
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -126,7 +155,7 @@ export default function WarehousesSection({
   // rather than showing a list someone changed in another tab.
   useEffect(() => {
     if (!open) return;
-    setForm({ kind: "none" });
+    setPanel({ kind: "none" });
     setDraft(EMPTY_DRAFT);
     setFormError(null);
     setRows(null);
@@ -138,20 +167,48 @@ export default function WarehousesSection({
   function startAdd() {
     setDraft(EMPTY_DRAFT);
     setFormError(null);
-    setForm({ kind: "add" });
+    setPanel({ kind: "add" });
   }
 
   function startEdit(w: Warehouse) {
     setDraft(draftOf(w));
     setFormError(null);
-    setForm({ kind: "edit", id: w.id });
+    setPanel({ kind: "edit", id: w.id });
+  }
+
+  function startDelete(w: Warehouse) {
+    setFormError(null);
+    setPanel({ kind: "confirmDelete", id: w.id });
   }
 
   function cancel() {
     if (saving) return;
-    setForm({ kind: "none" });
+    setPanel({ kind: "none" });
     setDraft(EMPTY_DRAFT);
     setFormError(null);
+  }
+
+  async function confirmDelete(id: string) {
+    setSaving(true);
+    setFormError(null);
+    const res = await deleteWarehouse(id);
+    setSaving(false);
+
+    // The strip stays open on failure, holding the message next to the row it
+    // is about. Closing it would drop the only explanation of why the row is
+    // still there — and the commonest failure here is exactly that: someone
+    // received stock into this warehouse while the confirm was on screen.
+    if (res.error) {
+      setFormError(res.error);
+      // Re-read regardless. Whatever refused the delete is a change this list
+      // has not seen, so the row's Delete control should stop being offered.
+      await load();
+      return;
+    }
+
+    setPanel({ kind: "none" });
+    await load();
+    router.refresh();
   }
 
   function set<K extends keyof Draft>(key: K, value: string) {
@@ -161,7 +218,7 @@ export default function WarehousesSection({
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (form.kind === "none") return;
+    if (panel.kind !== "add" && panel.kind !== "edit") return;
 
     // Checked here as well as in the action. The DB column is NOT NULL and the
     // server validates too — this exists so a name of nothing but spaces fails
@@ -174,22 +231,22 @@ export default function WarehousesSection({
 
     setSaving(true);
     setFormError(null);
-    const res = form.kind === "add"
+    const res = panel.kind === "add"
       ? await createWarehouse(toInput(draft))
-      : await updateWarehouse(form.id, toInput(draft));
+      : await updateWarehouse(panel.id, toInput(draft));
     setSaving(false);
 
     if (res.error || !res.warehouse) {
       setFormError(
         res.error ??
-        (form.kind === "add"
+        (panel.kind === "add"
           ? ar ? "تعذّر إنشاء المستودع." : "Could not create warehouse."
           : ar ? "تعذّر حفظ التغييرات." : "Could not save changes."),
       );
       return;
     }
 
-    setForm({ kind: "none" });
+    setPanel({ kind: "none" });
     setDraft(EMPTY_DRAFT);
     await load();
     // Inventory tabs by warehouse and Consumption/Maintenance pick from them,
@@ -198,7 +255,10 @@ export default function WarehousesSection({
     router.refresh();
   }
 
-  const busy = form.kind !== "none";
+  const busy = panel.kind !== "none";
+  // Only worth explaining the asymmetry when there is one on screen. With every
+  // row deletable the note would be answering a question nobody asked.
+  const anyLocked = (rows ?? []).some((w) => !w.deletable);
 
   return (
     <div>
@@ -235,7 +295,7 @@ export default function WarehousesSection({
 
       {/* ---- ADD FORM — above the list, so a new name lands where you are
               already looking rather than below the fold of a long list. ---- */}
-      {form.kind === "add" && (
+      {panel.kind === "add" && (
         <form
           onSubmit={submit}
           className="mt-5 rounded-xl border p-4"
@@ -285,7 +345,8 @@ export default function WarehousesSection({
           style={{ borderColor: "rgb(var(--border))" }}
         >
           {rows.map((w) => {
-            const isEditing = form.kind === "edit" && form.id === w.id;
+            const isEditing = panel.kind === "edit" && panel.id === w.id;
+            const isConfirming = panel.kind === "confirmDelete" && panel.id === w.id;
             return (
               <li key={w.id} className="px-3 py-3">
                 {isEditing ? (
@@ -302,6 +363,59 @@ export default function WarehousesSection({
                       submitLabel={ar ? "حفظ التغييرات" : "Save changes"}
                     />
                   </form>
+                ) : isConfirming ? (
+                  /* The confirm replaces the row rather than floating over it,
+                     for the same reason the edit form does: what is about to be
+                     destroyed stays named in the place it lived. A window.confirm
+                     — the pattern used elsewhere in this app — cannot be styled,
+                     cannot carry the "nothing points at it" reassurance, and has
+                     nowhere to put the failure message when the delete is
+                     refused. */
+                  <div
+                    className="flex flex-wrap items-start justify-between gap-3"
+                    role="group"
+                    aria-label={ar ? `حذف "${w.name}"؟` : `Delete “${w.name}”?`}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">
+                        {ar ? `حذف "${w.name}"؟` : `Delete “${w.name}”?`}
+                      </p>
+                      <p className="mt-0.5 text-xs muted">
+                        {ar
+                          ? "لا شيء يشير إلى هذا المستودع، لذا يمكن إزالته. لا يمكن التراجع عن هذا."
+                          : "Nothing points at this warehouse, so it can be removed. This cannot be undone."}
+                      </p>
+                      {formError && (
+                        <p role="alert" className="mt-2 text-sm text-rose-600 dark:text-rose-400">
+                          {formError}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {/* Focus lands on Cancel, not Delete. The button that was
+                          just clicked has unmounted, so something has to catch
+                          the focus it left; making that the safe choice means a
+                          keyboard user pressing Enter twice cancels rather than
+                          destroys. */}
+                      <Btn variant="outline" onClick={cancel} disabled={saving} autoFocus>
+                        {ar ? "إلغاء" : "Cancel"}
+                      </Btn>
+                      {/* Rose, not brand: this is the one control in Settings
+                          that destroys something, and it should not look like
+                          the Save button muscle memory expects in that corner.
+                          Cancel comes first so the safe choice is the one the
+                          hand is already on after clicking Delete. */}
+                      <Btn
+                        onClick={() => void confirmDelete(w.id)}
+                        disabled={saving}
+                        className="bg-rose-600 text-white hover:bg-rose-700"
+                      >
+                        {saving
+                          ? ar ? "جارٍ الحذف…" : "Deleting…"
+                          : ar ? "حذف" : "Delete"}
+                      </Btn>
+                    </div>
+                  </div>
                 ) : (
                   <div className="flex items-start gap-3">
                     <WarehouseIcon className="mt-0.5 h-4 w-4 shrink-0 muted" aria-hidden />
@@ -325,26 +439,50 @@ export default function WarehousesSection({
                       )}
                       {w.note && <p className="mt-1 text-xs muted">{w.note}</p>}
                     </div>
-                    {/* A word, not a pencil. Commit 3 puts Delete beside it, and
-                        two unlabelled icons on a row is a guessing game where
-                        one of the guesses is destructive. Disabled — not
-                        hidden — while another form is open: a control that
-                        vanishes mid-task reads as a bug, one that greys out
-                        reads as "finish what you started". */}
-                    <Btn
-                      variant="ghost"
-                      onClick={() => startEdit(w)}
-                      disabled={busy}
-                      className="shrink-0"
-                    >
-                      {ar ? "تعديل" : "Edit"}
-                    </Btn>
+                    {/* Words, not a pencil and a bin. Two unlabelled icons on a
+                        row is a guessing game where one of the guesses is
+                        destructive. Disabled — not hidden — while another panel
+                        is open: a control that vanishes mid-task reads as a bug,
+                        one that greys out reads as "finish what you started".
+
+                        Delete is the exception, and it is a different rule: it
+                        is absent, not disabled, when the warehouse is in use.
+                        Greying it out would advertise a removal that will never
+                        become available while the depot holds stock, and would
+                        invite clicking it to find out why. */}
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Btn variant="ghost" onClick={() => startEdit(w)} disabled={busy}>
+                        {ar ? "تعديل" : "Edit"}
+                      </Btn>
+                      {w.deletable && (
+                        <Btn
+                          variant="ghost"
+                          onClick={() => startDelete(w)}
+                          disabled={busy}
+                          className="text-rose-600 dark:text-rose-400"
+                        >
+                          {ar ? "حذف" : "Delete"}
+                        </Btn>
+                      )}
+                    </div>
                   </div>
                 )}
               </li>
             );
           })}
         </ul>
+      )}
+
+      {/* Said once, under the list, instead of on every row that lacks a Delete
+          button. A per-row "in use" badge would put a status on the warehouse —
+          and this app already has one column that looks like a warehouse status
+          and is not one. The missing control needs a reason, not a label. */}
+      {anyLocked && (
+        <p className="mt-3 text-xs muted">
+          {ar
+            ? "يمكن حذف المستودع فقط ما دام لا شيء يشير إليه. بمجرد أن تصبح لديه قطع أو استلامات أو أوامر شراء أو أذون خروج، يبقيه سجلّه."
+            : "A warehouse can only be deleted while nothing points at it. Once it has parts, receipts, purchase orders or exit permits, its history keeps it."}
+        </p>
       )}
     </div>
   );

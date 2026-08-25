@@ -103,9 +103,14 @@ export function Section({ title, action, children }: { title: string; action?: R
   );
 }
 
-export function Btn({ children, variant = "default", className, onClick, type = "button", disabled }: {
+// `autoFocus` is optional and off by default, so every existing caller is
+// unaffected. It exists because a control that REPLACES the control you just
+// clicked has to catch the focus that click left behind — otherwise focus falls
+// to <body> and the keyboard user is dropped at the top of the page. Settings →
+// Warehouses uses it to land on Cancel when a delete confirmation opens.
+export function Btn({ children, variant = "default", className, onClick, type = "button", disabled, autoFocus }: {
   children: ReactNode; variant?: "default" | "ghost" | "primary" | "outline"; className?: string;
-  onClick?: () => void; type?: "button" | "submit"; disabled?: boolean;
+  onClick?: () => void; type?: "button" | "submit"; disabled?: boolean; autoFocus?: boolean;
 }) {
   const v =
     variant === "primary" ? "bg-brand-600 hover:bg-brand-700 text-white" :
@@ -113,7 +118,7 @@ export function Btn({ children, variant = "default", className, onClick, type = 
     variant === "outline" ? "border hover:bg-black/5 dark:hover:bg-white/5" :
     "bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10";
   return (
-    <button type={type} onClick={onClick} disabled={disabled}
+    <button type={type} onClick={onClick} disabled={disabled} autoFocus={autoFocus}
       className={cn("h-9 px-3 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition disabled:opacity-50 disabled:pointer-events-none", v, className)}
       style={variant === "outline" ? { borderColor: "rgb(var(--border))" } : undefined}>
       {children}
