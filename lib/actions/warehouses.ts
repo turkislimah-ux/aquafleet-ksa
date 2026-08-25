@@ -46,6 +46,23 @@ export type WarehouseInput = {
   note: string | null;
 };
 
+// THREE routes read warehouses, not one. app/inventory/page.tsx tabs by them,
+// and app/consumption/page.tsx + app/maintenance/page.tsx both select
+// "id, name" for their pickers — so a rename that only revalidated /inventory
+// would leave the old name showing on two other pages. Same shape as
+// operation-stations.ts's revalidateAll(), and for the same reason.
+//
+// createWarehouse revalidated /inventory alone when it moved here, because that
+// commit was a relocation and changing behaviour mid-move would have hidden the
+// change inside a diff that claimed to be a no-op. This is that fix, made on
+// purpose: a newly created warehouse has to become pickable everywhere it can
+// be picked, not just where it is tabbed.
+function revalidateWarehouses() {
+  revalidatePath("/inventory");
+  revalidatePath("/consumption");
+  revalidatePath("/maintenance");
+}
+
 // Oldest first — the same ordering the Inventory page's warehouse tabs use, so
 // the list in Settings reads in the order the user already knows.
 export async function listWarehouses(): Promise<{
@@ -83,6 +100,50 @@ export async function createWarehouse(
     .single();
   if (error) return { error: error.message };
 
-  revalidatePath("/inventory");
+  revalidateWarehouses();
+  return { error: null, warehouse: data as Warehouse };
+}
+
+// Edit. Plain UPDATE — warehouses has no RPC and needs none: RLS already grants
+// authenticated the write, and there is no cross-table invariant to hold. Same
+// validation and same empty-string-to-null mapping as create, because a field
+// cleared in the editor has to mean what a field left blank at creation means.
+//
+// THE SET LIST IS THE GUARANTEE. Exactly the four editable columns appear in
+// it, so `active` cannot be written by this path even by accident — it is not
+// "left alone by convention", it is absent. `id` and `created_at` likewise.
+//
+// Returns the updated row so the caller can render what the database actually
+// stored rather than echoing back the draft it just sent.
+export async function updateWarehouse(
+  id: string,
+  input: WarehouseInput,
+): Promise<{ error: string | null; warehouse?: Warehouse }> {
+  if (!id) return { error: "Missing warehouse." };
+  const name = input.name?.trim() ?? "";
+  if (!name) return { error: "Warehouse name is required." };
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("warehouses")
+    .update({
+      name,
+      location: input.location?.trim() || null,
+      type: input.type?.trim() || null,
+      note: input.note?.trim() || null,
+    })
+    .eq("id", id)
+    .select(COLUMNS)
+    .single();
+  // PGRST116 is "no rows returned" from .single() — here that means the row is
+  // gone, not that the update was rejected. Postgres reports a matched-nothing
+  // UPDATE as success, so without this the editor would show a raw PostgREST
+  // code for the one situation a user can actually understand.
+  if (error) {
+    if (error.code === "PGRST116") return { error: "That warehouse no longer exists." };
+    return { error: error.message };
+  }
+
+  revalidateWarehouses();
   return { error: null, warehouse: data as Warehouse };
 }

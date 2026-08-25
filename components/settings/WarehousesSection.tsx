@@ -1,7 +1,6 @@
 "use client";
 
-// Settings → Warehouses. The one place a warehouse is created, and (in the
-// commits that follow) edited and deleted.
+// Settings → Warehouses. The one place a warehouse is created and edited.
 //
 // ==========================================================================
 // WHY IT MOVED OUT OF INVENTORY
@@ -18,18 +17,26 @@
 // is, so the whole lifecycle lives here in one list instead of three places.
 //
 // ==========================================================================
-// A LIST WITH AN INLINE FORM, NOT A NESTED MODAL
+// AN INLINE FORM, NOT A NESTED MODAL — AND ONE FORM AT A TIME
 // ==========================================================================
-// The form that used to be CreateWarehouseModal is now inline, revealed by the
-// Add button above the list. Settings is already a dialog; opening a second
-// overlay on top of it would stack two backdrops and two close buttons for a
-// four-field form — the same reasoning CompanySettingsSection's header gives
-// for dropping its own chrome when it moved in here.
+// The form that used to be CreateWarehouseModal is inline, revealed by the Add
+// button above the list. Settings is already a dialog; opening a second overlay
+// on top of it would stack two backdrops and two close buttons for a four-field
+// form — the same reasoning CompanySettingsSection's header gives for dropping
+// its own chrome when it moved in here.
 //
 // Inline also puts the form next to the list it changes: you can see the names
 // that already exist while typing a new one, which matters because names are
 // NOT unique in the database. Two depots may legitimately share a name; the
 // list is what stops an accidental duplicate rather than a constraint.
+//
+// EDITING HAPPENS IN THE ROW ITSELF, not in a panel above the list, because a
+// detached form has to re-state which row it belongs to and can still be read
+// against the wrong one. The row becomes the form. Only one form is open at a
+// time and every other Edit button disables while it is: the alternative is a
+// second click silently discarding whatever was typed into the first, and the
+// fix for that is either a confirm prompt nobody wants for a four-field form,
+// or simply not making the conflict reachable.
 //
 // ==========================================================================
 // `active` IS NEVER SHOWN AND NEVER SET
@@ -38,6 +45,7 @@
 // for a warehouse: the four dependent tables are ON DELETE RESTRICT, so the
 // database itself refuses to lose history. Surfacing a toggle here would offer
 // a second, softer kind of removal that nothing else in the app understands.
+// updateWarehouse's SET list does not name the column at all — see its header.
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -48,6 +56,7 @@ import type { Warehouse } from "@/lib/db-types";
 import {
   listWarehouses,
   createWarehouse,
+  updateWarehouse,
   type WarehouseInput,
 } from "@/lib/actions/warehouses";
 
@@ -57,6 +66,33 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 
 const EMPTY_DRAFT = { name: "", location: "", type: "", note: "" };
 type Draft = typeof EMPTY_DRAFT;
+
+// The open form, if any. One value rather than an `adding` flag plus an
+// `editingId`, so "adding AND editing" is not a state the component can reach.
+type FormState = { kind: "none" } | { kind: "add" } | { kind: "edit"; id: string };
+
+// Editing starts from what the database returned, not from a blank form: a
+// nullable column comes back null and an <input value> must be a string.
+function draftOf(w: Warehouse): Draft {
+  return {
+    name: w.name,
+    location: w.location ?? "",
+    type: w.type ?? "",
+    note: w.note ?? "",
+  };
+}
+
+function toInput(draft: Draft): WarehouseInput {
+  return {
+    name: draft.name.trim(),
+    // Empty means "no value", not an empty string. Same mapping create has
+    // always used, so a field cleared here reads exactly like a field never
+    // filled in.
+    location: draft.location.trim() || null,
+    type: draft.type.trim() || null,
+    note: draft.note.trim() || null,
+  };
+}
 
 export default function WarehousesSection({
   open, lang,
@@ -69,7 +105,7 @@ export default function WarehousesSection({
   const [rows, setRows] = useState<Warehouse[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState<FormState>({ kind: "none" });
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -90,7 +126,7 @@ export default function WarehousesSection({
   // rather than showing a list someone changed in another tab.
   useEffect(() => {
     if (!open) return;
-    setAdding(false);
+    setForm({ kind: "none" });
     setDraft(EMPTY_DRAFT);
     setFormError(null);
     setRows(null);
@@ -102,12 +138,18 @@ export default function WarehousesSection({
   function startAdd() {
     setDraft(EMPTY_DRAFT);
     setFormError(null);
-    setAdding(true);
+    setForm({ kind: "add" });
   }
 
-  function cancelAdd() {
+  function startEdit(w: Warehouse) {
+    setDraft(draftOf(w));
+    setFormError(null);
+    setForm({ kind: "edit", id: w.id });
+  }
+
+  function cancel() {
     if (saving) return;
-    setAdding(false);
+    setForm({ kind: "none" });
     setDraft(EMPTY_DRAFT);
     setFormError(null);
   }
@@ -119,32 +161,44 @@ export default function WarehousesSection({
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const name = draft.name.trim();
-    if (!name) {
+    if (form.kind === "none") return;
+
+    // Checked here as well as in the action. The DB column is NOT NULL and the
+    // server validates too — this exists so a name of nothing but spaces fails
+    // next to the field rather than as a round trip, since `required` alone
+    // treats "   " as filled.
+    if (!draft.name.trim()) {
       setFormError(ar ? "اسم المستودع مطلوب." : "Warehouse name is required.");
       return;
     }
-    const input: WarehouseInput = {
-      name,
-      location: draft.location.trim() || null,
-      type: draft.type.trim() || null,
-      note: draft.note.trim() || null,
-    };
+
     setSaving(true);
     setFormError(null);
-    const res = await createWarehouse(input);
+    const res = form.kind === "add"
+      ? await createWarehouse(toInput(draft))
+      : await updateWarehouse(form.id, toInput(draft));
     setSaving(false);
+
     if (res.error || !res.warehouse) {
-      setFormError(res.error ?? (ar ? "تعذّر إنشاء المستودع." : "Could not create warehouse."));
+      setFormError(
+        res.error ??
+        (form.kind === "add"
+          ? ar ? "تعذّر إنشاء المستودع." : "Could not create warehouse."
+          : ar ? "تعذّر حفظ التغييرات." : "Could not save changes."),
+      );
       return;
     }
-    setAdding(false);
+
+    setForm({ kind: "none" });
     setDraft(EMPTY_DRAFT);
     await load();
-    // The Inventory page keeps its warehouse tabs in server-rendered props, so
-    // a new depot only appears there after the route re-renders.
+    // Inventory tabs by warehouse and Consumption/Maintenance pick from them,
+    // all three from server-rendered props — so a new or renamed depot only
+    // reaches those pages once the route re-renders.
     router.refresh();
   }
+
+  const busy = form.kind !== "none";
 
   return (
     <div>
@@ -157,12 +211,14 @@ export default function WarehousesSection({
               : "Where parts are stored. Parts, purchase orders, receipts and exit permits are all tracked per warehouse."}
           </p>
         </div>
-        {!adding && (
-          <Btn variant="primary" onClick={startAdd} className="shrink-0">
-            <Plus className="h-4 w-4" aria-hidden />
-            {ar ? "إضافة مستودع" : "Add warehouse"}
-          </Btn>
-        )}
+        {/* Greyed out rather than removed while a form is open, for the same
+            reason the per-row Edit buttons are: this button sits in the header,
+            so hiding it would also collapse the header's height mid-edit and
+            shift the list under the cursor. */}
+        <Btn variant="primary" onClick={startAdd} disabled={busy} className="shrink-0">
+          <Plus className="h-4 w-4" aria-hidden />
+          {ar ? "إضافة مستودع" : "Add warehouse"}
+        </Btn>
       </div>
 
       {loadError && (
@@ -179,7 +235,7 @@ export default function WarehousesSection({
 
       {/* ---- ADD FORM — above the list, so a new name lands where you are
               already looking rather than below the fold of a long list. ---- */}
-      {adding && (
+      {form.kind === "add" && (
         <form
           onSubmit={submit}
           className="mt-5 rounded-xl border p-4"
@@ -190,73 +246,14 @@ export default function WarehousesSection({
               that accessible name or invent a different word for it — and an X
               badge is modal chrome on a panel that is not a modal. */}
           <h3 className="text-sm font-semibold">{ar ? "مستودع جديد" : "New warehouse"}</h3>
-
-          <div className="mt-3 flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{ar ? "الاسم *" : "Name *"}</span>
-              <input
-                value={draft.name}
-                onChange={(e) => set("name", e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                required
-                // Focus lands on the only required field the moment the form
-                // appears, so the Add button is one click and then typing.
-                autoFocus
-                placeholder={ar ? "مثال: مستودع الرياض" : "e.g. Riyadh Depot"}
-              />
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">{ar ? "الموقع" : "Location"}</span>
-                <input
-                  value={draft.location}
-                  onChange={(e) => set("location", e.target.value)}
-                  className={INPUT}
-                  style={INPUT_STYLE}
-                  placeholder={ar ? "مثال: الرياض" : "e.g. Riyadh"}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">{ar ? "النوع" : "Type"}</span>
-                <input
-                  value={draft.type}
-                  onChange={(e) => set("type", e.target.value)}
-                  className={INPUT}
-                  style={INPUT_STYLE}
-                  placeholder={ar ? "مثال: مستودع رئيسي" : "e.g. Main depot"}
-                />
-              </label>
-            </div>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{ar ? "ملاحظة" : "Note"}</span>
-              <textarea
-                value={draft.note}
-                onChange={(e) => set("note", e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                rows={2}
-                placeholder={ar ? "ما الذي يُخزَّن هنا" : "What is stored here"}
-              />
-            </label>
-          </div>
-
-          {formError && (
-            <p role="alert" className="mt-3 text-sm text-rose-600 dark:text-rose-400">
-              {formError}
-            </p>
-          )}
-
-          <div className="mt-4 flex items-center justify-end gap-2">
-            <Btn variant="outline" onClick={cancelAdd} disabled={saving}>
-              {ar ? "إلغاء" : "Cancel"}
-            </Btn>
-            <Btn type="submit" variant="primary" disabled={saving}>
-              {saving
-                ? ar ? "جارٍ الحفظ…" : "Saving…"
-                : ar ? "إنشاء المستودع" : "Create warehouse"}
-            </Btn>
-          </div>
+          <WarehouseFields draft={draft} set={set} ar={ar} />
+          <FormFooter
+            ar={ar}
+            saving={saving}
+            onCancel={cancel}
+            error={formError}
+            submitLabel={ar ? "إنشاء المستودع" : "Create warehouse"}
+          />
         </form>
       )}
 
@@ -264,7 +261,7 @@ export default function WarehousesSection({
       {rows === null ? (
         <div className="py-8 text-center text-sm muted">{ar ? "جارٍ التحميل…" : "Loading…"}</div>
       ) : rows.length === 0 ? (
-        !adding && (
+        !busy && (
           <div
             className="mt-5 rounded-xl border p-8 flex flex-col items-center gap-2 text-center"
             style={{ borderColor: "rgb(var(--border))" }}
@@ -287,33 +284,163 @@ export default function WarehousesSection({
           className="mt-5 rounded-xl border divide-y divide-[rgb(var(--border))]"
           style={{ borderColor: "rgb(var(--border))" }}
         >
-          {rows.map((w) => (
-            <li key={w.id} className="flex items-start gap-3 px-3 py-3">
-              <WarehouseIcon className="mt-0.5 h-4 w-4 shrink-0 muted" aria-hidden />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <span className="text-sm font-medium">{w.name}</span>
-                  {w.location && <span className="text-xs muted">{w.location}</span>}
-                </div>
-                {/* Type is free text, not an enum (0043), so it gets the
-                    neutral chip rather than a colour that would imply a
-                    category the database does not actually have. */}
-                {w.type && (
-                  <span
-                    className={cn(
-                      "mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
-                      PILL_TONE_CLS.neutral.chip,
-                    )}
-                  >
-                    {w.type}
-                  </span>
+          {rows.map((w) => {
+            const isEditing = form.kind === "edit" && form.id === w.id;
+            return (
+              <li key={w.id} className="px-3 py-3">
+                {isEditing ? (
+                  <form onSubmit={submit}>
+                    <h3 className="text-sm font-semibold">
+                      {ar ? "تعديل المستودع" : "Edit warehouse"}
+                    </h3>
+                    <WarehouseFields draft={draft} set={set} ar={ar} />
+                    <FormFooter
+                      ar={ar}
+                      saving={saving}
+                      onCancel={cancel}
+                      error={formError}
+                      submitLabel={ar ? "حفظ التغييرات" : "Save changes"}
+                    />
+                  </form>
+                ) : (
+                  <div className="flex items-start gap-3">
+                    <WarehouseIcon className="mt-0.5 h-4 w-4 shrink-0 muted" aria-hidden />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <span className="text-sm font-medium">{w.name}</span>
+                        {w.location && <span className="text-xs muted">{w.location}</span>}
+                      </div>
+                      {/* Type is free text, not an enum (0043), so it gets the
+                          neutral chip rather than a colour that would imply a
+                          category the database does not actually have. */}
+                      {w.type && (
+                        <span
+                          className={cn(
+                            "mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+                            PILL_TONE_CLS.neutral.chip,
+                          )}
+                        >
+                          {w.type}
+                        </span>
+                      )}
+                      {w.note && <p className="mt-1 text-xs muted">{w.note}</p>}
+                    </div>
+                    {/* A word, not a pencil. Commit 3 puts Delete beside it, and
+                        two unlabelled icons on a row is a guessing game where
+                        one of the guesses is destructive. Disabled — not
+                        hidden — while another form is open: a control that
+                        vanishes mid-task reads as a bug, one that greys out
+                        reads as "finish what you started". */}
+                    <Btn
+                      variant="ghost"
+                      onClick={() => startEdit(w)}
+                      disabled={busy}
+                      className="shrink-0"
+                    >
+                      {ar ? "تعديل" : "Edit"}
+                    </Btn>
+                  </div>
                 )}
-                {w.note && <p className="mt-1 text-xs muted">{w.note}</p>}
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
+  );
+}
+
+// The four fields, shared verbatim by create and edit. They are the same four
+// columns with the same rules, so two copies would be two places for a label,
+// a placeholder or a required marker to drift.
+function WarehouseFields({
+  draft, set, ar,
+}: {
+  draft: Draft;
+  set: <K extends keyof Draft>(key: K, value: string) => void;
+  ar: boolean;
+}) {
+  return (
+    <div className="mt-3 flex flex-col gap-3">
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="muted">{ar ? "الاسم *" : "Name *"}</span>
+        <input
+          value={draft.name}
+          onChange={(e) => set("name", e.target.value)}
+          className={INPUT}
+          style={INPUT_STYLE}
+          required
+          // Focus lands on the only required field the moment the form appears,
+          // so opening it is one click and then typing. On edit that also puts
+          // the caret in the field being changed most often — the name.
+          autoFocus
+          placeholder={ar ? "مثال: مستودع الرياض" : "e.g. Riyadh Depot"}
+        />
+      </label>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="muted">{ar ? "الموقع" : "Location"}</span>
+          <input
+            value={draft.location}
+            onChange={(e) => set("location", e.target.value)}
+            className={INPUT}
+            style={INPUT_STYLE}
+            placeholder={ar ? "مثال: الرياض" : "e.g. Riyadh"}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="muted">{ar ? "النوع" : "Type"}</span>
+          <input
+            value={draft.type}
+            onChange={(e) => set("type", e.target.value)}
+            className={INPUT}
+            style={INPUT_STYLE}
+            placeholder={ar ? "مثال: مستودع رئيسي" : "e.g. Main depot"}
+          />
+        </label>
+      </div>
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="muted">{ar ? "ملاحظة" : "Note"}</span>
+        <textarea
+          value={draft.note}
+          onChange={(e) => set("note", e.target.value)}
+          className={INPUT}
+          style={INPUT_STYLE}
+          rows={2}
+          placeholder={ar ? "ما الذي يُخزَّن هنا" : "What is stored here"}
+        />
+      </label>
+    </div>
+  );
+}
+
+// Error line + Cancel/Submit, shared for the same reason the fields are: the
+// only thing that differs between creating and saving is one word on one
+// button.
+function FormFooter({
+  ar, saving, error, onCancel, submitLabel,
+}: {
+  ar: boolean;
+  saving: boolean;
+  error: string | null;
+  onCancel: () => void;
+  submitLabel: string;
+}) {
+  return (
+    <>
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-rose-600 dark:text-rose-400">
+          {error}
+        </p>
+      )}
+      <div className="mt-4 flex items-center justify-end gap-2">
+        <Btn variant="outline" onClick={onCancel} disabled={saving}>
+          {ar ? "إلغاء" : "Cancel"}
+        </Btn>
+        <Btn type="submit" variant="primary" disabled={saving}>
+          {saving ? (ar ? "جارٍ الحفظ…" : "Saving…") : submitLabel}
+        </Btn>
+      </div>
+    </>
   );
 }
