@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `cb76319`** — read that back from the BRANCH line of `git status -sb`, never the tree line. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE: the warehouse `Furian warehouse` was a Delete fixture and is now deletable from the very UI this unit shipped — remove it there, not in SQL, or keep it; either is fine, but it is not production data. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
+# SESSION HANDOFF — closes at WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `cb76319`** — read that back from the BRANCH line of `git status -sb`, never the tree line. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
 
 # PREVIOUS HEADER — the UI polish pass, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
@@ -154,7 +154,10 @@ checks can itself be the thing that is broken.
     next build        clean, 17 routes + middleware;  middleware 83 kB
                       (RE-RUN at 41ea251 — source was touched, licence void)
     warehouses        4 rows, all active = true; three live, plus `Furian warehouse`
-                      which is leftover Delete-test data and is safely removable
+                      which is leftover Delete-test data. TURKI'S CALL, MADE AND
+                      CLOSED: it STAYS, and he removes it himself when he wants to.
+                      Not an open item — do NOT re-raise it, do NOT delete it, and
+                      do not read a 4th warehouse row as an anomaly
 
 **EVERY DATABASE FIGURE ABOVE CAME BACK IDENTICAL, AND THAT IS THE EXPECTED
 RESULT, NOT A SKIPPED CHECK.** The UI pass wrote no SQL — no migration, no RPC, no
