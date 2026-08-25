@@ -35,18 +35,24 @@
 // to navigate.
 
 import { useEffect, useRef, useState } from "react";
-import { X, Building2, BellRing, UserRound, LifeBuoy } from "lucide-react";
+import { X, Building2, Warehouse, BellRing, UserRound, LifeBuoy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import CompanySettingsSection from "./CompanySettingsSection";
+import WarehousesSection from "./WarehousesSection";
 import NotificationsSection from "./NotificationsSection";
 import ProfileSection from "./ProfileSection";
 import IssuesSection from "./IssuesSection";
 import ScrollLock from "@/components/ScrollLock";
 
-type SectionKey = "company" | "notifications" | "profile" | "issues";
+type SectionKey = "company" | "warehouses" | "notifications" | "profile" | "issues";
 
+// Order is deliberate and not alphabetical: the two ORGANISATION sections
+// (things about the business, shared by everyone) sit above the two PERSONAL
+// ones (things about you alone), and reporting a problem stays last because it
+// is an exit, not a setting. Warehouses joins Company on the organisation side.
 const SECTIONS: { key: SectionKey; label: string; labelAr: string; icon: typeof Building2 }[] = [
   { key: "company",       label: "Company",          labelAr: "الشركة",           icon: Building2 },
+  { key: "warehouses",    label: "Warehouses",       labelAr: "المستودعات",       icon: Warehouse },
   { key: "notifications", label: "Notifications",    labelAr: "الإشعارات",        icon: BellRing  },
   { key: "profile",       label: "Profile",          labelAr: "الملف",            icon: UserRound },
   { key: "issues",        label: "Report a problem", labelAr: "الإبلاغ عن مشكلة", icon: LifeBuoy  },
@@ -173,6 +179,7 @@ export default function SettingsModal({
           {/* The one scrolling region. */}
           <div className="min-w-0 flex-1 overflow-y-auto scrollbar-thin p-6">
             <CompanySettingsSection open={section === "company"} />
+            <WarehousesSection open={section === "warehouses"} lang={lang} />
             <NotificationsSection open={section === "notifications"} lang={lang} />
             <ProfileSection open={section === "profile"} lang={lang} />
             <IssuesSection open={section === "issues"} lang={lang} />

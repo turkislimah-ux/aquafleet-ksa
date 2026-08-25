@@ -52,9 +52,6 @@
 //     shows only the name, no SKU).
 //
 // What's KEPT as a flagged, reasoned deviation (not silently invented):
-//   - "Create Warehouse" header button — warehouses need a creation path and
-//     preview only offers one buried inside its Add-Parts/PO draft modals
-//     (which we don't have). No new table involved, just no 1:1 preview spot.
 //   - Adjust Stock — the ONE genuinely-new-vs-preview capability kept. Preview
 //     has no manual stock-correction UI anywhere (no FIFO tiers to "recount"
 //     against). Wraps 0044's already-committed, already-live adjust_stock
@@ -257,7 +254,6 @@ import {
 } from "./PurchaseOrders";
 import {
   ModalOverlay,
-  CreateWarehouseModal,
   NewSupplierModal,
   AddPartModal,
   AdjustItemModal,
@@ -372,7 +368,6 @@ export default function InventoryClient({
   const [warehouseTab, setWarehouseTab] = useState<string>(warehouses[0]?.id ?? "");
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
-  const [warehouseModalOpen, setWarehouseModalOpen] = useState(false);
   const [viewPart, setViewPart] = useState<Part | null>(null);
   const [financePart, setFinancePart] = useState<Part | null>(null);
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
@@ -587,10 +582,12 @@ export default function InventoryClient({
         }
         actions={
           <>
-            <Btn variant="outline" onClick={() => setWarehouseModalOpen(true)}>
-              <Plus className="h-4 w-4" />
-              {lang === "en" ? "Create Warehouse" : "إنشاء مستودع"}
-            </Btn>
+            {/* The "Create Warehouse" button that used to open this row is
+                gone. Creating a warehouse is a settings act, not a daily
+                inventory act — it happens once per depot and then never again,
+                while every other button here is used constantly. It now lives
+                in Settings -> Warehouses, where it sits next to editing and
+                deleting one. */}
             {/* Phase 4 — preview's header order is New PO (primary) / Add
                 Parts (outline) / AI-suggest-PO (outline). Same warehouse-
                 required gate as Add Parts — a PO always needs a warehouse
@@ -686,7 +683,7 @@ export default function InventoryClient({
       {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
 
       {warehouses.length === 0 ? (
-        <EmptyWarehouseState lang={lang} onCreate={() => setWarehouseModalOpen(true)} />
+        <EmptyWarehouseState lang={lang} />
       ) : (
         <>
           {/* Per-warehouse tabs — Turki's explicit call, no preview
@@ -890,14 +887,6 @@ export default function InventoryClient({
             />
           )}
         </>
-      )}
-
-      {warehouseModalOpen && (
-        <CreateWarehouseModal
-          lang={lang}
-          onClose={() => setWarehouseModalOpen(false)}
-          onCreated={(w) => setWarehouseTab(w.id)}
-        />
       )}
 
       {viewPart && (
@@ -1124,27 +1113,29 @@ export default function InventoryClient({
   );
 }
 
-function EmptyWarehouseState({ lang, onCreate }: { lang: "en" | "ar"; onCreate: () => void }) {
+// No button. Warehouses are created in Settings now, and Settings is a dialog
+// owned by AppShell — a button here would mean threading "open Settings on the
+// Warehouses section" through a context this page has no other use for, to save
+// one click on a screen that is only ever seen once, before the first depot
+// exists. So this states the path instead of taking it, and names the gear so
+// the sentence is followable rather than merely true.
+function EmptyWarehouseState({ lang }: { lang: "en" | "ar" }) {
   return (
     <div
       className="rounded-xl border p-12 flex flex-col items-center justify-center gap-3 text-center"
       style={{ borderColor: "rgb(var(--border))" }}
     >
-      <WarehouseIcon className="h-8 w-8 muted" />
-      <div>
+      <WarehouseIcon className="h-8 w-8 muted" aria-hidden />
+      <div className="max-w-sm">
         <p className="font-medium">
           {lang === "en" ? "No warehouses yet" : "لا توجد مستودعات بعد"}
         </p>
         <p className="text-sm muted mt-1">
           {lang === "en"
-            ? "Create your first warehouse to start tracking parts and stock."
-            : "أنشئ أول مستودع لبدء تتبع القطع والمخزون."}
+            ? "Add your first warehouse in Settings — the gear at the bottom of the sidebar — then Warehouses. Parts and stock are tracked per warehouse."
+            : "أضف أول مستودع من الإعدادات — رمز الترس أسفل الشريط الجانبي — ثم المستودعات. تُتتبَّع القطع والمخزون لكل مستودع."}
         </p>
       </div>
-      <Btn variant="primary" onClick={onCreate}>
-        <Plus className="h-4 w-4" />
-        {lang === "en" ? "Create your first warehouse" : "إنشاء أول مستودع"}
-      </Btn>
     </div>
   );
 }

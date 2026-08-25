@@ -5,6 +5,7 @@
 //
 // ROOT CAUSE (Phase 4 postmortem): PurchaseOrders.tsx needed to reuse
 // NewSupplierModal/CreateWarehouseModal/AddPartModal (they were exported
+// — CreateWarehouseModal has since been removed entirely, see below
 // FROM InventoryClient.tsx), while InventoryClient.tsx needed ProcStrip/
 // NewPOModal/POListModal/PODetailModal FROM PurchaseOrders.tsx — a genuine
 // two-file import cycle (InventoryClient.tsx <-> PurchaseOrders.tsx).
@@ -28,7 +29,8 @@
 // SharedCreateModals.tsx <- PurchaseOrders.tsx, and
 // InventoryClient.tsx -> PurchaseOrders.tsx (one-way only).
 //
-// Moved here verbatim (unchanged behavior): CreateWarehouseModal,
+// Moved here verbatim (unchanged behavior): CreateWarehouseModal (later
+// deleted — warehouses are created in Settings now),
 // NewSupplierModal, AddPartModal (+ its private NewUnitModal), the
 // ComboInput control, and the small helpers those four depend on
 // (categoryLabel/CREATE_CATS/CATEGORY_LABEL, autoSku, useNumField/
@@ -51,12 +53,10 @@ import type { Warehouse, Part, Supplier, Unit } from "@/lib/db-types";
 // NOT lib/vat.ts (see lib/inventory-vat.ts's own header).
 import { calculateInventoryVatDocument, formatSarVat } from "@/lib/inventory-vat";
 import {
-  createWarehouse,
   createSupplier,
   createPart,
   createUnit,
   updatePart,
-  type WarehouseInput,
   type SupplierInput,
   type PartInput,
   type UnitInput,
@@ -471,146 +471,15 @@ function ComboInput({
   );
 }
 
-export function CreateWarehouseModal({
-  lang,
-  onClose,
-  onCreated,
-}: {
-  lang: "en" | "ar";
-  onClose: () => void;
-  // Optional. The header's own "Create Warehouse" button (the ONLY place a
-  // warehouse can be created now — the inline "+ Warehouse" triggers inside
-  // NewPOModal/ReceivePartsModal were removed, per-warehouse tabs on the
-  // Inventory page) passes this to auto-switch the page's active warehouse
-  // tab to the freshly created one, same immediate-select-no-wait-for-
-  // refresh pattern onCreated on NewSupplierModal/AddPartModal already uses.
-  onCreated?: (warehouse: Warehouse) => void;
-}) {
-  const router = useRouter();
-  const [name, setName] = useState("");
-  const [location, setLocation] = useState("");
-  const [type, setType] = useState("");
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const canSubmit = name.trim() !== "";
-
-  function close() {
-    if (saving) return;
-    onClose();
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmit) {
-      setError(lang === "en" ? "Warehouse name is required." : "اسم المستودع مطلوب.");
-      return;
-    }
-    const input: WarehouseInput = {
-      name: name.trim(),
-      location: location.trim() || null,
-      type: type.trim() || null,
-      note: note.trim() || null,
-    };
-    setSaving(true);
-    setError(null);
-    const res = await createWarehouse(input);
-    setSaving(false);
-    if (res.error || !res.warehouse) {
-      setError(res.error ?? (lang === "en" ? "Could not create warehouse." : "تعذّر إنشاء المستودع."));
-      return;
-    }
-    onCreated?.(res.warehouse);
-    onClose();
-    router.refresh();
-  }
-
-  return (
-    <ModalOverlay onClick={close}>
-      <div
-        className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <form onSubmit={submit}>
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <h2 className="text-lg font-semibold">
-              {lang === "en" ? "Create warehouse" : "إنشاء مستودع"}
-            </h2>
-            <button
-              type="button"
-              onClick={close}
-              className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Name *" : "الاسم *"}</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                required
-                placeholder={lang === "en" ? "e.g. Riyadh Depot" : "مثال: مستودع الرياض"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Location" : "الموقع"}</span>
-              <input
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                placeholder={lang === "en" ? "e.g. Riyadh" : "مثال: الرياض"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Type" : "النوع"}</span>
-              <input
-                value={type}
-                onChange={(e) => setType(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                placeholder={lang === "en" ? "e.g. Main depot" : "مثال: مستودع رئيسي"}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Note" : "ملاحظة"}</span>
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                className={INPUT}
-                style={INPUT_STYLE}
-                rows={2}
-              />
-            </label>
-          </div>
-
-          {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
-
-          <div className="mt-5 flex justify-end gap-2">
-            <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
-            </Btn>
-            <button
-              type="submit"
-              disabled={!canSubmit || saving}
-              className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
-            >
-              {saving
-                ? lang === "en" ? "Saving…" : "جارٍ الحفظ…"
-                : lang === "en" ? "Create warehouse" : "إنشاء المستودع"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </ModalOverlay>
-  );
-}
+// CreateWarehouseModal LIVED HERE AND IS GONE.
+//
+// It was the modal behind the Inventory header's "Create Warehouse" button —
+// the only trigger it ever had once the inline "+ Warehouse" shortcuts inside
+// NewPOModal/ReceivePartsModal were removed. Warehouse creation now lives in
+// Settings, which supplies its own dialog frame, so a second overlay component
+// here would be a modal opened from inside a modal. The FORM moved to
+// components/settings/WarehousesSection.tsx and the ACTION moved to
+// lib/actions/warehouses.ts; nothing was left behind to drift.
 
 // Reusable "New supplier" modal — Phase 1 of the full-demo build-out
 // (migration 0045, LIVE). Mirrors preview/'s openNewSupplier()/

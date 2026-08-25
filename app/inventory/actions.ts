@@ -21,7 +21,6 @@ import type {
   StockReceipt,
   Supplier,
   Unit,
-  Warehouse,
 } from "@/lib/db-types";
 // VAT (migration 0056) — updatePurchaseOrder (below) is the one PO mutation
 // NOT backed by an RPC (flagged exception, see its own header), so it must
@@ -31,39 +30,16 @@ import type {
 // never lib/vat.ts (see lib/inventory-vat.ts's own header for why).
 import { lineVat, calculateInventoryVatDocument } from "@/lib/inventory-vat";
 
-export type WarehouseInput = {
-  name: string;
-  location: string | null;
-  type: string | null;
-  note: string | null;
-};
-
-// Returns the full inserted row (not just id) — the inline "+ Warehouse"
-// trigger inside ReceivePartsModal (Add Parts) needs it immediately, to
-// merge into the draft's local warehouse list and auto-select it, same
-// reasoning as createSupplier/createPart above.
-export async function createWarehouse(
-  input: WarehouseInput,
-): Promise<{ error: string | null; warehouse?: Warehouse }> {
-  const name = input.name?.trim() ?? "";
-  if (!name) return { error: "Warehouse name is required." };
-
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("warehouses")
-    .insert({
-      name,
-      location: input.location?.trim() || null,
-      type: input.type?.trim() || null,
-      note: input.note?.trim() || null,
-    })
-    .select("id, name, location, type, note, active, created_at")
-    .single();
-  if (error) return { error: error.message };
-
-  revalidatePath("/inventory");
-  return { error: null, warehouse: data as Warehouse };
-}
+// WAREHOUSE CREATION MOVED OUT — see lib/actions/warehouses.ts.
+// createWarehouse and WarehouseInput used to open this file. A warehouse is now
+// created (and, from here on, edited) in Settings rather than from the
+// Inventory page header, so the action moved to the shared lib/actions/ home
+// that operation-stations.ts already uses for exactly this reason: a lookup
+// row that several surfaces read and one settings surface owns. It was MOVED,
+// not copied — there is no createWarehouse here any more.
+//
+// The Inventory page still READS warehouses (app/inventory/page.tsx) and still
+// tabs by them. Only the write path left.
 
 // ---------------------------------------------------------------------------
 // Suppliers (full-demo build-out, Phase 1 — migration 0045, LIVE)
