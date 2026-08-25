@@ -61,6 +61,7 @@ import {
   type PlacedWidget, type WidgetDef, type WidgetDisplay,
 } from "@/lib/dashboard-widgets";
 import { getWidgetValue, type WidgetValue } from "@/lib/actions/dashboard-widgets";
+import ScrollLock from "@/components/ScrollLock";
 
 const PREVIEW_COUNT = 6;
 
@@ -258,7 +259,14 @@ export default function DashboardClient({
       <div ref={heroRef} className={cn("relative", reducedMotion ? "h-0" : "h-[34vh]")} aria-hidden>
         {!reducedMotion && (
           <div
-            className="pointer-events-none absolute left-1/2 top-1/2 h-[26rem] w-[46rem] max-w-[92vw] -translate-x-1/2 -translate-y-1/2"
+            // Centred on the hero, which is where the bar rests — the bar is
+            // centred in this same content column at progress 0 and only
+            // travels to the header's start as you scroll, by which point the
+            // glow has faded out entirely.
+            //
+            // `max-w-full` and not `92vw`: the cap is this column, and vw
+            // ignores the sidebar.
+            className="pointer-events-none absolute left-1/2 top-1/2 h-[26rem] w-[46rem] max-w-full -translate-x-1/2 -translate-y-1/2"
             style={{
               opacity: "calc((1 - var(--dock-progress, 1)) * 0.9)",
               background:
@@ -272,7 +280,13 @@ export default function DashboardClient({
       {!reducedMotion && (
         <div
           aria-hidden
-          className="pointer-events-none fixed bottom-0 start-0 end-0 md:start-64 z-10 h-44"
+          // The inset clears the sidebar off AppShell's --app-sidebar-w rather
+          // than restating its width here. That variable tracks the sidebar's
+          // FOOTPRINT — the rail — not how wide the panel currently looks: the
+          // panel is `fixed` and overlays the page when hovered, so this fade
+          // must not chase it or it would slide sideways under the cursor.
+          // The fallback matches the rail for the same reason.
+          className="pointer-events-none fixed bottom-0 start-0 end-0 md:start-[var(--app-sidebar-w,3.5rem)] z-10 h-44"
           style={{
             opacity: "calc(1 - var(--dock-progress, 1))",
             background:
@@ -1655,6 +1669,7 @@ function Modal({ title, onClose, children }: {
   return createPortal(
     <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <ScrollLock />
       <div className="card w-full max-w-[1080px] max-h-[85vh] overflow-hidden p-0">
         <div className="flex items-center justify-between gap-3 border-b px-4 py-3"
           style={{ borderColor: "rgb(var(--border))" }}>

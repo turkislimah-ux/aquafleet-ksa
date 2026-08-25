@@ -403,12 +403,44 @@ export default function GlobalSearch({
       // unclickable (verified: elementFromPoint returned the INPUT over the
       // bell). Open, the results panel must win over everything in the
       // header. One value cannot satisfy both, so it follows `open`.
-      className={cn("absolute top-0 left-1/2", open ? "z-40" : "z-0")}
+      // ANCHORED AT `start-0`, WHICH IS THE DOCKED POSITION — the header slot
+      // it sits in already starts exactly where the docked bar belongs, so at
+      // progress 1 both offsets below are zero and the bar simply fills its
+      // slot. `start` rather than `left` puts that anchor on the right edge
+      // under RTL with no second rule.
+      className={cn("absolute top-0 start-0", open ? "z-40" : "z-0")}
       style={{
+        // THE HERO POSITION IS CENTRED IN THE CONTENT COLUMN, and this is the
+        // whole x half of the animation. `50%` inside translateX resolves
+        // against the ELEMENT's own width — which is the grown hero width — so
+        // `--dock-col / 2 - 50%` is literally (column - bar) / 2, the centring
+        // offset, with no second measurement of the bar. It scales by
+        // (1 - progress) alongside the lift, so the bar travels the diagonal
+        // from page centre to the header's start in one motion.
+        //
+        // `--dock-dir` flips the sign under RTL (globals.css): translateX is
+        // physical, the anchor is logical, and only this line cares.
+        //
+        // When the column is too narrow for the bar to grow, the clamp below
+        // makes bar == column, this evaluates to 0, and the bar is full-width
+        // at both ends of the travel. No special case needed.
         transform:
-          "translateX(-50%) translateY(calc((1 - var(--dock-progress, 1)) * var(--dock-distance, 0px)))",
+          "translateX(calc((1 - var(--dock-progress, 1)) * var(--dock-dir, 1) * (var(--dock-col, 0px) / 2 - 50%))) " +
+          "translateY(calc((1 - var(--dock-progress, 1)) * var(--dock-distance, 0px)))",
+        // THE CLAMP IS THE CONTENT COLUMN, NOT THE VIEWPORT. It was `92vw`,
+        // which ignores the sidebar — at 1024px the grown bar ran past the
+        // column's end edge. `--dock-col` is the column measured for real (see
+        // SearchDock); the `100vw` arithmetic is only the fallback for pages
+        // that register no hero, where progress is pinned at 1 and the clamp
+        // can never bind anyway.
+        //
+        // THE GROW AMOUNT IS A PLAIN NUMBER, NOT A CUSTOM PROPERTY. It was
+        // `var(--dock-grow, 22rem)`, and nothing anywhere ever set --dock-grow
+        // — so it read like a per-page knob while being a constant with extra
+        // steps. 18rem on top of the docked `max-w-[34rem]` puts the hero bar
+        // at ~52rem where the column allows it.
         width:
-          "min(92vw, calc(100% + (1 - var(--dock-progress, 1)) * var(--dock-grow, 240px)))",
+          "min(var(--dock-col, calc(100vw - var(--app-sidebar-w, 0rem) - 4rem)), calc(100% + (1 - var(--dock-progress, 1)) * 18rem))",
       }}
     >
       <div className="relative">

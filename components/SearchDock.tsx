@@ -6,7 +6,11 @@
 // the CENTRE of the dashboard page with the features/charts partially
 // visible below it. As the user scrolls, the page reveals (period picker,
 // KPIs, then everything) while the search bar lifts upward AT THE SAME SPEED
-// AS THE SCROLL until it docks into its header-centre position. The title
+// AS THE SCROLL until it docks into its header position — the START of the
+// header since the Polish Batch 2 move, so the travel is a diagonal: centred
+// in the content column at rest, flush to the column's start when docked. The
+// x half is pure CSS off `--dock-col` (see GlobalSearch); this file measures
+// only y, which is the half that is genuinely scroll-linked. The title
 // and description stay fixed on top throughout; the separator bar returns
 // under the title as the bar docks.
 //
@@ -81,6 +85,28 @@ function setVars(progress: number, distance: number) {
   root.style.setProperty("--dock-distance", `${distance}px`);
 }
 
+/**
+ * The CONTENT COLUMN's width, published so the hero bar can centre itself in
+ * it — offset = (column - bar) / 2, done in CSS, see GlobalSearch.
+ *
+ * IT IS THE HERO'S OWN offsetWidth, and that is not a coincidence dressed up
+ * as a measurement. <main> is `p-4 md:p-6` and the header is `px-4 md:px-6`,
+ * so the two content boxes start and end at the same x; the hero spacer is an
+ * unconstrained block inside main, so its width IS the header's content width.
+ *
+ * Why not compute it in CSS from `100vw`: `100vw` INCLUDES the classic
+ * scrollbar and the layout does not, so every centring would sit half a
+ * scrollbar off on Windows — and it would also have to re-derive the sidebar
+ * inset that this element already sits clear of. offsetWidth has neither
+ * problem. It costs nothing extra: this runs in `measure()`, on register and
+ * resize only, never per scroll frame.
+ */
+function setCol(width: number | null) {
+  const root = document.documentElement;
+  if (width === null) root.style.removeProperty("--dock-col");
+  else root.style.setProperty("--dock-col", `${width}px`);
+}
+
 export function SearchDockProvider({ children }: { children: ReactNode }) {
   const heroRef = useRef<HTMLElement | null>(null);
   const distanceRef = useRef(0);
@@ -106,6 +132,7 @@ export function SearchDockProvider({ children }: { children: ReactNode }) {
     const el = heroRef.current;
     if (!el) {
       distanceRef.current = 0;
+      setCol(null);
       return;
     }
     // Hero centre in DOCUMENT coordinates, so the value is independent of
@@ -113,6 +140,7 @@ export function SearchDockProvider({ children }: { children: ReactNode }) {
     const rect = el.getBoundingClientRect();
     const heroCentreDoc = rect.top + window.scrollY + rect.height / 2;
     distanceRef.current = Math.max(0, heroCentreDoc - HEADER_H / 2);
+    setCol(el.offsetWidth);
   }, []);
 
   const update = useCallback(() => {
@@ -137,6 +165,7 @@ export function SearchDockProvider({ children }: { children: ReactNode }) {
       setActive(!!el);
       if (!el) {
         distanceRef.current = 0;
+        setCol(null);
         setVars(1, 0);
         return;
       }
