@@ -129,7 +129,13 @@ function NavRow({ item, lang, pathname }: {
   pathname: string | null;
 }) {
   const Icon = item.icon;
-  const label = item.label ?? t(`nav.${item.key}`, lang);
+  // The `item.key ?` guard is the same one ProfileSection's route picker
+  // already had. Both `key` and `label` are optional on NavItem, so without it
+  // an entry carrying neither interpolated `undefined` and printed the literal
+  // "nav.undefined" in the sidebar. Unreachable today — every NAV entry has a
+  // key — but it is what the typed `t()` flagged, so it is fixed rather than
+  // asserted away.
+  const label = item.label ?? (item.key ? t(`nav.${item.key}`, lang) : item.href);
   const active = item.href === "/" ? pathname === "/" : !!pathname?.startsWith(item.href);
   return (
     <Link

@@ -300,7 +300,51 @@ export const dict = {
   },
 } as const;
 
-export function t(path: string, lang: Lang): string {
+/**
+ * A translation LEAF — the `{ en, ar }` pair that `t()` actually reads from.
+ * Anything in `dict` that is not this shape is a namespace to recurse into.
+ */
+type Leaf = { readonly en: string; readonly ar: string };
+
+/**
+ * Every dotted path in `dict` that ends at a leaf, as a union of string
+ * literals: "appName" | "nav.dashboard" | … | "search.g_repairer".
+ *
+ * Derived FROM the dictionary, never hand-listed — add a key above and it is
+ * callable immediately; delete one and every caller breaks at compile time
+ * instead of quietly printing its own path on screen.
+ */
+type LeafPaths<T> = {
+  [K in keyof T & string]: T[K] extends Leaf ? K : `${K}.${LeafPaths<T[K]>}`;
+}[keyof T & string];
+
+export type TKey = LeafPaths<typeof dict>;
+
+/**
+ * The tails of every key under one prefix. `SubKeys<"nav.">` is
+ * "dashboard" | "fleet" | … ; `SubKeys<"search.g_">` is "page" | "truck" | …
+ *
+ * For code that builds a key from a value — `t(\`nav.${item.key}\`)` — this is
+ * what types that value, so the interpolation produces a real TKey instead of
+ * a `\`nav.${string}\`` the compiler has to reject.
+ *
+ * The `K = TKey` parameter is load-bearing: a conditional type only spreads
+ * across a union when the checked side is a NAKED TYPE PARAMETER. Written
+ * inline as `TKey extends \`nav.${infer R}\` ? R : never` it does not
+ * distribute — the whole union does not match the pattern, only its members do
+ * — and the answer silently collapses to `never`.
+ */
+export type SubKeys<Prefix extends string, K = TKey> =
+  K extends `${Prefix}${infer Rest}` ? Rest : never;
+
+/**
+ * The `??`/`if (!node)` fallbacks below are now UNREACHABLE for any typed
+ * caller — a bad path stops at `tsc`, not at render time. They stay as a
+ * backstop for the one thing types cannot cover: `dict` is data, and a future
+ * edit could leave a namespace with no `en`/`ar` pair under it. Printing the
+ * path beats throwing inside a render.
+ */
+export function t(path: TKey, lang: Lang): string {
   const parts = path.split(".");
   let node: any = dict;
   for (const p of parts) node = node?.[p];

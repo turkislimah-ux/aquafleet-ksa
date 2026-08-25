@@ -20,6 +20,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { NAV_HREFS, type NavHref } from "@/lib/routes";
+// TYPE-ONLY, and it has to stay that way. The block above explains why this
+// module must not drag anything extra into the edge bundle; `import type` is
+// erased entirely at compile time, so this adds no runtime edge and no import.
+import type { SubKeys } from "@/lib/i18n";
 
 /**
  * Which block of the sidebar an entry renders in. "soon" is the deferred trio
@@ -31,6 +35,15 @@ import { NAV_HREFS, type NavHref } from "@/lib/routes";
  */
 export type NavGroup = "main" | "soon";
 
+/**
+ * The leaf names under `nav.` in lib/i18n.ts — "dashboard" | "fleet" | …
+ *
+ * Derived from the dictionary rather than restated, so the "every key below
+ * exists in lib/i18n.ts" promise on `NavItem.key` is now checked by the
+ * compiler instead of maintained by hand.
+ */
+type NavKey = SubKeys<"nav.">;
+
 export type NavItem = {
   /**
    * Typed NavHref, not string — so a nav entry pointing at a route missing from
@@ -38,8 +51,8 @@ export type NavItem = {
    * validates today and 404s after the page is renamed.
    */
   href: NavHref;
-  /** i18n key under `nav.` — every key below exists in lib/i18n.ts. */
-  key?: string;
+  /** i18n key under `nav.` — a name that is not in lib/i18n.ts will not compile. */
+  key?: NavKey;
   /** Overrides the i18n lookup when set. */
   label?: string;
   icon: LucideIcon;
@@ -132,8 +145,8 @@ export type NavDestination = {
   href: string;
   en: string;
   ar: string;
-  /** Parent page label, shown as the result's subtitle. */
-  parentKey: string;
+  /** Parent page label, shown as the result's subtitle. Same `nav.` key set. */
+  parentKey: NavKey;
   icon: LucideIcon;
 };
 

@@ -34,16 +34,29 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { NAV, NAV_DESTINATIONS } from "@/lib/nav";
 import { searchNorm, searchScore, SEARCH_SCORE_FLOOR, SEARCH_MIN_CHARS } from "@/lib/search-match";
-import { type Lang, t } from "@/lib/i18n";
+import { type Lang, type SubKeys, t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const RECENTS_KEY = "bousla.recentSearches";
 const RECENTS_MAX = 8;
 
+/**
+ * Which bucket a hit renders under, and the tail of its heading key. The name
+ * IS the i18n suffix — "truck" prints `search.g_truck` — so this is derived
+ * from the dictionary rather than typed `string` with a comment saying so. A
+ * group with no heading in lib/i18n.ts now fails to compile instead of
+ * rendering "search.g_whatever" as a section header.
+ *
+ * It lands on exactly `SearchEntity | "page"`: the 17 record entities plus the
+ * nav pages. Nothing asserts that equality — the two sets are maintained
+ * apart, and if they ever diverge the mismatch surfaces here as a type error.
+ */
+export type SearchGroup = SubKeys<"search.g_">;
+
 /** One row in the panel. Records and pages both land in this shape. */
 export type SearchHit = {
   id: string;
-  group: string;          // i18n suffix: search.g_<group>
+  group: SearchGroup;
   title: string;
   subtitle?: string | null;
   badge?: string | null;
@@ -178,7 +191,10 @@ export default function GlobalSearch({
     const hits: SearchHit[] = [];
 
     for (const item of NAV) {
-      const label = item.label ?? t(`nav.${item.key}`, lang);
+      // Guarded like the two scoring calls just below it — without the check a
+      // NavItem with neither `key` nor `label` produced the literal string
+      // "nav.undefined" as a search result's title.
+      const label = item.label ?? (item.key ? t(`nav.${item.key}`, lang) : item.href);
       // Score BOTH languages regardless of the active one: an Arabic UI
       // user still types "fleet" half the time, and vice versa.
       const score = Math.max(
@@ -249,7 +265,7 @@ export default function GlobalSearch({
   // ---- grouped, flattened for keyboard nav --------------------------------
   const groups = useMemo(() => {
     const all = [...pageHits, ...records];
-    const byGroup = new Map<string, SearchHit[]>();
+    const byGroup = new Map<SearchGroup, SearchHit[]>();
     for (const h of all) {
       const arr = byGroup.get(h.group) ?? [];
       arr.push(h);
