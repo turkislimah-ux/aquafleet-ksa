@@ -64,7 +64,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { Btn, Table, TH, TD, Card, Stat } from "@/components/ui";
-import { cn, daysAgoKey, formatSar } from "@/lib/utils";
+import { cn, daysAgoKey, formatSar, formatDateTime } from "@/lib/utils";
 // VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
 // NOT lib/vat.ts (document-level rounding, a different convention for a
 // different document — see lib/inventory-vat.ts's own header).
@@ -1559,7 +1559,7 @@ export function PODetailModal({
                     <div className="flex-1">
                       <div className="font-medium">{a.approver_email}</div>
                       <div className="text-[11px] muted">
-                        {new Date(a.approved_at).toLocaleString(lang === "ar" ? "ar-SA" : "en-US")}
+                        {formatDateTime(a.approved_at)}
                         {a.comment ? ` · "${a.comment}"` : ""}
                       </div>
                     </div>
@@ -1573,7 +1573,7 @@ export function PODetailModal({
                   {lang === "en" ? "Rejected by" : "رُفض من"}: {po.rejected_by ?? "—"}
                 </div>
                 <div className="text-xs muted mt-1">
-                  {po.rejected_at ? new Date(po.rejected_at).toLocaleString(lang === "ar" ? "ar-SA" : "en-US") : "—"}
+                  {po.rejected_at ? formatDateTime(po.rejected_at) : "—"}
                 </div>
                 {po.rejection_reason && <div className="text-sm mt-1">&quot;{po.rejection_reason}&quot;</div>}
               </div>
@@ -3233,7 +3233,7 @@ export function ReceiptDetailModal({
                       )}
                     </div>
                     <div className="text-[11px] muted">
-                      {new Date(a.approved_at).toLocaleString(lang === "ar" ? "ar-SA" : "en-US")}
+                      {formatDateTime(a.approved_at)}
                       {a.comment ? ` · "${a.comment}"` : ""}
                     </div>
                   </div>
@@ -3250,7 +3250,7 @@ export function ReceiptDetailModal({
                 )}
               </div>
               <div className="text-xs muted mt-1">
-                {receipt.rejected_at ? new Date(receipt.rejected_at).toLocaleString(lang === "ar" ? "ar-SA" : "en-US") : "—"}
+                {receipt.rejected_at ? formatDateTime(receipt.rejected_at) : "—"}
               </div>
               {receipt.rejection_reason && <div className="text-sm mt-1">&quot;{receipt.rejection_reason}&quot;</div>}
             </div>

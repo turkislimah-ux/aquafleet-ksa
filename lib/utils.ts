@@ -69,12 +69,58 @@ export function validateImageFile(
   return null;
 }
 
+// NUMBERS ARE ALWAYS LATIN, IN BOTH LANGUAGES — every formatter here pins
+// "en-US" and none of them takes a `lang`. Arabic-Indic digits (٠١٢٣) are a
+// display convention this app does not use: plate digits are the ONE place
+// Arabic numerals appear, they are preview-only, and lib/plate.ts guards them.
+//
+// The pinned locale is doing real work, not decoration. `toLocaleString()` and
+// `toLocaleString(undefined, …)` follow the BROWSER's locale, so the same row
+// renders "1,234.56" on an English device and "١٬٢٣٤٫٥٦" on an Arabic one —
+// different digits AND different group/decimal marks (٬ ٫). That is invisible
+// to whoever develops in English and it is not controlled by the app's own
+// language toggle at all.
+
 export function formatSar(n: number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n) + " SAR";
 }
 
 export function formatNum(n: number, digits = 0) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: digits }).format(n);
+}
+
+// EXACT to the halala — 1,234.56, never 1,235. This is NOT interchangeable with
+// `formatSar` above, and the difference is money, not style: `formatSar` rounds
+// to whole riyals for dashboard headlines, so routing a ledger figure through it
+// silently restates the amount. Archive invoice rows, staff/truck ledgers and the
+// maintenance-job export all quote a figure the user can reconcile against a
+// document, so they round-trip at two decimals or they are wrong.
+//
+// Exists because five copies of `toLocaleString(undefined, { min: 2, max: 2 })`
+// had accumulated across app/archive/ — each browser-locale-dependent per the
+// note above. One definition, one locale, one precision.
+export function formatAmount(n: number) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+}
+
+export function formatSarExact(n: number) {
+  return `${formatAmount(n)} SAR`;
+}
+
+// Timestamp for display. Pinned "en-US" like the number formatters above, and
+// it deliberately takes NO `lang`.
+//
+// It replaces five copies of `toLocaleString(lang === "ar" ? "ar-SA" : "en-US")`
+// — a DIFFERENT and worse bug than the browser-locale one, because that ternary
+// is driven by the app's own toggle, so switching to Arabic reliably produced
+// "٢٥‏/٨‏/٢٠٢٦، ١:٣٠:٠٠ م" for every user. Passing "ar-SA" also reorders the
+// date parts and swaps the AM/PM marker, so it was never only about digits.
+// English output is unchanged: those sites already passed "en-US".
+export function formatDateTime(iso: string | number | Date): string {
+  return new Date(iso).toLocaleString("en-US");
 }
 
 // Local "today" as YYYY-MM-DD. Uses getFullYear/getMonth/getDate (local clock),

@@ -22,6 +22,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
 import { linkTarget, isStandingType, type PersonIdField } from "@/lib/archive";
+import { formatSarExact } from "@/lib/utils";
 import type {
   ArchiveTab,
   ArchiveSubjectKind,
@@ -858,9 +859,18 @@ export type MaintenanceJobDetail = {
   error: string | null;
 };
 
+// Feeds the maintenance-job detail/export strings, so the AMOUNT here must not
+// move — only the digit system is being pinned. Two decimals in, two decimals
+// out; `formatSar` is NOT the right target for this one, it rounds to whole
+// riyals and would restate every figure the export quotes.
+//
+// This runs on the SERVER, where `toLocaleString(undefined, …)` resolved to the
+// Node process locale, not the reader's — so an export could already format
+// differently from the screen it was read off. Pinned now, same as the UI.
+// The null branch is untouched: a missing figure stays an em dash, never "0.00".
 function money(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
-  return `${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SAR`;
+  return formatSarExact(Number(n));
 }
 
 function dateOnly(iso: string | null | undefined): string {

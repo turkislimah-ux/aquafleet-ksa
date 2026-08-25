@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, Eye, X, Archive, Undo2, RotateCcw } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn, todayKey, formatDayKey } from "@/lib/utils";
+import { cn, todayKey, formatDayKey, formatSarExact } from "@/lib/utils";
 import type { SubTabItem } from "./SubTabPicker";
 import {
   PROJECT_STATUS_LABELS, PAYMENT_MODE_LABELS, COMMISSION_MODE_LABELS,
@@ -76,9 +76,10 @@ function invoiceDate(inv: ArchiveInvoiceRow): { text: string; isIssued: boolean 
   return { text: new Date(inv.created_at).toLocaleDateString(), isIssued: false };
 }
 
-function money(n: number): string {
-  return `${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SAR`;
-}
+// Was a local `toLocaleString(undefined, …)` — one of five identical copies.
+// `undefined` means the BROWSER's locale, so these figures rendered in
+// Arabic-Indic digits on an Arabic device. Same precision, pinned locale.
+const money = (n: number): string => formatSarExact(Number(n));
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";

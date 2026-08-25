@@ -32,7 +32,7 @@ import {
   FileText, History,
 } from "lucide-react";
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import { cn, formatSarExact } from "@/lib/utils";
 import {
   docStatus, expirySummary,
   ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
@@ -138,10 +138,9 @@ function fmtDate(iso: string | null): string {
 // Only used inside a confirm() string, which is plain text — no formatting
 // component can reach in there. Matches ArchiveCustomerTab's money() output
 // so the figure the dialog quotes reads identically to the one on the row
-// the user clicked.
-function moneySar(n: number): string {
-  return `${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SAR`;
-}
+// the user clicked — which is now guaranteed by SHARING the formatter rather
+// than by two copies of the same options object staying in step.
+const moneySar = (n: number): string => formatSarExact(Number(n));
 
 export default function ArchiveClient({
   groups,

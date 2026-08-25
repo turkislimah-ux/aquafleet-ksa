@@ -42,9 +42,22 @@ export function emptyPlateBoxes(): PlateBoxes {
 // boxes produce a "clean" ABC-1234 string; a partially-filled set still
 // assembles whatever is present (no dash) so the required-field check on the
 // surrounding form still sees a non-empty value while the user is mid-typing.
+//
+// THIS IS THE BOUNDARY WHERE DISPLAY STATE BECOMES A STORED VALUE, so it filters
+// rather than trusts its caller. The Arabic forms above are PREVIEW ONLY — they
+// exist so a user can check the plate against the physical one — and an
+// Arabic-Indic digit reaching `trucks.plate` would be invisible in the UI
+// (it renders as a plate either way) while silently missing every lookup,
+// including the case-insensitive unique index the header describes.
+//
+// Today's input handlers in components/PlateInput.tsx already reject anything
+// outside 0-9 and PLATE_LETTERS, so this filter changes NO current output — it
+// is here so that a future caller assembling boxes from somewhere other than
+// those handlers cannot reintroduce the leak. Cheap, and the failure it
+// prevents is a silent data defect rather than a visible one.
 export function assemblePlate(boxes: PlateBoxes): string {
-  const letters = boxes.letters.join("");
-  const digits = boxes.digits.join("");
+  const letters = boxes.letters.filter((l) => isPlateLetter(l)).join("").toUpperCase();
+  const digits = boxes.digits.filter((d) => d >= "0" && d <= "9").join("");
   if (letters.length === 3 && digits.length === 4) return `${letters}-${digits}`;
   return `${letters}${digits}`;
 }

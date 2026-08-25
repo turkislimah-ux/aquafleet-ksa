@@ -30,7 +30,7 @@ import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { LinkPill } from "./ArchiveModals";
 import type { SubTabItem } from "./SubTabPicker";
 import { getMaintenanceJobDetail, type MaintenanceJobDetail } from "./actions";
-import { cn } from "@/lib/utils";
+import { cn, formatAmount } from "@/lib/utils";
 import {
   docStatus, ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
   groupAccent, groupDot, linkedFieldFor, linkedFieldForDoc, readPersonLink,
@@ -90,9 +90,10 @@ function fmtDate(iso: string | null): string {
   return new Date(iso + "T00:00:00").toLocaleDateString();
 }
 
-function fmtMoney(n: number): string {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+// No " SAR" suffix here on purpose — the unit is in the column header. Was a
+// local `toLocaleString(undefined, …)`, which followed the browser's locale
+// and rendered Arabic-Indic digits on an Arabic device.
+const fmtMoney = (n: number): string => formatAmount(n);
 
 function truckLabel(t: ArchiveTruckRow): string {
   return t.plate;

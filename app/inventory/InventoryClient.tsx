@@ -210,7 +210,7 @@ import {
 } from "lucide-react";
 import { useApp } from "@/components/AppShell";
 import { PageHeader, Btn, Stat, Table, TH, TD, Card } from "@/components/ui";
-import { cn, formatSar, formatNum } from "@/lib/utils";
+import { cn, formatSar, formatNum, formatDateTime } from "@/lib/utils";
 // VAT (migration 0056) — fixed 15%, per-line rounding summed. Deliberately
 // NOT lib/vat.ts (see lib/inventory-vat.ts's own header).
 import { lineVat, calculateInventoryVatDocument, formatSarVat } from "@/lib/inventory-vat";
@@ -1741,7 +1741,7 @@ function ViewPartModal({
                     </TD>
                     <TD className="text-xs muted">{m.created_by ?? "—"}</TD>
                     <TD className="text-xs muted whitespace-nowrap">
-                      {new Date(m.created_at).toLocaleString(lang === "ar" ? "ar-SA" : "en-US")}
+                      {formatDateTime(m.created_at)}
                     </TD>
                   </tr>
                 ))}
