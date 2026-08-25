@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at the UI POLISH PASS, four commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean; **origin is `[ahead 4]` — the UI commits are NOT pushed.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
+# SESSION HANDOFF — closes at the UI POLISH PASS, four commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean; **origin is AHEAD — nothing from this session is pushed.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -105,7 +105,7 @@ one document — here and in the CLAUDE.md AUDIT section — is the shape this f
 exists to catch, and it was caught in this file.
 
     HEAD              13389b7 (the feature commit; this file's own commit follows)
-    branch main   tree clean   **[ahead 4] — NOT PUSHED**
+    branch main   tree clean   **AHEAD OF ORIGIN — NOT PUSHED**
     migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
                       — a TIMESTAMP version, not "0167"; see the 0167 section below)
@@ -632,7 +632,7 @@ reconstructed. If a non-derivable event is ever needed, re-add it deliberately �
 ## SESSION LEDGER — 2026-08-25 (THE UI PASS — SAME DAY, SEPARATE SESSION)
 
 FOUR commits, no SQL, no schema. DB stays at 0167 and every figure re-measured
-identical. **Unpushed at close — `[ahead 4]`.**
+identical. **Unpushed at close.**
 
     1e658a0        Modals: one ref-counted scroll lock, shared by every overlay
     65aa655        Sidebar: hover-collapse rail, glass panel, deferred pages grouped
@@ -1505,7 +1505,7 @@ section is notifications only — do not read it as the complete set.)*
 
 ## OPEN / CARRIED FORWARD
 
-**Nothing is in flight, but ORIGIN IS NOT IN SYNC — `[ahead 4]`.** No migration is
+**Nothing is in flight, but ORIGIN IS NOT IN SYNC.** No migration is
 drafted-but-unapplied, no code is uncommitted, no feature is half-built. **The
 four UI commits are local only and need a push.** This line used to read "origin
 is in sync" and it is corrected rather than deleted, because this file records TWO
