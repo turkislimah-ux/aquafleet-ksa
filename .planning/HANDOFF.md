@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at A CLAUDE.md COMPRESSION PASS (`ef9ba4b` + this commit; §5's 20KB trigger, fired by the 805 bytes the divide rule had just added — the pass RE-VERIFIED EVERY CLAIM IN THE FILE AND FOUND ZERO STALE FACTS, the first pass of three to come back clean, see THE CLAUDE.md COMPRESSION PASS section), after THE `divide-y` DARK-MODE FIX (`42cb69a`), after WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `42cb69a`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has been wrong twice already. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
+# SESSION HANDOFF — closes at A CLAUDE.md COMPRESSION PASS (`30ea4b8`; §5's 20KB trigger, fired by the 805 bytes the divide rule had just added — the pass RE-VERIFIED EVERY CLAIM IN THE FILE AND FOUND ZERO STALE FACTS, the first pass of three to come back clean, see THE CLAUDE.md COMPRESSION PASS section), after THE `divide-y` DARK-MODE FIX (`42cb69a`), after WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `30ea4b8`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has now been wrong three times. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
 
 # PREVIOUS HEADER — the UI polish pass, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
@@ -9,7 +9,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `ef9ba4b`, not recalled
+## CURRENT STATE — MEASURED at `30ea4b8`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
@@ -127,26 +127,30 @@ pipeline's status is its LAST command. Re-run as `cd <repo> && ./node_modules/.b
 pointed at the tooling instead of at a figure: the check that confirms the other
 checks can itself be the thing that is broken.
 
-    HEAD              ef9ba4b when this line was written, PLUS the commit carrying
-                      this line itself — which is one further ahead and whose hash
-                      could not be known while writing it. That gap is structural,
-                      not sloppiness: a self-describing file can never name its own
-                      commit. Below it: c892c80, 42cb69a (the divide-y dark-mode fix,
-                      see its section), and above 41ea251 sit cb76319, 16d9864,
-                      ef64630 — all handoff.
-    branch main   IN SYNC with origin at ef9ba4b — READ BACK from the BRANCH
+    HEAD              30ea4b8 (the CLAUDE.md compression pass), PLUS the handoff-only
+                      commit carrying this line, one further ahead, whose hash could
+                      not be known while writing it. That gap is STRUCTURAL, not
+                      sloppiness — a self-describing file can never name its own
+                      commit — so the last hash here is always off by exactly the
+                      commit you are reading. Below it: ef9ba4b, c892c80, 42cb69a
+                      (the divide-y dark-mode fix, see its section), and above
+                      41ea251 sit cb76319, 16d9864, ef64630 — all handoff.
+    branch main   IN SYNC with origin at 30ea4b8 — READ BACK from the BRANCH
                       line of `git status -sb`, which reads `## main...origin/main`
-                      with no ahead/behind. Nine commits pushed this session:
+                      with no ahead/behind. Ten commits pushed this session:
                       a2a4c7e, ed2c1f0, 41ea251, cb76319, 16d9864, ef64630, 42cb69a,
-                      c892c80, ef9ba4b.
-                      THIS BLOCK HAS NOW BEEN STALE THREE TIMES IN ONE SESSION. It
+                      c892c80, ef9ba4b, 30ea4b8.
+                      THIS BLOCK HAS NOW BEEN STALE FOUR TIMES IN ONE SESSION. It
                       said "AHEAD 3, NOT PUSHED" after a push made that false; was
-                      corrected to name cb76319; three more commits made THAT false;
-                      it was corrected to 42cb69a and two more commits made that
-                      false as well. Every one of those was written true. A push-
-                      state line does not go wrong by being careless — it goes wrong
-                      by being correct and then waiting. Three strikes is the rule,
-                      not the exception: re-measure it, never re-read it, and do not
+                      corrected to cb76319, and three more commits made THAT false;
+                      corrected to 42cb69a, and two more made that false; corrected
+                      to ef9ba4b, and the compression commit made that false too.
+                      Every one was written true. A push-state line does not go wrong
+                      by being careless — it goes wrong by being correct and then
+                      waiting. FOUR corrections in one session is not bad luck, it is
+                      the cost of writing a mutable fact into an immutable file: this
+                      block is a CACHE, and it is stale by construction the moment
+                      anything commits. Re-measure it, never re-read it, and do not
                       trust the commit hash in this block on sight.
     migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
@@ -1377,7 +1381,7 @@ parts ever gain a nullable warehouse.
 
 ---
 
-## THE CLAUDE.md COMPRESSION PASS — THIRD AUDIT. DOCS ONLY. **CAME BACK CLEAN.**
+## THE CLAUDE.md COMPRESSION PASS (`30ea4b8`) — THIRD AUDIT. DOCS ONLY. **CLEAN.**
 
 §5's 20KB trigger fired, tripped by the 805 bytes the `divide-*` rule had just
 added. The rule it fires is "compress by RE-VERIFYING every claim, not by trimming
