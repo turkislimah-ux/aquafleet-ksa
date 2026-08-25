@@ -57,7 +57,11 @@ function Note({ children }: { children: React.ReactNode }) {
 function PrintBand({ title, period }: { title: React.ReactNode; period: string }) {
   return (
     <div className="print-only" style={{ marginBottom: "10pt", borderBottom: "1px solid #000", paddingBottom: "6pt" }}>
-      <div style={{ fontSize: "8pt", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+      {/* translate="no" — this line is the whole point of the band: it is the
+          identification a filed sheet carries when nothing else on the paper
+          says whose statement it is. A translated company name defeats that.
+          The title and period below are content and translate normally. */}
+      <div translate="no" style={{ fontSize: "8pt", letterSpacing: "0.08em", textTransform: "uppercase" }}>
         Bin Slimah Group
       </div>
       <div style={{ fontSize: "14pt", fontWeight: 600, marginTop: "2pt" }}>{title}</div>

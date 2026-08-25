@@ -47,7 +47,12 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen grid place-items-center p-4" style={{ background: "rgb(var(--bg))" }}>
       <div className="w-full max-w-sm">
-        <div className="flex items-center gap-2 mb-6 justify-center">
+        {/* translate="no" on the WRAPPER — it inherits, and everything inside
+            this block is brand: the "B" mark (a logo that happens to be a
+            glyph, which a translation pass will transliterate) and the two
+            name lines. Same treatment as the sidebar's header in
+            components/AppShell.tsx; this is the same block, pre-login. */}
+        <div translate="no" className="flex items-center gap-2 mb-6 justify-center">
           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 grid place-items-center text-white font-bold text-lg">B</div>
           <div>
             <div className="font-semibold text-lg leading-tight">Bousla</div>
