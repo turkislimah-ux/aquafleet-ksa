@@ -143,10 +143,15 @@ checks can itself be the thing that is broken.
     migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
                       — a TIMESTAMP version, not "0167"; see the 0167 section below)
-    CLAUDE.md         19,156 bytes (§5 threshold 20KB — 1,324 of headroom)
-                      UNCHANGED — the UI pass edited no rules. The 17,700 this
-                      block used to carry was ALREADY wrong before `9e0fd77` —
-                      18,948 on disk at `810696d` — never a measurement, a memory
+    CLAUDE.md         19,961 bytes (§5 threshold 20KB = 20,480 — 519 of headroom)
+                      (was 19,156) MOVED — §6 gained the `divide-*` colour rule,
+                      promoted out of this file because it is a standing rule and
+                      not a state. HEADROOM IS NOW THIN: the next rule added is
+                      likely the one that trips §5's compression pass, and §5 says
+                      compress by RE-VERIFYING every claim, not by trimming prose.
+                      The 17,700 this block used to carry was ALREADY wrong before
+                      `9e0fd77` — 18,948 on disk at `810696d` — never a
+                      measurement, a memory
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
     tables            84, all 84 RLS-enabled
     anon table grants 0     anon-executable non-trigger functions 0

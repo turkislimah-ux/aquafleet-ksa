@@ -143,6 +143,16 @@ Loading every skill at once wastes context and has crashed sessions.
 - **Immutable keys** on lookup tables (`water_stations.key`) — a rename updates
   the name only.
 - **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew.
+- **`divide-*` CARRIES ITS OWN COLOUR: `divide-y divide-[rgb(var(--border))]`.**
+  `border-color` is not inherited, so an inline `borderColor` on the container
+  reaches that container's frame and nothing else — the child rules `divide-y`
+  creates stay at Tailwind preflight's `#e5e7eb`. Invisible in light mode
+  (`--border` is one step off it), a bright hairline in dark, which is how it got
+  written seven times before anyone saw it. Nothing else covers this: there is no
+  `borderColor.DEFAULT` in `tailwind.config.ts` and no `@layer base` override for
+  `*`. On a container with no `border` utility that inline style is inert anyway
+  (preflight sets `border-width:0`) — delete it rather than leave it implying the
+  rules are handled. **An uncoloured `divide-` IS the bug**; grep is the test.
 
 **WHAT SURVIVES A REPLACEMENT IS NOT OBVIOUS — AND WHAT DOES NOT IS A PERMISSION.**
 The next three rules are one lesson in three places.
