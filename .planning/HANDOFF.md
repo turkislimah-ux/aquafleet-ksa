@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at the 0167 migration commit (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE. DB at 0167 — nine views replaced, no table or column changed. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
+# SESSION HANDOFF — closes at the 0167 UNIT, all four commits (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE. DB at 0167 — nine views replaced, no table or column changed. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -7,7 +7,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `810696d`, not recalled
+## CURRENT STATE — MEASURED at `167c557`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
@@ -84,7 +84,27 @@ added — a name collision, not coverage. The new VAT panel does no arithmetic
 across sources, so there is no derived figure for a harness to check; what proves
 it is the per-source query in the section below, run against live data.
 
-    HEAD              810696d + the docs commit that carries this file
+**A FIFTH REFRESH RAN AT SESSION CLOSE, AND THE BUILD LICENCE WAS VOID AGAIN.**
+`cefcff8` touched `app/reports/StatementsTab.tsx`, so the exemption expired by its
+own terms and **the full `./scripts/safe-build.sh --dist-dir .next-verify` was
+re-run: clean, 17 routes, middleware still 83 kB.** `tsc --noEmit` clean, all eight
+`scripts/*check*.ts` suites EXECUTED, 8/8 pass. **Every DATABASE figure below was
+re-queried in ONE statement and every one came back identical** — 50 / 50 / 0,
+84 tables all RLS-enabled, 0 anon table grants, 0 anon-executable non-trigger
+functions, 12 buckets, 938 `authenticated` privilege rows. `v_active_alerts` reads
+9, the same value the previous refresh landed on after its round trip; that is not
+evidence the figure has settled — see the oscillation paragraph above, and do not
+pin this line to whichever value was seen last.
+
+**THE ONE FIGURE THAT MOVED THIS SESSION WAS A FILE SIZE, AND IT HAD BEEN WRONG
+BEFORE ANYONE TOUCHED IT.** `CLAUDE.md` bytes: this block carried 17,700, the disk
+said 18,948 at `810696d`, and `9e0fd77` then moved it to 19,156. So the figure
+drifted AND was never a measurement to begin with. Both facts are recorded on the
+line itself rather than silently overwritten, because "17,700" appearing twice in
+one document — here and in the CLAUDE.md AUDIT section — is the shape this file
+exists to catch, and it was caught in this file.
+
+    HEAD              167c557 (the docs commit that carries this file follows it)
     branch main   tree clean   in sync with origin
     migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
@@ -101,7 +121,7 @@ it is the per-source query in the section below, run against live data.
     v_active_alerts   9 rows                                           (was 10, was 9)
     tsc --noEmit      clean;  8/8 check suites pass (scripts/*check*.ts)
     next build        clean, 17 routes + middleware;  middleware 83 kB
-                      (RE-RUN at 810696d — source was touched, licence void)
+                      (RE-RUN at 167c557 — source was touched, licence void)
 
 **A CLEAN TREE DOES NOT MEAN A PUSHED TREE, AND THIS IS THE SECOND OCCURRENCE.**
 For most of this refresh `de7174c` sat committed, verified and unpushed while
@@ -479,12 +499,34 @@ reconstructed. If a non-derivable event is ever needed, re-add it deliberately �
 
 ## SESSION LEDGER — 2026-08-25
 
-ONE feature commit, then ONE migration commit that also carries this file. DB
-moves 0166 → 0167; views stay at **50**, because 0167 REPLACES nine and adds none.
-No table, column, RPC or grant changed.
+ONE feature commit, then FOUR that are a single unit of work: the 0167 migration,
+and then the three places the old behaviour was still written down. DB moves
+0166 → 0167; views stay at **50**, because 0167 REPLACES nine and adds none. No
+table, column, RPC or grant changed.
 
     810696d        P&L indicative Zakat line + per-source VAT section
-    (this file)    0167 migration + HANDOFF corrections, committed as one unit
+    cb0986b        0167 migration + HANDOFF corrections, committed as one unit
+    cefcff8        the VAT panel's on-screen caveat, now false, reworded
+    9e0fd77        CLAUDE.md §7: the "known open defect" line becomes the rule
+    167c557        HANDOFF: retire the closed OPEN item, correct the phantom row
+    (this file)    session close — the block above, re-measured
+
+**ONE FIX, FOUR DESCRIPTIONS, AND THE FIX WAS THE CHEAPEST PART.** 0167 changed
+three view bodies. Retiring what the old behaviour had been written down as took
+three further commits: the caveat printed under the VAT panel, the "known open
+defect" line in CLAUDE.md §7, two entries and a byte count in this file. **None of
+them was wrong when it was written.** Every one was a place where a reader would
+have been told, in confident and specific language, something the database had
+stopped doing — the on-screen one worst of all, because Turki reads it and has no
+way to check it. Treat a fix as unfinished until the sentences describing the
+defect have been hunted down, and grep for the defect's WORDS, not just its code.
+
+**0167 WAS APPLIED BY CLAUDE CODE, WHICH CLAUDE.md §5 FORBIDS.** The waiver was
+explicit, written in chat before the apply, and granted because the architect's
+own paste channel had already dropped the file once — the no-op recorded in the
+0167 section. **It is not a precedent; the next migration is drafted and stopped.**
+The architect has since deleted that no-op's `schema_migrations` row, re-measured
+live at close: exactly one row carries the name.
 
 **THE MEASUREMENT MISTAKE THIS SESSION IS WORTH MORE THAN THE FEATURE, because it
 is a NEW false-positive family for the list further down.** Verifying the VAT
