@@ -1,4 +1,3 @@
-import { PageHeader } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
 import type { Project, DriverStatus, ProjectDriver } from "@/lib/db-types";
 import type { LeavePeriod } from "@/lib/leave";
@@ -8,7 +7,10 @@ import ProjectForm from "./ProjectForm";
 
 export const dynamic = "force-dynamic";
 
-type JoinedProject = Project & { customer: { name: string } | null };
+// `name_ar` rides along so the Customer column and the customer dropdown can go
+// through arText. It is the customer's Arabic name — `projects` itself has no
+// name_ar column, so a PROJECT name is not an arText candidate anywhere here.
+type JoinedProject = Project & { customer: { name: string; name_ar: string | null } | null };
 
 export default async function ProjectsPage() {
   const supabase = createClient();
@@ -18,12 +20,16 @@ export default async function ProjectsPage() {
     await Promise.all([
       supabase
         .from("projects")
-        .select("*, customer:customers(name)")
+        .select("*, customer:customers(name, name_ar)")
         .is("archived_at", null)
         .order("created_at", { ascending: false }),
       supabase
         .from("customers")
-        .select("id, name")
+        // ORDERED BY THE BASE NAME, still, in both languages. arText is display
+        // only (see its header in lib/i18n.ts) — sorting on whichever column
+        // happens to be shown would reshuffle this dropdown when the language
+        // is toggled, for a list the user is picking from by position.
+        .select("id, name, name_ar")
         .is("archived_at", null)
         .order("name", { ascending: true }),
       // Terminated drivers must never reach buildDriverStateMap or the
@@ -51,8 +57,11 @@ export default async function ProjectsPage() {
   const projects = ((projectsRes.data ?? []) as JoinedProject[]).map((p) => ({
     ...p,
     customerName: p.customer?.name ?? "—",
+    // No customer -> null, so arText falls back to the em dash above rather
+    // than to an empty cell.
+    customerNameAr: p.customer?.name_ar ?? null,
   }));
-  const customers = (customersRes.data ?? []) as { id: string; name: string }[];
+  const customers = (customersRes.data ?? []) as { id: string; name: string; name_ar: string | null }[];
   const drivers = (driversRes.data ?? []) as {
     id: string;
     name: string;
@@ -101,14 +110,11 @@ export default async function ProjectsPage() {
     assignmentsRes.error ||
     leavePeriodsRes.error;
 
+  // Title and error line moved into ProjectForm — same reason as the Customers
+  // page: both are translated now and `lang` is client state. The message
+  // itself stays English (Supabase text, out of scope for this MVP).
   return (
     <div>
-      <PageHeader title="Projects" subtitle="Delivery contracts tied to a customer." />
-      {error && (
-        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">
-          Failed to load projects: {error.message}
-        </p>
-      )}
       <ProjectForm
         projects={projects}
         customers={customers}
@@ -117,6 +123,7 @@ export default async function ProjectsPage() {
         assignmentsByProject={assignmentsByProject}
         driverStateById={driverStateById}
         leaveLoadFailed={leaveLoadFailed}
+        error={error?.message ?? null}
       />
     </div>
   );

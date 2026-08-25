@@ -239,8 +239,21 @@ export default function AppShell({
   const setLang = (l: Lang) => setLangState(l);
   const setTheme = (m: "light" | "dark") => setThemeState(m);
 
-  // /login renders standalone, without the app chrome.
-  if (pathname === "/login") return <>{children}</>;
+  // /login renders standalone, without the app chrome — but STILL INSIDE the
+  // language context, which is why this is a Provider and not a bare fragment.
+  //
+  // The dir/lang/theme effects above are not gated by this early return, so on
+  // /login the document already carries dir="rtl" and lang="ar" for a user who
+  // last used Arabic. Returning `<>{children}</>` left the login page reading
+  // the context DEFAULT — "en" — so it laid out right-to-left and read
+  // left-to-right English. Nothing noticed while the page was untranslated;
+  // it became visible the moment login started calling useApp() (Phase 3).
+  //
+  // No chrome renders here, so the toggles are still absent: the language on
+  // this screen is whatever the browser last stored.
+  if (pathname === "/login") {
+    return <Ctx.Provider value={{ lang, setLang, theme, setTheme }}>{children}</Ctx.Provider>;
+  }
 
   return (
     <Ctx.Provider value={{ lang, setLang, theme, setTheme }}>

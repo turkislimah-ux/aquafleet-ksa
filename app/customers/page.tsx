@@ -1,4 +1,3 @@
-import { PageHeader } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
 import type { Customer, PaymentMode } from "@/lib/db-types";
 import CustomerForm from "./CustomerForm";
@@ -38,15 +37,20 @@ export default async function CustomersPage() {
   // column of em dashes that reads as real data.
   const error = customersRes.error || projectsRes.error;
 
+  // THE PAGE TITLE AND THE ERROR LINE MOVED INTO CustomerForm, and the message
+  // goes down as a prop. Both carry translated copy now, and `lang` is client
+  // state (AppShell, restored from localStorage) — a server component cannot
+  // read it. Every other route in the app already renders its PageHeader from
+  // inside its client island for the same reason, and app/inventory/page.tsx
+  // already hands its fetch error down as a string. The message itself stays
+  // English: it comes from Supabase, which is out of scope for this MVP.
   return (
     <div>
-      <PageHeader title="Customers" subtitle="Organizations that order water deliveries." />
-      {error && (
-        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">
-          Failed to load customers: {error.message}
-        </p>
-      )}
-      <CustomerForm customers={customers} paymentModeByCustomer={paymentModeByCustomer} />
+      <CustomerForm
+        customers={customers}
+        paymentModeByCustomer={paymentModeByCustomer}
+        error={error?.message ?? null}
+      />
     </div>
   );
 }

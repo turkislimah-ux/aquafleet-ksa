@@ -113,6 +113,15 @@ export const dict = {
     unitPrice: { en: "Unit price", ar: "سعر الوحدة" },
     add: { en: "Add", ar: "إضافة" },
     newWO: { en: "New Work Order", ar: "أمر عمل جديد" },
+    // Added in Phase 3 Batch 1. These three earn a place in `common` rather
+    // than a route namespace because each already appears in more than one of
+    // the three routes converted in that batch — Edit and Saving in all three
+    // forms, Select… in both entity pickers. `mt.edit` / `mt.saveNotes` are the
+    // maintenance track's own copies and stay where they are: they are read by
+    // that module's buttons, not by generic form chrome.
+    edit: { en: "Edit", ar: "تعديل" },
+    saving: { en: "Saving…", ar: "جارٍ الحفظ…" },
+    selectPlaceholder: { en: "Select…", ar: "اختر…" },
   },
   mt: {
     calendar: { en: "Maintenance Calendar", ar: "تقويم الصيانة" },
@@ -297,6 +306,121 @@ export const dict = {
     g_supplier: { en: "Suppliers", ar: "الموردون" },
     g_warehouse: { en: "Warehouses", ar: "المستودعات" },
     g_repairer: { en: "Repairers", ar: "الورش" },
+  },
+
+  /**
+   * DB ENUM LABELS — the display text for a column whose values are a fixed
+   * Postgres enum. Deliberately NOT under a route namespace, and deliberately
+   * NOT merged into `status` above.
+   *
+   * Not under a route: the English source of each of these is a label map in
+   * lib/db-types.ts (CUSTOMER_TYPE_LABELS, PAYMENT_MODE_LABELS,
+   * PROJECT_STATUS_LABELS), and those maps are read from several routes —
+   * app/archive/ArchiveCustomerTab.tsx, app/trips/FinanceTab.tsx,
+   * app/trips/BreakdownReport.tsx and app/trips/ProjectModal.tsx as well as the
+   * two converted here. A key called `customers.postpaid` would be imported by
+   * the Trips finance tab in a later batch, or duplicated there.
+   *
+   * Not merged into `status`: that block is the StatusPill vocabulary (truck,
+   * driver, trip and work-order states) and is indexed by a different set of
+   * enums. `projActive` and `status.active` render the same English word today
+   * and are still two different columns; collapsing them would make a future
+   * rewording of one silently reword the other.
+   *
+   * The English values here are byte-identical to the label maps they came
+   * from. The maps stay in db-types.ts as the enum's source of order and as
+   * the English text — they are still read for iteration order, so a status
+   * added there and not translated here is a compile error, not a silent gap.
+   */
+  labels: {
+    // CustomerType
+    custConstruction: { en: "Construction", ar: "مقاولات" },
+    custGovernmentOffice: { en: "Government office", ar: "جهة حكومية" },
+    custFacilityManagement: { en: "Facility management", ar: "إدارة مرافق" },
+    // PaymentMode
+    postpaid: { en: "Postpaid", ar: "دفع آجل" },
+    prepaid: { en: "Prepaid", ar: "دفع مقدم" },
+    // ProjectStatus
+    projActive: { en: "Active", ar: "نشط" },
+    projPaused: { en: "Paused", ar: "متوقف" },
+    projEnded: { en: "Ended", ar: "منتهي" },
+  },
+
+  // ── Phase 3 Batch 1 — per-route screen copy ──────────────────────────────
+  // One namespace per route. Every `en` value below is the EXACT literal that
+  // was in the JSX before the conversion, so English output is unchanged.
+
+  customers: {
+    title: { en: "Customers", ar: "العملاء" },
+    subtitle: {
+      en: "Organizations that order water deliveries.",
+      ar: "الجهات التي تطلب توريد المياه.",
+    },
+    // Prefix only — the message that follows it comes from Supabase and is
+    // out of scope for this MVP (server-action and DB text stay English).
+    loadFailed: { en: "Failed to load customers:", ar: "تعذر تحميل العملاء:" },
+    newCustomer: { en: "New customer", ar: "عميل جديد" },
+    editCustomer: { en: "Edit customer", ar: "تعديل عميل" },
+    thName: { en: "Name", ar: "الاسم" },
+    thContact: { en: "Contact", ar: "جهة الاتصال" },
+    thPhone: { en: "Phone", ar: "الهاتف" },
+    thPayment: { en: "Payment", ar: "الدفع" },
+    empty: {
+      en: "No customers yet. Create the first one.",
+      ar: "لا يوجد عملاء بعد. أنشئ أول عميل.",
+    },
+    inactive: { en: "Inactive", ar: "غير نشط" },
+    fName: { en: "Name *", ar: "الاسم *" },
+    fNameAr: { en: "Name (Arabic)", ar: "الاسم (بالعربية)" },
+    fType: { en: "Customer type *", ar: "نوع العميل *" },
+    fContactName: { en: "Contact name", ar: "اسم جهة الاتصال" },
+    fAddress: { en: "Delivery site address", ar: "عنوان موقع التسليم" },
+    fLat: { en: "Delivery latitude", ar: "خط عرض التسليم" },
+    fLng: { en: "Delivery longitude", ar: "خط طول التسليم" },
+  },
+
+  projects: {
+    title: { en: "Projects", ar: "المشاريع" },
+    subtitle: {
+      en: "Delivery contracts tied to a customer.",
+      ar: "عقود التوريد المرتبطة بعميل.",
+    },
+    loadFailed: { en: "Failed to load projects:", ar: "تعذر تحميل المشاريع:" },
+    newProject: { en: "New project", ar: "مشروع جديد" },
+    editProject: { en: "Edit project", ar: "تعديل مشروع" },
+    needCustomer: {
+      en: "Create a customer first — projects must belong to a customer.",
+      ar: "أنشئ عميلاً أولاً — كل مشروع يجب أن يتبع عميلاً.",
+    },
+    thProject: { en: "Project", ar: "المشروع" },
+    thCustomer: { en: "Customer", ar: "العميل" },
+    thDates: { en: "Dates", ar: "التواريخ" },
+    empty: { en: "No projects yet.", ar: "لا توجد مشاريع بعد." },
+    // The end-date cell when a project has no end date. A word, not a status:
+    // it reads "2026-01-04 → open".
+    openEnded: { en: "open", ar: "مفتوح" },
+    drivers: { en: "Drivers", ar: "السائقون" },
+    fName: { en: "Name *", ar: "الاسم *" },
+    fCustomer: { en: "Customer *", ar: "العميل *" },
+    fStartDate: { en: "Start date", ar: "تاريخ البدء" },
+    fEndDate: {
+      en: "End date (blank = open-ended)",
+      ar: "تاريخ الانتهاء (فارغ = مفتوح)",
+    },
+    manageDrivers: { en: "Manage drivers", ar: "إدارة السائقين" },
+    // Trails a Latin count: "Riyadh North · 4 selected".
+    selectedCount: { en: "selected", ar: "محدد" },
+  },
+
+  // The login screen renders OUTSIDE the app chrome (AppShell returns early
+  // for /login), but inside the language context — see the note at that early
+  // return. The brand block above the form is translate="no" and has no keys
+  // here on purpose: "Bousla" and "Bin Slimah Group · Operations" are a name.
+  login: {
+    signIn: { en: "Sign in", ar: "تسجيل الدخول" },
+    email: { en: "Email", ar: "البريد الإلكتروني" },
+    password: { en: "Password", ar: "كلمة المرور" },
+    signingIn: { en: "Signing in…", ar: "جارٍ تسجيل الدخول…" },
   },
 } as const;
 

@@ -7,9 +7,15 @@ import { Btn } from "@/components/ui";
 // From lib/routes rather than lib/nav: the login page has no sidebar and no
 // need for twelve icon components in its bundle.
 import { resolveLandingRoute } from "@/lib/routes";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 export default function LoginPage() {
   const router = useRouter();
+  // AppShell renders /login WITHOUT its chrome but WITH the context provider,
+  // so this reads the same stored language every other page does. There is no
+  // toggle on this screen — see the note at that early return in AppShell.
+  const { lang } = useApp();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -61,10 +67,10 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="card p-6 flex flex-col gap-4">
-          <h1 className="text-lg font-semibold">Sign in</h1>
+          <h1 className="text-lg font-semibold">{t("login.signIn", lang)}</h1>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Email</span>
+            <span className="muted">{t("login.email", lang)}</span>
             <input
               type="email"
               required
@@ -77,7 +83,7 @@ export default function LoginPage() {
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Password</span>
+            <span className="muted">{t("login.password", lang)}</span>
             <input
               type="password"
               required
@@ -94,7 +100,7 @@ export default function LoginPage() {
           )}
 
           <Btn type="submit" variant="primary" className="w-full justify-center" >
-            {loading ? "Signing in…" : "Sign in"}
+            {loading ? t("login.signingIn", lang) : t("login.signIn", lang)}
           </Btn>
         </form>
       </div>

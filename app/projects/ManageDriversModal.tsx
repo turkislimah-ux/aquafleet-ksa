@@ -13,6 +13,8 @@ import { type DriverState } from "@/lib/driver-state";
 import DriverRosterTable from "../trips/DriverRosterTable";
 import { setProjectDrivers } from "./actions";
 import ScrollLock from "@/components/ScrollLock";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 export type DriverOption = { id: string; name: string; status: DriverStatus };
 type TruckLite = {
@@ -43,6 +45,7 @@ export default function ManageDriversModal({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const { lang } = useApp();
   const [selected, setSelected] = useState<Set<string>>(new Set(assigned));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,9 +81,13 @@ export default function ManageDriversModal({
         className="card p-6 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-semibold">Manage drivers</h2>
+        <h2 className="text-lg font-semibold">{t("projects.manageDrivers", lang)}</h2>
+        {/* The count stays a Latin numeral in both languages (standing rule);
+            only the word after it is translated. The project name has no
+            Arabic column to fall back on — see ProjectRow in ProjectForm.
+            DriverRosterTable below is app/trips/ and is still English. */}
         <p className="text-sm muted mt-1 mb-4">
-          {project.name} · {selected.size} selected
+          {project.name} · {selected.size} {t("projects.selectedCount", lang)}
         </p>
 
         <DriverRosterTable
@@ -97,10 +104,10 @@ export default function ManageDriversModal({
 
         <div className="flex justify-end gap-2 mt-4">
           <Btn variant="outline" onClick={onClose}>
-            Cancel
+            {t("common.cancel", lang)}
           </Btn>
           <Btn variant="primary" onClick={save} className={saving ? "opacity-60 pointer-events-none" : ""}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("common.saving", lang) : t("common.save", lang)}
           </Btn>
         </div>
       </div>
