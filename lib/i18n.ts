@@ -17,6 +17,21 @@ export const dict = {
     reports: { en: "Reports", ar: "التقارير" },
     archive: { en: "Archive", ar: "الأرشيف" },
   },
+  /**
+   * Names for the sidebar's two <nav> LANDMARKS — deliberately a separate block
+   * from `nav` above, which is keyed by `NavItem.key` and read as
+   * `t(\`nav.${item.key}\`)`. A `main` or `soon` entry sitting in there would be
+   * indistinguishable from a page, and would start resolving for any nav item
+   * that ever took one of those keys.
+   *
+   * `soon` is also the heading printed above the deferred trio, so the visible
+   * text and the landmark's accessible name are the same string rather than two
+   * that can drift apart.
+   */
+  navLandmark: {
+    main: { en: "Main", ar: "الرئيسية" },
+    soon: { en: "Coming Soon", ar: "قريبًا" },
+  },
   status: {
     active: { en: "Active", ar: "نشط" },
     idle: { en: "Idle", ar: "متوقف" },

@@ -106,6 +106,15 @@ const REVEAL =
   "group-hover/nav:opacity-100 group-has-[:focus-visible]/nav:opacity-100";
 
 /**
+ * The "Coming Soon" heading's id, so the deferred <nav> can name itself off the
+ * heading already on screen. A literal and not a `useId()` value because the id
+ * has to be STABLE and there is exactly one rail: `useId()` would change between
+ * server and client render and produce a hydration mismatch on an aria wiring
+ * that has no other way to be checked.
+ */
+const SOON_HEADING_ID = "rail-soon-heading";
+
+/**
  * ONE <Link> WRAPS ICON AND LABEL TOGETHER. That is the requirement in both
  * states: at rail width the icon is the whole target, and when expanded the
  * label is part of the same target rather than a second one beside it.
@@ -330,7 +339,11 @@ export default function AppShell({
                   visibly scrolls out from under a rail the pointer never left.
                   Costs nothing when the nav is short enough not to scroll. */}
               <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-thin">
-                <nav className="flex flex-col gap-1">
+                {/* Both <nav>s carry a name. Two unnamed navigation landmarks
+                    announce as "navigation" twice, and the landmark list — one
+                    of the two ways a screen-reader user skips straight to the
+                    menu — becomes a coin flip between them. */}
+                <nav aria-label={t("navLandmark.main", lang)} className="flex flex-col gap-1">
                   {NAV.filter(n => n.group === "main").map(item => (
                     <NavRow key={item.href} item={item} lang={lang} pathname={pathname} />
                   ))}
@@ -345,13 +358,18 @@ export default function AppShell({
                   marks the group at rail width.
                 */}
                 <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--rail-hairline)" }}>
-                  <div className={cn(
+                  <div id={SOON_HEADING_ID} className={cn(
                     "px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide rail-muted whitespace-nowrap",
                     REVEAL,
                   )}>
-                    {lang === "ar" ? "قريبًا" : "Coming Soon"}
+                    {t("navLandmark.soon", lang)}
                   </div>
-                  <nav className="flex flex-col gap-1">
+                  {/* aria-labelledby, not aria-label — the heading is already on
+                      screen saying exactly this, so pointing at it keeps one
+                      string instead of two that can drift. REVEAL only animates
+                      opacity, and an element at opacity 0 is still exposed to
+                      assistive tech, so the name holds at rail width too. */}
+                  <nav aria-labelledby={SOON_HEADING_ID} className="flex flex-col gap-1">
                     {NAV.filter(n => n.group === "soon").map(item => (
                       <NavRow key={item.href} item={item} lang={lang} pathname={pathname} />
                     ))}
