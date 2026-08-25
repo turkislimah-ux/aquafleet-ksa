@@ -1,6 +1,18 @@
-# SESSION HANDOFF — closes at A CLAUDE.md COMPRESSION PASS (`30ea4b8`; §5's 20KB trigger, fired by the 805 bytes the divide rule had just added — the pass RE-VERIFIED EVERY CLAIM IN THE FILE AND FOUND ZERO STALE FACTS, the first pass of three to come back clean, see THE CLAUDE.md COMPRESSION PASS section), after THE `divide-y` DARK-MODE FIX (`42cb69a`), after WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `30ea4b8`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has now been wrong three times. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
+# SESSION HANDOFF — closes at PHASE 1 OF THE ARABIC EFFORT: CAIRO SELF-HOSTED FOR ARABIC ONLY (`1e5ab78`), ONE COMMIT, NO SCHEMA. Font only — no translation, no dir/lang change, no digits. Cairo is scoped by `unicode-range` rather than by a `[lang="ar"]` selector, which is what makes "English is byte-identical" a property of the CSS rather than a thing to re-test per screen. Verified by measuring each string rendered with the shipped stack against that same stack with Cairo removed: Arabic moves, Latin does not, to three decimal places. **THE SCOPE OF THE WHOLE ARABIC EFFORT WAS DECIDED THIS SESSION — OPTION 1, SCREEN TEXT ONLY.** Server-action messages and DB `raise` messages are explicitly OUT for the MVP, and the language cookie is DEFERRED; see THE ARABIC EFFORT section for what that closes and what it leaves open. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close, every one IDENTICAL, DB still 0167. Tree clean apart from gsd's `preview/.planning/HANDOFF.json`, and **PUSHED through `1e5ab78`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has now been wrong five times. NEXT: the foundation phase — see the open follow-ups in THE ARABIC EFFORT. Previous header, retained because the sections below still describe it: closes at A CLAUDE.md COMPRESSION PASS (`30ea4b8`; §5's 20KB trigger, fired by the 805 bytes the divide rule had just added — the pass RE-VERIFIED EVERY CLAIM IN THE FILE AND FOUND ZERO STALE FACTS, the first pass of three to come back clean, see THE CLAUDE.md COMPRESSION PASS section), after THE `divide-y` DARK-MODE FIX (`42cb69a`), after WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `30ea4b8`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has now been wrong three times. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
 
 # PREVIOUS HEADER — the UI polish pass, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
+
+**`.planning/AQUAFLEET-HANDOFF.json` IS ABANDONED — DO NOT READ IT FOR STATE, AND
+DO NOT PARTIALLY REFRESH IT.** Measured: last touched at `d6bf67b`, 2026-08-20,
+and its `status` still reads `archive-and-return-fully-verified-0139-closed`. The
+DB has since gone 0139 → 0167 and this file has been re-pointed six times. It was
+checked this session precisely because §5 names it alongside `HANDOFF.md`, and the
+finding is that the pairing lapsed weeks ago. **It is deliberately left stale
+rather than half-updated:** editing one field would make a 0139-era document
+LOOK maintained while still lying about everything else, which is strictly worse
+than a file that is obviously old. Either it gets rewritten wholesale in a
+dedicated pass or it stays exactly as it is. **`.planning/HANDOFF.md` — this file
+— is the only handoff state that is current.**
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -9,7 +21,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `30ea4b8`, not recalled
+## CURRENT STATE — MEASURED at `1e5ab78`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
@@ -118,6 +130,33 @@ and not a skipped check: this unit wrote no SQL at all. `v_active_alerts` reads 
 for the fourth refresh running — still NOT evidence it has settled, see the
 oscillation paragraph above, and do not pin this line to it.
 
+**A SEVENTH REFRESH RAN AT THE CAIRO COMMIT, AND THE BUILD LICENCE WAS VOID
+AGAIN — two source files.** `./scripts/safe-build.sh --dist-dir .next-verify`
+re-run: clean, 17 routes, middleware still 83 kB. `tsc --noEmit` exit 0 read
+directly, all eight `scripts/*check*.ts` suites EXECUTED, 8/8 pass. **All eleven
+database counts re-queried in ONE statement, every one IDENTICAL** — 50 / 50 / 0,
+84 tables all RLS-enabled, 0 anon table grants, 0 anon-executable non-trigger
+functions, 938 `authenticated` privilege rows, 12 buckets, latest migration
+`20260824231520`. Expected: this unit wrote no SQL. `v_active_alerts` reads 9 for
+the fifth refresh running — still not evidence it has settled, see the
+oscillation paragraph above.
+
+**AND THIS REFRESH FOUND SOMETHING THE OTHERS DID NOT: TWO NUMBERS THAT CAME OUT
+OF AN AUDIT WERE BOTH WRONG, AND BOTH WERE MINE.** The Arabic scope brief carried
+"~297 server-action messages" and "223 DB raise messages" — figures produced by
+the i18n audit earlier in this same session, days old at most. Re-measured at
+close: the DB has **236** `raise exception` sites, not 223. And the server-side
+count could not be reproduced at all — `error:`/`message:` string literals across
+the 29 `"use server"` files come to **334 call sites / 184 distinct strings**,
+depending entirely on how you count. The likely cause of "~297" is a grep scoped
+to `lib/actions/` alone, which is **7 files of 29** — `app/*/actions.ts` holds
+twelve more. **A number is only as good as the glob that produced it, so the glob
+belongs next to the number.** Recorded as a range with its method rather than
+silently replaced, because the failure here was not the arithmetic, it was
+quoting a count without saying what was counted. §5's re-measure rule is usually
+aimed at figures that DRIFT; these did not drift, they were never right, and the
+only thing that catches that is re-running the command.
+
 **A `tsc` INVOCATION LIED CLEAN DURING THIS SESSION AND THE PIPELINE IS WHY.**
 `./node_modules/.bin/tsc --noEmit 2>&1 | head -20 && echo "TSC-CLEAN"` printed
 TSC-CLEAN while tsc had not run at all — the shell's cwd had reset to `$HOME`, the
@@ -127,27 +166,31 @@ pipeline's status is its LAST command. Re-run as `cd <repo> && ./node_modules/.b
 pointed at the tooling instead of at a figure: the check that confirms the other
 checks can itself be the thing that is broken.
 
-    HEAD              30ea4b8 (the CLAUDE.md compression pass), PLUS the handoff-only
-                      commit carrying this line, one further ahead, whose hash could
-                      not be known while writing it. That gap is STRUCTURAL, not
-                      sloppiness — a self-describing file can never name its own
-                      commit — so the last hash here is always off by exactly the
-                      commit you are reading. Below it: ef9ba4b, c892c80, 42cb69a
-                      (the divide-y dark-mode fix, see its section), and above
-                      41ea251 sit cb76319, 16d9864, ef64630 — all handoff.
-    branch main   IN SYNC with origin at 30ea4b8 — READ BACK from the BRANCH
+    HEAD              1e5ab78 (Cairo self-hosted for Arabic, scoped by
+                      unicode-range), PLUS the handoff-only commit carrying this
+                      line, one further ahead, whose hash could not be known while
+                      writing it. That gap is STRUCTURAL, not sloppiness — a
+                      self-describing file can never name its own commit — so the
+                      last hash here is always off by exactly the commit you are
+                      reading. Below it: 30ea4b8, ef9ba4b, c892c80, 42cb69a (the
+                      divide-y dark-mode fix, see its section), and above 41ea251
+                      sit cb76319, 16d9864, ef64630 — all handoff.
+    branch main   IN SYNC with origin at 1e5ab78 — READ BACK from the BRANCH
                       line of `git status -sb`, which reads `## main...origin/main`
-                      with no ahead/behind. Ten commits pushed this session:
+                      with no ahead/behind, and cross-checked with
+                      `git rev-list --left-right --count origin/main...main` = 0 0.
+                      Eleven commits pushed this session:
                       a2a4c7e, ed2c1f0, 41ea251, cb76319, 16d9864, ef64630, 42cb69a,
-                      c892c80, ef9ba4b, 30ea4b8.
-                      THIS BLOCK HAS NOW BEEN STALE FOUR TIMES IN ONE SESSION. It
+                      c892c80, ef9ba4b, 30ea4b8, 1e5ab78.
+                      THIS BLOCK HAS NOW BEEN STALE FIVE TIMES IN ONE SESSION. It
                       said "AHEAD 3, NOT PUSHED" after a push made that false; was
                       corrected to cb76319, and three more commits made THAT false;
                       corrected to 42cb69a, and two more made that false; corrected
-                      to ef9ba4b, and the compression commit made that false too.
+                      to ef9ba4b, and the compression commit made that false too;
+                      corrected to 30ea4b8, and the Cairo commit made THAT false.
                       Every one was written true. A push-state line does not go wrong
                       by being careless — it goes wrong by being correct and then
-                      waiting. FOUR corrections in one session is not bad luck, it is
+                      waiting. FIVE corrections in one session is not bad luck, it is
                       the cost of writing a mutable fact into an immutable file: this
                       block is a CACHE, and it is stale by construction the moment
                       anything commits. Re-measure it, never re-read it, and do not
@@ -172,7 +215,24 @@ checks can itself be the thing that is broken.
     v_active_alerts   9 rows                            (was 10, was 9, was 9, was 9)
     tsc --noEmit      clean, exit 0 READ DIRECTLY;  8/8 check suites EXECUTED, 8/8 pass
     next build        clean, 17 routes + middleware;  middleware 83 kB
-                      (RE-RUN at 41ea251 — source was touched, licence void)
+                      (RE-RUN at 41ea251 — source was touched, licence void;
+                      RE-RUN again at 1e5ab78 for the same reason)
+    i18n dictionary   lib/i18n.ts, 309 lines, 227 leaf keys (`ar:` pairs)
+    i18n adoption     258 `t("…")` call sites, 138 DISTINCT paths, in 14 files
+                      of the 100 `.tsx` under app/ + components/. So 89 of the
+                      227 defined keys are unreferenced, and the 14 files are
+                      NOT spread across the app — see THE ARABIC EFFORT.
+                      Smoke check for dot-path leaks (a bad path renders the
+                      literal string, it is not a compile error): zero found.
+                      Weak test — leaf-name presence, not full path resolution.
+    server-side msgs  334 `error:`/`message:` literals, 184 DISTINCT, across the
+                      29 `"use server"` files. OUT of MVP scope, see below.
+                      The glob is part of the figure: `lib/actions/` ALONE is
+                      7 of those 29 files and gives a much smaller number.
+    DB raise messages 236 `raise exception` sites in 56 of 69 plpgsql functions;
+                      235 carry a quoted literal, 171 DISTINCT. OUT of scope.
+    public/fonts/     Cairo-Arabic-Variable.woff2 30,712 bytes (NEW, 1e5ab78)
+                      + NotoSansArabic Regular/Bold, used only by the PDF path
     warehouses        4 rows, all active = true; three live, plus `Furian warehouse`
                       which is leftover Delete-test data. TURKI'S CALL, MADE AND
                       CLOSED: it STAYS, and he removes it himself when he wants to.
@@ -308,6 +368,142 @@ Park` — carries `status='active'` AND a non-null `archived_at`. Daily Trips sh
 in a concrete place: archive is a PRE-FILTER, never a state, so `status` alone is
 never the whole test. Any report that counts projects filters on `archived_at is
 null` as well, and anything showing 8 has dropped the pre-filter.
+
+---
+
+## THE ARABIC EFFORT — SCOPE DECIDED, PHASE 1 SHIPPED (`1e5ab78`)
+
+**READ THIS BEFORE TOUCHING ANY ARABIC / i18n / RTL WORK.** The scope was settled
+this session and the boundary is deliberate — the two large exclusions below are
+not backlog, they are decisions.
+
+### THE SCOPE: OPTION 1 — USER-FACING SCREEN TEXT ONLY
+
+Translate the text a user READS ON A SCREEN. That is the MVP. Explicitly OUT:
+
+- **Server-action messages — 334 `error:`/`message:` literals, 184 distinct**,
+  across the 29 `"use server"` files. Out because translating them needs a
+  language to reach the server, and **nothing transports one today**: `lang` is
+  React state in `AppShell` (`:164`), restored from `localStorage` after mount
+  (`:213-215`). A server action cannot read either. Doing this properly means
+  adding the transport first, which is a bigger change than the strings.
+- **DB `raise exception` messages — 236 sites in 56 of 69 plpgsql functions,
+  171 distinct strings.** Out for a stronger reason: these are not UI copy. They
+  are guard rails that surface as thrown errors, most of them conditions a
+  correct client never hits. Translating them means a message catalogue in SQL,
+  and it would put user-facing copy behind a migration.
+- **The language COOKIE — DEFERRED, and the reason is worth keeping.** Its only
+  remaining job was the first-paint flash: `app/layout.tsx:18` is
+  `<html lang="en" suppressHydrationWarning>` — hardcoded, **and with no `dir`
+  attribute at all** — so an Arabic session serves LTR/English markup and flips
+  after hydration. A cookie would let the server emit the right `dir`/`lang` on
+  the first byte. Real, but it is one flash on load, not a coverage gap, and it
+  buys nothing for the 100 screens that have no Arabic strings yet. Sequenced
+  after coverage, not dropped.
+
+**Both figures above were WRONG in the brief that set this scope** (~297 and 223).
+See the seventh-refresh paragraph in CURRENT STATE — one had drifted, one was
+never reproducible because its glob covered 7 of 29 files.
+
+### PHASE 1 — SHIPPED: CAIRO, ARABIC ONLY (`1e5ab78`)
+
+Four files, +145/−1. No schema. Font only: no translation, no `dir`/`lang` change,
+no digit handling.
+
+- `public/fonts/Cairo-Arabic-Variable.woff2` (30,712 bytes) + `OFL-Cairo.txt`,
+  matching the existing `OFL.txt` precedent. Self-hosted, no CDN.
+- `app/globals.css` — `@font-face` with `font-weight: 400 700`.
+- `tailwind.config.ts` — `"Cairo"` PREPENDED to `fontFamily.sans`.
+
+**SCOPED BY `unicode-range`, NOT BY A `[lang="ar"]` SELECTOR — and that choice is
+the whole design.** The browser matches codepoints against the range BEFORE it
+consults the font, so Cairo is skipped for Latin no matter where it sits in the
+stack; leading position only lets Arabic reach it instead of the OS fallback.
+Three consequences, all of which a selector-based swap would lose:
+
+1. "English is unchanged" becomes a property of the CSS, not a per-screen re-test.
+2. **Mixed content works with no markup** — an Arabic customer name inside an
+   English table gets Cairo for the Arabic glyphs and the existing stack for the
+   Latin, in the SAME text node. No selector can split a text node.
+3. It is immune to the first-paint flash above, because it never consults the
+   language attribute.
+
+**THE RANGE IS `invoicePdfTemplate.ts`'s, NOT GOOGLE'S, AND THAT IS NOT A DETAIL.**
+Google's published `arabic` subset range includes **`U+2010-2011` — the HYPHEN** —
+which is shared punctuation sitting in ordinary English text. Adopting it verbatim
+would have pulled English hyphens into Cairo and broken the one guarantee this
+phase exists to make. Reuse the PDF template's range for any future Arabic face;
+do not copy a range off Google Fonts.
+
+**CAIRO v31 IS A VARIABLE FONT.** The brief asked for three static weights
+(400/600/700); all three resolve to ONE file, so a single face declaring
+`font-weight: 400 700` covers them and 500 (`font-medium`) as well, with real
+masters rather than synthetic bolding. Three static files would be three
+downloads of the same data.
+
+**How it was verified, and one near-miss worth inheriting.** Each string was
+rendered twice — once with the shipped stack, once with that same stack minus
+Cairo (i.e. exactly the old rendering) — and the boxes compared, using the
+`@font-face` and stack EXTRACTED FROM THE BUILT CSS rather than retyped. Arabic
+and an Arabic name in a Latin row both change metrics; Latin prose and
+`"Riyadh - Jeddah, 1,250.75 SAR (2026)"` are identical to three decimals. Weight
+axis confirmed live (Arabic width grows monotonically 400 < 500 < 600 < 700).
+**The near-miss:** the first run reported IDENTICAL on all five rows, which reads
+as a clean pass on "English unchanged" — the font had failed CORS and never
+loaded. **A dead font passes every Latin check.** Any future font verification
+asserts the face reached status `loaded` BEFORE it compares anything.
+
+**Known and expected: Arabic line boxes are ~54% taller** under Cairo's metrics
+(60px vs 39px at 32px). Verified in-browser by Turki. If an Arabic row ever looks
+clipped, this is why — it is a metrics difference, not a bug in the scoping.
+
+**Unrelated, found while verifying, NOT fixed (out of "font only" scope):**
+`middleware.ts:11`'s matcher excludes `svg|png|jpg|jpeg|gif|webp` but **not
+`woff2`**, so `/fonts/*.woff2` runs through auth middleware and 307s to `/login`
+when signed out. Pre-existing — it applies to the Noto files identically. No user
+impact today (the login page has no Arabic; post-login the cookie is present).
+
+### OPEN FOLLOW-UPS — NOT STARTED
+
+1. **THE FOUNDATION PHASE, and it comes before any bulk translation.** Three
+   things, none of them copy:
+   - **Consolidate the translation idiom.** `t(path, lang)` in `lib/i18n.ts`
+     takes `path` as `string`, NOT a key union — so a typo is not a compile
+     error, it renders the literal dot-path on screen. Zero leaks today (smoke
+     check, see CURRENT STATE), but that is luck across 138 paths and will not
+     survive scaling to the whole app.
+   - **ONE `_ar` display helper with a fallback.** Free-text `_ar` columns exist
+     in the DB; there is no single helper deciding when to show `name_ar` over
+     `name` and what to do when it is null. Write it once — this is exactly the
+     shape §7 keeps calling "EXACTLY TWO EXPRESSIONS", and the cheapest moment
+     to get it right is before there are twenty call sites.
+   - **Digit safety.** Decide Western vs Arabic-Indic digits ONCE and apply it
+     everywhere. Money and dates are the risk; this touches invoices.
+2. **SCREEN-TEXT COVERAGE, BY AREA — and the measured picture is lopsided.**
+   All 14 files that call `t()` are: `app/maintenance/` (9 files),
+   `app/iot|predictive|routes/page.tsx` (3 placeholder pages),
+   `components/AppShell.tsx`, `components/GlobalSearch.tsx`. **Every operational
+   area has ZERO**: `app/trips/` (17 `.tsx`), `app/drivers/` (10),
+   `app/archive/` (9), `app/reports/` (9), `app/consumption/` (5),
+   `app/fleet/` (5), `app/inventory/` (4), `app/projects/` (3),
+   `app/customers/` (2), `app/login/` (1). So this is not "finish the last few
+   screens" — maintenance is the ONLY translated feature, and the dictionary's
+   227 keys are sized for it, not for the app.
+3. **GLOBAL SEARCH — Arabic primary line needs a MIGRATION.** The fix is in
+   `search_everything`, not in the component, so it cannot ship with the UI
+   phases and needs sequencing with a migration.
+
+**One trap, already load-bearing:** `user_profiles.preferred_language` exists and
+looks like the natural home for the language switch. Migration `0159:67-81`
+("preferred_language IS COSMETIC AND CAN DISAGREE WITH THE REAL UI LANGUAGE")
+EXPLICITLY forbids wiring it to that switch — a per-ACCOUNT value and a
+per-DEVICE value have different lifetimes, so a "sync" fights the user every time
+they change machines. If it should ever become per-account, that REPLACES
+localStorage; it is never a second writer beside it. Read that header first.
+**Its line references have drifted** — it cites `AppShell.tsx` lines 61 and 73;
+the state is now `:164` and the localStorage read/write `:213`/`:225`. The rule
+holds, the pointers do not, which is the usual fate of a line number written into
+a file that cannot be updated.
 
 ---
 
@@ -1828,9 +2024,16 @@ section is notifications only — do not read it as the complete set.)*
 
 ## OPEN / CARRIED FORWARD
 
-**Nothing is in flight, and origin IS in sync — read back from the BRANCH line at
-close, not inferred from a clean tree.** No migration is drafted-but-unapplied, no
-code is uncommitted, no feature is half-built.
+**NOTHING IS HALF-BUILT, BUT SOMETHING IS NOW QUEUED — and that is a change from
+every previous close of this file.** Origin IS in sync (read back from the BRANCH
+line at close, not inferred from a clean tree). No migration is
+drafted-but-unapplied, no code is uncommitted. **But THE ARABIC EFFORT is a
+multi-phase piece of work with Phase 1 shipped and the rest scoped and not
+started** — see THE ARABIC EFFORT section for the three open follow-ups (the
+foundation phase, screen-text coverage by area, the global-search migration) and,
+just as importantly, for the two large exclusions that are DECISIONS rather than
+backlog. A reader who lands here and sees "nothing in flight" has the wrong
+picture: the next session has a queue, it just does not have a WIP.
 
 **THIS LINE MADE A ROUND TRIP IN ONE SESSION AND ALL THREE STATES ARE KEPT.** It
 said "origin is in sync" while four commits sat local — stale, inherited from the
