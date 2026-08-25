@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at the UI POLISH PASS, four commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — `2c90eb6`, verified from the BRANCH line, not the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
+# SESSION HANDOFF — closes at the UI POLISH PASS, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -255,9 +255,9 @@ null` as well, and anything showing 8 has dropped the pre-filter.
 
 ---
 
-## SHIPPED — THE UI POLISH PASS (`1e658a0` … `13389b7`). NO SQL, NO SCHEMA.
+## SHIPPED — THE UI POLISH PASS (`1e658a0` … `de64afb`). NO SQL, NO SCHEMA.
 
-Four commits, split by logical unit, each independently `tsc --noEmit` clean —
+Five commits, split by logical unit, each independently `tsc --noEmit` clean —
 verified in a throwaway `git worktree`, not asserted from the final tree, because
 the final tree type-checks even when an intermediate commit would not.
 
@@ -265,6 +265,7 @@ the final tree type-checks even when an intermediate commit would not.
     65aa655   Sidebar: hover-collapse rail, glass panel, deferred pages grouped
     bc27e93   Search dock centres on the content column, not the viewport
     13389b7   Fence brand strings from browser translation
+    de64afb   Name both sidebar nav landmarks (the review item, same session)
 
 **TWO FILES CARRY RIDERS, AND THE COMMIT BODIES SAY SO.** `BreakdownReport.tsx`
 and `InvoiceDetailModal.tsx` each gained a print-footer `translate="no"` AND a
@@ -631,13 +632,14 @@ reconstructed. If a non-derivable event is ever needed, re-add it deliberately �
 
 ## SESSION LEDGER — 2026-08-25 (THE UI PASS — SAME DAY, SEPARATE SESSION)
 
-FOUR commits, no SQL, no schema. DB stays at 0167 and every figure re-measured
+FIVE commits, no SQL, no schema. DB stays at 0167 and every figure re-measured
 identical. **Pushed at close** — the four above plus the two that carry this file.
 
     1e658a0        Modals: one ref-counted scroll lock, shared by every overlay
     65aa655        Sidebar: hover-collapse rail, glass panel, deferred pages grouped
     bc27e93        Search dock centres on the content column, not the viewport
     13389b7        Fence brand strings from browser translation
+    de64afb        Name both sidebar nav landmarks (the review item, same session)
     (this file)    session close — the block above, re-measured
 
 **THE MISTAKE THIS SESSION IS A MEASUREMENT MISTAKE, WHICH MAKES IT THE THIRD IN
@@ -1519,12 +1521,15 @@ a pushed one (`de7174c` and `e65d980`, both `[ahead 1]` under a paragraph claimi
 otherwise). Read the BRANCH line of `git status -sb`, never the tree line, and
 never this sentence.
 
-**ONE REVIEW ITEM CAME OUT OF THE UI PASS, and it is a task, unlike the four
-below.** `components/AppShell.tsx` renders two sibling `<nav>` landmarks — the main
-list and the "Coming Soon" block — and neither has an accessible name, so a screen
-reader announces "navigation" twice with no way to tell them apart. One
-`aria-label` on each. It was spun out rather than folded in so the rail commit
-stayed one unit; it is not done.
+*(The **two unnamed `<nav>` landmarks** item that stood here is CLOSED — `de64afb`.
+Both are named now: the main list by `aria-label`, the deferred block by
+`aria-labelledby` pointing at the "Coming Soon" heading already on screen, so the
+visible text and the accessible name are one string. The names live in a new
+`navLandmark` i18n block, deliberately NOT two more keys in `nav` — that one is
+keyed by `NavItem.key` and read as ``t(`nav.${item.key}`)``, so a `main` or `soon`
+entry there would be indistinguishable from a page. Recorded as closed rather than
+deleted because it is the only item this file has ever carried that was opened and
+shut inside one session.)*
 
 The four items below are decisions and reviews, not work in progress — **none of
 them is a task.** The
