@@ -43,6 +43,7 @@ import {
   removeWorkOrderPartPhoto,
   getWorkOrderPartPhotoSignedUrls,
 } from "./actions";
+import ScrollLock from "@/components/ScrollLock";
 
 const MAX_PHOTOS_PER_LINE = 4;
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
@@ -56,6 +57,7 @@ function ModalOverlay({ onClick, children }: { onClick: () => void; children: Re
   if (!mounted) return null;
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={(e) => { e.stopPropagation(); onClick(); }}>
+      <ScrollLock />
       {children}
     </div>,
     document.body,
@@ -590,6 +592,7 @@ export default function WorkOrderDetailModal({
           className="fixed inset-0 z-[60] grid place-items-center p-6 bg-black/80"
           onClick={(e) => { e.stopPropagation(); setLightboxUrl(null); }}
         >
+          <ScrollLock />
           <button
             onClick={(e) => { e.stopPropagation(); setLightboxUrl(null); }}
             className="absolute top-4 end-4 h-9 w-9 rounded-lg bg-white/10 text-white grid place-items-center hover:bg-white/20"

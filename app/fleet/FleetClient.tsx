@@ -23,6 +23,7 @@ import {
   UTILIZATION_BAND, type TruckUtilizationRow,
 } from "@/lib/utilization";
 import { Activity, Eye, Filter, Pencil, Plus, Truck as TruckIcon, Users, X } from "lucide-react";
+import ScrollLock from "@/components/ScrollLock";
 
 type Kpis = {
   total: number;
@@ -621,6 +622,7 @@ export default function FleetClient({
           className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40"
           onClick={() => setAssignTruck(null)}
         >
+          <ScrollLock />
           <div
             className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin"
             onClick={(e) => e.stopPropagation()}

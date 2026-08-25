@@ -32,6 +32,7 @@ import {
   type PayoutSnapshot,
   type SnapItem,
 } from "@/lib/commission-rows";
+import ScrollLock from "@/components/ScrollLock";
 
 function fmtDate(iso: string): string {
   // Frozen paid_at is an ISO timestamptz. Show date + short time.
@@ -246,6 +247,7 @@ function PayoutDetail({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div
         className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}

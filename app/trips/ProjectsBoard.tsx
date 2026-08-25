@@ -51,6 +51,7 @@ import DeliveriesReportBand, {
 } from "./DeliveriesReportBand";
 import CreateTripForm from "./CreateTripForm";
 import ManageDriversModal from "../projects/ManageDriversModal";
+import ScrollLock from "@/components/ScrollLock";
 
 // Mid-sentence wording for a water type, off the ONE label map — the same map
 // CreateTripForm's own gate message reads, so the two halves of the gate say
@@ -738,6 +739,7 @@ function PhasePickerModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div className="card p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         {view === "pick" ? (
           <>

@@ -51,6 +51,7 @@ import {
   type SalaryHistoryRow,
   type SalarySubject,
 } from "./actions";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -180,6 +181,7 @@ export default function SalaryHistoryModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: "rgba(0,0,0,.45)" }}>
+      <ScrollLock />
       <div className="card w-full max-w-[760px] max-h-[88vh] overflow-auto p-5">
         <div className="flex items-start justify-between gap-3 mb-1">
           <div>

@@ -31,6 +31,7 @@ import { type Project, PROJECT_STATUS_LABELS } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
 import { createProject, updateProject } from "./actions";
 import ManageDriversModal, { type DriverOption } from "./ManageDriversModal";
+import ScrollLock from "@/components/ScrollLock";
 
 type CustomerOption = { id: string; name: string };
 type ProjectRow = Project & { customerName: string };
@@ -171,6 +172,7 @@ export default function ProjectForm({
 
       {open && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+          <ScrollLock />
           <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-semibold mb-4">{editing ? "Edit project" : "New project"}</h2>
             <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -62,6 +62,7 @@ import {
   type UnitInput,
   type PartUpdateInput,
 } from "./actions";
+import ScrollLock from "@/components/ScrollLock";
 
 // Shared modal backdrop — "risky batch" Stage 3, items 1 + 7. Every
 // Inventory modal used to render its own `fixed inset-0` backdrop INLINE
@@ -104,6 +105,7 @@ export function ModalOverlay({ onClick, children }: { onClick: () => void; child
         onClick();
       }}
     >
+      <ScrollLock />
       {children}
     </div>,
     document.body

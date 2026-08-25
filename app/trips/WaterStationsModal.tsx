@@ -36,6 +36,7 @@ import {
   type WaterStationInput,
   type StationReassignment,
 } from "./actions";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -154,6 +155,7 @@ export default function WaterStationsModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+      <ScrollLock />
       <div
         // 1080px = this app's size:lg popup width (InventoryClient.tsx:130).
         // Widened from max-w-3xl: the list view's fourth column holds BOTH

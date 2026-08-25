@@ -12,6 +12,7 @@ import { type DriverStatus } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
 import DriverRosterTable from "../trips/DriverRosterTable";
 import { setProjectDrivers } from "./actions";
+import ScrollLock from "@/components/ScrollLock";
 
 export type DriverOption = { id: string; name: string; status: DriverStatus };
 type TruckLite = {
@@ -70,6 +71,7 @@ export default function ManageDriversModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div
         // Hosts DriverRosterTable — a table-bearing popup, so it takes the
         // app's size:lg width (1080px) like every other one.

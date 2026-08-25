@@ -25,6 +25,7 @@ import PersonIdLink from "./PersonIdLink";
 import LookupSelect from "./LookupSelect";
 import LinkedIdField from "@/components/LinkedIdField";
 import { useRecordFocus } from "@/lib/useRecordFocus";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -401,6 +402,7 @@ export default function StaffTab({
       {/* Detail modal — view + Edit + Terminate. */}
       {detail && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={() => setDetail(null)}>
+          <ScrollLock />
           <div className="card p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-4">
               <h2 className="text-lg font-semibold">Staff Member</h2>
@@ -512,7 +514,8 @@ export default function StaffTab({
       {/* Add / Edit form. */}
       {formOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={closeForm}>
-          <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
+          <ScrollLock />
+          <div className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-semibold mb-4">{editing ? "Edit staff member" : "Add Staff Member"}</h2>
             <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Name *">

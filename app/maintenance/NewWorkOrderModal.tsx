@@ -48,6 +48,7 @@ import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, W
 import { createWorkOrder, editWorkOrder, saveWorkOrderTitle, addRepairDescription } from "./actions";
 import { hourlyLaborCost } from "./laborCost";
 import { MechanicPicker } from "./MechanicPicker";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))" } as const;
@@ -64,6 +65,7 @@ function ModalOverlay({ onClick, children }: { onClick: () => void; children: Re
   if (!mounted) return null;
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={(e) => { e.stopPropagation(); onClick(); }}>
+      <ScrollLock />
       {children}
     </div>,
     document.body,

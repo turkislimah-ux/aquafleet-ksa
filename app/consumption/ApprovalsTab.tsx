@@ -33,6 +33,7 @@ import type {
   WorkOrder, WorkOrderPart, OutsourcedJob, WorkshopPayment,
 } from "@/lib/db-types";
 import { decideConsumptionApproval } from "./actions";
+import ScrollLock from "@/components/ScrollLock";
 
 type PartNameLite = { id: string; name: string; sku: string; unit: string | null };
 type TruckLite = { id: string; plate: string };
@@ -621,6 +622,7 @@ function ConflictModal({ message, onClose }: { message: string; onClose: () => v
       className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
       onClick={onClose}
     >
+      <ScrollLock />
       <div className="card w-full max-w-[440px] p-0" onClick={(ev) => ev.stopPropagation()}>
         <div className="p-4 flex items-start gap-3">
           <span className="h-8 w-8 shrink-0 rounded-full grid place-items-center bg-rose-500/10 text-rose-600 dark:text-rose-400">
@@ -664,6 +666,7 @@ function RejectModal({
       className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
       onClick={onCancel}
     >
+      <ScrollLock />
       <div
         className="card w-full max-w-[520px] p-0"
         onClick={(ev) => ev.stopPropagation()}

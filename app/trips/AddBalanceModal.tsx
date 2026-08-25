@@ -27,6 +27,7 @@ import { X, Plus, Image as ImageIcon } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar, todayKey } from "@/lib/utils";
 import { recordTopup, getTopupProofSignedUrl } from "@/lib/actions/finance";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -166,6 +167,7 @@ export default function AddBalanceModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+      <ScrollLock />
       <div
         // TWO WIDTHS, because this shell hosts two different things. The list
         // view is a five-column history table (Date / Method / ETF Ref. /

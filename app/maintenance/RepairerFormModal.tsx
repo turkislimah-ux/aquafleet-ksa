@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import type { RepairerType, Repairer } from "@/lib/db-types";
 import { addRepairer, updateRepairer, addRepairerType } from "./osActions";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))" } as const;
@@ -26,6 +27,7 @@ function ModalOverlay({ onClick, children }: { onClick: () => void; children: Re
   if (!mounted) return null;
   return createPortal(
     <div className="fixed inset-0 z-[70] grid place-items-center p-4 bg-black/50" onClick={(e) => { e.stopPropagation(); onClick(); }}>
+      <ScrollLock />
       {children}
     </div>,
     document.body,

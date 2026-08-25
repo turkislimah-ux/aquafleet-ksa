@@ -20,6 +20,7 @@ import { X, Plus, Pencil, Trash2, Check, AlertTriangle } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import { createExpense, updateExpense, deleteExpense, type ExpenseInput } from "./actions";
+import ScrollLock from "@/components/ScrollLock";
 
 export type ExpenseRow = {
   id: string;
@@ -131,6 +132,7 @@ export default function ExpensesModal({
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
       onClick={onClose}>
+      <ScrollLock />
       <div className="card w-full max-w-[860px] max-h-[88vh] overflow-y-auto scrollbar-thin p-0"
         onClick={(e) => e.stopPropagation()}>
 

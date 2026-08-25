@@ -19,6 +19,7 @@ import { selectableWaterTypes, type StationOption } from "@/lib/station-pricing"
 import { type DriverState, resolveOnLeave } from "@/lib/driver-state";
 import { type LeavePeriod } from "@/lib/leave";
 import DriverDutyTable from "./DriverDutyTable";
+import ScrollLock from "@/components/ScrollLock";
 
 type ProjectOption = {
   id: string;
@@ -321,6 +322,7 @@ export default function CreateTripForm({
           className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40"
           onClick={close}
         >
+          <ScrollLock />
           <div
             className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin"
             onClick={(e) => e.stopPropagation()}

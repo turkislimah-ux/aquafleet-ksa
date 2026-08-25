@@ -32,6 +32,7 @@ import {
   uploadExitPermitFile, removeExitPermitFile,
   type ExitPermitHeaderInput,
 } from "./actions";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
@@ -50,6 +51,7 @@ function Overlay({ onClick, children }: { onClick: () => void; children: React.R
       className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
       onClick={(e) => { e.stopPropagation(); onClick(); }}
     >
+      <ScrollLock />
       {children}
     </div>,
     document.body,

@@ -41,6 +41,7 @@ import CompanySettingsSection from "./CompanySettingsSection";
 import NotificationsSection from "./NotificationsSection";
 import ProfileSection from "./ProfileSection";
 import IssuesSection from "./IssuesSection";
+import ScrollLock from "@/components/ScrollLock";
 
 type SectionKey = "company" | "notifications" | "profile" | "issues";
 
@@ -87,14 +88,11 @@ export default function SettingsModal({
     if (open) setSection("company");
   }, [open]);
 
-  // The dialog owns the page's scroll while it is up, so the page behind does
-  // not move under the overlay.
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, [open]);
+  // The scroll lock this dialog used to keep here is now <ScrollLock /> in the
+  // backdrop below — same behaviour, shared with every other modal. It had to
+  // move: two independent locks each save and restore `body.overflow`, so a
+  // dialog opened FROM this one would restore the page's scroll on its own
+  // close while Settings was still up. The shared one is ref-counted.
 
   if (!open) return null;
 
@@ -108,6 +106,7 @@ export default function SettingsModal({
       aria-modal="true"
       aria-label={title}
     >
+      <ScrollLock />
       {/*
         SIZE. max-w-5xl and 46rem tall, both capped against the viewport so it
         still fits a laptop. Sized up from 4xl/38rem on Turki's call after the

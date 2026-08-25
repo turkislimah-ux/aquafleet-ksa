@@ -39,6 +39,7 @@ import {
 import type {
   ExitPermit, ExitPermitLine, WorkOrder, WorkOrderPart,
 } from "@/lib/db-types";
+import ScrollLock from "@/components/ScrollLock";
 
 type PartLite = { id: string; name: string; sku: string; unit: string | null; warehouse_id: string };
 type WarehouseLite = { id: string; name: string };
@@ -924,6 +925,7 @@ function ListModal({
 
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto" onClick={onClose}>
+      <ScrollLock />
       <div className="card w-full max-w-[720px] max-h-[85vh] overflow-y-auto scrollbar-thin p-0"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>

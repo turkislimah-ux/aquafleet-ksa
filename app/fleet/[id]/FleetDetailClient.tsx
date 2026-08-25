@@ -33,6 +33,7 @@ import {
   utilizationBand, formatUtilization, utilizationNaReason,
   type TruckUtilizationRolling30Row,
 } from "@/lib/utilization";
+import ScrollLock from "@/components/ScrollLock";
 
 const TYPE_LABEL: Record<string, string> = {
   preventive: "Preventive",
@@ -780,6 +781,7 @@ export default function FleetDetailClient({
           className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40"
           onClick={() => setAssignOpen(false)}
         >
+          <ScrollLock />
           <div
             className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin"
             onClick={(e) => e.stopPropagation()}

@@ -86,6 +86,7 @@ import {
 } from "@/lib/db-types";
 import { formatTripRef, sampleTripRef } from "@/lib/trip-ref";
 import TripRefLink from "@/components/TripRefLink";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT = "px-2.5 py-1.5 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-brand-500/30";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -283,6 +284,7 @@ export default function StatementModal({
 
   return createPortal(
     <div className="statement-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div
         id="statement-print"
         // 1080px is this app's size:lg popup width (InventoryClient.tsx:130,

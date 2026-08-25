@@ -38,6 +38,7 @@ import { X } from "lucide-react";
 import { formatNum } from "@/lib/utils";
 import type { MetricDictionaryRow } from "@/lib/reports";
 import { Disclosure, EmptyNote } from "./OverviewTab";
+import ScrollLock from "@/components/ScrollLock";
 
 /** Reading order — money first, then position, then activity. */
 const BASIS_ORDER = ["accrual", "cash", "state", "operational"];
@@ -111,6 +112,7 @@ export default function MetricsGlossaryModal({
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
       onClick={onClose}>
+      <ScrollLock />
       <div className="card w-full max-w-[1200px] max-h-[92vh] flex flex-col p-0"
         role="dialog" aria-modal="true" aria-label="Metrics dictionary"
         onClick={(e) => e.stopPropagation()}>

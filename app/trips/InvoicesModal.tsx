@@ -16,6 +16,7 @@ import { formatSar, todayKey } from "@/lib/utils";
 import { INVOICE_STATUS_LABELS, type Invoice } from "@/lib/db-types";
 import { createDraftInvoice, listInvoicesForCustomer } from "./invoiceActions";
 import InvoiceDetailModal from "./InvoiceDetailModal";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -128,6 +129,7 @@ export default function InvoicesModal({
   return (
     <>
       <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+        <ScrollLock />
         {/* 1080px = this app's size:lg popup width (InventoryClient.tsx:130).
             Widened from max-w-2xl: six columns (Period / Status / Invoice # /
             Grand Total / Amount Due / actions) plus two money figures that must

@@ -53,6 +53,7 @@ import {
   setHideAmountDue,
   type UndeliveredTripBlocker,
 } from "./invoiceActions";
+import ScrollLock from "@/components/ScrollLock";
 
 // Fallback company email — used in template bodies/signatures whenever
 // company_settings.email is unset. mailto cannot set the actual From
@@ -627,6 +628,7 @@ export default function InvoiceDetailModal({
   return createPortal(
     <>
     <div className="invoice-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div
         // 1080px = this app's size:lg popup width (InventoryClient.tsx:130).
         // Widened from max-w-4xl: the trip tables are six columns and each row
@@ -1218,7 +1220,12 @@ export default function InvoiceDetailModal({
 
             <div className="border-t border-app pt-3 text-[11px] muted flex items-center justify-between">
               <span>Generated {new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</span>
-              <span>Bin Slimah Group · Bousla</span>
+              {/* translate="no" on the SPAN, not the row — "Generated <date>"
+                  is ordinary prose that SHOULD translate. Only the company's
+                  own name is fenced off. This footer prints onto an invoice
+                  that leaves the building, so a translated company name here
+                  reaches a customer. */}
+              <span translate="no">Bin Slimah Group · Bousla</span>
             </div>
           </div>
         )}
@@ -1230,6 +1237,7 @@ export default function InvoiceDetailModal({
         className="no-print fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40"
         onClick={() => setEmailPickerOpen(false)}
       >
+        <ScrollLock />
         <div className="card p-5 w-full max-w-sm space-y-3" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">Email invoice — choose type</h3>

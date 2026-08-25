@@ -54,6 +54,7 @@ import type {
   ArchiveDriverRow,
   ArchiveStaffRow,
 } from "@/lib/db-types";
+import ScrollLock from "@/components/ScrollLock";
 
 export type StaffSubTab = "drivers" | "management" | "commissions" | "deleted";
 
@@ -797,6 +798,7 @@ function TerminatedPersonDetail({
       className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
       onClick={onClose}
     >
+      <ScrollLock />
       <div
         className="card w-full max-w-[860px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0"
         onClick={(e) => e.stopPropagation()}

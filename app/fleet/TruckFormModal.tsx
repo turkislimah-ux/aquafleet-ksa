@@ -26,6 +26,7 @@ import { createTruck, updateTruck } from "./actions";
 import OperationStationField from "@/components/OperationStationField";
 import LinkedIdField from "@/components/LinkedIdField";
 import PlateInput from "@/components/PlateInput";
+import ScrollLock from "@/components/ScrollLock";
 
 const CAPACITY_OPTIONS_M3 = [33, 18, 6] as const;
 
@@ -74,8 +75,9 @@ export default function TruckFormModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div
-        className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin"
+        className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold mb-1">{isEdit ? "Edit Truck" : "Add New Truck"}</h2>

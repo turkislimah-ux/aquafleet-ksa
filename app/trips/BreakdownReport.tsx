@@ -66,6 +66,7 @@ import DeliveriesReportBand, { buildDeliveriesReport } from "./DeliveriesReportB
 import { round2 } from "@/lib/prepaid";
 import { computeAmountPayable } from "./amountPayable";
 import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import ScrollLock from "@/components/ScrollLock";
 
 // Chart palette — emerald for money (consistent with the report), slate/amber for
 // the rest. Hex (not Tailwind tokens) so the SVG fills survive print.
@@ -542,6 +543,7 @@ export default function BreakdownReport({
       className="breakdown-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40"
       onClick={onClose}
     >
+      <ScrollLock />
       <div
         // 1080px = this app's size:lg popup width (InventoryClient.tsx:130).
         // Only 56px wider than the max-w-5xl (1024px) it replaces, so this one
@@ -982,7 +984,10 @@ export default function BreakdownReport({
           {/* Print footer — generated date + branding. */}
           <div className="border-t border-app pt-3 text-[11px] muted flex items-center justify-between">
             <span>Generated {generatedOn}</span>
-            <span>Bin Slimah Group · Bousla</span>
+            {/* translate="no" on the SPAN, not the row — "Generated <date>" is
+                ordinary prose that SHOULD translate. Only the company's own
+                name is fenced off. Same footer as the invoice's. */}
+            <span translate="no">Bin Slimah Group · Bousla</span>
           </div>
         </div>
       </div>

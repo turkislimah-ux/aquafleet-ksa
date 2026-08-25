@@ -14,6 +14,7 @@ import {
   PAYMENT_MODE_LABELS,
 } from "@/lib/db-types";
 import { createCustomer, updateCustomer } from "./actions";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -126,6 +127,7 @@ export default function CustomerForm({
 
       {open && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
+          <ScrollLock />
           <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-semibold mb-4">{editing ? "Edit customer" : "New customer"}</h2>
             <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -86,6 +86,7 @@ import {
   type CommAdjustmentRow,
   type ReviewStatus,
 } from "@/lib/commission-rows";
+import ScrollLock from "@/components/ScrollLock";
 
 export { buildCurrentRows } from "@/lib/commission-rows";
 export type {
@@ -683,6 +684,7 @@ function BreakdownModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-semibold">
@@ -991,6 +993,7 @@ function SpecialsModal({
 
   return (
     <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-semibold">Specials &amp; Bonuses — {driverName} <span className="muted font-normal text-sm">· {monthLabel(monthKey)}</span></h2>
@@ -1191,6 +1194,7 @@ function AdjustmentsModal({
 
   return (
     <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-semibold">Adjustments — {driverName} <span className="muted font-normal text-sm">· {monthLabel(monthKey)}</span></h2>
@@ -1298,6 +1302,7 @@ function DenyModal({
 
   return (
     <div className="fixed inset-0 z-[70] grid place-items-center p-4 bg-black/50" onClick={onClose}>
+      <ScrollLock />
       <div className="card p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-3">
           <h2 className="text-lg font-semibold flex items-center gap-2 capitalize"><Ban className="h-5 w-5 text-rose-600 dark:text-rose-400" /> {title}</h2>

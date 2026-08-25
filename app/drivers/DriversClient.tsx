@@ -62,6 +62,7 @@ import PersonIdLink from "./PersonIdLink";
 import LinkedIdField from "@/components/LinkedIdField";
 import StaffTab from "./StaffTab";
 import type { CommPayout } from "@/lib/commission-rows";
+import ScrollLock from "@/components/ScrollLock";
 
 const DRIVER_TABS = ["drivers", "commissions", "history", "staff"] as const;
 
@@ -839,7 +840,8 @@ export default function DriversClient({
 
       {formOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={closeForm}>
-          <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
+          <ScrollLock />
+          <div className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-semibold mb-4">{editing ? "Edit driver" : "New driver"}</h2>
             <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Name *">
@@ -1174,6 +1176,7 @@ function DriverDetail({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-semibold">Driver Details — {d.name}</h2>

@@ -42,6 +42,7 @@ import {
   deleteArchiveDocumentType,
   setPersonLinkedId,
 } from "./actions";
+import ScrollLock from "@/components/ScrollLock";
 
 // The purple "Link" pill. Purple because every other status colour in the
 // archive is already spoken for by expiry (red/amber/green/slate) — a link is
@@ -348,6 +349,7 @@ export function ModalOverlay({ onClick, children }: { onClick: () => void; child
         onClick();
       }}
     >
+      <ScrollLock />
       {children}
     </div>,
     document.body,

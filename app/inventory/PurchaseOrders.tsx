@@ -106,6 +106,7 @@ import {
   categoryLabel,
   PartPicker,
 } from "./SharedCreateModals";
+import ScrollLock from "@/components/ScrollLock";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -1334,6 +1335,7 @@ export function PODetailModal({
 
   return createPortal(
     <div className="po-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+      <ScrollLock />
       <div
         id="po-print"
         className="card p-6 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin"

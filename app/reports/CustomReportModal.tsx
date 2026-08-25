@@ -29,6 +29,7 @@ import {
   availableMetrics, allowedGroupings, metricId, GROUPING_LABELS,
   type Grouping, type BuilderSelection,
 } from "@/lib/report-builder";
+import ScrollLock from "@/components/ScrollLock";
 
 const BASIS_STYLE: Record<string, string> = {
   accrual: "bg-brand-500/10 text-brand-700 dark:text-brand-300 ring-brand-500/20",
@@ -108,6 +109,7 @@ export default function CustomReportModal({
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
       onClick={onClose}>
+      <ScrollLock />
       <div className="card w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0"
         onClick={(e) => e.stopPropagation()}>
 

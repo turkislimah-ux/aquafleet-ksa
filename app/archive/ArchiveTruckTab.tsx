@@ -44,6 +44,7 @@ import type {
   ArchiveDocumentType,
   ArchiveTruckRow,
 } from "@/lib/db-types";
+import ScrollLock from "@/components/ScrollLock";
 
 // Narrow shapes matching EXACTLY what app/archive/page.tsx selects. Not the
 // full WorkOrder / OutsourcedJob types: those claim a couple of dozen columns
@@ -821,6 +822,7 @@ function TerminatedTruckDetail({
       className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
       onClick={onClose}
     >
+      <ScrollLock />
       <div
         className="card w-full max-w-[860px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0"
         onClick={(e) => e.stopPropagation()}
@@ -945,6 +947,7 @@ function MaintenanceJobModal({
       className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
       onClick={onClose}
     >
+      <ScrollLock />
       <div
         className="card w-full max-w-[860px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0"
         onClick={(e) => e.stopPropagation()}
