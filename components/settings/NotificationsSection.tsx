@@ -238,7 +238,7 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">
               {ar ? "ما الذي يظهر" : "What shows"}
             </h3>
-            <div className="mt-2 rounded-xl border divide-y" style={{ borderColor: "rgb(var(--border))" }}>
+            <div className="mt-2 rounded-xl border divide-y divide-[rgb(var(--border))]" style={{ borderColor: "rgb(var(--border))" }}>
               {SEVERITIES.map((s) => {
                 const on = data.prefs[s.prefKey];
                 const tone = PILL_TONE_CLS[SEVERITY_TONE[s.key]];

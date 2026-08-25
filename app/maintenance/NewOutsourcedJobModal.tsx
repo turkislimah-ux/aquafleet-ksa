@@ -361,7 +361,7 @@ export default function NewOutsourcedJobModal({
               </div>
             )}
             <div className="rounded-lg border overflow-hidden" style={INPUT_STYLE}>
-              <div className="max-h-[220px] overflow-y-auto scrollbar-thin divide-y" style={{ borderColor: "rgb(var(--border))" }}>
+              <div className="max-h-[220px] overflow-y-auto scrollbar-thin divide-y divide-[rgb(var(--border))]">
                 {allRepairers.length === 0 ? (
                   <p className="text-xs muted p-3">—</p>
                 ) : (

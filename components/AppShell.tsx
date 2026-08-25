@@ -721,7 +721,7 @@ function NotificationsMenu({ lang }: { lang: Lang }) {
                 <p className="text-xs muted">{nt("emptyBody", lang)}</p>
               </div>
             ) : (
-              <ul className="divide-y" style={{ borderColor: "rgb(var(--border))" }}>
+              <ul className="divide-y divide-[rgb(var(--border))]">
                 {visible.map((r) => (
                   <NotificationItem
                     key={r.alert_identity}

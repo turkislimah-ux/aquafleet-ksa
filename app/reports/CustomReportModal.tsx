@@ -127,8 +127,10 @@ export default function CustomReportModal({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] divide-y lg:divide-y-0 lg:divide-x"
-          style={{ borderColor: "rgb(var(--border))" }}>
+        {/* One colour class covers BOTH rules here: the divide utility's selector
+            is `> :not([hidden]) ~ :not([hidden])`, direction-agnostic, so it
+            paints the horizontal split below `lg` and the vertical one above it. */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] divide-y lg:divide-y-0 lg:divide-x divide-[rgb(var(--border))]">
 
           {/* ---- The builder ------------------------------------------- */}
           <div className="p-4 space-y-4">

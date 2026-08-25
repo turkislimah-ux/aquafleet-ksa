@@ -583,7 +583,7 @@ export default function DashboardClient({
                   : (ar ? "لا توجد رحلات نشطة." : "No active trips.")}
               </p>
             ) : (
-              <ul className="divide-y" style={{ borderColor: "rgb(var(--border))" }}>
+              <ul className="divide-y divide-[rgb(var(--border))]">
                 {liveTrips.map((t) => (
                   // TWO LINES PER TRIP, not four fixed columns. At half width
                   // the old single row had to truncate the project name to
@@ -1306,7 +1306,7 @@ function DriversOpsTable({
 
   return (
     <Card className="p-0">
-      <ul className="divide-y" style={{ borderColor: "rgb(var(--border))" }}>
+      <ul className="divide-y divide-[rgb(var(--border))]">
         {sorted.map((d) => {
           const st = DRIVER_STATE_LABEL[d.state];
           return (
@@ -1622,7 +1622,7 @@ function ActionCard({ row, lang, ar }: { row: ActionItemRow; lang: "en" | "ar"; 
 
 function FeedList({ rows, lang }: { rows: FeedRow[]; lang: "en" | "ar" }) {
   return (
-    <ul className="divide-y" style={{ borderColor: "rgb(var(--border))" }}>
+    <ul className="divide-y divide-[rgb(var(--border))]">
       {rows.map((row, i) => (
         <li key={`${row.kind}-${row.entity_id}-${i}`} className="flex items-start gap-3 px-4 py-2.5">
           <span aria-hidden className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
