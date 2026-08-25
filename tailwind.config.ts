@@ -59,7 +59,14 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"],
+        // "Cairo" FIRST, and that does NOT change Latin. Its @font-face in
+        // app/globals.css carries a unicode-range covering Arabic blocks only,
+        // so the browser skips it entirely for Latin codepoints and falls
+        // through to ui-sans-serif exactly as before — position in the stack
+        // cannot override unicode-range. Leading position is what makes Arabic
+        // characters reach Cairo instead of the OS fallback. The rest of this
+        // list is UNCHANGED; Latin rendering is byte-identical.
+        sans: ["Cairo", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"],
       },
       boxShadow: {
         soft: "0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06)",

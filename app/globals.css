@@ -2,6 +2,50 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ARABIC UI FONT — CAIRO, SCOPED BY unicode-range SO LATIN IS UNTOUCHED.
+   Same technique lib/invoicePdfTemplate.ts already uses for the invoice PDF
+   (see its header comment); this is the screen-side counterpart.
+
+   Before this, the app shipped NO webfont at all — tailwind.config.ts's `sans`
+   was a pure system stack, so Arabic resolved to whatever the OS happened to
+   pick: SF Arabic on macOS, Segoe UI Arabic on Windows, fontconfig's guess on
+   Linux, Arial's Arabic in the poor case. Four renderings, none of them chosen.
+
+   WHY unicode-range AND NOT [lang="ar"] / A GLOBAL SWAP:
+   - The browser matches per CHARACTER, before the font is consulted. Latin
+     codepoints are not in the range below, so they can never resolve to Cairo
+     no matter where "Cairo" sits in the stack. Latin safety is DECLARATIVE
+     here, not a consequence of getting a selector right.
+   - It covers MIXED content, which is the case that actually matters in this
+     app: an Arabic customer/part name rendered inside an English-mode table
+     (the `*_ar` columns). A language-scoped rule renders exactly those in the
+     system fallback — i.e. it would miss the case Cairo was added for.
+   - AppShell writes dir/lang onto <html> only AFTER hydration (app/layout.tsx
+     ships `lang="en"` and no dir at all), so any [lang="ar"] rule would flash.
+     unicode-range is immune to that.
+
+   RANGE IS DELIBERATELY THE PDF TEMPLATE'S, NOT GOOGLE'S. Google's own `arabic`
+   subset range additionally claims U+2010-2011 — the HYPHEN — which is shared
+   punctuation that appears in English text. Adopting it verbatim would have
+   pulled English hyphens into Cairo and broken the "Latin renders identically"
+   requirement in a way that is easy to miss. The blocks below are Arabic-only:
+   Arabic, Arabic Supplement, Presentation Forms-A/B, plus ZWNJ/ZWJ/LRM.
+
+   ONE VARIABLE FILE, NOT THREE STATIC ONES. Cairo v31 on Google Fonts is a
+   variable font — the 400/600/700 CSS all resolves to the same woff2 — so a
+   single face with a `400 700` weight RANGE serves every weight in between.
+   30 KB total instead of ~3x that, and no CDN at runtime: self-hosted from
+   public/fonts/, matching the Noto files already there. Licence: OFL, see
+   public/fonts/OFL-Cairo.txt. */
+@font-face {
+  font-family: "Cairo";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/Cairo-Arabic-Variable.woff2") format("woff2");
+  unicode-range: U+0600-06FF, U+0750-077F, U+FB50-FDFF, U+FE70-FEFC, U+200C-200E;
+}
+
 :root {
   --bg: 248 250 252;
   --fg: 15 23 42;
