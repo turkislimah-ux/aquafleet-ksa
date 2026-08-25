@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at the 0167 UNIT, all four commits (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE. DB at 0167 — nine views replaced, no table or column changed. Tree clean, origin in sync. NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
+# SESSION HANDOFF — closes at the UI POLISH PASS, four commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean; **origin is `[ahead 4]` — the UI commits are NOT pushed.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
 **Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this file.**
 This file is a POINTER to §7, never the record itself — §5's rule, and §7's
@@ -7,7 +7,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `167c557`, not recalled
+## CURRENT STATE — MEASURED at `13389b7`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
@@ -104,24 +104,42 @@ line itself rather than silently overwritten, because "17,700" appearing twice i
 one document — here and in the CLAUDE.md AUDIT section — is the shape this file
 exists to catch, and it was caught in this file.
 
-    HEAD              167c557 (the docs commit that carries this file follows it)
-    branch main   tree clean   in sync with origin
+    HEAD              13389b7 (the feature commit; this file's own commit follows)
+    branch main   tree clean   **[ahead 4] — NOT PUSHED**
     migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
                       — a TIMESTAMP version, not "0167"; see the 0167 section below)
     CLAUDE.md         19,156 bytes (§5 threshold 20KB — 1,324 of headroom)
-                      re-measured after `9e0fd77`. The 17,700 this block used to
-                      carry was ALREADY wrong before that commit — 18,948 on disk
-                      at `810696d` — so it was never a measurement, only a memory
+                      UNCHANGED — the UI pass edited no rules. The 17,700 this
+                      block used to carry was ALREADY wrong before `9e0fd77` —
+                      18,948 on disk at `810696d` — never a measurement, a memory
     views             50 / security_invoker 50 / anon_readable 0   (CLAUDE §6)
-                      re-measured AFTER 0167: nine views replaced, none added
     tables            84, all 84 RLS-enabled
     anon table grants 0     anon-executable non-trigger functions 0
+    authenticated     938 privilege rows
     storage buckets   12
-    v_active_alerts   9 rows                                           (was 10, was 9)
-    tsc --noEmit      clean;  8/8 check suites pass (scripts/*check*.ts)
+    v_active_alerts   9 rows                                    (was 10, was 9, was 9)
+    tsc --noEmit      clean;  8/8 check suites EXECUTED, 8/8 pass
     next build        clean, 17 routes + middleware;  middleware 83 kB
-                      (RE-RUN at 167c557 — source was touched, licence void)
+                      (RE-RUN at 13389b7 — source was touched, licence void)
+
+**EVERY DATABASE FIGURE ABOVE CAME BACK IDENTICAL, AND THAT IS THE EXPECTED
+RESULT, NOT A SKIPPED CHECK.** The UI pass wrote no SQL — no migration, no RPC, no
+view, no grant. All eleven counts were still re-read live in one round trip at
+close (views, security_invoker, anon_readable, tables, RLS, anon table grants,
+anon-executable non-trigger functions, `authenticated` privileges, buckets,
+`v_active_alerts`, applied migrations) because "nothing moved" is only a claim
+worth writing if the query was actually run. `v_active_alerts` came back 9 for the
+third refresh running — still not evidence it has settled, see the oscillation
+paragraph above.
+
+**THE MIDDLEWARE FIGURE WAS THE ONE THAT COULD HAVE MOVED, AND IT IS WHY THAT
+GUARD EXISTS.** This session edited `lib/nav.ts` — the exact file the guard names,
+because it re-exports `lib/routes.ts` and routing an Edge import through it drags
+`lucide-react` into the middleware bundle. `lib/nav.ts` now carries a `NavGroup`
+type and a `group` field on every entry. **83 kB, unchanged.** The guard was
+checked against the change it was written for, rather than being a number that
+sits in this file untested until the day it matters.
 
 **A CLEAN TREE DOES NOT MEAN A PUSHED TREE, AND THIS IS THE SECOND OCCURRENCE.**
 For most of this refresh `de7174c` sat committed, verified and unpushed while
@@ -234,6 +252,120 @@ Park` — carries `status='active'` AND a non-null `archived_at`. Daily Trips sh
 in a concrete place: archive is a PRE-FILTER, never a state, so `status` alone is
 never the whole test. Any report that counts projects filters on `archived_at is
 null` as well, and anything showing 8 has dropped the pre-filter.
+
+---
+
+## SHIPPED — THE UI POLISH PASS (`1e658a0` … `13389b7`). NO SQL, NO SCHEMA.
+
+Four commits, split by logical unit, each independently `tsc --noEmit` clean —
+verified in a throwaway `git worktree`, not asserted from the final tree, because
+the final tree type-checks even when an intermediate commit would not.
+
+    1e658a0   Modals: one ref-counted scroll lock, shared by every overlay
+    65aa655   Sidebar: hover-collapse rail, glass panel, deferred pages grouped
+    bc27e93   Search dock centres on the content column, not the viewport
+    13389b7   Fence brand strings from browser translation
+
+**TWO FILES CARRY RIDERS, AND THE COMMIT BODIES SAY SO.** `BreakdownReport.tsx`
+and `InvoiceDetailModal.tsx` each gained a print-footer `translate="no"` AND a
+`<ScrollLock />` line, so their translate change sits in `1e658a0` rather than
+`13389b7`; the three modals that went `max-w-2xl → max-w-4xl` ride there too.
+Splitting them would have needed interactive staging, which §5 rules out. A rider
+named in the commit body is honest history; a rider that is silent is not.
+
+### The rail's glass contract — do not reintroduce `brightness()`
+
+`.glass-rail` is a vertical gradient of `--rail-glass` at **0.32 → 0.26** alpha
+over `blur(10px) saturate(140%)`. **No `brightness()`, as a rule and not a
+preference.** An earlier cut of this work added `brightness(1.6)` to buy contrast
+back; `backdrop-filter` functions apply left to right, so it remapped the
+backdrop's luminance toward white BEFORE the pane's own colour composited over it,
+and the rail read as a bright SOLID panel — the exact opposite of the request that
+prompted it.
+
+`--rail-solid` in the `@supports not` fallback is **the tint AS COMPOSITED over
+the page**, not `--rail-glass`. Painting the tint directly lands nowhere near the
+real pane at these alphas. Measured 2 apart from the live composite in both themes.
+
+`.glass-chrome` (the top bar) is byte-identical and was regression-checked against
+`rgba(8, 12, 22, 0.72)` / `blur(14px) saturate(1.8)` on every pass. Anything that
+edits rail tokens re-checks the bar, because they sit in the same block.
+
+### THE MEASUREMENT LESSON, AND IT IS THE SAME FAMILY AS THE `count(*)` BUG ABOVE
+
+**`getComputedStyle` CANNOT SEE THROUGH `backdrop-filter`.** The composite happens
+on the GPU; the computed style reports the declared colour, not the pixel. Every
+number here came from a screenshot plus canvas `getImageData` readback against the
+COMPILED stylesheet served by the dev server — no runtime overrides, because a
+value injected at test time is a value that was never shipped.
+
+Three checks passed in a row while measuring the wrong thing, and the third one
+shipped a regression Turki caught in the browser:
+
+  - **A "gradient falls off" reading of 82** sampled one point over the bare page
+    and one over a coloured band, so it measured the BAND'S transmission, not the
+    gradient. Honest value with both samples over the same backdrop: 1–2.
+  - **A "transmission" check of 86** asked whether two DIFFERENT backdrops produce
+    two different pane colours. They do — even when `brightness()` has washed both
+    to near-white. It could not fail for the defect it was meant to catch.
+  - **The alpha floor was set by a backdrop that does not exist.** The worst-case
+    surface behind the rail's footer ink was modelled as a wide violet
+    `#8b5cf6` band. It is a **24×24 px icon chip** (`DashboardClient.tsx`, the
+    Sparkles pill). Measured against the surfaces the rail is actually over,
+    footer ink holds 9.35:1 light / 12.38:1 dark, and 5.24:1 / 6.17:1 over the
+    chip itself, against an AA bar of 4.5:1. **Contrast was never the binding
+    constraint** — a fabricated backdrop cost two rounds of the transparency that
+    had been asked for.
+
+The replacement metric is an **edge-preservation ratio**: how much of a
+high-contrast edge behind the rail survives, against that same edge with no rail
+at all. **0.48 → 0.73**, both themes. It can fail, which is the only property that
+made it worth more than the three that could not. Note the baseline has to
+CONTRAST with the page per theme — a dark block on a dark page gives a bare step
+of 17 and the whole ratio is noise.
+
+### `--app-sidebar-w` is the RAIL'S FOOTPRINT, not the panel's width
+
+The panel is `fixed` and overlays the page when hovered. Page chrome that clears
+the sidebar (the dashboard's bottom fade, the search dock's width cap) reads this
+variable so it does NOT chase the panel sideways under the cursor. Anything that
+sets it to the expanded width will look correct at rest and slide on hover.
+
+`--dock-grow` was deleted rather than left in place: it was read with a fallback
+and never set by anything, so it was a hook nobody held.
+
+### ScrollLock — a component, not a hook, and ref-counted
+
+Overlays here are rendered inline and conditionally by their parent, so mounting
+is already the signal; a `useScrollLock(open)` hook would have to thread a boolean
+up past the `if (!open) return null` early returns several call sites already use,
+at forty-odd sites. The counter is **module-level on purpose** — separate
+instances must share it, because overlays stack (z-50 → z-[60] → z-[70]) and a
+naive lock restores the page's scroll when the INNER one closes. That was a live
+bug: `SettingsModal` owned a private lock and any dialog opened from it did
+exactly this.
+
+It reserves the scrollbar's gutter only where the gutter is non-zero. Under macOS
+overlay scrollbars it is 0, and applying the padding there causes the sideways jog
+it exists to cancel.
+
+### `translate="no"` goes on the smallest correct element
+
+Chrome's translate pass rewrites text nodes in place, proper nouns included. The
+company's own name and the "B" mark are fenced; surrounding prose ("Generated
+<date>", statement titles, periods) is content and must keep translating. On an
+invoice footer this reaches a customer, which is why the span — not the row — is
+the unit.
+
+### WHAT COULD NOT BE VERIFIED HERE, STATED PLAINLY
+
+**Claude Code could not sign in to look at any of this.** There is no Playwright
+auth fixture in the repo, no dev bypass in `middleware.ts` (it just calls
+`updateSession`), the Chrome MCP reported not connected, and entering Turki's
+password is not something Claude does. Every number above is a measurement of the
+compiled stylesheet in a headless page; **Turki verified the actual application in
+the browser** and signed off ("okay now it's clean"). Per §2 and §5 that is the
+verification that counts — the harness only made the numbers falsifiable.
 
 ---
 
@@ -497,7 +629,48 @@ reconstructed. If a non-derivable event is ever needed, re-add it deliberately �
 
 ---
 
-## SESSION LEDGER — 2026-08-25
+## SESSION LEDGER — 2026-08-25 (THE UI PASS — SAME DAY, SEPARATE SESSION)
+
+FOUR commits, no SQL, no schema. DB stays at 0167 and every figure re-measured
+identical. **Unpushed at close — `[ahead 4]`.**
+
+    1e658a0        Modals: one ref-counted scroll lock, shared by every overlay
+    65aa655        Sidebar: hover-collapse rail, glass panel, deferred pages grouped
+    bc27e93        Search dock centres on the content column, not the viewport
+    13389b7        Fence brand strings from browser translation
+    (this file)    session close — the block above, re-measured
+
+**THE MISTAKE THIS SESSION IS A MEASUREMENT MISTAKE, WHICH MAKES IT THE THIRD IN
+THIS FILE AND THE SAME SHAPE AS THE OTHER TWO.** The `count(*)`-over-a-left-join
+bug invented a row; the `18/18` route count counted the middleware line; this one
+built three checks that could not fail for the defect they were aimed at, and the
+third shipped a regression — a `brightness()` filter that made the sidebar read as
+MORE opaque while the check reported it as transmitting. Turki caught it in the
+browser. Full account in the UI POLISH PASS section above.
+
+**The common thread is not carelessness, it is proxy selection.** Each check
+measured something correlated with the property under test instead of the property
+itself: a row count instead of matched rows, a printed line instead of a route, a
+colour DIFFERENCE instead of RECOGNISABILITY. All three passed. **A check that has
+never failed on a known-bad input has not been tested — it has only been run.**
+The fix each time was to construct the failing case first and confirm the check
+rejects it, which is what the edge-preservation ratio does and the three
+"transmission" readings never did.
+
+**A SECOND, SMALLER ONE: `git` and `node` were both run from the wrong directory.**
+The shell's cwd resets between calls, so `node railsweep.tmp.cjs` resolved against
+`$HOME` and `git log` reported "not a repository". Use `git -C <repo>` and absolute
+paths; the sibling gotcha already recorded here is `npx tsc` answering "This is not
+the tsc command you are looking for" — always `./node_modules/.bin/tsc --noEmit`.
+
+**The verification harness was a temp file and it is deleted.** `railsweep.tmp.cjs`
+existed only to read the compiled stylesheet back through a headless browser; it
+was never committed, and the working tree was checked for it at close. Nothing in
+`components/ScrollLock.tsx` or the rail CSS depends on it.
+
+---
+
+## SESSION LEDGER — 2026-08-25 (THE 0167 UNIT)
 
 ONE feature commit, then FOUR that are a single unit of work: the 0167 migration,
 and then the three places the old behaviour was still written down. DB moves
@@ -1332,9 +1505,24 @@ section is notifications only — do not read it as the complete set.)*
 
 ## OPEN / CARRIED FORWARD
 
-**Nothing is in flight.** No migration is drafted-but-unapplied, no code is
-uncommitted, no feature is half-built, and origin is in sync. The four items below
-are decisions and reviews, not work in progress — **none of them is a task.** The
+**Nothing is in flight, but ORIGIN IS NOT IN SYNC — `[ahead 4]`.** No migration is
+drafted-but-unapplied, no code is uncommitted, no feature is half-built. **The
+four UI commits are local only and need a push.** This line used to read "origin
+is in sync" and it is corrected rather than deleted, because this file records TWO
+prior occurrences of a clean tree being mistaken for a pushed one — `de7174c` and
+`e65d980`, both `[ahead 1]` while a paragraph here claimed otherwise. Three
+occurrences is not a pattern any more, it is the default failure. Read the BRANCH
+line of `git status -sb`, never the tree line, and never this sentence.
+
+**ONE REVIEW ITEM CAME OUT OF THE UI PASS, and it is a task, unlike the four
+below.** `components/AppShell.tsx` renders two sibling `<nav>` landmarks — the main
+list and the "Coming Soon" block — and neither has an accessible name, so a screen
+reader announces "navigation" twice with no way to tell them apart. One
+`aria-label` on each. It was spun out rather than folded in so the rail commit
+stayed one unit; it is not done.
+
+The four items below are decisions and reviews, not work in progress — **none of
+them is a task.** The
 one task 0167 left behind, a now-false paragraph of on-screen copy, was done and
 pushed in `cefcff8`; it is recorded as closed above rather than carried.
 
