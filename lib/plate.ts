@@ -92,11 +92,11 @@ export function parsePlate(stored: string): PlateBoxes {
   return boxes;
 }
 
-// Live Arabic preview for whatever boxes are currently filled. Empty boxes
-// render as "" (display-only — never required, user never types Arabic).
-export function arabicPlatePreview(boxes: PlateBoxes): string {
-  const letters = boxes.letters.map((l) => (l && isPlateLetter(l) ? AR_LETTER_MAP[l as PlateLetter] : "")).join("");
-  const digits = boxes.digits.map((d) => AR_DIGIT_MAP[d] ?? "").join("");
-  if (!letters && !digits) return "";
-  return `${letters} ${digits}`.trim();
-}
+// NOTE: an `arabicPlatePreview(boxes)` helper used to sit here, joining the two
+// maps above into a display string. It was exported and never once called —
+// components/PlateInput.tsx builds the same preview inline from AR_LETTER_MAP /
+// AR_DIGIT_MAP, and did so from the same commit that introduced both. Deleted
+// rather than left dormant: it emitted exactly the Arabic-Indic digits this
+// app has now finished eliminating everywhere else, so leaving it exported was
+// a loaded gun aimed at a future caller. The maps stay — PlateInput needs them,
+// and a plate preview is the ONE place Arabic numerals are wanted.

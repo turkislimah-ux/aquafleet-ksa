@@ -15,7 +15,7 @@ import { X, Pencil, Ban, History, Wrench } from "lucide-react";
 import { Btn, Stat } from "@/components/ui";
 import { type Staff, type StaffRole, type OperationStation, type StaffCommission, type StaffCommissionType } from "@/lib/db-types";
 import { onLeaveTodaySet, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
-import { addDaysToKey, formatSar } from "@/lib/utils";
+import { addDaysToKey, formatDate, formatSar } from "@/lib/utils";
 import { createStaff, updateStaff, terminateStaff, addStaffRole } from "./actions";
 import LeaveSection from "./LeaveSection";
 import SalaryHistoryModal from "./SalaryHistoryModal";
@@ -436,7 +436,7 @@ export default function StaffTab({
                 <Cell label="Iqama expiry">{detail.iqama_expiry ?? <span className="muted">—</span>}</Cell>
                 <Cell label="Status">
                   {detail.terminated_at
-                    ? `Terminated · ${new Date(detail.terminated_at).toLocaleDateString()}`
+                    ? `Terminated · ${formatDate(detail.terminated_at)}`
                     : onLeaveStaff.has(detail.id)
                       ? "On leave today"
                       : detail.active ? "Active" : "Inactive"}

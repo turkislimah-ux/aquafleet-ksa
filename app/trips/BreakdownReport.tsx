@@ -50,7 +50,7 @@ import {
   Legend,
 } from "recharts";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { currentMonthKey, formatSar, todayKey, formatDayKey } from "@/lib/utils";
+import { currentMonthKey, formatDate, formatDayKey, formatSar, todayKey } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import {
   WATER_TYPE_LABELS,
@@ -532,7 +532,7 @@ export default function BreakdownReport({
   const commMode = commissionNow?.commission_mode ?? null;
   const commType =
     commMode === "scalable" ? `Scalable +${commissionNow?.commission_bump_pct ?? 0}%` : "Fixed";
-  const generatedOn = new Date().toLocaleDateString(undefined, {
+  const generatedOn = formatDate(new Date(), {
     year: "numeric",
     month: "short",
     day: "numeric",

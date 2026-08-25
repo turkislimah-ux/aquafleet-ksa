@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn, formatSar } from "@/lib/utils";
+import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import {
   buildApprovalEvents, APPROVAL_KIND_LABELS, APPROVAL_KIND_SHORT,
   APPROVAL_KIND_PILL, APPROVAL_STATUS_LABELS, APPROVAL_STATUS_PILL,
@@ -312,7 +312,7 @@ export default function ApprovalsTab({
                         </div>
                       </TD>
                       <TD className="text-xs muted">
-                        {e.occurredAt ? new Date(e.occurredAt).toLocaleDateString() : "—"}
+                        {e.occurredAt ? formatDate(e.occurredAt) : "—"}
                       </TD>
                       <TD className="text-xs tabular-nums font-medium">{formatSar(e.valueSar)}</TD>
                       {/* VOTE DOTS — copied from the inventory approvals
@@ -437,7 +437,7 @@ export default function ApprovalsTab({
                                       <TD className="text-xs font-mono">{p.invoice_number ?? "—"}</TD>
                                       <TD className="text-xs muted">
                                         {p.invoice_date
-                                          ? new Date(p.invoice_date + "T00:00:00").toLocaleDateString()
+                                          ? formatDate(p.invoice_date + "T00:00:00")
                                           : "—"}
                                       </TD>
                                       <TD className="text-xs">{repairerNameById.get(p.repairer_id) ?? "—"}</TD>
@@ -525,7 +525,7 @@ export default function ApprovalsTab({
                                     </span>
                                     <span>by {a.decided_by}</span>
                                     <span className="opacity-70">
-                                      on {new Date(a.decided_at).toLocaleString()}
+                                      on {formatDateTime(a.decided_at)}
                                     </span>
                                     {a.decided_by === viewer && <span className="opacity-70">(you)</span>}
                                     {a.reason && <span className="w-full">{a.reason}</span>}
@@ -534,7 +534,7 @@ export default function ApprovalsTab({
                                     {a.created_at.slice(0, 19) !== a.decided_at.slice(0, 19) && (
                                       <span className="w-full opacity-70 inline-flex items-center gap-1">
                                         <Undo2 className="h-3 w-3" />
-                                        first decided {new Date(a.created_at).toLocaleString()}
+                                        first decided {formatDateTime(a.created_at)}
                                       </span>
                                     )}
                                   </div>

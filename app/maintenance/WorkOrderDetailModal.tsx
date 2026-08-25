@@ -29,7 +29,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { X, CheckSquare, Square, Play, Check, Pencil, Trash2, AlertTriangle, ImagePlus } from "lucide-react";
 import { t } from "@/lib/i18n";
-import { cn, formatSar } from "@/lib/utils";
+import { cn, formatDate, formatSar } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
 import type { Truck, Staff, Part, WorkOrder, WorkOrderTask, WorkOrderPart, WorkOrderPartPhoto } from "@/lib/db-types";
@@ -367,15 +367,15 @@ export default function WorkOrderDetailModal({
             </div>
             <div>
               <div className="muted mb-0.5">{t("common.opened", lang)}</div>
-              <div>{new Date(workOrder.opened_at).toLocaleDateString()}</div>
+              <div>{formatDate(workOrder.opened_at)}</div>
             </div>
             <div>
               <div className="muted mb-0.5">{t("mt.startDate", lang)}</div>
-              <div>{workOrder.start_date ? new Date(workOrder.start_date).toLocaleDateString() : "—"}</div>
+              <div>{workOrder.start_date ? formatDate(workOrder.start_date) : "—"}</div>
             </div>
             <div>
               <div className="muted mb-0.5">{t("common.due", lang)}</div>
-              <div className={delayed ? "text-rose-600 font-semibold" : ""}>{new Date(workOrder.due_by).toLocaleDateString()}</div>
+              <div className={delayed ? "text-rose-600 font-semibold" : ""}>{formatDate(workOrder.due_by)}</div>
             </div>
             <div>
               <div className="muted mb-0.5">{lang === "en" ? "Odometer at service" : "العداد عند الصيانة"}</div>

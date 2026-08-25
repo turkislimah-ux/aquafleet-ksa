@@ -32,7 +32,7 @@ import {
   FileText, History,
 } from "lucide-react";
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn, formatSarExact } from "@/lib/utils";
+import { cn, formatDate, formatSarExact } from "@/lib/utils";
 import {
   docStatus, expirySummary,
   ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
@@ -132,7 +132,7 @@ const TABS: { key: PageTab; label: string }[] = [
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso + "T00:00:00").toLocaleDateString();
+  return formatDate(iso + "T00:00:00");
 }
 
 // Only used inside a confirm() string, which is plain text — no formatting
@@ -973,7 +973,7 @@ export default function ArchiveClient({
                                     <TD className="text-xs muted ps-8">
                                       Previous version
                                       <div className="text-[11px]">
-                                        superseded {new Date(r.superseded_at).toLocaleDateString()}
+                                        superseded {formatDate(r.superseded_at)}
                                         {r.superseded_by ? ` · ${r.superseded_by}` : ""}
                                       </div>
                                     </TD>

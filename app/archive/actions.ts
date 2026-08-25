@@ -22,7 +22,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
 import { linkTarget, isStandingType, type PersonIdField } from "@/lib/archive";
-import { formatSarExact } from "@/lib/utils";
+import { formatDate, formatSarExact } from "@/lib/utils";
 import type {
   ArchiveTab,
   ArchiveSubjectKind,
@@ -875,7 +875,7 @@ function money(n: number | null | undefined): string {
 
 function dateOnly(iso: string | null | undefined): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString();
+  return formatDate(iso);
 }
 
 export async function getMaintenanceJobDetail(

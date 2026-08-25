@@ -22,7 +22,7 @@
 import { useMemo, useState } from "react";
 import { Eye, X, Printer, History as HistoryIcon } from "lucide-react";
 import { Stat, StatusPill, Table, TH, TD } from "@/components/ui";
-import { formatSar } from "@/lib/utils";
+import { formatDateTime, formatSar } from "@/lib/utils";
 import {
   buildHistoryRows,
   monthLabel,
@@ -38,7 +38,7 @@ function fmtDate(iso: string): string {
   // Frozen paid_at is an ISO timestamptz. Show date + short time.
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, {
+  return formatDateTime(d, {
     year: "numeric",
     month: "short",
     day: "2-digit",

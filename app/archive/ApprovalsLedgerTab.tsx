@@ -21,7 +21,7 @@ import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X, ChevronDown, ChevronRight, Lock, Scale, Clock } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn, formatSar } from "@/lib/utils";
+import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import {
   buildLedger, LEDGER_KIND_LABELS, LEDGER_KIND_SHORT, LEDGER_KIND_PILL,
   LEDGER_LOCK_DAYS,
@@ -265,7 +265,7 @@ export default function ApprovalsLedgerTab({
                         <span className="text-sm line-clamp-1" title={r.title}>{r.title}</span>
                       </TD>
                       <TD className="text-xs muted">
-                        {new Date(r.completedAt).toLocaleDateString()}
+                        {formatDate(r.completedAt)}
                       </TD>
                       <TD className="text-xs tabular-nums font-medium">
                         {r.valueSar === null ? <span className="muted">—</span> : formatSar(r.valueSar)}
@@ -332,7 +332,7 @@ export default function ApprovalsLedgerTab({
                             )}>
                               <div className="font-medium">
                                 {r.outcome === "approved" ? "Approved" : "Rejected"} on{" "}
-                                {new Date(r.completedAt).toLocaleString()}
+                                {formatDateTime(r.completedAt)}
                               </div>
                               {r.votes.map((v, i) => (
                                 <div key={`${v.by}-${i}`} className="flex flex-wrap items-baseline gap-x-1.5">
@@ -340,7 +340,7 @@ export default function ApprovalsLedgerTab({
                                     {v.decision === "approved" ? "Approved" : "Rejected"}
                                   </span>
                                   <span>by {v.by}</span>
-                                  <span className="opacity-70">on {new Date(v.at).toLocaleString()}</span>
+                                  <span className="opacity-70">on {formatDateTime(v.at)}</span>
                                   {v.by === viewer && <span className="opacity-70">(you)</span>}
                                   {v.comment && <span className="w-full">{v.comment}</span>}
                                 </div>
@@ -358,7 +358,7 @@ export default function ApprovalsLedgerTab({
                                 </span>
                               ) : (
                                 <>
-                                  Re-votable until {new Date(r.locksAt).toLocaleDateString()} ({r.daysLeft} days
+                                  Re-votable until {formatDate(r.locksAt)} ({r.daysLeft} days
                                   left). A re-vote that drops this below two matching votes returns it to the
                                   Consumption Approvals tab as pending, and it leaves this ledger.
                                 </>

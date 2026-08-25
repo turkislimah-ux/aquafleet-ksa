@@ -38,7 +38,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { X, CheckSquare, Square, Play, Check, Pencil, FileText, Trash2, Upload } from "lucide-react";
 import { t } from "@/lib/i18n";
-import { cn, formatSar, todayKey } from "@/lib/utils";
+import { cn, formatDate, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
 import { formatSarVat } from "@/lib/inventory-vat";
@@ -394,11 +394,11 @@ export default function OutsourcedJobDetailModal({
             </div>
             <div>
               <div className="muted mb-0.5">{t("mt.startDate", lang)}</div>
-              <div>{new Date(job.start_date).toLocaleDateString()}</div>
+              <div>{formatDate(job.start_date)}</div>
             </div>
             <div>
               <div className="muted mb-0.5">{t("mt.estimatedFinish", lang)}</div>
-              <div className={overdue ? "text-rose-600 font-semibold" : ""}>{new Date(job.estimated_finish).toLocaleDateString()}</div>
+              <div className={overdue ? "text-rose-600 font-semibold" : ""}>{formatDate(job.estimated_finish)}</div>
             </div>
           </div>
 
@@ -617,7 +617,7 @@ export default function OutsourcedJobDetailModal({
                       <tr key={p.id} className={cn(editingPaymentId === p.id ? "bg-brand-500/5" : "")}>
                         <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{r ? (lang === "ar" ? r.name_ar || r.name : r.name) : "—"}</td>
                         <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{p.invoice_number || "—"}</td>
-                        <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{p.invoice_date ? new Date(p.invoice_date).toLocaleDateString() : "—"}</td>
+                        <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{p.invoice_date ? formatDate(p.invoice_date) : "—"}</td>
                         <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>{formatSarVat(p.subtotal_sar)}</td>
                         <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>{formatSarVat(p.vat_sar)}</td>
                         <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>{p.discount_sar > 0 ? `-${formatSarVat(p.discount_sar)}` : "—"}</td>

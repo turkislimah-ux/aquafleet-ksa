@@ -32,7 +32,7 @@ import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
 import { useApp } from "@/components/AppShell";
 import { t } from "@/lib/i18n";
-import { cn, formatSar } from "@/lib/utils";
+import { cn, formatDate, formatSar } from "@/lib/utils";
 import type {
   Truck,
   Staff,
@@ -434,8 +434,8 @@ export default function MaintenanceClient({
             </div>
           ) : "—"}
         </TD>
-        <TD className="text-xs">{new Date(w.opened_at).toLocaleDateString()}</TD>
-        <TD className={cn("text-xs", delayed ? "text-rose-600 font-medium" : "")}>{new Date(w.due_by).toLocaleDateString()}</TD>
+        <TD className="text-xs">{formatDate(w.opened_at)}</TD>
+        <TD className={cn("text-xs", delayed ? "text-rose-600 font-medium" : "")}>{formatDate(w.due_by)}</TD>
         <TD>
           {outOfPart ? (
             <MtStatusPill kind="overdue" label={t("mt.outOfPart", lang)} />

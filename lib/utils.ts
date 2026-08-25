@@ -110,17 +110,50 @@ export function formatSarExact(n: number) {
   return `${formatAmount(n)} SAR`;
 }
 
-// Timestamp for display. Pinned "en-US" like the number formatters above, and
-// it deliberately takes NO `lang`.
+// THE TWO CANONICAL DATE FORMATTERS. Pinned "en-US" like the number formatters
+// above, and both deliberately take NO `lang`. Everything user-facing that shows
+// a date or a timestamp goes through one of these; there is no third.
 //
-// It replaces five copies of `toLocaleString(lang === "ar" ? "ar-SA" : "en-US")`
-// — a DIFFERENT and worse bug than the browser-locale one, because that ternary
-// is driven by the app's own toggle, so switching to Arabic reliably produced
-// "٢٥‏/٨‏/٢٠٢٦، ١:٣٠:٠٠ م" for every user. Passing "ar-SA" also reorders the
-// date parts and swaps the AM/PM marker, so it was never only about digits.
-// English output is unchanged: those sites already passed "en-US".
-export function formatDateTime(iso: string | number | Date): string {
-  return new Date(iso).toLocaleString("en-US");
+// `formatDateTime` replaced five copies of
+// `toLocaleString(lang === "ar" ? "ar-SA" : "en-US")` — the app-toggle bug,
+// which fired for every user the moment the language switch flipped, producing
+// "٢٥‏/٨‏/٢٠٢٦، ١:٣٠:٠٠ م". Passing "ar-SA" also reorders the date parts and
+// swaps the AM/PM marker, so it was never only about digits.
+//
+// `formatDate` closes the quieter half: the 69 `toLocaleDateString()` /
+// `toLocaleString()` calls with NO locale argument. Those follow the DEVICE,
+// not the app, so they render Latin on a developer's machine and Arabic-Indic
+// on an Arabic-locale phone — the same screen, two different alphabets,
+// untouched by the language toggle. Nobody developing in English can see it.
+//
+// The options object passes straight through, because several callers need one
+// (`timeZone: "UTC"` for the parts-usage buckets, "short"/"long" month shapes
+// for the invoice and breakdown headers). Passing options is NOT a second
+// formatter — the locale is still pinned here and only here.
+//
+// SCOPE NOTE: pinning "en-US" means a device set to another ENGLISH locale now
+// sees US date order (8/25/2026) where it used to see its own (25/08/2026).
+// That is the deliberate trade: one predictable rendering everywhere beats a
+// date whose shape depends on the phone. Riyadh reads both.
+//
+// NOT everything that formats a date belongs here. `formatDayKey` above renders
+// a YYYY-MM-DD calendar key in its own "1 Sep 2026" shape and parses the parts
+// to avoid a UTC shift; `todayKey`/`daysAgoKey` never touch Intl at all. And any
+// date that becomes a KEY or a COMPARISON — notably driver-state-drift.ts's
+// en-CA + Asia/Riyadh bucket key, which is diffed against SQL — must never be
+// routed through a display formatter.
+export function formatDateTime(
+  iso: string | number | Date,
+  opts?: Intl.DateTimeFormatOptions,
+): string {
+  return new Date(iso).toLocaleString("en-US", opts);
+}
+
+export function formatDate(
+  iso: string | number | Date,
+  opts?: Intl.DateTimeFormatOptions,
+): string {
+  return new Date(iso).toLocaleDateString("en-US", opts);
 }
 
 // Local "today" as YYYY-MM-DD. Uses getFullYear/getMonth/getDate (local clock),

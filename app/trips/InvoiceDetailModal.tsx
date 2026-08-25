@@ -18,7 +18,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { X, Printer, Mail, Plus, Trash2, AlertTriangle, Download, Image as ImageIcon, Paperclip } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
-import { formatSar, formatNum, todayKey } from "@/lib/utils";
+import { formatDate, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
 import { round2 } from "@/lib/vat";
 import { groupInvoiceLines } from "@/lib/invoiceDisplay";
@@ -1219,7 +1219,7 @@ export default function InvoiceDetailModal({
             )}
 
             <div className="border-t border-app pt-3 text-[11px] muted flex items-center justify-between">
-              <span>Generated {new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</span>
+              <span>Generated {formatDate(new Date(), { year: "numeric", month: "short", day: "numeric" })}</span>
               {/* translate="no" on the SPAN, not the row — "Generated <date>"
                   is ordinary prose that SHOULD translate. Only the company's
                   own name is fenced off. This footer prints onto an invoice
@@ -1942,7 +1942,7 @@ function buildMailtoFor(
       break;
     case "sales_return": {
       const returnDate = raw.voided_at
-        ? new Date(raw.voided_at).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
+        ? formatDate(raw.voided_at, { year: "numeric", month: "long", day: "numeric" })
         : "recently";
       subject = `Sales Return — Invoice ${ref} — ${buyerName}`;
       bodyLines = [

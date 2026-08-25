@@ -43,7 +43,7 @@ import { ChevronDown, ChevronRight, Eye, Layers, X } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
 import { t } from "@/lib/i18n";
-import { cn, formatSar, todayKey } from "@/lib/utils";
+import { cn, formatDate, formatSar, todayKey } from "@/lib/utils";
 import type {
   Truck,
   Staff,
@@ -217,8 +217,8 @@ export default function OutsourcedTrack({
             <div className="muted">{lang === "ar" ? mechanic.name_ar || mechanic.name : mechanic.name}</div>
           )}
         </TD>
-        <TD className="text-xs">{new Date(j.start_date).toLocaleDateString()}</TD>
-        <TD className={cn("text-xs", overdue ? "text-rose-600 font-medium" : "")}>{new Date(j.estimated_finish).toLocaleDateString()}</TD>
+        <TD className="text-xs">{formatDate(j.start_date)}</TD>
+        <TD className={cn("text-xs", overdue ? "text-rose-600 font-medium" : "")}>{formatDate(j.estimated_finish)}</TD>
         <TD>
           {overdue ? (
             <MtStatusPill kind="overdue" label={t("mt.osOverdue", lang)} />

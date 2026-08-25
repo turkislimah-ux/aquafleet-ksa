@@ -30,7 +30,7 @@ import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { LinkPill } from "./ArchiveModals";
 import type { SubTabItem } from "./SubTabPicker";
 import { getMaintenanceJobDetail, type MaintenanceJobDetail } from "./actions";
-import { cn, formatAmount } from "@/lib/utils";
+import { cn, formatAmount, formatDate } from "@/lib/utils";
 import {
   docStatus, ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
   groupAccent, groupDot, linkedFieldFor, linkedFieldForDoc, readPersonLink,
@@ -87,7 +87,7 @@ const MISSING_PILL =
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso + "T00:00:00").toLocaleDateString();
+  return formatDate(iso + "T00:00:00");
 }
 
 // No " SAR" suffix here on purpose — the unit is in the column header. Was a
@@ -501,7 +501,7 @@ export default function ArchiveTruckTab({
                                       <TD className="text-xs muted ps-8">
                                         Previous version
                                         <div className="text-[11px]">
-                                          superseded {new Date(r.superseded_at).toLocaleDateString()}
+                                          superseded {formatDate(r.superseded_at)}
                                           {r.superseded_by ? ` · ${r.superseded_by}` : ""}
                                         </div>
                                       </TD>
@@ -689,7 +689,7 @@ export default function ArchiveTruckTab({
                   <TD className="text-xs capitalize">{r.status.replace(/_/g, " ")}</TD>
                   <TD className="text-xs">{r.opened ? fmtDate(r.opened.slice(0, 10)) : "—"}</TD>
                   <TD className="text-xs">
-                    {r.closed ? new Date(r.closed).toLocaleDateString() : "—"}
+                    {r.closed ? formatDate(r.closed) : "—"}
                   </TD>
                   <TD className="text-xs tabular-nums">
                     {r.cost != null ? `${fmtMoney(Number(r.cost))} SAR` : <span className="muted">—</span>}
@@ -750,7 +750,7 @@ export default function ArchiveTruckTab({
                   </TD>
                   <TD className="text-xs">{fmtDate(t.released_date)}</TD>
                   <TD className="text-xs">
-                    {t.terminated_at ? new Date(t.terminated_at).toLocaleDateString() : "—"}
+                    {t.terminated_at ? formatDate(t.terminated_at) : "—"}
                   </TD>
                   <TD>
                     <div className="flex items-center gap-1 justify-end">
@@ -873,7 +873,7 @@ function TerminatedTruckDetail({
             <TruckField label="Released" value={fmtDate(truck.released_date)} />
             <TruckField
               label="Terminated on"
-              value={truck.terminated_at ? new Date(truck.terminated_at).toLocaleDateString() : "—"}
+              value={truck.terminated_at ? formatDate(truck.terminated_at) : "—"}
             />
             <TruckField label="Maintenance jobs on record" value={String(jobCount)} />
           </div>

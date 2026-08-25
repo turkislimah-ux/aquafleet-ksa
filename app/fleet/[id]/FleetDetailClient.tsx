@@ -26,7 +26,7 @@ import type { TruckRow, DriverLite } from "../page";
 import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
 import { assignDriver, unassignDriver, terminateTruck } from "../actions";
 import TruckFormModal from "../TruckFormModal";
-import { cn, formatNum, formatSar, todayKey } from "@/lib/utils";
+import { cn, formatDate, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { ArrowLeft, Users, X, Activity, Pencil, Eye, Wrench, Package } from "lucide-react";
 import MtStatusPill, { type MtPillKind } from "@/app/maintenance/MtStatusPill";
 import {
@@ -142,7 +142,7 @@ function InfoField({
 
 function fmtDateOnly(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso + "T00:00:00").toLocaleDateString();
+  return formatDate(iso + "T00:00:00");
 }
 
 function lastServiceLabel(iso: string | null): string {
@@ -586,7 +586,7 @@ export default function FleetDetailClient({
                     const cost = w.actual_cost_sar ?? w.estimated_cost_sar;
                     return (
                       <tr key={`wo-${w.id}`}>
-                        <TD className="text-xs">{new Date(w.opened_at).toLocaleDateString()}</TD>
+                        <TD className="text-xs">{formatDate(w.opened_at)}</TD>
                         <TD className="font-mono text-xs">
                           <span className="inline-flex items-center gap-1.5">
                             <Wrench className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
@@ -616,7 +616,7 @@ export default function FleetDetailClient({
                   const cost = actualCostByJob.get(j.id) ?? 0;
                   return (
                     <tr key={`os-${j.id}`}>
-                      <TD className="text-xs">{new Date(j.start_date).toLocaleDateString()}</TD>
+                      <TD className="text-xs">{formatDate(j.start_date)}</TD>
                       <TD className="font-mono text-xs">
                         <span className="inline-flex items-center gap-1.5">
                           <Package className="h-3.5 w-3.5 text-purple-500 shrink-0" />

@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, Eye, X, Archive, Undo2, RotateCcw } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn, todayKey, formatDayKey, formatSarExact } from "@/lib/utils";
+import { cn, formatDate, formatDayKey, formatSarExact, todayKey } from "@/lib/utils";
 import type { SubTabItem } from "./SubTabPicker";
 import {
   PROJECT_STATUS_LABELS, PAYMENT_MODE_LABELS, COMMISSION_MODE_LABELS,
@@ -71,9 +71,9 @@ function statusPill(inv: ArchiveInvoiceRow): { label: string; tone: string } {
 // has never been issued, so it falls back to created_at, marked as such.
 function invoiceDate(inv: ArchiveInvoiceRow): { text: string; isIssued: boolean } {
   if (inv.confirmed_at) {
-    return { text: new Date(inv.confirmed_at).toLocaleDateString(), isIssued: true };
+    return { text: formatDate(inv.confirmed_at), isIssued: true };
   }
-  return { text: new Date(inv.created_at).toLocaleDateString(), isIssued: false };
+  return { text: formatDate(inv.created_at), isIssued: false };
 }
 
 // Was a local `toLocaleString(undefined, …)` — one of five identical copies.
@@ -83,7 +83,7 @@ const money = (n: number): string => formatSarExact(Number(n));
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString();
+  return formatDate(iso);
 }
 
 const PILL = "text-[11px] px-2 py-0.5 rounded-full ring-1 ring-inset font-medium shrink-0";

@@ -4,7 +4,7 @@ import { useApp } from "@/components/AppShell";
 import { PageHeader, Stat, StatusPill, Btn, Section, Bar } from "@/components/ui";
 import { predictiveAlerts, findTruck, trucks } from "@/lib/mock-data";
 import { t } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { cn, formatNum } from "@/lib/utils";
 import { Brain, AlertTriangle, Sparkles, Cpu } from "lucide-react";
 import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -42,7 +42,7 @@ export default function PredictivePage() {
         <Stat label={lang === "en" ? "Critical Alerts" : "تنبيهات حرجة"} value={critical.length} tone="bad" />
         <Stat label={lang === "en" ? "Warnings" : "تحذيرات"} value={warning.length} tone="warn" />
         <Stat label={lang === "en" ? "Avg Confidence" : "متوسط الثقة"} value={`${avgConfidence}%`} tone="info" />
-        <Stat label={lang === "en" ? "Estimated Savings" : "مدخرات تقديرية"} value={`${totalSavingsEst.toLocaleString()} SAR`} sub={lang === "en" ? "vs. reactive repair" : "مقابل الإصلاح التفاعلي"} tone="ok" />
+        <Stat label={lang === "en" ? "Estimated Savings" : "مدخرات تقديرية"} value={`${formatNum(totalSavingsEst)} SAR`} sub={lang === "en" ? "vs. reactive repair" : "مقابل الإصلاح التفاعلي"} tone="ok" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

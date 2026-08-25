@@ -35,6 +35,10 @@
 import type {
   ExitPermit, ExitPermitLine, WorkOrder, WorkOrderPart,
 } from "./db-types";
+// Display formatting only — every figure below is still a stamped FIFO cost,
+// unchanged. These pin the locale so the insight sentences and the period
+// labels read in Latin digits on an Arabic-locale device.
+import { formatDate, formatNum } from "./utils";
 
 export type ConsumptionSource = "maintenance" | "exit_permit";
 
@@ -265,9 +269,9 @@ function fmtRange(kind: PeriodKind, start: Date): string {
   if (kind === "year") return String(y);
   if (kind === "quarter") return `Q${Math.floor(start.getUTCMonth() / 3) + 1} ${y}`;
   if (kind === "month") {
-    return start.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+    return formatDate(start, { month: "long", year: "numeric", timeZone: "UTC" });
   }
-  return `Week of ${start.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}`;
+  return `Week of ${formatDate(start, { month: "short", day: "numeric", timeZone: "UTC" })}`;
 }
 
 export function periodWindow(kind: PeriodKind, now: Date): PeriodWindow {
@@ -335,7 +339,7 @@ function trendKey(kind: TrendKind, iso: string): string {
 export function trendLabel(kind: TrendKind, key: string): string {
   if (kind === "year") return key;
   if (kind === "quarter") return key.replace("-", " ");
-  return new Date(key + "-01T00:00:00Z").toLocaleDateString(undefined, {
+  return formatDate(key + "-01T00:00:00Z", {
     month: "short", year: "2-digit", timeZone: "UTC",
   });
 }
@@ -463,14 +467,14 @@ export function weeklySummary(
     bullets.push({
       tone: "info",
       text: p.valueSar > 0
-        ? `Nothing left stock this week — last week it was ${Math.round(p.valueSar).toLocaleString()} SAR across ${p.qty} units.`
+        ? `Nothing left stock this week — last week it was ${formatNum(Math.round(p.valueSar))} SAR across ${p.qty} units.`
         : "Nothing left stock this week, and nothing last week either.",
     });
     // A quiet week still has stock sitting outside, and that is worth saying.
     if (outstanding && outstanding.qty > 0) {
       bullets.push({
         tone: outstanding.overdue > 0 ? "up" : "info",
-        text: `${Math.round(outstanding.valueSar).toLocaleString()} SAR of returnable stock is still out across ${outstanding.qty} units${
+        text: `${formatNum(Math.round(outstanding.valueSar))} SAR of returnable stock is still out across ${outstanding.qty} units${
           outstanding.overdue > 0 ? ` — ${outstanding.overdue} past its due-back date` : ""
         }.`,
       });
@@ -482,8 +486,8 @@ export function weeklySummary(
   bullets.push({
     tone: delta === null ? "info" : delta > 5 ? "up" : delta < -5 ? "down" : "flat",
     text: delta === null
-      ? `${Math.round(c.valueSar).toLocaleString()} SAR of parts left stock across ${c.qty} units — nothing moved last week, so there is no comparison yet.`
-      : `${Math.round(c.valueSar).toLocaleString()} SAR of parts left stock across ${c.qty} units, ${
+      ? `${formatNum(Math.round(c.valueSar))} SAR of parts left stock across ${c.qty} units — nothing moved last week, so there is no comparison yet.`
+      : `${formatNum(Math.round(c.valueSar))} SAR of parts left stock across ${c.qty} units, ${
           delta >= 0 ? "up" : "down"} ${Math.abs(Math.round(delta))}% in value against last week.`,
   });
 
@@ -495,7 +499,7 @@ export function weeklySummary(
     const share = Math.round((maint.valueSar / (c.valueSar || 1)) * 100);
     bullets.push({
       tone: "info",
-      text: `Maintenance took ${share}% of the value (${Math.round(maint.valueSar).toLocaleString()} SAR); exit permits took the rest (${Math.round(exits.valueSar).toLocaleString()} SAR).`,
+      text: `Maintenance took ${share}% of the value (${formatNum(Math.round(maint.valueSar))} SAR); exit permits took the rest (${formatNum(Math.round(exits.valueSar))} SAR).`,
     });
   } else if (maint) {
     bullets.push({ tone: "info", text: "Everything consumed this week went to in-house maintenance — no exit permits." });
@@ -509,7 +513,7 @@ export function weeklySummary(
     const share = Math.round((topPart.valueSar / (c.valueSar || 1)) * 100);
     bullets.push({
       tone: share >= 50 ? "up" : "info",
-      text: `${topPart.label} was the biggest single item at ${Math.round(topPart.valueSar).toLocaleString()} SAR${
+      text: `${topPart.label} was the biggest single item at ${formatNum(Math.round(topPart.valueSar))} SAR${
         share >= 50 ? ` — over half the week's value on its own` : ""}.`,
     });
   }
@@ -531,7 +535,7 @@ export function weeklySummary(
     if (topTruck) {
       bullets.push({
         tone: "info",
-        text: `${topTruck.plate} drew the most maintenance parts — ${Math.round(topTruck.valueSar).toLocaleString()} SAR across ${topTruck.visits} job${topTruck.visits === 1 ? "" : "s"}.`,
+        text: `${topTruck.plate} drew the most maintenance parts — ${formatNum(Math.round(topTruck.valueSar))} SAR across ${topTruck.visits} job${topTruck.visits === 1 ? "" : "s"}.`,
       });
     }
 
@@ -557,7 +561,7 @@ export function weeklySummary(
     bullets.push({
       tone: "info",
       text: `${permitCount} exit permit${permitCount === 1 ? "" : "s"} took stock out${
-        top ? `, mostly to ${top.label.toLowerCase()} (${Math.round(top.valueSar).toLocaleString()} SAR)` : ""
+        top ? `, mostly to ${top.label.toLowerCase()} (${formatNum(Math.round(top.valueSar))} SAR)` : ""
       }.`,
     });
   } else {
@@ -568,7 +572,7 @@ export function weeklySummary(
   if (outstanding && outstanding.qty > 0) {
     bullets.push({
       tone: outstanding.overdue > 0 ? "up" : "info",
-      text: `${Math.round(outstanding.valueSar).toLocaleString()} SAR of returnable stock is still out across ${outstanding.qty} units${
+      text: `${formatNum(Math.round(outstanding.valueSar))} SAR of returnable stock is still out across ${outstanding.qty} units${
         outstanding.overdue > 0 ? ` — ${outstanding.overdue} permit${outstanding.overdue === 1 ? " is" : "s are"} past the due-back date` : ""
       }.`,
     });

@@ -27,7 +27,7 @@ import {
   TrendingUp, TrendingDown, Minus, Truck,
 } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
+import { cn, formatDate, formatNum, formatSar, todayKey } from "@/lib/utils";
 import {
   buildUsageRows, totals, bySource, byWarehouse, byDestination,
   topParts, outstandingReturnable, byTruck, weeklySummary,
@@ -423,7 +423,7 @@ export default function PartsUsageTab({
                     <TD className="text-xs">{r.destination}</TD>
                     <TD className="text-xs muted">
                       {r.expectedReturnOn
-                        ? new Date(r.expectedReturnOn + "T00:00:00").toLocaleDateString()
+                        ? formatDate(r.expectedReturnOn + "T00:00:00")
                         : "—"}
                     </TD>
                     <TD className="text-xs tabular-nums font-medium">{formatNum(r.qty, 2)}</TD>
@@ -471,7 +471,7 @@ export default function PartsUsageTab({
                         {i === 0 && <span className="text-xs line-clamp-2" title={wo.title}>{wo.title}</span>}
                       </TD>
                       <TD className="align-top text-xs muted">
-                        {i === 0 && (wo.closed_at ? new Date(wo.closed_at).toLocaleDateString() : "—")}
+                        {i === 0 && (wo.closed_at ? formatDate(wo.closed_at) : "—")}
                       </TD>
                       <TD>
                         <span className="text-sm">{part?.name ?? "Unknown part"}</span>

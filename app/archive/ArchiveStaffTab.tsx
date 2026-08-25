@@ -40,7 +40,7 @@ import {
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { LinkPill } from "./ArchiveModals";
 import type { SubTabItem } from "./SubTabPicker";
-import { cn, formatAmount } from "@/lib/utils";
+import { cn, formatAmount, formatDate } from "@/lib/utils";
 import {
   docStatus, ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
   groupAccent, groupDot, linkedFieldFor, linkedFieldForDoc, readPersonLink, PERSON_ID_LABEL,
@@ -93,7 +93,7 @@ const MISSING_PILL =
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso + "T00:00:00").toLocaleDateString();
+  return formatDate(iso + "T00:00:00");
 }
 
 // No " SAR" suffix here on purpose — the unit is in the column header. Was a
@@ -561,7 +561,7 @@ export default function ArchiveStaffTab({
                                     <TD className="text-xs muted ps-8">
                                       Previous version
                                       <div className="text-[11px]">
-                                        superseded {new Date(r.superseded_at).toLocaleDateString()}
+                                        superseded {formatDate(r.superseded_at)}
                                         {r.superseded_by ? ` · ${r.superseded_by}` : ""}
                                       </div>
                                     </TD>
@@ -676,7 +676,7 @@ export default function ArchiveStaffTab({
                   <TD className="font-mono text-xs">{d.iqama_number || "—"}</TD>
                   <TD className="text-xs">{fmtDate(d.termination_date)}</TD>
                   <TD className="text-xs">
-                    {d.terminated_at ? new Date(d.terminated_at).toLocaleDateString() : "—"}
+                    {d.terminated_at ? formatDate(d.terminated_at) : "—"}
                   </TD>
                   <TD>
                     <div className="flex items-center gap-1 justify-end">
@@ -723,7 +723,7 @@ export default function ArchiveStaffTab({
                   </TD>
                   <TD className="text-xs">{s.role}</TD>
                   <TD className="text-xs">
-                    {s.terminated_at ? new Date(s.terminated_at).toLocaleDateString() : "—"}
+                    {s.terminated_at ? formatDate(s.terminated_at) : "—"}
                   </TD>
                   <TD>
                     <div className="flex items-center gap-1 justify-end">
@@ -860,7 +860,7 @@ function TerminatedPersonDetail({
             )}
             <PersonField
               label="Terminated on"
-              value={row.terminated_at ? new Date(row.terminated_at).toLocaleDateString() : "—"}
+              value={row.terminated_at ? formatDate(row.terminated_at) : "—"}
             />
           </div>
 

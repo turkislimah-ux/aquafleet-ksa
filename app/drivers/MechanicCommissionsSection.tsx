@@ -27,7 +27,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Trash2 } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
-import { formatSar } from "@/lib/utils";
+import { formatDate, formatSar } from "@/lib/utils";
 import type { Staff, StaffCommission, StaffCommissionType } from "@/lib/db-types";
 import { addStaffCommission, updateStaffCommission, deleteStaffCommission, addStaffCommissionType } from "./actions";
 import LookupSelect from "./LookupSelect";
@@ -36,7 +36,7 @@ const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 foc
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
 function fmtDate(iso: string): string {
-  return new Date(iso + "T00:00:00").toLocaleDateString();
+  return formatDate(iso + "T00:00:00");
 }
 
 export default function MechanicCommissionsSection({

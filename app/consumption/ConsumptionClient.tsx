@@ -20,7 +20,7 @@ import {
   RotateCcw, AlertTriangle, FileText, Paperclip,
 } from "lucide-react";
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn, formatSar } from "@/lib/utils";
+import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import {
   outstandingQty, permitOutstanding, permitValueSar, isOverdue, daysOverdue,
   lineUnitCost, EXIT_PERMIT_STATUS_PILL, type LotLite, type ConsumptionLedgerRow,
@@ -441,7 +441,7 @@ export default function ConsumptionClient({
                             {EXIT_PERMIT_KIND_LABELS[p.kind]}
                             {p.kind === "returnable" && p.expected_return_on && (
                               <div className={cn("text-[11px]", overdue ? "text-rose-600 dark:text-rose-400 font-medium" : "muted")}>
-                                due {new Date(p.expected_return_on + "T00:00:00").toLocaleDateString()}
+                                due {formatDate(p.expected_return_on + "T00:00:00")}
                               </div>
                             )}
                           </TD>
@@ -611,7 +611,7 @@ export default function ConsumptionClient({
                                         return (
                                           <li key={r.id} className="text-xs rounded-lg border px-2.5 py-1.5" style={{ borderColor: "rgb(var(--border))" }}>
                                             <span className="font-medium">
-                                              {new Date(r.returned_on + "T00:00:00").toLocaleDateString()}
+                                              {formatDate(r.returned_on + "T00:00:00")}
                                             </span>
                                             {" — "}
                                             {rl.map((x) => {
@@ -655,7 +655,7 @@ export default function ConsumptionClient({
                                     <span className="inline-flex items-center gap-1 font-medium">
                                       <RotateCcw className="h-3.5 w-3.5" />Voided
                                     </span>
-                                    {p.voided_at && ` on ${new Date(p.voided_at).toLocaleDateString()}`}
+                                    {p.voided_at && ` on ${formatDate(p.voided_at)}`}
                                     {p.voided_by && ` by ${p.voided_by}`}
                                     {p.void_reason && ` — ${p.void_reason}`}
                                     <div className="mt-0.5">
@@ -667,7 +667,7 @@ export default function ConsumptionClient({
 
                                 <div className="text-[11px] muted">
                                   {p.issued_by && <>Issued by {p.issued_by}. </>}
-                                  {p.exited_at && <>Exited {new Date(p.exited_at).toLocaleString()}{p.exited_by ? ` by ${p.exited_by}` : ""}. </>}
+                                  {p.exited_at && <>Exited {formatDateTime(p.exited_at)}{p.exited_by ? ` by ${p.exited_by}` : ""}. </>}
                                 </div>
                               </div>
                             </td>

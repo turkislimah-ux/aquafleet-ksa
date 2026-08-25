@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Trash2 } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { isOnLeaveToday, periodCoversToday, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
+import { formatDate } from "@/lib/utils";
 import { addLeave, updateLeave, deleteLeave, addLeaveType } from "./actions";
 import LookupSelect from "./LookupSelect";
 
@@ -24,7 +25,7 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 
 // ISO date (YYYY-MM-DD) → local display, anchored at midnight so no TZ shift.
 function fmtDate(iso: string): string {
-  return new Date(iso + "T00:00:00").toLocaleDateString();
+  return formatDate(iso + "T00:00:00");
 }
 function fmtRange(start: string, end: string): string {
   return start === end ? fmtDate(start) : `${fmtDate(start)} – ${fmtDate(end)}`;

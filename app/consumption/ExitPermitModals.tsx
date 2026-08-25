@@ -16,7 +16,7 @@ import {
   X, Plus, Trash2, Printer, Upload, FileText, AlertTriangle, Image as ImageIcon,
 } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
-import { cn, formatSar } from "@/lib/utils";
+import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import {
   outstandingQty, permitValueSar, fifoPreviewUnitCost, lineUnitCost,
   returnedUnitPricePreview, type LotLite, type ConsumptionLedgerRow,
@@ -855,7 +855,7 @@ export function ConfirmExitModal({
 
       {permit.kind === "returnable" && permit.expected_return_on && (
         <p className="text-[11px] muted">
-          Returnable — due back {new Date(permit.expected_return_on + "T00:00:00").toLocaleDateString()}.
+          Returnable — due back {formatDate(permit.expected_return_on + "T00:00:00")}.
         </p>
       )}
     </Shell>
@@ -1165,12 +1165,12 @@ export function PermitPrintView({
             <div className="text-xs muted mt-0.5">
               {EXIT_PERMIT_KIND_LABELS[permit.kind]}
               {permit.kind === "returnable" && permit.expected_return_on &&
-                ` · due back ${new Date(permit.expected_return_on + "T00:00:00").toLocaleDateString()}`}
+                ` · due back ${formatDate(permit.expected_return_on + "T00:00:00")}`}
             </div>
           </div>
           <div className="text-end text-xs">
             <div className="muted">Issued</div>
-            <div>{permit.exited_at ? new Date(permit.exited_at).toLocaleString() : "—"}</div>
+            <div>{permit.exited_at ? formatDateTime(permit.exited_at) : "—"}</div>
             {permit.exited_by && <div className="muted">{permit.exited_by}</div>}
             {permit.status === "voided" && (
               <div className="mt-1 font-semibold text-rose-600 dark:text-rose-400">VOIDED</div>

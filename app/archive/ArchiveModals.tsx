@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Plus, Trash2, FileText, Upload, User, Truck as TruckIcon, ChevronDown, Lock, Link as LinkIcon } from "lucide-react";
 import { Btn } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import {
   ARCHIVE_GROUP_COLORS, ARCHIVE_STATUS_PILL, archiveStatusLabel, docStatus, groupDot,
   linkedFieldFor, groupExpectsLink, isStandingType, PERSON_ID_LABEL,
@@ -1109,7 +1109,7 @@ export function DocumentModal({
                 </>
               ) : (
                 <>
-                  <LockedValue value={personExpiry ? new Date(personExpiry + "T00:00:00").toLocaleDateString() : ""} />
+                  <LockedValue value={personExpiry ? formatDate(personExpiry + "T00:00:00") : ""} />
                   <p className="text-[11px] muted mt-1">
                     Renew to move it forward.
                   </p>
@@ -1420,7 +1420,7 @@ export function DocumentDetailModal({
   }
   const dash = (v: string | null) => (v && v.trim() ? v : "—");
   const date = (iso: string | null) =>
-    iso ? new Date(iso + "T00:00:00").toLocaleDateString() : "—";
+    iso ? formatDate(iso + "T00:00:00") : "—";
 
   return (
     <ModalShell
@@ -1526,7 +1526,7 @@ export function DocumentDetailModal({
                     <DetailRow label="Expiry date" value={date(r.expiry_date)} />
                     <DetailRow
                       label="Replaced on"
-                      value={new Date(r.superseded_at).toLocaleDateString()}
+                      value={formatDate(r.superseded_at)}
                     />
                   </div>
                   {r.note && r.note.trim() && (
