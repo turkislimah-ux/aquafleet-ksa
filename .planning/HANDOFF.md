@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at THE `divide-y` DARK-MODE FIX (`42cb69a`), after WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `42cb69a`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has been wrong twice already. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
+# SESSION HANDOFF — closes at A CLAUDE.md COMPRESSION PASS (`ef9ba4b` + this commit; §5's 20KB trigger, fired by the 805 bytes the divide rule had just added — the pass RE-VERIFIED EVERY CLAIM IN THE FILE AND FOUND ZERO STALE FACTS, the first pass of three to come back clean, see THE CLAUDE.md COMPRESSION PASS section), after THE `divide-y` DARK-MODE FIX (`42cb69a`), after WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `42cb69a`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has been wrong twice already. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
 
 # PREVIOUS HEADER — the UI polish pass, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
@@ -9,7 +9,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `42cb69a`, not recalled
+## CURRENT STATE — MEASURED at `ef9ba4b`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
@@ -127,28 +127,36 @@ pipeline's status is its LAST command. Re-run as `cd <repo> && ./node_modules/.b
 pointed at the tooling instead of at a figure: the check that confirms the other
 checks can itself be the thing that is broken.
 
-    HEAD              42cb69a (the divide-y dark-mode fix; see its section below.
-                      Above 41ea251 sit cb76319, 16d9864, ef64630 — all handoff)
-    branch main   IN SYNC with origin — READ BACK from the BRANCH line of
-                      `git status -sb`, which reads `## main...origin/main` with no
-                      ahead/behind. Seven commits pushed this session: a2a4c7e,
-                      ed2c1f0, 41ea251, cb76319, 16d9864, ef64630, 42cb69a.
-                      THIS BLOCK HAS NOW BEEN STALE TWICE IN ONE SESSION. It said
-                      "AHEAD 3, NOT PUSHED" after a push made that false, was
-                      corrected to name cb76319 as the tip, and three more commits
-                      made THAT false too. Both times it was written true. A push-
+    HEAD              ef9ba4b when this line was written, PLUS the commit carrying
+                      this line itself — which is one further ahead and whose hash
+                      could not be known while writing it. That gap is structural,
+                      not sloppiness: a self-describing file can never name its own
+                      commit. Below it: c892c80, 42cb69a (the divide-y dark-mode fix,
+                      see its section), and above 41ea251 sit cb76319, 16d9864,
+                      ef64630 — all handoff.
+    branch main   IN SYNC with origin at ef9ba4b — READ BACK from the BRANCH
+                      line of `git status -sb`, which reads `## main...origin/main`
+                      with no ahead/behind. Nine commits pushed this session:
+                      a2a4c7e, ed2c1f0, 41ea251, cb76319, 16d9864, ef64630, 42cb69a,
+                      c892c80, ef9ba4b.
+                      THIS BLOCK HAS NOW BEEN STALE THREE TIMES IN ONE SESSION. It
+                      said "AHEAD 3, NOT PUSHED" after a push made that false; was
+                      corrected to name cb76319; three more commits made THAT false;
+                      it was corrected to 42cb69a and two more commits made that
+                      false as well. Every one of those was written true. A push-
                       state line does not go wrong by being careless — it goes wrong
-                      by being correct and then waiting. Re-measure it, never re-read
-                      it, and do not trust the commit hash in this block on sight.
+                      by being correct and then waiting. Three strikes is the rule,
+                      not the exception: re-measure it, never re-read it, and do not
+                      trust the commit hash in this block on sight.
     migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
                       — a TIMESTAMP version, not "0167"; see the 0167 section below)
-    CLAUDE.md         19,961 bytes (§5 threshold 20KB = 20,480 — 519 of headroom)
-                      (was 19,156) MOVED — §6 gained the `divide-*` colour rule,
-                      promoted out of this file because it is a standing rule and
-                      not a state. HEADROOM IS NOW THIN: the next rule added is
-                      likely the one that trips §5's compression pass, and §5 says
-                      compress by RE-VERIFYING every claim, not by trimming prose.
+    CLAUDE.md         19,605 bytes (§5 threshold 20KB = 20,480 — 875 of headroom)
+                      MOVED TWICE THIS SESSION: 19,156 → 19,961 when §6 gained the
+                      `divide-*` colour rule (+805, leaving only 519), then →
+                      19,605 on the compression pass that 519 triggered. See THE
+                      CLAUDE.md COMPRESSION PASS section for what it found — the
+                      bytes are the smaller half of it.
                       The 17,700 this block used to carry was ALREADY wrong before
                       `9e0fd77` — 18,948 on disk at `810696d` — never a
                       measurement, a memory
@@ -1366,6 +1374,69 @@ summing to the "All" count is what proves no part is unreachable under every
 pill — a null or orphan `warehouse_id` would have produced a row visible only
 under "All", and the UI gives no hint that such a row exists. Re-run that sum if
 parts ever gain a nullable warehouse.
+
+---
+
+## THE CLAUDE.md COMPRESSION PASS — THIRD AUDIT. DOCS ONLY. **CAME BACK CLEAN.**
+
+§5's 20KB trigger fired, tripped by the 805 bytes the `divide-*` rule had just
+added. The rule it fires is "compress by RE-VERIFYING every claim, not by trimming
+prose blind — both prior passes found a stale fact; the audit is the payoff, the
+bytes are the pretext." **This pass found ZERO stale facts. Every DB and repo claim
+in the file verified true.** That is a first in three passes, and it is recorded as
+a result rather than dressed up: the honest outcome of an audit that finds nothing
+is "nothing", and manufacturing a finding to justify the pass would be the actual
+failure. **It does NOT retire the rule** — a clean pass is evidence about this
+moment, not about the next one. The value showed up in the STRESS TESTS below, none
+of which changed a line.
+
+    views 50/50/0, tables 84/84, anon table privs 0     all as written
+    non-trigger functions anon-executable = 0           trigger fns = 4, which is
+                                                        what §6's "several
+                                                        legitimately remain" means
+    customer_write_offs.payment_mode                    ABSENT, and
+                                                        archive_project_guarded
+                                                        does not write it
+    the partial unique index                            UNIQUE (customer_id)
+                                                        WHERE (reversed_at IS NULL)
+    update_project_with_customer                        still no commission params;
+                                                        create_ still keeps three
+    issue_driver_payslip                                SECURITY DEFINER, NOT anon-
+                                                        executable — 0163 holds
+    `w.reversed_at is null`                             in the JOIN, not a WHERE
+    3 COST views ex-VAT / 2 CASH views grand_total      split intact (0167)
+    public.rate_at                                      MISSING — which CONFIRMS the
+                                                        Deferred claim, not refutes it
+
+**THE TWO "EXACTLY TWO EXPRESSIONS" INVARIANTS ARE THE STRONGEST CLAIMS IN THE FILE,
+SO THEY GOT STRESS-TESTED RATHER THAN SPOT-CHECKED.** Both hold, but one needed real
+work to confirm:
+
+- **Driver state:** exactly 3 views mention `on_leave`, and both non-canonical ones
+  compose on `v_driver_state_now`. Clean.
+- **Prepaid returns:** `v_customer_amount_payable` LOOKED like it touched
+  `customer_balance_returns` directly, which would have been a third expression.
+  Read its full `pg_get_functiondef`/`pg_get_viewdef`: it takes `balance_sar` from
+  `v_customer_prepaid_balance` and touches the returns table only for DISPLAY
+  columns. That is the same carve-out §7 already grants `buildStatementItems` —
+  consuming the ROWS is not restating the SUMMATION. Invariant holds. **Anyone
+  re-auditing this will hit the same false positive; the resolution is to read the
+  view body, not the table list.**
+
+**BONUS CHECK, NOT A CLAUDE.md CLAIM:** that unguarded `LEFT JOIN
+customer_balance_returns` could in principle fan out customer rows. It cannot —
+`customer_balance_returns_customer_id_key` is UNIQUE on `customer_id`, and 0
+customers have more than one row. No bug. Recorded so the next reader does not have
+to re-derive it.
+
+Bytes: **19,961 → 19,605** (saved 356; headroom 875 of 20,480). Four redundancies
+removed, all of them restatements of something the file already said elsewhere: §1's
+business-figures paragraph, §5's HANDOFF bullet (it explained gsd's `HANDOFF.json` a
+third time — now points at the header), §7's opening paragraph (duplicated header
+lines 7-8), and §6's function-ACL rule. **No rule lost a mechanism, an error code,
+or a migration number.** Deliberate non-change: **no audit date was stamped into
+CLAUDE.md.** That file is stateless by §5; a date in it is state, and state lives
+here.
 
 ---
 

@@ -20,11 +20,10 @@ a 50+ year-old family water-transport & treatment business in Riyadh (~40 trucks
 3 stations). Non-technical founder (Turki) directs. Manages trucks, drivers,
 staff, trips, projects, commissions, leave, stations, finance/invoicing.
 
-**Those two figures describe the BUSINESS, not the database.** The live rows are a
-partial working set and have never matched them. Do NOT "correct" this line from a
-`count(*)` — it is Turki's fact about his own fleet, not a measurement, and it is
-the one number in this file that re-measuring cannot settle. He has confirmed it
-and the gap to the seeded rows is expected — do not re-raise it.
+**Those two figures describe the BUSINESS, not the database,** and the live rows —
+a partial working set — have never matched them. Do NOT "correct" them from a
+`count(*)`: they are Turki's confirmed facts about his own fleet, and the one
+number here that re-measuring cannot settle. The gap is expected; do not re-raise.
 
 - **Stack:** Next.js (App Router) + Supabase (Postgres) + Tailwind. TypeScript.
 - **Repo:** `~/aquafleet-ksa`, GitHub `turkislimah-ux/aquafleet-ksa`, branch `main`.
@@ -102,10 +101,9 @@ Loading every skill at once wastes context and has crashed sessions.
   would actually be committed. A file can be correct on disk and blank in the index.
 - **Quote dynamic-route paths:** `git add 'app/fleet/[id]/page.tsx'` — zsh globs
   `[id]` silently. **Avoid `!` in commit messages** (history expansion).
-- **HANDOFF files:** `.planning/HANDOFF.md` is ours and committed — read at
-  session start, write at session end; current state lives THERE, not here.
-  `.planning/HANDOFF.json` and `preview/.planning/HANDOFF.json` are gsd's,
-  gitignored — never read for state, never stage.
+- **HANDOFF files:** `.planning/HANDOFF.md` is ours and committed — read at session
+  start, write at session end; state lives THERE, not here. Both `HANDOFF.json`s
+  (`.planning/` and `preview/.planning/`) are gsd's — see the header.
 - **Migrations:** numbered sequentially (`00NN_name.sql`), **DRAFTED to disk and
   never self-applied by Claude Code** — draft, stop, let Turki/the architect run
   it. **Verify the file exists on disk** (`ls supabase/migrations/ | tail -3` +
@@ -145,14 +143,13 @@ Loading every skill at once wastes context and has crashed sessions.
 - **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew.
 - **`divide-*` CARRIES ITS OWN COLOUR: `divide-y divide-[rgb(var(--border))]`.**
   `border-color` is not inherited, so an inline `borderColor` on the container
-  reaches that container's frame and nothing else — the child rules `divide-y`
-  creates stay at Tailwind preflight's `#e5e7eb`. Invisible in light mode
-  (`--border` is one step off it), a bright hairline in dark, which is how it got
-  written seven times before anyone saw it. Nothing else covers this: there is no
-  `borderColor.DEFAULT` in `tailwind.config.ts` and no `@layer base` override for
-  `*`. On a container with no `border` utility that inline style is inert anyway
-  (preflight sets `border-width:0`) — delete it rather than leave it implying the
-  rules are handled. **An uncoloured `divide-` IS the bug**; grep is the test.
+  paints its own frame only — the rules `divide-y` creates stay at preflight's
+  `#e5e7eb`. Light mode sits one step off that and dark mode does not, so it looks
+  right in the mode you develop in; that is how it reached seven sites. Nothing
+  else covers it: no `borderColor.DEFAULT`, no `@layer base` rule for `*`. On a
+  border-less container the inline style is inert anyway (preflight zeroes
+  border-width) — delete it, don't leave it implying the rules are handled.
+  **An uncoloured `divide-` IS the bug**; grep is the regression test.
 
 **WHAT SURVIVES A REPLACEMENT IS NOT OBVIOUS — AND WHAT DOES NOT IS A PERMISSION.**
 The next three rules are one lesson in three places.
@@ -182,25 +179,23 @@ The next three rules are one lesson in three places.
 - **A REDEFINED FUNCTION IS EXECUTE-TO-PUBLIC AGAIN — RE-REVOKE IN THE SAME
   TRANSACTION.** `create or replace function` and `drop`+`create` both reset the
   ACL to the Postgres default, `EXECUTE TO PUBLIC`; `anon` inherits PUBLIC, and
-  the Supabase anon key ships in the client bundle. **There is no
-  default-privileges equivalent for functions** (0161's covers TABLES only), so
-  nothing makes this stick. Every SECURITY DEFINER function and every money or
-  guarded RPC ends with:
+  the anon key ships in the client bundle. **No default-privileges equivalent
+  exists for functions** (0161's covers TABLES only) — nothing makes this stick.
+  Every SECURITY DEFINER function and every money or guarded RPC ends with:
 ```sql
   revoke execute on function public.X(<exact identity args>) from public, anon;
 ```
-  **`from public, anon` — BOTH.** The offending grant is the PUBLIC one (an ACL
-  entry with an EMPTY grantee, `=X/postgres`); revoking from `anon` alone leaves
-  it and changes nothing. Read it back with `has_function_privilege('anon', …,
-  'execute')` = false. **Never assert via `proacl` matching** — `'%=X/%'` also
-  matches `postgres=X/postgres` and reports every function as leaking.
-  Not hypothetical: 0115 defined `issue_driver_payslip`, 0118 replaced it without
-  re-revoking, and a SECURITY DEFINER money RPC sat callable by anyone with the
-  anon key — bypassing RLS *and* 0161's table revoke, because a definer runs as
-  its owner. Proven by probe (business-logic 23514, not permission 42501), closed
-  in **0163**; **0164** locked the guarded RPCs. Invariant: **zero NON-TRIGGER
-  functions anon-executable** (trigger functions are unreachable via PostgREST and
-  several legitimately remain).
+  **BOTH grantees.** The offending entry is the PUBLIC one (EMPTY grantee,
+  `=X/postgres`); revoking `anon` alone leaves it and changes nothing. Read back
+  with `has_function_privilege('anon', …, 'execute')` = false — **never via
+  `proacl` matching**, `'%=X/%'` also matches `postgres=X/postgres` and reports
+  every function as leaking. Not hypothetical: 0115 defined
+  `issue_driver_payslip`, 0118 replaced it without re-revoking, and a definer
+  money RPC sat callable by anyone with the anon key — bypassing RLS *and* 0161's
+  table revoke, since a definer runs as its owner. Proven by probe (business-logic
+  23514, not permission 42501), closed in **0163**; **0164** locked the guarded
+  RPCs. Invariant: **zero NON-TRIGGER functions anon-executable** (trigger
+  functions are unreachable via PostgREST; several legitimately remain).
 - **New tables in `public` still end with `revoke all on public.X from anon`,**
   even though 0161 revoked anon everywhere and stopped future tables inheriting
   grants. That default-privileges change only affects tables created AFTER it, so
@@ -211,8 +206,7 @@ The next three rules are one lesson in three places.
 
 ## 7. Durable money & schema rules
 
-**Not a status report.** What is built / in flight / open lives in
-`.planning/HANDOFF.md`. These are the rules that must survive any future change.
+Rules that must survive any future change — not a status report; see the header.
 
 - **A WRITE-OFF ROW CARRIES NO PAYMENT MODE (0143).** `archive_project_guarded`
   records exactly customer, project, amount, reason, actor.
