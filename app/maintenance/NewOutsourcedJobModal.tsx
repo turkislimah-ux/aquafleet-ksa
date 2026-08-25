@@ -28,7 +28,7 @@ import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEffect } from "react";
 import { Plus, X, Pencil, Trash2 } from "lucide-react";
-import { t } from "@/lib/i18n";
+import { t, arText } from "@/lib/i18n";
 import { cn, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import type { Truck, Staff, RepairerType, Repairer, OutsourcedDescription, OutsourcedJob } from "@/lib/db-types";
@@ -372,8 +372,8 @@ export default function NewOutsourcedJobModal({
                       <div key={r.id} className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-black/5 dark:hover:bg-white/5">
                         <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
                           <input type="checkbox" checked={on} onChange={() => toggleRepairer(r.id)} />
-                          <span className="font-medium truncate">{lang === "ar" ? r.name_ar || r.name : r.name}</span>
-                          {rt && <span className="text-[11px] muted shrink-0">{lang === "ar" ? rt.label_ar || rt.label_en : rt.label_en}</span>}
+                          <span className="font-medium truncate">{arText(r.name, r.name_ar, lang)}</span>
+                          {rt && <span className="text-[11px] muted shrink-0">{arText(rt.label_en, rt.label_ar, lang)}</span>}
                           {r.location && <span className="text-[11px] muted ms-auto shrink-0">{r.location}</span>}
                         </label>
                         <button

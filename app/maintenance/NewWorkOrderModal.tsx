@@ -41,7 +41,7 @@ import { Fragment, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEffect } from "react";
 import { Plus, Minus, X } from "lucide-react";
-import { t } from "@/lib/i18n";
+import { t, arText } from "@/lib/i18n";
 import { cn, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings, Warehouse } from "@/lib/db-types";
@@ -651,7 +651,7 @@ export default function NewWorkOrderModal({
                           return (
                             <tr key={p.id} className={cn(outOfStock ? "opacity-50" : "")}>
                               <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-                                <div className="font-medium text-sm">{lang === "ar" ? p.name_ar || p.name : p.name}</div>
+                                <div className="font-medium text-sm">{arText(p.name, p.name_ar, lang)}</div>
                                 <div className="text-[11px] muted font-mono">
                                   {p.sku}
                                   {/* Location, shown ONLY while unfiltered —

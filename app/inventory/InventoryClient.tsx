@@ -275,6 +275,7 @@ import {
   receiveLooseParts,
   type ReceiveLine,
 } from "./actions";
+import { arText } from "@/lib/i18n";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -1238,7 +1239,7 @@ function PartsTable({
                   <div className="flex items-center gap-2">
                     <Package className="h-4 w-4 muted" />
                     <div>
-                      <div className="font-medium">{lang === "ar" ? p.name_ar ?? p.name : p.name}</div>
+                      <div className="font-medium">{arText(p.name, p.name_ar, lang)}</div>
                       {secondaryName && <div className="text-[11px] muted">{secondaryName}</div>}
                     </div>
                   </div>
@@ -1462,7 +1463,7 @@ function ViewPartModal({
         <div className="flex items-start justify-between gap-4 mb-4">
           <div className="flex items-center gap-2">
             <Package className="h-5 w-5 muted" />
-            <h2 className="text-lg font-semibold">{lang === "ar" ? part.name_ar ?? part.name : part.name}</h2>
+            <h2 className="text-lg font-semibold">{arText(part.name, part.name_ar, lang)}</h2>
           </div>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
             <X className="h-4 w-4" />
@@ -2192,7 +2193,7 @@ function ReceivePartsModal({
                           <TD>
                             <div className="font-mono text-[11px] muted">{part?.sku ?? ""}</div>
                             <div className="text-sm font-medium">
-                              {part ? (lang === "ar" && part.name_ar ? part.name_ar : part.name) : "—"}
+                              {part ? arText(part.name, part.name_ar, lang) : "—"}
                             </div>
                           </TD>
                           <TD>
@@ -2471,7 +2472,7 @@ function AdjustStockModal({
             <div className="flex flex-col gap-1 text-sm">
               <span className="muted">{lang === "en" ? "Part" : "القطعة"}</span>
               <div className="px-3 py-2 rounded-lg border text-sm" style={INPUT_STYLE}>
-                <span className="font-medium">{lang === "ar" ? part.name_ar ?? part.name : part.name}</span>
+                <span className="font-medium">{arText(part.name, part.name_ar, lang)}</span>
                 <span className="muted ml-2 font-mono text-xs">{part.sku}</span>
               </div>
             </div>

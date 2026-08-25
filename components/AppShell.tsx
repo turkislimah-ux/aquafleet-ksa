@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell, Sun, Moon, Globe, LogOut, X, Check, Settings } from "lucide-react";
 import type { Lang } from "@/lib/i18n";
-import { t } from "@/lib/i18n";
+import { t, arText } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { signOut } from "@/lib/actions/auth";
 import { NAV, type NavItem } from "@/lib/nav";
@@ -837,8 +837,11 @@ function AccountMenu({
   viewer, lang, avatarUrl,
 }: { viewer: Viewer | null; lang: Lang; avatarUrl: string | null }) {
   const emailLocal = viewer?.email?.split("@")[0] ?? null;
+  // `?? ""` only feeds arText a string when there is no viewer at all; the
+  // result is still falsy, so the `|| emailLocal || "—"` chain behaves exactly
+  // as it did before.
   const displayName =
-    (lang === "ar" ? viewer?.nameAr || viewer?.name : viewer?.name) || emailLocal || "—";
+    arText(viewer?.name ?? "", viewer?.nameAr, lang) || emailLocal || "—";
   const subtitle = viewer?.roleLabel ?? viewer?.email ?? null;
 
   // Initials from the display name: two words -> two letters, one word -> one.

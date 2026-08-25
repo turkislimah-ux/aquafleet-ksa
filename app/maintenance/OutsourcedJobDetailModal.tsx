@@ -37,7 +37,7 @@ import { createPortal } from "react-dom";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { X, CheckSquare, Square, Play, Check, Pencil, FileText, Trash2, Upload } from "lucide-react";
-import { t } from "@/lib/i18n";
+import { t, arText } from "@/lib/i18n";
 import { cn, formatDate, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
@@ -329,7 +329,7 @@ export default function OutsourcedJobDetailModal({
       <div className="card w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
           <div>
-            <h2 className="font-semibold">{lang === "ar" ? job.title_ar : job.title}</h2>
+            <h2 className="font-semibold">{arText(job.title, job.title_ar, lang)}</h2>
             <div className="text-xs muted font-mono">{job.os_number}</div>
             {(job.created_by || job.started_by || job.completed_by) && (
               <div className="text-[11px] muted mt-0.5 flex flex-wrap gap-x-3">
@@ -388,7 +388,7 @@ export default function OutsourcedJobDetailModal({
             <div>
               <div className="muted mb-0.5">{t("mt.responsibleMechanic", lang)}</div>
               <div className={cn("flex flex-col items-start gap-0.5", mechanicOnLeave && "muted")}>
-                <span>{mechanic ? (lang === "ar" ? mechanic.name_ar || mechanic.name : mechanic.name) : "—"}</span>
+                <span>{mechanic ? arText(mechanic.name, mechanic.name_ar, lang) : "—"}</span>
                 {mechanicOnLeave && <MtStatusPill kind="on_leave" label={t("status.leave", lang)} />}
               </div>
             </div>
@@ -412,8 +412,8 @@ export default function OutsourcedJobDetailModal({
                   const rt = r.type ? repairerTypesById.get(r.type) : null;
                   return (
                     <span key={r.id} className="text-xs rounded-full px-2.5 py-1 border" style={INPUT_STYLE}>
-                      {lang === "ar" ? r.name_ar || r.name : r.name}
-                      {rt && <span className="muted"> · {lang === "ar" ? rt.label_ar || rt.label_en : rt.label_en}</span>}
+                      {arText(r.name, r.name_ar, lang)}
+                      {rt && <span className="muted"> · {arText(rt.label_en, rt.label_ar, lang)}</span>}
                     </span>
                   );
                 })}
@@ -441,7 +441,7 @@ export default function OutsourcedJobDetailModal({
                       className="flex items-center gap-2 text-sm w-full text-start disabled:cursor-default"
                     >
                       {tk.done ? <CheckSquare className="h-4 w-4 text-emerald-600 shrink-0" /> : <Square className="h-4 w-4 muted shrink-0" />}
-                      <span className={cn(tk.done ? "line-through muted" : "")}>{lang === "ar" ? tk.description_ar : tk.description_en}</span>
+                      <span className={cn(tk.done ? "line-through muted" : "")}>{arText(tk.description_en, tk.description_ar, lang)}</span>
                     </button>
                   ))}
                 </div>
@@ -507,7 +507,7 @@ export default function OutsourcedJobDetailModal({
                   <label className="text-xs muted block mb-1">{t("mt.billedBy", lang)} *</label>
                   <select value={form.repairerId} onChange={(e) => setForm((f) => ({ ...f, repairerId: e.target.value }))} className={INPUT} style={INPUT_STYLE}>
                     {jobRepairers.map((r) => (
-                      <option key={r.id} value={r.id}>{lang === "ar" ? r.name_ar || r.name : r.name}</option>
+                      <option key={r.id} value={r.id}>{arText(r.name, r.name_ar, lang)}</option>
                     ))}
                   </select>
                 </div>
@@ -615,7 +615,7 @@ export default function OutsourcedJobDetailModal({
                     const files = paymentFiles.filter((f) => f.payment_id === p.id);
                     return (
                       <tr key={p.id} className={cn(editingPaymentId === p.id ? "bg-brand-500/5" : "")}>
-                        <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{r ? (lang === "ar" ? r.name_ar || r.name : r.name) : "—"}</td>
+                        <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{r ? arText(r.name, r.name_ar, lang) : "—"}</td>
                         <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{p.invoice_number || "—"}</td>
                         <td className="py-2 px-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>{p.invoice_date ? formatDate(p.invoice_date) : "—"}</td>
                         <td className="py-2 px-3 border-t tabular-nums" style={{ borderColor: "rgb(var(--border))" }}>{formatSarVat(p.subtotal_sar)}</td>

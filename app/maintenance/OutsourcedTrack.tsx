@@ -42,7 +42,7 @@ import { Fragment, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Eye, Layers, X } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import MtStatusPill, { type MtPillKind } from "./MtStatusPill";
-import { t } from "@/lib/i18n";
+import { t, arText } from "@/lib/i18n";
 import { cn, formatDate, formatSar, todayKey } from "@/lib/utils";
 import type {
   Truck,
@@ -208,13 +208,13 @@ export default function OutsourcedTrack({
         )}
         <TD>{t(`status.${j.type}`, lang)}</TD>
         <TD className="text-xs">
-          <span className="font-bold">{jRepairers.length === 0 ? "—" : jRepairers.map((r) => (lang === "ar" ? r.name_ar || r.name : r.name)).join(", ")}</span>
+          <span className="font-bold">{jRepairers.length === 0 ? "—" : jRepairers.map((r) => arText(r.name, r.name_ar, lang)).join(", ")}</span>
           {/* P3 item 1 — responsible mechanic underneath, replacing
               preview's own contact-number-underneath for this column.
               Repairer name bolded so it stands out from the mechanic
               name below it. */}
           {mechanic && (
-            <div className="muted">{lang === "ar" ? mechanic.name_ar || mechanic.name : mechanic.name}</div>
+            <div className="muted">{arText(mechanic.name, mechanic.name_ar, lang)}</div>
           )}
         </TD>
         <TD className="text-xs">{formatDate(j.start_date)}</TD>

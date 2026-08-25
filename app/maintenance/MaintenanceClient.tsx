@@ -31,7 +31,7 @@ import { Plus, ChevronDown, ChevronRight, Eye, Layers, X, AlertTriangle } from "
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
 import { useApp } from "@/components/AppShell";
-import { t } from "@/lib/i18n";
+import { t, arText } from "@/lib/i18n";
 import { cn, formatDate, formatSar } from "@/lib/utils";
 import type {
   Truck,
@@ -423,13 +423,13 @@ export default function MaintenanceClient({
           <TD className="font-mono text-xs">{truck ? `${truck.plate}` : w.truck_id}</TD>
         )}
         <TD>
-          <span className="font-medium">{lang === "ar" ? w.title_ar : w.title}</span>
+          <span className="font-medium">{arText(w.title, w.title_ar, lang)}</span>
         </TD>
         <TD><MtPriorityPill priority={w.priority} label={t(`status.${w.priority}`, lang)} /></TD>
         <TD>
           {mech ? (
             <div className={cn("flex flex-col items-start gap-0.5", onLeaveMechanicIdSet.has(mech.id) && "muted")}>
-              <span>{lang === "ar" ? mech.name_ar || mech.name : mech.name}</span>
+              <span>{arText(mech.name, mech.name_ar, lang)}</span>
               {onLeaveMechanicIdSet.has(mech.id) && <MtStatusPill kind="on_leave" label={t("status.leave", lang)} />}
             </div>
           ) : "—"}

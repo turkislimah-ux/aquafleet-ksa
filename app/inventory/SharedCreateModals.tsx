@@ -63,6 +63,7 @@ import {
   type PartUpdateInput,
 } from "./actions";
 import ScrollLock from "@/components/ScrollLock";
+import { arText } from "@/lib/i18n";
 
 // Shared modal backdrop — "risky batch" Stage 3, items 1 + 7. Every
 // Inventory modal used to render its own `fixed inset-0` backdrop INLINE
@@ -279,7 +280,7 @@ export function PartPicker({
             <>
               <span className="font-mono text-[11px] muted">{selected.sku}</span>
               <span className="muted mx-1">·</span>
-              <span className="font-medium">{lang === "ar" && selected.name_ar ? selected.name_ar : selected.name}</span>
+              <span className="font-medium">{arText(selected.name, selected.name_ar, lang)}</span>
             </>
           ) : (
             placeholder
@@ -312,7 +313,7 @@ export function PartPicker({
                   <span className="truncate">
                     <span className="font-mono text-[11px] muted">{p.sku}</span>
                     <span className="muted mx-1">·</span>
-                    <span className="font-medium">{lang === "ar" && p.name_ar ? p.name_ar : p.name}</span>
+                    <span className="font-medium">{arText(p.name, p.name_ar, lang)}</span>
                   </span>
                   <span
                     className={cn(
@@ -874,7 +875,7 @@ export function AddPartModal({
                   </option>
                   {allUnits.map((u) => (
                     <option key={u.id} value={u.code}>
-                      {u.code} — {lang === "ar" && u.label_ar ? u.label_ar : u.label_en}
+                      {u.code} — {arText(u.label_en, u.label_ar, lang)}
                     </option>
                   ))}
                 </select>
@@ -1175,7 +1176,7 @@ export function AdjustItemModal({
                   </option>
                   {allUnits.map((u) => (
                     <option key={u.id} value={u.code}>
-                      {u.code} — {lang === "ar" && u.label_ar ? u.label_ar : u.label_en}
+                      {u.code} — {arText(u.label_en, u.label_ar, lang)}
                     </option>
                   ))}
                 </select>

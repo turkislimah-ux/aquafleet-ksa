@@ -307,3 +307,36 @@ export function t(path: string, lang: Lang): string {
   if (!node) return path;
   return (node as any)[lang] ?? path;
 }
+
+// `t()` above translates STATIC copy from the dictionary. `arText()` below is
+// its counterpart for ROW DATA — the per-record Arabic columns: name_ar,
+// title_ar, description_ar, label_ar.
+//
+// One rule, everywhere: show the Arabic value only when the UI is in Arabic AND
+// that value is really there — non-null and non-empty AFTER a trim. A row saved
+// with "  " therefore falls back to the base column instead of rendering an
+// empty cell. In English it returns `base` untouched, so every adopting site is
+// byte-identical to what it printed before.
+//
+// It replaces four hand-rolled patterns that had drifted apart across the app:
+//   x.name_ar || x.name                             null+empty safe, not trimmed
+//   x.name_ar ?? x.name                             BLANK on an empty string
+//   lang === "ar" && x.name_ar ? x.name_ar : x.name correct, not trimmed
+//   lang === "ar" ? x.title_ar : x.title            no fallback at all
+//
+// Trim-awareness is belt-and-braces, not a live bug fix: every Arabic-name
+// writer was audited for this commit and all of them already trim before the
+// ""-to-null coercion (`str()` in the customers/drivers actions trims, and the
+// inventory/repairer/settings writers use `?.trim() || null`), so no code path
+// today can store "  ". The rule belongs in the reader anyway — it costs
+// nothing, and it means one careless future writer cannot blank a name.
+//
+// DISPLAY ONLY. Never use this for a sort key, a lookup/match key, a dedupe
+// map, or a type-to-confirm gate — those compare against the base column and
+// must stay language-independent, or an Arabic-mode user is comparing a string
+// the rest of the system never sees.
+export function arText(base: string, ar: string | null | undefined, lang: Lang): string {
+  if (lang !== "ar") return base;
+  const trimmed = ar?.trim();
+  return trimmed ? trimmed : base;
+}

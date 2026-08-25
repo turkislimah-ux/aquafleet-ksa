@@ -17,10 +17,10 @@
 // an HR form. When they have NOT set one — which is every user until they open
 // that section — this behaves exactly as it always did.
 //
-// AND IT CLEARS nameAr WHEN IT WINS. The header renders `nameAr || name` in
-// Arabic, so leaving a staff-sourced Arabic name in place would show the new
-// name in English and the old one in Arabic. A self-chosen name applies in both
-// languages or it is not a self-chosen name.
+// AND IT CLEARS nameAr WHEN IT WINS. The header falls back from nameAr to name
+// in Arabic (`arText` in lib/i18n.ts), so leaving a staff-sourced Arabic name in
+// place would show the new name in English and the old one in Arabic. A
+// self-chosen name applies in both languages or it is not a self-chosen name.
 //
 // THIS FILE STILL READS public.staff, AND THAT IS NOT A BOUNDARY BREACH.
 // user_profiles (0159) must never link to an employee record, and it does not:

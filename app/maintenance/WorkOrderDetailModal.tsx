@@ -28,7 +28,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { X, CheckSquare, Square, Play, Check, Pencil, Trash2, AlertTriangle, ImagePlus } from "lucide-react";
-import { t } from "@/lib/i18n";
+import { t, arText } from "@/lib/i18n";
 import { cn, formatDate, formatSar } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
@@ -295,7 +295,7 @@ export default function WorkOrderDetailModal({
       <div className="card w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
           <div>
-            <h2 className="font-semibold">{lang === "ar" ? workOrder.title_ar : workOrder.title}</h2>
+            <h2 className="font-semibold">{arText(workOrder.title, workOrder.title_ar, lang)}</h2>
             <div className="text-xs muted font-mono">{workOrder.wo_number}</div>
             {(workOrder.created_by || workOrder.started_by || workOrder.completed_by) && (
               <div className="text-[11px] muted mt-0.5 flex flex-wrap gap-x-3">
@@ -361,7 +361,7 @@ export default function WorkOrderDetailModal({
             <div>
               <div className="muted mb-0.5">{t("common.mechanic", lang)}</div>
               <div className={cn("flex flex-col items-start gap-0.5", mechanicOnLeave && "muted")}>
-                <span>{mechanic ? (lang === "ar" ? mechanic.name_ar || mechanic.name : mechanic.name) : "—"}</span>
+                <span>{mechanic ? arText(mechanic.name, mechanic.name_ar, lang) : "—"}</span>
                 {mechanicOnLeave && <MtStatusPill kind="on_leave" label={t("status.leave", lang)} />}
               </div>
             </div>
@@ -403,7 +403,7 @@ export default function WorkOrderDetailModal({
                       className="flex items-center gap-2 text-sm w-full text-start disabled:cursor-default"
                     >
                       {tk.done ? <CheckSquare className="h-4 w-4 text-emerald-600 shrink-0" /> : <Square className="h-4 w-4 muted shrink-0" />}
-                      <span className={cn(tk.done ? "line-through muted" : "")}>{lang === "ar" ? tk.description_ar : tk.description_en}</span>
+                      <span className={cn(tk.done ? "line-through muted" : "")}>{arText(tk.description_en, tk.description_ar, lang)}</span>
                     </button>
                   ))}
                 </div>
@@ -463,7 +463,7 @@ export default function WorkOrderDetailModal({
                     return (
                       <tr key={l.id}>
                         <td className="py-2 px-3 border-t align-top" style={{ borderColor: "rgb(var(--border))" }}>
-                          <div className="font-medium">{p ? (lang === "ar" ? p.name_ar || p.name : p.name) : l.part_id}</div>
+                          <div className="font-medium">{p ? arText(p.name, p.name_ar, lang) : l.part_id}</div>
                           <div className="text-[11px] muted font-mono">{p?.sku ?? ""}</div>
                         </td>
                         <td className="py-2 px-3 border-t tabular-nums align-top" style={{ borderColor: "rgb(var(--border))" }}>{l.qty}</td>

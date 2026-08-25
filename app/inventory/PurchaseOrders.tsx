@@ -107,6 +107,7 @@ import {
   PartPicker,
 } from "./SharedCreateModals";
 import ScrollLock from "@/components/ScrollLock";
+import { arText } from "@/lib/i18n";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -944,7 +945,7 @@ export function NewPOModal({
                           <TD>
                             <div className="font-mono text-[11px] muted">{part?.sku ?? ""}</div>
                             <div className="text-sm font-medium">
-                              {part ? (lang === "ar" && part.name_ar ? part.name_ar : part.name) : "—"}
+                              {part ? arText(part.name, part.name_ar, lang) : "—"}
                             </div>
                           </TD>
                           <TD>
@@ -1477,7 +1478,7 @@ export function PODetailModal({
                   <TD>
                     <div className="font-mono text-[11px] muted">{part?.sku ?? ""}</div>
                     <div className="text-sm font-medium">
-                      {part ? (lang === "ar" && part.name_ar ? part.name_ar : part.name) : "—"}
+                      {part ? arText(part.name, part.name_ar, lang) : "—"}
                     </div>
                   </TD>
                   <TD className="tabular">
@@ -2069,7 +2070,7 @@ export function ReceivePOModal({
                       <TD>
                         <div className="font-mono text-[11px] muted">{part?.sku ?? ""}</div>
                         <div className="text-sm font-medium">
-                          {part ? (lang === "ar" && part.name_ar ? part.name_ar : part.name) : "—"}
+                          {part ? arText(part.name, part.name_ar, lang) : "—"}
                         </div>
                         {l.line_id === null && (
                           <span
@@ -3147,7 +3148,7 @@ export function ReceiptDetailModal({
                     <TD>
                       <div className="font-mono text-[11px] muted">{part?.sku ?? ""}</div>
                       <div className="text-sm font-medium">
-                        {part ? (lang === "ar" && part.name_ar ? part.name_ar : part.name) : "—"}
+                        {part ? arText(part.name, part.name_ar, lang) : "—"}
                       </div>
                       {l.price_lot_id === null && (
                         <span
@@ -3865,7 +3866,7 @@ export function PartFinanceModal({
       >
         <div className="flex items-start justify-between gap-4 mb-1">
           <div>
-            <h2 className="text-lg font-semibold">{lang === "ar" && part.name_ar ? part.name_ar : part.name}</h2>
+            <h2 className="text-lg font-semibold">{arText(part.name, part.name_ar, lang)}</h2>
             <p className="text-xs muted mt-0.5">
               <span className="font-mono">{part.sku}</span> · {categoryLabel(part.category, lang)} · {warehouseName}
             </p>

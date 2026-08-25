@@ -11,7 +11,7 @@ import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEffect } from "react";
 import { X, Plus } from "lucide-react";
-import { t } from "@/lib/i18n";
+import { t, arText } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import type { RepairerType, Repairer } from "@/lib/db-types";
@@ -149,7 +149,7 @@ export default function RepairerFormModal({
               <span className="text-xs muted block mb-1">{t("mt.repairerType", lang)}</span>
               <select value={typeId} onChange={(e) => setTypeId(e.target.value)} className={INPUT} style={INPUT_STYLE}>
                 {allTypes.map((rt) => (
-                  <option key={rt.id} value={rt.id}>{lang === "ar" ? rt.label_ar || rt.label_en : rt.label_en}</option>
+                  <option key={rt.id} value={rt.id}>{arText(rt.label_en, rt.label_ar, lang)}</option>
                 ))}
               </select>
             </label>

@@ -26,7 +26,7 @@
 
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
-import { t } from "@/lib/i18n";
+import { t, arText } from "@/lib/i18n";
 import { cn, todayKey as todayKeyUtil } from "@/lib/utils";
 import type { Truck, WorkOrder, OutsourcedJob } from "@/lib/db-types";
 
@@ -290,7 +290,7 @@ export default function MaintenanceCalendar({
                         key={`wo-${w.id}`}
                         onClick={(e) => { e.stopPropagation(); onOpenWorkOrder(w.id); }}
                         className={cn("text-[10px] rounded px-1.5 py-1 truncate cursor-pointer border-s-[3px]", tone)}
-                        title={lang === "ar" ? w.title_ar : w.title}
+                        title={arText(w.title, w.title_ar, lang)}
                       >
                         {truck?.plate ?? w.truck_id}
                       </div>

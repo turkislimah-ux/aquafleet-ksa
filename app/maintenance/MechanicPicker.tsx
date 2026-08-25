@@ -25,7 +25,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { t, type Lang } from "@/lib/i18n";
+import { t, arText, type Lang } from "@/lib/i18n";
 import type { Staff } from "@/lib/db-types";
 import MtStatusPill from "./MtStatusPill";
 
@@ -66,7 +66,7 @@ export function MechanicPicker({
   const selectedOnLeave = selected ? onLeaveMechanicIds.has(selected.id) : false;
 
   function mechName(m: Staff) {
-    return lang === "ar" ? m.name_ar || m.name : m.name;
+    return arText(m.name, m.name_ar, lang);
   }
 
   return (
