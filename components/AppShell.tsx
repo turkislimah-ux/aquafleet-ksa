@@ -8,7 +8,7 @@ import type { Lang } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { signOut } from "@/lib/actions/auth";
-import { NAV } from "@/lib/nav";
+import { NAV, type NavItem } from "@/lib/nav";
 import { SearchDockProvider } from "@/components/SearchDock";
 import GlobalSearch from "@/components/GlobalSearch";
 import { searchRecords } from "@/lib/actions/search";
@@ -22,6 +22,123 @@ import {
   SEVERITY_TONE, SEVERITY_RANK, actionableCount, badgeTone, detailLine, routeEntity, nt,
   type NotificationRow,
 } from "@/lib/notification-format";
+
+/*
+  THE RAIL IS THE RESTING STATE AND HOVER IS THE ONLY OPENER. There is no
+  toggle and no persisted preference: collapsed is not a mode the user selects,
+  it is simply what the sidebar looks like when the pointer is elsewhere.
+
+  That is why none of this is React state. A `hovered` boolean would mean a
+  mouseenter/mouseleave pair re-rendering the whole shell — including <main> —
+  on every pass of the cursor. CSS `:hover` on the panel does the same job with
+  no render at all, and cannot desynchronise from the actual pointer position.
+*/
+
+/**
+ * Rail width — the resting look AND the permanent footprint. `3.5rem` appears
+ * a third time as `--app-sidebar-w` on the shell wrapper; all three are the
+ * same number and have to move together.
+ */
+const RAIL = "w-14";
+
+/**
+ * The panel's own width: the rail at rest, wider while hovered or focused.
+ *
+ * SPELLED OUT AS LITERAL CLASS NAMES, NOT COMPOSED — `w-14` is repeated from
+ * RAIL rather than interpolated on purpose. Tailwind's JIT scans source TEXT
+ * for whole class names, so a template literal like `hover:${OPEN}` yields a
+ * class the element asks for at runtime and the stylesheet never defined: the
+ * rail silently refuses to open. That is not hypothetical, it is the bug this
+ * rewrite exists to fix. Anything that reaches `class` appears here verbatim.
+ *
+ * `w-56` (14rem) IS A MEASURED FLOOR, NOT A ROUND NUMBER. The binding string
+ * is the footer's "© 2026 Bousla · Bin Slimah Group": every label here is
+ * `whitespace-nowrap`, so an over-tight panel CLIPS rather than wraps. Measured
+ * across the whole font stack (the `sans` list resolves to SF Pro here, Segoe
+ * UI on Windows, Roboto elsewhere) the widest render is 179px, and 14rem leaves
+ * it 184px. `w-52` was 11px short on this machine alone.
+ *
+ * And `whitespace-nowrap` on the footer has to stay, which is what makes the
+ * width a hard floor: without it that line wraps to ~8 lines at RAIL width and
+ * eats the nav's vertical space while sitting invisible at `opacity-0`.
+ *
+ * `has-[:focus-visible]` AND NOT `focus-within` — this was a real bug. Clicking
+ * a nav link leaves DOM focus sitting on that link, and `:focus-within` is
+ * still true when the pointer walks away, so the panel stayed stuck open until
+ * something else was clicked. `:focus-visible` is the browser's own answer to
+ * "was this focus reached by keyboard": a mouse click does not set it, Tab
+ * does. So the rail still opens for keyboard users, and a click no longer
+ * pins it. There is no `focus-visible-within`, hence `:has()`.
+ *
+ * `:has()` is Chrome 105 / Safari 15.4 / Firefox 121. Where it is missing this
+ * rule is dropped ALONE — `hover:` is a separate rule — so the cost of the
+ * fallback is keyboard-open, never the hover behaviour itself.
+ */
+const PANEL_W = "w-14 hover:w-56 has-[:focus-visible]:w-56";
+
+/**
+ * The leading column of every sidebar row: exactly as wide as the rail's
+ * content box, so whatever sits in it is CENTRED ON THE RAIL for free.
+ *
+ * The alternative was padding arithmetic on each row, which only works while
+ * every glyph is the same size — the B mark is 32px and the nav icons are 16px,
+ * so a single `px-3` cannot centre both. A fixed-width box centres anything.
+ *
+ * `w-10` = 2.5rem = the rail (3.5rem) minus the panel's `px-2` (2 x 0.5rem).
+ * These three numbers move together; changing one alone un-centres the rail.
+ */
+const LEAD = "grid w-10 shrink-0 place-items-center";
+
+/**
+ * Applied to every piece of sidebar text. The text STAYS IN THE DOM — it is
+ * the accessible name of the link it sits in, and removing it would leave a row
+ * of unlabelled icons for a screen reader. It is hidden by opacity and clipped
+ * by the panel's `overflow-hidden`, then revealed by the panel's own hover.
+ *
+ * The focus half is not decoration: it is how the rail opens for a keyboard,
+ * which never produces a hover. It tracks PANEL_W's condition exactly — see
+ * there for why it is `:focus-visible` inside `:has()` rather than
+ * `focus-within`. The two must stay in step: a panel that widens while its
+ * labels stay hidden is worse than either state on its own.
+ */
+const REVEAL =
+  "opacity-0 transition-opacity duration-200 ease-out motion-reduce:transition-none " +
+  "group-hover/nav:opacity-100 group-has-[:focus-visible]/nav:opacity-100";
+
+/**
+ * ONE <Link> WRAPS ICON AND LABEL TOGETHER. That is the requirement in both
+ * states: at rail width the icon is the whole target, and when expanded the
+ * label is part of the same target rather than a second one beside it.
+ *
+ * `title` matters more than usual here — at rest the label is invisible, so the
+ * native tooltip is what identifies an icon to a pointer user who does not wait
+ * for the panel to open.
+ */
+function NavRow({ item, lang, pathname }: {
+  item: NavItem;
+  lang: Lang;
+  pathname: string | null;
+}) {
+  const Icon = item.icon;
+  const label = item.label ?? t(`nav.${item.key}`, lang);
+  const active = item.href === "/" ? pathname === "/" : !!pathname?.startsWith(item.href);
+  return (
+    <Link
+      href={item.href}
+      aria-current={active ? "page" : undefined}
+      title={label}
+      className={cn(
+        "focus-ring flex items-center rounded-lg py-2 text-sm transition-colors [touch-action:manipulation]",
+        active ? "bg-brand-600 text-white shadow-soft" : "hover:bg-black/5 dark:hover:bg-white/5",
+      )}
+    >
+      <span className={LEAD}>
+        <Icon className="h-4 w-4" aria-hidden />
+      </span>
+      <span className={cn("whitespace-nowrap pe-3", REVEAL)}>{label}</span>
+    </Link>
+  );
+}
 
 type AppCtx = { lang: Lang; setLang: (l: Lang) => void; theme: "light" | "dark"; setTheme: (m: "light" | "dark") => void };
 const Ctx = createContext<AppCtx>({ lang: "en", setLang: () => {}, theme: "light", setTheme: () => {} });
@@ -104,26 +221,6 @@ export default function AppShell({
     if (hydrated) localStorage.setItem("theme", theme);
   }, [theme, hydrated]);
 
-  // Measure the control cluster so the centred search bar can reserve the
-  // same width on BOTH sides and therefore never reach it. CSS cannot read a
-  // sibling's width; this is the one measurement in the shell.
-  const headerRef = useRef<HTMLElement>(null);
-  const controlsRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const header = headerRef.current;
-    const controls = controlsRef.current;
-    if (!header || !controls) return;
-    const apply = () => {
-      header.style.setProperty("--hdr-side", `${controls.offsetWidth}px`);
-    };
-    apply();
-    const ro = new ResizeObserver(apply);
-    ro.observe(controls);
-    return () => ro.disconnect();
-    // Re-measures when the cluster's own content changes width — a longer
-    // name, a different language label, the account chip appearing at all.
-  }, [lang, viewer?.name, viewer?.roleLabel, viewer?.email]);
-
   const setLang = (l: Lang) => setLangState(l);
   const setTheme = (m: "light" | "dark") => setThemeState(m);
 
@@ -133,55 +230,177 @@ export default function AppShell({
   return (
     <Ctx.Provider value={{ lang, setLang, theme, setTheme }}>
       <SearchDockProvider>
-        <div className="flex min-h-screen">
-          {/* Sidebar */}
-          <aside className="w-64 shrink-0 border-app border-e p-4 hidden md:flex flex-col" style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}>
-            <div className="flex items-center gap-2 mb-6 px-2">
-              <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 grid place-items-center text-white font-bold">B</div>
-              <div>
-                <div className="font-semibold leading-tight">Bousla</div>
-                <div className="text-[11px] muted leading-tight">Bin Slimah Group · Operations</div>
-              </div>
-            </div>
-            <nav className="flex flex-col gap-1">
-              {NAV.map(item => {
-                const Icon = item.icon;
-                const active = item.href === "/" ? pathname === "/" : pathname?.startsWith(item.href);
-                return (
-                  <Link key={item.href} href={item.href}
-                    className={cn(
-                      "focus-ring flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                      active ? "bg-brand-600 text-white shadow-soft" : "hover:bg-black/5 dark:hover:bg-white/5"
-                    )}>
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span>{item.label ?? t(`nav.${item.key}`, lang)}</span>
-                  </Link>
-                );
-              })}
-            </nav>
-            {/*
-              Settings sits BELOW the page buttons and is deliberately NOT one
-              of them: NAV items are routes, this opens a dialog. It gets a
-              hairline above it and a quieter resting state so the nav reads as
-              "places to go" and this reads as "a thing to open" — same row
-              rhythm, different weight, no active-route highlight it can never
-              earn.
-            */}
-            <div className="mt-3 border-t pt-3" style={{ borderColor: "rgb(var(--border))" }}>
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(true)}
-                aria-haspopup="dialog"
-                className="focus-ring flex w-full items-center gap-3 rounded-lg px-3 py-2 text-start text-sm transition-colors hover:bg-black/5 dark:hover:bg-white/5"
-              >
-                <Settings className="h-4 w-4 shrink-0" aria-hidden />
-                <span>{lang === "ar" ? "الإعدادات" : "Settings"}</span>
-              </button>
-            </div>
+        {/*
+          --app-sidebar-w is published for page chrome that has to clear the
+          sidebar: the dashboard's bottom fade insets by it, and the search
+          bar's hero width subtracts it to stay inside the content column.
 
-            <div className="mt-auto pt-4 text-[11px] muted px-2">
-              <div>v0.1 · MVP</div>
-              <div>© 2026 Bousla · Bin Slimah Group</div>
+          It tracks the FOOTPRINT, which is the RAIL and never changes — a
+          hover-expanded panel overlays the page, it does not push it. So the
+          page's chrome never has to animate along with the sidebar.
+
+          IT IS A CLASS, NOT AN INLINE STYLE, for one reason: the sidebar is
+          `hidden md:block`, so below md the correct value is 0. An inline
+          style cannot be made responsive; an arbitrary-property utility can.
+        */}
+        <div className="flex min-h-screen [--app-sidebar-w:0rem] md:[--app-sidebar-w:3.5rem]">
+          {/*
+            TWO ELEMENTS, ONE SIDEBAR — and the split is the whole trick.
+
+            <aside> is the FOOTPRINT: an ordinary flex child that reserves
+            space in the row. The panel inside it is `fixed`, so it stays put
+            while the page scrolls, and — because it is out of flow — it can
+            grow past the footprint on hover WITHOUT reflowing main. One
+            element could not do both.
+
+            `start-0` rather than `left-0` puts it on the correct edge in
+            Arabic with no second rule. `data-app-chrome` is what globals.css's
+            print block hides; it used to key off `aside.w-64`, which made the
+            width a load-bearing magic number.
+          */}
+          <aside
+            data-app-chrome="sidebar"
+            className={cn("hidden md:block shrink-0", RAIL)}
+          >
+            <div
+              // WIDTH COMES FROM CLASSES, NEVER INLINE STYLE. An inline width
+              // would outrank the `hover:` variant on specificity and the rail
+              // would never open.
+              //
+              // THE SURFACE IS GLASS, NOT `--card`, AND THAT FOLLOWS FROM THE
+              // GEOMETRY ABOVE. This panel is `fixed`: opening it does not
+              // widen the footprint, it lays 168px over whatever page is
+              // showing. An opaque panel makes that a wall — the thing Turki
+              // reported as the left of the page being covered.
+              //
+              // `.glass-rail`, NOT `.glass-chrome`. The rail wore the top
+              // bar's recipe first and rendered as no glass at all: that one
+              // paints `--bg` at 0.72, and over the page — which IS `--bg` —
+              // every alpha of X over X is X. globals.css carries the
+              // arithmetic. The rail's surface, edge and open-state elevation
+              // are all specific to here.
+              //
+              // `shadow-rail` REPEATS PANEL_W's CONDITION and has to keep
+              // repeating it. Width, labels and elevation are three properties
+              // answering one question — "is the rail open" — and a panel that
+              // widens without lifting reads as a bug. Written literally for
+              // the JIT-scanning reason PANEL_W documents at length.
+              className={cn(
+                "group/nav fixed inset-y-0 start-0 z-40 flex flex-col overflow-hidden px-2 py-3",
+                "glass-rail rail-edge",
+                "transition-[width,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+                "hover:shadow-rail has-[:focus-visible]:shadow-rail",
+                PANEL_W,
+              )}
+            >
+              {/*
+                The B mark is the one thing that never hides — it is the rail's
+                only fixed landmark. It sits in the same LEAD column as every
+                nav icon, so the mark and the icons share one centre line down
+                the rail rather than each being centred by its own padding.
+              */}
+              <div className="mb-4 flex items-center">
+                <span className={LEAD}>
+                  {/* translate="no" — the mark is a logo that happens to be a
+                      glyph, not a word. Browser/extension translation into
+                      Arabic will transliterate a bare Latin letter otherwise. */}
+                  <span translate="no" className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 font-bold text-white">B</span>
+                </span>
+                {/* translate="no" on the WRAPPER, inherited by both lines —
+                    "Bousla" and "Bin Slimah Group" are proper nouns. This app
+                    ships EN and AR, so a page-translate pass is a realistic
+                    thing to happen to it, and it would rewrite the company's
+                    own name. One attribute here beats one per line. */}
+                <div translate="no" className={cn("min-w-0 flex-1 pe-3", REVEAL)}>
+                  <div className="font-semibold leading-tight whitespace-nowrap">Bousla</div>
+                  {/* rail-muted, not muted — see globals.css. `.muted` is
+                      measured against a card; this text sits on glass over
+                      whatever the page is showing, and fails AA there. */}
+                  <div className="text-[11px] rail-muted leading-tight whitespace-nowrap">Bin Slimah Group · FM</div>
+                </div>
+              </div>
+
+              {/* overflow-x-hidden matters: `overflow-y-auto` promotes the x
+                  axis to `auto` too, and the collapsed rail's labels are wider
+                  than the rail — without it they raise a scrollbar.
+
+                  overscroll-contain: this scroller now sits inside a FIXED
+                  overlay, so hitting its top or bottom would otherwise chain
+                  the wheel through to the page behind the glass — the content
+                  visibly scrolls out from under a rail the pointer never left.
+                  Costs nothing when the nav is short enough not to scroll. */}
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-thin">
+                <nav className="flex flex-col gap-1">
+                  {NAV.filter(n => n.group === "main").map(item => (
+                    <NavRow key={item.href} item={item} lang={lang} pathname={pathname} />
+                  ))}
+                </nav>
+
+                {/*
+                  The deferred trio, fenced off. The heading KEEPS ITS BOX at
+                  rest and only its TEXT fades, so opening the panel does not
+                  shuffle every row below it — the rows must not move
+                  vertically while the width animates, or the icon the pointer
+                  is aimed at slides out from under it. The hairline alone
+                  marks the group at rail width.
+                */}
+                <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--rail-hairline)" }}>
+                  <div className={cn(
+                    "px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide rail-muted whitespace-nowrap",
+                    REVEAL,
+                  )}>
+                    {lang === "ar" ? "قريبًا" : "Coming Soon"}
+                  </div>
+                  <nav className="flex flex-col gap-1">
+                    {NAV.filter(n => n.group === "soon").map(item => (
+                      <NavRow key={item.href} item={item} lang={lang} pathname={pathname} />
+                    ))}
+                  </nav>
+                </div>
+              </div>
+
+              {/*
+                Settings sits BELOW the page buttons and is deliberately NOT one
+                of them: NAV items are routes, this opens a dialog. It gets a
+                hairline above it and a quieter resting state so the nav reads as
+                "places to go" and this reads as "a thing to open" — same row
+                rhythm, different weight, no active-route highlight it can never
+                earn. The footer sits under it, so the order down the block is
+                hairline → Settings → footer.
+              */}
+              <div className="mt-auto">
+                {/* Same one colour as the rail's outer edge — see
+                    --rail-hairline in globals.css for why it is a token. */}
+                <div className="border-t pt-2" style={{ borderColor: "var(--rail-hairline)" }}>
+                  {/* Row geometry is NavRow's, to the class: same LEAD column,
+                      same py-2, same pe-3 on the label. It is a <button> and
+                      they are <Link>s, but on the rail all the user sees is a
+                      column of icons — one of them sitting 3px off the shared
+                      centre line would read as a mistake. */}
+                  <button
+                    type="button"
+                    onClick={() => setSettingsOpen(true)}
+                    aria-haspopup="dialog"
+                    title={lang === "ar" ? "الإعدادات" : "Settings"}
+                    className="focus-ring flex w-full items-center rounded-lg py-2 text-start text-sm transition-colors [touch-action:manipulation] hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    <span className={LEAD}>
+                      <Settings className="h-4 w-4" aria-hidden />
+                    </span>
+                    <span className={cn("whitespace-nowrap pe-3", REVEAL)}>
+                      {lang === "ar" ? "الإعدادات" : "Settings"}
+                    </span>
+                  </button>
+                </div>
+
+                {/* translate="no" for the same reason as the header block —
+                    the version line rides along, but "v0.1 · MVP" has nothing
+                    to translate, so scoping it tighter would only add markup. */}
+                <div translate="no" className={cn("px-3 pt-3 text-[11px] rail-muted whitespace-nowrap", REVEAL)}>
+                  <div>v0.1 · MVP</div>
+                  <div>© 2026 Bousla · Bin Slimah Group</div>
+                </div>
+              </div>
             </div>
           </aside>
 
@@ -201,90 +420,65 @@ export default function AppShell({
                  intro translates the search bar DOWN out of this header into
                  page centre. Clipping it would erase the whole interaction.
 
-              3. The search is centred by ABSOLUTE POSITIONING on the header,
-                 not by a grid column.
+              3. THE SEARCH IS A PLAIN FLEX CHILD AT THE HEADER'S START, AND
+                 THAT IS WHAT KILLED THE ONE JS MEASUREMENT IN THE SHELL.
 
-                 The first version used `grid-cols-[1fr_auto_1fr]` with the
-                 search in the middle column, on the reasoning that a grid
-                 "makes centre mean centre". IT DOES NOT. `1fr` is shorthand
-                 for `minmax(auto, 1fr)`, and that `auto` minimum is
-                 MIN-CONTENT — so the right column refuses to shrink below the
-                 width of the control cluster (bell + language + theme + the
-                 account pill with a full email in it), while the left column
-                 is empty and collapses. The two side tracks end up wildly
-                 unequal and the middle column is pushed left. Turki caught it
-                 on screen: the bar sat ~190px left of true centre.
+                 It used to be centred, which is genuinely hard: a
+                 `grid-cols-[1fr_auto_1fr]` version sat ~190px left of true
+                 centre, because `1fr` means `minmax(auto, 1fr)` and that
+                 `auto` minimum is MIN-CONTENT — the control-cluster track
+                 refused to shrink while the empty track collapsed. The fix at
+                 the time was to absolutely centre the bar on the header and
+                 reserve `2 x cluster width` so it could never reach the
+                 controls, which meant measuring the cluster with a
+                 ResizeObserver and publishing `--hdr-side`.
 
-                 `minmax(0, 1fr)` would fix the tracks but then squeezes the
-                 controls instead. Absolute centring sidesteps both: the bar is
-                 centred on the header box (which IS the content area), and the
-                 side clusters can be any width at all without moving it.
+                 START-ALIGNED, none of that exists. The bar takes the free
+                 space (`flex-1`), the cluster refuses to give any up
+                 (`shrink-0`), and flexbox does the arithmetic. No overlay, no
+                 observer, no reserved gutters — and no `--hdr-side`.
 
-                 The overlay is pointer-events-none so it cannot swallow clicks
-                 meant for the controls behind it; the bar itself re-enables
-                 pointer events on its own footprint.
+                 `md:px-6` matches <main>'s md:p-6 so the docked bar lines up
+                 exactly under the page title it sits below, which is the whole
+                 point of moving it here.
             */}
             <header
-              ref={headerRef}
               // GLOSSY, BORDERLESS. The hairline under the header is gone and
               // the surface is translucent with a backdrop blur, so page
               // content dissolves under it instead of stopping at a rule.
-              // -webkit- prefix included: Safari still needs it.
-              className="h-14 sticky top-0 z-30 relative flex items-center justify-end gap-2 px-4 overflow-visible"
-              style={{
-                background: "rgb(var(--bg) / 0.72)",
-                backdropFilter: "blur(14px) saturate(180%)",
-                WebkitBackdropFilter: "blur(14px) saturate(180%)",
-              }}
+              //
+              // The three numbers used to be typed here inline. They are
+              // `.glass-chrome` in globals.css now, unchanged to the value —
+              // the sidebar rail needs the same surface, and the moment the
+              // same recipe exists in two places by hand one of them is
+              // eventually edited alone. This also picks up the no-backdrop-
+              // filter fallback that the inline version never had.
+              className="glass-chrome h-14 sticky top-0 z-30 relative flex items-center gap-3 px-4 md:px-6 overflow-visible"
             >
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-14 flex items-center justify-center px-4">
-                {/*
-                  DOCKED FOOTPRINT only — the search inside is absolutely
-                  positioned, so growing to hero size reflows nothing.
+              {/*
+                DOCKED FOOTPRINT only — the search inside is absolutely
+                positioned, so growing to hero size reflows nothing.
 
-                  WIDTH IS CAPPED SO THE BAR CAN NEVER REACH THE CONTROLS.
-                  Centring alone was not enough: the bar is centred on the
-                  header, but the control cluster lives at one end, so a bar
-                  wide enough to look right at 1600px was overlapping the bell
-                  and the language button at narrower widths — and the new
-                  account chip (avatar + name + role) made the cluster much
-                  wider still.
-
-                  True centring requires reserving the SAME space on both
-                  sides, and only the right side has content — so the cap is
-                  `100% - 2 x (cluster width) - gutter`. CSS cannot read a
-                  sibling's width, so the cluster is measured once and
-                  published as --hdr-side (see the effect above). This is the
-                  one place JS measurement earns its keep; everything else
-                  here is plain layout.
-                */}
-                <div
-                  className="pointer-events-auto relative h-9"
-                  style={{
-                    // max() is a FLOOR, and it is load-bearing: at 1024px the
-                    // reservation `100% - 2 x cluster - gutter` goes NEGATIVE
-                    // and the bar collapsed to zero width — it vanished
-                    // entirely. Measured, not theorised. The floor keeps it
-                    // usable; the account chip's text yields first (see its
-                    // xl: breakpoint) so the cluster shrinks before this ever
-                    // binds on a normal desktop.
-                    width:
-                      "max(11rem, min(30rem, calc(100% - 2 * var(--hdr-side, 12rem) - 2rem)))",
-                  }}
-                >
-                  {/* searchRecords is a server action (lib/actions/search.ts).
-                      Passing it down means the record query runs on the
-                      server under the caller's own session, so RLS decides
-                      what comes back — the browser never gets a row it was
-                      not already allowed to read. */}
-                  <GlobalSearch lang={lang} searchRecords={searchRecords} />
-                </div>
+                `min-w-[8rem]` does two jobs. A flex item's default min-width
+                is `auto` — min-content — which on a phone refuses to shrink
+                and shoves the controls off the edge; ANY explicit min-width
+                lifts that. 8rem rather than 0 because a search box narrower
+                than that is not typeable. The cap stops it running the full
+                width of an ultrawide.
+              */}
+              <div className="relative h-9 flex-1 min-w-[8rem] max-w-[34rem]">
+                {/* searchRecords is a server action (lib/actions/search.ts).
+                    Passing it down means the record query runs on the
+                    server under the caller's own session, so RLS decides
+                    what comes back — the browser never gets a row it was
+                    not already allowed to read. */}
+                <GlobalSearch lang={lang} searchRecords={searchRecords} />
               </div>
 
               {/* z-20 keeps the controls above the CLOSED search bar (z-0) and
                   below its OPEN panel (z-40), so an overlap can never make a
                   control unclickable while the panel still layers correctly. */}
-              <div ref={controlsRef} className="relative z-20 flex items-center justify-end gap-2">
+              <div className="relative z-20 ms-auto flex shrink-0 items-center justify-end gap-2">
                 <NotificationsMenu lang={lang} />
 
                 <button onClick={() => setLang(lang === "en" ? "ar" : "en")}

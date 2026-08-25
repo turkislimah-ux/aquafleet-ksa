@@ -21,6 +21,16 @@ import {
 } from "lucide-react";
 import { NAV_HREFS, type NavHref } from "@/lib/routes";
 
+/**
+ * Which block of the sidebar an entry renders in. "soon" is the deferred trio
+ * (Route Optimization, Predictive AI, IoT Monitoring) — the three pages listed
+ * as deliberately deferred in CLAUDE.md's Deferred line. They stay routable and
+ * stay in NAV_HREFS: the pages render, they are just grouped under a heading
+ * that says so, rather than sitting in the main list implying parity with
+ * Trips or Reports.
+ */
+export type NavGroup = "main" | "soon";
+
 export type NavItem = {
   /**
    * Typed NavHref, not string — so a nav entry pointing at a route missing from
@@ -33,21 +43,27 @@ export type NavItem = {
   /** Overrides the i18n lookup when set. */
   label?: string;
   icon: LucideIcon;
+  group: NavGroup;
 };
 
+// ARRAY ORDER IS RENDER ORDER, including across the group split — the deferred
+// trio sits at the end here because it sits at the end on screen. `group` is
+// not a sort key: the sidebar filters into two blocks and each keeps this
+// order, so moving a line here is the whole edit.
 export const NAV: NavItem[] = [
-  { href: "/", key: "dashboard", icon: LayoutDashboard },
-  { href: "/fleet", key: "fleet", icon: TruckIcon },
-  { href: "/drivers", key: "drivers", icon: Users },
-  { href: "/trips", key: "trips", icon: Route },
-  { href: "/routes", key: "routes", icon: MapPin },
-  { href: "/maintenance", key: "maintenance", icon: Wrench },
-  { href: "/predictive", key: "predictive", icon: Brain },
-  { href: "/iot", key: "iot", icon: Activity },
-  { href: "/inventory", key: "inventory", icon: Boxes },
-  { href: "/consumption", key: "consumption", icon: PackageMinus },
-  { href: "/reports", key: "reports", icon: FileBarChart },
-  { href: "/archive", key: "archive", icon: Archive },
+  { href: "/", key: "dashboard", icon: LayoutDashboard, group: "main" },
+  { href: "/fleet", key: "fleet", icon: TruckIcon, group: "main" },
+  { href: "/drivers", key: "drivers", icon: Users, group: "main" },
+  { href: "/trips", key: "trips", icon: Route, group: "main" },
+  { href: "/maintenance", key: "maintenance", icon: Wrench, group: "main" },
+  { href: "/inventory", key: "inventory", icon: Boxes, group: "main" },
+  { href: "/consumption", key: "consumption", icon: PackageMinus, group: "main" },
+  { href: "/reports", key: "reports", icon: FileBarChart, group: "main" },
+  { href: "/archive", key: "archive", icon: Archive, group: "main" },
+
+  { href: "/routes", key: "routes", icon: MapPin, group: "soon" },
+  { href: "/predictive", key: "predictive", icon: Brain, group: "soon" },
+  { href: "/iot", key: "iot", icon: Activity, group: "soon" },
 ];
 
 // ---------------------------------------------------------------------------

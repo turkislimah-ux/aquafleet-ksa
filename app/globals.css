@@ -9,6 +9,16 @@
   --muted: 100 116 139;
   --border: 226 232 240;
   --accent: 11 126 234;
+
+  /* The app chrome's glass — see .glass-chrome below for what uses it and why.
+     DELIBERATELY NOT OVERRIDDEN IN .dark: the top bar has shipped at 0.72 in
+     both themes and is signed off, so a dark-only alpha here would be a silent
+     restyle of an approved surface riding along with a sidebar change. If dark
+     glass wants its own number that is its own decision, made on purpose. */
+  --chrome-alpha: 0.72;
+  --chrome-blur: 14px;
+  --chrome-sat: 180%;
+
   /* Themes what the BROWSER paints, not only what we paint: scrollbars,
      <select> popups, date pickers, number spinners, autofill, the caret.
      Without it this app's dark mode stopped at its own components and every
@@ -67,6 +77,16 @@ body {
 [dir="rtl"] .ltr-only { display: none; }
 [dir="ltr"] .rtl-only { display: none; }
 
+/* Sign of the physical x-axis relative to the WRITING direction, for the one
+   place that needs it: the dashboard search bar slides from centre-of-column
+   to the header's start, and `translateX` is physical while `start` is not.
+   Under RTL the start edge is the right one, so the same journey runs the
+   other way along x. Everything else here uses logical properties and never
+   needs this. Selector is `html[dir=…]` (0,1,1) over `html` (0,0,1) so the
+   override is unambiguous — AppShell writes dir onto <html>. */
+html { --dock-dir: 1; }
+html[dir="rtl"] { --dock-dir: -1; }
+
 .card {
   background-color: rgb(var(--card));
   border: 1px solid rgb(var(--border));
@@ -76,6 +96,212 @@ body {
 
 .muted { color: rgb(var(--muted)); }
 .border-app { border-color: rgb(var(--border)); }
+
+/* ---- Chrome glass -------------------------------------------------------
+   `.card` is the OTHER surface layer and the two are not interchangeable:
+   card is opaque and owns its space, glass floats over content that is still
+   there underneath. preview/app.css states that split in its own header
+   ("solid (--card) for opaque blocks, glass for floating surfaces over the
+   ambient background"), and the sidebar changed category when it became a
+   `fixed` panel — it just kept `--card`'s opaque background afterwards.
+
+   TWO RECIPES, NOT ONE — and the first attempt here got that wrong. This
+   class was written to serve the top bar AND the rail, on the reasoning that
+   one shared surface cannot drift. preview/app.css does not agree: it styles
+   the topbar and the sidebar as two separate rules with different alpha,
+   different blur, and a gradient on only one of them (see `aside.w-64`,
+   "slightly translucent with inner highlight"). It is right and the shared
+   class was wrong, because the two surfaces have different jobs — see
+   .glass-rail below.
+
+   ORDER MATTERS in the filter list: saturate-then-blur and blur-then-saturate
+   are different images. This is the header's order. -webkit- stays: Safari
+   still ships backdrop-filter prefixed only. */
+.glass-chrome {
+  background: rgb(var(--bg) / var(--chrome-alpha));
+  -webkit-backdrop-filter: blur(var(--chrome-blur)) saturate(var(--chrome-sat));
+  backdrop-filter: blur(var(--chrome-blur)) saturate(var(--chrome-sat));
+}
+
+/* ---- Rail glass ---------------------------------------------------------
+   WHY THIS IS NOT `.glass-chrome`, stated as arithmetic rather than taste.
+
+   `.glass-chrome` paints `--bg` at 0.72. In light mode `--bg` is 248 250 252
+   — the page background itself. Composited over the page that is
+   0.72x248 + 0.28x248 = 248: the pane comes out PIXEL-IDENTICAL to what is
+   behind it. The glass was never broken; it was invisible by construction,
+   and no alpha value fixes it because every alpha of X over X is X.
+
+   That is fine for the TOP BAR, whose backdrop is scrolling page content —
+   cards, chips, tables — so there is always something to be seen through it.
+   It is fatal for the RAIL, which at rest is 56px sitting over nothing but
+   empty page margin. Same recipe, opposite outcome, because the two surfaces
+   cover different things.
+
+   SO THE PANE MUST DIFFER IN VALUE FROM EVERYTHING IT COVERS — and "the
+   page" is not the only thing it covers. Taking preview's `--glass-bg`
+   literally (255 255 255 light / 18 25 39 dark) fixed the page case and
+   walked straight into the same trap one surface over: white glass over a
+   white `--card` measured a delta of ZERO, and dark glass over `--card`
+   (17 24 39) measured ONE. The rail vanished into any card it overlapped.
+
+   The tint therefore moves AWAY from the content, not toward it: slate-200
+   in light, slate-800 in dark. Both sit clear of `--bg` AND `--card` in their
+   own theme, which is the only way a translucent pane stays a pane on a
+   palette this close to monochrome. This is what the macOS/iOS sidebar does
+   — a cool grey frosted column against white content — and it is a departure
+   from preview's literal value for a reason preview never had to face: its
+   sidebar is opaque enough at 0.92 that the question never arose.
+
+   THE GRADIENT IS THE "INNER HIGHLIGHT" from preview's sidebar comment, and
+   it is load-bearing, not decoration: a flat translucent panel over a flat
+   background is a flat rectangle no matter how correct its blur. A vertical
+   falloff reads as a surface catching light, which is what sells the
+   material on the many pages whose left edge has no content to transmit.
+   180deg is vertical, so unlike a horizontal one it needs no RTL mirror.
+
+   ALPHAS ARE BELOW PREVIEW'S 0.92 -> 0.82, deliberately. preview's sidebar is
+   `w-64`, permanently open and IN FLOW — it reserves its own column and
+   covers nothing, so it can afford to be nearly opaque. This rail is a fixed
+   overlay that lays 168px over live page content on hover, which is the
+   condition Turki described as the left of the page being covered. Preview's
+   recipe, our geometry's numbers.
+
+   THE ONLY REAL TRADE IS SEE-THROUGH AGAINST "STILL READS AS A PANE", and two
+   earlier passes here got that wrong by inventing a third constraint.
+
+   AA WAS NEVER THE BINDING GATE. It looked like one because the probe measured
+   `.rail-muted` over #8b5cf6 painted as a 900px-wide band across the rail's
+   whole footer. That colour is real — and it is a 24x24px sparkle icon inside
+   a dashboard card, smaller than one line of the text it was supposedly
+   ruining. Measured over the surfaces the rail actually sits on, `--bg` and
+   `--card`, the footer ink holds 9.3:1 light and 12.4:1 dark at the alphas
+   below; even that chip stays above 5:1. A fabricated worst case set an alpha
+   floor of 0.50 and cost two rounds of the transparency that was asked for.
+
+   NO brightness() IN THE FILTER, and the reason is a rule not a preference.
+   It was added to buy contrast back against that fake floor: brightness(>1)
+   lifts the backdrop toward white before the tint lands, which does raise
+   contrast. It also washes everything behind the glass out, so the rail read
+   as a bright SOLID panel — the exact opposite of the request. The gate meant
+   to catch that scored it as a pass, because it measured whether two different
+   backdrops produce different pane colours (they do, even when both are washed
+   to near-white) rather than whether anything behind stays recognisable.
+
+   SO SEE-THROUGH IS MEASURED AS EDGE PRESERVATION: put a hard dark/light edge
+   behind the pane, read the step across it through the glass, divide by the
+   same step with no pane. 1.00 is clear glass, 0.00 is opaque. That number
+   corresponds to "the left of the page is not covered" and is the one to
+   maximise. It is 0.48 at 0.56/0.50 and 0.73 at the values below — the pane
+   passes through half again as much of what is behind it.
+
+   Light 0.32/0.26: see-through 0.73, footer ink 9.35:1 over page and 9.73:1
+   over card, pane-vs-page delta 9, pane-vs-card 9.
+   Dark 0.32/0.26: 0.76, 12.38:1 / 11.35:1, deltas 14 and 10. */
+:root {
+  --rail-glass: 226 232 240;
+  --rail-alpha-top: 0.32;
+  --rail-alpha-bottom: 0.26;
+  --rail-solid: 241 244 248;
+}
+.dark {
+  --rail-glass: 30 41 59;
+  --rail-alpha-top: 0.32;
+  --rail-alpha-bottom: 0.26;
+  --rail-solid: 15 21 34;
+}
+
+.glass-rail {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--rail-glass) / var(--rail-alpha-top)),
+    rgb(var(--rail-glass) / var(--rail-alpha-bottom))
+  );
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+}
+
+/* Without backdrop-filter the alphas above are not a frosted pane, they are a
+   sheet of tracing paper: page content reads THROUGH the chrome at full
+   detail and every label on it becomes unreadable. So the fallback is not a
+   lesser blur, it is no transparency at all. Covers ~3% of browsers and, as a
+   side effect, the header — which has been shipping this alpha with no
+   fallback of its own.
+
+   IT PAINTS `--rail-solid`, NOT `--rail-glass`. The tint is now a long way
+   from the content on purpose (slate-300 / slate-600), and at 0.32 alpha it is
+   never seen at anything near full strength — so painting it opaque would show
+   a colour the rail does not actually have. In dark mode that is not a subtle
+   miss: raw slate-600 is a light grey column where a dark one belongs.
+   `--rail-solid` is instead the tint AS COMPOSITED over the page — the value
+   the glass resolves to where it spends most of its length — so the fallback
+   looks like the same rail with the transparency switched off, which is what a
+   fallback is for. */
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .glass-chrome { background: rgb(var(--bg)); }
+  .glass-rail { background: rgb(var(--rail-solid)); }
+}
+
+/* Every rule drawn on the rail — its outer edge and the two dividers inside
+   it — is this one colour. A hairline at full `--border` strength reads as
+   drawn ON the glass instead of in it, so all three are softened, and they are
+   softened by ONE definition because three hand-matched alphas is three
+   chances to update two of them.
+
+   NOT preview's glass border. That one is white at 55% — a light catch, which
+   works on a modal because a modal sits over a DIMMED backdrop. This rail sits
+   over an undimmed near-white page, where white-on-white is no edge at all,
+   and a floating panel whose boundary you cannot find is worse than an opaque
+   one. So light mode keeps the app's own hairline, quietened. Dark mode DOES
+   take the light catch: there the surface is darker than what it covers, and a
+   bright edge is what separates them. */
+:root { --rail-hairline: rgb(var(--border) / 0.6); }
+.dark { --rail-hairline: rgb(255 255 255 / 0.06); }
+
+/* Logical property, so the edge lands on the right side in Arabic with no
+   second rule. Shorthand rather than a Tailwind `border-e` plus a colour:
+   preflight zeroes border-width globally, so the width has to come from
+   somewhere, and one declaration owning both is harder to half-remove. */
+.rail-edge { border-inline-end: 1px solid var(--rail-hairline); }
+
+/* Secondary text ON THE RAIL — the tagline, "Coming Soon", the footer. One
+   step further from the background than `.muted` is everywhere else, and the
+   difference is not taste.
+
+   `.muted` is tuned against a KNOWN surface: a white card, where it measures
+   4.55:1 and clears AA with almost nothing to spare. The rail's surface is not
+   known — it is whatever the page happens to be showing through the glass.
+   Measured off screenshots of the composited pane, `.muted` lands at 2.58:1
+   over a brand-600 block in light mode and 3.81:1 in dark. That is a fail, and
+   it is a fail introduced by making the panel see-through.
+
+   RAISING THE ALPHA CANNOT FIX IT without giving back the transparency that
+   is the entire point of the change. The two are only compatible if the TEXT
+   moves, so the text moves — down the same slate ramp the token already sits
+   on. Light is slate-700 rather than slate-600 because the gradient's BOTTOM
+   is its most transparent point and the footer line lives exactly there: at
+   slate-600, and at the higher alpha the rail then carried, that corner
+   measured 4.11:1 — an AA fail by a margin too small to eyeball, and the
+   reason this is a measured number and not a chosen one.
+
+   THIS TOKEN IS ALSO WHAT SETS THE ALPHA FLOOR ABOVE, so the two are one
+   decision read from either end. slate-700 is the darkest step that still
+   reads as SECONDARY against `--fg`; going to slate-800 would buy roughly
+   0.04 more transparency and spend the hierarchy to get it, which is the
+   wrong trade — a footer that competes with the nav labels is a worse bug
+   than a rail 4% more opaque. So the ink holds here.
+
+   IT IS ALSO NOT THE THING LIMITING TRANSPARENCY, which one pass here assumed
+   and built a whole brightness remap around. Over `--bg` and `--card` — the
+   surfaces the rail is actually on — this ink measures 9.35:1 and 9.73:1
+   light, 12.38:1 and 11.35:1 dark, at the lowest alphas the pane can carry.
+   It has room to spare. See the alpha block above for how a fabricated
+   backdrop made it look otherwise.
+
+   Primary text never needed this either — `--fg` has even more headroom. */
+:root { --rail-muted: 51 65 85; }
+.dark { --rail-muted: 203 213 225; }
+.rail-muted { color: rgb(var(--rail-muted)); }
 
 /* Trip-highlight ring: outline, not a Tailwind ring — .card's box-shadow
    below always overwrote a ring's box-shadow (same specificity, later rule). */
@@ -179,10 +405,18 @@ body {
      hides the sidebar and topbar but KEEPS THEIR LAYOUT, so the statement
      stayed indented by the 256px sidebar and overflowed the right edge of
      the sheet. They have to leave the flow entirely, not just turn
-     invisible. Selectors are pinned to the shell's own unique classes —
+     invisible. Selectors are pinned to something UNIQUE TO THE SHELL —
      `header.h-14` rather than `header`, because every statement renders its
-     own <header>, and a blanket rule would delete each statement's title. */
-  aside.w-64 { display: none !important; }
+     own <header>, and a blanket rule would delete each statement's title.
+
+     The sidebar hook is a data attribute, not `aside.w-64`. It was that class
+     until the sidebar became a hover-expanding rail — at which point `w-64`
+     stopped existing, this rule silently stopped matching, and printing lost
+     its only guard with nothing in git to signal it. An attribute cannot
+     drift with the design, which is the point of using one. (256px above is
+     what the sidebar measured when the clipping bug was found; the footprint
+     is 56px now. That number is history, not a value to keep in sync.) */
+  aside[data-app-chrome="sidebar"] { display: none !important; }
   header.h-14 { display: none !important; }
   main { padding: 0 !important; margin: 0 !important; }
 

@@ -63,6 +63,22 @@ const config: Config = {
       },
       boxShadow: {
         soft: "0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06)",
+        // The sidebar rail's elevation WHILE IT IS OPEN — pairs with the
+        // hover/focus condition carried in AppShell's PANEL_W. At rest the
+        // rail sits inside its own reserved footprint and covers nothing, so
+        // it casts nothing; expanded it floats over the page, and a
+        // translucent panel with no lift reads as a film stuck to the page
+        // rather than a layer above it.
+        //
+        // NO X OFFSET, on purpose. A rail-shaped shadow "wants" to cast
+        // toward the content it covers, but that direction flips under RTL
+        // and a box-shadow cannot follow `dir`. Cast evenly and the only
+        // visible side is the inner one anyway — the other is off-viewport.
+        //
+        // One value for both themes: black on a dark background is close to a
+        // no-op, which is why .rail-edge in globals.css hands dark mode a
+        // bright border instead. There the edge carries the separation.
+        rail: "0 0 44px -8px rgb(15 23 42 / 0.30)",
       },
     },
   },
