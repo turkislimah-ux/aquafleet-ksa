@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `cb76319`** — read that back from the BRANCH line of `git status -sb`, never the tree line. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
+# SESSION HANDOFF — closes at THE `divide-y` DARK-MODE FIX (`42cb69a`), after WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `42cb69a`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has been wrong twice already. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
 
 # PREVIOUS HEADER — the UI polish pass, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
@@ -9,7 +9,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `41ea251`, not recalled
+## CURRENT STATE — MEASURED at `42cb69a`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
@@ -127,16 +127,19 @@ pipeline's status is its LAST command. Re-run as `cd <repo> && ./node_modules/.b
 pointed at the tooling instead of at a figure: the check that confirms the other
 checks can itself be the thing that is broken.
 
-    HEAD              cb76319 (this file's own commit, on top of the delete commit
-                      41ea251; the correction commit that fixes THIS block follows)
+    HEAD              42cb69a (the divide-y dark-mode fix; see its section below.
+                      Above 41ea251 sit cb76319, 16d9864, ef64630 — all handoff)
     branch main   IN SYNC with origin — READ BACK from the BRANCH line of
                       `git status -sb`, which reads `## main...origin/main` with no
-                      ahead/behind. a2a4c7e + ed2c1f0 + 41ea251 + cb76319 all pushed
-                      (`9092254..cb76319`). This block SAID "AHEAD 3, NOT PUSHED"
-                      after the push made that false — written true, stale within
-                      the same session. That is the drift this file exists to catch,
-                      and it caught it against itself: re-measure the line, never
-                      re-read the sentence.
+                      ahead/behind. Seven commits pushed this session: a2a4c7e,
+                      ed2c1f0, 41ea251, cb76319, 16d9864, ef64630, 42cb69a.
+                      THIS BLOCK HAS NOW BEEN STALE TWICE IN ONE SESSION. It said
+                      "AHEAD 3, NOT PUSHED" after a push made that false, was
+                      corrected to name cb76319 as the tip, and three more commits
+                      made THAT false too. Both times it was written true. A push-
+                      state line does not go wrong by being careless — it goes wrong
+                      by being correct and then waiting. Re-measure it, never re-read
+                      it, and do not trust the commit hash in this block on sight.
     migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
                       — a TIMESTAMP version, not "0167"; see the 0167 section below)
@@ -288,6 +291,69 @@ Park` — carries `status='active'` AND a non-null `archived_at`. Daily Trips sh
 in a concrete place: archive is a PRE-FILTER, never a state, so `status` alone is
 never the whole test. Any report that counts projects filters on `archived_at is
 null` as well, and anything showing 8 has dropped the pre-filter.
+
+---
+
+## SHIPPED — `divide-y` SEPARATORS FIXED IN DARK MODE (`42cb69a`). CSS ONLY.
+
+Five files, seven sites, +10/−8. No schema, no behaviour, no new dependency.
+Browser-verified by Turki in dark mode before it landed.
+
+**THE RULE, WHICH IS THE ONLY PART OF THIS WORTH CARRYING FORWARD:**
+
+> **`divide-*` NEEDS ITS OWN COLOUR CLASS. `border-color` IS NOT INHERITED, SO AN
+> INLINE `borderColor` ON THE CONTAINER REACHES THE CONTAINER'S FRAME AND NOTHING
+> ELSE.** Write `divide-y divide-[rgb(var(--border))]`, never `divide-y` alone.
+
+Seven panels had `divide-y` beside `style={{ borderColor: "rgb(var(--border))" }}`
+on the container, which looks like it colours the row rules and does not. The
+child separators stayed at Tailwind's preflight default. Measured in the built
+CSS rather than reasoned about:
+
+    *,::before,::after { border-width:0; border-style:solid; border-color:#e5e7eb }
+
+**IT WAS INVISIBLE FOR A REASON, AND THE REASON IS WHY IT SURVIVED SEVEN
+WRITINGS.** In light mode `--border` is `226 232 240` (#e2e8f0) — one step off
+#e5e7eb, indistinguishable on screen. In dark mode it is `30 41 59`, so every one
+of them rendered as a bright near-white hairline. A bug that is correct-looking in
+the mode you develop in gets copied, and this one was: three times inside
+`DashboardClient.tsx` alone. `tailwind.config.ts` sets no `borderColor.DEFAULT`
+and `globals.css` has no `@layer base` override for `*`, so nothing was covering
+it. Both of those were checked, because "something else probably handles it" is
+the assumption that let it sit.
+
+The fix class is `divide-[rgb(var(--border))]`, confirmed to compile under this
+Tailwind 3.4.14 JIT config by reading the built CSS, not by trusting that
+arbitrary values work:
+
+    .divide-\[rgb\(var\(--border\)\)\] > :not([hidden]) ~ :not([hidden])
+      { border-color: rgb(var(--border)); }
+
+**TWO SHAPES OF FIX, AND THE DIFFERENCE IS NOT COSMETIC.** Six sites also DELETE
+the inline style, because those containers carry no `border` utility and
+preflight's `border-width:0` makes a border-colour on them inert — the
+declaration painted nothing. Keeping it would preserve exactly the artifact that
+implies the dividers are handled. `NotificationsSection.tsx` KEEPS its style: that
+panel is `rounded-xl border divide-y`, so its frame is real and the style is live.
+`WarehousesSection.tsx:344` already had this shape and was not touched.
+
+**`CustomReportModal.tsx` was the worst and the least visible.** Its container is
+`divide-y lg:divide-y-0 lg:divide-x`, so the wrong hairline showed HORIZONTALLY
+below `lg` and VERTICALLY above it — one bug wearing two appearances, neither
+present at the same time. One colour class fixes both: the divide selector is
+`> :not([hidden]) ~ :not([hidden])`, direction-agnostic. That site carries a
+comment because it is the only one where a single class doing double duty is not
+obvious from reading it.
+
+**The seven sites**, so a regression is checkable without re-deriving the list:
+`DashboardClient.tsx` 586 / 1309 / 1625 (live trips, drivers, activity feed),
+`NewOutsourcedJobModal.tsx` 364 (repairer picker — scrolls, check mid-list),
+`CustomReportModal.tsx` 133 (builder/preview split — resize past `lg`),
+`AppShell.tsx` 724 (notifications dropdown), `NotificationsSection.tsx` 241
+(severity toggles). A grep for `divide-y\|divide-x` across `app components lib`
+now returns every site carrying a colour, plus one comment line in
+`WarehousesSection.tsx`. **That grep IS the regression test** — an uncoloured
+`divide-` is the whole bug.
 
 ---
 
