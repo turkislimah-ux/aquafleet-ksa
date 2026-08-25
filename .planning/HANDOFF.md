@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. **TREE IS AHEAD 3 AND NOT PUSHED** — read that back from the BRANCH line of `git status -sb`, never the tree line. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE: the warehouse `Furian warehouse` was a Delete fixture and is now deletable from the very UI this unit shipped — remove it there, not in SQL, or keep it; either is fine, but it is not production data. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
+# SESSION HANDOFF — closes at WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `cb76319`** — read that back from the BRANCH line of `git status -sb`, never the tree line. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE: the warehouse `Furian warehouse` was a Delete fixture and is now deletable from the very UI this unit shipped — remove it there, not in SQL, or keep it; either is fine, but it is not production data. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
 
 # PREVIOUS HEADER — the UI polish pass, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
@@ -127,9 +127,16 @@ pipeline's status is its LAST command. Re-run as `cd <repo> && ./node_modules/.b
 pointed at the tooling instead of at a figure: the check that confirms the other
 checks can itself be the thing that is broken.
 
-    HEAD              41ea251 (the delete commit; this file's own commit follows)
-    branch main   AHEAD 3, NOT PUSHED — READ BACK from `status -sb`
-                      (was "in sync"; a2a4c7e + ed2c1f0 + 41ea251 are local only)
+    HEAD              cb76319 (this file's own commit, on top of the delete commit
+                      41ea251; the correction commit that fixes THIS block follows)
+    branch main   IN SYNC with origin — READ BACK from the BRANCH line of
+                      `git status -sb`, which reads `## main...origin/main` with no
+                      ahead/behind. a2a4c7e + ed2c1f0 + 41ea251 + cb76319 all pushed
+                      (`9092254..cb76319`). This block SAID "AHEAD 3, NOT PUSHED"
+                      after the push made that false — written true, stale within
+                      the same session. That is the drift this file exists to catch,
+                      and it caught it against itself: re-measure the line, never
+                      re-read the sentence.
     migration files   165, highest 0167_cost_views_ex_vat_and_archive_date_aware.sql
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
                       — a TIMESTAMP version, not "0167"; see the 0167 section below)
