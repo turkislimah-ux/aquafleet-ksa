@@ -1382,31 +1382,56 @@ export const dict = {
     kpi: {
       totalTrucks: { en: "Total Trucks", ar: "إجمالي الشاحنات" },
       // Trucks are feminine in Arabic, so these do NOT reuse `status.active` /
-      // `status.idle` (نشط / متوقف, masculine). The values are LIFTED from
-      // dashboard.fleetState, which already says it the right way.
+      // `status.idle` (نشط / متوقف, masculine).
+      //
+      // `idle` NO LONGER matches dashboard.fleetState (متوقفة). Turki's wording:
+      // an idle truck is في الموقف — parked in the yard — which says WHERE it is
+      // rather than that it stopped. It MUST stay equal to truckState.idle
+      // below: the KPI card, the filter chip and the table pill all count the
+      // same buildTruckStatusMap enum, so a reader seeing three different words
+      // would think they were three different facts.
       active: { en: "Active", ar: "نشطة" },
       inMaintenance: { en: "In Maintenance", ar: "في الصيانة" },
-      idle: { en: "Idle", ar: "متوقفة" },
+      idle: { en: "Idle", ar: "في الموقف" },
       totalCapacity: { en: "Total Capacity", ar: "إجمالي السعة" },
     },
 
     // TRUCK_OPS_STATE_LABELS (lib/truck-status.ts) rendered for THIS route.
     // That map is plain English and is read by the drivers and trips routes
     // too, so it is not touched — the fleet files key off the same enum and
-    // read these instead. Values LIFTED from dashboard.fleetState.
+    // read these instead.
+    //
+    // `idle` is في الموقف and must stay equal to kpi.idle above — same enum,
+    // same source map, three surfaces. `maintenance` / `active` are still the
+    // dashboard.fleetState wording.
     truckState: {
       maintenance: { en: "Maintenance", ar: "صيانة" },
       active: { en: "Active", ar: "نشطة" },
-      idle: { en: "Idle", ar: "متوقفة" },
+      idle: { en: "Idle", ar: "في الموقف" },
     },
-    // DRIVER_STATE_LABELS (lib/driver-state.ts), same arrangement. Values
-    // LIFTED from dashboard.driverState — note its English is "Off duty" /
-    // "On leave", which is NOT byte-identical to status.off_duty / status.leave
-    // ("Off Duty" / "On Leave"), so those cannot be reused here.
+    // DRIVER_STATE_LABELS (lib/driver-state.ts), same arrangement. Note the
+    // English is "Off duty" / "On leave", which is NOT byte-identical to
+    // status.off_duty / status.leave ("Off Duty" / "On Leave"), so those cannot
+    // be reused here.
+    //
+    // `idle` and `off_duty` NO LONGER match dashboard.driverState (خامل /
+    // خارج الدوام). Both of those describe the driver; Turki's wording describes
+    // his WORKLOAD, which is what the fleet page is actually about:
+    //   idle     = has a truck, no active project -> متاح, free to take work
+    //   off_duty = has no truck at all            -> غير مكلف, not tasked
+    // خارج الدوام was wrong on its own terms — it reads "outside working hours",
+    // but the state has nothing to do with the clock.
+    //
+    // متاح here is the SAME WORD as availability.available below, and the two
+    // render side by side in the driver picker (Status column vs Availability
+    // column). That is deliberate and Turki's call: a driver free to take work
+    // and a driver assignable to this truck are near enough the same thing to a
+    // dispatcher. They are still separate KEYS off separate enums, so nothing is
+    // coupled — only the word agrees.
     driverState: {
       active: { en: "Active", ar: "نشط" },
-      idle: { en: "Idle", ar: "خامل" },
-      off_duty: { en: "Off duty", ar: "خارج الدوام" },
+      idle: { en: "Idle", ar: "متاح" },
+      off_duty: { en: "Off duty", ar: "غير مكلف" },
       on_leave: { en: "On leave", ar: "في إجازة" },
     },
 
@@ -1419,7 +1444,12 @@ export const dict = {
     // Column headers with no exact match in `common` / `status`.
     cols: {
       model: { en: "Model", ar: "الطراز" },
-      vehicleId: { en: "Vehicle ID", ar: "معرّف المركبة" },
+      // Not a literal rendering of "Vehicle ID". The استمارة is the KSA vehicle
+      // registration card, and its number is what this column actually shows —
+      // Turki's wording names the document a Saudi operator recognises instead
+      // of a generic identifier. Distinct from form.vehicleRegistration (رخصة
+      // السير) below, which labels the EXPIRY field, not this number.
+      vehicleId: { en: "Vehicle ID", ar: "استمارة السيارة" },
       station: { en: "Station", ar: "المحطة" },
       assignedProject: { en: "Assigned Project", ar: "المشروع المُسند" },
       lastService: { en: "Last Service", ar: "آخر صيانة" },
@@ -1617,9 +1647,22 @@ export const dict = {
     },
 
     // ---- danger zone ------------------------------------------------------
-    // NEW BUSINESS WORDING — standard Arabic, flagged for Turki's review. The
-    // type-to-confirm gate compares against truck.plate (data), so none of
-    // this is load-bearing.
+    // BUSINESS WORDING — reviewed and confirmed by Turki. The type-to-confirm
+    // gate compares against truck.plate (data), so none of this is load-bearing.
+    //
+    // `terminateTruck` / `terminating` keep the شطب family, and the picker's
+    // availability.terminated keeps مشطوب — Turki's explicit decision, not an
+    // oversight. Do not "align" them with anything.
+    //
+    // TOTAL LOSS IS DELIBERATELY TWO DIFFERENT WORDS, and the difference is
+    // grammatical, not editorial:
+    //   totalLoss       تالف   — the button, standing alone, no noun to agree with
+    //   reasonTotalLoss تالفة  — lands inside `…على أنها ___`, and أنها is
+    //                            feminine because a شاحنة is. Its sibling
+    //                            reasonSold is مباعة for exactly this reason.
+    // Making them the same word puts a masculine adjective on a feminine noun in
+    // the confirm sentence. The English side is likewise two entries ("Total
+    // loss" / "total loss"), so this is not new asymmetry.
     term: {
       dangerZone: { en: "Danger zone", ar: "منطقة الخطر" },
       terminateTruck: { en: "Terminate truck", ar: "شطب الشاحنة" },
@@ -1628,11 +1671,11 @@ export const dict = {
         ar: "يزيل {plate} من جميع الشاشات النشطة. يُحفظ سجل الرحلات.",
       },
       deactivateSold: { en: "Deactivate — Sold", ar: "إيقاف — مباعة" },
-      totalLoss: { en: "Total loss", ar: "خسارة كلية" },
+      totalLoss: { en: "Total loss", ar: "تالف" },
       confirmLead: { en: "This will mark", ar: "سيؤدي هذا إلى تعليم" },
       confirmMid: { en: "as", ar: "على أنها" },
       reasonSold: { en: "sold", ar: "مباعة" },
-      reasonTotalLoss: { en: "total loss", ar: "خسارة كلية" },
+      reasonTotalLoss: { en: "total loss", ar: "تالفة" },
       confirmTail: {
         en: "and remove it from the active fleet. Its trip history is preserved. Restorable later from Archive.",
         ar: "وإزالتها من الأسطول النشط. يُحفظ سجل رحلاتها، ويمكن استعادتها لاحقاً من الأرشيف.",
@@ -1643,7 +1686,7 @@ export const dict = {
       typeToConfirm: { en: 'Type "{plate}" to confirm', ar: 'اكتب "{plate}" للتأكيد' },
       terminating: { en: "Terminating…", ar: "جارٍ الشطب…" },
       confirmSale: { en: "Confirm sale", ar: "تأكيد البيع" },
-      confirmTotalLoss: { en: "Confirm total loss", ar: "تأكيد الخسارة الكلية" },
+      confirmTotalLoss: { en: "Confirm total loss", ar: "تأكيد التلف" },
     },
   },
 } as const;
