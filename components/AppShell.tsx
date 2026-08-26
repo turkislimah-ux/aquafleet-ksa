@@ -418,14 +418,14 @@ export default function AppShell({
                     type="button"
                     onClick={() => setSettingsOpen(true)}
                     aria-haspopup="dialog"
-                    title={lang === "ar" ? "الإعدادات" : "Settings"}
+                    title={t("shared.chrome.settings", lang)}
                     className="focus-ring flex w-full items-center rounded-lg py-2 text-start text-sm transition-colors [touch-action:manipulation] hover:bg-black/5 dark:hover:bg-white/5"
                   >
                     <span className={LEAD}>
                       <Settings className="h-4 w-4" aria-hidden />
                     </span>
                     <span className={cn("whitespace-nowrap pe-3", REVEAL)}>
-                      {lang === "ar" ? "الإعدادات" : "Settings"}
+                      {t("shared.chrome.settings", lang)}
                     </span>
                   </button>
                 </div>
@@ -917,8 +917,8 @@ function AccountMenu({
       <form action={signOut} className="shrink-0">
         <button
           type="submit"
-          aria-label={lang === "ar" ? "تسجيل الخروج" : "Log out"}
-          title={lang === "ar" ? "تسجيل الخروج" : "Log out"}
+          aria-label={t("shared.chrome.logOut", lang)}
+          title={t("shared.chrome.logOut", lang)}
           className="focus-ring grid h-8 w-8 place-items-center rounded-full transition-colors [touch-action:manipulation] muted hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400"
         >
           <LogOut className="h-4 w-4" aria-hidden />

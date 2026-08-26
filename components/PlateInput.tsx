@@ -37,6 +37,8 @@ import {
   type PlateBoxes,
   type PlateLetter,
 } from "@/lib/plate";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 const BOX = "h-9 w-8 rounded-lg border text-center text-sm font-mono font-semibold uppercase outline-none focus:ring-2 focus:ring-brand-500/30";
 const BOX_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -45,12 +47,18 @@ const AR_CELL = "h-7 w-8 grid place-items-center text-xl leading-none font-semib
 export default function PlateInput({
   name,
   defaultValue,
-  label = "Plate",
+  label,
 }: {
   name: string;
   defaultValue: string | null;
+  // Default moved OUT of the destructuring pattern and into the body below: a
+  // parameter default is evaluated before the component body, so it cannot
+  // call a hook, and the fallback text now comes from the dictionary.
+  // Callers that pass their own label still win — theirs is route copy and
+  // stays English until that route's own batch.
   label?: string;
 }) {
+  const { lang } = useApp();
   const [boxes, setBoxes] = useState<PlateBoxes>(() => (defaultValue ? parsePlate(defaultValue) : emptyPlateBoxes()));
   const refs = useRef<Array<HTMLInputElement | null>>([]);
 
@@ -107,7 +115,7 @@ export default function PlateInput({
 
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-sm muted">{label} *</span>
+      <span className="text-sm muted">{label ?? t("common.plate", lang)} *</span>
       <div className="flex items-start gap-1.5">
         {[0, 1, 2].map((i) => (
           <div key={`lc${i}`} className="flex flex-col items-center gap-1">
@@ -117,7 +125,7 @@ export default function PlateInput({
               onChange={(e) => onLetterInput(i, e.target.value)}
               onKeyDown={(e) => onLetterKeyDown(i, e)}
               maxLength={1}
-              aria-label={`Plate letter ${i + 1}`}
+              aria-label={t("shared.fields.plateLetterAria", lang).replace("{n}", () => String(i + 1))}
               className={BOX}
               style={BOX_STYLE}
             />
@@ -137,7 +145,7 @@ export default function PlateInput({
               onKeyDown={(e) => onDigitKeyDown(i, e)}
               maxLength={1}
               inputMode="numeric"
-              aria-label={`Plate digit ${i + 1}`}
+              aria-label={t("shared.fields.plateDigitAria", lang).replace("{n}", () => String(i + 1))}
               className={BOX}
               style={BOX_STYLE}
             />

@@ -31,6 +31,8 @@ import { MapPin, Settings } from "lucide-react";
 import { Btn } from "@/components/ui";
 import type { OperationStation } from "@/lib/db-types";
 import OperationStationsModal from "./OperationStationsModal";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -39,16 +41,25 @@ export default function OperationStationField({
   name,
   stations,
   defaultValue,
-  label = "Operation station",
-  hint = "Where this is based — the truck/driver/staff BASE, separate from water/fill stations.",
+  label,
+  hint,
 }: {
   name: string;
   stations: OperationStation[]; // ALL rows (active + inactive)
   defaultValue: string | null;
+  // The defaults for these two MOVED OUT of the destructuring pattern and into
+  // the body below (`label ?? t(...)`). A parameter default is evaluated before
+  // the component body runs, so it cannot call a hook — and the fallback text
+  // has to come from the dictionary now.
+  //
+  // A caller that passes its own still wins, unchanged: those overrides live in
+  // ROUTE files (StaffTab, DriversClient, TruckFormModal) and stay English
+  // until each route's own batch.
   label?: string; // e.g. "Station" (driver/truck) vs "Branch of operation" (staff)
   hint?: string;
 }) {
   const router = useRouter();
+  const { lang } = useApp();
   const [value, setValue] = useState(defaultValue ?? "");
   const [managing, setManaging] = useState(false);
 
@@ -75,19 +86,21 @@ export default function OperationStationField({
           >
             <MapPin className="h-3.5 w-3.5" />
           </span>
-          <span className="text-sm font-medium">{label}</span>
+          <span className="text-sm font-medium">{label ?? t("shared.stations.fieldLabel", lang)}</span>
           {selected && !selected.active && (
             <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400">
-              deactivated
+              {t("shared.stations.deactivated", lang)}
             </span>
           )}
         </div>
         <Btn variant="ghost" onClick={() => setManaging(true)} className="h-7 px-2 text-xs shrink-0">
-          <Settings className="h-3.5 w-3.5" /> Manage stations
+          {/* The space before the label is on THIS line, so JSX keeps it —
+              a newline here would have collapsed it away. */}
+          <Settings className="h-3.5 w-3.5" /> {t("shared.stations.manage", lang)}
         </Btn>
       </div>
 
-      <p className="text-xs muted">{hint}</p>
+      <p className="text-xs muted">{hint ?? t("shared.stations.fieldHint", lang)}</p>
 
       <select
         value={value}
@@ -98,7 +111,7 @@ export default function OperationStationField({
         <option value="">—</option>
         {options.map((s) => (
           <option key={s.id} value={s.id}>
-            {s.name}{!s.active ? " (deactivated)" : ""}
+            {s.name}{!s.active ? ` ${t("shared.stations.deactivatedParen", lang)}` : ""}
           </option>
         ))}
       </select>

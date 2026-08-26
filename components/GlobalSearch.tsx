@@ -690,9 +690,10 @@ export default function GlobalSearch({
                   {flat.length === 0 && !loadingRecords && (
                     <div className="px-3 py-6 text-center">
                       <div className="text-sm">
-                        {lang === "ar"
-                          ? `لا توجد نتائج لـ "${query.trim()}"`
-                          : `No matches for “${query.trim()}”`}
+                        {/* Replacer FUNCTION, not a string: the token's value
+                            is whatever the user typed, and String.replace
+                            would re-expand a `$&` or `$1` inside it. */}
+                        {t("shared.chrome.noMatches", lang).replace("{q}", () => query.trim())}
                       </div>
                       <div className="mt-1 text-xs muted">
                         {t("search.searchedAcross", lang)}
@@ -822,7 +823,7 @@ function ResultRow({
 
       {approximate && (
         <span className="shrink-0 text-[10px] muted hidden sm:inline">
-          {lang === "ar" ? "فتح الصفحة" : "opens page"}
+          {t("shared.chrome.opensPage", lang)}
         </span>
       )}
 

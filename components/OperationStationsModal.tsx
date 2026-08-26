@@ -21,6 +21,8 @@ import {
   type OperationStationInput,
 } from "@/lib/actions/operation-stations";
 import ScrollLock from "@/components/ScrollLock";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -38,6 +40,7 @@ export default function OperationStationsModal({
   onClose: () => void;
   onChanged: () => void; // parent calls router.refresh()
 }) {
+  const { lang } = useApp();
   const [view, setView] = useState<View>("list");
   const [editing, setEditing] = useState<OperationStation | null>(null);
   const [showInactive, setShowInactive] = useState(false);
@@ -110,22 +113,22 @@ export default function OperationStationsModal({
             <div className="flex items-start justify-between gap-4 mb-1">
               <div className="flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-brand-600 dark:text-brand-300" />
-                <h2 className="text-lg font-semibold">Operation stations</h2>
+                <h2 className="text-lg font-semibold">{t("shared.stations.title", lang)}</h2>
               </div>
               <button onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <p className="text-sm muted mb-4">
-              Where a driver, truck, or staff member is based. Separate from water/fill stations.
+              {t("shared.stations.subtitle", lang)}
             </p>
 
             <Table>
               <thead>
                 <tr>
-                  <TH>Name</TH>
-                  <TH>Coordinates</TH>
-                  <TH className="text-right">Actions</TH>
+                  <TH>{t("shared.stations.thName", lang)}</TH>
+                  <TH>{t("shared.stations.thCoordinates", lang)}</TH>
+                  <TH className="text-right">{t("common.actions", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -136,7 +139,7 @@ export default function OperationStationsModal({
                       className="py-6 px-3 border-t text-center muted text-sm"
                       style={{ borderColor: "rgb(var(--border))" }}
                     >
-                      No active stations.
+                      {t("shared.stations.none", lang)}
                     </td>
                   </tr>
                 )}
@@ -153,7 +156,7 @@ export default function OperationStationsModal({
                         <button
                           type="button"
                           onClick={() => openEdit(s)}
-                          title="Edit"
+                          title={t("common.edit", lang)}
                           className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/5"
                         >
                           <Pencil className="h-4 w-4" />
@@ -161,7 +164,7 @@ export default function OperationStationsModal({
                         <button
                           type="button"
                           onClick={() => setPendingDeactivate(s)}
-                          title="Deactivate"
+                          title={t("shared.stations.deactivate", lang)}
                           className="p-1.5 rounded hover:bg-rose-500/10 text-rose-600 dark:text-rose-400"
                         >
                           <X className="h-4 w-4" />
@@ -175,23 +178,28 @@ export default function OperationStationsModal({
 
             {pendingDeactivate && (
               <div className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/5 p-4">
-                <p className="text-sm font-medium mb-1">Deactivate "{pendingDeactivate.name}"?</p>
+                {/* Replacer FUNCTION, not a string: a station named `$&` would
+                    otherwise be re-expanded by String.replace. */}
+                <p className="text-sm font-medium mb-1">
+                  {t("shared.stations.confirmTitle", lang).replace("{name}", () => pendingDeactivate.name)}
+                </p>
                 <p className="text-xs muted mb-3">
-                  It disappears from every station picker. A driver, truck, or staff member already
-                  based here keeps showing it (marked "deactivated") until changed — nothing breaks.
+                  {t("shared.stations.confirmBody", lang)}
                 </p>
                 {deactivateErr && (
                   <p className="text-xs text-rose-600 dark:text-rose-400 mb-2">{deactivateErr}</p>
                 )}
                 <div className="flex gap-2 justify-end">
-                  <Btn variant="outline" onClick={resetDeactivate}>Cancel</Btn>
+                  <Btn variant="outline" onClick={resetDeactivate}>{t("common.cancel", lang)}</Btn>
                   <button
                     type="button"
                     disabled={deactivating}
                     onClick={confirmDeactivate}
                     className="h-9 px-3 rounded-lg text-sm font-medium bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50"
                   >
-                    {deactivating ? "Deactivating…" : "Deactivate"}
+                    {deactivating
+                      ? t("shared.stations.deactivating", lang)
+                      : t("shared.stations.deactivate", lang)}
                   </button>
                 </div>
               </div>
@@ -204,14 +212,17 @@ export default function OperationStationsModal({
                   onClick={() => setShowInactive((v) => !v)}
                   className="text-xs muted underline underline-offset-2"
                 >
-                  {showInactive ? "Hide" : "Show"} deactivated stations ({inactiveStations.length})
+                  {/* Count stays a Latin numeral in both languages (standing
+                      rule); only the words around it are translated. */}
+                  {showInactive ? t("shared.stations.hide", lang) : t("shared.stations.show", lang)}{" "}
+                  {t("shared.stations.deactivatedStations", lang)} ({inactiveStations.length})
                 </button>
                 {showInactive && (
                   <ul className="mt-2 flex flex-col gap-1">
                     {inactiveStations.map((s) => (
                       <li key={s.id} className="text-xs muted flex items-center gap-2">
                         <span className="line-through">{s.name}</span>
-                        <span className="text-[10px] uppercase tracking-wide">deactivated</span>
+                        <span className="text-[10px] uppercase tracking-wide">{t("shared.stations.deactivated", lang)}</span>
                       </li>
                     ))}
                   </ul>
@@ -220,8 +231,8 @@ export default function OperationStationsModal({
             )}
 
             <div className="mt-5 flex justify-between">
-              <Btn variant="primary" onClick={openAdd}><Plus className="h-4 w-4" /> Add station</Btn>
-              <Btn variant="outline" onClick={close}>Close</Btn>
+              <Btn variant="primary" onClick={openAdd}><Plus className="h-4 w-4" /> {t("shared.stations.add", lang)}</Btn>
+              <Btn variant="outline" onClick={close}>{t("shared.stations.close", lang)}</Btn>
             </div>
           </>
         ) : (
@@ -253,6 +264,11 @@ function StationForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  // Own `useApp()` rather than a `lang` prop from the parent: this is a
+  // sibling in the same module, both render under the same provider, and the
+  // parent already passes four callbacks — a fifth prop that only ever carries
+  // context is drilling for its own sake.
+  const { lang } = useApp();
   const [name, setName] = useState(editing?.name ?? "");
   const [latitude, setLatitude] = useState(editing?.latitude != null ? String(editing.latitude) : "");
   const [longitude, setLongitude] = useState(editing?.longitude != null ? String(editing.longitude) : "");
@@ -265,7 +281,7 @@ function StationForm({
     e.preventDefault();
     e.stopPropagation(); // belt-and-suspenders: never let this bubble to an ancestor form
     if (!canSubmit) {
-      setError("Station name is required.");
+      setError(t("shared.stations.nameRequired", lang));
       return;
     }
     const input: OperationStationInput = {
@@ -289,7 +305,9 @@ function StationForm({
   return (
     <form onSubmit={submit}>
       <div className="flex items-start justify-between gap-4 mb-4">
-        <h2 className="text-lg font-semibold">{editing ? "Edit station" : "Add station"}</h2>
+        <h2 className="text-lg font-semibold">
+          {editing ? t("shared.stations.edit", lang) : t("shared.stations.add", lang)}
+        </h2>
         <button type="button" onClick={onCancel} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
           <X className="h-4 w-4" />
         </button>
@@ -297,30 +315,30 @@ function StationForm({
 
       <div className="flex flex-col gap-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="muted">Name *</span>
+          <span className="muted">{t("shared.stations.fName", lang)}</span>
           <input value={name} onChange={(e) => setName(e.target.value)} className={INPUT} style={INPUT_STYLE} required />
         </label>
         <div className="grid grid-cols-2 gap-3">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Latitude</span>
+            <span className="muted">{t("shared.stations.fLatitude", lang)}</span>
             <input
               value={latitude}
               onChange={(e) => setLatitude(e.target.value)}
               className={INPUT}
               style={INPUT_STYLE}
               inputMode="decimal"
-              placeholder="e.g. 24.7136"
+              placeholder={t("shared.stations.phLatitude", lang)}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Longitude</span>
+            <span className="muted">{t("shared.stations.fLongitude", lang)}</span>
             <input
               value={longitude}
               onChange={(e) => setLongitude(e.target.value)}
               className={INPUT}
               style={INPUT_STYLE}
               inputMode="decimal"
-              placeholder="e.g. 46.6753"
+              placeholder={t("shared.stations.phLongitude", lang)}
             />
           </label>
         </div>
@@ -329,13 +347,17 @@ function StationForm({
       {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
 
       <div className="mt-5 flex justify-end gap-2">
-        <Btn variant="outline" onClick={onCancel}>Cancel</Btn>
+        <Btn variant="outline" onClick={onCancel}>{t("common.cancel", lang)}</Btn>
         <button
           type="submit"
           disabled={!canSubmit || saving}
           className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
         >
-          {saving ? "Saving…" : editing ? "Save changes" : "Add station"}
+          {saving
+            ? t("common.saving", lang)
+            : editing
+              ? t("shared.stations.saveChanges", lang)
+              : t("shared.stations.add", lang)}
         </button>
       </div>
     </form>

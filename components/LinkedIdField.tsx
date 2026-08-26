@@ -28,6 +28,8 @@
 
 import Link from "next/link";
 import { Lock } from "lucide-react";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
@@ -48,6 +50,10 @@ export default function LinkedIdField({
   archiveHref?: string | null;
   type?: "text" | "date";
 }) {
+  // Above the early return on purpose — a hook cannot sit after a conditional
+  // return, and the unlocked branch below is exactly that.
+  const { lang } = useApp();
+
   if (!locked) {
     return <input name={name} type={type} defaultValue={value} className={INPUT} style={INPUT_STYLE} />;
   }
@@ -66,7 +72,7 @@ export default function LinkedIdField({
           href={archiveHref}
           className="text-[11px] text-brand-600 dark:text-brand-300 hover:underline mt-1 inline-block"
         >
-          Edit in the Archive
+          {t("shared.fields.editInArchive", lang)}
         </Link>
       )}
     </div>

@@ -178,7 +178,7 @@ export default function SettingsModal({
 
           {/* The one scrolling region. */}
           <div className="min-w-0 flex-1 overflow-y-auto scrollbar-thin p-6">
-            <CompanySettingsSection open={section === "company"} />
+            <CompanySettingsSection open={section === "company"} lang={lang} />
             <WarehousesSection open={section === "warehouses"} lang={lang} />
             <NotificationsSection open={section === "notifications"} lang={lang} />
             <ProfileSection open={section === "profile"} lang={lang} />

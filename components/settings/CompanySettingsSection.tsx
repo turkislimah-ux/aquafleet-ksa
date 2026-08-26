@@ -36,6 +36,7 @@ import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { getCompanySettings, updateCompanySettings, type CompanySettingsInput } from "@/app/trips/invoiceActions";
+import { t } from "@/lib/i18n";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -54,7 +55,19 @@ const EMPTY: CompanySettingsInput = {
   standard_working_days_per_month: 26,
 };
 
-export default function CompanySettingsSection({ open }: { open: boolean }) {
+// `lang` is a PROP, not `useApp()`, and that is not a style choice: AppShell
+// imports SettingsModal which imports this file, so reaching back into
+// AppShell's context here would close a real import cycle — the failure
+// GlobalSearch's header documents, which tsc and next build both miss and
+// which blanks the page at request time. The other four sections in this
+// folder already take `lang` the same way.
+export default function CompanySettingsSection({
+  open,
+  lang,
+}: {
+  open: boolean;
+  lang: "en" | "ar";
+}) {
   const router = useRouter();
   const [form, setForm] = useState<CompanySettingsInput>(EMPTY);
   const [loading, setLoading] = useState(true);
@@ -124,50 +137,54 @@ export default function CompanySettingsSection({ open }: { open: boolean }) {
   return (
     <div>
       <div>
-        <h2 className="text-lg font-semibold">Company settings</h2>
+        <h2 className="text-lg font-semibold">{t("shared.company.title", lang)}</h2>
         <p className="mt-1 text-sm muted mb-4">
-          Seller identity — appears in the Seller section of every invoice header.
+          {t("shared.company.subtitle", lang)}
         </p>
 
         {loading ? (
-          <div className="py-6 text-center muted text-sm">Loading…</div>
+          <div className="py-6 text-center muted text-sm">{t("shared.company.loading", lang)}</div>
         ) : (
           <form onSubmit={onSubmit} className="space-y-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">CR Company Name *</span>
+              <span className="muted">{t("shared.company.fLegalName", lang)}</span>
               <input
                 value={form.legal_name}
                 onChange={(e) => set("legal_name", e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
                 required
-                placeholder="e.g. Bin Slimah Group"
+                placeholder={t("shared.company.phLegalName", lang)}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">Company name (Arabic)</span>
+              <span className="muted">{t("shared.company.fLegalNameAr", lang)}</span>
               <input
                 value={form.legal_name_ar ?? ""}
                 onChange={(e) => set("legal_name_ar", e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
                 dir="rtl"
+                // NOT keyed, deliberately: this is a sample VALUE for an
+                // Arabic-only column, not UI copy. It must stay Arabic while
+                // the interface is in English — that is the whole point of the
+                // field.
                 placeholder="مجموعة بن سليمة"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">Description</span>
+              <span className="muted">{t("shared.company.fDescription", lang)}</span>
               <input
                 value={form.description ?? ""}
                 onChange={(e) => set("description", e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
-                placeholder="e.g. Water transport & treatment"
+                placeholder={t("shared.company.phDescription", lang)}
               />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">CR Number</span>
+                <span className="muted">{t("shared.company.fCrNumber", lang)}</span>
                 <input
                   value={form.cr_number ?? ""}
                   onChange={(e) => set("cr_number", e.target.value)}
@@ -176,7 +193,7 @@ export default function CompanySettingsSection({ open }: { open: boolean }) {
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">VAT Registration Number</span>
+                <span className="muted">{t("shared.company.fVatNumber", lang)}</span>
                 <input
                   value={form.vat_number ?? ""}
                   onChange={(e) => set("vat_number", e.target.value)}
@@ -186,7 +203,7 @@ export default function CompanySettingsSection({ open }: { open: boolean }) {
               </label>
             </div>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">Address</span>
+              <span className="muted">{t("shared.company.fAddress", lang)}</span>
               <input
                 value={form.address ?? ""}
                 onChange={(e) => set("address", e.target.value)}
@@ -196,7 +213,7 @@ export default function CompanySettingsSection({ open }: { open: boolean }) {
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Telephone (landline)</span>
+                <span className="muted">{t("shared.company.fTelephone", lang)}</span>
                 <input
                   value={form.telephone ?? ""}
                   onChange={(e) => set("telephone", e.target.value)}
@@ -205,7 +222,7 @@ export default function CompanySettingsSection({ open }: { open: boolean }) {
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Phone (mobile)</span>
+                <span className="muted">{t("shared.company.fPhone", lang)}</span>
                 <input
                   value={form.phone ?? ""}
                   onChange={(e) => set("phone", e.target.value)}
@@ -215,20 +232,20 @@ export default function CompanySettingsSection({ open }: { open: boolean }) {
               </label>
             </div>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">Company email</span>
+              <span className="muted">{t("shared.company.fEmail", lang)}</span>
               <input
                 value={form.email ?? ""}
                 onChange={(e) => set("email", e.target.value)}
                 type="email"
                 className={INPUT}
                 style={INPUT_STYLE}
-                placeholder="e.g. info@binslimah.com"
+                placeholder={t("shared.company.phEmail", lang)}
               />
             </label>
             <div className="pt-2 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-              <p className="text-xs font-semibold uppercase muted mt-3 mb-2">Operations</p>
+              <p className="text-xs font-semibold uppercase muted mt-3 mb-2">{t("shared.company.operations", lang)}</p>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Working days per month</span>
+                <span className="muted">{t("shared.company.fWorkingDays", lang)}</span>
                 <input
                   value={form.standard_working_days_per_month}
                   onChange={(e) =>
@@ -241,7 +258,7 @@ export default function CompanySettingsSection({ open }: { open: boolean }) {
                   style={INPUT_STYLE}
                 />
                 <span className="text-[11px] muted">
-                  Used to turn a mechanic's per-day duty hours into monthly hours for Maintenance labor costing.
+                  {t("shared.company.workingDaysHint", lang)}
                 </span>
               </label>
             </div>
@@ -254,11 +271,11 @@ export default function CompanySettingsSection({ open }: { open: boolean }) {
               {saved && (
                 <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
                   <Check className="h-4 w-4" aria-hidden />
-                  Saved
+                  {t("shared.company.saved", lang)}
                 </span>
               )}
               <Btn type="submit" variant="primary" className={saving ? "opacity-50 pointer-events-none" : ""}>
-                {saving ? "Saving…" : "Save"}
+                {saving ? t("common.saving", lang) : t("common.save", lang)}
               </Btn>
             </div>
           </form>

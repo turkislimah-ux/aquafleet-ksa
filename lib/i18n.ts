@@ -346,6 +346,140 @@ export const dict = {
     projEnded: { en: "Ended", ar: "منتهي" },
   },
 
+  /**
+   * ── Phase 3 Batch 2a — SHARED CHROME + SHARED FIELD COMPONENTS ───────────
+   *
+   * The strings that belong to `components/` rather than to any one route: the
+   * app chrome (AppShell's Settings and Log out, the global search panel's own
+   * words) and the field components that three different route dirs render
+   * inside their own forms.
+   *
+   * GROUPED BY THE SURFACE THAT OWNS THE STRING, not flattened. A flat
+   * `shared` would sit "Name *" from the station form next to "Name *" from a
+   * customer form with nothing to tell them apart.
+   *
+   * Every `en` below is the EXACT literal that was in the JSX before this
+   * conversion. Two things that looks like but is not:
+   *   - `chrome.noMatches` keeps the CURLY quotes the English line has always
+   *     used, while its Arabic keeps the straight ones IT has always used.
+   *   - the multi-line JSX text nodes are stored in their COLLAPSED single-line
+   *     form, because JSX joins a wrapped text run with exactly one space —
+   *     the collapsed string is what actually rendered.
+   *
+   * `{q}` / `{name}` / `{n}` are call-site tokens, the same device as
+   * `search.resultsCount`, so Arabic word order is free of the code. Every one
+   * of them is substituted with a REPLACER FUNCTION rather than a string,
+   * because a plain string replacement would interpret `$&` / `$1` inside a
+   * value the user typed or named.
+   *
+   * Reused rather than duplicated here: `common.plate`, `common.actions`,
+   * `common.edit`, `common.cancel`, `common.save`, `common.saving` — each is
+   * already byte-identical to the literal it replaces.
+   */
+  shared: {
+    chrome: {
+      settings: { en: "Settings", ar: "الإعدادات" },
+      logOut: { en: "Log out", ar: "تسجيل الخروج" },
+      // Trails a global-search hit that routes to a PAGE rather than a record.
+      opensPage: { en: "opens page", ar: "فتح الصفحة" },
+      noMatches: { en: "No matches for “{q}”", ar: "لا توجد نتائج لـ \"{q}\"" },
+    },
+
+    // OperationStationField (the picker section) and OperationStationsModal
+    // (the popup it opens). One group: they are one feature in two files, and
+    // `deactivated` is genuinely rendered by both.
+    stations: {
+      fieldLabel: { en: "Operation station", ar: "محطة التشغيل" },
+      fieldHint: {
+        en: "Where this is based — the truck/driver/staff BASE, separate from water/fill stations.",
+        ar: "المقر الذي تتبع له الشاحنة أو السائق أو الموظف — منفصل عن محطات المياه والتعبئة.",
+      },
+      // Lower-case in English on purpose: both sites uppercase it in CSS.
+      deactivated: { en: "deactivated", ar: "معطّلة" },
+      // Suffix on a select option whose station has since been deactivated.
+      // The separating space stays in the JSX, so this is the bracketed word
+      // only — otherwise the leading space would be invisible in this file.
+      deactivatedParen: { en: "(deactivated)", ar: "(معطّلة)" },
+      manage: { en: "Manage stations", ar: "إدارة المحطات" },
+      title: { en: "Operation stations", ar: "محطات التشغيل" },
+      subtitle: {
+        en: "Where a driver, truck, or staff member is based. Separate from water/fill stations.",
+        ar: "المقر الذي يتبع له السائق أو الشاحنة أو الموظف. منفصل عن محطات المياه والتعبئة.",
+      },
+      thName: { en: "Name", ar: "الاسم" },
+      thCoordinates: { en: "Coordinates", ar: "الإحداثيات" },
+      none: { en: "No active stations.", ar: "لا توجد محطات نشطة." },
+      deactivate: { en: "Deactivate", ar: "تعطيل" },
+      deactivating: { en: "Deactivating…", ar: "جارٍ التعطيل…" },
+      confirmTitle: { en: "Deactivate \"{name}\"?", ar: "تعطيل \"{name}\"؟" },
+      confirmBody: {
+        en: "It disappears from every station picker. A driver, truck, or staff member already based here keeps showing it (marked \"deactivated\") until changed — nothing breaks.",
+        ar: "ستختفي من كل قوائم اختيار المحطات. وستظل ظاهرة لأي سائق أو شاحنة أو موظف يتبعها بالفعل (موسومة بـ \"معطّلة\") إلى أن تُغيَّر — دون أن يتعطل شيء.",
+      },
+      hide: { en: "Hide", ar: "إخفاء" },
+      show: { en: "Show", ar: "إظهار" },
+      // Follows Hide/Show and precedes a Latin count:
+      // "Show deactivated stations (3)".
+      deactivatedStations: { en: "deactivated stations", ar: "المحطات المعطّلة" },
+      add: { en: "Add station", ar: "إضافة محطة" },
+      close: { en: "Close", ar: "إغلاق" },
+      edit: { en: "Edit station", ar: "تعديل محطة" },
+      fName: { en: "Name *", ar: "الاسم *" },
+      fLatitude: { en: "Latitude", ar: "خط العرض" },
+      fLongitude: { en: "Longitude", ar: "خط الطول" },
+      // Sample coordinates stay Latin numerals — the standing rule.
+      phLatitude: { en: "e.g. 24.7136", ar: "مثال: 24.7136" },
+      phLongitude: { en: "e.g. 46.6753", ar: "مثال: 46.6753" },
+      // StationForm's own client-side guard. The SERVER action's messages stay
+      // English this batch — same boundary as `customers.loadFailed`.
+      nameRequired: { en: "Station name is required.", ar: "اسم المحطة مطلوب." },
+      saveChanges: { en: "Save changes", ar: "حفظ التغييرات" },
+    },
+
+    company: {
+      title: { en: "Company settings", ar: "إعدادات الشركة" },
+      subtitle: {
+        en: "Seller identity — appears in the Seller section of every invoice header.",
+        ar: "هوية البائع — تظهر في قسم البائع في ترويسة كل فاتورة.",
+      },
+      loading: { en: "Loading…", ar: "جارٍ التحميل…" },
+      fLegalName: { en: "CR Company Name *", ar: "اسم الشركة في السجل التجاري *" },
+      // The SAMPLE stays Latin in both languages: this field holds the Latin CR
+      // name and `fLegalNameAr` below holds the Arabic one. That Arabic field's
+      // own placeholder ("مجموعة بن سليمة") is not keyed at all — it is sample
+      // DATA for an Arabic-only column, not UI copy, and must not flip to
+      // English when the interface does.
+      phLegalName: { en: "e.g. Bin Slimah Group", ar: "مثال: Bin Slimah Group" },
+      fLegalNameAr: { en: "Company name (Arabic)", ar: "اسم الشركة (بالعربية)" },
+      fDescription: { en: "Description", ar: "الوصف" },
+      phDescription: { en: "e.g. Water transport & treatment", ar: "مثال: نقل ومعالجة المياه" },
+      fCrNumber: { en: "CR Number", ar: "رقم السجل التجاري" },
+      fVatNumber: { en: "VAT Registration Number", ar: "الرقم الضريبي" },
+      fAddress: { en: "Address", ar: "العنوان" },
+      fTelephone: { en: "Telephone (landline)", ar: "الهاتف (أرضي)" },
+      fPhone: { en: "Phone (mobile)", ar: "الجوال" },
+      fEmail: { en: "Company email", ar: "البريد الإلكتروني للشركة" },
+      phEmail: { en: "e.g. info@binslimah.com", ar: "مثال: info@binslimah.com" },
+      operations: { en: "Operations", ar: "العمليات" },
+      fWorkingDays: { en: "Working days per month", ar: "أيام العمل في الشهر" },
+      workingDaysHint: {
+        en: "Used to turn a mechanic's per-day duty hours into monthly hours for Maintenance labor costing.",
+        ar: "تُستخدم لتحويل ساعات دوام الفني اليومية إلى ساعات شهرية في احتساب تكلفة عمالة الصيانة.",
+      },
+      saved: { en: "Saved", ar: "تم الحفظ" },
+    },
+
+    fields: {
+      // LinkedIdField's link out to the one screen that DOES edit the value —
+      // see that file's header for why it is read-only where it is shown.
+      editInArchive: { en: "Edit in the Archive", ar: "التعديل في الأرشيف" },
+      // PlateInput's per-box screen-reader names; `{n}` is the 1-based column.
+      // The VISIBLE label reuses `common.plate`, which is already "Plate".
+      plateLetterAria: { en: "Plate letter {n}", ar: "حرف اللوحة {n}" },
+      plateDigitAria: { en: "Plate digit {n}", ar: "رقم اللوحة {n}" },
+    },
+  },
+
   // ── Phase 3 Batch 1 — per-route screen copy ──────────────────────────────
   // One namespace per route. Every `en` value below is the EXACT literal that
   // was in the JSX before the conversion, so English output is unchanged.
