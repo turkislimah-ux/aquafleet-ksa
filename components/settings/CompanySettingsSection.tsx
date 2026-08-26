@@ -143,7 +143,7 @@ export default function CompanySettingsSection({
         </p>
 
         {loading ? (
-          <div className="py-6 text-center muted text-sm">{t("shared.company.loading", lang)}</div>
+          <div className="py-6 text-center muted text-sm">{t("common.loading", lang)}</div>
         ) : (
           <form onSubmit={onSubmit} className="space-y-3">
             <label className="flex flex-col gap-1 text-sm">
@@ -271,7 +271,7 @@ export default function CompanySettingsSection({
               {saved && (
                 <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
                   <Check className="h-4 w-4" aria-hidden />
-                  {t("shared.company.saved", lang)}
+                  {t("common.saved", lang)}
                 </span>
               )}
               <Btn type="submit" variant="primary" className={saving ? "opacity-50 pointer-events-none" : ""}>

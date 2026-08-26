@@ -48,6 +48,7 @@ import {
   categoryLabel, statusMeta, statusRank, validateIssueDraft, validateAttachmentFile,
   type IssueRow,
 } from "@/lib/issues";
+import { t } from "@/lib/i18n";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -80,6 +81,14 @@ function StatusPillSmall({ status, ar }: { status: string; ar: boolean }) {
 }
 
 export default function IssuesSection({ open, lang }: { open: boolean; lang: "en" | "ar" }) {
+  // SURVIVES the move to the dictionary, unlike its twin in the other Settings
+  // panels. Every line of COPY in this file now reads from `t()`, but four sites
+  // are not copy: ISSUE_CATEGORIES, ISSUE_STATUSES, statusMeta() and
+  // categoryLabel() are bilingual DATA in lib/issues.ts, each row carrying its
+  // own `ar`/`en` pair alongside the key the database stores. Those pairs belong
+  // next to the keys they label — a category list the dictionary duplicated
+  // could drift from the CHECK constraint that defines it — so they stay, and
+  // picking a side of one still needs the boolean.
   const ar = lang === "ar";
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -222,11 +231,9 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
 
   return (
     <div>
-      <h2 className="text-lg font-semibold">{ar ? "الإبلاغ عن مشكلة" : "Report a problem"}</h2>
+      <h2 className="text-lg font-semibold">{t("settings.issues.title", lang)}</h2>
       <p className="mt-1 text-sm muted">
-        {ar
-          ? "قائمة مشتركة — كلاكما يرى كل البلاغات ويستطيع حلّها."
-          : "A shared list — you both see every report and either can resolve it."}
+        {t("settings.issues.subtitle", lang)}
       </p>
 
       {/* View toggle. The count is the one thing worth knowing before clicking. */}
@@ -236,8 +243,13 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
         role="tablist"
       >
         {([
-          { key: "report" as const, label: ar ? "بلاغ جديد" : "New report" },
-          { key: "queue" as const, label: ar ? "القائمة" : "Queue" },
+          // `labelKey`, not `label`: the words moved to the dictionary and this
+          // array carries the pointer to them. Named per row rather than
+          // interpolated from `key` — `settings.issues.tab${key}` would need the
+          // key capitalised, and a Capitalize<> dance to save two characters is
+          // worse than spelling both out.
+          { key: "report" as const, labelKey: "settings.issues.tabReport" as const },
+          { key: "queue"  as const, labelKey: "settings.issues.tabQueue"  as const },
         ]).map((v) => (
           <button
             key={v.key}
@@ -250,7 +262,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
               view === v.key ? "bg-brand-600 text-white shadow-soft" : "muted hover:text-[rgb(var(--fg))]",
             )}
           >
-            {v.label}
+            {t(v.labelKey, lang)}
             {v.key === "queue" && openCount > 0 && (
               <span
                 className={cn(
@@ -269,7 +281,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
         <div className="mt-4 rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-1 ring-inset ring-rose-500/20">
           {loadError}{" "}
           <button onClick={() => void load()} className="focus-ring underline underline-offset-2">
-            {ar ? "إعادة المحاولة" : "Try again"}
+            {t("common.tryAgain", lang)}
           </button>
         </div>
       )}
@@ -278,7 +290,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
       {view === "report" && (
         <form onSubmit={onSubmit} className="mt-5 space-y-4">
           <div>
-            <p className="mb-1.5 text-sm muted">{ar ? "ما نوع المشكلة؟" : "What kind of problem?"}</p>
+            <p className="mb-1.5 text-sm muted">{t("settings.issues.kind", lang)}</p>
             {/* Chips, not a dropdown: five short options, and this is the first
                 decision — one visible click beats open-scan-select. */}
             <div className="flex flex-wrap gap-1.5">
@@ -303,30 +315,26 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
           </div>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">{ar ? "عنوان قصير *" : "Short title *"}</span>
+            <span className="muted">{t("settings.issues.fTitle", lang)}</span>
             <input
               value={title}
               onChange={(e) => { setSubmitted(false); setFormError(null); setTitle(e.target.value); }}
               className={INPUT}
               style={INPUT_STYLE}
               maxLength={200}
-              placeholder={ar ? "مثال: زر الحفظ لا يستجيب" : "e.g. Save button does nothing"}
+              placeholder={t("settings.issues.phTitle", lang)}
             />
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">{ar ? "التفاصيل" : "Details"}</span>
+            <span className="muted">{t("settings.issues.fDetails", lang)}</span>
             <textarea
               value={description}
               onChange={(e) => { setSubmitted(false); setFormError(null); setDescription(e.target.value); }}
               rows={4}
               className={cn(INPUT, "resize-y")}
               style={INPUT_STYLE}
-              placeholder={
-                ar
-                  ? "ماذا كنت تحاول أن تفعل؟ وماذا حدث بدلًا من ذلك؟"
-                  : "What were you trying to do, and what happened instead?"
-              }
+              placeholder={t("settings.issues.phDetails", lang)}
             />
           </label>
 
@@ -363,7 +371,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                 <button
                   type="button"
                   onClick={() => setFile(null)}
-                  aria-label={ar ? "إزالة المرفق" : "Remove attachment"}
+                  aria-label={t("settings.issues.removeAttachment", lang)}
                   className="focus-ring shrink-0 rounded-md p-1 muted hover:text-rose-600"
                 >
                   <X className="h-3.5 w-3.5" aria-hidden />
@@ -373,14 +381,12 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
               <Btn onClick={() => fileRef.current?.click()}>
                 <span className="inline-flex items-center gap-1.5">
                   <Upload className="h-3.5 w-3.5" aria-hidden />
-                  {ar ? "إرفاق لقطة شاشة" : "Attach a screenshot"}
+                  {t("settings.issues.attach", lang)}
                 </span>
               </Btn>
             )}
             <p className="mt-1.5 text-[11px] muted">
-              {ar
-                ? "اختياري. JPEG أو PNG أو WebP أو GIF، بحد أقصى ٥ ميجابايت."
-                : "Optional. JPEG, PNG, WebP or GIF, up to 5 MB."}
+              {t("settings.issues.attachHint", lang)}
             </p>
           </div>
 
@@ -390,7 +396,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
               that the report will point somewhere unhelpful. */}
           {pageRoute && (
             <p className="flex flex-wrap items-center gap-1.5 text-[11px] muted">
-              {ar ? "سيُرفق مع البلاغ:" : "Filed against:"}
+              {t("settings.issues.filedAgainst", lang)}
               <code
                 dir="ltr"
                 className="rounded px-1.5 py-0.5 font-mono"
@@ -407,13 +413,13 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
             {submitted && (
               <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
                 <Check className="h-4 w-4" aria-hidden />
-                {ar ? "تم الإرسال" : "Sent"}
+                {t("settings.issues.sent", lang)}
                 <button
                   type="button"
                   onClick={() => setView("queue")}
                   className="focus-ring underline underline-offset-2"
                 >
-                  {ar ? "عرضه" : "See it"}
+                  {t("settings.issues.seeIt", lang)}
                 </button>
               </span>
             )}
@@ -422,7 +428,9 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
               variant="primary"
               className={submitting ? "opacity-50 pointer-events-none" : ""}
             >
-              {submitting ? (ar ? "جارٍ الإرسال…" : "Sending…") : ar ? "إرسال" : "Send report"}
+              {submitting
+                ? t("settings.issues.sending", lang)
+                : t("settings.issues.send", lang)}
             </Btn>
           </div>
         </form>
@@ -432,14 +440,14 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
       {view === "queue" && (
         <div className="mt-5">
           {queue === null && !loadError ? (
-            <div className="py-8 text-center text-sm muted">{ar ? "جارٍ التحميل…" : "Loading…"}</div>
+            <div className="py-8 text-center text-sm muted">{t("common.loading", lang)}</div>
           ) : ordered.length === 0 ? (
             // A real empty state. Zero reports is the outcome this feature hopes
             // for, so it should not look like a failed load.
             <div className="rounded-xl border py-10 text-center" style={CARD_STYLE}>
               <Inbox className="mx-auto h-6 w-6 muted" aria-hidden />
               <p className="mt-2 text-sm muted">
-                {ar ? "لا توجد بلاغات. جيد." : "No reports. That is the good outcome."}
+                {t("settings.issues.empty", lang)}
               </p>
             </div>
           ) : (
@@ -471,7 +479,11 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                         </div>
                         <p className="mt-1 truncate text-sm font-medium">{row.title}</p>
                         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] muted">
-                          <span>{mine ? (ar ? "أنت" : "You") : (ar ? "زميلك" : "Someone else")}</span>
+                          <span>
+                            {mine
+                              ? t("settings.issues.you", lang)
+                              : t("settings.issues.someoneElse", lang)}
+                          </span>
                           <span aria-hidden>·</span>
                           <span>{when(row.created_at)}</span>
                           {row.page_route && (
@@ -500,7 +512,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                         {row.attachment_path && (
                           <div>
                             {attachmentLoading ? (
-                              <p className="text-[11px] muted">{ar ? "جارٍ تحميل الصورة…" : "Loading image…"}</p>
+                              <p className="text-[11px] muted">{t("settings.issues.imageLoading", lang)}</p>
                             ) : attachmentUrl ? (
                               // Plain <img>: a signed URL with a query string and
                               // a five-minute life, on a host that would need a
@@ -511,14 +523,14 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img
                                   src={attachmentUrl}
-                                  alt={ar ? "مرفق البلاغ" : "Report attachment"}
+                                  alt={t("settings.issues.attachmentAlt", lang)}
                                   className="max-h-56 rounded-lg border object-contain"
                                   style={CARD_STYLE}
                                 />
                               </a>
                             ) : (
                               <p className="text-[11px] muted">
-                                {ar ? "تعذّر تحميل الصورة." : "The image could not be loaded."}
+                                {t("settings.issues.imageFailed", lang)}
                               </p>
                             )}
                           </div>
@@ -526,7 +538,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
 
                         <div className="grid gap-3 sm:grid-cols-[auto_1fr] sm:items-start">
                           <label className="flex flex-col gap-1 text-sm">
-                            <span className="muted">{ar ? "الحالة" : "Status"}</span>
+                            <span className="muted">{t("common.status", lang)}</span>
                             <select
                               value={draftStatus}
                               onChange={(e) => { setRowSaved(null); setRowError(null); setDraftStatus(e.target.value); }}
@@ -547,8 +559,8 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                                   right now — 0157 stores one column and lets the
                                   status decide its meaning. */}
                               {draftStatus === "needs_info"
-                                ? ar ? "ما المطلوب توضيحه؟" : "What do you need to know?"
-                                : ar ? "ملاحظة" : "Note"}
+                                ? t("settings.issues.needsInfoLabel", lang)
+                                : t("common.note", lang)}
                             </span>
                             <textarea
                               value={draftNote}
@@ -562,11 +574,16 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
 
                         {row.resolved_at && row.status === RESOLVED && (
                           <p className="text-[11px] muted">
-                            {ar ? "تم الحل في " : "Resolved "}
+                            {/* Three fragments around a timestamp. The prefix
+                                ends with a space and both suffixes start with
+                                one, and the dictionary entries carry those
+                                spaces rather than adding {" "} here — see the
+                                note on those three keys in lib/i18n.ts. */}
+                            {t("settings.issues.resolvedPrefix", lang)}
                             {when(row.resolved_at)}
                             {queue?.currentUserId != null && row.resolved_by === queue.currentUserId
-                              ? ar ? " — بواسطتك" : " by you"
-                              : ar ? " — بواسطة زميلك" : " by someone else"}
+                              ? t("settings.issues.byYou", lang)
+                              : t("settings.issues.bySomeoneElse", lang)}
                           </p>
                         )}
 
@@ -578,7 +595,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                           {rowSaved === row.id && (
                             <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
                               <Check className="h-4 w-4" aria-hidden />
-                              {ar ? "تم الحفظ" : "Saved"}
+                              {t("common.saved", lang)}
                             </span>
                           )}
                           <Btn
@@ -586,7 +603,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                             onClick={() => void onSaveRow(row)}
                             className={savingId === row.id ? "opacity-50 pointer-events-none" : ""}
                           >
-                            {savingId === row.id ? (ar ? "جارٍ الحفظ…" : "Saving…") : ar ? "حفظ" : "Save"}
+                            {savingId === row.id ? t("common.saving", lang) : t("common.save", lang)}
                           </Btn>
                         </div>
                       </div>

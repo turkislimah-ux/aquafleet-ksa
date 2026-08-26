@@ -67,6 +67,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Warehouse as WarehouseIcon } from "lucide-react";
 import { Btn, PILL_TONE_CLS } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { t } from "@/lib/i18n";
 import type { Warehouse } from "@/lib/db-types";
 import {
   listWarehouses,
@@ -126,7 +127,6 @@ export default function WarehousesSection({
   open: boolean;
   lang: "en" | "ar";
 }) {
-  const ar = lang === "ar";
   const router = useRouter();
   const [rows, setRows] = useState<WarehouseRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -225,7 +225,7 @@ export default function WarehousesSection({
     // next to the field rather than as a round trip, since `required` alone
     // treats "   " as filled.
     if (!draft.name.trim()) {
-      setFormError(ar ? "اسم المستودع مطلوب." : "Warehouse name is required.");
+      setFormError(t("settings.warehouses.nameRequired", lang));
       return;
     }
 
@@ -240,8 +240,8 @@ export default function WarehousesSection({
       setFormError(
         res.error ??
         (panel.kind === "add"
-          ? ar ? "تعذّر إنشاء المستودع." : "Could not create warehouse."
-          : ar ? "تعذّر حفظ التغييرات." : "Could not save changes."),
+          ? t("settings.warehouses.createFailed", lang)
+          : t("settings.warehouses.saveFailed", lang)),
       );
       return;
     }
@@ -264,12 +264,8 @@ export default function WarehousesSection({
     <div>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold">{ar ? "المستودعات" : "Warehouses"}</h2>
-          <p className="mt-1 text-sm muted">
-            {ar
-              ? "أماكن تخزين القطع. تُتتبَّع القطع وأوامر الشراء والاستلامات وأذون الخروج لكل مستودع."
-              : "Where parts are stored. Parts, purchase orders, receipts and exit permits are all tracked per warehouse."}
-          </p>
+          <h2 className="text-lg font-semibold">{t("settings.warehouses.title", lang)}</h2>
+          <p className="mt-1 text-sm muted">{t("settings.warehouses.subtitle", lang)}</p>
         </div>
         {/* Greyed out rather than removed while a form is open, for the same
             reason the per-row Edit buttons are: this button sits in the header,
@@ -277,7 +273,7 @@ export default function WarehousesSection({
             shift the list under the cursor. */}
         <Btn variant="primary" onClick={startAdd} disabled={busy} className="shrink-0">
           <Plus className="h-4 w-4" aria-hidden />
-          {ar ? "إضافة مستودع" : "Add warehouse"}
+          {t("settings.warehouses.add", lang)}
         </Btn>
       </div>
 
@@ -288,7 +284,7 @@ export default function WarehousesSection({
         >
           {loadError}{" "}
           <button onClick={() => void load()} className="focus-ring underline underline-offset-2">
-            {ar ? "إعادة المحاولة" : "Try again"}
+            {t("common.tryAgain", lang)}
           </button>
         </div>
       )}
@@ -305,21 +301,21 @@ export default function WarehousesSection({
               second dismiss control with the same job would either duplicate
               that accessible name or invent a different word for it — and an X
               badge is modal chrome on a panel that is not a modal. */}
-          <h3 className="text-sm font-semibold">{ar ? "مستودع جديد" : "New warehouse"}</h3>
-          <WarehouseFields draft={draft} set={set} ar={ar} />
+          <h3 className="text-sm font-semibold">{t("settings.warehouses.newTitle", lang)}</h3>
+          <WarehouseFields draft={draft} set={set} lang={lang} />
           <FormFooter
-            ar={ar}
+            lang={lang}
             saving={saving}
             onCancel={cancel}
             error={formError}
-            submitLabel={ar ? "إنشاء المستودع" : "Create warehouse"}
+            submitLabel={t("settings.warehouses.create", lang)}
           />
         </form>
       )}
 
       {/* ---- LIST ---- */}
       {rows === null ? (
-        <div className="py-8 text-center text-sm muted">{ar ? "جارٍ التحميل…" : "Loading…"}</div>
+        <div className="py-8 text-center text-sm muted">{t("common.loading", lang)}</div>
       ) : rows.length === 0 ? (
         !busy && (
           <div
@@ -327,11 +323,7 @@ export default function WarehousesSection({
             style={{ borderColor: "rgb(var(--border))" }}
           >
             <WarehouseIcon className="h-7 w-7 muted" aria-hidden />
-            <p className="text-sm muted">
-              {ar
-                ? "لا توجد مستودعات بعد. أضف واحدًا لبدء تتبع القطع والمخزون."
-                : "No warehouses yet. Add one to start tracking parts and stock."}
-            </p>
+            <p className="text-sm muted">{t("settings.warehouses.empty", lang)}</p>
           </div>
         )
       ) : (
@@ -347,20 +339,28 @@ export default function WarehousesSection({
           {rows.map((w) => {
             const isEditing = panel.kind === "edit" && panel.id === w.id;
             const isConfirming = panel.kind === "confirmDelete" && panel.id === w.id;
+            // The confirm question is printed twice — once as the group's
+            // accessible name, once visibly — so it is built once here. The
+            // substitution goes through a replacer FUNCTION because `{name}` is
+            // filled with a warehouse name the user typed: passing the name as a
+            // plain replacement string would let a literal `$&` or `$1` in it
+            // re-expand against the match.
+            const confirmQuestion = t("settings.warehouses.confirmDelete", lang)
+              .replace("{name}", () => w.name);
             return (
               <li key={w.id} className="px-3 py-3">
                 {isEditing ? (
                   <form onSubmit={submit}>
                     <h3 className="text-sm font-semibold">
-                      {ar ? "تعديل المستودع" : "Edit warehouse"}
+                      {t("settings.warehouses.editTitle", lang)}
                     </h3>
-                    <WarehouseFields draft={draft} set={set} ar={ar} />
+                    <WarehouseFields draft={draft} set={set} lang={lang} />
                     <FormFooter
-                      ar={ar}
+                      lang={lang}
                       saving={saving}
                       onCancel={cancel}
                       error={formError}
-                      submitLabel={ar ? "حفظ التغييرات" : "Save changes"}
+                      submitLabel={t("settings.warehouses.saveChanges", lang)}
                     />
                   </form>
                 ) : isConfirming ? (
@@ -374,16 +374,12 @@ export default function WarehousesSection({
                   <div
                     className="flex flex-wrap items-start justify-between gap-3"
                     role="group"
-                    aria-label={ar ? `حذف "${w.name}"؟` : `Delete “${w.name}”?`}
+                    aria-label={confirmQuestion}
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-medium">
-                        {ar ? `حذف "${w.name}"؟` : `Delete “${w.name}”?`}
-                      </p>
+                      <p className="text-sm font-medium">{confirmQuestion}</p>
                       <p className="mt-0.5 text-xs muted">
-                        {ar
-                          ? "لا شيء يشير إلى هذا المستودع، لذا يمكن إزالته. لا يمكن التراجع عن هذا."
-                          : "Nothing points at this warehouse, so it can be removed. This cannot be undone."}
+                        {t("settings.warehouses.confirmBody", lang)}
                       </p>
                       {formError && (
                         <p role="alert" className="mt-2 text-sm text-rose-600 dark:text-rose-400">
@@ -398,7 +394,7 @@ export default function WarehousesSection({
                           keyboard user pressing Enter twice cancels rather than
                           destroys. */}
                       <Btn variant="outline" onClick={cancel} disabled={saving} autoFocus>
-                        {ar ? "إلغاء" : "Cancel"}
+                        {t("common.cancel", lang)}
                       </Btn>
                       {/* Rose, not brand: this is the one control in Settings
                           that destroys something, and it should not look like
@@ -411,8 +407,8 @@ export default function WarehousesSection({
                         className="bg-rose-600 text-white hover:bg-rose-700"
                       >
                         {saving
-                          ? ar ? "جارٍ الحذف…" : "Deleting…"
-                          : ar ? "حذف" : "Delete"}
+                          ? t("settings.warehouses.deleting", lang)
+                          : t("settings.warehouses.delete", lang)}
                       </Btn>
                     </div>
                   </div>
@@ -452,7 +448,7 @@ export default function WarehousesSection({
                         invite clicking it to find out why. */}
                     <div className="flex shrink-0 items-center gap-1">
                       <Btn variant="ghost" onClick={() => startEdit(w)} disabled={busy}>
-                        {ar ? "تعديل" : "Edit"}
+                        {t("common.edit", lang)}
                       </Btn>
                       {w.deletable && (
                         <Btn
@@ -461,7 +457,7 @@ export default function WarehousesSection({
                           disabled={busy}
                           className="text-rose-600 dark:text-rose-400"
                         >
-                          {ar ? "حذف" : "Delete"}
+                          {t("settings.warehouses.delete", lang)}
                         </Btn>
                       )}
                     </div>
@@ -478,11 +474,7 @@ export default function WarehousesSection({
           and this app already has one column that looks like a warehouse status
           and is not one. The missing control needs a reason, not a label. */}
       {anyLocked && (
-        <p className="mt-3 text-xs muted">
-          {ar
-            ? "يمكن حذف المستودع فقط ما دام لا شيء يشير إليه. بمجرد أن تصبح لديه قطع أو استلامات أو أوامر شراء أو أذون خروج، يبقيه سجلّه."
-            : "A warehouse can only be deleted while nothing points at it. Once it has parts, receipts, purchase orders or exit permits, its history keeps it."}
-        </p>
+        <p className="mt-3 text-xs muted">{t("settings.warehouses.lockedNote", lang)}</p>
       )}
     </div>
   );
@@ -491,17 +483,21 @@ export default function WarehousesSection({
 // The four fields, shared verbatim by create and edit. They are the same four
 // columns with the same rules, so two copies would be two places for a label,
 // a placeholder or a required marker to drift.
+//
+// Takes `lang`, not the `ar` boolean it used to: the copy is now read from the
+// dictionary, and `t()` wants the language rather than a yes/no about one of
+// them. Same reason the parent stopped computing `ar` at all.
 function WarehouseFields({
-  draft, set, ar,
+  draft, set, lang,
 }: {
   draft: Draft;
   set: <K extends keyof Draft>(key: K, value: string) => void;
-  ar: boolean;
+  lang: "en" | "ar";
 }) {
   return (
     <div className="mt-3 flex flex-col gap-3">
       <label className="flex flex-col gap-1 text-sm">
-        <span className="muted">{ar ? "الاسم *" : "Name *"}</span>
+        <span className="muted">{t("settings.warehouses.fName", lang)}</span>
         <input
           value={draft.name}
           onChange={(e) => set("name", e.target.value)}
@@ -512,40 +508,40 @@ function WarehouseFields({
           // so opening it is one click and then typing. On edit that also puts
           // the caret in the field being changed most often — the name.
           autoFocus
-          placeholder={ar ? "مثال: مستودع الرياض" : "e.g. Riyadh Depot"}
+          placeholder={t("settings.warehouses.phName", lang)}
         />
       </label>
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="muted">{ar ? "الموقع" : "Location"}</span>
+          <span className="muted">{t("settings.warehouses.fLocation", lang)}</span>
           <input
             value={draft.location}
             onChange={(e) => set("location", e.target.value)}
             className={INPUT}
             style={INPUT_STYLE}
-            placeholder={ar ? "مثال: الرياض" : "e.g. Riyadh"}
+            placeholder={t("settings.warehouses.phLocation", lang)}
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="muted">{ar ? "النوع" : "Type"}</span>
+          <span className="muted">{t("common.type", lang)}</span>
           <input
             value={draft.type}
             onChange={(e) => set("type", e.target.value)}
             className={INPUT}
             style={INPUT_STYLE}
-            placeholder={ar ? "مثال: مستودع رئيسي" : "e.g. Main depot"}
+            placeholder={t("settings.warehouses.phType", lang)}
           />
         </label>
       </div>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="muted">{ar ? "ملاحظة" : "Note"}</span>
+        <span className="muted">{t("common.note", lang)}</span>
         <textarea
           value={draft.note}
           onChange={(e) => set("note", e.target.value)}
           className={INPUT}
           style={INPUT_STYLE}
           rows={2}
-          placeholder={ar ? "ما الذي يُخزَّن هنا" : "What is stored here"}
+          placeholder={t("settings.warehouses.phNote", lang)}
         />
       </label>
     </div>
@@ -555,10 +551,14 @@ function WarehouseFields({
 // Error line + Cancel/Submit, shared for the same reason the fields are: the
 // only thing that differs between creating and saving is one word on one
 // button.
+//
+// `lang` for the same reason WarehouseFields takes it. `submitLabel` stays a
+// resolved STRING rather than a key: the caller is the one that knows whether
+// this footer is under a create form or an edit form.
 function FormFooter({
-  ar, saving, error, onCancel, submitLabel,
+  lang, saving, error, onCancel, submitLabel,
 }: {
-  ar: boolean;
+  lang: "en" | "ar";
   saving: boolean;
   error: string | null;
   onCancel: () => void;
@@ -573,10 +573,10 @@ function FormFooter({
       )}
       <div className="mt-4 flex items-center justify-end gap-2">
         <Btn variant="outline" onClick={onCancel} disabled={saving}>
-          {ar ? "إلغاء" : "Cancel"}
+          {t("common.cancel", lang)}
         </Btn>
         <Btn type="submit" variant="primary" disabled={saving}>
-          {saving ? (ar ? "جارٍ الحفظ…" : "Saving…") : submitLabel}
+          {saving ? t("common.saving", lang) : submitLabel}
         </Btn>
       </div>
     </>

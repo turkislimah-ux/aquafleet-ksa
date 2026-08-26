@@ -37,6 +37,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Building2, Warehouse, BellRing, UserRound, LifeBuoy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { t } from "@/lib/i18n";
 import CompanySettingsSection from "./CompanySettingsSection";
 import WarehousesSection from "./WarehousesSection";
 import NotificationsSection from "./NotificationsSection";
@@ -50,12 +51,18 @@ type SectionKey = "company" | "warehouses" | "notifications" | "profile" | "issu
 // (things about the business, shared by everyone) sit above the two PERSONAL
 // ones (things about you alone), and reporting a problem stays last because it
 // is an exit, not a setting. Warehouses joins Company on the organisation side.
-const SECTIONS: { key: SectionKey; label: string; labelAr: string; icon: typeof Building2 }[] = [
-  { key: "company",       label: "Company",          labelAr: "الشركة",           icon: Building2 },
-  { key: "warehouses",    label: "Warehouses",       labelAr: "المستودعات",       icon: Warehouse },
-  { key: "notifications", label: "Notifications",    labelAr: "الإشعارات",        icon: BellRing  },
-  { key: "profile",       label: "Profile",          labelAr: "الملف",            icon: UserRound },
-  { key: "issues",        label: "Report a problem", labelAr: "الإبلاغ عن مشكلة", icon: LifeBuoy  },
+//
+// The `label`/`labelAr` pair that used to sit on each row is gone — the copy is
+// `settings.nav.<key>` in the dictionary now, reached by interpolating the key
+// this array already carries. Keeping the words here would have meant two places
+// to reword and one of them silent. SectionKey being a literal union is what
+// makes the template-literal t() call type-check.
+const SECTIONS: { key: SectionKey; icon: typeof Building2 }[] = [
+  { key: "company",       icon: Building2 },
+  { key: "warehouses",    icon: Warehouse },
+  { key: "notifications", icon: BellRing  },
+  { key: "profile",       icon: UserRound },
+  { key: "issues",        icon: LifeBuoy  },
 ];
 
 // The ComingSoon stub that used to live here is gone, along with the `ready`
@@ -102,7 +109,10 @@ export default function SettingsModal({
 
   if (!open) return null;
 
-  const title = lang === "ar" ? "الإعدادات" : "Settings";
+  // Reuses the sidebar/user-menu entry that opens this dialog rather than
+  // minting a second "Settings" — the label on the door and the title inside it
+  // are the same word by design, and a reword should not be able to split them.
+  const title = t("shared.chrome.settings", lang);
 
   return (
     <div
@@ -137,7 +147,7 @@ export default function SettingsModal({
           <button
             type="button"
             onClick={onClose}
-            aria-label={lang === "ar" ? "إغلاق" : "Close"}
+            aria-label={t("settings.close", lang)}
             className="focus-ring rounded-md p-1 muted hover:text-[rgb(var(--fg))]"
           >
             <X className="h-5 w-5" aria-hidden />
@@ -169,7 +179,7 @@ export default function SettingsModal({
                 >
                   <Icon className="h-4 w-4 shrink-0" aria-hidden />
                   <span className="min-w-0 flex-1 truncate">
-                    {lang === "ar" ? s.labelAr : s.label}
+                    {t(`settings.nav.${s.key}`, lang)}
                   </span>
                 </button>
               );

@@ -122,6 +122,22 @@ export const dict = {
     edit: { en: "Edit", ar: "تعديل" },
     saving: { en: "Saving…", ar: "جارٍ الحفظ…" },
     selectPlaceholder: { en: "Select…", ar: "اختر…" },
+    // Added in Phase 3 Batch 2b, on the same test the three above were added
+    // under: a string earns `common` by appearing in MORE THAN ONE of the files
+    // that batch converted. Loading and Try again are in four of the five
+    // Settings panels, Saved in three, Note in two — every one of them already
+    // spelled the same way in both languages, so keying them per-panel would
+    // have minted four near-identical entries a reword would have to find.
+    //
+    // `loading` and `saved` also ABSORBED `shared.company.loading` /
+    // `shared.company.saved`, which held byte-identical pairs and had exactly
+    // one caller each (CompanySettingsSection). Two keys for one string is the
+    // duplication this batch was told to avoid, so the old pair is gone and
+    // that caller now reads these. Nothing else referenced them.
+    loading: { en: "Loading…", ar: "جارٍ التحميل…" },
+    tryAgain: { en: "Try again", ar: "إعادة المحاولة" },
+    saved: { en: "Saved", ar: "تم الحفظ" },
+    note: { en: "Note", ar: "ملاحظة" },
   },
   mt: {
     calendar: { en: "Maintenance Calendar", ar: "تقويم الصيانة" },
@@ -442,7 +458,9 @@ export const dict = {
         en: "Seller identity — appears in the Seller section of every invoice header.",
         ar: "هوية البائع — تظهر في قسم البائع في ترويسة كل فاتورة.",
       },
-      loading: { en: "Loading…", ar: "جارٍ التحميل…" },
+      // `loading` and `saved` used to sit here. Both moved to `common` in Batch
+      // 2b — the four other Settings panels print the same two strings, and one
+      // panel's namespace is the wrong home for copy five of them share.
       fLegalName: { en: "CR Company Name *", ar: "اسم الشركة في السجل التجاري *" },
       // The SAMPLE stays Latin in both languages: this field holds the Latin CR
       // name and `fLegalNameAr` below holds the Arabic one. That Arabic field's
@@ -466,7 +484,6 @@ export const dict = {
         en: "Used to turn a mechanic's per-day duty hours into monthly hours for Maintenance labor costing.",
         ar: "تُستخدم لتحويل ساعات دوام الفني اليومية إلى ساعات شهرية في احتساب تكلفة عمالة الصيانة.",
       },
-      saved: { en: "Saved", ar: "تم الحفظ" },
     },
 
     fields: {
@@ -555,6 +572,293 @@ export const dict = {
     email: { en: "Email", ar: "البريد الإلكتروني" },
     password: { en: "Password", ar: "كلمة المرور" },
     signingIn: { en: "Signing in…", ar: "جارٍ تسجيل الدخول…" },
+  },
+
+  // ── Phase 3 Batch 2b — the Settings dialog's five panels ──────────────────
+  //
+  // NOTHING HERE WAS TRANSLATED. Every `ar` value below was already written, by
+  // hand, in the JSX of the panel it belongs to — this batch moved the pairs out
+  // of `{ar ? "…" : "…"}` ternaries and out of parallel `labelAr`/`helpAr` object
+  // fields, unchanged in both directions. Every `en` value is the exact literal
+  // that was on screen before, so English output is byte-identical.
+  //
+  // WHERE A STRING LIVES. It goes to `common` if it appears in MORE THAN ONE of
+  // the five panels, and stays in its panel's block if it appears in exactly one
+  // — the same test Batch 1 used, and the reason `common` gained loading /
+  // tryAgain / saved / note and nothing else. Panel-local keys are kept even
+  // when another namespace already renders the same English word, per the rule
+  // `labels`' header states: two keys that happen to match today are still two
+  // columns, and collapsing them makes a future reword of one silently reword
+  // the other.
+  //
+  // Reached OUT of this namespace on purpose, because the pair is byte-identical
+  // and already exists: `shared.chrome.settings` (the dialog title — the same
+  // string the sidebar button that opens it already prints), `common.save`,
+  // `common.saving`, `common.cancel`, `common.edit`, `common.type`,
+  // `common.status`, `common.note`, `common.loading`, `common.tryAgain`,
+  // `common.saved`.
+  //
+  // `shared.stations.close` was NOT reached for. Close appears in one panel
+  // here, so by the rule above it stays local as `settings.close` — the stations
+  // modal's copy is that feature's own.
+  settings: {
+    // Rail labels, keyed by `SectionKey` so SettingsModal can build the path
+    // from the value it already has: t(`settings.nav.${s.key}`). Same shape as
+    // `nav` and `search.g_*`.
+    //
+    // A rail label is NOT the panel heading it opens, and Arabic is where that
+    // stops being pedantic: this reads "الملف" and the Profile panel's own h2
+    // reads "الملف الشخصي". Two strings, deliberately.
+    nav: {
+      company: { en: "Company", ar: "الشركة" },
+      warehouses: { en: "Warehouses", ar: "المستودعات" },
+      notifications: { en: "Notifications", ar: "الإشعارات" },
+      profile: { en: "Profile", ar: "الملف" },
+      issues: { en: "Report a problem", ar: "الإبلاغ عن مشكلة" },
+    },
+    close: { en: "Close", ar: "إغلاق" },
+
+    notifications: {
+      title: { en: "Notifications", ar: "الإشعارات" },
+      subtitle: {
+        en: "Yours alone — these never change what the other user sees.",
+        ar: "تخصّك وحدك — لا تؤثر على المستخدم الآخر.",
+      },
+      whatShows: { en: "What shows", ar: "ما الذي يظهر" },
+      savedInstantly: {
+        en: "Saved instantly. Hiding a level does not delete those alerts — it only hides them from you.",
+        ar: "يُحفظ فورًا. إخفاء مستوى لا يحذف التنبيهات — يخفيها عنك فقط.",
+      },
+      whenFire: { en: "When they fire", ar: "متى تظهر" },
+      custom: { en: "Custom", ar: "مخصّص" },
+      default: { en: "Default", ar: "افتراضي" },
+      reset: { en: "Reset to default", ar: "استعادة الافتراضي" },
+      // `{n}` is the inherited shared default. Latin numerals in both languages
+      // — the standing rule for figures this app formats.
+      sharedDefault: {
+        en: "Shared default: {n} — leave blank to use it.",
+        ar: "الافتراضي المشترك: {n} — اتركه فارغًا لاستخدامه.",
+      },
+      // `{label}` is the field's own label from the f_* block below. The English
+      // half used to interpolate `THRESHOLD_BOUNDS[key].label` while the Arabic
+      // half interpolated the component's `labelAr` — two sources for one slot.
+      // They are byte-identical strings, which is why one key can now feed both.
+      notANumber: { en: "{label}: not a number.", ar: "{label}: قيمة غير صالحة." },
+
+      // The four threshold rows: f_ is the label, h_ the help line under it.
+      // Keyed by `ThresholdKey` so FIELDS can hold nothing but a key and a step.
+      f_low_runway_trips: { en: "Low balance warning", ar: "تحذير قرب نفاد الرصيد" },
+      h_low_runway_trips: {
+        en: "Warn when a prepaid wallet holds fewer than this many trips' worth of work.",
+        ar: "تنبيه عندما يقل رصيد العميل عن هذا العدد من الرحلات.",
+      },
+      f_doc_expiry_lead_days: { en: "Document expiry notice", ar: "مهلة انتهاء المستندات" },
+      h_doc_expiry_lead_days: {
+        en: "How many days before a licence, iqama or registration expires to start warning.",
+        ar: "عدد الأيام قبل انتهاء الرخصة أو الإقامة أو الاستمارة لبدء التنبيه.",
+      },
+      f_maintenance_stuck_days: { en: "Work order stuck after", ar: "أمر الصيانة متعثر بعد" },
+      h_maintenance_stuck_days: {
+        en: "An open work order older than this is flagged as stuck.",
+        ar: "أمر صيانة مفتوح أطول من هذه المدة يُعتبر متعثرًا.",
+      },
+      f_invoice_overdue_red_days: { en: "Invoice turns red after", ar: "الفاتورة تصبح حمراء بعد" },
+      h_invoice_overdue_red_days: {
+        en: "Overdue longer than this escalates the invoice alert from yellow to red.",
+        ar: "التأخر أكثر من هذه المدة يرفع تنبيه الفاتورة من الأصفر إلى الأحمر.",
+      },
+
+      // The three severity toggles, keyed by `Severity`. sev_ is the switch
+      // label, sevHint_ the line under it.
+      sev_red: { en: "Act today", ar: "عاجل" },
+      sevHint_red: { en: "Money and compliance", ar: "المال والامتثال" },
+      sev_yellow: { en: "This week", ar: "هذا الأسبوع" },
+      sevHint_yellow: { en: "Coming up, not urgent", ar: "قادم وغير عاجل" },
+      sev_blue: { en: "For info", ar: "للعلم" },
+      sevHint_blue: { en: "Never counted in the badge", ar: "لا تُحتسب في العداد" },
+    },
+
+    warehouses: {
+      title: { en: "Warehouses", ar: "المستودعات" },
+      subtitle: {
+        en: "Where parts are stored. Parts, purchase orders, receipts and exit permits are all tracked per warehouse.",
+        ar: "أماكن تخزين القطع. تُتتبَّع القطع وأوامر الشراء والاستلامات وأذون الخروج لكل مستودع.",
+      },
+      add: { en: "Add warehouse", ar: "إضافة مستودع" },
+      newTitle: { en: "New warehouse", ar: "مستودع جديد" },
+      create: { en: "Create warehouse", ar: "إنشاء المستودع" },
+      editTitle: { en: "Edit warehouse", ar: "تعديل المستودع" },
+      saveChanges: { en: "Save changes", ar: "حفظ التغييرات" },
+      // The section's own client-side guard and its two write failures. The
+      // SERVER action's messages stay English — same boundary Batch 1 drew.
+      nameRequired: { en: "Warehouse name is required.", ar: "اسم المستودع مطلوب." },
+      createFailed: { en: "Could not create warehouse.", ar: "تعذّر إنشاء المستودع." },
+      saveFailed: { en: "Could not save changes.", ar: "تعذّر حفظ التغييرات." },
+      empty: {
+        en: "No warehouses yet. Add one to start tracking parts and stock.",
+        ar: "لا توجد مستودعات بعد. أضف واحدًا لبدء تتبع القطع والمخزون.",
+      },
+      // The QUOTE MARKS DIFFER BY LANGUAGE and that is not a typo to tidy: the
+      // English literal has always used curly “ ”, the Arabic straight ". Both
+      // are copied exactly as they were, because English output has to be
+      // byte-identical and the Arabic was written that way on purpose.
+      // `{name}` is the warehouse's own name — user data, substituted through a
+      // replacer FUNCTION so a `$&` in a name cannot re-expand.
+      confirmDelete: { en: "Delete “{name}”?", ar: "حذف \"{name}\"؟" },
+      confirmBody: {
+        en: "Nothing points at this warehouse, so it can be removed. This cannot be undone.",
+        ar: "لا شيء يشير إلى هذا المستودع، لذا يمكن إزالته. لا يمكن التراجع عن هذا.",
+      },
+      deleting: { en: "Deleting…", ar: "جارٍ الحذف…" },
+      delete: { en: "Delete", ar: "حذف" },
+      lockedNote: {
+        en: "A warehouse can only be deleted while nothing points at it. Once it has parts, receipts, purchase orders or exit permits, its history keeps it.",
+        ar: "يمكن حذف المستودع فقط ما دام لا شيء يشير إليه. بمجرد أن تصبح لديه قطع أو استلامات أو أوامر شراء أو أذون خروج، يبقيه سجلّه.",
+      },
+      // The four form fields. Type and Note reuse `common`; only the two labels
+      // with no `common` twin, plus all four placeholders, live here.
+      fName: { en: "Name *", ar: "الاسم *" },
+      phName: { en: "e.g. Riyadh Depot", ar: "مثال: مستودع الرياض" },
+      fLocation: { en: "Location", ar: "الموقع" },
+      phLocation: { en: "e.g. Riyadh", ar: "مثال: الرياض" },
+      phType: { en: "e.g. Main depot", ar: "مثال: مستودع رئيسي" },
+      phNote: { en: "What is stored here", ar: "ما الذي يُخزَّن هنا" },
+    },
+
+    profile: {
+      // "الملف الشخصي" here, "الملف" in `nav` above — see that block's note.
+      title: { en: "Profile", ar: "الملف الشخصي" },
+      subtitle: {
+        en: "Yours alone — you are the only one who can see or change this.",
+        ar: "تخصّك وحدك — أنت الوحيد الذي يراه أو يعدّله.",
+      },
+      photoAlt: { en: "Your photo", ar: "صورتك" },
+      uploading: { en: "Uploading…", ar: "جارٍ الرفع…" },
+      changePhoto: { en: "Change photo", ar: "تغيير الصورة" },
+      addPhoto: { en: "Add photo", ar: "إضافة صورة" },
+      removePhoto: { en: "Remove", ar: "إزالة" },
+      // The Arabic size limit is written ٢ — an Arabic-Indic numeral — in the
+      // original copy, and it is LIFTED AS IT WAS RATHER THAN LATINISED. The
+      // Latin-numerals rule governs figures this app FORMATS from data; this one
+      // is a hand-written sentence, and rewriting it here would be re-authoring
+      // the panel's Arabic under cover of a mechanical move. Same for the ٥ in
+      // `issues.attachHint`.
+      //
+      // RULED ON — do not re-raise. Arabic-Indic digits STAY in hand-written
+      // copy. The Latin-numerals rule covers figures this app FORMATS from data:
+      // `notifications.sharedDefault`'s `{n}`, `profile.hNewPassword`'s `{n}`.
+      // Those two are substitutions; these two are sentences someone wrote.
+      photoHint: {
+        en: "JPEG, PNG, WebP or GIF, up to 2 MB. Saved as soon as you pick it.",
+        ar: "JPEG أو PNG أو WebP أو GIF، بحد أقصى ٢ ميجابايت. تُحفظ فور اختيارها.",
+      },
+      gAccount: { en: "Account", ar: "الحساب" },
+      fDisplayName: { en: "Display name", ar: "الاسم المعروض" },
+      hDisplayName: { en: "Shown in the header, top right.", ar: "يظهر في الشريط العلوي." },
+      phDisplayName: { en: "How your name should appear", ar: "كيف تريد أن يظهر اسمك" },
+      fLoginEmail: { en: "Login email", ar: "بريد تسجيل الدخول" },
+      hLoginEmail: { en: "Not changeable here.", ar: "لا يمكن تغييره من هنا." },
+      gPersonal: { en: "Personal info", ar: "معلومات شخصية" },
+      fJobTitle: { en: "Job title", ar: "المسمى الوظيفي" },
+      hJobTitle: {
+        en: "How you describe yourself. It grants no permissions.",
+        ar: "وصف تعرّف به نفسك فقط — لا يمنح أي صلاحية.",
+      },
+      // Lower-case n. `mt.contactNumber` is "Contact Number" with a capital N,
+      // so it is a DIFFERENT string and reusing it would change English output.
+      fContactNumber: { en: "Contact number", ar: "رقم التواصل" },
+      fPersonalEmail: { en: "Personal email", ar: "بريد شخصي" },
+      hEmailWarn: {
+        en: "That does not look like an email — it will still be saved.",
+        ar: "لا يبدو كبريد إلكتروني — سيُحفظ كما هو.",
+      },
+      gEmergency: { en: "Emergency contact", ar: "جهة اتصال للطوارئ" },
+      fEmergencyName: { en: "Name", ar: "الاسم" },
+      fEmergencyNumber: { en: "Number", ar: "الرقم" },
+      emergencyHint: {
+        en: "Shared with colleagues in an emergency. Not the official HR record.",
+        ar: "تشاركها مع زملائك للطوارئ — ليست سجل الموارد البشرية الرسمي.",
+      },
+      fAbout: { en: "About", ar: "نبذة" },
+      gPreferences: { en: "Preferences", ar: "التفضيلات" },
+      fLandingPage: { en: "Landing page", ar: "صفحة البداية" },
+      hLandingPage: { en: "Where you land after signing in.", ar: "الصفحة التي تفتح بعد تسجيل الدخول." },
+      // The empty option on BOTH selects below. One key, two call sites — it is
+      // the same sentence meaning the same thing in both.
+      noPreference: { en: "No preference", ar: "بدون تفضيل" },
+      fPreferredLanguage: { en: "Preferred language", ar: "اللغة المفضلة" },
+      hPreferredLanguage: {
+        en: "A label only. To change the interface language, use the toggle in the header.",
+        ar: "ملصق فقط. لتغيير لغة الواجهة استخدم زر اللغة في الأعلى.",
+      },
+      gPassword: { en: "Password", ar: "كلمة المرور" },
+      fCurrentPassword: { en: "Current password", ar: "كلمة المرور الحالية" },
+      hCurrentPassword: {
+        en: "Required, so an unattended screen cannot change it.",
+        ar: "مطلوبة للتأكد أنك أنت.",
+      },
+      fNewPassword: { en: "New password", ar: "كلمة المرور الجديدة" },
+      // `{n}` is MIN_PASSWORD_LENGTH — one definition in lib/profile.ts, so the
+      // hint cannot drift from the validator that enforces it.
+      hNewPassword: { en: "At least {n} characters.", ar: "{n} أحرف على الأقل." },
+      fConfirmPassword: { en: "Confirm new password", ar: "تأكيد كلمة المرور" },
+      passwordChanged: { en: "Password changed", ar: "تم تغيير كلمة المرور" },
+      changing: { en: "Changing…", ar: "جارٍ التغيير…" },
+      changePassword: { en: "Change password", ar: "تغيير كلمة المرور" },
+      boundaryNote: {
+        en: "This is information you enter yourself. It is not linked to your employee file — no iqama, salary or leave.",
+        ar: "هذه معلومات تُدخلها بنفسك. لا ترتبط بملف الموظف — لا إقامة ولا راتب ولا إجازات.",
+      },
+    },
+
+    issues: {
+      title: { en: "Report a problem", ar: "الإبلاغ عن مشكلة" },
+      subtitle: {
+        en: "A shared list — you both see every report and either can resolve it.",
+        ar: "قائمة مشتركة — كلاكما يرى كل البلاغات ويستطيع حلّها.",
+      },
+      tabReport: { en: "New report", ar: "بلاغ جديد" },
+      tabQueue: { en: "Queue", ar: "القائمة" },
+      kind: { en: "What kind of problem?", ar: "ما نوع المشكلة؟" },
+      fTitle: { en: "Short title *", ar: "عنوان قصير *" },
+      phTitle: { en: "e.g. Save button does nothing", ar: "مثال: زر الحفظ لا يستجيب" },
+      fDetails: { en: "Details", ar: "التفاصيل" },
+      phDetails: {
+        en: "What were you trying to do, and what happened instead?",
+        ar: "ماذا كنت تحاول أن تفعل؟ وماذا حدث بدلًا من ذلك؟",
+      },
+      removeAttachment: { en: "Remove attachment", ar: "إزالة المرفق" },
+      attach: { en: "Attach a screenshot", ar: "إرفاق لقطة شاشة" },
+      // Carries an Arabic-Indic ٥ — see `profile.photoHint` for why it is lifted
+      // rather than converted.
+      attachHint: {
+        en: "Optional. JPEG, PNG, WebP or GIF, up to 5 MB.",
+        ar: "اختياري. JPEG أو PNG أو WebP أو GIF، بحد أقصى ٥ ميجابايت.",
+      },
+      filedAgainst: { en: "Filed against:", ar: "سيُرفق مع البلاغ:" },
+      sent: { en: "Sent", ar: "تم الإرسال" },
+      seeIt: { en: "See it", ar: "عرضه" },
+      sending: { en: "Sending…", ar: "جارٍ الإرسال…" },
+      send: { en: "Send report", ar: "إرسال" },
+      empty: { en: "No reports. That is the good outcome.", ar: "لا توجد بلاغات. جيد." },
+      // Not a name — see this panel's header for why the queue cannot resolve
+      // another person's uuid to one.
+      you: { en: "You", ar: "أنت" },
+      someoneElse: { en: "Someone else", ar: "زميلك" },
+      imageLoading: { en: "Loading image…", ar: "جارٍ تحميل الصورة…" },
+      attachmentAlt: { en: "Report attachment", ar: "مرفق البلاغ" },
+      imageFailed: { en: "The image could not be loaded.", ar: "تعذّر تحميل الصورة." },
+      // The note field's other name, shown while the status is needs_info. Its
+      // default name is `common.note`.
+      needsInfoLabel: { en: "What do you need to know?", ar: "ما المطلوب توضيحه؟" },
+      // THE SPACES IN THESE THREE ARE LOAD-BEARING. The resolved stamp is
+      // assembled from three JSX fragments around a timestamp — "Resolved " +
+      // date + " by you" — so the prefix ends with a space and the two suffixes
+      // start with one. Trimming any of them runs the words into the date.
+      resolvedPrefix: { en: "Resolved ", ar: "تم الحل في " },
+      byYou: { en: " by you", ar: " — بواسطتك" },
+      bySomeoneElse: { en: " by someone else", ar: " — بواسطة زميلك" },
+    },
   },
 } as const;
 

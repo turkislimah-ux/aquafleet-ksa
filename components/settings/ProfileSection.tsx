@@ -96,7 +96,6 @@ function looksLikeEmail(v: string): boolean {
 
 export default function ProfileSection({ open, lang }: { open: boolean; lang: "en" | "ar" }) {
   const router = useRouter();
-  const ar = lang === "ar";
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [data, setData] = useState<ProfileData | null>(null);
@@ -250,24 +249,20 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
 
   return (
     <div>
-      <h2 className="text-lg font-semibold">{ar ? "الملف الشخصي" : "Profile"}</h2>
-      <p className="mt-1 text-sm muted">
-        {ar
-          ? "تخصّك وحدك — أنت الوحيد الذي يراه أو يعدّله."
-          : "Yours alone — you are the only one who can see or change this."}
-      </p>
+      <h2 className="text-lg font-semibold">{t("settings.profile.title", lang)}</h2>
+      <p className="mt-1 text-sm muted">{t("settings.profile.subtitle", lang)}</p>
 
       {loadError && (
         <div className="mt-4 rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-1 ring-inset ring-rose-500/20">
           {loadError}{" "}
           <button onClick={() => void load()} className="focus-ring underline underline-offset-2">
-            {ar ? "إعادة المحاولة" : "Try again"}
+            {t("common.tryAgain", lang)}
           </button>
         </div>
       )}
 
       {data === null ? (
-        <div className="py-8 text-center text-sm muted">{ar ? "جارٍ التحميل…" : "Loading…"}</div>
+        <div className="py-8 text-center text-sm muted">{t("common.loading", lang)}</div>
       ) : (
         <>
           {/* ---- AVATAR — saves on pick ---- */}
@@ -280,7 +275,7 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={avatarUrl}
-                alt={ar ? "صورتك" : "Your photo"}
+                alt={t("settings.profile.photoAlt", lang)}
                 className="h-20 w-20 shrink-0 rounded-full object-cover ring-1 ring-inset"
                 style={{ borderColor: "rgb(var(--border))" }}
               />
@@ -316,10 +311,10 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                   <span className="inline-flex items-center gap-1.5">
                     <Upload className="h-3.5 w-3.5" aria-hidden />
                     {avatarBusy
-                      ? ar ? "جارٍ الرفع…" : "Uploading…"
+                      ? t("settings.profile.uploading", lang)
                       : avatarUrl
-                        ? ar ? "تغيير الصورة" : "Change photo"
-                        : ar ? "إضافة صورة" : "Add photo"}
+                        ? t("settings.profile.changePhoto", lang)
+                        : t("settings.profile.addPhoto", lang)}
                   </span>
                 </Btn>
                 {avatarUrl && (
@@ -330,14 +325,12 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                     className="focus-ring inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm muted transition hover:text-rose-600 disabled:opacity-40"
                   >
                     <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                    {ar ? "إزالة" : "Remove"}
+                    {t("settings.profile.removePhoto", lang)}
                   </button>
                 )}
               </div>
               <p className="mt-1.5 text-[11px] muted">
-                {ar
-                  ? "JPEG أو PNG أو WebP أو GIF، بحد أقصى ٢ ميجابايت. تُحفظ فور اختيارها."
-                  : "JPEG, PNG, WebP or GIF, up to 2 MB. Saved as soon as you pick it."}
+                {t("settings.profile.photoHint", lang)}
               </p>
               {avatarError && (
                 <p className="mt-1 text-sm text-rose-600 dark:text-rose-400">{avatarError}</p>
@@ -348,18 +341,18 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
           <form onSubmit={onSave}>
             {/* ---- ACCOUNT ---- */}
             <section className="mt-8">
-              <GroupHeading>{ar ? "الحساب" : "Account"}</GroupHeading>
+              <GroupHeading>{t("settings.profile.gAccount", lang)}</GroupHeading>
               <div className={cn("mt-2 space-y-3", CARD)} style={CARD_STYLE}>
                 <Field
-                  label={ar ? "الاسم المعروض" : "Display name"}
-                  hint={ar ? "يظهر في الشريط العلوي." : "Shown in the header, top right."}
+                  label={t("settings.profile.fDisplayName", lang)}
+                  hint={t("settings.profile.hDisplayName", lang)}
                 >
                   <input
                     value={accountName}
                     onChange={(e) => { setSaved(false); setSaveError(null); setAccountName(e.target.value); }}
                     className={INPUT}
                     style={INPUT_STYLE}
-                    placeholder={ar ? "كيف تريد أن يظهر اسمك" : "How your name should appear"}
+                    placeholder={t("settings.profile.phDisplayName", lang)}
                   />
                 </Field>
 
@@ -368,8 +361,8 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                     own confirm-by-email flow, which this popup does not
                     implement — offering a greyed-out box would imply it does. */}
                 <Field
-                  label={ar ? "بريد تسجيل الدخول" : "Login email"}
-                  hint={ar ? "لا يمكن تغييره من هنا." : "Not changeable here."}
+                  label={t("settings.profile.fLoginEmail", lang)}
+                  hint={t("settings.profile.hLoginEmail", lang)}
                 >
                   <p className="rounded-lg border px-3 py-2 text-sm muted" style={INPUT_STYLE}>
                     {data.email || "—"}
@@ -380,15 +373,11 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
 
             {/* ---- PERSONAL INFO ---- */}
             <section className="mt-6">
-              <GroupHeading>{ar ? "معلومات شخصية" : "Personal info"}</GroupHeading>
+              <GroupHeading>{t("settings.profile.gPersonal", lang)}</GroupHeading>
               <div className={cn("mt-2 space-y-3", CARD)} style={CARD_STYLE}>
                 <Field
-                  label={ar ? "المسمى الوظيفي" : "Job title"}
-                  hint={
-                    ar
-                      ? "وصف تعرّف به نفسك فقط — لا يمنح أي صلاحية."
-                      : "How you describe yourself. It grants no permissions."
-                  }
+                  label={t("settings.profile.fJobTitle", lang)}
+                  hint={t("settings.profile.hJobTitle", lang)}
                 >
                   <input
                     value={draft.job_title}
@@ -399,7 +388,7 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                 </Field>
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label={ar ? "رقم التواصل" : "Contact number"}>
+                  <Field label={t("settings.profile.fContactNumber", lang)}>
                     <input
                       value={draft.contact_number}
                       onChange={(e) => set("contact_number", e.target.value)}
@@ -410,14 +399,12 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                     />
                   </Field>
                   <Field
-                    label={ar ? "بريد شخصي" : "Personal email"}
+                    label={t("settings.profile.fPersonalEmail", lang)}
                     hint={
                       // A WARNING, never a block. The save goes through either
                       // way; the database has no format rule and neither does
                       // this. It only catches the honest typo.
-                      emailWarn
-                        ? ar ? "لا يبدو كبريد إلكتروني — سيُحفظ كما هو." : "That does not look like an email — it will still be saved."
-                        : undefined
+                      emailWarn ? t("settings.profile.hEmailWarn", lang) : undefined
                     }
                   >
                     <input
@@ -433,10 +420,10 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
 
                 <div>
                   <p className="mb-1.5 text-[11px] uppercase tracking-wide muted">
-                    {ar ? "جهة اتصال للطوارئ" : "Emergency contact"}
+                    {t("settings.profile.gEmergency", lang)}
                   </p>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label={ar ? "الاسم" : "Name"}>
+                    <Field label={t("settings.profile.fEmergencyName", lang)}>
                       <input
                         value={draft.emergency_contact_name}
                         onChange={(e) => set("emergency_contact_name", e.target.value)}
@@ -444,7 +431,7 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                         style={INPUT_STYLE}
                       />
                     </Field>
-                    <Field label={ar ? "الرقم" : "Number"}>
+                    <Field label={t("settings.profile.fEmergencyNumber", lang)}>
                       <input
                         value={draft.emergency_contact_number}
                         onChange={(e) => set("emergency_contact_number", e.target.value)}
@@ -456,13 +443,11 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                     </Field>
                   </div>
                   <p className="mt-1.5 text-[11px] muted">
-                    {ar
-                      ? "تشاركها مع زملائك للطوارئ — ليست سجل الموارد البشرية الرسمي."
-                      : "Shared with colleagues in an emergency. Not the official HR record."}
+                    {t("settings.profile.emergencyHint", lang)}
                   </p>
                 </div>
 
-                <Field label={ar ? "نبذة" : "About"}>
+                <Field label={t("settings.profile.fAbout", lang)}>
                   <textarea
                     value={draft.bio}
                     onChange={(e) => set("bio", e.target.value)}
@@ -476,15 +461,11 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
 
             {/* ---- PREFERENCES ---- */}
             <section className="mt-6">
-              <GroupHeading>{ar ? "التفضيلات" : "Preferences"}</GroupHeading>
+              <GroupHeading>{t("settings.profile.gPreferences", lang)}</GroupHeading>
               <div className={cn("mt-2 space-y-3", CARD)} style={CARD_STYLE}>
                 <Field
-                  label={ar ? "صفحة البداية" : "Landing page"}
-                  hint={
-                    ar
-                      ? "الصفحة التي تفتح بعد تسجيل الدخول."
-                      : "Where you land after signing in."
-                  }
+                  label={t("settings.profile.fLandingPage", lang)}
+                  hint={t("settings.profile.hLandingPage", lang)}
                 >
                   <select
                     value={draft.default_route}
@@ -492,7 +473,7 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                     className={INPUT}
                     style={INPUT_STYLE}
                   >
-                    <option value="">{ar ? "بدون تفضيل" : "No preference"}</option>
+                    <option value="">{t("settings.profile.noPreference", lang)}</option>
                     {/* Built from the SAME NAV the sidebar renders, so the list
                         cannot offer a page that does not exist. */}
                     {NAV.map((n) => (
@@ -504,16 +485,12 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                 </Field>
 
                 <Field
-                  label={ar ? "اللغة المفضلة" : "Preferred language"}
-                  hint={
-                    // Stated plainly because the alternative is a control that
-                    // looks like the language switch and is not one. The real
-                    // switch is the header toggle (localStorage, per-device);
-                    // this is a per-account label. 0159 forbids syncing them.
-                    ar
-                      ? "ملصق فقط. لتغيير لغة الواجهة استخدم زر اللغة في الأعلى."
-                      : "A label only. To change the interface language, use the toggle in the header."
-                  }
+                  label={t("settings.profile.fPreferredLanguage", lang)}
+                  // Stated plainly because the alternative is a control that
+                  // looks like the language switch and is not one. The real
+                  // switch is the header toggle (localStorage, per-device);
+                  // this is a per-account label. 0159 forbids syncing them.
+                  hint={t("settings.profile.hPreferredLanguage", lang)}
                 >
                   <select
                     value={draft.preferred_language}
@@ -521,7 +498,10 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                     className={INPUT}
                     style={INPUT_STYLE}
                   >
-                    <option value="">{ar ? "بدون تفضيل" : "No preference"}</option>
+                    <option value="">{t("settings.profile.noPreference", lang)}</option>
+                    {/* NOT translated, and not an oversight: a language picker
+                        names each language IN that language, so both options read
+                        the same whichever way the interface is set. */}
                     <option value="en">English</option>
                     <option value="ar">العربية</option>
                   </select>
@@ -537,7 +517,7 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
               {saved && (
                 <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
                   <Check className="h-4 w-4" aria-hidden />
-                  {ar ? "تم الحفظ" : "Saved"}
+                  {t("common.saved", lang)}
                 </span>
               )}
               <Btn
@@ -545,7 +525,7 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                 variant="primary"
                 className={saving ? "opacity-50 pointer-events-none" : ""}
               >
-                {saving ? (ar ? "جارٍ الحفظ…" : "Saving…") : ar ? "حفظ" : "Save"}
+                {saving ? t("common.saving", lang) : t("common.save", lang)}
               </Btn>
             </div>
           </form>
@@ -557,15 +537,11 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
           <hr className="mt-8" style={{ borderColor: "rgb(var(--border))" }} />
 
           <section className="mt-6">
-            <GroupHeading>{ar ? "كلمة المرور" : "Password"}</GroupHeading>
+            <GroupHeading>{t("settings.profile.gPassword", lang)}</GroupHeading>
             <form onSubmit={onChangePassword} className={cn("mt-2 space-y-3", CARD)} style={CARD_STYLE}>
               <Field
-                label={ar ? "كلمة المرور الحالية" : "Current password"}
-                hint={
-                  ar
-                    ? "مطلوبة للتأكد أنك أنت."
-                    : "Required, so an unattended screen cannot change it."
-                }
+                label={t("settings.profile.fCurrentPassword", lang)}
+                hint={t("settings.profile.hCurrentPassword", lang)}
               >
                 <input
                   type="password"
@@ -580,8 +556,13 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field
-                  label={ar ? "كلمة المرور الجديدة" : "New password"}
-                  hint={ar ? `${MIN_PASSWORD_LENGTH} أحرف على الأقل.` : `At least ${MIN_PASSWORD_LENGTH} characters.`}
+                  label={t("settings.profile.fNewPassword", lang)}
+                  // `{n}` through a replacer FUNCTION, like every other token
+                  // substitution in this batch. MIN_PASSWORD_LENGTH is a number
+                  // and cannot carry a `$&`, but the rule is uniform so no future
+                  // edit has to work out which sites were the safe ones.
+                  hint={t("settings.profile.hNewPassword", lang)
+                    .replace("{n}", () => String(MIN_PASSWORD_LENGTH))}
                 >
                   <input
                     type="password"
@@ -593,7 +574,7 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                     dir="ltr"
                   />
                 </Field>
-                <Field label={ar ? "تأكيد كلمة المرور" : "Confirm new password"}>
+                <Field label={t("settings.profile.fConfirmPassword", lang)}>
                   <input
                     type="password"
                     autoComplete="new-password"
@@ -612,7 +593,7 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                 {pwDone && (
                   <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
                     <Check className="h-4 w-4" aria-hidden />
-                    {ar ? "تم تغيير كلمة المرور" : "Password changed"}
+                    {t("settings.profile.passwordChanged", lang)}
                   </span>
                 )}
                 <Btn
@@ -622,8 +603,8 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
                   <span className="inline-flex items-center gap-1.5">
                     <KeyRound className="h-3.5 w-3.5" aria-hidden />
                     {pwSaving
-                      ? ar ? "جارٍ التغيير…" : "Changing…"
-                      : ar ? "تغيير كلمة المرور" : "Change password"}
+                      ? t("settings.profile.changing", lang)
+                      : t("settings.profile.changePassword", lang)}
                   </span>
                 </Btn>
               </div>
@@ -635,11 +616,7 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
               is not coming, rather than concluding the page is broken. */}
           <p className="mt-6 flex items-start gap-2 text-[11px] muted">
             <UserRound className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span>
-              {ar
-                ? "هذه معلومات تُدخلها بنفسك. لا ترتبط بملف الموظف — لا إقامة ولا راتب ولا إجازات."
-                : "This is information you enter yourself. It is not linked to your employee file — no iqama, salary or leave."}
-            </span>
+            <span>{t("settings.profile.boundaryNote", lang)}</span>
           </p>
         </>
       )}

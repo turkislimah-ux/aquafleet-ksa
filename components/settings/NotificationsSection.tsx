@@ -39,6 +39,7 @@ import { useRouter } from "next/navigation";
 import { Check, RotateCcw } from "lucide-react";
 import { Btn, PILL_TONE_CLS } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { t } from "@/lib/i18n";
 import { SEVERITY_TONE, type Severity } from "@/lib/notification-format";
 import {
   fetchNotificationSettings, saveSeverityPrefs, saveThresholdOverrides,
@@ -53,56 +54,39 @@ const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-28 tabular-nums";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-// Copy carries the WORDS. The numeric bounds come from THRESHOLD_BOUNDS so the
-// input attributes, the client validation, the server validation and the DB
-// CHECK are one definition rather than four that drift.
-const FIELDS: {
-  key: ThresholdKey;
-  label: string; labelAr: string;
-  help: string; helpAr: string;
-  step: string;
-}[] = [
-  {
-    key: "low_runway_trips",
-    label: "Low balance warning", labelAr: "تحذير قرب نفاد الرصيد",
-    help: "Warn when a prepaid wallet holds fewer than this many trips' worth of work.",
-    helpAr: "تنبيه عندما يقل رصيد العميل عن هذا العدد من الرحلات.",
-    step: "0.5",
-  },
-  {
-    key: "doc_expiry_lead_days",
-    label: "Document expiry notice", labelAr: "مهلة انتهاء المستندات",
-    help: "How many days before a licence, iqama or registration expires to start warning.",
-    helpAr: "عدد الأيام قبل انتهاء الرخصة أو الإقامة أو الاستمارة لبدء التنبيه.",
-    step: "1",
-  },
-  {
-    key: "maintenance_stuck_days",
-    label: "Work order stuck after", labelAr: "أمر الصيانة متعثر بعد",
-    help: "An open work order older than this is flagged as stuck.",
-    helpAr: "أمر صيانة مفتوح أطول من هذه المدة يُعتبر متعثرًا.",
-    step: "1",
-  },
-  {
-    key: "invoice_overdue_red_days",
-    label: "Invoice turns red after", labelAr: "الفاتورة تصبح حمراء بعد",
-    help: "Overdue longer than this escalates the invoice alert from yellow to red.",
-    helpAr: "التأخر أكثر من هذه المدة يرفع تنبيه الفاتورة من الأصفر إلى الأحمر.",
-    step: "1",
-  },
+// This array carries NO WORDS. The label and help line for each row are
+// `settings.notifications.f_<key>` / `h_<key>` in the dictionary, reached by
+// interpolating the key that is already here — `ThresholdKey` is a literal
+// union, so that template-literal t() call resolves to a real TKey rather than
+// a `\`settings.notifications.f_${string}\`` the compiler has to reject.
+//
+// The numeric bounds still come from THRESHOLD_BOUNDS so the input attributes,
+// the client validation, the server validation and the DB CHECK stay one
+// definition rather than four that drift. `step` stays here because it is a
+// presentation choice about the input, not a bound anything else enforces.
+const FIELDS: { key: ThresholdKey; step: string }[] = [
+  { key: "low_runway_trips",         step: "0.5" },
+  { key: "doc_expiry_lead_days",     step: "1"   },
+  { key: "maintenance_stuck_days",   step: "1"   },
+  { key: "invoice_overdue_red_days", step: "1"   },
 ];
 
-const SEVERITIES: { key: Severity; prefKey: keyof SeverityPrefs; label: string; labelAr: string; hint: string; hintAr: string }[] = [
-  { key: "red",    prefKey: "show_red",    label: "Act today",  labelAr: "عاجل",   hint: "Money and compliance",          hintAr: "المال والامتثال" },
-  { key: "yellow", prefKey: "show_yellow", label: "This week",  labelAr: "هذا الأسبوع", hint: "Coming up, not urgent",   hintAr: "قادم وغير عاجل" },
-  { key: "blue",   prefKey: "show_blue",   label: "For info",   labelAr: "للعلم",  hint: "Never counted in the badge",    hintAr: "لا تُحتسب في العداد" },
+// Same shape, keyed by `Severity`: sev_<key> is the switch label, sevHint_<key>
+// the line under it. `prefKey` stays — it is the DB column this row writes, not
+// copy.
+const SEVERITIES: { key: Severity; prefKey: keyof SeverityPrefs }[] = [
+  { key: "red",    prefKey: "show_red"    },
+  { key: "yellow", prefKey: "show_yellow" },
+  { key: "blue",   prefKey: "show_blue"   },
 ];
 
 /** Empty string maps to null — "inherit the shared default for this field". */
 function parseField(raw: string): number | null {
-  const t = raw.trim();
-  if (t === "") return null;
-  const n = Number(t);
+  // Named `s`, not `t`: `t` is the translator imported above, and a local of
+  // that name would shadow it inside this function.
+  const s = raw.trim();
+  if (s === "") return null;
+  const n = Number(s);
   return Number.isFinite(n) ? n : NaN as unknown as number;
 }
 
@@ -189,14 +173,25 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
       // ONE validator, shared with the server action, so a value can never
       // pass the form and then fail the database. Arabic gets the label; the
       // rule text stays English rather than inventing a second rule set.
-      const b = THRESHOLD_BOUNDS[f.key];
+      //
+      // The English half used to interpolate THRESHOLD_BOUNDS[f.key].label while
+      // the Arabic half interpolated the component's own labelAr — two sources
+      // for the same slot, which only agreed because the strings happened to be
+      // byte-identical. One dictionary lookup now feeds both, and the local that
+      // held the bounds row is gone with it: nothing else in this loop read it,
+      // and `noUnusedLocals` would fail the build on a leftover.
+      const label = t(`settings.notifications.f_${f.key}`, lang);
       if (v !== null && Number.isNaN(v)) {
-        setThresholdError(ar ? `${f.labelAr}: قيمة غير صالحة.` : `${b.label}: not a number.`);
+        setThresholdError(
+          t("settings.notifications.notANumber", lang).replace("{label}", () => label),
+        );
         return;
       }
       const problem = validateThreshold(f.key, v);
       if (problem) {
-        setThresholdError(ar ? `${f.labelAr}: ${problem.split(": ")[1] ?? problem}` : problem);
+        // Still a ternary, and deliberately: the English branch prints the
+        // SERVER's own rule sentence verbatim, which is not dictionary copy.
+        setThresholdError(ar ? `${label}: ${problem.split(": ")[1] ?? problem}` : problem);
         return;
       }
       parsed[f.key] = v;
@@ -213,30 +208,26 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
 
   return (
     <div>
-      <h2 className="text-lg font-semibold">{ar ? "الإشعارات" : "Notifications"}</h2>
-      <p className="mt-1 text-sm muted">
-        {ar
-          ? "تخصّك وحدك — لا تؤثر على المستخدم الآخر."
-          : "Yours alone — these never change what the other user sees."}
-      </p>
+      <h2 className="text-lg font-semibold">{t("settings.notifications.title", lang)}</h2>
+      <p className="mt-1 text-sm muted">{t("settings.notifications.subtitle", lang)}</p>
 
       {loadError && (
         <div className="mt-4 rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-1 ring-inset ring-rose-500/20">
           {loadError}{" "}
           <button onClick={() => void load()} className="focus-ring underline underline-offset-2">
-            {ar ? "إعادة المحاولة" : "Try again"}
+            {t("common.tryAgain", lang)}
           </button>
         </div>
       )}
 
       {data === null ? (
-        <div className="py-8 text-center text-sm muted">{ar ? "جارٍ التحميل…" : "Loading…"}</div>
+        <div className="py-8 text-center text-sm muted">{t("common.loading", lang)}</div>
       ) : (
         <>
           {/* ---- A. SEVERITY TOGGLES — save on flip ---- */}
           <section className="mt-6">
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">
-              {ar ? "ما الذي يظهر" : "What shows"}
+              {t("settings.notifications.whatShows", lang)}
             </h3>
             <div className="mt-2 rounded-xl border divide-y divide-[rgb(var(--border))]" style={{ borderColor: "rgb(var(--border))" }}>
               {SEVERITIES.map((s) => {
@@ -250,8 +241,12 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
                   >
                     <span className={cn("h-2 w-2 shrink-0 rounded-full", tone.dot)} aria-hidden />
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm">{ar ? s.labelAr : s.label}</span>
-                      <span className="block text-xs muted">{ar ? s.hintAr : s.hint}</span>
+                      <span className="block text-sm">
+                        {t(`settings.notifications.sev_${s.key}`, lang)}
+                      </span>
+                      <span className="block text-xs muted">
+                        {t(`settings.notifications.sevHint_${s.key}`, lang)}
+                      </span>
                     </span>
                     {/* A real checkbox, not a div pretending: it is focusable,
                         space-toggleable and announced without any ARIA work. */}
@@ -261,29 +256,31 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
                       disabled={togglingKey === s.prefKey}
                       onChange={() => void toggle(s.prefKey)}
                       className="focus-ring h-4 w-4 shrink-0 accent-brand-600 disabled:opacity-50"
-                      aria-label={ar ? s.labelAr : s.label}
+                      aria-label={t(`settings.notifications.sev_${s.key}`, lang)}
                     />
                   </label>
                 );
               })}
             </div>
             <p className="mt-2 text-xs muted">
-              {ar
-                ? "يُحفظ فورًا. إخفاء مستوى لا يحذف التنبيهات — يخفيها عنك فقط."
-                : "Saved instantly. Hiding a level does not delete those alerts — it only hides them from you."}
+              {t("settings.notifications.savedInstantly", lang)}
             </p>
           </section>
 
           {/* ---- B. THRESHOLDS — explicit save ---- */}
           <section className="mt-8">
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">
-              {ar ? "متى تظهر" : "When they fire"}
+              {t("settings.notifications.whenFire", lang)}
             </h3>
 
             <div className="mt-2 space-y-3">
               {FIELDS.map((f) => {
                 const shared = data.defaults[f.key];
                 const isOverridden = draft[f.key].trim() !== "";
+                // Read once: this row prints its label four times (the visible
+                // one, both aria-labels, and the reset button's composite).
+                const label = t(`settings.notifications.f_${f.key}`, lang);
+                const resetLabel = t("settings.notifications.reset", lang);
                 return (
                   <div
                     key={f.key}
@@ -293,7 +290,7 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm">{ar ? f.labelAr : f.label}</span>
+                          <span className="text-sm">{label}</span>
                           {/* The state badge. "Default" vs "Custom" is the one
                               thing that is invisible from the number alone —
                               30 typed by hand and 30 inherited look identical. */}
@@ -305,10 +302,14 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
                                 : "bg-slate-500/10 text-slate-600 dark:text-slate-300 ring-slate-500/20",
                             )}
                           >
-                            {isOverridden ? (ar ? "مخصّص" : "Custom") : (ar ? "افتراضي" : "Default")}
+                            {isOverridden
+                              ? t("settings.notifications.custom", lang)
+                              : t("settings.notifications.default", lang)}
                           </span>
                         </div>
-                        <p className="mt-0.5 text-xs muted">{ar ? f.helpAr : f.help}</p>
+                        <p className="mt-0.5 text-xs muted">
+                          {t(`settings.notifications.h_${f.key}`, lang)}
+                        </p>
                       </div>
 
                       <div className="flex shrink-0 items-center gap-2">
@@ -329,7 +330,7 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
                           }}
                           className={INPUT}
                           style={INPUT_STYLE}
-                          aria-label={ar ? f.labelAr : f.label}
+                          aria-label={label}
                         />
                         <button
                           type="button"
@@ -339,8 +340,11 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
                             setDraft((d) => ({ ...d, [f.key]: "" }));
                           }}
                           disabled={!isOverridden}
-                          title={ar ? "استعادة الافتراضي" : "Reset to default"}
-                          aria-label={`${ar ? "استعادة الافتراضي" : "Reset to default"} — ${ar ? f.labelAr : f.label}`}
+                          title={resetLabel}
+                          // Composite, assembled here rather than keyed: the
+                          // em-dash join is punctuation, not copy, and keying it
+                          // would mean four near-identical dictionary entries.
+                          aria-label={`${resetLabel} — ${label}`}
                           className="focus-ring rounded-md p-1.5 muted transition hover:text-brand-600 disabled:opacity-30 disabled:hover:text-inherit"
                         >
                           <RotateCcw className="h-3.5 w-3.5" aria-hidden />
@@ -349,9 +353,8 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
                     </div>
 
                     <p className="mt-1.5 text-[11px] muted">
-                      {ar
-                        ? `الافتراضي المشترك: ${shared} — اتركه فارغًا لاستخدامه.`
-                        : `Shared default: ${shared} — leave blank to use it.`}
+                      {t("settings.notifications.sharedDefault", lang)
+                        .replace("{n}", () => String(shared))}
                     </p>
                   </div>
                 );
@@ -366,7 +369,7 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
               {thresholdsSaved && (
                 <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
                   <Check className="h-4 w-4" aria-hidden />
-                  {ar ? "تم الحفظ" : "Saved"}
+                  {t("common.saved", lang)}
                 </span>
               )}
               <Btn
@@ -374,7 +377,7 @@ export default function NotificationsSection({ open, lang }: { open: boolean; la
                 onClick={() => void saveThresholds()}
                 className={savingThresholds ? "opacity-50 pointer-events-none" : ""}
               >
-                {savingThresholds ? (ar ? "جارٍ الحفظ…" : "Saving…") : ar ? "حفظ" : "Save"}
+                {savingThresholds ? t("common.saving", lang) : t("common.save", lang)}
               </Btn>
             </div>
           </section>
