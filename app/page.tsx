@@ -261,13 +261,15 @@ export default async function DashboardPage() {
   // Manual expenses are still deliberately NOT folded in — 0098 keeps them a
   // separate P&L section, and this card's subtitle says "operating cost".
   //
-  // Label and colour come from COST_TYPE, the SAME source the monthly Cost
-  // composition bar reads, so a bucket cannot be cyan on one card and some
-  // other colour on the one beside it. (The four pre-existing hexes were
-  // identical to COST_TYPE's already — this changes no existing slice.)
+  // Colour comes from COST_TYPE, the SAME source the monthly Cost composition
+  // bar reads, so a bucket cannot be cyan on one card and some other colour on
+  // the one beside it. (The four pre-existing hexes were identical to
+  // COST_TYPE's already — this changes no existing slice.) The KEY travels
+  // instead of a label: this is a server component with no language, so the
+  // client island names the slice at render time.
   const slice = (key: CostSliceKey, value: number) => {
-    const t = COST_TYPE.find((c) => c.key === key);
-    return { label: t?.en ?? key, value, color: t?.color ?? "#64748b" };
+    const c = COST_TYPE.find((x) => x.key === key);
+    return { key, value, color: c?.color ?? "#64748b" };
   };
   const charts: DashCharts = {
     costMix: latestPnl
@@ -308,64 +310,56 @@ export default async function DashboardPage() {
     // different calendar (0108/0109). The two are not reconcilable and are
     // never added; this tile is where anyone checking against the P&L should
     // land, which is why its href goes straight to the Revenue statement.
-    { key: "revenue", en: "Revenue", ar: "الإيرادات",
+    { key: "revenue",
       value: formatSar(num(revenueRow?.revenue_sar)),
-      subEn: "this month, net of VAT", subAr: "هذا الشهر، بدون الضريبة",
       href: "/reports?tab=statements&statement=revenue",
       hasData: !!revenueRow,
       // Revenue existing at all is the good reading. Zero is not "bad" — it
       // is nothing yet — so it stays neutral rather than alarming.
       tone: num(revenueRow?.revenue_sar) > 0 ? "good" : "neutral" },
 
-    { key: "operating_margin", en: "Operating margin", ar: "هامش التشغيل",
+    { key: "operating_margin",
       value: `${marginPct.toFixed(1)}%`,
-      subEn: "this month", subAr: "هذا الشهر",
       href: "/reports?tab=statements&statement=pnl",
       hasData: !!latestPnl,
       // The most critical figure on the page: a negative margin means the
       // month is losing money. Thin (<10%) is worth attention, not alarm.
       tone: !latestPnl ? "neutral" : marginPct < 0 ? "bad" : marginPct < 10 ? "warn" : "good" },
 
-    { key: "net_profit", en: "Net profit", ar: "صافي الربح",
+    { key: "net_profit",
       value: formatSar(netProfit),
-      subEn: "after manual expenses", subAr: "بعد المصروفات اليدوية",
       href: "/reports?tab=statements&statement=pnl",
       hasData: !!latestPnl,
       tone: !latestPnl ? "neutral" : netProfit < 0 ? "bad" : "good" },
 
-    { key: "collections", en: "Collected", ar: "المحصّل",
+    { key: "collections",
       value: formatSar(num(collectionsRow?.collected_gross_sar)),
-      subEn: "cash in, this month", subAr: "نقد وارد هذا الشهر",
       href: "/reports?tab=statements&statement=receivables",
       hasData: !!collectionsRow,
       tone: num(collectionsRow?.collected_gross_sar) > 0 ? "good" : "neutral" },
 
-    { key: "receivables_outstanding", en: "Outstanding", ar: "مستحقات",
+    { key: "receivables_outstanding",
       value: formatSar(outstanding),
-      subEn: "owed right now", subAr: "مستحق الآن",
       href: "/reports?tab=statements&statement=receivables",
       hasData: !receivablesRes.error,
       // Money owed always deserves attention; nothing owed is genuinely good.
       tone: outstanding > 0 ? "warn" : "good" },
 
-    { key: "operations", en: "Trips delivered", ar: "الرحلات المسلَّمة",
+    { key: "operations",
       value: String(num(opsRow?.trips_delivered)),
-      subEn: "this month", subAr: "هذا الشهر",
       href: "/reports?tab=statements&statement=operations",
       hasData: !!opsRow,
       // A throughput count with no good/bad direction — an active reading.
       tone: "neutral" },
 
-    { key: "trips_in_flight", en: "Trips in flight", ar: "رحلات جارية",
+    { key: "trips_in_flight",
       value: String(state?.trips_in_flight ?? 0),
-      subEn: "right now", subAr: "الآن",
       href: "/trips?tab=projects",
       hasData: !!state,
       tone: "neutral" },
 
-    { key: "open_actions", en: "Needs action", ar: "يحتاج إجراء",
+    { key: "open_actions",
       value: String(openActions),
-      subEn: "items waiting", subAr: "عنصر بالانتظار",
       href: "#dash-actions",
       hasData: !actionsRes.error,
       // Red ONLY when something high-severity is actually waiting. A queue of

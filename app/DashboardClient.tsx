@@ -36,6 +36,7 @@ import { useApp } from "@/components/AppShell";
 import { useHeroDock, useSearchDock } from "@/components/SearchDock";
 import { ComboChart, PieChart } from "@/components/Charts";
 import { cn, formatSar } from "@/lib/utils";
+import { t, type Lang } from "@/lib/i18n";
 import {
   utilizationBand, utilizationBarWidth, formatUtilization,
   UTILIZATION_BAND, type FleetUtilizationRow,
@@ -50,7 +51,7 @@ import {
   monthTitle, relativeTime, sortActionItems,
   sortDriverOps, COST_TYPE, STAGE_BAR,
   type ActionItemRow, type CostComposition, type ComplianceStatus,
-  type DailyOps, type DashCharts, type DeliveredRevenueDay,
+  type CostSliceKey, type DailyOps, type DashCharts, type DeliveredRevenueDay,
   type DeliveryDay, type DriverOps,
   type DriverOpsState, type FeedRow, type FleetStateNow, type Headline,
   type LiveTrip, type MonthlyOnlyCost, type ProjectStages,
@@ -97,6 +98,19 @@ const TONE_TEXT: Record<string, string> = {
   info: "text-brand-600 dark:text-brand-300",
 };
 
+/**
+ * Substitutes `{name}` placeholders in a dictionary string.
+ *
+ * The replacement is a FUNCTION, not a string: `String.prototype.replace`
+ * re-expands `$&` and `$1` in a string replacement, and an entity name or a
+ * formatted figure is user data that may contain either.
+ */
+function fill(s: string, tokens: Record<string, string | number>): string {
+  let out = s;
+  for (const [k, v] of Object.entries(tokens)) out = out.replace(`{${k}}`, () => String(v));
+  return out;
+}
+
 export default function DashboardClient({
   actionItems, feed, state, truckState, headlines, charts, dailyOps, deliveredRevenue,
   delivery, monthlyOnly,
@@ -126,7 +140,6 @@ export default function DashboardClient({
   errorMsg: string | null;
 }) {
   const { lang } = useApp();
-  const ar = lang === "ar";
   // A failed read means we do not KNOW the state of anything, so no section
   // may claim to be empty. "Every queue is clear" after an error is a lie.
   const failed = !!errorMsg;
@@ -238,17 +251,15 @@ export default function DashboardClient({
         <div className="flex items-start justify-between gap-4 flex-wrap pb-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              {ar ? "لوحة التحكم" : "Dashboard"}
+              {t("dashboard.title", lang)}
             </h1>
             <p className="muted text-sm mt-1">
-              {ar
-                ? "ما يحتاج إلى إجراء، وما استجدّ، والوضع الآن"
-                : "What needs action, what changed, where things stand"}
+              {t("dashboard.subtitle", lang)}
             </p>
           </div>
           <Btn variant="outline" onClick={() => setPickerOpen(true)}>
             <Plus className="h-4 w-4" aria-hidden />
-            {ar ? "إضافة ملخص" : "Add summary"}
+            {t("dashboard.addSummary", lang)}
           </Btn>
         </div>
         <div className="h-px w-full" style={{ background: "rgb(var(--border))", opacity: "var(--dock-progress, 1)" }} />
@@ -297,19 +308,19 @@ export default function DashboardClient({
 
       {errorMsg && (
         <p className="text-sm text-rose-600 dark:text-rose-400">
-          {ar ? "تعذّر تحميل اللوحة: " : "Failed to load the dashboard: "}{errorMsg}
+          {t("dashboard.loadFailed", lang)}{errorMsg}
         </p>
       )}
 
       {/* Renders NOTHING unless the two definitions of driver state disagree. */}
-      <DriftBanner ar={ar} drift={drift} />
+      <DriftBanner lang={lang} drift={drift} />
 
       {/* ---- KPI ROW — always above the charts ------------------------- */}
       <section aria-labelledby="dash-kpi">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 id="dash-kpi" className="text-sm font-semibold">{ar ? "المؤشرات" : "Key figures"}</h2>
+          <h2 id="dash-kpi" className="text-sm font-semibold">{t("dashboard.kpiHeading", lang)}</h2>
           <Link href="/reports" className="focus-ring rounded text-xs text-brand-600 hover:underline dark:text-brand-300">
-            {ar ? "التحليل الكامل في التقارير ←" : "Full analysis in Reports →"}
+            {t("dashboard.fullAnalysis", lang)}
           </Link>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
@@ -323,14 +334,14 @@ export default function DashboardClient({
                 // separate the hues — colour is never the only signal.
                 h.hasData && KPI_EDGE[h.tone]
               )}>
-              <div className="text-[11px] muted uppercase tracking-wide truncate">{ar ? h.ar : h.en}</div>
+              <div className="text-[11px] muted uppercase tracking-wide truncate">{t(`dashboard.headline.${h.key}.label`, lang)}</div>
               {/* An absent period must never render a confident zero — and a
                   figure we do not have must not be coloured as if we did. */}
               <div className={cn("mt-1 text-xl font-semibold tabular-nums",
                 h.hasData ? KPI_TEXT[h.tone] : "")}>
                 {h.hasData ? h.value : "—"}
               </div>
-              <div className="mt-0.5 text-[11px] muted truncate">{ar ? h.subAr : h.subEn}</div>
+              <div className="mt-0.5 text-[11px] muted truncate">{t(`dashboard.headline.${h.key}.sub`, lang)}</div>
             </Link>
           ))}
         </div>
@@ -348,7 +359,7 @@ export default function DashboardClient({
           legend. Receivables aging left this block entirely; it is a snapshot
           of what is owed and now sits with Active Trips. */}
       <section aria-labelledby="dash-charts" className="space-y-4">
-        <h2 id="dash-charts" className="text-sm font-semibold">{ar ? "نظرة عامة" : "Overview"}</h2>
+        <h2 id="dash-charts" className="text-sm font-semibold">{t("dashboard.overview", lang)}</h2>
 
         {/* DAILY revenue vs DIRECT cost, one month at a time (0104).
             Two labelling rules are non-negotiable and come from the metrics
@@ -359,16 +370,16 @@ export default function DashboardClient({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ChartCard
           className="lg:col-span-2"
-          title={ar ? "الإيراد المُسلَّم مقابل التكلفة المباشرة" : "Delivered revenue vs direct cost"}
+          title={t("dashboard.revVsCost.title", lang)}
           sub={activeMonth
-            ? `${ar ? "يومياً — " : "daily — "}${monthTitle(activeMonth, ar)}`
-            : (ar ? "يومياً" : "daily")}
+            ? `${t("dashboard.dailyPrefix", lang)}${monthTitle(activeMonth, lang)}`
+            : t("dashboard.daily", lang)}
           href="/reports?tab=statements&statement=pnl"
-          empty={monthDays.length === 0} failed={failed} ar={ar}
+          empty={monthDays.length === 0} failed={failed} lang={lang}
           action={
             dailyMonths.length > 1 ? (
               <MonthStepper
-                ar={ar}
+                lang={lang}
                 canPrev={activeMonthIdx > 0}
                 canNext={activeMonthIdx < dailyMonths.length - 1}
                 onPrev={() => setMonthIdx(Math.max(0, activeMonthIdx - 1))}
@@ -387,20 +398,20 @@ export default function DashboardClient({
           <ComboChart
             labels={monthDays.map((d) => dayTick(d.day))}
             line={{
-              label: ar ? "إيرادات مُسلَّمة" : "Delivered revenue",
+              label: t("dashboard.series.deliveredRevenue", lang),
               data: monthDays.map((d) => deliveredByDay.get(d.day)?.revenue ?? 0),
               color: "#10b981",
             }}
             extraLine={{
-              label: ar ? "التكلفة المباشرة" : "Direct cost",
+              label: t("dashboard.series.directCost", lang),
               data: monthDays.map((d) => d.directCost),
               color: "#f59e0b",
             }}
             className="h-72"
           />
-          <DeliveredRevenueNote ar={ar} unpricedTrips={unpricedInMonth} />
-          <UncostedFillsNote ar={ar} uncosted={uncostedFillsInMonth} />
-          <DailyCostDisclosure ar={ar} excluded={monthExcluded} failed={failed} />
+          <DeliveredRevenueNote lang={lang} unpricedTrips={unpricedInMonth} />
+          <UncostedFillsNote lang={lang} uncosted={uncostedFillsInMonth} />
+          <DailyCostDisclosure lang={lang} excluded={monthExcluded} failed={failed} />
         </ChartCard>
 
         {/* COST MIX rides alongside the money chart it explains: the bars
@@ -409,19 +420,21 @@ export default function DashboardClient({
             takes the space — which is the better trade anyway, since the
             doughnut alone never said which slice was which. */}
         <ChartCard
-          title={ar ? "مزيج التكلفة" : "Cost mix"}
-          sub={ar ? "هذا الشهر — تكلفة التشغيل" : "this month — operating cost"}
+          title={t("dashboard.costMix.title", lang)}
+          sub={t("dashboard.costMix.sub", lang)}
           href="/reports?tab=statements&statement=cost"
           empty={!charts.hasPnl || charts.costMix.every((c) => c.value === 0)}
-          failed={failed} ar={ar}>
+          failed={failed} lang={lang}>
           <PieChart className="h-48"
-            items={charts.costMix.map((c) => ({ label: c.label, value: c.value, color: c.color }))} />
-          <CostMixLegend ar={ar} items={charts.costMix} />
+            items={charts.costMix.map((c) => ({
+              label: t(`dashboard.costType.${c.key}`, lang), value: c.value, color: c.color,
+            }))} />
+          <CostMixLegend lang={lang} items={charts.costMix} />
           {/* Station fill is one of the slices, so its unknown-cost count
               belongs on this card too — a wedge summed with sum() over a column
               that can be NULL is short by an unknown amount, and the doughnut
               cannot show that by itself. */}
-          <UncostedFillsNote ar={ar} uncosted={charts.costMixUncosted} shortOf="fillSlice" />
+          <UncostedFillsNote lang={lang} uncosted={charts.costMixUncosted} shortOf="fillSlice" />
         </ChartCard>
         </div>
 
@@ -439,16 +452,16 @@ export default function DashboardClient({
             and misreport it. Contrast with the revenue-vs-cost card above,
             where BOTH series are SAR and therefore must share a scale. */}
         <ChartCard
-          title={ar ? "ناتج التوصيل" : "Delivery Output"}
+          title={t("dashboard.deliveryOutput.title", lang)}
           sub={activeMonth
-            ? `${ar ? "يومياً — " : "daily — "}${monthTitle(activeMonth, ar)}`
-            : (ar ? "يومياً" : "daily")}
+            ? `${t("dashboard.dailyPrefix", lang)}${monthTitle(activeMonth, lang)}`
+            : t("dashboard.daily", lang)}
           href="/reports?tab=statements&statement=operations"
-          empty={deliveryDays.length === 0} failed={failed} ar={ar}
+          empty={deliveryDays.length === 0} failed={failed} lang={lang}
           action={
             dailyMonths.length > 1 ? (
               <MonthStepper
-                ar={ar}
+                lang={lang}
                 canPrev={activeMonthIdx > 0}
                 canNext={activeMonthIdx < dailyMonths.length - 1}
                 onPrev={() => setMonthIdx(Math.max(0, activeMonthIdx - 1))}
@@ -459,21 +472,21 @@ export default function DashboardClient({
           <ComboChart
             labels={deliveryDays.map((d) => dayTick(d.day))}
             bar={{
-              label: ar ? "السعة المُشغَّلة (م٣)" : "Capacity dispatched (m³)",
+              label: t("dashboard.series.capacityM3", lang),
               data: deliveryDays.map((d) => d.capacityM3),
               color: "#0b7eea",
             }}
             line={{
-              label: ar ? "الرحلات المسلَّمة" : "Trips delivered",
+              label: t("dashboard.series.tripsDelivered", lang),
               data: deliveryDays.map((d) => d.tripsDelivered),
               color: "#8b5cf6",
             }}
             lineAxis="y1"
-            y1Label={ar ? "رحلات" : "trips"}
+            y1Label={t("dashboard.series.tripsAxis", lang)}
             className="h-64"
           />
           <DeliveryOutputNote
-            ar={ar} noTruckTrips={noTruckTrips} deliveredTrips={deliveredTrips} />
+            lang={lang} noTruckTrips={noTruckTrips} deliveredTrips={deliveredTrips} />
         </ChartCard>
 
         {/* PROJECTS — one compact card per active project, each a single
@@ -492,38 +505,34 @@ export default function DashboardClient({
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <h3 id="dash-projects" className="text-sm font-semibold">
-                {ar ? "المشاريع" : "Projects"}
+                {t("dashboard.projects.heading", lang)}
               </h3>
               {/* The window is the view's (0107), not this file's — it moves
                   to the new month on the 1st with nothing to update here. Said
                   out loud because the same cards used to mean all-time, and a
                   reader has no way to tell the two apart from the bars. */}
               <p className="text-[11px] muted">
-                {ar
-                  ? "هذا الشهر فقط، حسب المرحلة — لوحة كانبان تعرض يوماً واحداً"
-                  : "this month only, by stage — the Kanban board shows a single day"}
+                {t("dashboard.projects.window", lang)}
               </p>
             </div>
             <Link href="/trips?tab=projects"
               className="focus-ring shrink-0 rounded text-xs text-brand-600 hover:underline dark:text-brand-300">
-              {ar ? "لوحة الرحلات ←" : "Trips board →"}
+              {t("dashboard.projects.boardLink", lang)}
             </Link>
           </div>
 
-          <StageLegend ar={ar} />
+          <StageLegend lang={lang} />
 
           {projectStages.length === 0 ? (
             <Card>
               <p className="text-sm muted">
-                {failed
-                  ? (ar ? "تعذّرت قراءة المشاريع." : "Could not read projects.")
-                  : (ar ? "لا توجد مشاريع نشطة." : "No active projects.")}
+                {t(failed ? "dashboard.projects.readFailed" : "dashboard.projects.empty", lang)}
               </p>
             </Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {projectStages.map((p) => (
-                <ProjectStageCard key={p.projectId} ar={ar} project={p} />
+                <ProjectStageCard key={p.projectId} lang={lang} project={p} />
               ))}
             </div>
           )}
@@ -535,11 +544,11 @@ export default function DashboardClient({
             Shares come from v_cost_composition_monthly, computed per month off
             the P&L's own published figures. */}
         <ChartCard
-          title={ar ? "تركيبة التكلفة" : "Cost composition"}
-          sub={ar ? "حصة كل نوع من تكلفة الشهر" : "each type's share of the month's cost"}
+          title={t("dashboard.costComposition.title", lang)}
+          sub={t("dashboard.costComposition.sub", lang)}
           href="/reports?tab=statements&statement=cost"
-          empty={costComposition.length === 0} failed={failed} ar={ar}>
-          <CostCompositionChart ar={ar} months={costComposition} />
+          empty={costComposition.length === 0} failed={failed} lang={lang}>
+          <CostCompositionChart lang={lang} months={costComposition} />
         </ChartCard>
 
         {/* FLEET UTILIZATION (0130) — placed directly BELOW Cost composition:
@@ -556,7 +565,7 @@ export default function DashboardClient({
             percentages here would weight a truck available 2 days the same as
             one available 31 (live August: 45.86 blended, 38.40 averaged). */}
         <FleetUtilizationCard
-          ar={ar}
+          lang={lang}
           row={fleetUtilization.find((f) => f.month === activeMonth) ?? null}
           month={activeMonth}
           failed={failed}
@@ -573,39 +582,37 @@ export default function DashboardClient({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <section aria-labelledby="dash-live" className="space-y-3">
           <h2 id="dash-live" className="text-sm font-semibold">
-            {ar ? "الرحلات النشطة" : "Active Trips"}
+            {t("dashboard.liveTrips.heading", lang)}
           </h2>
           <Card className="p-0">
             {liveTrips.length === 0 ? (
               <p className="p-4 text-sm muted">
-                {failed
-                  ? (ar ? "تعذّر القراءة." : "Could not read.")
-                  : (ar ? "لا توجد رحلات نشطة." : "No active trips.")}
+                {t(failed ? "dashboard.liveTrips.readFailed" : "dashboard.liveTrips.empty", lang)}
               </p>
             ) : (
               <ul className="divide-y divide-[rgb(var(--border))]">
-                {liveTrips.map((t) => (
+                {liveTrips.map((trip) => (
                   // TWO LINES PER TRIP, not four fixed columns. At half width
                   // the old single row had to truncate the project name to
                   // almost nothing; stacking keeps every field readable and
                   // drops nothing. Ref and phase lead, because those are what
                   // you scan for.
-                  <li key={t.id} className="px-3 py-2">
+                  <li key={trip.id} className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                        {t.ref ?? "—"}
+                        {trip.ref ?? "—"}
                       </span>
-                      <PhasePill stage={t.stage} ar={ar} />
+                      <PhasePill stage={trip.stage} lang={lang} />
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5 text-xs muted">
                       <TruckIcon className="h-3 w-3 shrink-0" aria-hidden />
-                      <span className="shrink-0 truncate">{t.truckLabel}</span>
+                      <span className="shrink-0 truncate">{trip.truckLabel}</span>
                       <span aria-hidden>·</span>
                       {/* The PROJECT it serves — who the trip is for. It used
                           to show the water station, which is where it filled
                           up rather than who it is for. */}
                       <span className="min-w-0 flex-1 truncate">
-                        {t.project ?? (ar ? "غير مُسند" : "Unassigned")}
+                        {trip.project ?? t("dashboard.liveTrips.unassigned", lang)}
                       </span>
                     </div>
                   </li>
@@ -621,14 +628,14 @@ export default function DashboardClient({
         <section aria-labelledby="dash-drivers" className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h2 id="dash-drivers" className="text-sm font-semibold">
-              {ar ? "حالة السائقين" : "Drivers Ops"}
+              {t("dashboard.driversOps.heading", lang)}
             </h2>
             <Link href="/drivers"
               className="focus-ring rounded text-xs text-brand-600 hover:underline dark:text-brand-300">
-              {ar ? "كل السائقين ←" : "All drivers →"}
+              {t("dashboard.driversOps.allLink", lang)}
             </Link>
           </div>
-          <DriversOpsTable ar={ar} rows={driverOps} failed={failed} />
+          <DriversOpsTable lang={lang} rows={driverOps} failed={failed} />
         </section>
       </div>
 
@@ -636,12 +643,12 @@ export default function DashboardClient({
       <section aria-labelledby="dash-actions">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 id="dash-actions" className="text-sm font-semibold">
-            {ar ? "يحتاج إلى إجراء" : "Needs action"}
+            {t("dashboard.actions.heading", lang)}
           </h2>
           {openItems.length > PREVIEW_COUNT && (
             <button type="button" onClick={() => setAllActions(true)}
               className="focus-ring rounded text-xs text-brand-600 hover:underline dark:text-brand-300">
-              {ar ? `عرض الكل (${openItems.length})` : `View all (${openItems.length})`}
+              {fill(t("dashboard.actions.viewAllCount", lang), { n: openItems.length })}
             </button>
           )}
         </div>
@@ -649,22 +656,22 @@ export default function DashboardClient({
         {failed ? (
           <Card className="flex items-center gap-3">
             <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" aria-hidden />
-            <div className="text-sm muted">{ar ? "تعذّر قراءة قائمة المهام." : "Could not read the queue."}</div>
+            <div className="text-sm muted">{t("dashboard.actions.readFailed", lang)}</div>
           </Card>
         ) : openItems.length === 0 ? (
           <Card className="flex items-center gap-3">
             <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" aria-hidden />
             <div>
-              <div className="text-sm font-medium">{ar ? "لا شيء معلّق" : "Nothing waiting"}</div>
+              <div className="text-sm font-medium">{t("dashboard.actions.emptyTitle", lang)}</div>
               <div className="text-xs muted">
-                {ar ? "كل قوائم الموافقات والمهام فارغة." : "Every queue is clear right now."}
+                {t("dashboard.actions.emptyBody", lang)}
               </div>
             </div>
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {openItems.slice(0, PREVIEW_COUNT).map((row) => (
-              <ActionCard key={row.kind} row={row} lang={lang} ar={ar} />
+              <ActionCard key={row.kind} row={row} lang={lang} />
             ))}
           </div>
         )}
@@ -673,13 +680,11 @@ export default function DashboardClient({
       {/* ---- RIGHT NOW | ACTIVITY -------------------------------------- */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <section aria-labelledby="dash-now" className="lg:col-span-2 space-y-3">
-          <h2 id="dash-now" className="text-sm font-semibold">{ar ? "الوضع الآن" : "Right now"}</h2>
+          <h2 id="dash-now" className="text-sm font-semibold">{t("dashboard.now.heading", lang)}</h2>
           {!state ? (
             <Card>
               <p className="text-sm muted">
-                {failed
-                  ? (ar ? "تعذّر قراءة الوضع الحالي." : "Could not read current state.")
-                  : (ar ? "لا توجد بيانات." : "No data.")}
+                {t(failed ? "dashboard.now.readFailed" : "dashboard.now.empty", lang)}
               </p>
             </Card>
           ) : (
@@ -687,7 +692,7 @@ export default function DashboardClient({
               <Card>
                 <div className="flex items-center gap-2 mb-3">
                   <TruckIcon className="h-4 w-4 muted" aria-hidden />
-                  <span className="text-xs font-semibold uppercase tracking-wider muted">{ar ? "الأسطول" : "Fleet"}</span>
+                  <span className="text-xs font-semibold uppercase tracking-wider muted">{t("dashboard.now.fleet", lang)}</span>
                   {/* TRUCK COUNTS COME FROM THE FLEET PAGE'S OWN RULE, not from
                       v_fleet_state_now. The view still derives them in SQL but
                       nothing reads that any more — this mirrors what /fleet
@@ -700,31 +705,31 @@ export default function DashboardClient({
                 </div>
                 {truckState.ok ? (
                   <MixBar parts={[
-                    { label: ar ? "نشطة" : "Active", value: truckState.active, color: "#10b981" },
-                    { label: ar ? "متوقفة" : "Idle", value: truckState.idle, color: "#3b82f6" },
-                    { label: ar ? "صيانة" : "Maintenance", value: truckState.maintenance, color: "#f59e0b" },
+                    { label: t("dashboard.fleetState.active", lang), value: truckState.active, color: "#10b981" },
+                    { label: t("dashboard.fleetState.idle", lang), value: truckState.idle, color: "#3b82f6" },
+                    { label: t("dashboard.fleetState.maintenance", lang), value: truckState.maintenance, color: "#f59e0b" },
                   ]} />
                 ) : (
-                  <p className="text-xs muted">{ar ? "تعذّرت قراءة حالة الأسطول." : "Could not read fleet state."}</p>
+                  <p className="text-xs muted">{t("dashboard.now.fleetReadFailed", lang)}</p>
                 )}
               </Card>
               <Card>
                 <div className="flex items-center gap-2 mb-3">
                   <Users className="h-4 w-4 muted" aria-hidden />
-                  <span className="text-xs font-semibold uppercase tracking-wider muted">{ar ? "السائقون" : "Drivers"}</span>
+                  <span className="text-xs font-semibold uppercase tracking-wider muted">{t("dashboard.now.drivers", lang)}</span>
                   <span className="ms-auto text-xs muted tabular-nums">{state.drivers_total}</span>
                 </div>
                 <MixBar parts={[
-                  { label: ar ? "في الخدمة" : "Active", value: state.drivers_active, color: "#10b981" },
-                  { label: ar ? "متاح" : "Idle", value: state.drivers_idle, color: "#3b82f6" },
-                  { label: ar ? "خارج الخدمة" : "Off duty", value: state.drivers_off_duty, color: "#94a3b8" },
-                  { label: ar ? "إجازة" : "On leave", value: state.drivers_on_leave, color: "#f59e0b" },
+                  { label: t("dashboard.driverMix.active", lang), value: state.drivers_active, color: "#10b981" },
+                  { label: t("dashboard.driverMix.idle", lang), value: state.drivers_idle, color: "#3b82f6" },
+                  { label: t("dashboard.driverMix.offDuty", lang), value: state.drivers_off_duty, color: "#94a3b8" },
+                  { label: t("dashboard.driverMix.onLeave", lang), value: state.drivers_on_leave, color: "#f59e0b" },
                 ]} />
               </Card>
               <div className="grid grid-cols-2 gap-3">
-                <MiniStat icon={Route} label={ar ? "رحلات جارية" : "Trips in flight"}
+                <MiniStat icon={Route} label={t("dashboard.now.tripsInFlight", lang)}
                   value={state.trips_in_flight} href="/trips?tab=projects" />
-                <MiniStat icon={Wrench} label={ar ? "أعمال جارية" : "Jobs running"}
+                <MiniStat icon={Wrench} label={t("dashboard.now.jobsRunning", lang)}
                   value={state.work_orders_running + state.outsourced_running} href="/maintenance" />
               </div>
             </>
@@ -734,21 +739,19 @@ export default function DashboardClient({
         <section aria-labelledby="dash-activity" className="lg:col-span-3 space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h2 id="dash-activity" className="text-sm font-semibold">
-              {ar ? "آخر النشاطات" : "Latest activity"}
+              {t("dashboard.activity.heading", lang)}
             </h2>
             {feed.length > PREVIEW_COUNT && (
               <button type="button" onClick={() => setAllFeed(true)}
                 className="focus-ring rounded text-xs text-brand-600 hover:underline dark:text-brand-300">
-                {ar ? "عرض الكل" : "View all"}
+                {t("dashboard.activity.viewAll", lang)}
               </button>
             )}
           </div>
           <Card className="p-0">
             {feed.length === 0 ? (
               <p className="p-4 text-sm muted">
-                {failed
-                  ? (ar ? "تعذّر قراءة النشاط." : "Could not read activity.")
-                  : (ar ? "لا يوجد نشاط مسجّل بعد." : "No recorded activity yet.")}
+                {t(failed ? "dashboard.activity.readFailed" : "dashboard.activity.empty", lang)}
               </p>
             ) : (
               <FeedList rows={feed.slice(0, PREVIEW_COUNT)} lang={lang} />
@@ -758,18 +761,18 @@ export default function DashboardClient({
       </div>
 
       {/* ---- MY SUMMARIES — appended at the bottom --------------------- */}
-      <Summaries options={widgetOptions} ar={ar} pickerOpen={pickerOpen} setPickerOpen={setPickerOpen} />
+      <Summaries options={widgetOptions} lang={lang} pickerOpen={pickerOpen} setPickerOpen={setPickerOpen} />
 
       {/* ---- popups ---------------------------------------------------- */}
       {allActions && (
-        <Modal title={ar ? "كل ما يحتاج إجراء" : "Everything that needs action"} onClose={() => setAllActions(false)}>
+        <Modal title={t("dashboard.actions.modalTitle", lang)} onClose={() => setAllActions(false)}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {openItems.map((row) => <ActionCard key={row.kind} row={row} lang={lang} ar={ar} />)}
+            {openItems.map((row) => <ActionCard key={row.kind} row={row} lang={lang} />)}
           </div>
         </Modal>
       )}
       {allFeed && (
-        <Modal title={ar ? "كل النشاطات" : "All activity"} onClose={() => setAllFeed(false)}>
+        <Modal title={t("dashboard.activity.modalTitle", lang)} onClose={() => setAllFeed(false)}>
           <div className="card p-0"><FeedList rows={feed} lang={lang} /></div>
         </Modal>
       )}
@@ -779,9 +782,9 @@ export default function DashboardClient({
 
 /** A chart card that shows an honest empty state instead of empty axes. */
 function ChartCard({
-  title, sub, href, empty, failed, ar, className, action, children,
+  title, sub, href, empty, failed, lang, className, action, children,
 }: {
-  title: string; sub: string; href: string; empty: boolean; ar: boolean;
+  title: string; sub: string; href: string; empty: boolean; lang: Lang;
   /**
    * A read FAILED, so we do not know whether there is data. Without this the
    * card renders "No data yet." over a permission error — the same confident
@@ -811,9 +814,7 @@ function ChartCard({
       </div>
       {empty ? (
         <div className="grid h-44 place-items-center text-sm muted">
-          {failed
-            ? (ar ? "تعذّرت قراءة هذا الرسم." : "Could not read this chart.")
-            : (ar ? "لا توجد بيانات بعد." : "No data yet.")}
+          {t(failed ? "dashboard.chart.readFailed" : "dashboard.chart.empty", lang)}
         </div>
       ) : children}
     </Card>
@@ -822,9 +823,9 @@ function ChartCard({
 
 /** Steps the daily charts back and forth one month at a time. */
 function MonthStepper({
-  ar, canPrev, canNext, onPrev, onNext,
+  lang, canPrev, canNext, onPrev, onNext,
 }: {
-  ar: boolean; canPrev: boolean; canNext: boolean;
+  lang: Lang; canPrev: boolean; canNext: boolean;
   onPrev: () => void; onNext: () => void;
 }) {
   // Older is always on the LEFT and newer on the RIGHT in both directions —
@@ -836,11 +837,11 @@ function MonthStepper({
   return (
     <div className="flex items-center" dir="ltr">
       <button type="button" onClick={onPrev} disabled={!canPrev} className={btn}
-        aria-label={ar ? "الشهر السابق" : "Previous month"}>
+        aria-label={t("dashboard.monthStepper.prev", lang)}>
         <ChevronLeft className="h-4 w-4" aria-hidden />
       </button>
       <button type="button" onClick={onNext} disabled={!canNext} className={btn}
-        aria-label={ar ? "الشهر التالي" : "Next month"}>
+        aria-label={t("dashboard.monthStepper.next", lang)}>
         <ChevronRight className="h-4 w-4" aria-hidden />
       </button>
     </div>
@@ -863,47 +864,45 @@ function MonthStepper({
  * this line look smaller than it is rather than larger.
  */
 function DailyCostDisclosure({
-  ar, excluded, failed,
+  lang, excluded, failed,
 }: {
-  ar: boolean; excluded: MonthlyOnlyCost | null; failed: boolean;
+  lang: Lang; excluded: MonthlyOnlyCost | null; failed: boolean;
 }) {
   return (
     <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed">
       <Info className="mt-px h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
       <p className="muted">
         {excluded ? (
-          ar ? (
-            <>
-              <span className="font-medium">التكلفة المباشرة ليست التكلفة الكاملة.</span>{" "}
-              تستثني {formatSar(excluded.total)} هذا الشهر (رواتب {formatSar(excluded.payroll)}
-              {excluded.commissionNonTrip !== 0
-                ? `، وعمولات خاصة وتسويات ومكافآت ${formatSar(excluded.commissionNonTrip)}`
-                : ""}
-              ) — لا يوجد لأيٍّ منها مصدر يومي، فكلاهما رقم شهري. والتكلفة المباشرة تشمل
-              تعبئة المحطة.
-            </>
-          ) : (
-            <>
-              <span className="font-medium">Direct cost is not full cost.</span>{" "}
-              It excludes {formatSar(excluded.total)} this month (
-              {formatSar(excluded.payroll)} payroll
-              {excluded.commissionNonTrip !== 0
-                ? `, ${formatSar(excluded.commissionNonTrip)} commission specials, adjustments and bonus`
-                : ""}
-              ) — neither has a daily source; both are monthly figures. Direct cost DOES
-              include station fill.
-            </>
-          )
+          <>
+            <span className="font-medium">{t("dashboard.dailyCost.lead", lang)}</span>{" "}
+            {/* TWO WHOLE SENTENCES, not a translated fragment spliced into a
+                shared frame. The commission clause sits inside a parenthesis
+                in both languages but takes a different separator in each, so
+                assembling it from pieces would put the punctuation in the
+                wrong place in one of them. Each variant is written out in the
+                dictionary and chosen whole. */}
+            {fill(
+              t(
+                excluded.commissionNonTrip !== 0
+                  ? "dashboard.dailyCost.bodyWithCommission"
+                  : "dashboard.dailyCost.body",
+                lang
+              ),
+              {
+                total: formatSar(excluded.total),
+                payroll: formatSar(excluded.payroll),
+                commission: formatSar(excluded.commissionNonTrip),
+              }
+            )}
+          </>
         ) : failed ? (
-          ar ? "تعذّرت قراءة التكلفة الشهرية المستثناة." : "Could not read the excluded monthly cost."
+          t("dashboard.dailyCost.readFailed", lang)
         ) : (
           // Same two claims as the branch above, minus the figure it could not
           // read. What direct cost DOES include is not conditional on that read
           // succeeding, so it is stated here as well rather than silently
           // disappearing in the month with nothing excluded.
-          ar
-            ? "التكلفة المباشرة تشمل تعبئة المحطة، وتستثني الرواتب والعمولات غير المرتبطة برحلة — لا يوجد لها مصدر يومي."
-            : "Direct cost includes station fill, and excludes payroll and non-trip commission — neither has a daily source."
+          t("dashboard.dailyCost.noneExcluded", lang)
         )}
       </p>
     </div>
@@ -924,30 +923,28 @@ function DailyCostDisclosure({
  * would train everyone to dismiss this banner — which costs more than the bug
  * it watches for.
  */
-function DriftBanner({ ar, drift }: { ar: boolean; drift: DriverStateDrift }) {
+function DriftBanner({ lang, drift }: { lang: Lang; drift: DriverStateDrift }) {
   if (drift.ok || !drift.reachable) return null;
   return (
     <div role="alert"
       className="rounded-lg border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-xs">
       <p className="flex items-start gap-2 font-medium text-rose-700 dark:text-rose-300">
         <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
-        {ar
-          ? `تعارض في حالة السائقين: ${drift.mismatches.length} من ${drift.checked} لا تتطابق بين قاعدة البيانات وحساب التطبيق.`
-          : `Driver state disagrees: ${drift.mismatches.length} of ${drift.checked} differ between the database view and the app's own rule.`}
+        {fill(t("dashboard.drift.headline", lang), {
+          n: drift.mismatches.length, checked: drift.checked,
+        })}
       </p>
       <ul className="mt-1 space-y-0.5 ps-5 muted">
         {drift.mismatches.map((m) => (
           <li key={m.driverId}>
             <span className="font-medium">{m.name}</span>
             {" — "}
-            {ar ? "العرض" : "view"}: {m.sql} · {ar ? "التطبيق" : "app"}: {m.ts}
+            {t("dashboard.drift.view", lang)}: {m.sql} · {t("dashboard.drift.app", lang)}: {m.ts}
           </li>
         ))}
       </ul>
       <p className="mt-1 muted">
-        {ar
-          ? "v_driver_state_now و lib/driver-state.ts يجب أن يتطابقا — أصلح القاعدة في الاثنين معاً."
-          : "v_driver_state_now and lib/driver-state.ts must match — fix the rule in both."}
+        {t("dashboard.drift.fix", lang)}
       </p>
     </div>
   );
@@ -968,12 +965,12 @@ function DriftBanner({ ar, drift }: { ar: boolean; drift: DriverStateDrift }) {
  *
  * "No truck" now means genuinely none — not "none, and we did not look".
  */
-function DriverTruckCell({ ar, driver }: { ar: boolean; driver: DriverOps }) {
+function DriverTruckCell({ lang, driver }: { lang: Lang; driver: DriverOps }) {
   if (!driver.truckPlate) {
     return (
       <span className="flex items-center gap-1">
         <TruckIcon className="h-3 w-3 shrink-0" aria-hidden />
-        {ar ? "بلا شاحنة" : "No truck"}
+        {t("dashboard.driverTruck.none", lang)}
       </span>
     );
   }
@@ -985,14 +982,14 @@ function DriverTruckCell({ ar, driver }: { ar: boolean; driver: DriverOps }) {
       <span className="truncate">{driver.truckPlate}</span>
       {driver.truckInMaintenance && (
         <span className="shrink-0 text-amber-700 dark:text-amber-300">
-          {ar ? "— في الصيانة" : "— in maintenance"}
+          {t("dashboard.driverTruck.inMaintenance", lang)}
         </span>
       )}
       {/* An inferred plate is labelled as such. Without this the row would
           read as an assignment the driver does not have. */}
       {driver.truckSource === "trip" && (
         <span className="shrink-0 opacity-70">
-          {ar ? "(من رحلته)" : "(from his trip)"}
+          {t("dashboard.driverTruck.fromTrip", lang)}
         </span>
       )}
     </span>
@@ -1001,14 +998,14 @@ function DriverTruckCell({ ar, driver }: { ar: boolean; driver: DriverOps }) {
 
 /** One legend for all six project cards — repeating it per card would be six
  *  copies of the same four words in a grid meant to read compactly. */
-function StageLegend({ ar }: { ar: boolean }) {
+function StageLegend({ lang }: { lang: Lang }) {
   return (
     <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
       {STAGE_BAR.map((s) => (
         <li key={s.key} className="flex items-center gap-1.5 text-[11px] muted">
           <span className="h-2.5 w-2.5 shrink-0 rounded-sm" aria-hidden
             style={{ background: s.color }} />
-          {ar ? s.ar : s.en}
+          {t(`dashboard.stage.${s.key}`, lang)}
         </li>
       ))}
     </ul>
@@ -1028,7 +1025,7 @@ function StageLegend({ ar }: { ar: boolean }) {
  * SHOULD read as mostly delivered. The in-flight count is called out
  * separately because it is the part that can still be acted on.
  */
-function ProjectStageCard({ ar, project }: { ar: boolean; project: ProjectStages }) {
+function ProjectStageCard({ lang, project }: { lang: Lang; project: ProjectStages }) {
   const segments = STAGE_BAR
     .map((s) => ({ ...s, value: project[s.key] }))
     .filter((s) => s.value > 0);
@@ -1038,19 +1035,21 @@ function ProjectStageCard({ ar, project }: { ar: boolean; project: ProjectStages
       <div className="flex items-baseline justify-between gap-2">
         <span className="min-w-0 truncate text-sm font-medium">{project.projectName}</span>
         <span className="shrink-0 text-xs tabular-nums muted">
-          {project.total} {ar ? "رحلة" : project.total === 1 ? "trip" : "trips"}
+          {project.total} {t(project.total === 1 ? "dashboard.projects.tripOne" : "dashboard.projects.tripMany", lang)}
         </span>
       </div>
 
       {project.total === 0 ? (
-        <p className="mt-2 text-[11px] muted">{ar ? "لا توجد رحلات بعد." : "No trips yet."}</p>
+        <p className="mt-2 text-[11px] muted">{t("dashboard.projects.noTrips", lang)}</p>
       ) : (
         <>
           <div className="mt-2 flex h-2.5 w-full overflow-hidden rounded-full"
             role="img"
-            aria-label={segments.map((s) => `${ar ? s.ar : s.en}: ${s.value}`).join(", ")}>
+            aria-label={segments
+              .map((s) => `${t(`dashboard.stage.${s.key}`, lang)}: ${s.value}`)
+              .join(", ")}>
             {segments.map((s) => (
-              <span key={s.key} title={`${ar ? s.ar : s.en}: ${s.value}`}
+              <span key={s.key} title={`${t(`dashboard.stage.${s.key}`, lang)}: ${s.value}`}
                 style={{ width: `${(s.value / project.total) * 100}%`, background: s.color }} />
             ))}
           </div>
@@ -1064,7 +1063,7 @@ function ProjectStageCard({ ar, project }: { ar: boolean; project: ProjectStages
             ))}
             {project.inFlight > 0 && (
               <span className="ms-auto text-brand-600 dark:text-brand-300">
-                {project.inFlight} {ar ? "قيد التنفيذ" : "in flight"}
+                {project.inFlight} {t("dashboard.projects.inFlight", lang)}
               </span>
             )}
           </div>
@@ -1094,9 +1093,9 @@ function ProjectStageCard({ ar, project }: { ar: boolean; project: ProjectStages
  * reader trusting the number and reporting it as a bug.
  */
 function FleetUtilizationCard({
-  ar, row, month, failed,
+  lang, row, month, failed,
 }: {
-  ar: boolean;
+  lang: Lang;
   row: FleetUtilizationRow | null;
   month: string | null;
   failed: boolean;
@@ -1110,14 +1109,14 @@ function FleetUtilizationCard({
 
   return (
     <ChartCard
-      title={ar ? "استخدام الأسطول" : "Fleet utilization"}
+      title={t("dashboard.utilization.title", lang)}
       sub={month
-        ? `${monthTitle(month, ar)}${isCurrentMonth(month) ? (ar ? " — حتى تاريخه" : " — month to date") : ""}`
-        : (ar ? "شهرياً" : "monthly")}
+        ? `${monthTitle(month, lang)}${isCurrentMonth(month) ? t("dashboard.utilization.monthToDate", lang) : ""}`
+        : t("dashboard.utilization.monthly", lang)}
       href="/fleet"
       empty={!row && !failed}
       failed={unreadable}
-      ar={ar}
+      lang={lang}
     >
       {row && (
         <div className="space-y-3">
@@ -1126,7 +1125,9 @@ function FleetUtilizationCard({
               {formatUtilization(row.utilization_pct)}
             </span>
             <span className={cn("text-xs font-medium", tone.text)}>
-              {ar ? tone.ar : tone.en}
+              {/* UTILIZATION_BAND is lib/utilization.ts — out of this batch's
+                  scope, so its own pair is read here rather than moved. */}
+              {lang === "ar" ? tone.ar : tone.en}
             </span>
           </div>
 
@@ -1150,23 +1151,21 @@ function FleetUtilizationCard({
 
           <dl className="grid grid-cols-3 gap-2 pt-1 text-center">
             <div>
-              <dt className="text-[10px] muted uppercase tracking-wide">{ar ? "أيام عمل" : "Worked"}</dt>
+              <dt className="text-[10px] muted uppercase tracking-wide">{t("dashboard.utilization.worked", lang)}</dt>
               <dd className="text-sm font-medium tabular-nums">{row.worked_days}</dd>
             </div>
             <div>
-              <dt className="text-[10px] muted uppercase tracking-wide">{ar ? "أيام متاحة" : "Available"}</dt>
+              <dt className="text-[10px] muted uppercase tracking-wide">{t("dashboard.utilization.available", lang)}</dt>
               <dd className="text-sm font-medium tabular-nums">{row.available_days}</dd>
             </div>
             <div>
-              <dt className="text-[10px] muted uppercase tracking-wide">{ar ? "شاحنات" : "Trucks"}</dt>
+              <dt className="text-[10px] muted uppercase tracking-wide">{t("dashboard.utilization.trucks", lang)}</dt>
               <dd className="text-sm font-medium tabular-nums">{row.trucks_with_availability}</dd>
             </div>
           </dl>
 
           <p className="text-[11px] muted leading-relaxed">
-            {ar
-              ? "أيام شغّلت فيها الشاحنة رحلة مسلَّمة واحدة على الأقل، مقسومة على أيام توفّرها. الأيام في الصيانة أو خارج الخدمة مستبعدة من المقام، وأيام التوقف بلا عمل محتسبة."
-              : "Days a truck ran at least one delivered trip, over the days it was available. Maintenance and out-of-service days leave the denominator; idle-but-in-service days stay in it — those are the ones this measures."}
+            {t("dashboard.utilization.note", lang)}
           </p>
         </div>
       )}
@@ -1186,15 +1185,15 @@ function FleetUtilizationCard({
  * claims, and printing the second when the first is true is the class of lie
  * this whole layer exists to prevent.
  */
-function CostCompositionChart({ ar, months }: { ar: boolean; months: CostComposition[] }) {
+function CostCompositionChart({ lang, months }: { lang: Lang; months: CostComposition[] }) {
   return (
     <div className="space-y-3">
       <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        {COST_TYPE.map((t) => (
-          <li key={t.key} className="flex items-center gap-1.5 text-[11px] muted">
+        {COST_TYPE.map((c) => (
+          <li key={c.key} className="flex items-center gap-1.5 text-[11px] muted">
             <span className="h-2.5 w-2.5 shrink-0 rounded-sm" aria-hidden
-              style={{ background: t.color }} />
-            {ar ? t.ar : t.en}
+              style={{ background: c.color }} />
+            {t(`dashboard.costType.${c.key}`, lang)}
           </li>
         ))}
       </ul>
@@ -1202,22 +1201,25 @@ function CostCompositionChart({ ar, months }: { ar: boolean; months: CostComposi
       <div className="space-y-2.5">
         {months.map((m) => {
           const parts = COST_TYPE
-            .map((t) => ({ ...t, ...m[t.key] }))
-            .filter((t) => t.pct != null && t.pct > 0);
+            .map((c) => ({ ...c, ...m[c.key] }))
+            .filter((c) => c.pct != null && c.pct > 0);
           const noCost = m.total === 0 || parts.length === 0;
           return (
             <div key={m.month}>
               <div className="mb-1 flex items-baseline justify-between gap-2 text-[11px]">
-                <span className="font-medium">{monthTitle(m.month, ar)}</span>
+                <span className="font-medium">{monthTitle(m.month, lang)}</span>
                 <span className="flex items-baseline gap-2">
                   {/* The filling slice is money, so its unknown-cost count has
                       to be reachable here too, not only on the daily chart. */}
                   {m.fillingUncosted > 0 && (
                     <span className="text-amber-700 dark:text-amber-300"
-                      title={ar
-                        ? `${m.fillingUncosted} تعبئة بلا سعر لنوع مياهها — تكلفتها غير معروفة وغير محتسبة`
-                        : `${m.fillingUncosted} fill${m.fillingUncosted === 1 ? "" : "s"} with no price for their water type — cost unknown, not counted`}>
-                      {ar ? `${m.fillingUncosted} بلا سعر` : `${m.fillingUncosted} unpriced`}
+                      title={fill(
+                        t(m.fillingUncosted === 1
+                          ? "dashboard.costComposition.uncostedTitleOne"
+                          : "dashboard.costComposition.uncostedTitleMany", lang),
+                        { n: m.fillingUncosted }
+                      )}>
+                      {fill(t("dashboard.costComposition.unpriced", lang), { n: m.fillingUncosted })}
                     </span>
                   )}
                   <span className="tabular-nums muted">{formatSar(m.total)}</span>
@@ -1226,20 +1228,22 @@ function CostCompositionChart({ ar, months }: { ar: boolean; months: CostComposi
               {noCost ? (
                 <div className="flex h-4 items-center rounded-md border border-dashed px-2 text-[10px] muted"
                   style={{ borderColor: "rgb(var(--border))" }}>
-                  {ar ? "لا تكلفة مسجَّلة" : "No cost recorded"}
+                  {t("dashboard.costComposition.noCost", lang)}
                 </div>
               ) : (
                 <div className="flex h-4 w-full overflow-hidden rounded-md"
                   role="img"
-                  aria-label={parts.map((t) => `${ar ? t.ar : t.en} ${t.pct}%`).join(", ")}>
-                  {parts.map((t) => (
-                    <span key={t.key}
+                  aria-label={parts
+                    .map((c) => `${t(`dashboard.costType.${c.key}`, lang)} ${c.pct}%`)
+                    .join(", ")}>
+                  {parts.map((c) => (
+                    <span key={c.key}
                       className="flex items-center justify-center overflow-hidden text-[9px] font-medium text-white"
-                      title={`${ar ? t.ar : t.en}: ${t.pct}% · ${formatSar(t.sar)}`}
-                      style={{ width: `${t.pct}%`, background: t.color }}>
+                      title={`${t(`dashboard.costType.${c.key}`, lang)}: ${c.pct}% · ${formatSar(c.sar)}`}
+                      style={{ width: `${c.pct}%`, background: c.color }}>
                       {/* Only label a slice wide enough to hold the text — a
                           clipped "1%" is noise, and the title carries it. */}
-                      {(t.pct ?? 0) >= 12 ? `${t.pct}%` : ""}
+                      {(c.pct ?? 0) >= 12 ? `${c.pct}%` : ""}
                     </span>
                   ))}
                 </div>
@@ -1260,17 +1264,14 @@ const COMPLIANCE_PILL: Record<ComplianceStatus, string> = {
   not_recorded: "bg-slate-500/10 text-slate-600 ring-slate-500/20 dark:text-slate-300",
   ok: "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300",
 };
-const COMPLIANCE_LABEL: Record<ComplianceStatus, { en: string; ar: string }> = {
-  expired: { en: "Expired", ar: "منتهية" },
-  expiring_soon: { en: "Expiring", ar: "تنتهي قريباً" },
-  not_recorded: { en: "Not recorded", ar: "غير مسجَّلة" },
-  ok: { en: "Valid", ar: "سارية" },
-};
-const DRIVER_STATE_LABEL: Record<DriverOpsState, { en: string; ar: string; dot: string }> = {
-  active:   { en: "Active",   ar: "نشط",         dot: "bg-emerald-500" },
-  idle:     { en: "Idle",     ar: "خامل",        dot: "bg-brand-500" },
-  off_duty: { en: "Off duty", ar: "خارج الدوام", dot: "bg-slate-400" },
-  on_leave: { en: "On leave", ar: "في إجازة",    dot: "bg-amber-500" },
+// The pill's WORDS are in the dictionary at `dashboard.compliance.<status>`,
+// keyed by the same status this map is keyed by; only the colour is here.
+// Likewise the driver's state name, at `dashboard.driverState.<state>`.
+const DRIVER_STATE_DOT: Record<DriverOpsState, string> = {
+  active:   "bg-emerald-500",
+  idle:     "bg-brand-500",
+  off_duty: "bg-slate-400",
+  on_leave: "bg-amber-500",
 };
 
 /**
@@ -1286,9 +1287,9 @@ const DRIVER_STATE_LABEL: Record<DriverOpsState, { en: string; ar: string; dot: 
  * blurring those cards.
  */
 function DriversOpsTable({
-  ar, rows, failed,
+  lang, rows, failed,
 }: {
-  ar: boolean; rows: DriverOps[]; failed: boolean;
+  lang: Lang; rows: DriverOps[]; failed: boolean;
 }) {
   const sorted = useMemo(() => sortDriverOps(rows), [rows]);
 
@@ -1296,9 +1297,7 @@ function DriversOpsTable({
     return (
       <Card>
         <p className="text-sm muted">
-          {failed
-            ? (ar ? "تعذّرت قراءة السائقين." : "Could not read drivers.")
-            : (ar ? "لا يوجد سائقون." : "No drivers.")}
+          {t(failed ? "dashboard.driversOps.readFailed" : "dashboard.driversOps.empty", lang)}
         </p>
       </Card>
     );
@@ -1308,27 +1307,26 @@ function DriversOpsTable({
     <Card className="p-0">
       <ul className="divide-y divide-[rgb(var(--border))]">
         {sorted.map((d) => {
-          const st = DRIVER_STATE_LABEL[d.state];
           return (
             <li key={d.driverId} className="px-3 py-2">
               <div className="flex items-center gap-2">
-                <span className={cn("h-2 w-2 shrink-0 rounded-full", st.dot)} aria-hidden />
+                <span className={cn("h-2 w-2 shrink-0 rounded-full", DRIVER_STATE_DOT[d.state])} aria-hidden />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{d.name}</span>
                 <span className={cn(
                   "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset",
                   COMPLIANCE_PILL[d.compliance]
                 )}>
-                  {ar ? COMPLIANCE_LABEL[d.compliance].ar : COMPLIANCE_LABEL[d.compliance].en}
+                  {t(`dashboard.compliance.${d.compliance}`, lang)}
                 </span>
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs muted">
-                <span>{ar ? st.ar : st.en}</span>
+                <span>{t(`dashboard.driverState.${d.state}`, lang)}</span>
                 <span aria-hidden>·</span>
-                <DriverTruckCell ar={ar} driver={d} />
+                <DriverTruckCell lang={lang} driver={d} />
                 {d.tripStage && (
                   <>
                     <span aria-hidden>·</span>
-                    <PhasePill stage={d.tripStage} ar={ar} />
+                    <PhasePill stage={d.tripStage} lang={lang} />
                     {d.inFlightTrips > 1 && <span className="tabular-nums">×{d.inFlightTrips}</span>}
                   </>
                 )}
@@ -1336,9 +1334,7 @@ function DriversOpsTable({
               {d.conflicts && (
                 <p className="mt-1 flex items-start gap-1 text-[10px] text-amber-700 dark:text-amber-300">
                   <AlertTriangle className="mt-px h-3 w-3 shrink-0" aria-hidden />
-                  {ar
-                    ? "بلا شاحنة مُسندة رغم وجود رحلات جارية — الحالة والرحلات لا تتفقان."
-                    : "Holds in-flight trips with no assigned truck — state and trips disagree."}
+                  {t("dashboard.driversOps.conflict", lang)}
                 </p>
               )}
             </li>
@@ -1363,24 +1359,24 @@ function DriversOpsTable({
  * carries the proportion visually.
  */
 function CostMixLegend({
-  ar, items,
+  lang, items,
 }: {
-  ar: boolean; items: { label: string; value: number; color: string }[];
+  lang: Lang; items: { key: CostSliceKey; value: number; color: string }[];
 }) {
-  // Built FROM COST_TYPE rather than hand-listed. The slices themselves are
-  // built from the same source in app/page.tsx, so adding a bucket there can no
-  // longer leave it rendering its English label inside the Arabic legend — the
-  // exact drift the previous hand-written map would have produced for the
-  // Station fill slice (0112).
-  const LABEL_AR: Record<string, string> =
-    Object.fromEntries(COST_TYPE.map((t) => [t.en, t.ar]));
+  // THE SLICE TRAVELS AS A KEY, NOT AS A LABEL. app/page.tsx builds these rows
+  // on the server, which has no language, so the name is looked up here at
+  // render time from the same `dashboard.costType.<key>` the doughnut, the
+  // Cost composition legend and its tooltips read. Adding a bucket therefore
+  // cannot leave it showing its English name inside the Arabic legend — the
+  // exact drift the previous English-keyed lookup produced for the Station
+  // fill slice (0112).
   return (
     <ul className="mt-3 space-y-1.5">
       {items.map((c) => (
-        <li key={c.label} className="flex items-center gap-2 text-xs">
+        <li key={c.key} className="flex items-center gap-2 text-xs">
           <span className="h-2.5 w-2.5 shrink-0 rounded-sm" aria-hidden
             style={{ background: c.color }} />
-          <span className="min-w-0 flex-1 truncate">{ar ? (LABEL_AR[c.label] ?? c.label) : c.label}</span>
+          <span className="min-w-0 flex-1 truncate">{t(`dashboard.costType.${c.key}`, lang)}</span>
           <span className="shrink-0 tabular-nums muted">{formatSar(c.value)}</span>
         </li>
       ))}
@@ -1402,9 +1398,9 @@ function CostMixLegend({
  * failure as rendering an unread figure as zero.
  */
 function UncostedFillsNote({
-  ar, uncosted, shortOf = "directCost",
+  lang, uncosted, shortOf = "directCost",
 }: {
-  ar: boolean;
+  lang: Lang;
   uncosted: number;
   /**
    * WHICH FIGURE ON THIS CARD IS SHORT. The count is the same fact either way,
@@ -1415,31 +1411,30 @@ function UncostedFillsNote({
   shortOf?: "directCost" | "fillSlice";
 }) {
   if (uncosted <= 0) return null;
-  const missingFrom = ar
-    ? (shortOf === "directCost" ? "ضمن التكلفة المباشرة أعلاه" : "ضمن شريحة تعبئة المحطة أعلاه")
-    : (shortOf === "directCost" ? "the direct-cost line above" : "the Station fill slice above");
+  const where = t(
+    shortOf === "directCost"
+      ? "dashboard.uncostedFills.fromDirectCost"
+      : "dashboard.uncostedFills.fromFillSlice",
+    lang
+  );
   return (
     <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed">
       <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
       <p className="muted">
-        {ar ? (
-          <>
-            <span className="font-medium">
-              {uncosted} تعبئة هذا الشهر بلا سعر لنوع مياهها،
-            </span>{" "}
-            فتكلفتها غير معروفة — وليست صفراً — ولم تُحتسب {missingFrom}.
-          </>
-        ) : (
-          <>
-            <span className="font-medium">
-              {uncosted} {uncosted === 1 ? "fill" : "fills"} this month{" "}
-              {uncosted === 1 ? "has" : "have"} no price for{" "}
-              {uncosted === 1 ? "its" : "their"} water type,
-            </span>{" "}
-            so {uncosted === 1 ? "its" : "their"} cost is unknown — not zero — and is not in{" "}
-            {missingFrom}.
-          </>
-        )}
+        {/* WHOLE SENTENCES, one per plural case — not fragments spliced around
+            the count. English inflects four times in this one sentence
+            (fill/fills, has/have, its/their twice); Arabic inflects none of
+            them and orders the clause differently. The AR/EN branch that used
+            to wrap this block is gone with it: both languages now render the
+            same two nodes, and the dictionary carries the difference. */}
+        <span className="font-medium">
+          {fill(t(uncosted === 1
+            ? "dashboard.uncostedFills.boldOne"
+            : "dashboard.uncostedFills.boldMany", lang), { n: uncosted })}
+        </span>{" "}
+        {fill(t(uncosted === 1
+          ? "dashboard.uncostedFills.tailOne"
+          : "dashboard.uncostedFills.tailMany", lang), { where })}
       </p>
     </div>
   );
@@ -1462,46 +1457,29 @@ function UncostedFillsNote({
  * That trip contributes 0 rather than a guessed price, which is why the figure
  * needs qualifying rather than correcting.
  */
-function DeliveredRevenueNote({ ar, unpricedTrips }: { ar: boolean; unpricedTrips: number }) {
+function DeliveredRevenueNote({ lang, unpricedTrips }: { lang: Lang; unpricedTrips: number }) {
   return (
     <div className="mt-3 flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-[11px] leading-relaxed">
       <Info className="mt-px h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
       <p className="muted">
-        {ar ? (
+        {/* The body was written across four source lines with `&apos;` and
+            `&quot;` entities; JSX collapses that to one sentence with real
+            apostrophes and quotes, which is exactly what the dictionary now
+            holds. The unpriced clause below is again two whole sentences per
+            language, never a spliced plural. */}
+        <span className="font-medium">{t("dashboard.deliveredRevenue.lead", lang)}</span>{" "}
+        {t("dashboard.deliveredRevenue.body", lang)}
+        {unpricedTrips > 0 && (
           <>
-            <span className="font-medium">إيراد مُكتسَب، لا مفوتر.</span>{" "}
-            قيمة العمل المنفَّذ في يومه بسعر مشروعه، سواء فُوتر أم لا — يُسجَّل بتاريخ الرحلة.
-            لا يطابق التقارير ولا يدخل في أي هامش؛ الإيراد المفوتر يبقى في التقارير وفي بطاقة
-            «الإيرادات» أعلى الصفحة.
-            {unpricedTrips > 0 && (
-              <>
-                {" "}
-                <span className="font-medium">
-                  {unpricedTrips} رحلة مُسلَّمة هذا الشهر بلا مشروع،
-                </span>{" "}
-                فلا سعر لها ولم تُحتسب هنا — ولم يُفترض لها سعر.
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            <span className="font-medium">Earned, not billed.</span>{" "}
-            What the day&apos;s completed work was worth at its project&apos;s rate, invoiced or
-            not, recorded on the day the trip ran. It does not match Reports and feeds no margin —
-            billed revenue stays in Reports and in the &quot;Revenue&quot; tile at the top of this
-            page.
-            {unpricedTrips > 0 && (
-              <>
-                {" "}
-                <span className="font-medium">
-                  {unpricedTrips} delivered {unpricedTrips === 1 ? "trip" : "trips"} this month{" "}
-                  {unpricedTrips === 1 ? "has" : "have"} no project,
-                </span>{" "}
-                so {unpricedTrips === 1 ? "it has" : "they have"} no rate and{" "}
-                {unpricedTrips === 1 ? "is" : "are"} not counted here — no price was assumed for{" "}
-                {unpricedTrips === 1 ? "it" : "them"}.
-              </>
-            )}
+            {" "}
+            <span className="font-medium">
+              {fill(t(unpricedTrips === 1
+                ? "dashboard.deliveredRevenue.unpricedBoldOne"
+                : "dashboard.deliveredRevenue.unpricedBoldMany", lang), { n: unpricedTrips })}
+            </span>{" "}
+            {t(unpricedTrips === 1
+              ? "dashboard.deliveredRevenue.unpricedTailOne"
+              : "dashboard.deliveredRevenue.unpricedTailMany", lang)}
           </>
         )}
       </p>
@@ -1526,46 +1504,29 @@ function DeliveredRevenueNote({ ar, unpricedTrips }: { ar: boolean; unpricedTrip
  *     understates the day. Said out loud, they reconcile.
  */
 function DeliveryOutputNote({
-  ar, noTruckTrips, deliveredTrips,
+  lang, noTruckTrips, deliveredTrips,
 }: {
-  ar: boolean; noTruckTrips: number; deliveredTrips: number;
+  lang: Lang; noTruckTrips: number; deliveredTrips: number;
 }) {
   return (
     <div className="mt-3 flex items-start gap-2 rounded-lg border border-brand-500/25 bg-brand-500/5 px-3 py-2 text-[11px] leading-relaxed">
       <Info className="mt-px h-3.5 w-3.5 shrink-0 text-brand-600 dark:text-brand-300" aria-hidden />
       <p className="muted">
-        {ar ? (
+        {/* The only one of the four with a single plural case: the author wrote
+            the no-truck clause in the many form and it renders only above zero,
+            so there is no singular sentence to lift. It is still stored whole,
+            for the same reason as its three siblings. */}
+        <span className="font-medium">{t("dashboard.dispatchedCapacity.lead", lang)}</span>{" "}
+        {t("dashboard.dispatchedCapacity.body", lang)}
+        {noTruckTrips > 0 && (
           <>
-            <span className="font-medium">السعة المُشغَّلة، لا الكمية المقاسة.</span>{" "}
-            تجمع الأعمدة السعة الكاملة لكل شاحنة نفّذت توصيلاً، سواء خرجت ممتلئة أم لا —
-            فحقل حجم الخزان لكل رحلة غير مُعبَّأ في أي رحلة، فلا توجد كمية مقاسة تُعرض.
-            {noTruckTrips > 0 && (
-              <>
-                {" "}
-                <span className="font-medium">
-                  {noTruckTrips} من {deliveredTrips} رحلة مسلَّمة هذا الشهر بلا شاحنة مُسندة،
-                </span>{" "}
-                فسعتها غير محسوبة ضمن الأعمدة رغم احتسابها ضمن خط الرحلات.
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            <span className="font-medium">Capacity dispatched, not measured volume.</span>{" "}
-            The bars add up the full capacity of every truck that made a delivery, whether
-            or not it ran full — per-trip tank size is unrecorded on every trip, so there is
-            no measured volume to show.
-            {noTruckTrips > 0 && (
-              <>
-                {" "}
-                <span className="font-medium">
-                  {noTruckTrips} of {deliveredTrips} delivered trips this month have no truck
-                  assigned,
-                </span>{" "}
-                so their capacity is missing from the bars even though they count on the
-                trips line.
-              </>
-            )}
+            {" "}
+            <span className="font-medium">
+              {fill(t("dashboard.dispatchedCapacity.noTruckBold", lang), {
+                n: noTruckTrips, total: deliveredTrips,
+              })}
+            </span>{" "}
+            {t("dashboard.dispatchedCapacity.noTruckTail", lang)}
           </>
         )}
       </p>
@@ -1578,29 +1539,36 @@ function DeliveryOutputNote({
 // All four stages, because Drivers Ops can report a driver whose most-advanced
 // in-flight trip is still `scheduled` — Active Trips only ever sees the middle
 // two. One pill for both, so a stage cannot end up two colours on one page.
-const PHASE_PILL: Record<TripStage, { en: string; ar: string; cls: string }> = {
-  scheduled:  { en: "Scheduled",  ar: "مجدولة",
+//
+// The WORDS are the project bars' own, at `dashboard.stage.<key>`, so a stage
+// cannot be named two different things on one page either. `TripStage` is
+// snake_case and the dictionary key is camelCase, which is why each row
+// carries its key rather than the lookup deriving one.
+const PHASE_PILL: Record<TripStage, {
+  key: "scheduled" | "loading" | "inTransit" | "delivered"; cls: string;
+}> = {
+  scheduled:  { key: "scheduled",
     cls: "bg-blue-500/10 text-blue-700 ring-blue-500/20 dark:text-blue-300" },
-  loading:    { en: "Loading",    ar: "تحميل",
+  loading:    { key: "loading",
     cls: "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300" },
-  in_transit: { en: "In transit", ar: "في الطريق",
+  in_transit: { key: "inTransit",
     cls: "bg-orange-500/10 text-orange-700 ring-orange-500/20 dark:text-orange-300" },
-  delivered:  { en: "Delivered",  ar: "مسلَّمة",
+  delivered:  { key: "delivered",
     cls: "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300" },
 };
 
-function PhasePill({ stage, ar }: { stage: TripStage; ar: boolean }) {
+function PhasePill({ stage, lang }: { stage: TripStage; lang: Lang }) {
   const p = PHASE_PILL[stage];
   return (
     <span className={cn(
       "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", p.cls
     )}>
-      {ar ? p.ar : p.en}
+      {t(`dashboard.stage.${p.key}`, lang)}
     </span>
   );
 }
 
-function ActionCard({ row, lang, ar }: { row: ActionItemRow; lang: "en" | "ar"; ar: boolean }) {
+function ActionCard({ row, lang }: { row: ActionItemRow; lang: Lang }) {
   return (
     <Link href={actionHref(row.kind)}
       className="focus-ring card p-4 flex items-start gap-3 transition-colors hover:border-brand-500/40 [touch-action:manipulation]">
@@ -1612,7 +1580,7 @@ function ActionCard({ row, lang, ar }: { row: ActionItemRow; lang: "en" | "ar"; 
         </span>
         <span className="mt-0.5 block truncate text-xs muted">
           {actionHint(row.kind, lang)}
-          {row.oldest_at && <> · {ar ? "الأقدم " : "oldest "}{relativeTime(row.oldest_at, lang)}</>}
+          {row.oldest_at && <> · {t("dashboard.actions.oldestPrefix", lang)}{relativeTime(row.oldest_at, lang)}</>}
         </span>
       </span>
       <ArrowUpRight className="h-4 w-4 shrink-0 muted" aria-hidden />
@@ -1734,8 +1702,8 @@ function MiniStat({ icon: Icon, label, value, href }: {
 // intersected with the live report_metrics dictionary, and the server action
 // re-checks the key before querying. The NL box is a marked, inert seam.
 // ---------------------------------------------------------------------------
-function Summaries({ options, ar, pickerOpen, setPickerOpen }: {
-  options: WidgetDef[]; ar: boolean; pickerOpen: boolean; setPickerOpen: (v: boolean) => void;
+function Summaries({ options, lang, pickerOpen, setPickerOpen }: {
+  options: WidgetDef[]; lang: Lang; pickerOpen: boolean; setPickerOpen: (v: boolean) => void;
 }) {
   const [widgets, setWidgets] = useState<PlacedWidget[]>([]);
   const [values, setValues] = useState<Record<string, WidgetValue | null>>({});
@@ -1770,7 +1738,7 @@ function Summaries({ options, ar, pickerOpen, setPickerOpen }: {
     <>
       {widgets.length > 0 && (
         <section aria-labelledby="dash-summary" className="space-y-3">
-          <h2 id="dash-summary" className="text-sm font-semibold">{ar ? "ملخصاتي" : "My summaries"}</h2>
+          <h2 id="dash-summary" className="text-sm font-semibold">{t("dashboard.summaries.heading", lang)}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {widgets.map((w) => {
               const def = widgetDef(w.key);
@@ -1779,17 +1747,21 @@ function Summaries({ options, ar, pickerOpen, setPickerOpen }: {
               return (
                 <Card key={w.id} className="relative">
                   <button type="button" onClick={() => persist(widgets.filter((x) => x.id !== w.id))}
-                    aria-label={ar ? "إزالة" : "Remove"}
+                    aria-label={t("dashboard.summaries.remove", lang)}
                     className="focus-ring absolute end-2 top-2 grid h-6 w-6 place-items-center rounded-md muted transition-colors hover:bg-black/5 dark:hover:bg-white/5">
                     <X className="h-3.5 w-3.5" aria-hidden />
                   </button>
                   <Link href={def.href} className="focus-ring block rounded">
-                    <div className="text-xs muted uppercase tracking-wide pe-7">{ar ? def.ar : def.en}</div>
+                    {/* The widget catalogue stays bilingual DATA in
+                        lib/dashboard-widgets.ts, fenced beside the
+                        report_metrics keys it names — out of this batch's
+                        scope, so its pair is read here rather than moved. */}
+                    <div className="text-xs muted uppercase tracking-wide pe-7">{lang === "ar" ? def.ar : def.en}</div>
                   </Link>
                   {val === undefined ? (
                     <div className="mt-2 text-sm muted">…</div>
                   ) : !val || !val.hasData ? (
-                    <div className="mt-2 text-sm muted">{ar ? "لا توجد بيانات." : "No data yet."}</div>
+                    <div className="mt-2 text-sm muted">{t("dashboard.summaries.noData", lang)}</div>
                   ) : w.display === "stat" || val.parts.length === 0 ? (
                     <div className="mt-1 text-2xl font-semibold tabular-nums">
                       {def.unit === "sar" ? formatSar(val.value)
@@ -1822,22 +1794,20 @@ function Summaries({ options, ar, pickerOpen, setPickerOpen }: {
       )}
 
       {pickerOpen && (
-        <Modal title={ar ? "إضافة ملخص" : "Add summary"} onClose={() => setPickerOpen(false)}>
+        <Modal title={t("dashboard.addSummary", lang)} onClose={() => setPickerOpen(false)}>
           <p className="mb-3 text-xs muted">
-            {ar
-              ? "كل خيار هنا يقرأ من الطبقة الدلالية نفسها التي تقرأ منها التقارير — لا أرقام مستقلة."
-              : "Every option here reads the same semantic layer Reports reads — no independent numbers."}
+            {t("dashboard.summaries.pickerNote", lang)}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {options.map((o) => (
               <div key={o.key} className="flex items-center gap-2 rounded-lg border p-2"
                 style={{ borderColor: "rgb(var(--border))" }}>
-                <span className="min-w-0 flex-1 truncate text-sm">{ar ? o.ar : o.en}</span>
+                <span className="min-w-0 flex-1 truncate text-sm">{lang === "ar" ? o.ar : o.en}</span>
                 {o.displays.map((d) => (
                   <button key={d} type="button" onClick={() => add(o.key, d)}
                     className="focus-ring rounded-md border px-2 py-0.5 text-[11px] muted transition-colors hover:border-brand-500/40 hover:text-[rgb(var(--fg))]"
                     style={{ borderColor: "rgb(var(--border))" }}>
-                    {d === "stat" ? (ar ? "رقم" : "number") : (ar ? "أعمدة" : "bars")}
+                    {t(d === "stat" ? "dashboard.summaries.displayStat" : "dashboard.summaries.displayBars", lang)}
                   </button>
                 ))}
               </div>
@@ -1850,17 +1820,15 @@ function Summaries({ options, ar, pickerOpen, setPickerOpen }: {
                 style={{ background: "linear-gradient(135deg,#8b5cf6,#0b7eea)" }}>
                 <Sparkles className="h-3.5 w-3.5" aria-hidden />
               </span>
-              <span className="text-xs font-medium">{ar ? "اطلب ملخصاً بالكلمات" : "Describe a summary"}</span>
+              <span className="text-xs font-medium">{t("dashboard.summaries.nlTitle", lang)}</span>
               <span className="rounded-full bg-black/5 px-2 py-0.5 text-[9px] uppercase tracking-wide muted dark:bg-white/10">
-                {ar ? "قريباً" : "Coming soon"}
+                {t("dashboard.summaries.comingSoon", lang)}
               </span>
             </div>
             <p className="mb-2 text-[11px] leading-relaxed muted">
-              {ar
-                ? "سيملأ هذا نفس المنشئ أعلاه انطلاقاً من وصفك. لم يُبنَ بعد — لا يُرسل ما تكتبه إلى أي مكان."
-                : "This will fill in the same builder above from a description. Not built yet — nothing you type is sent anywhere."}
+              {t("dashboard.summaries.nlBody", lang)}
             </p>
-            <input disabled placeholder={ar ? "غير متاح بعد" : "Not available yet"}
+            <input disabled placeholder={t("dashboard.summaries.nlPlaceholder", lang)}
               className="w-full cursor-not-allowed rounded-lg border px-3 py-2 text-sm opacity-60"
               style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--bg))" }} />
           </div>

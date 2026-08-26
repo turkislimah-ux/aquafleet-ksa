@@ -860,6 +860,488 @@ export const dict = {
       bySomeoneElse: { en: " by someone else", ar: " — بواسطة زميلك" },
     },
   },
+
+  // -------------------------------------------------------------------------
+  // DASHBOARD (app/page.tsx, app/DashboardClient.tsx, lib/dashboard.ts).
+  //
+  // WHY SO MANY NEAR-DUPLICATES. Several English labels here repeat a word
+  // that already exists elsewhere in this file while carrying DIFFERENT
+  // Arabic, because the author wrote each one for its own context. They are
+  // kept apart deliberately — collapsing them would silently retranslate a
+  // label Turki approved:
+  //   · `nav.dashboard` / `nav.fleet`   rail entries, not page headings
+  //   · `status.*`                      the Trips vocabulary, not this page's
+  //   · `navLandmark.soon`  "Coming Soon" / "قريبًا"  vs
+  //     `dashboard.summaries.comingSoon` "Coming soon" / "قريباً"
+  //   · fleetState / driverMix / driverState  all read "Active" in English and
+  //     "نشطة" / "في الخدمة" / "نشط" in Arabic — a truck, a headcount and a
+  //     single driver are three different things being described.
+  //   · actions.heading "يحتاج إلى إجراء" vs headline.open_actions.label
+  //     "يحتاج إجراء" — a section heading and a KPI tile.
+  // Three separate "no data" pairs exist for the same reason; see each one.
+  //
+  // `{n}`-style tokens are filled by the CALLER with a replacer function, never
+  // by string concatenation — see the `fill()` helper in DashboardClient.
+  // -------------------------------------------------------------------------
+  dashboard: {
+    title: { en: "Dashboard", ar: "لوحة التحكم" },
+    subtitle: {
+      en: "What needs action, what changed, where things stand",
+      ar: "ما يحتاج إلى إجراء، وما استجدّ، والوضع الآن",
+    },
+    addSummary: { en: "Add summary", ar: "إضافة ملخص" },
+    // The error text is appended straight after this, so the trailing space
+    // and colon are part of the string. Trimming runs the words together.
+    loadFailed: { en: "Failed to load the dashboard: ", ar: "تعذّر تحميل اللوحة: " },
+    kpiHeading: { en: "Key figures", ar: "المؤشرات" },
+    fullAnalysis: { en: "Full analysis in Reports →", ar: "التحليل الكامل في التقارير ←" },
+    overview: { en: "Overview", ar: "نظرة عامة" },
+    // Card subtitle prefix — "daily — " + the month title. Trailing space and
+    // em dash are the separator, so they travel with the word.
+    dailyPrefix: { en: "daily — ", ar: "يومياً — " },
+    daily: { en: "daily", ar: "يومياً" },
+
+    /** KPI tiles. Keys mirror `Headline["key"]` so `t()` type-checks. */
+    headline: {
+      revenue: {
+        label: { en: "Revenue", ar: "الإيرادات" },
+        sub: { en: "this month, net of VAT", ar: "هذا الشهر، بدون الضريبة" },
+      },
+      operating_margin: {
+        label: { en: "Operating margin", ar: "هامش التشغيل" },
+        sub: { en: "this month", ar: "هذا الشهر" },
+      },
+      net_profit: {
+        label: { en: "Net profit", ar: "صافي الربح" },
+        sub: { en: "after manual expenses", ar: "بعد المصروفات اليدوية" },
+      },
+      collections: {
+        label: { en: "Collected", ar: "المحصّل" },
+        sub: { en: "cash in, this month", ar: "نقد وارد هذا الشهر" },
+      },
+      receivables_outstanding: {
+        label: { en: "Outstanding", ar: "مستحقات" },
+        sub: { en: "owed right now", ar: "مستحق الآن" },
+      },
+      operations: {
+        label: { en: "Trips delivered", ar: "الرحلات المسلَّمة" },
+        sub: { en: "this month", ar: "هذا الشهر" },
+      },
+      trips_in_flight: {
+        label: { en: "Trips in flight", ar: "رحلات جارية" },
+        sub: { en: "right now", ar: "الآن" },
+      },
+      open_actions: {
+        label: { en: "Needs action", ar: "يحتاج إجراء" },
+        sub: { en: "items waiting", ar: "عنصر بالانتظار" },
+      },
+    },
+
+    /** Chart series and axis labels. */
+    series: {
+      deliveredRevenue: { en: "Delivered revenue", ar: "إيرادات مُسلَّمة" },
+      directCost: { en: "Direct cost", ar: "التكلفة المباشرة" },
+      // The Arabic keeps its Arabic-Indic ٣ — the author's own, and copy is
+      // not subject to the Latin-figures rule (that covers formatted values).
+      capacityM3: { en: "Capacity dispatched (m³)", ar: "السعة المُشغَّلة (م٣)" },
+      tripsDelivered: { en: "Trips delivered", ar: "الرحلات المسلَّمة" },
+      tripsAxis: { en: "trips", ar: "رحلات" },
+    },
+
+    revVsCost: {
+      title: {
+        en: "Delivered revenue vs direct cost",
+        ar: "الإيراد المُسلَّم مقابل التكلفة المباشرة",
+      },
+    },
+    costMix: {
+      title: { en: "Cost mix", ar: "مزيج التكلفة" },
+      sub: { en: "this month — operating cost", ar: "هذا الشهر — تكلفة التشغيل" },
+    },
+    deliveryOutput: {
+      title: { en: "Delivery Output", ar: "ناتج التوصيل" },
+    },
+
+    /** Generic chart-card states. "No data yet." here differs in Arabic from
+     *  `now.empty` and `summaries.noData`; all three are the author's. */
+    chart: {
+      readFailed: { en: "Could not read this chart.", ar: "تعذّرت قراءة هذا الرسم." },
+      empty: { en: "No data yet.", ar: "لا توجد بيانات بعد." },
+    },
+    monthStepper: {
+      prev: { en: "Previous month", ar: "الشهر السابق" },
+      next: { en: "Next month", ar: "الشهر التالي" },
+    },
+
+    /** Action-item catalogue — one entry per `kind` from
+     *  v_dashboard_action_items. Keys mirror `ActionKind`. */
+    action: {
+      po_pending_approval: {
+        label: { en: "Purchase orders awaiting approval", ar: "أوامر شراء بانتظار الموافقة" },
+        hint: { en: "Two matching votes complete each one", ar: "تكتمل بموافقتين متطابقتين" },
+      },
+      receipt_pending_approval: {
+        label: { en: "Stock receipts awaiting approval", ar: "إيصالات استلام بانتظار الموافقة" },
+        hint: { en: "Received stock not yet signed off", ar: "مخزون مستلم لم يُعتمد بعد" },
+      },
+      consumption_pending_approval: {
+        label: { en: "Consumption approvals pending", ar: "موافقات استهلاك معلقة" },
+        hint: { en: "An overlay — approving moves no stock", ar: "طبقة مراجعة — الموافقة لا تحرّك المخزون" },
+      },
+      invoice_unpaid: {
+        label: { en: "Invoices with money outstanding", ar: "فواتير عليها مبالغ مستحقة" },
+        hint: { en: "Confirmed, unpaid, and still owed", ar: "مؤكدة وغير مدفوعة وما زالت مستحقة" },
+      },
+      trip_overdue: {
+        label: { en: "Trips past their day, not delivered", ar: "رحلات تجاوزت يومها ولم تُسلَّم" },
+        hint: { en: "Still scheduled, loading or in transit", ar: "ما زالت مجدولة أو تحميل أو في الطريق" },
+      },
+      work_order_open: {
+        label: { en: "Work orders not started", ar: "أوامر عمل لم تبدأ" },
+        hint: { en: "Open or waiting on parts", ar: "مفتوحة أو بانتظار قطع" },
+      },
+      po_awaiting_receipt: {
+        label: { en: "Purchase orders awaiting receipt", ar: "أوامر شراء بانتظار الاستلام" },
+        hint: { en: "Issued, stock not received yet", ar: "صادرة ولم يُستلم المخزون" },
+      },
+      outsourced_overdue: {
+        label: { en: "Outsourced jobs past their estimate", ar: "أعمال خارجية تجاوزت الموعد المتوقع" },
+        hint: { en: "Still running after the expected finish", ar: "ما زالت جارية بعد الموعد المتوقع" },
+      },
+      permit_return_overdue: {
+        label: { en: "Exit permits past their return date", ar: "تصاريح خروج تجاوزت موعد الإرجاع" },
+        hint: { en: "Parts out and not returned", ar: "قطع خارجة ولم تُرجَع" },
+      },
+      parts_below_reorder: {
+        label: { en: "Parts at or below reorder level", ar: "قطع عند حد إعادة الطلب أو دونه" },
+        hint: { en: "Stock low enough to reorder", ar: "المخزون منخفض بما يستدعي إعادة الطلب" },
+      },
+      expiring_documents: {
+        label: { en: "Documents and IDs expiring soon", ar: "وثائق وهويات تنتهي قريباً" },
+        // The ٣٠ is the author's Arabic-Indic original and stays.
+        hint: { en: "Within 30 days, or already past", ar: "خلال ٣٠ يوماً أو منتهية بالفعل" },
+      },
+    },
+
+    /** Activity-feed verbs — one per `kind` from v_activity_feed. */
+    feed: {
+      trip_delivered: { en: "Trip delivered", ar: "تم تسليم رحلة" },
+      invoice_confirmed: { en: "Invoice confirmed", ar: "تم تأكيد فاتورة" },
+      invoice_paid: { en: "Invoice paid", ar: "تم دفع فاتورة" },
+      invoice_voided: { en: "Sales return", ar: "مرتجع مبيعات" },
+      work_order_opened: { en: "Work order opened", ar: "فتح أمر عمل" },
+      work_order_completed: { en: "Work order completed", ar: "اكتمل أمر عمل" },
+      outsourced_opened: { en: "Outsourced job opened", ar: "فتح عمل خارجي" },
+      outsourced_completed: { en: "Outsourced job done", ar: "اكتمل عمل خارجي" },
+      permit_exited: { en: "Parts left on permit", ar: "خروج قطع بتصريح" },
+      permit_voided: { en: "Exit permit voided", ar: "إلغاء تصريح خروج" },
+      consumption_decided: { en: "Consumption decided", ar: "تم البت في استهلاك" },
+      po_issued: { en: "Purchase order issued", ar: "صدر أمر شراء" },
+      po_approved: { en: "Purchase order approved", ar: "اعتُمد أمر شراء" },
+      po_rejected: { en: "Purchase order rejected", ar: "رُفض أمر شراء" },
+      stock_received: { en: "Stock received", ar: "استلام مخزون" },
+      topup_added: { en: "Balance added", ar: "إضافة رصيد" },
+      commission_paid: { en: "Commission paid", ar: "صرف عمولة" },
+      expense_recorded: { en: "Expense recorded", ar: "تسجيل مصروف" },
+      document_filed: { en: "Document filed", ar: "حفظ وثيقة" },
+    },
+
+    /** Trip stages on the project bars — keys mirror `STAGE_BAR`. */
+    stage: {
+      scheduled: { en: "Scheduled", ar: "مجدولة" },
+      loading: { en: "Loading", ar: "تحميل" },
+      inTransit: { en: "In transit", ar: "في الطريق" },
+      delivered: { en: "Delivered", ar: "مسلَّمة" },
+    },
+
+    /** Cost buckets — keys mirror `CostSliceKey` / lib/cost-colors.ts. */
+    costType: {
+      parts: { en: "Parts", ar: "قطع الغيار" },
+      outsourced: { en: "Outsourced", ar: "أعمال خارجية" },
+      payroll: { en: "Payroll", ar: "الرواتب" },
+      commissions: { en: "Commissions", ar: "العمولات" },
+      filling: { en: "Station fill", ar: "تعبئة المحطة" },
+      other: { en: "Other expenses", ar: "مصروفات أخرى" },
+    },
+
+    projects: {
+      heading: { en: "Projects", ar: "المشاريع" },
+      window: {
+        en: "this month only, by stage — the Kanban board shows a single day",
+        ar: "هذا الشهر فقط، حسب المرحلة — لوحة كانبان تعرض يوماً واحداً",
+      },
+      boardLink: { en: "Trips board →", ar: "لوحة الرحلات ←" },
+      readFailed: { en: "Could not read projects.", ar: "تعذّرت قراءة المشاريع." },
+      empty: { en: "No active projects.", ar: "لا توجد مشاريع نشطة." },
+      noTrips: { en: "No trips yet.", ar: "لا توجد رحلات بعد." },
+      // Rendered AFTER the count, with a space between, so these are the bare
+      // noun — English inflects, Arabic does not.
+      tripOne: { en: "trip", ar: "رحلة" },
+      tripMany: { en: "trips", ar: "رحلة" },
+      inFlight: { en: "in flight", ar: "قيد التنفيذ" },
+    },
+
+    liveTrips: {
+      heading: { en: "Active Trips", ar: "الرحلات النشطة" },
+      readFailed: { en: "Could not read.", ar: "تعذّر القراءة." },
+      empty: { en: "No active trips.", ar: "لا توجد رحلات نشطة." },
+      unassigned: { en: "Unassigned", ar: "غير مُسند" },
+    },
+
+    driversOps: {
+      heading: { en: "Drivers Ops", ar: "حالة السائقين" },
+      allLink: { en: "All drivers →", ar: "كل السائقين ←" },
+      readFailed: { en: "Could not read drivers.", ar: "تعذّرت قراءة السائقين." },
+      empty: { en: "No drivers.", ar: "لا يوجد سائقون." },
+      conflict: {
+        en: "Holds in-flight trips with no assigned truck — state and trips disagree.",
+        ar: "بلا شاحنة مُسندة رغم وجود رحلات جارية — الحالة والرحلات لا تتفقان.",
+      },
+    },
+
+    /** Driver compliance pills on the Drivers Ops board. */
+    compliance: {
+      expired: { en: "Expired", ar: "منتهية" },
+      expiring_soon: { en: "Expiring", ar: "تنتهي قريباً" },
+      not_recorded: { en: "Not recorded", ar: "غير مسجَّلة" },
+      ok: { en: "Valid", ar: "سارية" },
+    },
+
+    /** ONE driver's derived state. Arabic differs from `driverMix` on purpose
+     *  — that one counts a group, this one describes a person. */
+    driverState: {
+      active: { en: "Active", ar: "نشط" },
+      idle: { en: "Idle", ar: "خامل" },
+      off_duty: { en: "Off duty", ar: "خارج الدوام" },
+      on_leave: { en: "On leave", ar: "في إجازة" },
+    },
+
+    driverTruck: {
+      none: { en: "No truck", ar: "بلا شاحنة" },
+      // Appended after the plate; the em dash is the separator.
+      inMaintenance: { en: "— in maintenance", ar: "— في الصيانة" },
+      fromTrip: { en: "(from his trip)", ar: "(من رحلته)" },
+    },
+
+    actions: {
+      heading: { en: "Needs action", ar: "يحتاج إلى إجراء" },
+      viewAllCount: { en: "View all ({n})", ar: "عرض الكل ({n})" },
+      readFailed: { en: "Could not read the queue.", ar: "تعذّر قراءة قائمة المهام." },
+      emptyTitle: { en: "Nothing waiting", ar: "لا شيء معلّق" },
+      emptyBody: { en: "Every queue is clear right now.", ar: "كل قوائم الموافقات والمهام فارغة." },
+      modalTitle: { en: "Everything that needs action", ar: "كل ما يحتاج إجراء" },
+      // A relative timestamp follows immediately, so the trailing space stays.
+      oldestPrefix: { en: "oldest ", ar: "الأقدم " },
+    },
+
+    now: {
+      heading: { en: "Right now", ar: "الوضع الآن" },
+      readFailed: { en: "Could not read current state.", ar: "تعذّر قراءة الوضع الحالي." },
+      // "No data." — shorter than `chart.empty` in both languages.
+      empty: { en: "No data.", ar: "لا توجد بيانات." },
+      fleet: { en: "Fleet", ar: "الأسطول" },
+      fleetReadFailed: { en: "Could not read fleet state.", ar: "تعذّرت قراءة حالة الأسطول." },
+      drivers: { en: "Drivers", ar: "السائقون" },
+      tripsInFlight: { en: "Trips in flight", ar: "رحلات جارية" },
+      jobsRunning: { en: "Jobs running", ar: "أعمال جارية" },
+    },
+
+    /** Truck mix bar. Arabic is feminine (شاحنة) — a truck, not a driver. */
+    fleetState: {
+      active: { en: "Active", ar: "نشطة" },
+      idle: { en: "Idle", ar: "متوقفة" },
+      maintenance: { en: "Maintenance", ar: "صيانة" },
+    },
+
+    /** Driver mix bar — the headcount view, distinct from `driverState`. */
+    driverMix: {
+      active: { en: "Active", ar: "في الخدمة" },
+      idle: { en: "Idle", ar: "متاح" },
+      offDuty: { en: "Off duty", ar: "خارج الخدمة" },
+      onLeave: { en: "On leave", ar: "إجازة" },
+    },
+
+    activity: {
+      heading: { en: "Latest activity", ar: "آخر النشاطات" },
+      viewAll: { en: "View all", ar: "عرض الكل" },
+      readFailed: { en: "Could not read activity.", ar: "تعذّر قراءة النشاط." },
+      empty: { en: "No recorded activity yet.", ar: "لا يوجد نشاط مسجّل بعد." },
+      modalTitle: { en: "All activity", ar: "كل النشاطات" },
+    },
+
+    /** The driver-state drift guard. Silent unless the two definitions
+     *  disagree, so this copy is rarely seen — and must be exact when it is. */
+    drift: {
+      headline: {
+        en: "Driver state disagrees: {n} of {checked} differ between the database view and the app's own rule.",
+        ar: "تعارض في حالة السائقين: {n} من {checked} لا تتطابق بين قاعدة البيانات وحساب التطبيق.",
+      },
+      view: { en: "view", ar: "العرض" },
+      app: { en: "app", ar: "التطبيق" },
+      fix: {
+        en: "v_driver_state_now and lib/driver-state.ts must match — fix the rule in both.",
+        ar: "v_driver_state_now و lib/driver-state.ts يجب أن يتطابقا — أصلح القاعدة في الاثنين معاً.",
+      },
+    },
+
+    utilization: {
+      title: { en: "Fleet utilization", ar: "استخدام الأسطول" },
+      // Appended to the month title, so the leading space and dash stay.
+      monthToDate: { en: " — month to date", ar: " — حتى تاريخه" },
+      monthly: { en: "monthly", ar: "شهرياً" },
+      worked: { en: "Worked", ar: "أيام عمل" },
+      available: { en: "Available", ar: "أيام متاحة" },
+      trucks: { en: "Trucks", ar: "شاحنات" },
+      note: {
+        en: "Days a truck ran at least one delivered trip, over the days it was available. Maintenance and out-of-service days leave the denominator; idle-but-in-service days stay in it — those are the ones this measures.",
+        ar: "أيام شغّلت فيها الشاحنة رحلة مسلَّمة واحدة على الأقل، مقسومة على أيام توفّرها. الأيام في الصيانة أو خارج الخدمة مستبعدة من المقام، وأيام التوقف بلا عمل محتسبة.",
+      },
+    },
+
+    costComposition: {
+      title: { en: "Cost composition", ar: "تركيبة التكلفة" },
+      sub: { en: "each type's share of the month's cost", ar: "حصة كل نوع من تكلفة الشهر" },
+      // Hover title on the unpriced-fills badge. Two whole English variants
+      // rather than a spliced plural; the Arabic does not inflect.
+      uncostedTitleOne: {
+        en: "{n} fill with no price for their water type — cost unknown, not counted",
+        ar: "{n} تعبئة بلا سعر لنوع مياهها — تكلفتها غير معروفة وغير محتسبة",
+      },
+      uncostedTitleMany: {
+        en: "{n} fills with no price for their water type — cost unknown, not counted",
+        ar: "{n} تعبئة بلا سعر لنوع مياهها — تكلفتها غير معروفة وغير محتسبة",
+      },
+      unpriced: { en: "{n} unpriced", ar: "{n} بلا سعر" },
+      noCost: { en: "No cost recorded", ar: "لا تكلفة مسجَّلة" },
+    },
+
+    // -----------------------------------------------------------------------
+    // THE FOUR DISCLOSURE BLOCKS.
+    //
+    // Each is stored as WHOLE SENTENCES, one per plural case, never as
+    // fragments spliced around an interpolated figure. English inflects
+    // (fill/fills, has/have, its/their, it/them) where Arabic does not, so a
+    // fragment-level translation would have to reassemble the sentence in a
+    // language whose word order differs — which is how a disclosure ends up
+    // saying something the author did not write. The cost is a duplicated
+    // Arabic string in each pair; that is the intended trade.
+    // -----------------------------------------------------------------------
+    dailyCost: {
+      lead: {
+        en: "Direct cost is not full cost.",
+        ar: "التكلفة المباشرة ليست التكلفة الكاملة.",
+      },
+      bodyWithCommission: {
+        en: "It excludes {total} this month ({payroll} payroll, {commission} commission specials, adjustments and bonus) — neither has a daily source; both are monthly figures. Direct cost DOES include station fill.",
+        ar: "تستثني {total} هذا الشهر (رواتب {payroll}، وعمولات خاصة وتسويات ومكافآت {commission}) — لا يوجد لأيٍّ منها مصدر يومي، فكلاهما رقم شهري. والتكلفة المباشرة تشمل تعبئة المحطة.",
+      },
+      body: {
+        en: "It excludes {total} this month ({payroll} payroll) — neither has a daily source; both are monthly figures. Direct cost DOES include station fill.",
+        ar: "تستثني {total} هذا الشهر (رواتب {payroll}) — لا يوجد لأيٍّ منها مصدر يومي، فكلاهما رقم شهري. والتكلفة المباشرة تشمل تعبئة المحطة.",
+      },
+      readFailed: {
+        en: "Could not read the excluded monthly cost.",
+        ar: "تعذّرت قراءة التكلفة الشهرية المستثناة.",
+      },
+      noneExcluded: {
+        en: "Direct cost includes station fill, and excludes payroll and non-trip commission — neither has a daily source.",
+        ar: "التكلفة المباشرة تشمل تعبئة المحطة، وتستثني الرواتب والعمولات غير المرتبطة برحلة — لا يوجد لها مصدر يومي.",
+      },
+    },
+
+    uncostedFills: {
+      boldOne: {
+        en: "{n} fill this month has no price for its water type,",
+        ar: "{n} تعبئة هذا الشهر بلا سعر لنوع مياهها،",
+      },
+      boldMany: {
+        en: "{n} fills this month have no price for their water type,",
+        ar: "{n} تعبئة هذا الشهر بلا سعر لنوع مياهها،",
+      },
+      tailOne: {
+        en: "so its cost is unknown — not zero — and is not in {where}.",
+        ar: "فتكلفتها غير معروفة — وليست صفراً — ولم تُحتسب {where}.",
+      },
+      tailMany: {
+        en: "so their cost is unknown — not zero — and is not in {where}.",
+        ar: "فتكلفتها غير معروفة — وليست صفراً — ولم تُحتسب {where}.",
+      },
+      // WHICH figure on the card is short. The caller picks, because naming
+      // the wrong one is a false statement about what to distrust.
+      fromDirectCost: { en: "the direct-cost line above", ar: "ضمن التكلفة المباشرة أعلاه" },
+      fromFillSlice: { en: "the Station fill slice above", ar: "ضمن شريحة تعبئة المحطة أعلاه" },
+    },
+
+    deliveredRevenue: {
+      lead: { en: "Earned, not billed.", ar: "إيراد مُكتسَب، لا مفوتر." },
+      body: {
+        en: "What the day's completed work was worth at its project's rate, invoiced or not, recorded on the day the trip ran. It does not match Reports and feeds no margin — billed revenue stays in Reports and in the \"Revenue\" tile at the top of this page.",
+        ar: "قيمة العمل المنفَّذ في يومه بسعر مشروعه، سواء فُوتر أم لا — يُسجَّل بتاريخ الرحلة. لا يطابق التقارير ولا يدخل في أي هامش؛ الإيراد المفوتر يبقى في التقارير وفي بطاقة «الإيرادات» أعلى الصفحة.",
+      },
+      unpricedBoldOne: {
+        en: "{n} delivered trip this month has no project,",
+        ar: "{n} رحلة مُسلَّمة هذا الشهر بلا مشروع،",
+      },
+      unpricedBoldMany: {
+        en: "{n} delivered trips this month have no project,",
+        ar: "{n} رحلة مُسلَّمة هذا الشهر بلا مشروع،",
+      },
+      unpricedTailOne: {
+        en: "so it has no rate and is not counted here — no price was assumed for it.",
+        ar: "فلا سعر لها ولم تُحتسب هنا — ولم يُفترض لها سعر.",
+      },
+      unpricedTailMany: {
+        en: "so they have no rate and are not counted here — no price was assumed for them.",
+        ar: "فلا سعر لها ولم تُحتسب هنا — ولم يُفترض لها سعر.",
+      },
+    },
+
+    /** The footnote under the Delivery Output chart (`DeliveryOutputNote`).
+     *  Named for what it says, like its three siblings above; the chart's own
+     *  title lives at `deliveryOutput.title`. */
+    dispatchedCapacity: {
+      lead: {
+        en: "Capacity dispatched, not measured volume.",
+        ar: "السعة المُشغَّلة، لا الكمية المقاسة.",
+      },
+      body: {
+        en: "The bars add up the full capacity of every truck that made a delivery, whether or not it ran full — per-trip tank size is unrecorded on every trip, so there is no measured volume to show.",
+        ar: "تجمع الأعمدة السعة الكاملة لكل شاحنة نفّذت توصيلاً، سواء خرجت ممتلئة أم لا — فحقل حجم الخزان لكل رحلة غير مُعبَّأ في أي رحلة، فلا توجد كمية مقاسة تُعرض.",
+      },
+      // No English plural case: the source sentence is written for the many
+      // form only, and it is only rendered when the count is above zero.
+      noTruckBold: {
+        en: "{n} of {total} delivered trips this month have no truck assigned,",
+        ar: "{n} من {total} رحلة مسلَّمة هذا الشهر بلا شاحنة مُسندة،",
+      },
+      noTruckTail: {
+        en: "so their capacity is missing from the bars even though they count on the trips line.",
+        ar: "فسعتها غير محسوبة ضمن الأعمدة رغم احتسابها ضمن خط الرحلات.",
+      },
+    },
+
+    summaries: {
+      heading: { en: "My summaries", ar: "ملخصاتي" },
+      remove: { en: "Remove", ar: "إزالة" },
+      // English matches `chart.empty` but the Arabic is shorter — the
+      // author's own wording for a tile rather than a chart.
+      noData: { en: "No data yet.", ar: "لا توجد بيانات." },
+      pickerNote: {
+        en: "Every option here reads the same semantic layer Reports reads — no independent numbers.",
+        ar: "كل خيار هنا يقرأ من الطبقة الدلالية نفسها التي تقرأ منها التقارير — لا أرقام مستقلة.",
+      },
+      displayStat: { en: "number", ar: "رقم" },
+      displayBars: { en: "bars", ar: "أعمدة" },
+      nlTitle: { en: "Describe a summary", ar: "اطلب ملخصاً بالكلمات" },
+      // Lower-case "soon" and a different Arabic to `navLandmark.soon`.
+      comingSoon: { en: "Coming soon", ar: "قريباً" },
+      nlBody: {
+        en: "This will fill in the same builder above from a description. Not built yet — nothing you type is sent anywhere.",
+        ar: "سيملأ هذا نفس المنشئ أعلاه انطلاقاً من وصفك. لم يُبنَ بعد — لا يُرسل ما تكتبه إلى أي مكان.",
+      },
+      nlPlaceholder: { en: "Not available yet", ar: "غير متاح بعد" },
+    },
+  },
 } as const;
 
 /**

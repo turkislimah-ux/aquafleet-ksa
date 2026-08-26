@@ -9,7 +9,7 @@
 // row is named and where clicking it goes.
 
 import { COST_COLOR, type CostBucketKey } from "@/lib/cost-colors";
-import type { Lang } from "@/lib/i18n";
+import { t, type Lang } from "@/lib/i18n";
 
 // ---------------------------------------------------------------------------
 // Action items — one entry per `kind` emitted by v_dashboard_action_items.
@@ -28,94 +28,31 @@ export type ActionItemRow = {
   oldest_at: string | null;
 };
 
-type ActionMeta = {
-  en: string;
-  ar: string;
-  href: string;
-  /** Plain-language "what does clicking this do", shown under the label. */
-  hintEn: string;
-  hintAr: string;
-};
+// The LABEL and the HINT for each kind live in the dictionary, under
+// `dashboard.action.<kind>.{label,hint}`. What lives here is the one thing
+// that is not text: where the row links to. Keeping the keys of this object
+// as the source of `ActionKind` is what makes the template-literal lookups
+// below type-check — a kind with no href would also have no label.
+const ACTION_HREF = {
+  po_pending_approval: "/inventory?tab=approvals",
+  receipt_pending_approval: "/inventory?tab=approvals",
+  consumption_pending_approval: "/consumption?tab=approvals",
+  invoice_unpaid: "/trips?tab=finance",
+  trip_overdue: "/trips?tab=projects",
+  work_order_open: "/maintenance",
+  po_awaiting_receipt: "/inventory",
+  outsourced_overdue: "/maintenance",
+  permit_return_overdue: "/consumption?tab=permits",
+  parts_below_reorder: "/inventory",
+  expiring_documents: "/archive",
+} satisfies Record<string, string>;
 
-const ACTION_META: Record<string, ActionMeta> = {
-  po_pending_approval: {
-    en: "Purchase orders awaiting approval",
-    ar: "أوامر شراء بانتظار الموافقة",
-    href: "/inventory?tab=approvals",
-    hintEn: "Two matching votes complete each one",
-    hintAr: "تكتمل بموافقتين متطابقتين",
-  },
-  receipt_pending_approval: {
-    en: "Stock receipts awaiting approval",
-    ar: "إيصالات استلام بانتظار الموافقة",
-    href: "/inventory?tab=approvals",
-    hintEn: "Received stock not yet signed off",
-    hintAr: "مخزون مستلم لم يُعتمد بعد",
-  },
-  consumption_pending_approval: {
-    en: "Consumption approvals pending",
-    ar: "موافقات استهلاك معلقة",
-    href: "/consumption?tab=approvals",
-    hintEn: "An overlay — approving moves no stock",
-    hintAr: "طبقة مراجعة — الموافقة لا تحرّك المخزون",
-  },
-  invoice_unpaid: {
-    en: "Invoices with money outstanding",
-    ar: "فواتير عليها مبالغ مستحقة",
-    href: "/trips?tab=finance",
-    hintEn: "Confirmed, unpaid, and still owed",
-    hintAr: "مؤكدة وغير مدفوعة وما زالت مستحقة",
-  },
-  trip_overdue: {
-    en: "Trips past their day, not delivered",
-    ar: "رحلات تجاوزت يومها ولم تُسلَّم",
-    href: "/trips?tab=projects",
-    hintEn: "Still scheduled, loading or in transit",
-    hintAr: "ما زالت مجدولة أو تحميل أو في الطريق",
-  },
-  work_order_open: {
-    en: "Work orders not started",
-    ar: "أوامر عمل لم تبدأ",
-    href: "/maintenance",
-    hintEn: "Open or waiting on parts",
-    hintAr: "مفتوحة أو بانتظار قطع",
-  },
-  po_awaiting_receipt: {
-    en: "Purchase orders awaiting receipt",
-    ar: "أوامر شراء بانتظار الاستلام",
-    href: "/inventory",
-    hintEn: "Issued, stock not received yet",
-    hintAr: "صادرة ولم يُستلم المخزون",
-  },
-  outsourced_overdue: {
-    en: "Outsourced jobs past their estimate",
-    ar: "أعمال خارجية تجاوزت الموعد المتوقع",
-    href: "/maintenance",
-    hintEn: "Still running after the expected finish",
-    hintAr: "ما زالت جارية بعد الموعد المتوقع",
-  },
-  permit_return_overdue: {
-    en: "Exit permits past their return date",
-    ar: "تصاريح خروج تجاوزت موعد الإرجاع",
-    href: "/consumption?tab=permits",
-    hintEn: "Parts out and not returned",
-    hintAr: "قطع خارجة ولم تُرجَع",
-  },
-  parts_below_reorder: {
-    en: "Parts at or below reorder level",
-    ar: "قطع عند حد إعادة الطلب أو دونه",
-    href: "/inventory",
-    hintEn: "Stock low enough to reorder",
-    hintAr: "المخزون منخفض بما يستدعي إعادة الطلب",
-  },
-  expiring_documents: {
-    en: "Documents and IDs expiring soon",
-    ar: "وثائق وهويات تنتهي قريباً",
-    href: "/archive",
-    hintEn: "Within 30 days, or already past",
-    hintAr: "خلال ٣٠ يوماً أو منتهية بالفعل",
-  },
-};
+type ActionKind = keyof typeof ACTION_HREF;
+
+/** Narrows a view-supplied `kind` to one this file has a mapping for. */
+function isActionKind(kind: string): kind is ActionKind {
+  return Object.prototype.hasOwnProperty.call(ACTION_HREF, kind);
+}
 
 /** High first, then medium, then low; biggest count first inside a band. */
 const SEVERITY_ORDER: Record<ActionSeverity, number> = { high: 0, medium: 1, low: 2 };
@@ -130,22 +67,20 @@ export function sortActionItems(rows: ActionItemRow[]): ActionItemRow[] {
 }
 
 export function actionLabel(kind: string, lang: Lang): string {
-  const m = ACTION_META[kind];
   // An unmapped kind means 0103 gained a branch this file has not learned
   // about. Show the raw key rather than dropping the row silently — a
   // missing action item is worse than an ugly one.
-  if (!m) return kind;
-  return lang === "ar" ? m.ar : m.en;
+  if (!isActionKind(kind)) return kind;
+  return t(`dashboard.action.${kind}.label`, lang);
 }
 
 export function actionHint(kind: string, lang: Lang): string | null {
-  const m = ACTION_META[kind];
-  if (!m) return null;
-  return lang === "ar" ? m.hintAr : m.hintEn;
+  if (!isActionKind(kind)) return null;
+  return t(`dashboard.action.${kind}.hint`, lang);
 }
 
 export function actionHref(kind: string): string {
-  return ACTION_META[kind]?.href ?? "/";
+  return isActionKind(kind) ? ACTION_HREF[kind] : "/";
 }
 
 // ---------------------------------------------------------------------------
@@ -166,36 +101,44 @@ export type FeedRow = {
 
 type FeedTone = "ok" | "warn" | "bad" | "info";
 
-const FEED_META: Record<string, { en: string; ar: string; tone: FeedTone }> = {
-  trip_delivered:       { en: "Trip delivered",        ar: "تم تسليم رحلة",        tone: "ok" },
-  invoice_confirmed:    { en: "Invoice confirmed",     ar: "تم تأكيد فاتورة",      tone: "info" },
-  invoice_paid:         { en: "Invoice paid",          ar: "تم دفع فاتورة",        tone: "ok" },
-  invoice_voided:       { en: "Sales return",          ar: "مرتجع مبيعات",         tone: "bad" },
-  work_order_opened:    { en: "Work order opened",     ar: "فتح أمر عمل",          tone: "info" },
-  work_order_completed: { en: "Work order completed",  ar: "اكتمل أمر عمل",        tone: "ok" },
-  outsourced_opened:    { en: "Outsourced job opened", ar: "فتح عمل خارجي",        tone: "info" },
-  outsourced_completed: { en: "Outsourced job done",   ar: "اكتمل عمل خارجي",      tone: "ok" },
-  permit_exited:        { en: "Parts left on permit",  ar: "خروج قطع بتصريح",      tone: "warn" },
-  permit_voided:        { en: "Exit permit voided",    ar: "إلغاء تصريح خروج",     tone: "bad" },
-  consumption_decided:  { en: "Consumption decided",   ar: "تم البت في استهلاك",   tone: "info" },
-  po_issued:            { en: "Purchase order issued", ar: "صدر أمر شراء",         tone: "info" },
-  po_approved:          { en: "Purchase order approved", ar: "اعتُمد أمر شراء",    tone: "ok" },
-  po_rejected:          { en: "Purchase order rejected", ar: "رُفض أمر شراء",      tone: "bad" },
-  stock_received:       { en: "Stock received",        ar: "استلام مخزون",         tone: "ok" },
-  topup_added:          { en: "Balance added",         ar: "إضافة رصيد",           tone: "ok" },
-  commission_paid:      { en: "Commission paid",       ar: "صرف عمولة",            tone: "ok" },
-  expense_recorded:     { en: "Expense recorded",      ar: "تسجيل مصروف",          tone: "info" },
-  document_filed:       { en: "Document filed",        ar: "حفظ وثيقة",            tone: "info" },
-};
+// The verb itself is in the dictionary at `dashboard.feed.<kind>`; the tone is
+// the non-text half and stays here, same split as ACTION_HREF above.
+const FEED_TONE = {
+  trip_delivered:       "ok",
+  invoice_confirmed:    "info",
+  invoice_paid:         "ok",
+  invoice_voided:       "bad",
+  work_order_opened:    "info",
+  work_order_completed: "ok",
+  outsourced_opened:    "info",
+  outsourced_completed: "ok",
+  permit_exited:        "warn",
+  permit_voided:        "bad",
+  consumption_decided:  "info",
+  po_issued:            "info",
+  po_approved:          "ok",
+  po_rejected:          "bad",
+  stock_received:       "ok",
+  topup_added:          "ok",
+  commission_paid:      "ok",
+  expense_recorded:     "info",
+  document_filed:       "info",
+} satisfies Record<string, FeedTone>;
+
+type FeedKind = keyof typeof FEED_TONE;
+
+/** Narrows a view-supplied `kind` to one this file has a mapping for. */
+function isFeedKind(kind: string): kind is FeedKind {
+  return Object.prototype.hasOwnProperty.call(FEED_TONE, kind);
+}
 
 export function feedLabel(kind: string, lang: Lang): string {
-  const m = FEED_META[kind];
-  if (!m) return kind;
-  return lang === "ar" ? m.ar : m.en;
+  if (!isFeedKind(kind)) return kind;
+  return t(`dashboard.feed.${kind}`, lang);
 }
 
 export function feedTone(kind: string): FeedTone {
-  return FEED_META[kind]?.tone ?? "info";
+  return isFeedKind(kind) ? FEED_TONE[kind] : "info";
 }
 
 /**
@@ -254,15 +197,26 @@ export type FleetStateNow = {
 // ---------------------------------------------------------------------------
 type HeadlineTone = "good" | "warn" | "bad" | "neutral";
 
+/**
+ * The eight tiles the server may emit. The label and the window sub-label for
+ * each one live in the dictionary at `dashboard.headline.<key>.{label,sub}`,
+ * which is why this is a literal union rather than a `string` — it is what
+ * makes the client's template-literal lookup type-check.
+ */
+export type HeadlineKey =
+  | "revenue"
+  | "operating_margin"
+  | "net_profit"
+  | "collections"
+  | "receivables_outstanding"
+  | "operations"
+  | "trips_in_flight"
+  | "open_actions";
+
 export type Headline = {
-  key: string;
-  en: string;
-  ar: string;
+  key: HeadlineKey;
   /** Rendered value, already formatted by the server. */
   value: string;
-  /** Sub-label naming the window, so the figure is never ambiguous. */
-  subEn: string;
-  subAr: string;
   href: string;
   hasData: boolean;
   /**
@@ -307,7 +261,7 @@ export type DashCharts = {
   //                      Drivers Ops (v_drivers_ops_now, 0106)
   // Each was deleted rather than left unrendered: an unused copy of a figure
   // is how two versions of one number start to drift.
-  costMix: { label: string; value: number; color: string }[];
+  costMix: { key: CostSliceKey; value: number; color: string }[];
   /**
    * Filled trips in the cost-mix month with no price for their water type
    * (v_pnl_monthly.filling_uncosted_trips). The Station fill slice is summed
@@ -445,14 +399,15 @@ export type ProjectStages = {
 };
 
 /** Stage colours are the Kanban's own (STAGE_STYLES, lib/db-types.ts) so a
- *  stage means the same colour on both screens. */
+ *  stage means the same colour on both screens. Names are in the dictionary at
+ *  `dashboard.stage.<key>`; the `key` doubles as the dictionary leaf. */
 export const STAGE_BAR: { key: keyof Pick<ProjectStages,
   "scheduled" | "loading" | "inTransit" | "delivered">;
-  en: string; ar: string; color: string }[] = [
-  { key: "scheduled",  en: "Scheduled",  ar: "مجدولة",   color: "#3b82f6" },
-  { key: "loading",    en: "Loading",    ar: "تحميل",    color: "#f59e0b" },
-  { key: "inTransit",  en: "In transit", ar: "في الطريق", color: "#ea580c" },
-  { key: "delivered",  en: "Delivered",  ar: "مسلَّمة",   color: "#10b981" },
+  color: string }[] = [
+  { key: "scheduled",  color: "#3b82f6" },
+  { key: "loading",    color: "#f59e0b" },
+  { key: "inTransit",  color: "#ea580c" },
+  { key: "delivered",  color: "#10b981" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -492,20 +447,21 @@ export type CostComposition = {
 export type CostSliceKey = CostBucketKey;
 
 /**
- * THE LABELS LIVE HERE, THE COLOURS DO NOT. Every hex is read from
- * lib/cost-colors.ts, which Reports' own `costBuckets` reads too — so a bucket
- * is the same colour on the Dashboard's Cost mix and on Reports Overview. They
- * used to disagree, with Payroll and Outsourced actually swapped between the
- * two pages; that file's header has the detail.
+ * NEITHER THE LABELS NOR THE COLOURS LIVE HERE — this is the ORDER, and the
+ * join between the two. Every hex is read from lib/cost-colors.ts, which
+ * Reports' own `costBuckets` reads too, so a bucket is the same colour on the
+ * Dashboard's Cost mix and on Reports Overview. They used to disagree, with
+ * Payroll and Outsourced actually swapped between the two pages; that file's
+ * header has the detail. The names are in the dictionary at
+ * `dashboard.costType.<key>`, keyed by the same `key`.
  */
-export const COST_TYPE: { key: CostSliceKey;
-  en: string; ar: string; color: string }[] = [
-  { key: "parts",       en: "Parts",          ar: "قطع الغيار",   color: COST_COLOR.parts },
-  { key: "outsourced",  en: "Outsourced",     ar: "أعمال خارجية", color: COST_COLOR.outsourced },
-  { key: "payroll",     en: "Payroll",        ar: "الرواتب",      color: COST_COLOR.payroll },
-  { key: "commissions", en: "Commissions",    ar: "العمولات",     color: COST_COLOR.commissions },
-  { key: "filling",     en: "Station fill",   ar: "تعبئة المحطة", color: COST_COLOR.filling },
-  { key: "other",       en: "Other expenses", ar: "مصروفات أخرى", color: COST_COLOR.other },
+export const COST_TYPE: { key: CostSliceKey; color: string }[] = [
+  { key: "parts",       color: COST_COLOR.parts },
+  { key: "outsourced",  color: COST_COLOR.outsourced },
+  { key: "payroll",     color: COST_COLOR.payroll },
+  { key: "commissions", color: COST_COLOR.commissions },
+  { key: "filling",     color: COST_COLOR.filling },
+  { key: "other",       color: COST_COLOR.other },
 ];
 
 // ---------------------------------------------------------------------------
@@ -584,10 +540,10 @@ export function sortDriverOps(rows: DriverOps[]): DriverOps[] {
 }
 
 /** "2026-08-01" -> "August 2026". Formatting only; the value is the view's. */
-export function monthTitle(iso: string, ar: boolean): string {
+export function monthTitle(iso: string, lang: Lang): string {
   const d = new Date(`${iso}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat(ar ? "ar" : "en", {
+  return new Intl.DateTimeFormat(lang, {
     month: "long", year: "numeric", timeZone: "UTC",
   }).format(d);
 }
