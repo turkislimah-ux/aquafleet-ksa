@@ -27,6 +27,8 @@ import OperationStationField from "@/components/OperationStationField";
 import LinkedIdField from "@/components/LinkedIdField";
 import PlateInput from "@/components/PlateInput";
 import ScrollLock from "@/components/ScrollLock";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 const CAPACITY_OPTIONS_M3 = [33, 18, 6] as const;
 
@@ -53,18 +55,22 @@ export default function TruckFormModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { lang } = useApp();
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const isEdit = mode === "edit";
-  const t = truck ?? null;
+  // Renamed from `t`: that name now belongs to the translator imported
+  // above, and a shadow here would silently resolve every t("…") in this
+  // component to a TruckRow.
+  const row = truck ?? null;
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
     setError(null);
     const fd = new FormData(e.currentTarget);
-    const res = isEdit && t ? await updateTruck(t.id, fd) : await createTruck(fd);
+    const res = isEdit && row ? await updateTruck(row.id, fd) : await createTruck(fd);
     setSaving(false);
     if (res.error) {
       setError(res.error);
@@ -80,39 +86,41 @@ export default function TruckFormModal({
         className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-semibold mb-1">{isEdit ? "Edit Truck" : "Add New Truck"}</h2>
+        <h2 className="text-lg font-semibold mb-1">{t(isEdit ? "fleet.form.editTitle" : "fleet.form.addTitle", lang)}</h2>
         <p className="text-sm muted mb-4">
-          {isEdit ? `Update truck details · ${t?.plate ?? ""}` : "Register a new water truck. Plate is required."}
+          {isEdit
+            ? t("fleet.form.editSubtitle", lang).replace("{plate}", () => row?.plate ?? "")
+            : t("fleet.form.addSubtitle", lang)}
         </p>
         <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <PlateInput name="plate" defaultValue={t?.plate ?? null} />
+          <PlateInput name="plate" defaultValue={row?.plate ?? null} />
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Model</span>
+            <span className="muted">{t("fleet.cols.model", lang)}</span>
             <input
               name="model"
-              defaultValue={t?.model ?? ""}
-              placeholder="e.g. Mercedes-Benz Actros 3340"
+              defaultValue={row?.model ?? ""}
+              placeholder={t("fleet.form.modelPlaceholder", lang)}
               className={INPUT}
               style={INPUT_STYLE}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Year</span>
+            <span className="muted">{t("fleet.form.year", lang)}</span>
             <input
               name="year"
               type="number"
               min="1980"
               max="2030"
-              defaultValue={t?.year ?? ""}
+              defaultValue={row?.year ?? ""}
               className={INPUT}
               style={INPUT_STYLE}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Capacity</span>
+            <span className="muted">{t("common.capacity", lang)}</span>
             <select
               name="capacity_m3"
-              defaultValue={t?.capacity_m3 != null ? String(t.capacity_m3) : isEdit ? "" : "33"}
+              defaultValue={row?.capacity_m3 != null ? String(row.capacity_m3) : isEdit ? "" : "33"}
               className={INPUT}
               style={INPUT_STYLE}
             >
@@ -125,12 +133,12 @@ export default function TruckFormModal({
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Odometer (km)</span>
+            <span className="muted">{t("fleet.form.odometerKm", lang)}</span>
             <input
               name="odometer_km"
               type="number"
               min="0"
-              defaultValue={t?.odometer_km ?? 0}
+              defaultValue={row?.odometer_km ?? 0}
               className={INPUT}
               style={INPUT_STYLE}
             />
@@ -138,12 +146,12 @@ export default function TruckFormModal({
           <OperationStationField
             name="home_station"
             stations={operationStations}
-            defaultValue={t?.home_station ?? null}
-            label="Station"
+            defaultValue={row?.home_station ?? null}
+            label={t("fleet.cols.station", lang)}
           />
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">VIN</span>
-            <input name="vin" defaultValue={t?.vin ?? ""} className={INPUT} style={INPUT_STYLE} />
+            <span className="muted">{t("fleet.form.vin", lang)}</span>
+            <input name="vin" defaultValue={row?.vin ?? ""} className={INPUT} style={INPUT_STYLE} />
           </label>
 
           {/* LINKED IDENTITY FIELDS (0091) — editable ONLY when adding, as the
@@ -152,41 +160,41 @@ export default function TruckFormModal({
               second editor here would be a second way to change one fact.
               Same treatment as the Staff page's Iqama/License fields. */}
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Vehicle Registration</span>
+            <span className="muted">{t("fleet.form.vehicleRegistration", lang)}</span>
             <LinkedIdField
               name="vehicle_registration"
-              value={t?.vehicle_registration ?? ""}
+              value={row?.vehicle_registration ?? ""}
               locked={isEdit}
-              archiveHref={t?.id ? `/archive?tab=truck&trucksub=documents&truck=${t.id}` : null}
+              archiveHref={row?.id ? `/archive?tab=truck&trucksub=documents&truck=${row.id}` : null}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Registration expiry</span>
+            <span className="muted">{t("fleet.form.registrationExpiry", lang)}</span>
             <LinkedIdField
               name="registration_expiry"
               type="date"
-              value={dateInputValue(t?.registration_expiry)}
+              value={dateInputValue(row?.registration_expiry)}
               locked={isEdit}
-              archiveHref={t?.id ? `/archive?tab=truck&trucksub=documents&truck=${t.id}` : null}
+              archiveHref={row?.id ? `/archive?tab=truck&trucksub=documents&truck=${row.id}` : null}
             />
           </label>
 
           {!isEdit && (
             <>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Last Service</span>
+                <span className="muted">{t("fleet.cols.lastService", lang)}</span>
                 <input
                   name="last_service_date"
                   type="date"
-                  defaultValue={dateInputValue(t?.last_service_date)}
+                  defaultValue={dateInputValue(row?.last_service_date)}
                   className={INPUT}
                   style={INPUT_STYLE}
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Assigned driver</span>
+                <span className="muted">{t("fleet.form.assignedDriver", lang)}</span>
                 <select name="assigned_driver_id" defaultValue="" className={INPUT} style={INPUT_STYLE}>
-                  <option value="">Unassigned</option>
+                  <option value="">{t("fleet.form.unassigned", lang)}</option>
                   {drivers.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.name}
@@ -201,10 +209,10 @@ export default function TruckFormModal({
 
           <div className="flex justify-end gap-2 sm:col-span-2 mt-2">
             <Btn variant="outline" onClick={onClose}>
-              Cancel
+              {t("common.cancel", lang)}
             </Btn>
             <Btn type="submit" variant="primary">
-              {saving ? "Saving…" : "Save"}
+              {t(saving ? "common.saving" : "common.save", lang)}
             </Btn>
           </div>
         </form>

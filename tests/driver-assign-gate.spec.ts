@@ -41,13 +41,13 @@ test("an available driver is assignable", () => {
   const v = driverAvailability(available());
   expect(v.blockedReason).toBeNull();
   expect(v.error).toBeNull();
-  expect(v.label).toBe("Available");
+  expect(v.labelKind).toBe("available");
 });
 
 test("on leave today blocks the assignment", () => {
   const v = driverAvailability(available({ onLeaveToday: true }));
   expect(v.blockedReason).toBe("on_leave");
-  expect(v.label).toBe("On leave today");
+  expect(v.labelKind).toBe("on_leave");
   // The message must name the driver and say why — this is the sentence the
   // modal shows, so a bare "not allowed" would be a regression in itself.
   expect(v.error).toContain("Khan");
@@ -57,14 +57,15 @@ test("on leave today blocks the assignment", () => {
 test("already assigned to another truck blocks, and names the plate", () => {
   const v = driverAvailability(available({ assignedToOtherTruckPlate: "BBB-1111" }));
   expect(v.blockedReason).toBe("assigned_elsewhere");
-  expect(v.label).toBe("Already assigned · BBB-1111");
+  expect(v.labelKind).toBe("assigned_elsewhere");
+  expect(v.labelPlate).toBe("BBB-1111");
   expect(v.error).toContain("BBB-1111");
 });
 
 test("a terminated driver blocks — the picker's filter is not the gate", () => {
   const v = driverAvailability(available({ terminated: true }));
   expect(v.blockedReason).toBe("terminated");
-  expect(v.label).toBe("Terminated");
+  expect(v.labelKind).toBe("terminated");
 });
 
 test("terminated outranks every other reason", () => {
@@ -77,7 +78,8 @@ test("terminated outranks every other reason", () => {
 test("assigned-elsewhere outranks on-leave in the label — the plate is actionable", () => {
   const v = driverAvailability(available({ assignedToOtherTruckPlate: "BBB-1111", onLeaveToday: true }));
   expect(v.blockedReason).toBe("assigned_elsewhere");
-  expect(v.label).toBe("Already assigned · BBB-1111");
+  expect(v.labelKind).toBe("assigned_elsewhere");
+  expect(v.labelPlate).toBe("BBB-1111");
 });
 
 // THE EXEMPTION. Re-selecting the driver already on this truck is a no-op and
@@ -92,9 +94,10 @@ test("the current driver is never blocked, even while on leave", () => {
 test("the label ignores the exemption — an on-leave current driver still reads as on leave", () => {
   const v = driverAvailability(available({ isCurrentDriver: true, onLeaveToday: true }));
   // Both statements are true at once: the row stays clickable AND the cell
-  // tells the truth. Collapsing label into blockedReason would have to lie
-  // about one of them.
-  expect(v.label).toBe("On leave today");
+  // tells the truth. Collapsing labelKind into blockedReason would have to lie
+  // about one of them — and this is precisely the case that rules out styling
+  // the modal's green "Available" highlight off `blockedReason === null`.
+  expect(v.labelKind).toBe("on_leave");
   expect(v.blockedReason).toBeNull();
 });
 

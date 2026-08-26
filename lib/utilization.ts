@@ -34,6 +34,12 @@
 // This is the same rule the Dashboard's compliance pills follow — `not_recorded`
 // never collapses into `ok`, grey never becomes green.
 
+// lib/i18n.ts imports NOTHING, so depending on it cannot create a cycle however
+// this module is reached. `TKey` buys the compile-time check on
+// UTILIZATION_NA_KEY at the bottom; `t` is what lets formatUtilization stay the
+// SINGLE writer of the N/A token now that the token has two languages.
+import { t, type Lang, type TKey } from "./i18n";
+
 /** One row of v_truck_utilization_monthly. */
 export type TruckUtilizationRow = {
   truck_id: string;
@@ -136,11 +142,17 @@ export const UTILIZATION_BAND: Record<
 };
 
 /**
- * The percentage as text. **The only place "N/A" is written**, so no caller can
- * accidentally render a missing figure as 0%.
+ * The percentage as text. **The only place the N/A token is written**, so no
+ * caller can accidentally render a missing figure as 0%.
+ *
+ * `lang` is REQUIRED rather than defaulted. A default would let a caller forget
+ * it and silently print English into an Arabic page — exactly the failure this
+ * function centralises the token to prevent — and the compiler cannot warn about
+ * an argument that is optional. The percentage branch is language-independent:
+ * digits stay Latin here as everywhere else in the app.
  */
-export function formatUtilization(pct: number | null | undefined): string {
-  if (pct == null) return "N/A";
+export function formatUtilization(pct: number | null | undefined, lang: Lang): string {
+  if (pct == null) return t("common.na", lang);
   return `${pct.toFixed(1)}%`;
 }
 
@@ -155,22 +167,35 @@ export function utilizationBarWidth(pct: number | null | undefined): number {
   return Math.max(0, Math.min(100, pct));
 }
 
+/** Which of the four "no utilization" explanations applies. */
+export type UtilizationNaKind = "both" | "out_of_service" | "maintenance" | "none";
+
 /**
- * Why a truck has no utilization, in the reader's words. Only ever called for
- * the `na` band, where `available_days` is 0 by definition.
+ * Why a truck has no utilization. Only ever called for the `na` band, where
+ * `available_days` is 0 by definition.
+ *
+ * Returns the KIND, not the sentence: the four sentences live in the dictionary
+ * (`fleet.util.na*`) because they are page copy and have to change language.
+ * Callers render them through UTILIZATION_NA_KEY below, so the branch logic
+ * stays here — in the module that owns the band rules — and is written once.
  */
 export function utilizationNaReason(row: {
   out_of_service_days: number;
   maintenance_days: number;
-}): string {
-  if (row.out_of_service_days > 0 && row.maintenance_days > 0) {
-    return "No available days — out of service and in maintenance all period.";
-  }
-  if (row.out_of_service_days > 0) {
-    return "No available days — out of service for the whole period.";
-  }
-  if (row.maintenance_days > 0) {
-    return "No available days — in maintenance for the whole period.";
-  }
-  return "No available days in this period.";
+}): UtilizationNaKind {
+  if (row.out_of_service_days > 0 && row.maintenance_days > 0) return "both";
+  if (row.out_of_service_days > 0) return "out_of_service";
+  if (row.maintenance_days > 0) return "maintenance";
+  return "none";
 }
+
+/**
+ * Kind → dictionary key. TKey-typed, so a renamed dictionary leaf is a compile
+ * error here rather than a `fleet.util.naBoth` string printed on the page.
+ */
+export const UTILIZATION_NA_KEY: Record<UtilizationNaKind, TKey> = {
+  both: "fleet.util.naBoth",
+  out_of_service: "fleet.util.naOutOfService",
+  maintenance: "fleet.util.naMaintenance",
+  none: "fleet.util.naNone",
+};

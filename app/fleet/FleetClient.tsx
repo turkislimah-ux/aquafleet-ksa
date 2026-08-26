@@ -10,9 +10,9 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Card, Stat, StatusPill, Btn, Table, TH, TD } from "@/components/ui";
 import { type OperationStation } from "@/lib/db-types";
-import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
-import { driverAvailability } from "@/lib/driver-assignment";
-import { TRUCK_OPS_STATE_LABELS, type TruckOpsState } from "@/lib/truck-status";
+import { type DriverState } from "@/lib/driver-state";
+import { driverAvailability, AVAILABILITY_KEY } from "@/lib/driver-assignment";
+import { type TruckOpsState } from "@/lib/truck-status";
 import type { TruckRow, DriverLite } from "./page";
 import { assignDriver, unassignDriver } from "./actions";
 import TruckFormModal from "./TruckFormModal";
@@ -20,8 +20,14 @@ import { cn, formatNum } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
 import {
   utilizationBand, utilizationBarWidth, formatUtilization, utilizationNaReason,
-  UTILIZATION_BAND, type TruckUtilizationRow,
+  UTILIZATION_BAND, UTILIZATION_NA_KEY, type TruckUtilizationRow,
 } from "@/lib/utilization";
+// TRUCK_OPS_STATE_LABELS / DRIVER_STATE_LABELS are NOT imported anymore. Those
+// maps are plain English and the drivers and trips routes still read them, so
+// they stay exactly as they are; this page keys off the SAME enums into
+// fleet.truckState / fleet.driverState instead. No other route is affected.
+import { useApp } from "@/components/AppShell";
+import { t, type Lang } from "@/lib/i18n";
 import { Activity, Eye, Filter, Pencil, Plus, Truck as TruckIcon, Users, X } from "lucide-react";
 import ScrollLock from "@/components/ScrollLock";
 
@@ -80,14 +86,20 @@ function healthScaleClass(pct: number): string {
   return "bg-emerald-500";
 }
 
-/** "2026-08-01" -> "August 2026". Local formatting only; no date math. */
-function monthLabel(monthStart: string): string {
+/**
+ * "2026-08-01" -> "August 2026" / "أغسطس 2026". Local formatting only; no date
+ * math. The YEAR is an app-formatted figure and stays Latin in both languages,
+ * as every other number on this page does.
+ */
+const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
+
+function monthLabel(monthStart: string, lang: Lang): string {
   const [y, m] = monthStart.split("-");
-  const name = [
-    "January","February","March","April","May","June",
-    "July","August","September","October","November","December",
-  ][Number(m) - 1];
-  return name ? `${name} ${y}` : monthStart;
+  // Indexing a const tuple types `key` as the union of its twelve members, so
+  // `fleet.months.${key}` is twelve real TKeys rather than `string`.
+  const key = MONTH_KEYS[Number(m) - 1];
+  if (!key) return monthStart;
+  return `${t(`fleet.months.${key}`, lang)} ${y}`;
 }
 
 /**
@@ -108,23 +120,29 @@ function monthLabel(monthStart: string): string {
  * N/A while seven others read 0.0%), so the difference is visible rather than
  * theoretical.
  */
-function UtilizationCell({ row }: { row: TruckUtilizationRow | undefined }) {
+function UtilizationCell({ row, lang }: { row: TruckUtilizationRow | undefined; lang: Lang }) {
   if (!row) return <span className="muted">—</span>;
 
   const band = utilizationBand(row.utilization_pct);
   const tone = UTILIZATION_BAND[band];
   const isNa = row.utilization_pct == null;
   const title = isNa
-    ? utilizationNaReason(row)
-    : `${row.worked_days} of ${row.available_days} available days worked` +
-      (row.maintenance_days > 0 ? ` · ${row.maintenance_days} in maintenance` : "") +
-      (row.out_of_service_days > 0 ? ` · ${row.out_of_service_days} out of service` : "");
+    ? t(UTILIZATION_NA_KEY[utilizationNaReason(row)], lang)
+    : t("fleet.util.workedTitle", lang)
+        .replace("{worked}", () => String(row.worked_days))
+        .replace("{available}", () => String(row.available_days)) +
+      (row.maintenance_days > 0
+        ? ` · ${t("fleet.util.inMaintenance", lang).replace("{n}", () => String(row.maintenance_days))}`
+        : "") +
+      (row.out_of_service_days > 0
+        ? ` · ${t("fleet.util.outOfService", lang).replace("{n}", () => String(row.out_of_service_days))}`
+        : "");
 
   return (
     <div className="min-w-[7.5rem]" title={title}>
       <div className="flex items-baseline justify-between gap-2">
         <span className={cn("text-xs font-medium tabular-nums", isNa ? "muted" : tone.text)}>
-          {formatUtilization(row.utilization_pct)}
+          {formatUtilization(row.utilization_pct, lang)}
         </span>
         {!isNa && (
           <span className="text-[10px] muted tabular-nums">
@@ -135,7 +153,7 @@ function UtilizationCell({ row }: { row: TruckUtilizationRow | undefined }) {
       {/* No bar at all for N/A — an empty track at zero width reads as 0%,
           which is the one thing this cell must never say. */}
       {isNa ? (
-        <div className="mt-1 text-[10px] muted">no available days</div>
+        <div className="mt-1 text-[10px] muted">{t("fleet.util.noAvailableDays", lang)}</div>
       ) : (
         <div className="mt-1 h-1.5 w-full rounded-full bg-black/5 dark:bg-white/10 overflow-hidden">
           <div
@@ -148,7 +166,7 @@ function UtilizationCell({ row }: { row: TruckUtilizationRow | undefined }) {
   );
 }
 
-function HealthBar({ pct }: { pct?: number }) {
+function HealthBar({ pct, lang }: { pct?: number; lang: Lang }) {
   const hasReading = typeof pct === "number";
   const width = hasReading ? Math.max(0, Math.min(100, pct)) : 0;
   return (
@@ -156,8 +174,12 @@ function HealthBar({ pct }: { pct?: number }) {
       <div
         className="h-1.5 rounded-full bg-black/5 dark:bg-white/10 overflow-hidden"
         role="img"
-        aria-label={hasReading ? `Health ${width}%` : "Health monitoring not active yet"}
-        title={hasReading ? undefined : "Awaiting IoT sensors"}
+        aria-label={
+          hasReading
+            ? t("fleet.health.aria", lang).replace("{pct}", () => String(width))
+            : t("fleet.health.notActiveAria", lang)
+        }
+        title={hasReading ? undefined : t("fleet.health.awaitingSensors", lang)}
       >
         <div
           className={cn("h-full transition-[width] duration-300", hasReading ? healthScaleClass(width) : "bg-transparent")}
@@ -205,6 +227,7 @@ export default function FleetClient({
   errorMsg: string | null;
 }) {
   const router = useRouter();
+  const { lang } = useApp();
 
   /**
    * WHOLE-ROW NAVIGATION to the truck's detail page — the same destination the
@@ -355,27 +378,27 @@ export default function FleetClient({
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Fleet"
-        subtitle={`${kpis.total} trucks · Riyadh · 3 stations`}
+        title={t("nav.fleet", lang)}
+        subtitle={t("fleet.subtitle", lang).replace("{n}", () => String(kpis.total))}
         actions={
           <Btn variant="primary" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" /> Add Truck
+            <Plus className="h-4 w-4" /> {t("fleet.addTruck", lang)}
           </Btn>
         }
       />
 
       {errorMsg && (
-        <p className="text-sm text-rose-600 dark:text-rose-400">Failed to load fleet: {errorMsg}</p>
+        <p className="text-sm text-rose-600 dark:text-rose-400">{t("fleet.loadFailed", lang)} {errorMsg}</p>
       )}
 
       {/* KPI strip (6) — all REAL */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-        <Stat label="Total Trucks" value={kpis.total} tone="info" />
-        <Stat label="Active" value={kpis.active} tone="ok" />
-        <Stat label="In Maintenance" value={kpis.maint} tone={kpis.maint > 6 ? "warn" : "info"} />
-        <Stat label="Idle" value={kpis.idle} tone="info" />
+        <Stat label={t("fleet.kpi.totalTrucks", lang)} value={kpis.total} tone="info" />
+        <Stat label={t("fleet.kpi.active", lang)} value={kpis.active} tone="ok" />
+        <Stat label={t("fleet.kpi.inMaintenance", lang)} value={kpis.maint} tone={kpis.maint > 6 ? "warn" : "info"} />
+        <Stat label={t("fleet.kpi.idle", lang)} value={kpis.idle} tone="info" />
         <Stat
-          label="Total Capacity"
+          label={t("fleet.kpi.totalCapacity", lang)}
           value={kpis.capHasData ? `${formatNum(kpis.totalCap)} m³` : "—"}
           tone="info"
         />
@@ -388,7 +411,7 @@ export default function FleetClient({
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search plate, model…"
+            placeholder={t("fleet.filters.searchPlaceholder", lang)}
             className="h-9 px-3 rounded-lg border text-sm flex-1 min-w-[200px]"
             style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
           />
@@ -403,7 +426,7 @@ export default function FleetClient({
                 )}
                 style={status !== s ? { borderColor: "rgb(var(--border))" } : undefined}
               >
-                {s === "all" ? "All" : TRUCK_OPS_STATE_LABELS[s]}
+                {s === "all" ? t("common.all", lang) : t(`fleet.truckState.${s}`, lang)}
               </button>
             ))}
           </div>
@@ -413,14 +436,18 @@ export default function FleetClient({
             className="h-9 px-3 rounded-lg border text-sm"
             style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
           >
-            <option value="all">All Stations</option>
+            <option value="all">{t("fleet.filters.allStations", lang)}</option>
             {stationFilterOptions.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name}{!s.active ? " (deactivated)" : ""}
+                {/* No arText — operation_stations has no name_ar column, and
+                    OperationStationField renders the same bare name. */}
+                {s.name}{!s.active ? ` ${t("shared.stations.deactivatedParen", lang)}` : ""}
               </option>
             ))}
           </select>
-          <span className="muted text-xs ms-auto">{list.length} results</span>
+          <span className="muted text-xs ms-auto">
+            {t("fleet.filters.results", lang).replace("{n}", () => String(list.length))}
+          </span>
         </div>
       </Card>
 
@@ -429,23 +456,23 @@ export default function FleetClient({
         <Table>
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
             <tr>
-              <TH>Plate</TH>
-              <TH>Model</TH>
+              <TH>{t("common.plate", lang)}</TH>
+              <TH>{t("fleet.cols.model", lang)}</TH>
               {/* Vehicle ID = trucks.vehicle_registration (0091). Sits beside
                   Model because both answer "which vehicle is this". */}
-              <TH>Vehicle ID</TH>
-              <TH>Station</TH>
-              <TH>Status</TH>
-              <TH>Driver</TH>
-              <TH>Assigned Project</TH>
+              <TH>{t("fleet.cols.vehicleId", lang)}</TH>
+              <TH>{t("fleet.cols.station", lang)}</TH>
+              <TH>{t("common.status", lang)}</TH>
+              <TH>{t("common.driver", lang)}</TH>
+              <TH>{t("fleet.cols.assignedProject", lang)}</TH>
               {/* Utilization sits with the operational story (status -> driver
                   -> project -> how much the truck is actually used) and before
                   Health, which is still an inert placeholder. */}
-              <TH>Utilization</TH>
-              <TH>Health</TH>
-              <TH>Capacity</TH>
-              <TH>Odometer</TH>
-              <TH>Last Service</TH>
+              <TH>{t("kpi.utilization", lang)}</TH>
+              <TH>{t("common.health", lang)}</TH>
+              <TH>{t("common.capacity", lang)}</TH>
+              <TH>{t("common.odometer", lang)}</TH>
+              <TH>{t("fleet.cols.lastService", lang)}</TH>
               <TH></TH>
             </tr>
           </thead>
@@ -457,7 +484,9 @@ export default function FleetClient({
                   className="py-6 px-3 border-t text-center muted text-sm"
                   style={{ borderColor: "rgb(var(--border))" }}
                 >
-                  No trucks{trucks.length > 0 ? " match the filters" : " yet"}.
+                  {/* Two whole sentences, not a stem plus a swapped tail:
+                      Arabic does not take the English split. */}
+                  {t(trucks.length > 0 ? "fleet.noTrucksFiltered" : "fleet.noTrucksYet", lang)}
                 </td>
               </tr>
             )}
@@ -467,7 +496,7 @@ export default function FleetClient({
                 onClick={(e) => openDetail(e, tr.id)}
                 onKeyDown={(e) => openDetailKey(e, tr.id)}
                 tabIndex={0}
-                aria-label={`${tr.plate} — open truck detail`}
+                aria-label={t("fleet.openDetailAria", lang).replace("{plate}", () => tr.plate)}
                 className="cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/60"
               >
                 <TD>
@@ -485,13 +514,15 @@ export default function FleetClient({
                 <TD className="font-mono text-xs">{tr.vehicle_registration || "—"}</TD>
                 <TD>{tr.home_station ? stationNameById.get(tr.home_station) ?? "—" : "—"}</TD>
                 <TD>
-                  <StatusPill status={truckStatusById[tr.id] ?? "idle"} label={TRUCK_OPS_STATE_LABELS[truckStatusById[tr.id] ?? "idle"]} />
+                  {/* The PILL'S COLOUR keys off `status`, the enum — the label
+                      beside it is now translated, and nothing styles off it. */}
+                  <StatusPill status={truckStatusById[tr.id] ?? "idle"} label={t(`fleet.truckState.${truckStatusById[tr.id] ?? "idle"}`, lang)} />
                 </TD>
                 <TD>
                   {tr.driverName ? (
                     <button
                       type="button"
-                      title="Change driver"
+                      title={t("fleet.assign.changeDriverTitle", lang)}
                       onClick={() => openAssign(tr)}
                       className="inline-flex items-center gap-1.5 -mx-2 rounded-md px-2 py-1 text-left hover:bg-black/5 dark:hover:bg-white/5"
                     >
@@ -500,7 +531,7 @@ export default function FleetClient({
                     </button>
                   ) : (
                     <Btn variant="outline" onClick={() => openAssign(tr)}>
-                      <Plus className="h-3.5 w-3.5" /> Assign Driver
+                      <Plus className="h-3.5 w-3.5" /> {t("fleet.assign.assignDriver", lang)}
                     </Btn>
                   )}
                 </TD>
@@ -528,10 +559,10 @@ export default function FleetClient({
                   })()}
                 </TD>
                 <TD>
-                  <UtilizationCell row={utilizationByTruck[tr.id]} />
+                  <UtilizationCell row={utilizationByTruck[tr.id]} lang={lang} />
                 </TD>
                 <TD>
-                  <HealthBar />
+                  <HealthBar lang={lang} />
                 </TD>
                 <TD className="tabular-nums font-medium">
                   {tr.capacity_m3 != null ? `${tr.capacity_m3} m³` : "—"}
@@ -543,7 +574,7 @@ export default function FleetClient({
                 <TD>
                   <div className="flex items-center gap-1.5">
                     <button
-                      title="Edit truck"
+                      title={t("fleet.form.editTruckTitle", lang)}
                       onClick={() => setEditTruck(tr)}
                       className="h-9 w-9 grid place-items-center rounded-lg border hover:bg-black/5 dark:hover:bg-white/5"
                       style={{ borderColor: "rgb(var(--border))" }}
@@ -555,7 +586,7 @@ export default function FleetClient({
                       className="h-9 px-3 rounded-lg text-sm font-medium inline-flex items-center gap-2 border hover:bg-black/5 dark:hover:bg-white/5"
                       style={{ borderColor: "rgb(var(--border))" }}
                     >
-                      <Eye className="h-3.5 w-3.5" /> View
+                      <Eye className="h-3.5 w-3.5" /> {t("common.view", lang)}
                     </Link>
                   </div>
                 </TD>
@@ -571,12 +602,15 @@ export default function FleetClient({
           is idle", so the reader needs the month on screen to judge it. */}
       <p className="flex items-start gap-2 text-[11px] muted leading-relaxed">
         <TruckIcon className="h-3.5 w-3.5 shrink-0 mt-px" aria-hidden />
+        {/* Split at the two <b> runs and NOWHERE else. No dictionary value
+            carries an edge space — every single space here is supplied by the
+            JSX, so the English renders byte-for-byte as it did before. The N/A
+            run reads `common.na`, the SAME key formatUtilization() prints, so
+            this sentence cannot end up naming a token the cell does not show. */}
         <span>
-          <b>Utilization is {monthLabel(utilizationMonth)}, month to date.</b>{" "}
-          Days the truck ran at least one delivered trip, over the days it was
-          available — calendar days minus any time terminated, in maintenance or
-          out of service. A truck with no available days shows <b>N/A</b> rather
-          than 0%, because there is nothing to measure against.
+          <b>{t("fleet.utilNoteBold", lang).replace("{month}", () => monthLabel(utilizationMonth, lang))}</b>{" "}
+          {t("fleet.utilNoteBody1", lang)} <b>{t("common.na", lang)}</b>{" "}
+          {t("fleet.utilNoteBody2", lang)}
         </span>
       </p>
 
@@ -587,9 +621,8 @@ export default function FleetClient({
       <p className="flex items-start gap-2 text-[11px] muted leading-relaxed">
         <Activity className="h-3.5 w-3.5 shrink-0 mt-px" aria-hidden />
         <span>
-          <b>Health monitoring is not active yet.</b> The health bar is a placeholder —
-          it activates once IoT sensors are fitted to the fleet and integrated, at which
-          point each truck reports its own condition.
+          <b>{t("fleet.health.noteBold", lang)}</b>{" "}
+          {t("fleet.health.noteBody", lang)}
         </span>
       </p>
 
@@ -628,7 +661,9 @@ export default function FleetClient({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between mb-1">
-              <h2 className="text-lg font-semibold">Assign Driver — {assignTruck.plate}</h2>
+              <h2 className="text-lg font-semibold">
+                {t("fleet.assign.title", lang).replace("{plate}", () => assignTruck.plate)}
+              </h2>
               <button
                 onClick={() => setAssignTruck(null)}
                 className="h-8 w-8 grid place-items-center rounded-md hover:bg-black/5 dark:hover:bg-white/5"
@@ -636,16 +671,18 @@ export default function FleetClient({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <p className="text-sm muted mb-4">Select a driver to assign · {assignTruck.plate}</p>
+            <p className="text-sm muted mb-4">
+              {t("fleet.assign.subtitle", lang).replace("{plate}", () => assignTruck.plate)}
+            </p>
 
             <Table>
               <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                 <tr>
-                  <TH>Driver</TH>
-                  <TH>Status</TH>
-                  <TH>Availability</TH>
-                  <TH>Safety</TH>
-                  <TH>Trips 30d</TH>
+                  <TH>{t("common.driver", lang)}</TH>
+                  <TH>{t("common.status", lang)}</TH>
+                  <TH>{t("fleet.cols.availability", lang)}</TH>
+                  <TH>{t("fleet.cols.safety", lang)}</TH>
+                  <TH>{t("fleet.cols.trips30d", lang)}</TH>
                   <TH></TH>
                 </tr>
               </thead>
@@ -657,7 +694,7 @@ export default function FleetClient({
                       className="py-6 px-3 border-t text-center muted text-sm"
                       style={{ borderColor: "rgb(var(--border))" }}
                     >
-                      No drivers yet.
+                      {t("fleet.noDriversYet", lang)}
                     </td>
                   </tr>
                 )}
@@ -694,22 +731,33 @@ export default function FleetClient({
                     >
                       <TD className="font-medium">{d.name}</TD>
                       <TD>
-                        <StatusPill status={state} label={DRIVER_STATE_LABELS[state]} />
+                        <StatusPill status={state} label={t(`fleet.driverState.${state}`, lang)} />
                       </TD>
                       {/* Label comes from the same verdict as the lock, but is
                           NOT exempted for the current driver — a driver already
                           on this truck who is on leave today reads "On leave
                           today" while their row stays clickable, because both
-                          statements are true. */}
-                      <TD className={cn("text-xs", availability.label === "Available" ? "text-emerald-600 dark:text-emerald-400 font-medium" : "muted")}>
-                        {availability.label}
+                          statements are true.
+
+                          THE GREEN KEYS OFF `labelKind`, THE ENUM — never off
+                          the rendered sentence. It used to read
+                          `availability.label === "Available"`, which silently
+                          stops matching the moment the cell speaks Arabic, and
+                          every driver would have gone grey. `labelKind` is
+                          also the right datum rather than `blockedReason ===
+                          null`: the exemption clears the reason for a CURRENT
+                          driver who is on leave, whose cell still says "On
+                          leave today" and must stay muted. */}
+                      <TD className={cn("text-xs", availability.labelKind === "available" ? "text-emerald-600 dark:text-emerald-400 font-medium" : "muted")}>
+                        {t(AVAILABILITY_KEY[availability.labelKind], lang)
+                          .replace("{plate}", () => availability.labelPlate ?? "")}
                       </TD>
                       <TD className="tabular-nums text-xs">{d.safety_score ?? "—"}</TD>
                       <TD className="tabular-nums text-xs">{trips30d[d.id] ?? 0}</TD>
                       <TD>
                         {isCurrent ? (
                           <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Current
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> {t("fleet.assign.current", lang)}
                           </span>
                         ) : null}
                       </TD>
@@ -726,11 +774,11 @@ export default function FleetClient({
             <div className="flex justify-end gap-2 mt-4">
               {assignTruck.assigned_driver_id && (
                 <Btn variant="outline" onClick={doUnassign}>
-                  {assignSaving ? "…" : "Unassign"}
+                  {assignSaving ? "…" : t("fleet.assign.unassign", lang)}
                 </Btn>
               )}
               <Btn variant="outline" onClick={() => setAssignTruck(null)}>
-                Close
+                {t("fleet.assign.close", lang)}
               </Btn>
             </div>
           </div>

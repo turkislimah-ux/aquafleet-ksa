@@ -90,6 +90,10 @@ export const dict = {
     new: { en: "New", ar: "جديد" },
     save: { en: "Save", ar: "حفظ" },
     cancel: { en: "Cancel", ar: "إلغاء" },
+    // In `common`, not `fleet`: formatUtilization() is the single writer of this
+    // token and BOTH the Dashboard and Fleet render it, so a fleet-scoped key
+    // would misdescribe itself the first time the Dashboard called it.
+    na: { en: "N/A", ar: "غير متاح" },
     optimize: { en: "Optimize", ar: "تحسين" },
     nextService: { en: "Next Service", ar: "الصيانة القادمة" },
     capacity: { en: "Capacity", ar: "السعة" },
@@ -1340,6 +1344,306 @@ export const dict = {
         ar: "سيملأ هذا نفس المنشئ أعلاه انطلاقاً من وصفك. لم يُبنَ بعد — لا يُرسل ما تكتبه إلى أي مكان.",
       },
       nlPlaceholder: { en: "Not available yet", ar: "غير متاح بعد" },
+    },
+  },
+
+  // =========================================================================
+  // FLEET — Phase 3 Batch 4. The list page, the truck detail page, and the
+  // shared Add/Edit Truck modal.
+  //
+  // This route had ZERO Arabic before this batch: every `ar` below is new
+  // wording, EXCEPT the values explicitly noted as LIFTED, which are copied
+  // byte-for-byte from an existing dictionary entry or from
+  // MaintenanceCalendar's MONTHS_AR so the two surfaces cannot drift apart.
+  //
+  // WHAT IS NOT HERE, AND WHY:
+  //   · Unit tokens — `33 m³`, `12,000 km`, `SAR`, `VIN` — are app-formatted
+  //     figures and stay Latin in both languages. Only ONE unit reaches a
+  //     LABEL on this route ("Odometer (km)"), and it keeps `km` Latin so
+  //     every unit on the page reads the same way.
+  //   · `N/A` is NOT a unit and does NOT stay Latin — it is plain language, so
+  //     it translates to `غير متاح` via `common.na`. It lives in `common`
+  //     because formatUtilization() writes it for the Dashboard too, and
+  //     utilNoteBody1/2 below leave it out of both halves so the sentence and
+  //     the cell read the same token in either language.
+  //   · app/fleet/actions.ts server errors stay English, as in every prior
+  //     batch.
+  // =========================================================================
+  fleet: {
+    // ---- list page chrome -------------------------------------------------
+    // The two NUMBERS are facts about the business (CLAUDE.md section 1), not
+    // a count of rows — they are carried through untouched, Latin, and only
+    // the words around them are translated.
+    subtitle: { en: "{n} trucks · Riyadh · 3 stations", ar: "{n} شاحنة · الرياض · 3 محطات" },
+    addTruck: { en: "Add Truck", ar: "إضافة شاحنة" },
+    loadFailed: { en: "Failed to load fleet:", ar: "تعذّر تحميل الأسطول:" },
+    openDetailAria: { en: "{plate} — open truck detail", ar: "{plate} — فتح تفاصيل الشاحنة" },
+
+    kpi: {
+      totalTrucks: { en: "Total Trucks", ar: "إجمالي الشاحنات" },
+      // Trucks are feminine in Arabic, so these do NOT reuse `status.active` /
+      // `status.idle` (نشط / متوقف, masculine). The values are LIFTED from
+      // dashboard.fleetState, which already says it the right way.
+      active: { en: "Active", ar: "نشطة" },
+      inMaintenance: { en: "In Maintenance", ar: "في الصيانة" },
+      idle: { en: "Idle", ar: "متوقفة" },
+      totalCapacity: { en: "Total Capacity", ar: "إجمالي السعة" },
+    },
+
+    // TRUCK_OPS_STATE_LABELS (lib/truck-status.ts) rendered for THIS route.
+    // That map is plain English and is read by the drivers and trips routes
+    // too, so it is not touched — the fleet files key off the same enum and
+    // read these instead. Values LIFTED from dashboard.fleetState.
+    truckState: {
+      maintenance: { en: "Maintenance", ar: "صيانة" },
+      active: { en: "Active", ar: "نشطة" },
+      idle: { en: "Idle", ar: "متوقفة" },
+    },
+    // DRIVER_STATE_LABELS (lib/driver-state.ts), same arrangement. Values
+    // LIFTED from dashboard.driverState — note its English is "Off duty" /
+    // "On leave", which is NOT byte-identical to status.off_duty / status.leave
+    // ("Off Duty" / "On Leave"), so those cannot be reused here.
+    driverState: {
+      active: { en: "Active", ar: "نشط" },
+      idle: { en: "Idle", ar: "خامل" },
+      off_duty: { en: "Off duty", ar: "خارج الدوام" },
+      on_leave: { en: "On leave", ar: "في إجازة" },
+    },
+
+    filters: {
+      searchPlaceholder: { en: "Search plate, model…", ar: "ابحث برقم اللوحة أو الطراز…" },
+      allStations: { en: "All Stations", ar: "كل المحطات" },
+      results: { en: "{n} results", ar: "{n} نتيجة" },
+    },
+
+    // Column headers with no exact match in `common` / `status`.
+    cols: {
+      model: { en: "Model", ar: "الطراز" },
+      vehicleId: { en: "Vehicle ID", ar: "معرّف المركبة" },
+      station: { en: "Station", ar: "المحطة" },
+      assignedProject: { en: "Assigned Project", ar: "المشروع المُسند" },
+      lastService: { en: "Last Service", ar: "آخر صيانة" },
+      date: { en: "Date", ar: "التاريخ" },
+      id: { en: "ID", ar: "المعرّف" },
+      assignedTo: { en: "Assigned to", ar: "مُسند إلى" },
+      // LIFTED from dashboard.costType.parts / search.g_part.
+      parts: { en: "Parts", ar: "قطع الغيار" },
+      availability: { en: "Availability", ar: "التوفر" },
+      safety: { en: "Safety", ar: "الأمان" },
+      trips30d: { en: "Trips 30d", ar: "الرحلات 30 يوم" },
+    },
+
+    // Two whole sentences rather than a stem plus a swapped tail: Arabic does
+    // not take the English "No trucks" + " match the filters" split.
+    noTrucksFiltered: { en: "No trucks match the filters.", ar: "لا توجد شاحنات مطابقة للتصفية." },
+    noTrucksYet: { en: "No trucks yet.", ar: "لا توجد شاحنات بعد." },
+    noDriversYet: { en: "No drivers yet.", ar: "لا يوجد سائقون بعد." },
+
+    // ---- utilization ------------------------------------------------------
+    util: {
+      workedTitle: {
+        en: "{worked} of {available} available days worked",
+        ar: "{worked} من {available} يوم متاح تم العمل فيها",
+      },
+      inMaintenance: { en: "{n} in maintenance", ar: "{n} في الصيانة" },
+      outOfService: { en: "{n} out of service", ar: "{n} خارج الخدمة" },
+      noAvailableDays: { en: "no available days", ar: "لا توجد أيام متاحة" },
+      stat30d: { en: "Utilization · 30d", ar: "معدل الاستخدام · 30 يوماً" },
+      rolling: {
+        en: "{worked} of {available} available days · {from} to {to}",
+        ar: "{worked} من {available} يوم متاح · {from} إلى {to}",
+      },
+      // The four utilizationNaReason() sentences, moved out of
+      // lib/utilization.ts. That helper now returns the KIND, and the two
+      // fleet files translate it — nothing else in the app ever called it.
+      naBoth: {
+        en: "No available days — out of service and in maintenance all period.",
+        ar: "لا توجد أيام متاحة — خارج الخدمة وفي الصيانة طوال الفترة.",
+      },
+      naOutOfService: {
+        en: "No available days — out of service for the whole period.",
+        ar: "لا توجد أيام متاحة — خارج الخدمة طوال الفترة.",
+      },
+      naMaintenance: {
+        en: "No available days — in maintenance for the whole period.",
+        ar: "لا توجد أيام متاحة — في الصيانة طوال الفترة.",
+      },
+      naNone: { en: "No available days in this period.", ar: "لا توجد أيام متاحة في هذه الفترة." },
+    },
+
+    // The note under the table. Split at the two <b> runs, and NOWHERE else —
+    // each value is a whole clause, and the single spaces between them are
+    // supplied by the JSX, so no dictionary value carries an invisible edge
+    // space. `N/A` is not in either half: it is `common.na`, the same key the
+    // shared formatter prints, so the sentence always names the token actually
+    // in the cell — `N/A` in English, `غير متاح` in Arabic.
+    utilNoteBold: {
+      en: "Utilization is {month}, month to date.",
+      ar: "معدل الاستخدام لشهر {month}، حتى تاريخه.",
+    },
+    utilNoteBody1: {
+      en: "Days the truck ran at least one delivered trip, over the days it was available — calendar days minus any time terminated, in maintenance or out of service. A truck with no available days shows",
+      ar: "الأيام التي نفّذت فيها الشاحنة رحلة مسلّمة واحدة على الأقل، منسوبةً إلى الأيام التي كانت متاحة فيها — أيام التقويم ناقص أي وقت كانت فيه مشطوبة أو في الصيانة أو خارج الخدمة. الشاحنة التي لا أيام متاحة لها تُظهر",
+    },
+    utilNoteBody2: {
+      en: "rather than 0%, because there is nothing to measure against.",
+      ar: "بدلاً من 0%، لأنه لا يوجد ما تُقاس عليه.",
+    },
+
+    // ---- health placeholder ----------------------------------------------
+    health: {
+      aria: { en: "Health {pct}%", ar: "الحالة الفنية {pct}%" },
+      notActiveAria: { en: "Health monitoring not active yet", ar: "مراقبة الحالة الفنية غير مفعّلة بعد" },
+      awaitingSensors: { en: "Awaiting IoT sensors", ar: "بانتظار حسّاسات إنترنت الأشياء" },
+      noteBold: { en: "Health monitoring is not active yet.", ar: "مراقبة الحالة الفنية غير مفعّلة بعد." },
+      noteBody: {
+        en: "The health bar is a placeholder — it activates once IoT sensors are fitted to the fleet and integrated, at which point each truck reports its own condition.",
+        ar: "شريط الحالة الفنية عنصر مؤقت — يعمل بمجرد تركيب حسّاسات إنترنت الأشياء على الأسطول وربطها، وعندها تُبلّغ كل شاحنة عن حالتها بنفسها.",
+      },
+    },
+
+    // ---- months, for the "Utilization is <Month> <Year>" label ------------
+    // LIFTED VERBATIM from MaintenanceCalendar's MONTHS_AR. Copied, not
+    // imported: that file is a different route's and is not touched here, and
+    // a shared constant would make this dictionary depend on a component.
+    months: {
+      "1": { en: "January", ar: "يناير" },
+      "2": { en: "February", ar: "فبراير" },
+      "3": { en: "March", ar: "مارس" },
+      "4": { en: "April", ar: "أبريل" },
+      "5": { en: "May", ar: "مايو" },
+      "6": { en: "June", ar: "يونيو" },
+      "7": { en: "July", ar: "يوليو" },
+      "8": { en: "August", ar: "أغسطس" },
+      "9": { en: "September", ar: "سبتمبر" },
+      "10": { en: "October", ar: "أكتوبر" },
+      "11": { en: "November", ar: "نوفمبر" },
+      "12": { en: "December", ar: "ديسمبر" },
+    },
+
+    // ---- assign-driver modal ---------------------------------------------
+    assign: {
+      title: { en: "Assign Driver — {plate}", ar: "إسناد سائق — {plate}" },
+      subtitle: { en: "Select a driver to assign · {plate}", ar: "اختر سائقاً للإسناد · {plate}" },
+      assignDriver: { en: "Assign Driver", ar: "إسناد سائق" },
+      changeDriver: { en: "Change Driver", ar: "تغيير السائق" },
+      changeDriverTitle: { en: "Change driver", ar: "تغيير السائق" },
+      unassign: { en: "Unassign", ar: "إلغاء الإسناد" },
+      current: { en: "Current", ar: "الحالي" },
+      close: { en: "Close", ar: "إغلاق" },
+    },
+
+    // The Availability cell. These are keyed off driverAvailability()'s
+    // `labelKind` enum, never off the rendered text — see the FleetClient cell
+    // and lib/driver-assignment.ts. `available` is deliberately its OWN key:
+    // dashboard.utilization.available is also "Available" in English but means
+    // "available DAYS" (أيام متاحة), which is not what a free driver is.
+    availability: {
+      terminated: { en: "Terminated", ar: "مشطوب" },
+      assignedElsewhere: { en: "Already assigned · {plate}", ar: "مُسند بالفعل · {plate}" },
+      onLeave: { en: "On leave today", ar: "في إجازة اليوم" },
+      available: { en: "Available", ar: "متاح" },
+    },
+
+    // ---- truck form modal -------------------------------------------------
+    form: {
+      addTitle: { en: "Add New Truck", ar: "إضافة شاحنة جديدة" },
+      editTitle: { en: "Edit Truck", ar: "تعديل الشاحنة" },
+      addSubtitle: {
+        en: "Register a new water truck. Plate is required.",
+        ar: "سجّل شاحنة مياه جديدة. رقم اللوحة مطلوب.",
+      },
+      editSubtitle: { en: "Update truck details · {plate}", ar: "تحديث بيانات الشاحنة · {plate}" },
+      year: { en: "Year", ar: "سنة الصنع" },
+      // `km` stays Latin — see this namespace's header.
+      odometerKm: { en: "Odometer (km)", ar: "العداد (km)" },
+      vin: { en: "VIN", ar: "VIN" },
+      vehicleRegistration: { en: "Vehicle Registration", ar: "رخصة السير" },
+      registrationExpiry: { en: "Registration expiry", ar: "انتهاء رخصة السير" },
+      assignedDriver: { en: "Assigned driver", ar: "السائق المُسند" },
+      // LIFTED from dashboard.liveTrips.unassigned.
+      unassigned: { en: "Unassigned", ar: "غير مُسند" },
+      // The model is a manufacturer's name, so the example stays Latin.
+      modelPlaceholder: { en: "e.g. Mercedes-Benz Actros 3340", ar: "مثال: Mercedes-Benz Actros 3340" },
+      editTruckTitle: { en: "Edit truck", ar: "تعديل الشاحنة" },
+    },
+
+    // ---- detail page ------------------------------------------------------
+    detail: {
+      back: { en: "Back", ar: "رجوع" },
+      backToFleet: { en: "Back to Fleet", ar: "العودة إلى الأسطول" },
+      notFound: { en: "Truck not found.", ar: "لم يتم العثور على الشاحنة." },
+      loadFailed: { en: "Failed to load: {msg}", ar: "تعذّر التحميل: {msg}" },
+      generalInfo: { en: "General Info", ar: "المعلومات العامة" },
+      engineHealth: { en: "Engine Component Health", ar: "الحالة الفنية لمكونات المحرك" },
+      engineHealthSub: {
+        en: "Vibration + sound sensors detect failures before they happen",
+        ar: "حسّاسات الاهتزاز والصوت تكتشف الأعطال قبل وقوعها",
+      },
+      noTelemetry: { en: "No telemetry yet", ar: "لا توجد قياسات بعد" },
+      noTelemetrySub: {
+        en: "Component readings appear once IoT sensors are connected.",
+        ar: "تظهر قراءات المكونات بمجرد ربط حسّاسات إنترنت الأشياء.",
+      },
+      // LIFTED from nav.predictive — the same subsystem, named the same way.
+      // Its own key rather than reading nav's, so a nav rename cannot silently
+      // retitle a card on this page.
+      predictiveAi: { en: "Predictive AI", ar: "الذكاء التنبؤي" },
+      noAlerts: { en: "No active alerts", ar: "لا توجد تنبيهات نشطة" },
+      noDriverAssigned: { en: "No driver assigned", ar: "لا يوجد سائق مُسند" },
+      safetyScore: { en: "Safety Score:", ar: "درجة الأمان:" },
+      trips30d: { en: "Trips 30d:", ar: "الرحلات 30 يوم:" },
+      // Two clauses around the plate, so the plate can sit where Arabic wants
+      // it. The JSX supplies the single spaces.
+      waitingLead: { en: "Waiting for", ar: "بانتظار تحرير" },
+      waitingTail: { en: "to be released from maintenance", ar: "من الصيانة" },
+    },
+
+    // ---- maintenance history card ----------------------------------------
+    mt: {
+      historyTitle: { en: "Maintenance History", ar: "سجل الصيانة" },
+      allJobs: { en: "{n} all jobs", ar: "{n} من كل الأعمال" },
+      noHistory: { en: "No maintenance history", ar: "لا يوجد سجل صيانة" },
+      // status.corrective is "Repair" in English, not "Corrective", so it
+      // cannot be reused for this map. The other three types DO match exactly
+      // and read status.preventive / .inspection / .predictive.
+      corrective: { en: "Corrective", ar: "إصلاحية" },
+      // LIFTED from mt.delayed / mt.osOverdue — the maintenance route's own
+      // words for the same two states, copied so the two pages agree.
+      delayed: { en: "Delayed", ar: "متأخرة" },
+      overdue: { en: "Overdue", ar: "متأخر" },
+      costInternal: { en: "internal", ar: "داخلي" },
+      costExternal: { en: "external, incl. VAT", ar: "خارجي، شامل الضريبة" },
+    },
+
+    // ---- danger zone ------------------------------------------------------
+    // NEW BUSINESS WORDING — standard Arabic, flagged for Turki's review. The
+    // type-to-confirm gate compares against truck.plate (data), so none of
+    // this is load-bearing.
+    term: {
+      dangerZone: { en: "Danger zone", ar: "منطقة الخطر" },
+      terminateTruck: { en: "Terminate truck", ar: "شطب الشاحنة" },
+      removes: {
+        en: "Removes {plate} from all active views. Trip history is preserved.",
+        ar: "يزيل {plate} من جميع الشاشات النشطة. يُحفظ سجل الرحلات.",
+      },
+      deactivateSold: { en: "Deactivate — Sold", ar: "إيقاف — مباعة" },
+      totalLoss: { en: "Total loss", ar: "خسارة كلية" },
+      confirmLead: { en: "This will mark", ar: "سيؤدي هذا إلى تعليم" },
+      confirmMid: { en: "as", ar: "على أنها" },
+      reasonSold: { en: "sold", ar: "مباعة" },
+      reasonTotalLoss: { en: "total loss", ar: "خسارة كلية" },
+      confirmTail: {
+        en: "and remove it from the active fleet. Its trip history is preserved. Restorable later from Archive.",
+        ar: "وإزالتها من الأسطول النشط. يُحفظ سجل رحلاتها، ويمكن استعادتها لاحقاً من الأرشيف.",
+      },
+      // `SAR` stays Latin — see this namespace's header.
+      priceSar: { en: "Price (SAR) *", ar: "السعر (SAR) *" },
+      releasedDate: { en: "Released date *", ar: "تاريخ الإخراج *" },
+      typeToConfirm: { en: 'Type "{plate}" to confirm', ar: 'اكتب "{plate}" للتأكيد' },
+      terminating: { en: "Terminating…", ar: "جارٍ الشطب…" },
+      confirmSale: { en: "Confirm sale", ar: "تأكيد البيع" },
+      confirmTotalLoss: { en: "Confirm total loss", ar: "تأكيد الخسارة الكلية" },
     },
   },
 } as const;

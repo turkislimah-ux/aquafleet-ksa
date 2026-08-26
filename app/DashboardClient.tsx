@@ -1122,7 +1122,7 @@ function FleetUtilizationCard({
         <div className="space-y-3">
           <div className="flex items-baseline gap-2">
             <span className={cn("text-3xl font-semibold tabular-nums", tone.text)}>
-              {formatUtilization(row.utilization_pct)}
+              {formatUtilization(row.utilization_pct, lang)}
             </span>
             <span className={cn("text-xs font-medium", tone.text)}>
               {/* UTILIZATION_BAND is lib/utilization.ts — out of this batch's

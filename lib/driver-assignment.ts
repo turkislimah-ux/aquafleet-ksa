@@ -72,8 +72,35 @@
 //   state and trip stage are separate facts on purpose.
 
 import { isOnLeaveToday, type LeavePeriod } from "./leave";
+import type { TKey } from "./i18n";
 
 export type AssignBlockReason = "terminated" | "assigned_elsewhere" | "on_leave";
+
+/**
+ * What the Availability cell SAYS — the four cases, as data.
+ *
+ * This is `AssignBlockReason` plus the unblocked case, and it is deliberately a
+ * separate type: the exemption means a CURRENT driver can read "On leave today"
+ * while `blockedReason` is null, so the label and the verdict are two different
+ * facts and must not share one field. The cell renders a dictionary entry keyed
+ * on this, and styles off it too — never off the rendered sentence, which
+ * changes language.
+ */
+export type AvailabilityLabelKind = AssignBlockReason | "available";
+
+/**
+ * Kind → dictionary key for the Availability cell. TKey-typed, so a renamed
+ * dictionary leaf fails to compile rather than printing its own path.
+ *
+ * `assignedElsewhere` carries a `{plate}` hole; the other three have none, so
+ * one unconditional `.replace("{plate}", …)` at the call site covers all four.
+ */
+export const AVAILABILITY_KEY: Record<AvailabilityLabelKind, TKey> = {
+  terminated: "fleet.availability.terminated",
+  assigned_elsewhere: "fleet.availability.assignedElsewhere",
+  on_leave: "fleet.availability.onLeave",
+  available: "fleet.availability.available",
+};
 
 export type DriverAvailabilityFacts = {
   driverName: string;
@@ -88,8 +115,10 @@ export type DriverAvailabilityFacts = {
 };
 
 export type DriverAvailability = {
-  /** Short text for the modal's Availability cell. Ignores the exemption. */
-  label: string;
+  /** Which of the four cells to render. Ignores the exemption. */
+  labelKind: AvailabilityLabelKind;
+  /** The plate `assigned_elsewhere` names. Null for every other kind. */
+  labelPlate: string | null;
   /** Non-null means the write must be refused. Null for the current driver. */
   blockedReason: AssignBlockReason | null;
   /** Friendly sentence to show the user. Null when not blocked. */
@@ -107,8 +136,16 @@ export type DriverAvailability = {
 export function driverAvailability(facts: DriverAvailabilityFacts): DriverAvailability {
   const { driverName, isCurrentDriver, terminated, assignedToOtherTruckPlate, onLeaveToday } = facts;
 
-  const verdict = (reason: AssignBlockReason, label: string, error: string): DriverAvailability => ({
-    label,
+  // `labelKind` is the reason ITSELF, not the post-exemption verdict — see the
+  // type's note. The error sentences stay English: they are server-action
+  // returns, not page copy.
+  const verdict = (
+    reason: AssignBlockReason,
+    error: string,
+    labelPlate: string | null = null,
+  ): DriverAvailability => ({
+    labelKind: reason,
+    labelPlate,
     // The exemption is applied HERE, once, so no caller can forget it.
     blockedReason: isCurrentDriver ? null : reason,
     error: isCurrentDriver ? null : error,
@@ -117,25 +154,23 @@ export function driverAvailability(facts: DriverAvailabilityFacts): DriverAvaila
   if (terminated) {
     return verdict(
       "terminated",
-      "Terminated",
       `${driverName} has been terminated and can no longer be assigned to a truck.`,
     );
   }
   if (assignedToOtherTruckPlate) {
     return verdict(
       "assigned_elsewhere",
-      `Already assigned · ${assignedToOtherTruckPlate}`,
       `${driverName} is already assigned to ${assignedToOtherTruckPlate}. Unassign them from that truck first.`,
+      assignedToOtherTruckPlate,
     );
   }
   if (onLeaveToday) {
     return verdict(
       "on_leave",
-      "On leave today",
       `${driverName} is on leave today and cannot be assigned to a truck.`,
     );
   }
-  return { label: "Available", blockedReason: null, error: null };
+  return { labelKind: "available", labelPlate: null, blockedReason: null, error: null };
 }
 
 /**
