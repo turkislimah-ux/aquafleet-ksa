@@ -1,4 +1,4 @@
-# SESSION HANDOFF — closes at PHASE 2 OF THE ARABIC EFFORT COMPLETE: THE FOUNDATION, FOUR COMMITS, NO SCHEMA (`9e60b8f` digit safety at the app-toggle sites → `6fc9917` digit safety part 2, the ~69 device-locale calls, Latin-pinned → `8b7ab8d` `arText()`, one rule for Arabic name display, replacing four drifted patterns → `79a12db` type-safe `t()`, a `TKey` union derived from the dictionary, so a mistyped key is now a COMPILE error). **ALL FOUR ARE ON origin/main — verified 0 ahead / 0 behind at `79a12db`,** read from the BRANCH line of `git status -sb`, never the tree line and never from this sentence, which has now been wrong six times. **THE STANDING RULE, CONFIRMED BY TURKI THIS SESSION: NUMBERS STAY LATIN IN BOTH LANGUAGES.** He reversed toward Arabic-Indic mid-session and then reverted; the FINAL answer is Latin, and both digit commits are pinned to it — do not re-open it as a question. Date format is MONTH-FIRST for now, parked for a later revisit, not settled. Phase 2 delivered exactly the three things the previous header's OPEN FOLLOW-UPS item 1 listed — typed `t()`, one `_ar` display helper, digit safety — so that item is now CLOSED and rewritten below. **PHASE 3 IS THE UNTRANSLATED SCREENS AND IT HAS NOT STARTED**: 853 inline lang-ternaries, 712 of them in files that call `t()` zero times, plus eight areas with NO language wiring at all. DB untouched by all four commits — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close, every one IDENTICAL, DB still 0167. **The `middleware 83 kB` guard was re-checked and HOLDS** — `79a12db` edited `lib/nav.ts`, which is the exact change that guard exists to catch; it stayed 83 kB because the new i18n reference is an `import type` and erases. Tree clean apart from gsd's `preview/.planning/HANDOFF.json`. NEXT: Phase 3, per-route, gated on Turki. Previous header, retained because the sections below still describe it: closes at PHASE 1 OF THE ARABIC EFFORT: CAIRO SELF-HOSTED FOR ARABIC ONLY (`1e5ab78`), ONE COMMIT, NO SCHEMA. Font only — no translation, no dir/lang change, no digits. Cairo is scoped by `unicode-range` rather than by a `[lang="ar"]` selector, which is what makes "English is byte-identical" a property of the CSS rather than a thing to re-test per screen. Verified by measuring each string rendered with the shipped stack against that same stack with Cairo removed: Arabic moves, Latin does not, to three decimal places. **THE SCOPE OF THE WHOLE ARABIC EFFORT WAS DECIDED THIS SESSION — OPTION 1, SCREEN TEXT ONLY.** Server-action messages and DB `raise` messages are explicitly OUT for the MVP, and the language cookie is DEFERRED; see THE ARABIC EFFORT section for what that closes and what it leaves open. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close, every one IDENTICAL, DB still 0167. Tree clean apart from gsd's `preview/.planning/HANDOFF.json`, and **PUSHED through `1e5ab78`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has now been wrong five times. NEXT: the foundation phase — see the open follow-ups in THE ARABIC EFFORT. Previous header, retained because the sections below still describe it: closes at A CLAUDE.md COMPRESSION PASS (`30ea4b8`; §5's 20KB trigger, fired by the 805 bytes the divide rule had just added — the pass RE-VERIFIED EVERY CLAIM IN THE FILE AND FOUND ZERO STALE FACTS, the first pass of three to come back clean, see THE CLAUDE.md COMPRESSION PASS section), after THE `divide-y` DARK-MODE FIX (`42cb69a`), after WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `30ea4b8`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has now been wrong three times. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
+# SESSION HANDOFF — closes at PHASE 3 OF THE ARABIC EFFORT IN PROGRESS: BATCHES 1 THROUGH 5 SHIPPED, SIX COMMITS, NO SCHEMA (`f4cd71f` customers/projects/login → `a727a8b` Batch 2a, the shared chrome and the shared field components → `8b21143` Batch 2b, the five Settings panels → `6e3cad2` Batch 3, the Dashboard → `f1f66c9` Fleet, corrected in `0dffbc0` after Turki's wording review → `a4bf764` Batch 5, the Consumption route). **ALL SIX ARE ON origin/main — verified 0 ahead / 0 behind at `a4bf764`,** read from the BRANCH line of `git status -sb` and cross-checked with `git rev-list --left-right --count origin/main...HEAD` = 0 0, never from this sentence, which has now been wrong six times. **THIS FILE WAS SEVEN COMMITS STALE WHEN THIS REFRESH OPENED** — it still asserted "PHASE 3 … HAS NOT STARTED" while all five batches were already on main. That is the longest it has ever been allowed to drift, and the cause is worth naming: a handoff is written at a session CLOSE, and five batches ran as five sessions that each closed on a commit instead. **THE MEASURED PICTURE MOVED A LONG WAY: the dictionary went 227 leaves → 1194 (386 lines → 3078), and the inline lang-ternaries went 853 → 542.** Neither figure is copied forward from the batch messages — both were re-derived at this refresh, with the glob, per §5. **THE TERMINOLOGY RULING SET IN BATCH 5 IS DURABLE AND APPLIES APP-WIDE: the exit-permit noun is «إذن», plural «أذونات» — NOT «تصريح»/«تصاريح».** Turki reversed the earlier ruling; the sweep covered the whole consumption namespace plus six strays outside it, and `grep` now returns تصريح in exactly three places in `lib/i18n.ts`, all of them inside the ruling comment that records the reversal. **AND ONE RTL TRAP IS NOW WRITTEN DOWN BECAUSE IT COST A BUG: `dir` DOES NOT REACH A `viewBox`.** HTML flex rows and logical properties reverse for free in Arabic; SVG geometry does not, so the trend polyline drew oldest-at-x=0 and ran backwards against its own bars. DB untouched by all six commits — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and **ten came back IDENTICAL, with `v_active_alerts` 9 → 8 — a THIRD distinct value for the figure this file already documents as oscillating.** DB still 0167. **The `middleware 83 kB` guard was re-checked and HOLDS** — `a4bf764` edits `lib/nav.ts` again (the sixth stray Arabic string lives there), and it stayed 83 kB because that file's i18n reference is still `import type`. Tree clean apart from gsd's `preview/.planning/HANDOFF.json`. NEXT: Batch 6 is Inventory, which is now 395 of the 542 remaining ternaries in three files, then Reports, then the three routes with no language wiring at all (Trips, Drivers, Archive). Previous header, retained because the sections below still describe it: closes at PHASE 2 OF THE ARABIC EFFORT COMPLETE: THE FOUNDATION, FOUR COMMITS, NO SCHEMA (`9e60b8f` digit safety at the app-toggle sites → `6fc9917` digit safety part 2, the ~69 device-locale calls, Latin-pinned → `8b7ab8d` `arText()`, one rule for Arabic name display, replacing four drifted patterns → `79a12db` type-safe `t()`, a `TKey` union derived from the dictionary, so a mistyped key is now a COMPILE error). **ALL FOUR ARE ON origin/main — verified 0 ahead / 0 behind at `79a12db`,** read from the BRANCH line of `git status -sb`, never the tree line and never from this sentence, which has now been wrong six times. **THE STANDING RULE, CONFIRMED BY TURKI THIS SESSION: NUMBERS STAY LATIN IN BOTH LANGUAGES.** He reversed toward Arabic-Indic mid-session and then reverted; the FINAL answer is Latin, and both digit commits are pinned to it — do not re-open it as a question. Date format is MONTH-FIRST for now, parked for a later revisit, not settled. Phase 2 delivered exactly the three things the previous header's OPEN FOLLOW-UPS item 1 listed — typed `t()`, one `_ar` display helper, digit safety — so that item is now CLOSED and rewritten below. **PHASE 3 IS THE UNTRANSLATED SCREENS AND IT HAS NOT STARTED**: 853 inline lang-ternaries, 712 of them in files that call `t()` zero times, plus eight areas with NO language wiring at all. DB untouched by all four commits — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close, every one IDENTICAL, DB still 0167. **The `middleware 83 kB` guard was re-checked and HOLDS** — `79a12db` edited `lib/nav.ts`, which is the exact change that guard exists to catch; it stayed 83 kB because the new i18n reference is an `import type` and erases. Tree clean apart from gsd's `preview/.planning/HANDOFF.json`. NEXT: Phase 3, per-route, gated on Turki. Previous header, retained because the sections below still describe it: closes at PHASE 1 OF THE ARABIC EFFORT: CAIRO SELF-HOSTED FOR ARABIC ONLY (`1e5ab78`), ONE COMMIT, NO SCHEMA. Font only — no translation, no dir/lang change, no digits. Cairo is scoped by `unicode-range` rather than by a `[lang="ar"]` selector, which is what makes "English is byte-identical" a property of the CSS rather than a thing to re-test per screen. Verified by measuring each string rendered with the shipped stack against that same stack with Cairo removed: Arabic moves, Latin does not, to three decimal places. **THE SCOPE OF THE WHOLE ARABIC EFFORT WAS DECIDED THIS SESSION — OPTION 1, SCREEN TEXT ONLY.** Server-action messages and DB `raise` messages are explicitly OUT for the MVP, and the language cookie is DEFERRED; see THE ARABIC EFFORT section for what that closes and what it leaves open. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close, every one IDENTICAL, DB still 0167. Tree clean apart from gsd's `preview/.planning/HANDOFF.json`, and **PUSHED through `1e5ab78`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has now been wrong five times. NEXT: the foundation phase — see the open follow-ups in THE ARABIC EFFORT. Previous header, retained because the sections below still describe it: closes at A CLAUDE.md COMPRESSION PASS (`30ea4b8`; §5's 20KB trigger, fired by the 805 bytes the divide rule had just added — the pass RE-VERIFIED EVERY CLAIM IN THE FILE AND FOUND ZERO STALE FACTS, the first pass of three to come back clean, see THE CLAUDE.md COMPRESSION PASS section), after THE `divide-y` DARK-MODE FIX (`42cb69a`), after WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `30ea4b8`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has now been wrong three times. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
 
 # PREVIOUS HEADER — the UI polish pass, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
 
@@ -23,7 +23,7 @@ stale and actively wrong for two commits.
 
 ---
 
-## CURRENT STATE — MEASURED at `79a12db`, not recalled
+## CURRENT STATE — MEASURED at `a4bf764`, not recalled
 
 Every figure below was re-read from git and the live database while writing this
 line. Per `CLAUDE.md` §5: re-measure before quoting, including numbers already in
@@ -171,6 +171,27 @@ rows, 12 buckets, 116 applied migrations at `20260824231520`. Expected: Phase 2
 wrote no SQL. `v_active_alerts` reads 9 for the sixth refresh running — still not
 evidence it has settled.
 
+**A NINTH REFRESH RAN AT THE PHASE 3 BATCH 5 BOUNDARY, AND IT IS THE LARGEST GAP
+THIS FILE HAS EVER HAD TO CLOSE — SEVEN COMMITS, ELEVEN SOURCE FILES IN THE LAST
+ONE ALONE.** The build licence was void several times over. `./scripts/safe-build.sh
+--dist-dir .next-verify` re-run: clean, **17 routes, middleware still 83 kB — and
+the guard was again pointed at the change it exists for**, because `a4bf764` edits
+`lib/nav.ts`. `tsc --noEmit` exit 0 read directly. **All eleven database counts
+re-queried in ONE statement: TEN IDENTICAL, ONE MOVED** — 50 / 50 / 0, 84 tables
+all RLS-enabled, 0 anon table grants, 0 anon-executable non-trigger functions, 938
+`authenticated` privilege rows, 12 buckets, 116 applied migrations at
+`20260824231520`; **`v_active_alerts` 9 → 8.** Expected on the ten: Phase 3 writes
+no SQL at all.
+
+**AND THE ONE THAT MOVED IS THE ONE THIS FILE ALREADY PREDICTED WOULD.** The
+oscillation paragraphs above recorded 9 → 10 → 9 with nothing in any diff touching
+alerts. **8 is a THIRD distinct value, and it is the strongest confirmation the
+figure is data-dependent rather than drifting toward a settled number** — four
+refreshes reading 9 in a row did NOT mean it had stabilised, exactly as those
+paragraphs warned. A reader who sees 8 here and 10 in the browser has still found
+nothing wrong. Do not chase it, do not pin this line to it, and do not treat a
+run of identical readings as evidence a viewer-dependent figure has converged.
+
 **AND THIS REFRESH FOUND THE SAME CLASS OF FAULT AS THE SEVENTH, IN THIS FILE'S
 OWN i18n BLOCK: THREE NUMBERS THAT WERE ARTEFACTS OF THEIR GREP.**
 
@@ -207,15 +228,20 @@ pipeline's status is its LAST command. Re-run as `cd <repo> && ./node_modules/.b
 pointed at the tooling instead of at a figure: the check that confirms the other
 checks can itself be the thing that is broken.
 
-    HEAD              79a12db (type-safe t()), PLUS the handoff-only commit
-                      carrying this line, one further ahead, whose hash could not
-                      be known while writing it. That gap is STRUCTURAL, not
-                      sloppiness — a self-describing file can never name its own
-                      commit — so the last hash here is always off by exactly the
-                      commit you are reading. Below it, the rest of Phase 2:
-                      8b7ab8d (arText), 6fc9917 (digit safety pt 2), 9e60b8f (digit
-                      safety pt 1); then fe13298 (handoff), 1e5ab78 (Cairo, Phase 1).
-    branch main   IN SYNC with origin at 79a12db — READ BACK from the BRANCH
+    HEAD              a4bf764 (Phase 3 Batch 5, the Consumption route), PLUS the
+                      handoff-only commit carrying this line, one further ahead,
+                      whose hash could not be known while writing it. That gap is
+                      STRUCTURAL, not sloppiness — a self-describing file can never
+                      name its own commit — so the last hash here is always off by
+                      exactly the commit you are reading. Below it, the rest of
+                      Phase 3: 0dffbc0 (Fleet wording correction), f1f66c9 (Fleet),
+                      6e3cad2 (Batch 3, Dashboard), 8b21143 (Batch 2b, Settings),
+                      a727a8b (Batch 2a, shared chrome), f4cd71f (Batch 1);
+                      then 8da4c1d (handoff), and below that Phase 2:
+                      79a12db (type-safe t()), 8b7ab8d (arText), 6fc9917 (digit
+                      safety pt 2), 9e60b8f (digit safety pt 1); then fe13298
+                      (handoff), 1e5ab78 (Cairo, Phase 1).
+    branch main   IN SYNC with origin at a4bf764 — READ BACK from the BRANCH
                       line of `git status -sb`, which reads `## main...origin/main`
                       with no ahead/behind, cross-checked with
                       `git rev-list --left-right --count origin/main...HEAD` = 0 0.
@@ -223,10 +249,11 @@ checks can itself be the thing that is broken.
                       five of them in one. It said "AHEAD 3, NOT PUSHED" after a push
                       made that false; corrected to cb76319, and three more commits
                       made THAT false; corrected to 42cb69a, then ef9ba4b, then
-                      30ea4b8, then 1e5ab78 — each correction written true and each
+                      30ea4b8, then 1e5ab78, then 79a12db, then a4bf764 — each
+                      correction written true and each
                       falsified by the next commit. A push-state line does not go
                       wrong by being careless — it goes wrong by being correct and
-                      then waiting. Six corrections is not bad luck, it is the cost
+                      then waiting. Eight corrections is not bad luck, it is the cost
                       of writing a mutable fact into an immutable file: this block is
                       a CACHE, stale by construction the moment anything commits.
                       Re-measure it, never re-read it, and do not trust the commit
@@ -235,7 +262,8 @@ checks can itself be the thing that is broken.
     live DB           0167  (20260824231520 cost_views_ex_vat_and_archive_date_aware
                       — a TIMESTAMP version, not "0167"; see the 0167 section below)
     CLAUDE.md         19,605 bytes (§5 threshold 20KB = 20,480 — 875 of headroom)
-                      RE-MEASURED at 79a12db, UNCHANGED — Phase 2 wrote no rules.
+                      RE-MEASURED at a4bf764, UNCHANGED — neither Phase 2 nor any
+                      of Phase 3's six commits wrote a rule into it.
                       It moved twice in the UI-pass session: 19,156 → 19,961 when §6 gained the
                       `divide-*` colour rule (+805, leaving only 519), then →
                       19,605 on the compression pass that 519 triggered. See THE
@@ -249,37 +277,57 @@ checks can itself be the thing that is broken.
     anon table grants 0     anon-executable non-trigger functions 0
     authenticated     938 privilege rows
     storage buckets   12
-    v_active_alerts   9 rows                            (was 10, was 9, was 9, was 9)
+    v_active_alerts   8 rows                    (was 9, 9, 9, 9, was 10, was 9 —
+                      THREE distinct values now; see the oscillation paragraphs)
     tsc --noEmit      clean, exit 0 READ DIRECTLY;  8/8 check suites EXECUTED, 8/8 pass
     next build        clean, 17 routes + middleware;  middleware 83 kB
-                      (RE-RUN at 79a12db — source was touched, licence void.
+                      (RE-RUN at a4bf764 — eleven source files in that commit
+                      alone, licence void several times over.
                       **THE 83 kB IS THE GUARD AND IT WAS DIRECTLY IMPLICATED
-                      THIS TIME**: 79a12db edited lib/nav.ts, which middleware
-                      pulls in. It stayed 83 kB because the new i18n reference is
-                      `import type`, which erases at compile time. Verified twice
-                      over — the standalone-compiled nav.js imports only
-                      lucide-react and @/lib/routes, and a grep of the built
+                      AGAIN**: a4bf764 edits lib/nav.ts, which middleware pulls
+                      in — the sixth stray Arabic string lived there. It stayed
+                      83 kB because that file's i18n reference is `import type`,
+                      which erases at compile time. Previously verified twice
+                      over at 79a12db — the standalone-compiled nav.js imports
+                      only lucide-react and @/lib/routes, and a grep of the built
                       middleware bundle for dictionary strings returns 0.)
-    i18n dictionary   lib/i18n.ts, 386 lines (was 309 — arText + the TKey
-                      machinery, no new copy), 227 leaf keys (`en:`/`ar:` pairs),
-                      UNCHANGED. Phase 2 added no translations.
-    i18n adoption     281 `t(…)` call sites in 15 files (was "258 in 14" — the
-                      old figure counted only `t("…")` and missed app/iot).
-                      258 are literal `t("…")`, 138 DISTINCT paths;
-                      23 are TEMPLATE-LITERAL — `t(\`nav.${…}\`)` ×6,
-                      `t(\`status.${…}\`)` ×16, `t(\`search.g_${…}\`)` ×1.
-                      **KEY REACHABILITY — the "89 unreferenced" figure was a
-                      GREP ARTEFACT and is now retired.** 227 leaves − 138 literal
-                      = 89 reproduces it exactly, but 49 of those 89 are reached
-                      through the three template families above (all 12 `nav.*`,
-                      all 18 `search.g_*`, the `status.*` set). Reachable = 187.
-                      **TRULY UNREFERENCED = 40**, and that is the number to use:
-                      appName, tagline, the 12 `kpi.*`, 16 `common.*`, 8 `mt.*`,
-                      2 `search.*`. Pruning the 89 would have blanked the sidebar
-                      and every search heading.
+    i18n dictionary   lib/i18n.ts, **3,078 lines (was 386), 1,194 leaf keys
+                      (was 227)** — Phase 3's five batches are almost the whole
+                      of that growth. Leaves counted by WALKING THE AST, not by
+                      grepping `en:`: a `grep -c '^\s*en: '` returns 204, because
+                      most leaves are written inline as `k: { en: "…", ar: "…" }`
+                      on one line. The grep is off by a factor of six and looks
+                      plausible, which is why the count comes from the parser.
+    i18n adoption     1,026 literal `t("…")` sites + 70 template-literal sites,
+                      **41 files**, 722 DISTINCT literal paths (was "281 in 15").
+                      Pattern matters and is part of the figure: a bare `t("`
+                      grep counts 1,383, because `split("`, `NumberFormat("` and
+                      every other identifier ENDING in `t` match it. The count
+                      above is anchored `(^|[^A-Za-z0-9_$.])t\("`.
+                      **KEY REACHABILITY — RE-DERIVED, AND THE FIRST DERIVATION
+                      THIS SESSION WAS WRONG TOO.** Scanning only `t("literal")`
+                      reported 206 unreferenced, 119 of them under `consumption.`
+                      — a namespace that had just been fully translated, which is
+                      what exposed it. Two idioms defeat a `t(`-anchored grep:
+                      paths passed as BARE LITERALS that reach `t()` indirectly
+                      (`t(cond ? "a.b" : "a.c")`, a path in a const, a path handed
+                      to a prop typed `TKey`), and the plural buckets, which are
+                      reached through `fill(\`…\`)` rather than `t(\`…\`)`.
+                      Counting any path-shaped literal ANYWHERE in source, plus
+                      every leaf under the static prefix of a `t`/`fill` template:
+                      **TRULY UNREFERENCED = 31** (was 40) — appName, tagline,
+                      11 `kpi.*`, 8 `common.*`, 8 `mt.*`, 2 `search.*`. Same
+                      families as before, minus the ones Phase 3 consumed. The
+                      "89" is still retired and the reason has only got stronger.
                       The old "smoke check for dot-path leaks" line is GONE because
                       the class of bug is gone: since 79a12db a bad path is a tsc
                       error, not a string that renders. It is a compile check now.
+    lang-ternaries    **542 remaining (was 853).** 98 in files that also call
+                      `t()`, 444 in files that do not. Same four-idiom pattern as
+                      before — `lang === "en" ? …` ×470, `lang === "ar" ? …` ×18,
+                      `lang !== "ar"` ×1, and `ar ? …` ×53. **395 of the 542 are
+                      three Inventory files**, which makes Inventory the whole of
+                      the next batch and most of what is left overall.
     server-side msgs  335 `error:`/`message:`/`msg:` literals, 185 DISTINCT,
                       across 19 `.ts` files under lib/actions/ + app/.
                       OUT of MVP scope, see below. (Was recorded as
@@ -314,13 +362,27 @@ was actually run. `v_active_alerts` came back 9 for the fourth refresh running �
 still not evidence it has settled, see the oscillation paragraph above; it is
 viewer-dependent and must not be pinned as an invariant.
 
+**THAT PARAGRAPH IS KEPT AS WRITTEN AND IT HAS NOW BEEN OVERTAKEN, WHICH IS THE
+POINT OF KEEPING IT.** At the Phase 3 Batch 5 refresh, TEN of the eleven came back
+identical and `v_active_alerts` read **8**. The sentence above — "still not
+evidence it has settled" — was written while the figure had read 9 four times in
+a row, and it was right to refuse the conclusion. The table at the top of this
+block carries 8; **the honest reading of both is that the count is data-dependent
+and neither number is the fact.** Phase 3's six commits wrote no SQL either, so
+the ten that held are the expected result and not a skipped check.
+
 **THE MIDDLEWARE FIGURE WAS THE ONE THAT COULD HAVE MOVED, AND IT IS WHY THAT
-GUARD EXISTS — TWICE NOW, IN TWO CONSECUTIVE SESSIONS.** The guard names
+GUARD EXISTS — THREE TIMES NOW, IN THREE CONSECUTIVE SESSIONS.** The guard names
 `lib/nav.ts`, because it re-exports `lib/routes.ts` and routing an Edge import
 through it drags `lucide-react` into the middleware bundle. The UI-pass session
 edited it to add a `NavGroup` type and a `group` field; **`79a12db` edited it
 again**, retyping `NavItem.key` and `NavDestination.parentKey` from `string` to
-`SubKeys<"nav.">` and adding an i18n import. **83 kB both times, unchanged.**
+`SubKeys<"nav.">` and adding an i18n import; **`a4bf764` edited it a third time**,
+rewriting the sidebar's exit-permit label from «تصاريح الخروج» to «أذونات الخروج».
+**83 kB all three times, unchanged.** The third edit is the least interesting
+technically and the most interesting operationally — see Phase 3 Batch 5 below,
+because `lib/nav.ts` is the ONE file outside `lib/i18n.ts` that carries its own
+`{ en, ar }` pair, and a terminology sweep scoped to the dictionary misses it.
 
 The second edit is the more interesting one, because it added an import to
 `lib/i18n.ts` — the dictionary — from a file the Edge bundle reaches. **It costs
@@ -446,7 +508,7 @@ null` as well, and anything showing 8 has dropped the pre-filter.
 
 ---
 
-## THE ARABIC EFFORT — PHASES 1 AND 2 SHIPPED, PHASE 3 NOT STARTED
+## THE ARABIC EFFORT — PHASES 1 AND 2 SHIPPED, PHASE 3 IN PROGRESS (5 OF ~8 BATCHES)
 
 **READ THIS BEFORE TOUCHING ANY ARABIC / i18n / RTL WORK.** The scope was settled
 in the Phase 1 session and the boundary is deliberate — the two large exclusions
@@ -454,7 +516,19 @@ below are not backlog, they are decisions.
 
     PHASE 1  1e5ab78                                  SHIPPED — Cairo, font only
     PHASE 2  9e60b8f · 6fc9917 · 8b7ab8d · 79a12db    SHIPPED — the foundation
-    PHASE 3  —                                        NOT STARTED — the screens
+    PHASE 3  f4cd71f  Batch 1                         SHIPPED — customers, projects, login
+             a727a8b  Batch 2a                        SHIPPED — shared chrome + field components
+             8b21143  Batch 2b                        SHIPPED — the five Settings panels
+             6e3cad2  Batch 3                         SHIPPED — the Dashboard
+             f1f66c9 · 0dffbc0  Batch 4               SHIPPED — Fleet, + a wording correction
+             a4bf764  Batch 5                         SHIPPED — the Consumption route
+             —        Batch 6 and after               OPEN — Inventory, Reports, Trips,
+                                                      Drivers, Archive
+
+**THE BATCH NUMBERING HAS A GAP IN IT AND THAT IS NOT AN ERROR:** Fleet shipped
+without a batch number in its commit subject (`i18n: translate the Fleet route to
+Arabic`), so it is "Batch 4" only by position in the sequence. Do not go looking
+for a commit whose message says Batch 4.
 
 **THE STANDING DIGIT RULE, AND IT IS SETTLED: NUMBERS ARE LATIN IN BOTH
 LANGUAGES.** Turki confirmed Latin, reversed toward Arabic-Indic mid-session, then
@@ -638,50 +712,153 @@ TKey invents no keys and misses none.
   typed callers. `dict` is data: a future edit could leave a namespace with no
   `en`/`ar` pair under it, and printing the path beats throwing inside a render.
 
+### PHASE 3 — IN PROGRESS: THE SCREENS, ONE ROUTE PER BATCH. SIX COMMITS, NO SCHEMA.
+
+Five batches shipped, each its own session, each browser-verified by Turki before
+it committed. The unit is a ROUTE, not a file and not a component — a half-Arabic
+screen is worse than an English one, so a batch lands whole.
+
+**THE DICTIONARY GREW 227 → 1,194 LEAVES AND THE SHAPE CHANGED WITH IT.** Phase 2
+sized `dict` for Maintenance; Phase 3 is where it became the app's copy. Namespaces
+now mirror routes (`consumption.*` alone is ~1,300 lines of `lib/i18n.ts`). The
+`TKey` union still derives from the object, so a mistyped path is a compile error
+rather than a rendered string — that guarantee scales with the file and is the
+single most valuable thing Phase 2 left behind.
+
+**ARABIC PLURALS ARE A FOUR-BUCKET SELECTION AND `plural()` IS THE ONLY EXPRESSION
+OF IT.** `plural(n)` returns `"one" | "two" | "few" | "many"`, a key is written as
+four sibling leaves, and the call site is ``t(`ns.thing.${plural(n)}`)`` or
+``fill(`…`, lang, "{n}", String(n))``. Two properties are load-bearing:
+
+- **ZERO IS FOLDED INTO `few`, DELIBERATELY.** CLDR gives Arabic a fifth category
+  for 0; this dictionary does not, because the English side has nothing to say
+  differently and a fifth bucket would be four more leaves per family for one
+  sentence. The fold is literally `a === 0 ||` inside `plural()`. It is a
+  DEVIATION from CLDR, not an oversight — do not "fix" it, and do not assume a
+  zero-count fixture exercises a distinct string.
+- **THE ENGLISH INVARIANT: `EN[two] === EN[few] === EN[many]`, with `EN[one]`
+  free.** English has two plural forms and Arabic has four, so three of the four
+  Arabic buckets must carry byte-identical English or the language toggle changes
+  the English copy. That is checkable mechanically and it is what the duplicate-EN
+  prover exists for — duplicate English inside a plural family is CORRECT, and
+  duplicate English anywhere else is a smell.
+
+**TERMINOLOGY RULING, SET IN BATCH 5, APPLIES APP-WIDE: THE EXIT-PERMIT NOUN IS
+«إذن» / «أذونات», NOT «تصريح» / «تصاريح».** Turki reversed the earlier ruling,
+which had said the opposite and had a comment in `lib/i18n.ts` defending it. That
+comment is now replaced in place with one recording the reversal, and it is the
+only place either old word survives — `grep 'تصريح\|تصاريح' lib/i18n.ts` returns
+exactly 3 hits, all inside that comment, and 0 anywhere else in `app/`, `lib/` or
+`components/`. Three things about the swap are worth inheriting:
+
+1. **«تصريح» IS NOT A SUBSTRING OF «تصاريح»** (ت‑ص‑ر‑ي‑ح vs ت‑ص‑ا‑ر‑ي‑ح), so the
+   singular and plural rewrites cannot interfere with each other. That is what
+   made a scripted sweep defensible on a job Turki explicitly said was "NOT a
+   blind find-replace" — the two strings that WOULD have broken were pulled out
+   by hand first, and the script throws if either anchor is missing.
+2. **«إذن» IS MASCULINE EXACTLY AS «تصريح» WAS, AND «أذونات» IS A NON-HUMAN PLURAL
+   EXACTLY AS «تصاريح» WAS,** so no verb or adjective agreement anywhere had to
+   move. Had the replacement been feminine, every sentence containing it would
+   have needed re-reading, not re-writing.
+3. **THE COLLISION IS ACCEPTED, KNOWINGLY: «إذن خروج» (gate pass) is now one word
+   from «إذن صرف» (stores issue note).** Turki ruled it acceptable because nothing
+   on the route says «إذن صرف». **If a stores-issue feature is ever built, this is
+   where the ambiguity lands** — the comment in `lib/i18n.ts` says so and must not
+   be deleted as noise.
+
+**`lib/nav.ts` CARRIES ITS OWN `{ en, ar }` PAIR AND A DICTIONARY-SCOPED SWEEP
+MISSES IT.** The Batch 5 terminology sweep was run against `lib/i18n.ts` and
+reported itself complete; a repo-wide grep then found a SIXTH stray in
+`lib/nav.ts:169`, the sidebar's own exit-permit label. Left alone it would have
+put «تصاريح» in the sidebar and «أذونات» on the page that link opens. **Any future
+copy change greps the REPO, never just the dictionary** — and note the constraint
+that makes `lib/nav.ts` special in the other direction too: its i18n import must
+stay `import type` or the whole dictionary ships to the edge (the 83 kB guard).
+
+**`dir` DOES NOT REACH A `viewBox`, AND THIS COST A REAL BUG.** `AppShell` sets
+`document.documentElement.dir` and everything built from HTML flex rows and
+logical properties (`ps-`, `pe-`, `border-s`, `text-end`) mirrors for free in
+Arabic. **SVG geometry does not participate at all.** The trend polyline in
+`app/consumption/PartsUsageTab.tsx` went on drawing oldest-at-x=0 while its own
+bars reversed underneath it, so the line ran backwards against the data. The fix
+mirrors x explicitly, about the VIEWBOX width, not the length of the series array
+— reading the bound off the other array would have been right only by coincidence.
+It was the only chart affected on the route, and that is a measurement rather than
+a hope: one grep for `<svg|polyline|viewBox|<path` across `app/consumption/`
+returns exactly one geometry site, and no consumption file imports
+`@/components/Charts`. **Any future chart drawn in SVG coordinates needs the same
+mirror; any chart built from flex rows needs nothing.**
+
+**TURKI REVIEWS THE ARABIC AND IT COMES BACK — BUDGET FOR THAT.** Fleet shipped in
+`f1f66c9` and `0dffbc0` is the wording correction that followed his read. The
+review is not a formality and the corrections are not typos; they are word choices
+only a native speaker running the business can make. Batch 5's terminology
+reversal is the same event one size larger.
+
+**THE VERIFICATION HARNESS IS REAL AND IT IS NOT IN THE REPO.** Each batch was
+proved with throwaway ESM scripts in `/tmp` that import the repo's own `typescript`
+to parse `lib/i18n.ts`: an English byte-identity prover (dumps `path → en` per leaf
+from two file versions and asserts the EN side did not move — a comment cannot leak
+into an AST walk, which is what makes it trustworthy when the diff also rewrites
+comments), a leaf-count/appear/vanish differ, a rendered-output differ against the
+HEAD version of the module, a duplicate-EN detector, and per-route fixtures that
+render every plural bucket at n ∈ {0,1,2,3,10,11} in both languages.
+**They live in `/tmp` and will not survive the machine.** If Phase 3 continues past
+Batch 6, promoting the English byte-identity prover and the plural-bucket renderer
+into `scripts/` is worth more than the hour it costs — English regression is the
+one failure mode of this whole effort that a human reviewer cannot see.
+
+**ONE FIXTURE TRAP, RECORDED BECAUSE IT LOOKED LIKE COVERAGE AND WAS NOT.** Driving
+`weeklySummary` with zero rows to exercise the zero bucket returns early on the
+quiet-week branch and never reaches the sentence under test — so "n=0" printed
+nothing and read as a pass. A zero-count sentence needs a fixture that HAS other
+activity. Empty input tests the empty path, not the zero case.
+
 ### OPEN FOLLOW-UPS
 
-1. **PHASE 3 — THE SCREENS. NOT STARTED, and this is the whole remaining effort.**
+1. **PHASE 3 — THE SCREENS. FIVE BATCHES SHIPPED, INVENTORY IS NEXT.**
    Convert inline lang-ternaries to dictionary keys + `t()`, **per route, one route
-   per unit.** The measured picture, re-measured at `79a12db`:
+   per unit.** The measured picture, RE-MEASURED at `a4bf764` under the same
+   four-idiom pattern as before, so the two figures are comparable:
 
-       853 lang-ternary sites total   (idioms: `lang === "en" ? … : …` ×534,
-                                       `lang === "ar"` ×33, `lang !== "ar"` ×1,
-                                       and `const ar = lang === "ar"` + `ar ? …`)
-       712 of them in files that call t() ZERO times
-       141 in files that already call t()
+       542 lang-ternary sites total   (was 853; idioms: `lang === "en" ? … : …`
+                                       ×470, `lang === "ar" ? …` ×18,
+                                       `lang !== "ar"` ×1, and `ar ? …` ×53)
+       444 of them in files that call t() ZERO times   (was 712)
+        98 in files that already call t()               (was 141)
 
-   The 853 supersedes the ~894 this file used to carry; the older figure is not
-   reproducible under any single grep and the idiom list above is why — **the
-   dominant form is ENGLISH-FIRST (`lang === "en" ? english : arabic`), and a
-   pattern written for `"ar"` misses 534 of 853 sites.** Re-state your pattern
-   whenever you re-quote this number.
+   The 542 supersedes the 853, which superseded the ~894 this file carried before
+   that. **The dominant form is still ENGLISH-FIRST (`lang === "en" ? english :
+   arabic`), and a pattern written for `"ar"` finds 18 of 542.** Re-state your
+   pattern whenever you re-quote this number.
 
-   **THE WORK SPLITS IN TWO, and they are not the same job:**
+   **WHAT IS LEFT IS CONCENTRATED, WHICH MAKES THE SEQUENCING OBVIOUS:**
 
-   *(a) Language-AWARE, no dictionary — convert the ternaries:*
+       app/inventory/PurchaseOrders.tsx      208    ┐ 395 of the 542 — Batch 6
+       app/inventory/InventoryClient.tsx     113    │ is Inventory, and it is
+       app/inventory/SharedCreateModals.tsx   74    ┘ bigger than any batch so far
+       app/reports/DailyTripsTab.tsx          46
+       app/routes/page.tsx                    21      app/predictive/page.tsx   20
+       app/iot/page.tsx                       11      app/maintenance/*         29
+       everything else                        ~25     (AppShell 4, settings 4,
+                                                       DashboardClient 3, lib 7,
+                                                       GlobalSearch 1, +singletons)
 
-       app/inventory/PurchaseOrders.tsx      244        app/DashboardClient.tsx    110
-       app/inventory/InventoryClient.tsx     126        app/reports/DailyTripsTab   49
-       app/inventory/SharedCreateModals.tsx   79        settings/IssuesSection      35
-       settings/WarehousesSection             29        settings/NotificationsSect  22
-       settings/SettingsModal                  3        lib/ (dashboard, utils,
-                                                        notification-format, issues) 9
+   **`app/consumption/PartsUsageTab.tsx` KEEPS EXACTLY ONE `lang === "ar"` AND IT
+   IS CORRECT.** It is the SVG mirror described above — geometry, not copy. A
+   ternary count is a proxy for untranslated text and this one is a false positive;
+   do not "finish" it.
 
-   *(b) NO language wiring at all — eight areas, 52 `.tsx`, zero `lang`, zero
-   `t()`, zero `useApp`. These need `useApp` threaded BEFORE any copy can move:*
+   **THREE ROUTES STILL HAVE NO LANGUAGE WIRING AT ALL** and need `useApp` threaded
+   before any copy can move — `app/trips/` (17 `.tsx`), `app/drivers/` (10),
+   `app/archive/` (9). **`app/archive/` remains the cleanest example**: exactly one
+   match for `lang` in the whole module and it is the word "language" inside a
+   comment in `SubTabPicker.tsx:12`. The other five areas that were on this list —
+   consumption, fleet, projects, customers, login — are DONE.
 
-       app/trips/  17        app/drivers/ 10        app/archive/  9
-       app/consumption/ 5    app/fleet/    5        app/projects/ 3
-       app/customers/   2    app/login/    1
-
-   **`app/archive/` is the cleanest example of (b) and worth naming**: it has
-   exactly ONE match for `lang` in the whole module and it is the word "language"
-   inside a comment in `SubTabPicker.tsx:12`. Zero real wiring.
-
-   Already done (leave alone): `app/maintenance/` 243 `t()` calls,
-   `predictive` 6, `routes` 2, `iot` 1, plus `AppShell`, `GlobalSearch`,
-   `ProfileSection`. Maintenance is still the ONLY fully translated feature and
-   the dictionary's 227 keys are sized for it, not for the app.
+   Already translated (leave alone): everything in the phase table above, plus
+   `app/maintenance/` from before Phase 3. `t()` now reaches **41 files**; the
+   dictionary is no longer "sized for Maintenance", it is the app's copy.
 
 2. **B2 — `arText` ADOPTION AT THE REMAINING SITES. FOLD INTO EACH ROUTE'S PHASE 3
    PASS**, not a standalone sweep — Turki re-scoped it that way, because most of
@@ -689,16 +866,26 @@ TKey invents no keys and misses none.
    that is the same edit as translating the route. **ONE EXCEPTION that can go
    standalone: the Inventory PurchaseOrders supplier sites** — they need NO
    widening, `app/inventory/page.tsx:77` already selects `name_ar`.
-   Residual drifted patterns still to absorb: 19 `_ar ??`, 2 `_ar ||`, 1 ternary.
-   100 `_ar` field reads exist across the codebase, so most are already correct.
+   **Re-measured at `a4bf764`: `arText(` is now called at 59 sites**, up from the
+   handful Phase 2 converted — the fold-into-each-route plan is working. Residual
+   drifted patterns: 20 `_ar ??` (was 19) and 2 `_ar ||`. The `??` count going UP
+   while adoption rose is not a contradiction: Phase 3 added new reads at new
+   sites, so this is a rate, not a countdown. The old "100 `_ar` field reads"
+   figure is NOT comparable to anything measured here — a bare `_ar` grep also
+   matches `name_ar` inside `select()` strings, which are not display sites at
+   all. State the glob or drop the number.
 
-3. **THE 40 TRULY-UNREFERENCED DICTIONARY KEYS — decide during Phase 3, not before.**
-   **It is 40, NOT the 89 this file used to say.** See the i18n adoption block in
-   CURRENT STATE for the arithmetic: 49 of that 89 are reached through
-   template-literal calls and pruning them would blank the sidebar and every search
-   heading. Most of the 40 (`kpi.*`, `common.*`) look like they were written FOR
-   the Dashboard, which Phase 3 will translate — so they are probably early, not
-   dead. Do not prune them as a cleanup task.
+3. **THE 31 TRULY-UNREFERENCED DICTIONARY KEYS — decide when Phase 3 ends, not
+   before.** **It is 31 as of `a4bf764`, was 40, and was never the 89.** See the
+   i18n adoption block in CURRENT STATE for the full method; the short version is
+   that this figure has now been derived wrong THREE separate times, each time by
+   a grep that could not see one call idiom — template literals, then indirect
+   bare literals, then `fill()`. **The number shrank because Phase 3 consumed
+   keys, which is the prediction this item made and it held**: the `kpi.*` and
+   `common.*` families were written FOR screens that had not been translated yet.
+   What is left is appName, tagline, 11 `kpi.*`, 8 `common.*`, 8 `mt.*`,
+   2 `search.*`. Do not prune them as a cleanup task, and do not prune on the
+   output of any grep anchored on `t(`.
 
 4. **GLOBAL SEARCH — Arabic primary line needs a MIGRATION.** The fix is in
    `search_everything`, not in the component, so it cannot ship with the UI
@@ -722,6 +909,13 @@ migration cites `AppShell.tsx` lines 61 and 73; this file then corrected them to
 WRITE **`:231`**. The rule holds, the pointers do not, which is the usual fate of a
 line number written into a file that cannot be updated — including this one. Grep
 for `useState<Lang>` rather than trusting the number.
+**Re-checked at `a4bf764` and all three HELD** — `:170`, `:219`, `:231`, unmoved
+across six Phase 3 commits, one of which edits `AppShell.tsx`. Worth recording
+because it is the opposite of the usual result: the pointers survived, and the
+only reason that is known is that they were re-measured rather than assumed
+rotten. **A fourth line is worth adding while here: `AppShell.tsx:229` is where
+`document.documentElement.dir` is set,** which is the whole of the app's RTL
+mechanism and the thing the SVG lesson above is a limit on.
 
 ---
 
@@ -1263,6 +1457,72 @@ MCP and the file was written afterwards to match**; the view body in 0160 was
 pulled with `pg_get_viewdef` and checksum-matched against live rather than
 reconstructed. If a non-derivable event is ever needed, re-add it deliberately —
 0154 still holds the definition.
+
+---
+
+## SESSION LEDGER — 2026-08-27 (ARABIC PHASE 3 BATCH 5 — THE CONSUMPTION ROUTE)
+
+One commit, `a4bf764`, 11 files, +2267/−488. No SQL. Pushed; `origin/main` 0 ahead
+/ 0 behind. **This ledger also closes a seven-commit gap in this file** — Batches
+1 through 4 shipped without a handoff refresh, so their lessons are written up in
+the PHASE 3 section rather than as four ledger entries that were never taken.
+
+  - `a4bf764` the Consumption route — parts usage, exit permits, approvals,
+    the weekly bulletin, and the terminology sweep
+
+**THE BATCH WAS THREE JOBS AND ONLY ONE OF THEM WAS TRANSLATION.** The route's copy
+was the bulk of it; the other two were a chart bug and an app-wide vocabulary
+reversal that Turki called mid-session.
+
+**WHAT WENT RIGHT: THE ENGLISH SIDE WAS PROVEN UNMOVED, NOT ASSERTED.** Every
+Arabic edit in this batch — 69 leaves in the terminology sweep, plus the batch's
+own new copy — was checked by parsing `lib/i18n.ts` at both versions and diffing
+leaf by leaf: `leaves 1194, en changed 0, ar changed 69`. **That check is immune to
+the one thing that would have fooled a text diff**, because the same commit
+rewrites a long Arabic comment wholesale, and comment text is invisible to an AST
+walk. A `git diff | grep` would have counted the comment and reported a number
+that looked like coverage.
+
+**AND THE SWEEP'S SCOPE WAS PROVEN TWO INDEPENDENT WAYS BEFORE IT RAN** — an AST
+audit fixed the target at 69 Arabic leaves, and a hand enumeration by namespace
+summed to the same 69. Agreement between a script and a human count is worth more
+than either alone; it is the same both-directions discipline as Phase 2's `TKey`
+assertion.
+
+**WHAT WENT WRONG — FOUR, ALL CAUGHT, ONE OF THEM MINE FROM AN EARLIER SESSION:**
+
+1. **I HAD CLAIMED ALL ARABIC LIVES IN `lib/i18n.ts` AND THAT WAS FALSE.**
+   `lib/nav.ts:169` carries its own `{ en, ar }` pair. The earlier grep that
+   produced the claim had been scoped to the one file — the claim was true of the
+   glob and false of the repo. Found by a repo-wide grep here, fixed in the same
+   commit, and stated plainly rather than quietly corrected. **A negative claim
+   ("there are no others") is only as strong as its search scope**, and this file
+   now says so in the PHASE 3 section.
+2. **TWO BLIND-SWEEP COLLISIONS, both caught before applying.** `client.emptyHint`
+   already used «إذن» for "gate pass", so a mechanical swap would have produced
+   «الإذن هو إذن البوابة»; and the ruling comment quotes BOTH «تصريح خروج» and
+   «إذن صرف», so sweeping it would have destroyed the record of the decision. Both
+   were hand-handled and the comment was shielded behind a sentinel before the
+   script ran. **This is why "not a blind find-replace" was satisfiable by a
+   script**: the exceptions were enumerated first, and the script throws if an
+   anchor is missing rather than silently doing nothing.
+3. **A PLURAL-BUCKET FIXTURE PRINTED SIX EMPTY HEADERS AND LOOKED LIKE COVERAGE.**
+   Two causes: `bullets` are `{ tone, text }` objects, not strings, so the filter
+   matched nothing; and n=0 with no rows takes `weeklySummary`'s quiet-week early
+   return, so the zero sentence was never reached at all. Written up in the PHASE 3
+   section — **empty input tests the empty path, not the zero case.**
+4. **ONE DELIVERABLE DEVIATED FROM TURKI'S LITERAL WORDING AND WAS DISCLOSED.** He
+   asked for the dual «إذنان»; inside the construct «… خروج» the nūn drops, so the
+   permits sentence reads «إذنا خروج». The standalone overdue tail does read
+   «إذنان». Both are correct Arabic and they disagree with each other on the
+   surface, which is exactly the kind of thing to surface rather than silently
+   resolve.
+
+**AND ONE PREMISE IN THE BRIEF WAS WRONG AND WAS FLAGGED, NOT SILENTLY WIDENED.**
+The instruction named "the trend legend(s)", plural. There is exactly ONE legend
+leaf whose English contains "Trend"; `partsUsage.monthlyTitle`'s «الاتجاه الشهري»
+is a chart TITLE and was deliberately left alone. §5's re-measure rule applies to
+a count in a BRIEF, which is now the third session running that it has caught one.
 
 ---
 
