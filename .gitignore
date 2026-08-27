@@ -20,3 +20,8 @@ test-results
 # template after tool calls. Ours is .planning/AQUAFLEET-HANDOFF.json (CLAUDE.md §5).
 .planning/HANDOFF.json
 preview/.planning/HANDOFF.json
+
+# Not GSD's — a root-level handoff DRAFT (~310 KB) that gets rewritten by hand
+# during a session. The finished record is .planning/HANDOFF.md, which IS
+# committed. Ignored so no `git add .` can land the draft on main.
+HANDOFF-for-review.md
