@@ -261,8 +261,17 @@ export async function terminateStaff(id: string): Promise<ActionResult> {
 // already exists, reuse it (re-activating a deactivated one). Immediately
 // selectable in the role dropdown after the caller refreshes. Slug via the shared
 // lib/slug helper (same transform the form previews; DB CHECK is the hard floor).
-export async function addStaffRole(label: string): Promise<{ error: string | null; key?: string }> {
+//
+// `labelAr` (0168) is OPTIONAL and applies to this custom row only — built-ins
+// are translated by `key` and never carry it. Blank/whitespace stores NULL
+// rather than "", so `arText` sees an absent value and falls back to `label`
+// instead of rendering an empty string.
+export async function addStaffRole(
+  label: string,
+  labelAr?: string,
+): Promise<{ error: string | null; key?: string }> {
   const clean = label.trim();
+  const cleanAr = labelAr?.trim() || null;
   if (!clean) return { error: "Role name is required." };
   const key = slugifyKey(clean);
   if (!key) return { error: "Role name needs letters or numbers." };
@@ -277,6 +286,12 @@ export async function addStaffRole(label: string): Promise<{ error: string | nul
   if (lookupErr) return { error: lookupErr.message };
 
   if (existing) {
+    // REACTIVATION WRITES `active` AND NOTHING ELSE — `label_ar` is deliberately
+    // absent from this payload. Re-adding a name that already exists must not
+    // silently overwrite the Arabic someone entered when the row was created,
+    // and a blank Arabic box here would otherwise null it out. Arabic is
+    // captured once, at creation; editing it later is a separate write path
+    // that does not exist yet.
     if (!existing.active) {
       const { error } = await supabase.from("staff_roles").update({ active: true }).eq("key", key);
       if (error) return { error: error.message };
@@ -287,7 +302,7 @@ export async function addStaffRole(label: string): Promise<{ error: string | nul
 
   const { error } = await supabase
     .from("staff_roles")
-    .insert({ key, label: clean, is_default: false, active: true });
+    .insert({ key, label: clean, label_ar: cleanAr, is_default: false, active: true });
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
@@ -840,8 +855,16 @@ export async function deleteLeave(id: string): Promise<ActionResult> {
 // "Add custom type": insert a leave_types row and return its key (mirrors
 // addStaffRole). Reuses/re-activates an existing key. Selectable after refresh.
 // Slug via the shared lib/slug helper (matches the form preview + DB CHECK).
-export async function addLeaveType(label: string): Promise<{ error: string | null; key?: string }> {
+//
+// `labelAr` (0168) is OPTIONAL and custom-row-only, exactly as in addStaffRole
+// above — including the blank-becomes-NULL rule, so a skipped Arabic box falls
+// back to `label` rather than rendering empty.
+export async function addLeaveType(
+  label: string,
+  labelAr?: string,
+): Promise<{ error: string | null; key?: string }> {
   const clean = label.trim();
+  const cleanAr = labelAr?.trim() || null;
   if (!clean) return { error: "Type name is required." };
   const key = slugifyKey(clean);
   if (!key) return { error: "Type name needs letters or numbers." };
@@ -856,6 +879,8 @@ export async function addLeaveType(label: string): Promise<{ error: string | nul
   if (lookupErr) return { error: lookupErr.message };
 
   if (existing) {
+    // `active` ONLY — see the note on addStaffRole's reactivate branch. A
+    // re-add never touches `label_ar`.
     if (!existing.active) {
       const { error } = await supabase.from("leave_types").update({ active: true }).eq("key", key);
       if (error) return { error: error.message };
@@ -866,7 +891,7 @@ export async function addLeaveType(label: string): Promise<{ error: string | nul
 
   const { error } = await supabase
     .from("leave_types")
-    .insert({ key, label: clean, is_default: false, active: true });
+    .insert({ key, label: clean, label_ar: cleanAr, is_default: false, active: true });
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");

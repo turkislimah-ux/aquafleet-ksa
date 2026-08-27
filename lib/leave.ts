@@ -13,6 +13,11 @@ export type LeaveType = {
   id: string;
   key: string;
   label: string;
+  // 0168 — optional Arabic display label, for CUSTOM rows only. The four
+  // built-ins translate off `key` through the dictionary (drivers.leaveType.*)
+  // and never read this column. Nullable, no backfill; see StaffRole.label_ar
+  // in lib/db-types.ts, which is the same column on the sibling lookup table.
+  label_ar: string | null;
   is_default: boolean;
   active: boolean;
   created_at: string;

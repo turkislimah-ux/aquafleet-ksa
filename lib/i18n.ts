@@ -4920,6 +4920,12 @@ export const dict = {
       mustStartWithLetter: { en: "Label must start with a letter.", ar: "يجب أن يبدأ الاسم بحرف." },
       nameRequired: { en: "Name is required.", ar: "الاسم مطلوب." },
       couldNotAdd: { en: "Could not add.", ar: "تعذّرت الإضافة." },
+      // 0168 — placeholder for the OPTIONAL Arabic name on the add-custom form
+      // (staff roles, leave types). "(optional)" is carried in the placeholder
+      // itself because the inline add row has no field labels to hang it on;
+      // the English name beside it stays required and unmarked. Shown in both
+      // UI languages, so the English copy is not a dead string.
+      phArName: { en: "Arabic name (optional)", ar: "الاسم بالعربية (اختياري)" },
     },
 
     // PersonIdLink — the Iqama/licence number that deep-links into the Archive.

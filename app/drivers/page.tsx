@@ -104,7 +104,7 @@ export default async function DriversPage() {
       // Roles lookup for the Add/Edit dropdown — active roles, defaults first.
       supabase
         .from("staff_roles")
-        .select("id, key, label, is_default, active, created_at")
+        .select("id, key, label, label_ar, is_default, active, created_at")
         .eq("active", true)
         .order("is_default", { ascending: false })
         .order("label", { ascending: true }),
@@ -116,7 +116,7 @@ export default async function DriversPage() {
         .order("start_date", { ascending: false }),
       supabase
         .from("leave_types")
-        .select("id, key, label, is_default, active, created_at")
+        .select("id, key, label, label_ar, is_default, active, created_at")
         .eq("active", true)
         .order("is_default", { ascending: false })
         .order("label", { ascending: true }),

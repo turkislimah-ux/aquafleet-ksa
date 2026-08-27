@@ -16,7 +16,7 @@ import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Trash2 } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural } from "@/lib/i18n";
+import { t, fill, plural, arText } from "@/lib/i18n";
 import { isOnLeaveToday, periodCoversToday, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { formatDate } from "@/lib/utils";
 import { addLeave, updateLeave, deleteLeave, addLeaveType } from "./actions";
@@ -66,14 +66,19 @@ export default function LeaveSection({
   // Current-year total (Riyadh local date, via the `today` the caller already
   // derived from todayKey() — never re-derived here with `new Date()`).
   const yearDays = leaveDaysInYear(periods, Number(today.slice(0, 4)));
-  // The four built-ins translate off their immutable `key`; every custom type
-  // shows its stored `label` verbatim, because `leave_types` has no `label_ar`
-  // column to switch on. Row identity is `key`, never either label — and note
-  // the built-in arm does NOT consult `leaveTypes`, so a built-in still reads
-  // correctly if its row were ever deactivated out of the passed-in list.
+  // The four built-ins translate off their immutable `key` and NEVER consult
+  // `label_ar` — their Arabic is in the dictionary and 0168 left the column NULL
+  // on those rows. A custom type goes through `arText`: Arabic shows `label_ar`
+  // when present, else the English `label`; English mode always shows `label`.
+  // Row identity is `key`, never either label — and note the built-in arm does
+  // NOT consult `leaveTypes`, so a built-in still reads correctly if its row
+  // were ever deactivated out of the passed-in list.
   // The callback param is `lt`, not `t` — `t` is the translator in this file now.
-  const typeLabel = (key: string) =>
-    isBuiltinLeaveType(key) ? t(`drivers.leaveType.${key}`, lang) : leaveTypes.find((lt) => lt.key === key)?.label ?? key;
+  const typeLabel = (key: string) => {
+    if (isBuiltinLeaveType(key)) return t(`drivers.leaveType.${key}`, lang);
+    const row = leaveTypes.find((lt) => lt.key === key);
+    return row ? arText(row.label, row.label_ar, lang) : key;
+  };
   const defaultType = leaveTypes.find((lt) => lt.is_default)?.key ?? leaveTypes[0]?.key ?? "";
 
   // Newest start first.
@@ -237,6 +242,8 @@ export default function LeaveSection({
               items={leaveTypes.map((lt) => ({ key: lt.key, label: typeLabel(lt.key) }))}
               defaultKey={editing?.leave_type ?? defaultType}
               onAdd={addLeaveType}
+              // leave_types has label_ar as of 0168, so the add form collects it.
+              withArabicName
               addLabel={t("drivers.lookup.addCustomType", lang)}
               newPlaceholder={t("drivers.leave.newType", lang)}
             />

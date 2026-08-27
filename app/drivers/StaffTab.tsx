@@ -104,12 +104,18 @@ export default function StaffTab({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // The five built-ins translate off their immutable `key`; every custom role
-  // shows its stored `label` verbatim, because `staff_roles` has no `label_ar`
-  // column to switch on. staff_roles holds only active roles; an assigned role
-  // that was later deactivated still falls back to showing its raw key.
-  const roleName = (key: string) =>
-    isBuiltinRole(key) ? t(`drivers.role.${key}`, lang) : staffRoles.find((r) => r.key === key)?.label ?? key;
+  // The five built-ins translate off their immutable `key` and NEVER consult
+  // `label_ar` — their Arabic lives in the dictionary, and 0168 left the column
+  // NULL on those rows. A custom role goes through `arText`: Arabic shows
+  // `label_ar` when it has one and falls back to the English `label` when it
+  // does not, and English mode always shows `label`. staff_roles holds only
+  // active roles; an assigned role that was later deactivated still falls back
+  // to showing its raw key.
+  const roleName = (key: string) => {
+    if (isBuiltinRole(key)) return t(`drivers.role.${key}`, lang);
+    const row = staffRoles.find((r) => r.key === key);
+    return row ? arText(row.label, row.label_ar, lang) : key;
+  };
   // uuid -> name, built from ALL operation_stations rows (active + inactive) so
   // a staff member based at a since-deactivated station still resolves here.
   const stationNameById = useMemo(
@@ -572,6 +578,8 @@ export default function StaffTab({
                   items={staffRoles.map((r) => ({ key: r.key, label: roleName(r.key) }))}
                   defaultKey={editing?.role ?? staffRoles[0]?.key ?? ""}
                   onAdd={addStaffRole}
+                  // staff_roles has label_ar as of 0168, so the add form collects it.
+                  withArabicName
                   addLabel={t("drivers.staff.addRole", lang)}
                   newPlaceholder={t("drivers.staff.phNewRole", lang)}
                 />

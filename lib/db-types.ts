@@ -310,6 +310,12 @@ export type StaffRole = {
   id: string;
   key: string;
   label: string;
+  // 0168 — optional Arabic display label, for CUSTOM rows only. The five
+  // built-ins translate off `key` through the dictionary (drivers.role.*) and
+  // never read this column, so it stays NULL on them forever. Nullable with no
+  // backfill: a custom role added before 0168 keeps showing its English `label`
+  // in both languages until someone fills the Arabic in.
+  label_ar: string | null;
   is_default: boolean;
   active: boolean;
   created_at: string;
