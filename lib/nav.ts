@@ -166,7 +166,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   { href: "/inventory?tab=analysis", en: "Financial analysis", ar: "التحليل المالي", parentKey: "inventory", icon: FileBarChart },
 
   // Consumption
-  { href: "/consumption?tab=permits", en: "Exit permits", ar: "تصاريح الخروج", parentKey: "consumption", icon: PackageMinus },
+  { href: "/consumption?tab=permits", en: "Exit permits", ar: "أذونات الخروج", parentKey: "consumption", icon: PackageMinus },
   { href: "/consumption?tab=usage", en: "Parts usage", ar: "استهلاك القطع", parentKey: "consumption", icon: PackageMinus },
   { href: "/consumption?tab=approvals", en: "Consumption approvals", ar: "موافقات الاستهلاك", parentKey: "consumption", icon: PackageMinus },
 

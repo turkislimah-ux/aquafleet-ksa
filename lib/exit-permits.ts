@@ -10,7 +10,43 @@
 //   - overdue               = a returnable, still exited, with outstanding
 //                             quantity, past its expected_return_on
 
-import type { ExitPermit, ExitPermitLine } from "./db-types";
+import type { ExitPermit, ExitPermitDestinationKind, ExitPermitKind, ExitPermitLine } from "./db-types";
+import type { TKey } from "./i18n";
+
+// ENUM VALUE -> DICTIONARY KEY, the convention PROJECT_STATUS_TKEY established.
+// EXIT_PERMIT_DESTINATION_LABELS in db-types.ts still holds that enum's English
+// text and, more importantly, its option ORDER; these only route each value to
+// its key. There is no matching KIND map any more — see the note at the
+// destination map in db-types.ts for why. Total Records, so a sixth destination
+// fails the build here rather than rendering its raw enum value on screen.
+//
+// They live in THIS module rather than in db-types.ts because db-types.ts is
+// read by every route and these two enums are read by app/consumption/** alone.
+export const EXIT_PERMIT_KIND_TKEY: Record<ExitPermitKind, TKey> = {
+  returnable: "consumption.enums.kindReturnable",
+  permanent: "consumption.enums.kindPermanent",
+};
+
+export const EXIT_PERMIT_DESTINATION_TKEY: Record<ExitPermitDestinationKind, TKey> = {
+  water_station: "consumption.enums.destWaterStation",
+  project: "consumption.enums.destProject",
+  truck: "consumption.enums.destTruck",
+  customer: "consumption.enums.destCustomer",
+  other: "consumption.enums.destOther",
+};
+
+// The LOWER-CASE mid-sentence form of the same enum. Two sites used to call
+// `.toLowerCase()` on a rendered destination label to drop it into a sentence —
+// an English-shaped operation: Arabic has no letter case, so the call is a
+// no-op there and the sentence would carry a Title-Case noun mid-clause. The
+// call sites now key off the ENUM and look up a proper inline form.
+export const EXIT_PERMIT_DESTINATION_INLINE_TKEY: Record<ExitPermitDestinationKind, TKey> = {
+  water_station: "consumption.enums.destInlineWaterStation",
+  project: "consumption.enums.destInlineProject",
+  truck: "consumption.enums.destInlineTruck",
+  customer: "consumption.enums.destInlineCustomer",
+  other: "consumption.enums.destInlineOther",
+};
 
 export function outstandingQty(line: Pick<ExitPermitLine, "qty" | "qty_returned">): number {
   return Number(line.qty) - Number(line.qty_returned);

@@ -1594,11 +1594,18 @@ export type ExitPermitKind = "returnable" | "permanent";
 export type ExitPermitDestinationKind =
   | "water_station" | "project" | "truck" | "customer" | "other";
 
-export const EXIT_PERMIT_KIND_LABELS: Record<ExitPermitKind, string> = {
-  returnable: "Returnable",
-  permanent: "Permanent",
-};
-
+// Same convention as PAYMENT_MODE_LABELS / PROJECT_STATUS_LABELS above: this
+// stays ENGLISH and stays here, as the enum's source of option ORDER. The
+// enum-value -> dictionary-key routing lives with the consumer, in
+// lib/exit-permits.ts — see EXIT_PERMIT_DESTINATION_TKEY there.
+//
+// THERE IS DELIBERATELY NO KIND MAP. Both of its readers resolve through
+// EXIT_PERMIT_KIND_TKEY now, and the one place that wants kind ORDER — the
+// permanent/returnable toggle in app/consumption/ExitPermitModals.tsx — spells
+// it as a literal ["permanent", "returnable"], because it shows permanent
+// first while the enum declares returnable first. That left the map with zero
+// readers, and an exported const with no reader is invisible to noUnusedLocals:
+// it would sit here rotting. Do not re-add an English kind label here.
 export const EXIT_PERMIT_DESTINATION_LABELS: Record<ExitPermitDestinationKind, string> = {
   water_station: "Water station",
   project: "Project",

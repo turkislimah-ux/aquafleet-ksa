@@ -39,6 +39,8 @@ import type {
 // unchanged. These pin the locale so the insight sentences and the period
 // labels read in Latin digits on an Arabic-locale device.
 import { formatDate, formatNum } from "./utils";
+import { t, plural, type Lang, type TKey } from "./i18n";
+import { EXIT_PERMIT_DESTINATION_TKEY, EXIT_PERMIT_DESTINATION_INLINE_TKEY } from "./exit-permits";
 
 export type ConsumptionSource = "maintenance" | "exit_permit";
 
@@ -238,11 +240,13 @@ function group(rows: UsageRow[], keyOf: (r: UsageRow) => string, labelOf: (k: st
 // ---------------------------------------------------------------------------
 export type PeriodKind = "week" | "month" | "quarter" | "year";
 
-export const PERIOD_LABELS: Record<PeriodKind, string> = {
-  week: "Week to week",
-  month: "Month to month",
-  quarter: "Quarter to quarter",
-  year: "Year to year",
+// The picker's own order lives in this Record's key order, so the tab still
+// iterates it; the words moved to the dictionary.
+export const PERIOD_LABELS: Record<PeriodKind, TKey> = {
+  week: "consumption.usage.periodWeek",
+  month: "consumption.usage.periodMonth",
+  quarter: "consumption.usage.periodQuarter",
+  year: "consumption.usage.periodYear",
 };
 
 export type PeriodWindow = {
@@ -264,17 +268,22 @@ function startOfWeek(d: Date): Date {
   return x;
 }
 
-function fmtRange(kind: PeriodKind, start: Date): string {
+function fmtRange(kind: PeriodKind, start: Date, lang: Lang): string {
   const y = start.getUTCFullYear();
   if (kind === "year") return String(y);
-  if (kind === "quarter") return `Q${Math.floor(start.getUTCMonth() / 3) + 1} ${y}`;
+  if (kind === "quarter") {
+    return t("consumption.usage.rangeQuarter", lang)
+      .replace("{q}", () => String(Math.floor(start.getUTCMonth() / 3) + 1))
+      .replace("{y}", () => String(y));
+  }
   if (kind === "month") {
     return formatDate(start, { month: "long", year: "numeric", timeZone: "UTC" });
   }
-  return `Week of ${formatDate(start, { month: "short", day: "numeric", timeZone: "UTC" })}`;
+  return t("consumption.usage.rangeWeek", lang)
+    .replace("{d}", () => formatDate(start, { month: "short", day: "numeric", timeZone: "UTC" }));
 }
 
-export function periodWindow(kind: PeriodKind, now: Date): PeriodWindow {
+export function periodWindow(kind: PeriodKind, now: Date, lang: Lang): PeriodWindow {
   let start: Date, end: Date, prevStart: Date;
   const y = now.getUTCFullYear(), m = now.getUTCMonth();
 
@@ -301,10 +310,10 @@ export function periodWindow(kind: PeriodKind, now: Date): PeriodWindow {
     kind,
     start: start.toISOString(),
     end: end.toISOString(),
-    label: fmtRange(kind, start),
+    label: fmtRange(kind, start, lang),
     prevStart: prevStart.toISOString(),
     prevEnd: start.toISOString(),
-    prevLabel: fmtRange(kind, prevStart),
+    prevLabel: fmtRange(kind, prevStart, lang),
   };
 }
 
@@ -322,10 +331,10 @@ export function pctChange(current: number, previous: number): number | null {
 // --- Trend-chart bucketing (its own granularity, coarser than the picker) ---
 export type TrendKind = "month" | "quarter" | "year";
 
-export const TREND_LABELS: Record<TrendKind, string> = {
-  month: "Monthly",
-  quarter: "Quarterly",
-  year: "Yearly",
+export const TREND_LABELS: Record<TrendKind, TKey> = {
+  month: "consumption.usage.trendMonth",
+  quarter: "consumption.usage.trendQuarter",
+  year: "consumption.usage.trendYear",
 };
 
 function trendKey(kind: TrendKind, iso: string): string {
@@ -423,12 +432,12 @@ export type TruckUsage = {
  * double every figure. Labour (labor_hours × labor_rate_sar) is genuinely
  * separate money but is not parts consumption, and this tab's axis is parts.
  */
-export function byTruck(rows: UsageRow[], plate: (id: string) => string | null): TruckUsage[] {
+export function byTruck(rows: UsageRow[], plate: (id: string) => string | null, lang: Lang): TruckUsage[] {
   const m = new Map<string, TruckUsage & { wos: Set<string> }>();
   for (const r of rows) {
     if (r.source !== "maintenance" || !r.truckId) continue;
     const e = m.get(r.truckId) ?? {
-      truckId: r.truckId, plate: plate(r.truckId) ?? "Unknown truck",
+      truckId: r.truckId, plate: plate(r.truckId) ?? t("consumption.usage.unknownTruck", lang),
       visits: 0, qty: 0, valueSar: 0, wos: new Set<string>(),
     };
     e.qty += r.qty;
@@ -445,76 +454,123 @@ export function byTruck(rows: UsageRow[], plate: (id: string) => string | null):
 export type SummaryBullet = { tone: "up" | "down" | "flat" | "info"; text: string };
 
 /**
+ * Substitute `{token}` holes in a dictionary sentence.
+ *
+ * ONE PASS over the template, not one `.replace()` per token. A sequential pass
+ * would re-scan text it had just written, so a part named "{v}" or a plate
+ * containing "{n}" could be substituted a second time by the NEXT token. The
+ * regex form also sidesteps `$&`/`$1` being interpreted inside a value the user
+ * typed — the same reason every other call site in this app passes a replacer
+ * function rather than a string.
+ *
+ * An unknown token is left standing rather than blanked: a visible `{q}` on
+ * screen is a bug report, a silent empty space is not.
+ */
+function fill(s: string, vals: Record<string, string | number>): string {
+  return s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vals ? String(vals[k]) : m));
+}
+
+/**
  * The week in bullets, computed — never templated prose with numbers dropped
  * in. Every line below is a comparison the reader could redo by hand from the
  * tables on this page.
+ *
+ * WHY EVERY COUNTED BULLET LOOKS UP FOUR KEYS. English inflects a counted noun
+ * once — one/many — so the old code carried `jobs === 1 ? "" : "s"` inline.
+ * Arabic inflects it four times (1, 2, 3–10, 11+) and changes the VERB with it,
+ * so there is no suffix to append and no fragment to splice: each count bucket
+ * is a different sentence. `plural()` in lib/i18n.ts picks the bucket, and the
+ * English values under the four buckets are written identically wherever
+ * English does not inflect — so whichever bucket fires, the English string is
+ * the one this function printed before the conversion, byte for byte.
  */
 export function weeklySummary(
   allRows: UsageRow[],
   now: Date,
   partName: (id: string) => string | null,
   plate: (id: string) => string | null,
+  lang: Lang,
   /** Current outstanding state, so the week can say what is still out. */
   outstanding?: { qty: number; valueSar: number; overdue: number },
 ): { window: PeriodWindow; bullets: SummaryBullet[] } {
-  const w = periodWindow("week", now);
+  const w = periodWindow("week", now, lang);
   const cur = inWindow(allRows, w.start, w.end);
   const prev = inWindow(allRows, w.prevStart, w.prevEnd);
   const c = totals(cur), p = totals(prev);
   const bullets: SummaryBullet[] = [];
 
+  // Both "still out" bullets below — the quiet-week one and the normal-week one
+  // — share the no-overdue sentence and differ only in the overdue tail, so the
+  // shared half is written once here.
+  const stillOut = (o: { qty: number; valueSar: number; overdue: number }, family:
+    "stillOutOverdue" | "stillOutPermitOverdue"): string => {
+    const vals = { v: formatNum(Math.round(o.valueSar)), q: o.qty, o: o.overdue };
+    return o.overdue > 0
+      ? fill(t(`consumption.weekly.${family}.${plural(o.qty)}.${plural(o.overdue)}`, lang), vals)
+      : fill(t(`consumption.weekly.stillOut.${plural(o.qty)}`, lang), vals);
+  };
+
   if (cur.length === 0) {
     bullets.push({
       tone: "info",
       text: p.valueSar > 0
-        ? `Nothing left stock this week — last week it was ${formatNum(Math.round(p.valueSar))} SAR across ${p.qty} units.`
-        : "Nothing left stock this week, and nothing last week either.",
+        ? fill(t(`consumption.weekly.quietWithPrev.${plural(p.qty)}`, lang), {
+            v: formatNum(Math.round(p.valueSar)), q: p.qty,
+          })
+        : t("consumption.weekly.quietNoPrev", lang),
     });
     // A quiet week still has stock sitting outside, and that is worth saying.
     if (outstanding && outstanding.qty > 0) {
       bullets.push({
         tone: outstanding.overdue > 0 ? "up" : "info",
-        text: `${formatNum(Math.round(outstanding.valueSar))} SAR of returnable stock is still out across ${outstanding.qty} units${
-          outstanding.overdue > 0 ? ` — ${outstanding.overdue} past its due-back date` : ""
-        }.`,
+        text: stillOut(outstanding, "stillOutOverdue"),
       });
     }
     return { window: w, bullets };
   }
 
   const delta = pctChange(c.valueSar, p.valueSar);
+  // The TONE thresholds stay ±5 and stay separate from the key choice: a 3%
+  // rise reads "flat" but still says "up 3%", exactly as before.
+  const totalKey = delta === null ? "totalNoPrev" : delta >= 0 ? "totalUp" : "totalDown";
   bullets.push({
     tone: delta === null ? "info" : delta > 5 ? "up" : delta < -5 ? "down" : "flat",
-    text: delta === null
-      ? `${formatNum(Math.round(c.valueSar))} SAR of parts left stock across ${c.qty} units — nothing moved last week, so there is no comparison yet.`
-      : `${formatNum(Math.round(c.valueSar))} SAR of parts left stock across ${c.qty} units, ${
-          delta >= 0 ? "up" : "down"} ${Math.abs(Math.round(delta))}% in value against last week.`,
+    text: fill(t(`consumption.weekly.${totalKey}.${plural(c.qty)}`, lang), {
+      v: formatNum(Math.round(c.valueSar)),
+      q: c.qty,
+      d: delta === null ? 0 : Math.abs(Math.round(delta)),
+    }),
   });
 
   // Where it went.
-  const src = bySource(cur);
+  const src = bySource(cur, lang);
   const maint = src.find((s) => s.key === "maintenance");
   const exits = src.find((s) => s.key === "exit_permit");
   if (maint && exits) {
     const share = Math.round((maint.valueSar / (c.valueSar || 1)) * 100);
     bullets.push({
       tone: "info",
-      text: `Maintenance took ${share}% of the value (${formatNum(Math.round(maint.valueSar))} SAR); exit permits took the rest (${formatNum(Math.round(exits.valueSar))} SAR).`,
+      text: fill(t("consumption.weekly.splitShare", lang), {
+        s: share,
+        m: formatNum(Math.round(maint.valueSar)),
+        e: formatNum(Math.round(exits.valueSar)),
+      }),
     });
   } else if (maint) {
-    bullets.push({ tone: "info", text: "Everything consumed this week went to in-house maintenance — no exit permits." });
+    bullets.push({ tone: "info", text: t("consumption.weekly.allMaintenance", lang) });
   } else if (exits) {
-    bullets.push({ tone: "info", text: "Everything consumed this week left on exit permits — no maintenance draws." });
+    bullets.push({ tone: "info", text: t("consumption.weekly.allExits", lang) });
   }
 
   // The single biggest part.
-  const [topPart] = topParts(cur, partName, 1).byValue;
+  const [topPart] = topParts(cur, partName, lang, 1).byValue;
   if (topPart) {
     const share = Math.round((topPart.valueSar / (c.valueSar || 1)) * 100);
     bullets.push({
       tone: share >= 50 ? "up" : "info",
-      text: `${topPart.label} was the biggest single item at ${formatNum(Math.round(topPart.valueSar))} SAR${
-        share >= 50 ? ` — over half the week's value on its own` : ""}.`,
+      text: fill(t(share >= 50 ? "consumption.weekly.topPartHalf" : "consumption.weekly.topPart", lang), {
+        p: topPart.label, v: formatNum(Math.round(topPart.valueSar)),
+      }),
     });
   }
 
@@ -524,57 +580,77 @@ export function weeklySummary(
     const jobs = new Set(maintRows.map((r) => r.workOrderId).filter(Boolean)).size;
     const mPrev = totals(prev.filter((r) => r.source === "maintenance"));
     const mDelta = pctChange(totals(maintRows).valueSar, mPrev.valueSar);
+    // `jobs` can be 0 here — a maintenance row whose work order id is null. That
+    // lands in the `few` bucket, whose English says "0 work orders", which is
+    // what `jobs === 1 ? "" : "s"` printed too.
+    const woKey = mDelta === null ? "workOrders" : mDelta >= 0 ? "workOrdersUp" : "workOrdersDown";
     bullets.push({
       tone: mDelta === null ? "info" : mDelta > 5 ? "up" : mDelta < -5 ? "down" : "flat",
-      text: `${jobs} work order${jobs === 1 ? "" : "s"} drew parts this week${
-        mDelta === null ? "" : `, ${mDelta >= 0 ? "up" : "down"} ${Math.abs(Math.round(mDelta))}% in value on last week`
-      }.`,
+      text: fill(t(`consumption.weekly.${woKey}.${plural(jobs)}`, lang), {
+        n: jobs, d: mDelta === null ? 0 : Math.abs(Math.round(mDelta)),
+      }),
     });
 
-    const [topTruck] = byTruck(cur, plate);
+    const trucks = byTruck(cur, plate, lang);
+    const [topTruck] = trucks;
     if (topTruck) {
       bullets.push({
         tone: "info",
-        text: `${topTruck.plate} drew the most maintenance parts — ${formatNum(Math.round(topTruck.valueSar))} SAR across ${topTruck.visits} job${topTruck.visits === 1 ? "" : "s"}.`,
+        text: fill(t(`consumption.weekly.topTruck.${plural(topTruck.visits)}`, lang), {
+          plate: topTruck.plate, v: formatNum(Math.round(topTruck.valueSar)), n: topTruck.visits,
+        }),
       });
     }
 
     // A truck coming back repeatedly in ONE week is the kind of fact this
     // summary exists to surface.
-    const repeat = byTruck(cur, plate).filter((t) => t.visits > 1);
+    const repeat = trucks.filter((x) => x.visits > 1);
     if (repeat.length > 0) {
       bullets.push({
         tone: "up",
-        text: `${repeat.map((t) => `${t.plate} (${t.visits})`).join(", ")} came back for parts more than once this week.`,
+        text: fill(t("consumption.weekly.repeatTrucks", lang), {
+          list: repeat.map((x) => `${x.plate} (${x.visits})`).join(", "),
+        }),
       });
     }
   } else {
-    bullets.push({ tone: "info", text: "No work order drew parts this week." });
+    bullets.push({ tone: "info", text: t("consumption.weekly.noWorkOrder", lang) });
   }
 
   // --- EXIT PERMITS, in their own right ------------------------------------
   const exitRows = cur.filter((r) => r.source === "exit_permit");
   if (exitRows.length > 0) {
     const permitCount = new Set(exitRows.map((r) => r.reference)).size;
-    const dest = byDestination(cur);
+    const dest = byDestination(cur, lang);
     const top = dest[0];
+    // THE SEAM THAT WAS HERE: this used to be `top.label.toLowerCase()`. Lower-
+    // casing a rendered label is an English-shaped operation — Arabic has no
+    // letter case, so in Arabic it did nothing and the destination would have
+    // sat mid-sentence in whatever form the standalone label uses. The bucket
+    // carries its ENUM in `key`, so the inline form is now a lookup. The
+    // `toLowerCase()` survives only on the unknown-enum fallback, where `label`
+    // IS the raw key and lower-casing it is what the old code printed.
     bullets.push({
       tone: "info",
-      text: `${permitCount} exit permit${permitCount === 1 ? "" : "s"} took stock out${
-        top ? `, mostly to ${top.label.toLowerCase()} (${formatNum(Math.round(top.valueSar))} SAR)` : ""
-      }.`,
+      text: top
+        ? fill(t(`consumption.weekly.permitsTo.${plural(permitCount)}`, lang), {
+            n: permitCount,
+            dest: top.key in EXIT_PERMIT_DESTINATION_INLINE_TKEY
+              ? t(EXIT_PERMIT_DESTINATION_INLINE_TKEY[top.key as keyof typeof EXIT_PERMIT_DESTINATION_INLINE_TKEY], lang)
+              : top.label.toLowerCase(),
+            v: formatNum(Math.round(top.valueSar)),
+          })
+        : fill(t(`consumption.weekly.permits.${plural(permitCount)}`, lang), { n: permitCount }),
     });
   } else {
-    bullets.push({ tone: "info", text: "No parts left on an exit permit this week." });
+    bullets.push({ tone: "info", text: t("consumption.weekly.noExitPermit", lang) });
   }
 
   // --- Still out, and overdue ----------------------------------------------
   if (outstanding && outstanding.qty > 0) {
     bullets.push({
       tone: outstanding.overdue > 0 ? "up" : "info",
-      text: `${formatNum(Math.round(outstanding.valueSar))} SAR of returnable stock is still out across ${outstanding.qty} units${
-        outstanding.overdue > 0 ? ` — ${outstanding.overdue} permit${outstanding.overdue === 1 ? " is" : "s are"} past the due-back date` : ""
-      }.`,
+      text: stillOut(outstanding, "stillOutPermitOverdue"),
     });
   }
 
@@ -582,55 +658,63 @@ export function weeklySummary(
   // changed, not just the volume.
   const qtyDelta = pctChange(c.qty, p.qty);
   if (delta !== null && qtyDelta !== null && Math.sign(delta) !== Math.sign(qtyDelta)) {
-    bullets.push({
-      tone: "info",
-      text: `Value went ${delta >= 0 ? "up" : "down"} while quantity went ${qtyDelta >= 0 ? "up" : "down"} — the mix shifted toward ${delta >= 0 ? "more expensive" : "cheaper"} parts, not just more of them.`,
-    });
+    // FOUR combinations, not two. `delta === 0` has sign 0, so it clears the
+    // "signs differ" guard above while still taking the `>= 0` branch below —
+    // up/up and down/down are reachable and were reachable before this change.
+    const mixKey = delta >= 0
+      ? (qtyDelta >= 0 ? "mixUpUp" : "mixUpDown")
+      : (qtyDelta >= 0 ? "mixDownUp" : "mixDownDown");
+    bullets.push({ tone: "info", text: t(`consumption.weekly.${mixKey}`, lang) });
   }
 
   return { window: w, bullets };
 }
 
 
-export function bySource(rows: UsageRow[]): Bucket[] {
+export function bySource(rows: UsageRow[], lang: Lang): Bucket[] {
   // Sorted by value like every other bar list here. Left on insertion order
   // it followed whichever source happened to be most recent, so the same two
   // categories swapped places as data arrived.
   return group(rows, (r) => r.source, (k) =>
-    k === "maintenance" ? "Maintenance" : "Exit permits")
+    k === "maintenance"
+      ? t("consumption.usage.sourceMaintenance", lang)
+      : t("consumption.usage.sourceExitPermits", lang))
     .sort((a, b) => b.valueSar - a.valueSar);
 }
 
-export function byWarehouse(rows: UsageRow[], name: (id: string) => string | null): Bucket[] {
+export function byWarehouse(rows: UsageRow[], name: (id: string) => string | null, lang: Lang): Bucket[] {
   return group(rows, (r) => r.warehouseId ?? "unknown", (k) =>
-    k === "unknown" ? "Unassigned" : name(k) ?? "Unknown warehouse")
+    k === "unknown"
+      ? t("consumption.usage.unassignedWarehouse", lang)
+      : name(k) ?? t("consumption.usage.unknownWarehouse", lang))
     .sort((a, b) => b.valueSar - a.valueSar);
 }
-
-export const DESTINATION_LABELS: Record<string, string> = {
-  water_station: "Water station",
-  project: "Project",
-  truck: "Truck",
-  customer: "Customer",
-  other: "Other",
-};
 
 /** Exit permits only — maintenance has no destination, and folding it in as
- *  "none" would invent a category the business does not have. */
-export function byDestination(rows: UsageRow[]): Bucket[] {
+ *  "none" would invent a category the business does not have.
+ *
+ *  The local DESTINATION_LABELS map that used to sit here was a second copy of
+ *  db-types.ts's EXIT_PERMIT_DESTINATION_LABELS, byte-identical and free to
+ *  drift; it now routes through the one enum->key map in lib/exit-permits.ts.
+ *  The `?? k` fallback survives as a `k in` test, so a destination_kind the
+ *  enum does not know still renders itself rather than a dictionary path. */
+export function byDestination(rows: UsageRow[], lang: Lang): Bucket[] {
   return group(
     rows.filter((r) => r.source === "exit_permit" && r.destinationKind),
     (r) => r.destinationKind as string,
-    (k) => DESTINATION_LABELS[k] ?? k,
+    (k) => (k in EXIT_PERMIT_DESTINATION_TKEY
+      ? t(EXIT_PERMIT_DESTINATION_TKEY[k as keyof typeof EXIT_PERMIT_DESTINATION_TKEY], lang)
+      : k),
   ).sort((a, b) => b.valueSar - a.valueSar);
 }
 
 export function topParts(
   rows: UsageRow[],
   name: (id: string) => string | null,
+  lang: Lang,
   limit = 8,
 ): { byValue: Bucket[]; byQty: Bucket[] } {
-  const all = group(rows, (r) => r.partId, (k) => name(k) ?? "Unknown part");
+  const all = group(rows, (r) => r.partId, (k) => name(k) ?? t("consumption.usage.unknownPart", lang));
   return {
     byValue: [...all].sort((a, b) => b.valueSar - a.valueSar).slice(0, limit),
     byQty: [...all].sort((a, b) => b.qty - a.qty).slice(0, limit),

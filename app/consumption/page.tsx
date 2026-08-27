@@ -47,7 +47,7 @@ export default async function ConsumptionPage() {
     // the same rule confirm_exit_permit enforces server-side.
     supabase
       .from("parts")
-      .select("id, name, sku, unit, warehouse_id, qty_on_hand")
+      .select("id, name, name_ar, sku, unit, warehouse_id, qty_on_hand")
       .eq("active", true)
       .order("name"),
     supabase.from("water_stations").select("id, name").order("name"),
@@ -101,7 +101,7 @@ export default async function ConsumptionPage() {
     // still render its name rather than "Unknown".
     // warehouse_id rides along because Parts Usage attributes a MAINTENANCE
     // draw to the part's own warehouse — a work order has none of its own.
-    supabase.from("parts").select("id, name, sku, unit, warehouse_id"),
+    supabase.from("parts").select("id, name, name_ar, sku, unit, warehouse_id"),
     supabase.from("trucks").select("id, plate"),
     // The MAINTENANCE per-lot ledger — the twin of exit_permit_line_consumptions
     // fetched above. Read only; Parts Usage nets consume against return.
@@ -145,7 +145,7 @@ export default async function ConsumptionPage() {
       workshopPayments={(paymentsRes.data ?? []) as WorkshopPayment[]}
       repairers={(repairersRes.data ?? []) as NamedLite[]}
       jobRepairers={(jobRepairersRes.data ?? []) as { outsourced_job_id: string; repairer_id: string }[]}
-      allParts={(allPartsRes.data ?? []) as { id: string; name: string; sku: string; unit: string | null; warehouse_id: string }[]}
+      allParts={(allPartsRes.data ?? []) as { id: string; name: string; name_ar: string | null; sku: string; unit: string | null; warehouse_id: string }[]}
       allTrucks={(allTrucksRes.data ?? []) as TruckLite[]}
       woLedger={(woLedgerRes.data ?? []) as WoLedgerRow[]}
       viewer={viewer}

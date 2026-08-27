@@ -21,12 +21,14 @@ import {
 } from "lucide-react";
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
+import { useApp } from "@/components/AppShell";
+import { t, arText, type Lang, type TKey } from "@/lib/i18n";
 import {
   outstandingQty, permitOutstanding, permitValueSar, isOverdue, daysOverdue,
-  lineUnitCost, EXIT_PERMIT_STATUS_PILL, type LotLite, type ConsumptionLedgerRow,
+  lineUnitCost, EXIT_PERMIT_STATUS_PILL, EXIT_PERMIT_KIND_TKEY,
+  EXIT_PERMIT_DESTINATION_TKEY, type LotLite, type ConsumptionLedgerRow,
 } from "@/lib/exit-permits";
 import {
-  EXIT_PERMIT_KIND_LABELS, EXIT_PERMIT_DESTINATION_LABELS,
   type ExitPermit, type ExitPermitLine, type ExitPermitReturn,
   type ExitPermitReturnLine, type ExitPermitFile,
   type ConsumptionApproval, type WorkOrder, type WorkOrderPart,
@@ -46,8 +48,12 @@ export type WarehouseLite = { id: string; name: string };
 export type NamedLite = { id: string; name: string };
 export type TruckLite = { id: string; plate: string };
 export type StaffLite = { id: string; name: string };
+// `name_ar` rides on the PART types only. Warehouses, water stations, projects
+// and trucks have no Arabic column in the schema, so `NamedLite` deliberately
+// stays a bare `{ id, name }` rather than growing an optional field that would
+// be null for most of its users.
 export type PartLite = {
-  id: string; name: string; sku: string; unit: string | null;
+  id: string; name: string; name_ar: string | null; sku: string; unit: string | null;
   warehouse_id: string; qty_on_hand: number;
 };
 
@@ -57,10 +63,12 @@ export type PartLite = {
 // real. Nothing was built behind it.
 type Tab = "usage" | "permits" | "approvals";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "usage", label: "Consumptions" },
-  { key: "permits", label: "Exit Permits" },
-  { key: "approvals", label: "Approvals" },
+// The tab strip carries a KEY, not a rendered label: the array is module-level
+// and `t()` needs a language, which only exists inside the component.
+const TABS: { key: Tab; labelKey: TKey }[] = [
+  { key: "usage", labelKey: "consumption.client.tabUsage" },
+  { key: "permits", labelKey: "consumption.client.tabPermits" },
+  { key: "approvals", labelKey: "consumption.client.tabApprovals" },
 ];
 
 export default function ConsumptionClient({
@@ -95,7 +103,7 @@ export default function ConsumptionClient({
   jobRepairers: { outsourced_job_id: string; repairer_id: string }[];
   // Unfiltered label lookups — history can reference a deactivated part or a
   // terminated truck, and it must still render its name.
-  allParts: { id: string; name: string; sku: string; unit: string | null; warehouse_id: string }[];
+  allParts: { id: string; name: string; name_ar: string | null; sku: string; unit: string | null; warehouse_id: string }[];
   allTrucks: TruckLite[];
   // Signed-in user's email — the approvals tab compares it to decided_by.
   viewer: string | null;
@@ -104,6 +112,7 @@ export default function ConsumptionClient({
   today: string;
   error: string | null;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   // Tab lives in the URL so global search can deep-link a sub-page.
   const [tab, setTab] = useTabParam<Tab>(CONSUMPTION_TABS, "permits");
@@ -243,7 +252,7 @@ export default function ConsumptionClient({
   }
 
   async function onDeleteDraft(p: ExitPermit) {
-    if (!confirm("Delete this draft permit? Nothing has left the warehouse, so nothing is reversed.")) return;
+    if (!confirm(t("consumption.client.deleteDraftConfirm", lang))) return;
     const res = await deleteExitPermitDraft(p.id);
     if (res.error) { setActionError(res.error); return; }
     router.refresh();
@@ -251,7 +260,7 @@ export default function ConsumptionClient({
 
   async function openFile(path: string) {
     const res = await getExitPermitFileUrls([path]);
-    if (res.error || !res.urls?.[path]) { setActionError(res.error ?? "Could not open file."); return; }
+    if (res.error || !res.urls?.[path]) { setActionError(res.error ?? t("consumption.client.fileOpenFailed", lang)); return; }
     window.open(res.urls[path], "_blank", "noopener,noreferrer");
   }
 
@@ -264,30 +273,30 @@ export default function ConsumptionClient({
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Consumption"
-        subtitle="Where parts go when they leave the shelf — usage, exit permits and reporting"
+        title={t("consumption.client.title", lang)}
+        subtitle={t("consumption.client.subtitle", lang)}
         actions={
           tab === "permits" ? (
             <Btn variant="primary" onClick={() => setFormPermit("new")}>
-              <Plus className="h-4 w-4" />New Exit Permit
+              <Plus className="h-4 w-4" />{t("consumption.client.newPermit", lang)}
             </Btn>
           ) : undefined
         }
       />
 
       <div className="flex items-center gap-1 border-b flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
-        {TABS.map((t) => (
+        {TABS.map((tb) => (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+            key={tb.key}
+            onClick={() => setTab(tb.key)}
             className={cn(
               "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
-              tab === t.key
+              tab === tb.key
                 ? "border-brand-600 text-brand-600 dark:text-brand-300"
                 : "border-transparent muted hover:text-[rgb(var(--fg))]",
             )}
           >
-            {t.label}
+            {t(tb.labelKey, lang)}
           </button>
         ))}
       </div>
@@ -340,25 +349,28 @@ export default function ConsumptionClient({
       ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Kpi label="Drafts" value={String(kpis.drafts)} />
-            <Kpi label="Out on permit" value={String(kpis.exited)} />
+            <Kpi label={t("consumption.client.kpiDrafts", lang)} value={String(kpis.drafts)} />
+            <Kpi label={t("consumption.client.kpiOut", lang)} value={String(kpis.exited)} />
             <Kpi
-              label="Overdue returns"
+              label={t("consumption.client.kpiOverdue", lang)}
               value={String(kpis.overdue)}
               tone={kpis.overdue > 0 ? "bad" : undefined}
             />
             <Kpi
-              label="Value outstanding"
+              label={t("consumption.client.kpiValueOut", lang)}
               value={formatSar(kpis.outstandingValue)}
-              hint="FIFO cost of what is out and not yet back"
+              hint={t("consumption.client.kpiValueOutHint", lang)}
             />
           </div>
 
           <div className="flex items-center gap-1 flex-wrap">
             {([
-              ["all", "All"], ["draft", "Drafts"], ["exited", "Out"],
-              ["overdue", "Overdue"], ["voided", "Voided"],
-            ] as const).map(([k, label]) => (
+              ["all", "consumption.client.statusAll"],
+              ["draft", "consumption.client.statusDrafts"],
+              ["exited", "consumption.client.statusOut"],
+              ["overdue", "consumption.client.statusOverdue"],
+              ["voided", "consumption.client.statusVoided"],
+            ] as const).map(([k, labelKey]) => (
               <button
                 key={k}
                 onClick={() => setStatusFilter(k)}
@@ -369,7 +381,7 @@ export default function ConsumptionClient({
                     : "border-transparent muted hover:bg-black/5 dark:hover:bg-white/5",
                 )}
               >
-                {label}
+                {t(labelKey, lang)}
                 {k === "overdue" && kpis.overdue > 0 && (
                   <span className="ms-1.5 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 px-1.5 py-0.5 text-[10px] font-semibold">
                     {kpis.overdue}
@@ -382,10 +394,14 @@ export default function ConsumptionClient({
           {visible.length === 0 ? (
             <Card>
               <div className="p-10 text-center">
-                <p className="text-sm muted">No exit permits{statusFilter === "all" ? " yet" : " match this filter"}.</p>
+                <p className="text-sm muted">
+                  {t(statusFilter === "all"
+                    ? "consumption.client.emptyYet"
+                    : "consumption.client.emptyFiltered", lang)}
+                </p>
                 {statusFilter === "all" && (
                   <p className="text-xs muted mt-1">
-                    A permit is the gate pass for parts leaving for a non-maintenance reason.
+                    {t("consumption.client.emptyHint", lang)}
                   </p>
                 )}
               </div>
@@ -396,14 +412,14 @@ export default function ConsumptionClient({
                 <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                   <tr>
                     <TH>{null}</TH>
-                    <TH>Permit</TH>
-                    <TH>Kind</TH>
-                    <TH>Destination</TH>
-                    <TH>Receiver</TH>
-                    <TH>Warehouse</TH>
-                    <TH>Items</TH>
-                    <TH>Value out</TH>
-                    <TH>Status</TH>
+                    <TH>{t("consumption.shared.permit", lang)}</TH>
+                    <TH>{t("consumption.shared.kind", lang)}</TH>
+                    <TH>{t("consumption.shared.destination", lang)}</TH>
+                    <TH>{t("consumption.shared.receiver", lang)}</TH>
+                    <TH>{t("consumption.shared.warehouse", lang)}</TH>
+                    <TH>{t("consumption.shared.items", lang)}</TH>
+                    <TH>{t("consumption.client.colValueOut", lang)}</TH>
+                    <TH>{t("common.status", lang)}</TH>
                     <TH>{null}</TH>
                   </tr>
                 </thead>
@@ -422,14 +438,16 @@ export default function ConsumptionClient({
                             <button
                               onClick={() => toggle(p.id)}
                               className="h-7 w-7 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                              aria-label={open ? "Collapse" : "Expand"}
+                              aria-label={t(open
+                                ? "consumption.shared.collapseAria"
+                                : "consumption.shared.expandAria", lang)}
                             >
                               {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                             </button>
                           </TD>
                           <TD>
                             <span className="font-mono text-xs font-medium">
-                              {p.ep_number ?? <span className="muted">Draft</span>}
+                              {p.ep_number ?? <span className="muted">{t("consumption.client.statusDraft", lang)}</span>}
                             </span>
                             {pf.length > 0 && (
                               <span className="ms-1.5 inline-flex items-center gap-0.5 text-[10px] muted">
@@ -438,26 +456,32 @@ export default function ConsumptionClient({
                             )}
                           </TD>
                           <TD className="text-xs">
-                            {EXIT_PERMIT_KIND_LABELS[p.kind]}
+                            {t(EXIT_PERMIT_KIND_TKEY[p.kind], lang)}
                             {p.kind === "returnable" && p.expected_return_on && (
                               <div className={cn("text-[11px]", overdue ? "text-rose-600 dark:text-rose-400 font-medium" : "muted")}>
-                                due {formatDate(p.expected_return_on + "T00:00:00")}
+                                {fill("consumption.client.dueOn", lang, "{d}", formatDate(p.expected_return_on + "T00:00:00"))}
                               </div>
                             )}
                           </TD>
                           <TD className="text-xs">
                             {destinationLabel(p)}
-                            <div className="text-[11px] muted">{EXIT_PERMIT_DESTINATION_LABELS[p.destination_kind]}</div>
+                            <div className="text-[11px] muted">{t(EXIT_PERMIT_DESTINATION_TKEY[p.destination_kind], lang)}</div>
                           </TD>
                           <TD className="text-xs">
                             {receiverLabel(p)}
-                            {p.carrier_name && <div className="text-[11px] muted">via {p.carrier_name}</div>}
+                            {p.carrier_name && (
+                              <div className="text-[11px] muted">
+                                {fill("consumption.client.via", lang, "{name}", p.carrier_name)}
+                              </div>
+                            )}
                           </TD>
                           <TD className="text-xs">{warehousesById.get(p.warehouse_id)?.name ?? "—"}</TD>
                           <TD className="text-xs tabular-nums">
                             {pl.length}
                             {p.status === "exited" && p.kind === "returnable" && (
-                              <div className="text-[11px] muted">{outstanding} out</div>
+                              <div className="text-[11px] muted">
+                                {fill("consumption.client.qtyOutstanding", lang, "{n}", String(outstanding))}
+                              </div>
                             )}
                           </TD>
                           <TD className="text-xs tabular-nums">
@@ -466,12 +490,16 @@ export default function ConsumptionClient({
                           <TD>
                             <div className="flex items-center gap-1 flex-wrap">
                               <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", EXIT_PERMIT_STATUS_PILL[p.status])}>
-                                {p.status === "draft" ? "Draft" : p.status === "exited" ? "Out" : "Voided"}
+                                {t(p.status === "draft"
+                                  ? "consumption.client.statusDraft"
+                                  : p.status === "exited"
+                                    ? "consumption.client.statusOut"
+                                    : "consumption.client.statusVoided", lang)}
                               </span>
                               {overdue && p.expected_return_on && (
                                 <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20">
                                   <AlertTriangle className="h-3 w-3" />
-                                  {daysOverdue(p.expected_return_on, today)}d overdue
+                                  {fill("consumption.client.daysOverdue", lang, "{n}", String(daysOverdue(p.expected_return_on, today)))}
                                 </span>
                               )}
                             </div>
@@ -480,18 +508,18 @@ export default function ConsumptionClient({
                             <div className="flex items-center gap-1 justify-end">
                               {p.status === "draft" && (
                                 <>
-                                  <Btn variant="primary" onClick={() => setConfirmPermit(p)}>Confirm exit</Btn>
+                                  <Btn variant="primary" onClick={() => setConfirmPermit(p)}>{t("consumption.shared.confirmExit", lang)}</Btn>
                                   <button
                                     onClick={() => setFormPermit(p)}
                                     className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                                    title="Edit draft"
+                                    title={t("consumption.client.editDraft", lang)}
                                   >
                                     <Pencil className="h-4 w-4" />
                                   </button>
                                   <button
                                     onClick={() => onDeleteDraft(p)}
                                     className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                                    title="Delete draft"
+                                    title={t("consumption.client.deleteDraft", lang)}
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </button>
@@ -501,13 +529,13 @@ export default function ConsumptionClient({
                                 <>
                                   {p.kind === "returnable" && outstanding > 0 && (
                                     <Btn variant="outline" onClick={() => setReturnPermit(p)}>
-                                      <Undo2 className="h-3.5 w-3.5" />Return
+                                      <Undo2 className="h-3.5 w-3.5" />{t("consumption.client.returnBtn", lang)}
                                     </Btn>
                                   )}
                                   <button
                                     onClick={() => setVoidPermit(p)}
                                     className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                                    title="Void permit"
+                                    title={t("consumption.shared.voidPermit", lang)}
                                   >
                                     <Ban className="h-4 w-4" />
                                   </button>
@@ -517,7 +545,7 @@ export default function ConsumptionClient({
                                 <button
                                   onClick={() => setPrintPermit(p)}
                                   className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                                  title="Printable permit"
+                                  title={t("consumption.client.printablePermit", lang)}
                                 >
                                   <Printer className="h-4 w-4" />
                                 </button>
@@ -530,7 +558,7 @@ export default function ConsumptionClient({
                           <tr>
                             <td colSpan={10} className="p-0 border-t" style={{ borderColor: "rgb(var(--border))" }}>
                               <div className="p-4 bg-black/[0.015] dark:bg-white/[0.02] space-y-3">
-                                <div className="text-[11px] font-semibold uppercase tracking-wide muted">Items</div>
+                                <div className="text-[11px] font-semibold uppercase tracking-wide muted">{t("consumption.shared.items", lang)}</div>
                                 {p.note && (
                                   <p className="text-sm rounded-lg px-3 py-2 bg-black/[0.03] dark:bg-white/[0.04]">
                                     {p.note}
@@ -539,18 +567,18 @@ export default function ConsumptionClient({
                                 <Table>
                                   <thead>
                                     <tr>
-                                      <TH>Part</TH>
+                                      <TH>{t("common.part", lang)}</TH>
                                       {/* NOTE gets its own column beside the
                                           part, capped at roughly two lines —
                                           a long note should be readable at a
                                           glance without stretching the row
                                           into a paragraph. */}
-                                      <TH>Note</TH>
-                                      <TH>Qty out</TH>
-                                      <TH>Returned</TH>
-                                      <TH>Outstanding</TH>
-                                      <TH>FIFO unit value</TH>
-                                      <TH>Value</TH>
+                                      <TH>{t("common.note", lang)}</TH>
+                                      <TH>{t("consumption.shared.qtyOut", lang)}</TH>
+                                      <TH>{t("consumption.client.colReturned", lang)}</TH>
+                                      <TH>{t("consumption.shared.outstanding", lang)}</TH>
+                                      <TH>{t("consumption.shared.fifoUnitValue", lang)}</TH>
+                                      <TH>{t("consumption.shared.value", lang)}</TH>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -560,7 +588,9 @@ export default function ConsumptionClient({
                                       return (
                                         <tr key={l.id}>
                                           <TD>
-                                            <span className="text-sm font-medium">{part?.name ?? "Unknown part"}</span>
+                                            <span className="text-sm font-medium">
+                                              {part ? arText(part.name, part.name_ar, lang) : t("consumption.usage.unknownPart", lang)}
+                                            </span>
                                             <div className="text-[11px] muted">
                                               {part?.sku}{part?.unit ? ` · ${part.unit}` : ""}
                                             </div>
@@ -576,12 +606,12 @@ export default function ConsumptionClient({
                                           <TD className="text-xs tabular-nums">
                                             {(() => {
                                               const u = lineUnitCost(p.status, l, lots);
-                                              if (u === null) return <span className="muted" title="Not enough stock in lots to price this item">—</span>;
+                                              if (u === null) return <span className="muted" title={t("consumption.client.noPriceTitle", lang)}>—</span>;
                                               return (
                                                 <>
                                                   {formatSar(u)}
                                                   {p.status === "draft" && (
-                                                    <span className="block text-[10px] muted">preview</span>
+                                                    <span className="block text-[10px] muted">{t("consumption.shared.previewTag", lang)}</span>
                                                   )}
                                                 </>
                                               );
@@ -603,7 +633,7 @@ export default function ConsumptionClient({
                                 {pr.length > 0 && (
                                   <>
                                     <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
-                                      Returns ({pr.length})
+                                      {fill("consumption.client.returnsHeading", lang, "{n}", String(pr.length))}
                                     </div>
                                     <ul className="space-y-1">
                                       {pr.map((r) => {
@@ -617,7 +647,12 @@ export default function ConsumptionClient({
                                             {rl.map((x) => {
                                               const line = pl.find((l) => l.id === x.exit_permit_line_id);
                                               const part = line ? partsById.get(line.part_id) : null;
-                                              return `${x.qty} × ${part?.name ?? "?"}`;
+                                              const name = part
+                                                ? arText(part.name, part.name_ar, lang)
+                                                : t("consumption.client.unknownShort", lang);
+                                              return t("consumption.client.returnItem", lang)
+                                                .replace("{q}", () => String(x.qty))
+                                                .replace("{p}", () => name);
                                             }).join(", ")}
                                             {r.note && <span className="muted"> · {r.note}</span>}
                                             {r.created_by && <span className="muted"> · {r.created_by}</span>}
@@ -631,7 +666,7 @@ export default function ConsumptionClient({
                                 {pf.length > 0 && (
                                   <>
                                     <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
-                                      Attachments ({pf.length})
+                                      {fill("consumption.client.attachmentsHeading", lang, "{n}", String(pf.length))}
                                     </div>
                                     <div className="flex flex-wrap gap-2">
                                       {pf.map((f) => (
@@ -653,21 +688,26 @@ export default function ConsumptionClient({
                                 {p.status === "voided" && (
                                   <div className="rounded-lg px-3 py-2 text-xs bg-rose-500/10 text-rose-700 dark:text-rose-300">
                                     <span className="inline-flex items-center gap-1 font-medium">
-                                      <RotateCcw className="h-3.5 w-3.5" />Voided
+                                      <RotateCcw className="h-3.5 w-3.5" />{t("consumption.client.statusVoided", lang)}
                                     </span>
-                                    {p.voided_at && ` on ${formatDate(p.voided_at)}`}
-                                    {p.voided_by && ` by ${p.voided_by}`}
-                                    {p.void_reason && ` — ${p.void_reason}`}
+                                    {p.voided_at && fill("consumption.client.onDate", lang, "{d}", formatDate(p.voided_at))}
+                                    {p.voided_by && fill("consumption.client.byWho", lang, "{who}", p.voided_by)}
+                                    {p.void_reason && fill("consumption.client.dashReason", lang, "{reason}", p.void_reason)}
                                     <div className="mt-0.5">
-                                      Only the outstanding quantity was restored; anything already
-                                      returned had gone back with its own return event.
+                                      {t("consumption.client.voidedNote", lang)}
                                     </div>
                                   </div>
                                 )}
 
                                 <div className="text-[11px] muted">
-                                  {p.issued_by && <>Issued by {p.issued_by}. </>}
-                                  {p.exited_at && <>Exited {formatDateTime(p.exited_at)}{p.exited_by ? ` by ${p.exited_by}` : ""}. </>}
+                                  {p.issued_by && <>{fill("consumption.client.issuedBy", lang, "{who}", p.issued_by)}{" "}</>}
+                                  {p.exited_at && (
+                                    <>
+                                      {fill("consumption.client.exitedAt", lang, "{d}", formatDateTime(p.exited_at))}
+                                      {p.exited_by ? fill("consumption.client.byWho", lang, "{who}", p.exited_by) : ""}
+                                      {"."}{" "}
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             </td>
@@ -743,13 +783,28 @@ export default function ConsumptionClient({
           parts={parts}
           warehouseName={warehousesById.get(printPermit.warehouse_id)?.name ?? "—"}
           destination={destinationLabel(printPermit)}
-          destinationKind={EXIT_PERMIT_DESTINATION_LABELS[printPermit.destination_kind]}
+          destinationKind={t(EXIT_PERMIT_DESTINATION_TKEY[printPermit.destination_kind], lang)}
           receiver={receiverLabel(printPermit)}
           onClose={() => setPrintPermit(null)}
         />
       )}
     </div>
   );
+}
+
+/**
+ * ONE-TOKEN INTERPOLATION, in the repo's idiom: a FUNCTION replacer, so a `$&`
+ * or `$1` sitting inside a part name, a carrier name or a void reason is
+ * inserted literally instead of being read as a replacement pattern.
+ *
+ * It exists as a helper rather than an inline `.replace()` at each of the ten
+ * call sites for a second reason: several of those sites pass a column that is
+ * `string | null` and has just been narrowed by a `&&` guard. Passing the value
+ * as an ARGUMENT keeps the narrowing at the call site, where it holds; a closure
+ * written inline would lose it and force a non-null assertion.
+ */
+function fill(key: TKey, lang: Lang, token: string, value: string): string {
+  return t(key, lang).replace(token, () => value);
 }
 
 function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "bad" }) {

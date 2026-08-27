@@ -19,12 +19,16 @@ import { Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import {
   outstandingQty, permitValueSar, fifoPreviewUnitCost, lineUnitCost,
-  returnedUnitPricePreview, type LotLite, type ConsumptionLedgerRow,
+  returnedUnitPricePreview, EXIT_PERMIT_KIND_TKEY, EXIT_PERMIT_DESTINATION_TKEY,
+  type LotLite, type ConsumptionLedgerRow,
 } from "@/lib/exit-permits";
 import {
-  EXIT_PERMIT_KIND_LABELS,
+  EXIT_PERMIT_DESTINATION_LABELS,
   type ExitPermit, type ExitPermitLine, type ExitPermitFile,
+  type ExitPermitDestinationKind,
 } from "@/lib/db-types";
+import { useApp } from "@/components/AppShell";
+import { t, plural, arText, type Lang, type TKey } from "@/lib/i18n";
 import {
   createExitPermitDraft, updateExitPermitDraft,
   addExitPermitLine, updateExitPermitLineQty, removeExitPermitLine,
@@ -38,9 +42,26 @@ const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))" } as const;
 
-type PartLite = { id: string; name: string; sku: string; unit: string | null; warehouse_id: string; qty_on_hand: number };
+type PartLite = {
+  id: string; name: string; name_ar: string | null; sku: string;
+  unit: string | null; warehouse_id: string; qty_on_hand: number;
+};
 type NamedLite = { id: string; name: string };
 type TruckLite = { id: string; plate: string };
+
+/**
+ * ONE-TOKEN INTERPOLATION — the same helper, for the same two reasons, as the
+ * one at the bottom of ConsumptionClient.tsx: a FUNCTION replacer so a `$&` in
+ * a part name or a carrier name is inserted literally, and a plain ARGUMENT so
+ * a `string | null` narrowed by a `&&` guard at the call site stays narrowed.
+ *
+ * Duplicated rather than imported because this file is a LEAF — see the module
+ * header. Importing it back from ConsumptionClient is the exact edge that is
+ * forbidden here, and three lines is a cheaper price than a cycle.
+ */
+function fill(key: TKey, lang: Lang, token: string, value: string): string {
+  return t(key, lang).replace(token, () => value);
+}
 
 function Overlay({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
@@ -156,6 +177,7 @@ export function PermitFormModal({
   onRefresh: () => void;
   onClose: () => void;
 }) {
+  const { lang } = useApp();
   const isEdit = !!permit;
   // Derived from the prop, never owned here — see onDraftCreated.
   const permitId = permit?.id ?? null;
@@ -319,7 +341,7 @@ export function PermitFormModal({
     const created = (res as { permit?: ExitPermit }).permit;
     if (res.error || !created) {
       setSaving(false);
-      setError(res.error ?? "Could not create the draft.");
+      setError(res.error ?? t("consumption.modals.createFailed", lang));
       return false;
     }
 
@@ -360,28 +382,30 @@ export function PermitFormModal({
   return (
     <Shell
       size="xl"
-      title={isEdit ? "Edit draft permit" : "New exit permit"}
-      subtitle="A draft moves no stock. Confirming the exit is what deducts it."
+      title={t(isEdit ? "consumption.modals.formTitleEdit" : "consumption.modals.formTitleNew", lang)}
+      subtitle={t("consumption.modals.formSubtitle", lang)}
       onClose={onClose}
       footer={
         <>
-          <Btn variant="outline" onClick={onClose}>Close</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("consumption.shared.close", lang)}</Btn>
           <Btn
             variant="primary"
             onClick={() => void saveHeader()}
             disabled={saving || pending.some((p) => !(p.qty > 0))}
           >
-            {saving ? "Saving…" : permitId ? "Save details" : "Create draft"}
+            {saving
+              ? t("common.saving", lang)
+              : t(permitId ? "consumption.modals.saveDetails" : "consumption.modals.createDraft", lang)}
           </Btn>
         </>
       }
     >
       <ErrorBox msg={error} />
 
-      <div className="text-[11px] font-semibold uppercase tracking-wide muted">Permit</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted">{t("consumption.shared.permit", lang)}</div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
-          <label className="text-xs muted block mb-1">Kind *</label>
+          <label className="text-xs muted block mb-1">{t("consumption.shared.kind", lang)} *</label>
           <div className="flex gap-2">
             {(["permanent", "returnable"] as const).map((k) => (
               <button
@@ -394,14 +418,14 @@ export function PermitFormModal({
                 )}
                 style={kind === k ? undefined : INPUT_STYLE}
               >
-                {EXIT_PERMIT_KIND_LABELS[k]}
+                {t(EXIT_PERMIT_KIND_TKEY[k], lang)}
               </button>
             ))}
           </div>
         </div>
         <div>
           <label className="text-xs muted block mb-1">
-            Expected return {kind === "returnable" ? "*" : ""}
+            {t("consumption.modals.labelExpectedReturn", lang)} {kind === "returnable" ? "*" : ""}
           </label>
           <input
             type="date"
@@ -411,10 +435,10 @@ export function PermitFormModal({
             className={cn(INPUT, kind === "permanent" && "opacity-50 cursor-not-allowed")}
             style={INPUT_STYLE}
           />
-          {kind === "permanent" && <p className="text-[11px] muted mt-1">Permanent items are not expected back.</p>}
+          {kind === "permanent" && <p className="text-[11px] muted mt-1">{t("consumption.modals.permanentHint", lang)}</p>}
         </div>
         <div>
-          <label className="text-xs muted block mb-1">Warehouse *</label>
+          <label className="text-xs muted block mb-1">{t("consumption.shared.warehouse", lang)} *</label>
           <select
             value={warehouseId}
             onChange={(e) => setWarehouseId(e.target.value)}
@@ -425,106 +449,113 @@ export function PermitFormModal({
             {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
           </select>
           {warehouseLocked && (
-            <p className="text-[11px] muted mt-1">Locked — items were picked from this warehouse.</p>
+            <p className="text-[11px] muted mt-1">{t("consumption.modals.warehouseLockedHint", lang)}</p>
           )}
         </div>
       </div>
 
-      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Destination &amp; receiver</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("consumption.modals.sectionDestReceiver", lang)}</div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
-          <label className="text-xs muted block mb-1">Destination type *</label>
+          <label className="text-xs muted block mb-1">{t("consumption.modals.labelDestType", lang)}</label>
           <select
             value={destKind}
             onChange={(e) => { setDestKind(e.target.value as typeof destKind); setDestId(""); }}
             className={INPUT}
             style={INPUT_STYLE}
           >
-            <option value="water_station">Water station</option>
-            <option value="project">Project</option>
-            <option value="truck">Truck</option>
-            <option value="customer">Customer</option>
-            <option value="other">Other</option>
+            {/* The five options were hand-written in enum order. They now come
+                FROM the enum — EXIT_PERMIT_DESTINATION_LABELS is the declared
+                option order (see its note in db-types.ts) and the TKey map is
+                total, so a sixth destination is a build error here rather than
+                an option that silently never renders. */}
+            {(Object.keys(EXIT_PERMIT_DESTINATION_LABELS) as ExitPermitDestinationKind[]).map((k) => (
+              <option key={k} value={k}>{t(EXIT_PERMIT_DESTINATION_TKEY[k], lang)}</option>
+            ))}
           </select>
         </div>
         <div className="md:col-span-2">
-          <label className="text-xs muted block mb-1">Destination *</label>
+          <label className="text-xs muted block mb-1">{t("consumption.shared.destination", lang)} *</label>
           {destKind === "other" ? (
-            <input value={destOther} onChange={(e) => setDestOther(e.target.value)} placeholder="Where are these going?" className={INPUT} style={INPUT_STYLE} />
+            <input value={destOther} onChange={(e) => setDestOther(e.target.value)} placeholder={t("consumption.modals.destOtherPlaceholder", lang)} className={INPUT} style={INPUT_STYLE} />
           ) : (
             <select value={destId} onChange={(e) => setDestId(e.target.value)} className={INPUT} style={INPUT_STYLE}>
-              <option value="">Choose…</option>
+              <option value="">{t("consumption.modals.chooseOption", lang)}</option>
               {destOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           )}
         </div>
         <div>
-          <label className="text-xs muted block mb-1">Receiver *</label>
+          <label className="text-xs muted block mb-1">{t("consumption.shared.receiver", lang)} *</label>
           <select
             value={receiverMode}
             onChange={(e) => setReceiverMode(e.target.value as "staff" | "external")}
             className={INPUT}
             style={INPUT_STYLE}
           >
-            <option value="staff">Staff member</option>
-            <option value="external">External (name)</option>
+            <option value="staff">{t("consumption.modals.receiverStaff", lang)}</option>
+            <option value="external">{t("consumption.modals.receiverExternal", lang)}</option>
           </select>
         </div>
         <div>
           <label className="text-xs muted block mb-1">&nbsp;</label>
           {receiverMode === "staff" ? (
             <select value={receiverStaffId} onChange={(e) => setReceiverStaffId(e.target.value)} className={INPUT} style={INPUT_STYLE}>
-              <option value="">Choose…</option>
+              <option value="">{t("consumption.modals.chooseOption", lang)}</option>
               {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           ) : (
-            <input value={receiverName} onChange={(e) => setReceiverName(e.target.value)} placeholder="Receiver name" className={INPUT} style={INPUT_STYLE} />
+            <input value={receiverName} onChange={(e) => setReceiverName(e.target.value)} placeholder={t("consumption.modals.receiverNamePlaceholder", lang)} className={INPUT} style={INPUT_STYLE} />
           )}
         </div>
         <div>
-          <label className="text-xs muted block mb-1">Carrier / driver</label>
-          <input value={carrier} onChange={(e) => setCarrier(e.target.value)} placeholder="Who is taking them" className={INPUT} style={INPUT_STYLE} />
+          <label className="text-xs muted block mb-1">{t("consumption.modals.labelCarrier", lang)}</label>
+          <input value={carrier} onChange={(e) => setCarrier(e.target.value)} placeholder={t("consumption.modals.carrierPlaceholder", lang)} className={INPUT} style={INPUT_STYLE} />
         </div>
       </div>
 
       <div>
-        <label className="text-xs muted block mb-1">Note</label>
+        <label className="text-xs muted block mb-1">{t("common.note", lang)}</label>
         <input value={note} onChange={(e) => setNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
       </div>
 
       {/* ITEMS. The ENTRY row sits ABOVE the table: adding is the action, the
           table is the record of what has been added. */}
-      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Items</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("consumption.shared.items", lang)}</div>
 
       <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_2fr_auto] gap-2 items-end">
         <div>
-          <label className="text-xs muted block mb-1">Part</label>
+          <label className="text-xs muted block mb-1">{t("common.part", lang)}</label>
           <select value={newPartId} onChange={(e) => setNewPartId(e.target.value)} className={INPUT} style={INPUT_STYLE}>
-            <option value="">Choose a part…</option>
+            <option value="">{t("consumption.modals.choosePart", lang)}</option>
             {warehouseParts.map((p) => (
-              <option key={p.id} value={p.id}>{p.sku} · {p.name} ({p.qty_on_hand} on hand)</option>
+              <option key={p.id} value={p.id}>
+                {t("consumption.modals.partOption", lang)
+                  .replace("{sku}", () => p.sku)
+                  .replace("{name}", () => arText(p.name, p.name_ar, lang))
+                  .replace("{n}", () => String(p.qty_on_hand))}
+              </option>
             ))}
           </select>
         </div>
         <div>
-          <label className="text-xs muted block mb-1">Qty</label>
+          <label className="text-xs muted block mb-1">{t("common.qty", lang)}</label>
           <input type="number" min={0.01} step="0.01" value={newQty} onChange={(e) => setNewQty(e.target.value)} className={INPUT} style={INPUT_STYLE} />
         </div>
         <div>
-          <label className="text-xs muted block mb-1">Item note</label>
+          <label className="text-xs muted block mb-1">{t("consumption.modals.labelItemNote", lang)}</label>
           <input value={newNote} onChange={(e) => setNewNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
         </div>
         <Btn variant="outline" onClick={onAddLine} disabled={busyLine || !newPartId || !newQty}>
-          <Plus className="h-3.5 w-3.5" />Add
+          <Plus className="h-3.5 w-3.5" />{t("common.add", lang)}
         </Btn>
       </div>
       {warehouseParts.length === 0 && (
-        <p className="text-[11px] muted">This warehouse has no active parts.</p>
+        <p className="text-[11px] muted">{t("consumption.modals.noActiveParts", lang)}</p>
       )}
       {!permitId && pending.length > 0 && (
         <p className="text-[11px] muted">
-          {pending.length} item{pending.length === 1 ? "" : "s"} will be saved with the permit when
-          you press Create draft.
+          {fill(`consumption.modals.pendingItems.${plural(pending.length)}`, lang, "{n}", String(pending.length))}
         </p>
       )}
 
@@ -532,8 +563,8 @@ export function PermitFormModal({
         <Table>
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
             <tr>
-              <TH>Part</TH><TH>Qty</TH><TH>On hand</TH>
-              <TH>FIFO unit value</TH><TH>Item value</TH><TH>Note</TH><TH>{null}</TH>
+              <TH>{t("common.part", lang)}</TH><TH>{t("common.qty", lang)}</TH><TH>{t("consumption.modals.colOnHand", lang)}</TH>
+              <TH>{t("consumption.shared.fifoUnitValue", lang)}</TH><TH>{t("consumption.modals.colItemValue", lang)}</TH><TH>{t("common.note", lang)}</TH><TH>{null}</TH>
             </tr>
           </thead>
           <tbody>
@@ -544,7 +575,9 @@ export function PermitFormModal({
               return (
                 <tr key={row.key}>
                   <TD>
-                    <span className="text-sm font-medium">{part?.name ?? "Unknown"}</span>
+                    <span className="text-sm font-medium">
+                      {part ? arText(part.name, part.name_ar, lang) : t("consumption.modals.unknownPart", lang)}
+                    </span>
                     <div className="text-[11px] muted">{part?.sku}</div>
                   </TD>
                   <TD>
@@ -581,8 +614,8 @@ export function PermitFormModal({
                   <TD className="text-xs tabular-nums muted">{part?.qty_on_hand ?? "—"}</TD>
                   <TD className="text-xs tabular-nums">
                     {u === null
-                      ? <span className="muted" title="Lots cannot cover this quantity">—</span>
-                      : <>{formatSar(u)}{status === "draft" && <span className="block text-[10px] muted">preview</span>}</>}
+                      ? <span className="muted" title={t("consumption.modals.titleLotsShort", lang)}>—</span>
+                      : <>{formatSar(u)}{status === "draft" && <span className="block text-[10px] muted">{t("consumption.shared.previewTag", lang)}</span>}</>}
                   </TD>
                   <TD className="text-xs tabular-nums font-medium">
                     {u === null ? <span className="muted">—</span> : formatSar(row.qty * u)}
@@ -604,7 +637,7 @@ export function PermitFormModal({
                           if (res.error) setError(res.error); else onRefresh();
                         }}
                         className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                        title="Remove item"
+                        title={t("consumption.modals.removeItem", lang)}
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -619,7 +652,7 @@ export function PermitFormModal({
 
       {itemRows.length > 0 && (
         <div className="flex items-baseline justify-end gap-2 text-sm">
-          <span className="muted">Total units value</span>
+          <span className="muted">{t("consumption.modals.totalUnitsValue", lang)}</span>
           <span className="text-lg font-semibold tabular-nums">
             {(() => {
               // Sum of qty x FIFO unit value. Any item the lots cannot cover
@@ -636,7 +669,7 @@ export function PermitFormModal({
                   {formatSar(total)}
                   {missing > 0 && (
                     <span className="ms-2 text-[11px] font-normal muted">
-                      ({missing} item{missing === 1 ? "" : "s"} not priceable)
+                      {fill(`consumption.modals.notPriceable.${plural(missing)}`, lang, "{n}", String(missing))}
                     </span>
                   )}
                 </>
@@ -649,7 +682,7 @@ export function PermitFormModal({
       {/* ATTACHMENTS LAST — paperwork about the permit, after the permit
           itself. Available during creation too: files picked before the draft
           exists are held and uploaded when it is created. */}
-      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Attachments</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("consumption.modals.sectionAttachments", lang)}</div>
       <PermitFiles
         permitId={permitId}
         files={files}
@@ -661,8 +694,7 @@ export function PermitFormModal({
       />
       {!permitId && stagedFiles.length > 0 && (
         <p className="text-[11px] muted">
-          {stagedFiles.length} file{stagedFiles.length === 1 ? "" : "s"} will upload when you press
-          Create draft.
+          {fill(`consumption.modals.stagedFiles.${plural(stagedFiles.length)}`, lang, "{n}", String(stagedFiles.length))}
         </p>
       )}
     </Shell>
@@ -690,6 +722,7 @@ function PermitFiles({
   onUnstage: (index: number) => void;
   onChanged: () => void; onError: (m: string) => void;
 }) {
+  const { lang } = useApp();
   const [busy, setBusy] = useState(false);
   return (
     <div className="space-y-2">
@@ -707,7 +740,7 @@ function PermitFiles({
                   if (res.error) onError(res.error); else onChanged();
                 }}
                 className="p-1 rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                aria-label="Remove file"
+                aria-label={t("consumption.modals.removeFile", lang)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -719,11 +752,11 @@ function PermitFiles({
                 ? <ImageIcon className="h-3.5 w-3.5 shrink-0 muted" />
                 : <FileText className="h-3.5 w-3.5 shrink-0 muted" />}
               <span className="truncate flex-1">{f.name}</span>
-              <span className="shrink-0 muted">not uploaded yet</span>
+              <span className="shrink-0 muted">{t("consumption.modals.notUploadedYet", lang)}</span>
               <button
                 onClick={() => onUnstage(i)}
                 className="p-1 rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                aria-label="Remove file"
+                aria-label={t("consumption.modals.removeFile", lang)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -733,7 +766,7 @@ function PermitFiles({
       )}
       <label className={cn("inline-flex items-center gap-1.5 text-xs rounded-lg border px-2.5 py-1.5 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5", busy && "opacity-50")} style={INPUT_STYLE}>
         <Upload className="h-3.5 w-3.5" />
-        {busy ? "Uploading…" : "Attach photo or file"}
+        {t(busy ? "consumption.modals.uploading" : "consumption.modals.attachFile", lang)}
         <input
           type="file"
           multiple
@@ -766,6 +799,7 @@ function PermitFiles({
 export function ConfirmExitModal({
   permit, lines, parts, lots, onClose,
 }: { permit: ExitPermit; lines: ExitPermitLine[]; parts: PartLite[]; lots: LotLite[]; onClose: () => void }) {
+  const { lang } = useApp();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
@@ -779,12 +813,12 @@ export function ConfirmExitModal({
 
   return (
     <Shell
-      title="Confirm exit"
-      subtitle="This deducts stock and assigns the permit number. It cannot be undone — only voided."
+      title={t("consumption.shared.confirmExit", lang)}
+      subtitle={t("consumption.modals.confirmSubtitle", lang)}
       onClose={onClose}
       footer={
         <>
-          <Btn variant="outline" onClick={onClose}>Cancel</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("common.cancel", lang)}</Btn>
           <Btn
             variant="primary"
             disabled={busy || lines.length === 0 || short.length > 0}
@@ -796,7 +830,7 @@ export function ConfirmExitModal({
               onClose();
             }}
           >
-            {busy ? "Confirming…" : "Confirm exit"}
+            {t(busy ? "consumption.modals.confirming" : "consumption.shared.confirmExit", lang)}
           </Btn>
         </>
       }
@@ -806,25 +840,36 @@ export function ConfirmExitModal({
       {short.length > 0 && (
         <div className="rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300">
           <span className="inline-flex items-center gap-1 font-medium">
-            <AlertTriangle className="h-4 w-4" />Not enough stock
+            <AlertTriangle className="h-4 w-4" />{t("consumption.modals.notEnoughStock", lang)}
           </span>
           <ul className="mt-1 list-disc ps-5">
             {short.map((l) => {
               const p = partsById.get(l.part_id);
-              return <li key={l.id}>{p?.name}: need {l.qty}, {p?.qty_on_hand} on hand</li>;
+              // Both `{name}` and `{n}` fall back to "" rather than to a word:
+              // when the page did not load the part the old JSX rendered
+              // nothing in either slot, and a shortfall line that invents
+              // "Unknown" or "0" would be reporting a stock figure it has not
+              // read.
+              return (
+                <li key={l.id}>
+                  {t("consumption.modals.shortLine", lang)
+                    .replace("{name}", () => (p ? arText(p.name, p.name_ar, lang) : ""))
+                    .replace("{q}", () => String(l.qty))
+                    .replace("{n}", () => (p ? String(p.qty_on_hand) : ""))}
+                </li>
+              );
             })}
           </ul>
         </div>
       )}
 
       <p className="text-sm">
-        {lines.length} item{lines.length === 1 ? "" : "s"} will leave the warehouse. Cost is stamped
-        at FIFO from the oldest stock first.
+        {fill(`consumption.modals.willLeave.${plural(lines.length)}`, lang, "{n}", String(lines.length))}
       </p>
 
       <Table>
         <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-          <tr><TH>Part</TH><TH>Qty out</TH><TH>On hand now</TH><TH>After</TH><TH>FIFO unit value</TH></tr>
+          <tr><TH>{t("common.part", lang)}</TH><TH>{t("consumption.shared.qtyOut", lang)}</TH><TH>{t("consumption.modals.colOnHandNow", lang)}</TH><TH>{t("consumption.modals.colAfter", lang)}</TH><TH>{t("consumption.shared.fifoUnitValue", lang)}</TH></tr>
         </thead>
         <tbody>
           {lines.map((l) => {
@@ -833,7 +878,9 @@ export function ConfirmExitModal({
             return (
               <tr key={l.id}>
                 <TD>
-                  <span className="text-sm font-medium">{p?.name ?? "Unknown"}</span>
+                  <span className="text-sm font-medium">
+                    {p ? arText(p.name, p.name_ar, lang) : t("consumption.modals.unknownPart", lang)}
+                  </span>
                   <div className="text-[11px] muted">{p?.sku}</div>
                 </TD>
                 <TD className="text-xs tabular-nums">{l.qty}</TD>
@@ -855,7 +902,7 @@ export function ConfirmExitModal({
 
       {permit.kind === "returnable" && permit.expected_return_on && (
         <p className="text-[11px] muted">
-          Returnable — due back {formatDate(permit.expected_return_on + "T00:00:00")}.
+          {fill("consumption.modals.returnableDueBack", lang, "{d}", formatDate(permit.expected_return_on + "T00:00:00"))}
         </p>
       )}
     </Shell>
@@ -883,6 +930,7 @@ export function ReturnModal({
   permit: ExitPermit; lines: ExitPermitLine[]; parts: PartLite[];
   ledger: ConsumptionLedgerRow[]; today: string; onClose: () => void;
 }) {
+  const { lang } = useApp();
   const [qtys, setQtys] = useState<Record<string, string>>({});
   const [returnedOn, setReturnedOn] = useState(today);
   const [note, setNote] = useState("");
@@ -899,12 +947,12 @@ export function ReturnModal({
   return (
     <Shell
       size="lg"
-      title="Record a return"
-      subtitle={`Permit ${permit.ep_number ?? ""} — enter what came back. Partial returns are fine.`}
+      title={t("consumption.modals.returnTitle", lang)}
+      subtitle={fill("consumption.modals.returnSubtitle", lang, "{n}", permit.ep_number ?? "")}
       onClose={onClose}
       footer={
         <>
-          <Btn variant="outline" onClick={onClose}>Cancel</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("common.cancel", lang)}</Btn>
           <Btn
             variant="primary"
             disabled={busy || anyOver || !anyEntered}
@@ -919,7 +967,7 @@ export function ReturnModal({
               onClose();
             }}
           >
-            {busy ? "Recording…" : "Record return"}
+            {t(busy ? "consumption.shared.recording" : "consumption.modals.recordReturn", lang)}
           </Btn>
         </>
       }
@@ -928,11 +976,11 @@ export function ReturnModal({
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs muted block mb-1">Returned on</label>
+          <label className="text-xs muted block mb-1">{t("consumption.modals.labelReturnedOn", lang)}</label>
           <input type="date" value={returnedOn} onChange={(e) => setReturnedOn(e.target.value)} className={INPUT} style={INPUT_STYLE} />
         </div>
         <div>
-          <label className="text-xs muted block mb-1">Note</label>
+          <label className="text-xs muted block mb-1">{t("common.note", lang)}</label>
           <input value={note} onChange={(e) => setNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
         </div>
       </div>
@@ -940,7 +988,7 @@ export function ReturnModal({
       <Table>
         <thead style={{ background: "rgba(0,0,0,0.02)" }}>
           <tr>
-            <TH>Item</TH><TH>Returning</TH><TH>Outstanding</TH><TH>Item value</TH>
+            <TH>{t("consumption.modals.colItem", lang)}</TH><TH>{t("consumption.modals.colReturning", lang)}</TH><TH>{t("consumption.shared.outstanding", lang)}</TH><TH>{t("consumption.modals.colItemValue", lang)}</TH>
           </tr>
         </thead>
         <tbody>
@@ -963,11 +1011,13 @@ export function ReturnModal({
               >
                 <TD>
                   <span className={cn("text-sm", active ? "font-semibold" : "font-medium")}>
-                    {p?.name ?? "Unknown"}
+                    {p ? arText(p.name, p.name_ar, lang) : t("consumption.modals.unknownPart", lang)}
                   </span>
                   <div className="text-[11px] muted">
                     {p?.sku}
-                    {Number(l.qty_returned) > 0 && ` · ${l.qty_returned} of ${l.qty} already back`}
+                    {Number(l.qty_returned) > 0 && t("consumption.modals.alreadyBackCaption", lang)
+                      .replace("{r}", () => String(l.qty_returned))
+                      .replace("{q}", () => String(l.qty))}
                   </div>
                 </TD>
                 <TD>
@@ -991,7 +1041,7 @@ export function ReturnModal({
                     <span className="font-medium">{out}</span>
                   ) : over ? (
                     <span className="font-medium text-rose-600 dark:text-rose-400">
-                      only {out} out
+                      {fill("consumption.modals.onlyNOut", lang, "{n}", String(out))}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1.5">
@@ -1015,7 +1065,7 @@ export function ReturnModal({
                     const preview = returnedUnitPricePreview(l.id, entered, ledger, stamped);
                     if (preview === null) {
                       return (
-                        <span className="muted" title="This line's lot history cannot cover that quantity">
+                        <span className="muted" title={t("consumption.modals.titleLineLotsShort", lang)}>
                           —
                         </span>
                       );
@@ -1029,7 +1079,7 @@ export function ReturnModal({
         </tbody>
       </Table>
       <p className="text-[11px] muted">
-        Returned stock goes back to the exact price lots it came from, so cost stays accurate.
+        {t("consumption.modals.returnFooter", lang)}
       </p>
     </Shell>
   );
@@ -1041,6 +1091,7 @@ export function ReturnModal({
 export function VoidModal({
   permit, lines, parts, onClose,
 }: { permit: ExitPermit; lines: ExitPermitLine[]; parts: PartLite[]; onClose: () => void }) {
+  const { lang } = useApp();
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1051,12 +1102,12 @@ export function VoidModal({
 
   return (
     <Shell
-      title="Void this permit"
-      subtitle={`Permit ${permit.ep_number ?? ""} — the record is kept, marked voided.`}
+      title={t("consumption.modals.voidTitle", lang)}
+      subtitle={fill("consumption.modals.voidSubtitle", lang, "{n}", permit.ep_number ?? "")}
       onClose={onClose}
       footer={
         <>
-          <Btn variant="outline" onClick={onClose}>Cancel</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("common.cancel", lang)}</Btn>
           <Btn
             variant="primary"
             disabled={busy}
@@ -1068,7 +1119,7 @@ export function VoidModal({
               onClose();
             }}
           >
-            {busy ? "Voiding…" : "Void permit"}
+            {t(busy ? "consumption.modals.voiding" : "consumption.shared.voidPermit", lang)}
           </Btn>
         </>
       }
@@ -1077,23 +1128,27 @@ export function VoidModal({
 
       {restoring.length === 0 ? (
         <p className="text-sm">
-          Everything on this permit has already been returned, so voiding it moves no stock — it
-          only marks the record as void.
+          {t("consumption.modals.voidNothingToRestore", lang)}
         </p>
       ) : (
         <>
-          <p className="text-sm">These quantities go back to stock:</p>
+          <p className="text-sm">{t("consumption.modals.voidRestoreIntro", lang)}</p>
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-              <tr><TH>Part</TH><TH>Restoring</TH></tr>
+              <tr><TH>{t("common.part", lang)}</TH><TH>{t("consumption.modals.colRestoring", lang)}</TH></tr>
             </thead>
             <tbody>
-              {restoring.map((l) => (
-                <tr key={l.id}>
-                  <TD className="text-sm">{partsById.get(l.part_id)?.name ?? "Unknown"}</TD>
-                  <TD className="text-xs tabular-nums font-medium">{outstandingQty(l)}</TD>
-                </tr>
-              ))}
+              {restoring.map((l) => {
+                const p = partsById.get(l.part_id);
+                return (
+                  <tr key={l.id}>
+                    <TD className="text-sm">
+                      {p ? arText(p.name, p.name_ar, lang) : t("consumption.modals.unknownPart", lang)}
+                    </TD>
+                    <TD className="text-xs tabular-nums font-medium">{outstandingQty(l)}</TD>
+                  </tr>
+                );
+              })}
             </tbody>
           </Table>
         </>
@@ -1101,15 +1156,13 @@ export function VoidModal({
 
       {alreadyBack.length > 0 && (
         <p className="text-[11px] muted">
-          {alreadyBack.length} item{alreadyBack.length === 1 ? " has" : "s have"} already been
-          partly returned. Those quantities were restored by their own return event and are NOT
-          restored again here.
+          {fill(`consumption.modals.alreadyPartlyReturned.${plural(alreadyBack.length)}`, lang, "{n}", String(alreadyBack.length))}
         </p>
       )}
 
       <div>
-        <label className="text-xs muted block mb-1">Reason</label>
-        <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why is this being voided?" className={INPUT} style={INPUT_STYLE} />
+        <label className="text-xs muted block mb-1">{t("consumption.modals.labelReason", lang)}</label>
+        <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("consumption.modals.voidReasonPlaceholder", lang)} className={INPUT} style={INPUT_STYLE} />
       </div>
     </Shell>
   );
@@ -1130,6 +1183,7 @@ export function PermitPrintView({
   warehouseName: string; destination: string; destinationKind: string;
   receiver: string; onClose: () => void;
 }) {
+  const { lang } = useApp();
   const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
   const value = permitValueSar(lines);
 
@@ -1145,14 +1199,14 @@ export function PermitPrintView({
   return (
     <Shell
       size="xl"
-      title={`Exit permit ${permit.ep_number ?? ""}`}
-      subtitle="Print and send this with the carrier."
+      title={fill("consumption.modals.printTitle", lang, "{n}", permit.ep_number ?? "")}
+      subtitle={t("consumption.modals.printSubtitle", lang)}
       onClose={onClose}
       footer={
         <>
-          <Btn variant="outline" onClick={onClose}>Close</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("consumption.shared.close", lang)}</Btn>
           <Btn variant="primary" onClick={() => window.print()}>
-            <Printer className="h-4 w-4" />Print
+            <Printer className="h-4 w-4" />{t("consumption.modals.printBtn", lang)}
           </Btn>
         </>
       }
@@ -1160,37 +1214,39 @@ export function PermitPrintView({
       <div id="permit-print" className="space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="text-xs uppercase tracking-wide muted">Exit permit</div>
-            <div className="text-2xl font-bold font-mono">{permit.ep_number ?? "DRAFT"}</div>
+            <div className="text-xs uppercase tracking-wide muted">{t("consumption.shared.exitPermit", lang)}</div>
+            <div className="text-2xl font-bold font-mono">{permit.ep_number ?? t("consumption.modals.printDraft", lang)}</div>
             <div className="text-xs muted mt-0.5">
-              {EXIT_PERMIT_KIND_LABELS[permit.kind]}
+              {t(EXIT_PERMIT_KIND_TKEY[permit.kind], lang)}
               {permit.kind === "returnable" && permit.expected_return_on &&
-                ` · due back ${formatDate(permit.expected_return_on + "T00:00:00")}`}
+                fill("consumption.modals.printDueBack", lang, "{d}", formatDate(permit.expected_return_on + "T00:00:00"))}
             </div>
           </div>
           <div className="text-end text-xs">
-            <div className="muted">Issued</div>
+            <div className="muted">{t("consumption.modals.printIssued", lang)}</div>
             <div>{permit.exited_at ? formatDateTime(permit.exited_at) : "—"}</div>
             {permit.exited_by && <div className="muted">{permit.exited_by}</div>}
             {permit.status === "voided" && (
-              <div className="mt-1 font-semibold text-rose-600 dark:text-rose-400">VOIDED</div>
+              <div className="mt-1 font-semibold text-rose-600 dark:text-rose-400">{t("consumption.modals.printVoided", lang)}</div>
             )}
           </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-          <PrintField label="From warehouse" value={warehouseName} />
-          <PrintField label={`To (${destinationKind})`} value={destination} />
-          <PrintField label="Receiver" value={receiver} />
-          <PrintField label="Carrier / driver" value={permit.carrier_name || "—"} />
+          <PrintField label={t("consumption.modals.printFromWarehouse", lang)} value={warehouseName} />
+          {/* `destinationKind` arrives already translated — the caller resolves
+              the enum through EXIT_PERMIT_DESTINATION_TKEY. */}
+          <PrintField label={fill("consumption.modals.printTo", lang, "{kind}", destinationKind)} value={destination} />
+          <PrintField label={t("consumption.shared.receiver", lang)} value={receiver} />
+          <PrintField label={t("consumption.modals.labelCarrier", lang)} value={permit.carrier_name || "—"} />
         </div>
 
         <Table>
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
             <tr>
-              <TH>#</TH><TH>Part</TH><TH>SKU</TH>
-              <TH>{sharedUnit ? `Qty (${sharedUnit})` : "Qty"}</TH>
-              <TH>Item value</TH>
+              <TH>#</TH><TH>{t("common.part", lang)}</TH><TH>{t("consumption.modals.colSku", lang)}</TH>
+              <TH>{sharedUnit ? fill("consumption.modals.colQtyUnit", lang, "{u}", sharedUnit) : t("common.qty", lang)}</TH>
+              <TH>{t("consumption.modals.colItemValue", lang)}</TH>
             </tr>
           </thead>
           <tbody>
@@ -1201,7 +1257,9 @@ export function PermitPrintView({
               return (
                 <tr key={l.id}>
                   <TD className="text-xs tabular-nums">{i + 1}</TD>
-                  <TD className="text-sm">{p?.name ?? "Unknown"}</TD>
+                  <TD className="text-sm">
+                    {p ? arText(p.name, p.name_ar, lang) : t("consumption.modals.unknownPart", lang)}
+                  </TD>
                   <TD className="text-xs font-mono">{p?.sku ?? "—"}</TD>
                   <TD className="text-sm tabular-nums">
                     {/* A RETURNED item shows what went out, faded, with an
@@ -1228,17 +1286,30 @@ export function PermitPrintView({
           </tbody>
         </Table>
 
-        {permit.note && <div className="text-sm"><span className="muted">Note: </span>{permit.note}</div>}
+        {permit.note && (
+          <div className="text-sm">
+            <span className="muted">{t("common.note", lang)}{": "}</span>{permit.note}
+          </div>
+        )}
 
         {/* Value is internal cost — printed small and last, since the gate
             copy is about WHAT left, not what it was worth. */}
-        <div className="text-[11px] muted">Internal value at FIFO cost: {formatSar(value)}</div>
+        <div className="text-[11px] muted">
+          {fill("consumption.modals.printInternalValue", lang, "{v}", formatSar(value))}
+        </div>
 
+        {/* The three roles are KEYS, not English strings — an array of literals
+            would translate to whatever the caller's locale happened to be at
+            build time, and `key` needs the stable identity anyway. */}
         <div className="grid grid-cols-3 gap-6 pt-6">
-          {["Issued by", "Received by", "Gate / security"].map((role) => (
-            <div key={role}>
+          {([
+            "consumption.modals.printRoleIssuedBy",
+            "consumption.modals.printRoleReceivedBy",
+            "consumption.modals.printRoleGate",
+          ] as const).map((roleKey) => (
+            <div key={roleKey}>
               <div className="border-t pt-1 text-[11px] muted" style={{ borderColor: "rgb(var(--border))" }}>
-                {role} — name &amp; signature
+                {fill("consumption.modals.signatureLine", lang, "{role}", t(roleKey, lang))}
               </div>
               <div className="h-10" />
             </div>

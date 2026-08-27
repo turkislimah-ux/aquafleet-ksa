@@ -18,6 +18,7 @@ import type {
   WorkOrder, WorkOrderPart, OutsourcedJob, WorkshopPayment,
 } from "./db-types";
 import { permitValueSar } from "./exit-permits";
+import { t, type Lang, type TKey } from "./i18n";
 
 export type ApprovalKind = "exit_permit" | "work_order" | "outsourced_job";
 export type ApprovalStatus = "pending" | "approved" | "rejected";
@@ -33,23 +34,37 @@ export const APPROVAL_KIND_PILL: Record<ApprovalKind, string> = {
   outsourced_job: "bg-violet-500/10 text-violet-700 dark:text-violet-300 ring-violet-500/25",
 };
 
-export const APPROVAL_KIND_LABELS: Record<ApprovalKind, string> = {
-  exit_permit: "Exit permit",
-  work_order: "Work order",
-  outsourced_job: "Outsourced job",
+// ENUM VALUE -> DICTIONARY KEY. These three carry a TKey rather than English:
+// unlike db-types.ts's enum maps they are not a shared file's source of option
+// order — this module is read by app/consumption/** only, and the three lists
+// are already ordered by the ApprovalKind/ApprovalStatus unions above.
+export const APPROVAL_KIND_LABELS: Record<ApprovalKind, TKey> = {
+  exit_permit: "consumption.shared.exitPermit",
+  work_order: "consumption.approvals.kindWorkOrder",
+  outsourced_job: "consumption.approvals.kindOutsourcedJob",
+};
+
+// The LOWER-CASE mid-sentence form. The reject modal used to call
+// `.toLowerCase()` on APPROVAL_KIND_LABELS to drop the kind into a sentence,
+// which is an English-shaped operation — Arabic has no letter case, so the call
+// is a no-op there and the sentence would carry a Title-Case noun mid-clause.
+export const APPROVAL_KIND_INLINE: Record<ApprovalKind, TKey> = {
+  exit_permit: "consumption.approvals.inlineExitPermit",
+  work_order: "consumption.approvals.inlineWorkOrder",
+  outsourced_job: "consumption.approvals.inlineOutsourcedJob",
 };
 
 // Short form for the row pill, where the reference number already says a lot.
-export const APPROVAL_KIND_SHORT: Record<ApprovalKind, string> = {
-  exit_permit: "Permit",
-  work_order: "In-house",
-  outsourced_job: "Outsourced",
+export const APPROVAL_KIND_SHORT: Record<ApprovalKind, TKey> = {
+  exit_permit: "consumption.approvals.shortExitPermit",
+  work_order: "consumption.approvals.shortWorkOrder",
+  outsourced_job: "consumption.approvals.shortOutsourcedJob",
 };
 
-export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = {
-  pending: "Pending",
-  approved: "Approved",
-  rejected: "Rejected",
+export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, TKey> = {
+  pending: "consumption.approvals.statusPending",
+  approved: "consumption.approvals.statusApproved",
+  rejected: "consumption.approvals.statusRejected",
 };
 
 export const APPROVAL_STATUS_PILL: Record<ApprovalStatus, string> = {
@@ -145,7 +160,12 @@ export function buildApprovalEvents(input: {
   viewer: string | null;
   destinationLabel: (p: ExitPermit) => string;
   repairerNames: (jobId: string) => string | null;
+  // Only one string in this whole module is composed rather than looked up: the
+  // stand-in title an untitled permit gets. Work orders and outsourced jobs
+  // carry their own DB title, so nothing else here needs a language.
+  lang: Lang;
 }): ApprovalEvent[] {
+  const lang = input.lang;
   // 0095 changed the key from the EVENT to (EVENT, APPROVER), so each of
   // these now holds a LIST — the sign-off sheet, not a single verdict.
   const byPermit = new Map<string, ConsumptionApproval[]>();
@@ -178,7 +198,7 @@ export function buildApprovalEvents(input: {
       kind: "exit_permit",
       subjectId: p.id,
       reference: p.ep_number ?? "—",
-      title: p.note?.trim() || "Parts leaving the warehouse",
+      title: p.note?.trim() || t("consumption.approvals.untitledPermit", lang),
       occurredAt: p.exited_at,
       truckId: p.destination_truck_id,
       where: input.destinationLabel(p),

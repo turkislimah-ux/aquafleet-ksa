@@ -289,7 +289,7 @@ export const dict = {
     typeToSearch: { en: "Type at least 2 characters.", ar: "اكتب حرفين على الأقل." },
     searchedAcross: {
       en: "Searched pages, trucks, drivers, staff, customers, invoices, trips, parts, orders, permits and documents.",
-      ar: "تم البحث في الصفحات والشاحنات والسائقين والموظفين والعملاء والفواتير والرحلات وقطع الغيار والطلبات والتصاريح والوثائق.",
+      ar: "تم البحث في الصفحات والشاحنات والسائقين والموظفين والعملاء والفواتير والرحلات وقطع الغيار والطلبات والأذونات والوثائق.",
     },
     searching: { en: "Searching\u2026", ar: "\u062c\u0627\u0631\u064d \u0627\u0644\u0628\u062d\u062b\u2026" },
     // Announced to screen readers only (aria-live). "{n}" is replaced
@@ -319,7 +319,7 @@ export const dict = {
     g_part: { en: "Parts", ar: "قطع الغيار" },
     g_work_order: { en: "Work Orders", ar: "أوامر العمل" },
     g_outsourced_job: { en: "Outsourced Jobs", ar: "الأعمال الخارجية" },
-    g_exit_permit: { en: "Exit Permits", ar: "تصاريح الخروج" },
+    g_exit_permit: { en: "Exit Permits", ar: "أذونات الخروج" },
     g_purchase_order: { en: "Purchase Orders", ar: "أوامر الشراء" },
     g_archive_document: { en: "Archive Documents", ar: "وثائق الأرشيف" },
     g_expense: { en: "Expenses", ar: "المصروفات" },
@@ -1013,7 +1013,7 @@ export const dict = {
         hint: { en: "Still running after the expected finish", ar: "ما زالت جارية بعد الموعد المتوقع" },
       },
       permit_return_overdue: {
-        label: { en: "Exit permits past their return date", ar: "تصاريح خروج تجاوزت موعد الإرجاع" },
+        label: { en: "Exit permits past their return date", ar: "أذونات خروج تجاوزت موعد الإرجاع" },
         hint: { en: "Parts out and not returned", ar: "قطع خارجة ولم تُرجَع" },
       },
       parts_below_reorder: {
@@ -1037,8 +1037,8 @@ export const dict = {
       work_order_completed: { en: "Work order completed", ar: "اكتمل أمر عمل" },
       outsourced_opened: { en: "Outsourced job opened", ar: "فتح عمل خارجي" },
       outsourced_completed: { en: "Outsourced job done", ar: "اكتمل عمل خارجي" },
-      permit_exited: { en: "Parts left on permit", ar: "خروج قطع بتصريح" },
-      permit_voided: { en: "Exit permit voided", ar: "إلغاء تصريح خروج" },
+      permit_exited: { en: "Parts left on permit", ar: "خروج قطع بإذن" },
+      permit_voided: { en: "Exit permit voided", ar: "إلغاء إذن خروج" },
       consumption_decided: { en: "Consumption decided", ar: "تم البت في استهلاك" },
       po_issued: { en: "Purchase order issued", ar: "صدر أمر شراء" },
       po_approved: { en: "Purchase order approved", ar: "اعتُمد أمر شراء" },
@@ -1689,6 +1689,1269 @@ export const dict = {
       confirmTotalLoss: { en: "Confirm total loss", ar: "تأكيد التلف" },
     },
   },
+  /**
+   * ── Phase 3 Batch 5 — CONSUMPTION ────────────────────────────────────────
+   *
+   * The Consumption route: the Parts Usage analytics tab, the Exit Permits tab
+   * and its five modals, and the Approvals queue. Every `en` below is the EXACT
+   * literal that was in the source before this conversion, including the
+   * collapsed single-line form of a wrapped JSX text run.
+   *
+   * `enums` holds the two label maps that live in lib/db-types.ts. They are NOT
+   * in the `labels` namespace above, and the difference is the reason that
+   * namespace gives for itself: those three enum families are read from FOUR
+   * routes, so a route-scoped key would misdescribe them. EXIT_PERMIT_KIND and
+   * EXIT_PERMIT_DESTINATION are read by app/consumption/** and nothing else —
+   * grep-verified for this batch. If a second route ever reads them, move them
+   * up to `labels`; until then a consumption key is the honest description.
+   *
+   * `*Inline` entries are the LOWER-CASE mid-sentence forms. They exist because
+   * two sites used to call `.toLowerCase()` on a rendered label to drop it into
+   * a sentence — an English-shaped seam (Arabic has no letter case, so the call
+   * is a no-op there and the sentence would carry a Title-Case noun mid-clause).
+   * The call sites now key off the ENUM and look up a proper inline form.
+   *
+   * `weekly` is the weeklySummary() narrative. See the `plural()` helper at the
+   * foot of this file for why a bullet with a count has FOUR forms rather than
+   * two: Arabic agrees a counted noun differently at 1, 2, 3–10 and 11+. The
+   * four English values under such a key are deliberately identical wherever
+   * English does not inflect, so the English output is the same string
+   * whichever bucket fires. A sentence carrying TWO independent counts is
+   * stored as the full 4×4 cross product — writing the head and the tail as
+   * separate keys and joining them at render time is exactly the fragment
+   * splicing this batch was told not to do.
+   */
+  consumption: {
+    // WORDS MORE THAN ONE FILE IN THIS ROUTE RENDERS.
+    //
+    // The dictionary's rule at the top of `common` is that a string earns a
+    // shared home by appearing in MORE THAN ONE of the files a batch converted.
+    // These do — but they are Consumption VOCABULARY, not app chrome, so
+    // they land here rather than in `common`, which holds the words every route
+    // reuses (Part, Qty, Truck, Status, Cancel — all of which this route reads
+    // from `common` and does NOT re-mint below).
+    //
+    // Two deliberate duplicates, both kept:
+    //   - `permit` vs `consumption.approvals.shortExitPermit`. Same English
+    //     word, different jobs: this one is a COLUMN HEADER, that one is the
+    //     short KIND PILL on the approvals queue. Rewording one must not
+    //     reword the other.
+    //   - `close` vs the three route-local `close` keys already in this file
+    //     (Fleet, Inventory, Maintenance). Centralising all four is a
+    //     cross-route change and is not this batch's to make; a fourth copy in
+    //     `common` while three route-local ones survive would be the worst of
+    //     both, so this one stays scoped to the route that reads it.
+    shared: {
+      value: { en: "Value", ar: "القيمة" },
+      total: { en: "Total", ar: "الإجمالي" },
+      destination: { en: "Destination", ar: "الوجهة" },
+      permit: { en: "Permit", ar: "إذن" },
+      close: { en: "Close", ar: "إغلاق" },
+      kind: { en: "Kind", ar: "النوع" },
+      // The FIFO unit cost column. The Arabic spells the rule out rather than
+      // transliterating "FIFO": «الوارد أولًا» is the same phrase the Inventory
+      // route already uses, so a reader meets one name for one rule.
+      fifoUnitValue: { en: "FIFO unit value", ar: "قيمة الوحدة بالوارد أولًا" },
+      // Row-expander aria labels. Both tables in this route expand a row into a
+      // detail panel, and a screen reader should hear the same verb on each.
+      expandAria: { en: "Expand", ar: "توسيع" },
+      collapseAria: { en: "Collapse", ar: "طي" },
+
+      // --- PROMOTED WHEN ExitPermitModals.tsx CONVERTED ---
+      // Each of these was minted route-locally back when ONE file rendered it.
+      // The modals render all nine as well, which is exactly the "more than one
+      // file in this route" test this namespace exists for — so the
+      // single-file copy was deleted and its call site repointed here. The
+      // alternative, a second leaf holding byte-identical English, is the drift
+      // this namespace was created to prevent: the list column and the modal
+      // column ARE the same column, and one edit must move both.
+      warehouse: { en: "Warehouse", ar: "المستودع" },
+      receiver: { en: "Receiver", ar: "المستلم" },
+      items: { en: "Items", ar: "الأصناف" },
+      qtyOut: { en: "Qty out", ar: "الكمية الخارجة" },
+      outstanding: { en: "Outstanding", ar: "القائم" },
+      // The button on the list row, and the title of the modal it opens.
+      confirmExit: { en: "Confirm exit", ar: "تأكيد الخروج" },
+      voidPermit: { en: "Void permit", ar: "إلغاء الإذن" },
+      // The lower-case tag under an unstamped FIFO figure: a draft's cost is a
+      // preview, not a promise, and both the list and the form say so.
+      previewTag: { en: "preview", ar: "معاينة" },
+      // Was `approvals.kindExitPermit`, read by lib/consumption-approvals.ts.
+      // The printed permit's own header renders the same two words, so the
+      // document a driver carries and the approval queue name it identically.
+      exitPermit: { en: "Exit permit", ar: "إذن خروج" },
+      // The in-flight label on a button that is writing an event: the approvals
+      // queue recording a decision, the return popup recording a return.
+      recording: { en: "Recording…", ar: "جارٍ التسجيل…" },
+    },
+
+    enums: {
+      // ExitPermitKind
+      kindReturnable: { en: "Returnable", ar: "قابلة للإرجاع" },
+      kindPermanent: { en: "Permanent", ar: "دائمة" },
+      // ExitPermitDestinationKind
+      destWaterStation: { en: "Water station", ar: "محطة مياه" },
+      destProject: { en: "Project", ar: "مشروع" },
+      destTruck: { en: "Truck", ar: "شاحنة" },
+      destCustomer: { en: "Customer", ar: "عميل" },
+      destOther: { en: "Other", ar: "أخرى" },
+      // Mid-sentence forms — see this namespace's header.
+      destInlineWaterStation: { en: "water station", ar: "محطة مياه" },
+      destInlineProject: { en: "project", ar: "مشروع" },
+      destInlineTruck: { en: "truck", ar: "شاحنة" },
+      destInlineCustomer: { en: "customer", ar: "عميل" },
+      destInlineOther: { en: "other", ar: "جهة أخرى" },
+    },
+
+    // lib/consumption-approvals.ts — the three label maps plus the fallback
+    // title an untitled permit gets in the queue.
+    approvals: {
+      // NOTE: the exit-permit KIND label is not here — it is
+      // `consumption.shared.exitPermit`, because the print view renders the
+      // same words. The other two kinds have a single reader and stay local.
+      kindWorkOrder: { en: "Work order", ar: "أمر عمل" },
+      kindOutsourcedJob: { en: "Outsourced job", ar: "عمل خارجي" },
+      shortExitPermit: { en: "Permit", ar: "إذن" },
+      shortWorkOrder: { en: "In-house", ar: "داخلي" },
+      shortOutsourcedJob: { en: "Outsourced", ar: "خارجي" },
+      statusPending: { en: "Pending", ar: "قيد الانتظار" },
+      statusApproved: { en: "Approved", ar: "معتمد" },
+      statusRejected: { en: "Rejected", ar: "مرفوض" },
+      untitledPermit: { en: "Parts leaving the warehouse", ar: "قطع تخرج من المستودع" },
+      inlineExitPermit: { en: "exit permit", ar: "إذن الخروج" },
+      inlineWorkOrder: { en: "work order", ar: "أمر العمل" },
+      inlineOutsourcedJob: { en: "outsourced job", ar: "العمل الخارجي" },
+    },
+
+    // lib/parts-usage.ts — the label maps and the "unknown row" fallbacks.
+    usage: {
+      periodWeek: { en: "Week to week", ar: "أسبوع مقابل أسبوع" },
+      periodMonth: { en: "Month to month", ar: "شهر مقابل شهر" },
+      periodQuarter: { en: "Quarter to quarter", ar: "ربع مقابل ربع" },
+      periodYear: { en: "Year to year", ar: "سنة مقابل سنة" },
+      // fmtRange(). `{d}` is a formatDate() result and `{y}`/`{q}` are Latin
+      // numerals — figures stay Latin in both languages, the standing rule.
+      rangeWeek: { en: "Week of {d}", ar: "أسبوع {d}" },
+      rangeQuarter: { en: "Q{q} {y}", ar: "الربع {q} {y}" },
+      trendMonth: { en: "Monthly", ar: "شهري" },
+      trendQuarter: { en: "Quarterly", ar: "ربع سنوي" },
+      trendYear: { en: "Yearly", ar: "سنوي" },
+      sourceMaintenance: { en: "Maintenance", ar: "الصيانة" },
+      sourceExitPermits: { en: "Exit permits", ar: "أذونات الخروج" },
+      unknownTruck: { en: "Unknown truck", ar: "شاحنة غير معروفة" },
+      unknownPart: { en: "Unknown part", ar: "قطعة غير معروفة" },
+      unknownWarehouse: { en: "Unknown warehouse", ar: "مستودع غير معروف" },
+      unassignedWarehouse: { en: "Unassigned", ar: "غير محدد" },
+    },
+
+    weekly: {
+      quietNoPrev: {
+        en: "Nothing left stock this week, and nothing last week either.",
+        ar: "لم يخرج أي مخزون هذا الأسبوع، ولا في الأسبوع الماضي أيضاً.",
+      },
+      // {v} value, {q} units — bucketed on the PREVIOUS week's unit count.
+      quietWithPrev: {
+        one: {
+          en: "Nothing left stock this week — last week it was {v} SAR across {q} units.",
+          ar: "لم يخرج أي مخزون هذا الأسبوع — الأسبوع الماضي خرج ما قيمته {v} SAR عبر وحدة واحدة.",
+        },
+        two: {
+          en: "Nothing left stock this week — last week it was {v} SAR across {q} units.",
+          ar: "لم يخرج أي مخزون هذا الأسبوع — الأسبوع الماضي خرج ما قيمته {v} SAR عبر وحدتين.",
+        },
+        few: {
+          en: "Nothing left stock this week — last week it was {v} SAR across {q} units.",
+          ar: "لم يخرج أي مخزون هذا الأسبوع — الأسبوع الماضي خرج ما قيمته {v} SAR عبر {q} وحدات.",
+        },
+        many: {
+          en: "Nothing left stock this week — last week it was {v} SAR across {q} units.",
+          ar: "لم يخرج أي مخزون هذا الأسبوع — الأسبوع الماضي خرج ما قيمته {v} SAR عبر {q} وحدة.",
+        },
+      },
+      totalNoPrev: {
+        one: {
+          en: "{v} SAR of parts left stock across {q} units — nothing moved last week, so there is no comparison yet.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر وحدة واحدة — لم يتحرك شيء الأسبوع الماضي، فلا مقارنة بعد.",
+        },
+        two: {
+          en: "{v} SAR of parts left stock across {q} units — nothing moved last week, so there is no comparison yet.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر وحدتين — لم يتحرك شيء الأسبوع الماضي، فلا مقارنة بعد.",
+        },
+        few: {
+          en: "{v} SAR of parts left stock across {q} units — nothing moved last week, so there is no comparison yet.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر {q} وحدات — لم يتحرك شيء الأسبوع الماضي، فلا مقارنة بعد.",
+        },
+        many: {
+          en: "{v} SAR of parts left stock across {q} units — nothing moved last week, so there is no comparison yet.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر {q} وحدة — لم يتحرك شيء الأسبوع الماضي، فلا مقارنة بعد.",
+        },
+      },
+      totalUp: {
+        one: {
+          en: "{v} SAR of parts left stock across {q} units, up {d}% in value against last week.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر وحدة واحدة، بارتفاع {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        two: {
+          en: "{v} SAR of parts left stock across {q} units, up {d}% in value against last week.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر وحدتين، بارتفاع {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        few: {
+          en: "{v} SAR of parts left stock across {q} units, up {d}% in value against last week.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر {q} وحدات، بارتفاع {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        many: {
+          en: "{v} SAR of parts left stock across {q} units, up {d}% in value against last week.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر {q} وحدة، بارتفاع {d}% في القيمة عن الأسبوع الماضي.",
+        },
+      },
+      totalDown: {
+        one: {
+          en: "{v} SAR of parts left stock across {q} units, down {d}% in value against last week.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر وحدة واحدة، بانخفاض {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        two: {
+          en: "{v} SAR of parts left stock across {q} units, down {d}% in value against last week.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر وحدتين، بانخفاض {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        few: {
+          en: "{v} SAR of parts left stock across {q} units, down {d}% in value against last week.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر {q} وحدات، بانخفاض {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        many: {
+          en: "{v} SAR of parts left stock across {q} units, down {d}% in value against last week.",
+          ar: "خرجت قطع بقيمة {v} SAR من المخزون عبر {q} وحدة، بانخفاض {d}% في القيمة عن الأسبوع الماضي.",
+        },
+      },
+      splitShare: {
+        en: "Maintenance took {s}% of the value ({m} SAR); exit permits took the rest ({e} SAR).",
+        ar: "استحوذت الصيانة على {s}% من القيمة ({m} SAR)؛ وأخذت أذونات الخروج الباقي ({e} SAR).",
+      },
+      allMaintenance: {
+        en: "Everything consumed this week went to in-house maintenance — no exit permits.",
+        ar: "كل ما استُهلك هذا الأسبوع ذهب إلى الصيانة الداخلية — بلا أذونات خروج.",
+      },
+      allExits: {
+        en: "Everything consumed this week left on exit permits — no maintenance draws.",
+        ar: "كل ما استُهلك هذا الأسبوع خرج بأذونات خروج — بلا سحب للصيانة.",
+      },
+      topPart: {
+        en: "{p} was the biggest single item at {v} SAR.",
+        ar: "{p} كانت أكبر بند منفرد بقيمة {v} SAR.",
+      },
+      topPartHalf: {
+        en: "{p} was the biggest single item at {v} SAR — over half the week's value on its own.",
+        ar: "{p} كانت أكبر بند منفرد بقيمة {v} SAR — أكثر من نصف قيمة الأسبوع وحدها.",
+      },
+      // {n} work orders. Bucket `few` also carries ZERO, which is why its
+      // English says "orders" — plural(0) is "few" and English prints "0 work
+      // orders", exactly what the old `jobs === 1 ? "" : "s"` printed.
+      workOrders: {
+        one: { en: "{n} work order drew parts this week.", ar: "أمر عمل واحد سحب قطعاً هذا الأسبوع." },
+        two: { en: "{n} work orders drew parts this week.", ar: "أمرا عمل سحبا قطعاً هذا الأسبوع." },
+        few: { en: "{n} work orders drew parts this week.", ar: "{n} أوامر عمل سحبت قطعاً هذا الأسبوع." },
+        many: { en: "{n} work orders drew parts this week.", ar: "{n} أمر عمل سحب قطعاً هذا الأسبوع." },
+      },
+      workOrdersUp: {
+        one: {
+          en: "{n} work order drew parts this week, up {d}% in value on last week.",
+          ar: "أمر عمل واحد سحب قطعاً هذا الأسبوع، بارتفاع {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        two: {
+          en: "{n} work orders drew parts this week, up {d}% in value on last week.",
+          ar: "أمرا عمل سحبا قطعاً هذا الأسبوع، بارتفاع {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        few: {
+          en: "{n} work orders drew parts this week, up {d}% in value on last week.",
+          ar: "{n} أوامر عمل سحبت قطعاً هذا الأسبوع، بارتفاع {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        many: {
+          en: "{n} work orders drew parts this week, up {d}% in value on last week.",
+          ar: "{n} أمر عمل سحب قطعاً هذا الأسبوع، بارتفاع {d}% في القيمة عن الأسبوع الماضي.",
+        },
+      },
+      workOrdersDown: {
+        one: {
+          en: "{n} work order drew parts this week, down {d}% in value on last week.",
+          ar: "أمر عمل واحد سحب قطعاً هذا الأسبوع، بانخفاض {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        two: {
+          en: "{n} work orders drew parts this week, down {d}% in value on last week.",
+          ar: "أمرا عمل سحبا قطعاً هذا الأسبوع، بانخفاض {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        few: {
+          en: "{n} work orders drew parts this week, down {d}% in value on last week.",
+          ar: "{n} أوامر عمل سحبت قطعاً هذا الأسبوع، بانخفاض {d}% في القيمة عن الأسبوع الماضي.",
+        },
+        many: {
+          en: "{n} work orders drew parts this week, down {d}% in value on last week.",
+          ar: "{n} أمر عمل سحب قطعاً هذا الأسبوع، بانخفاض {d}% في القيمة عن الأسبوع الماضي.",
+        },
+      },
+      topTruck: {
+        one: {
+          en: "{plate} drew the most maintenance parts — {v} SAR across {n} job.",
+          ar: "{plate} سحبت أكثر قطع الصيانة — {v} SAR عبر عمل واحد.",
+        },
+        two: {
+          en: "{plate} drew the most maintenance parts — {v} SAR across {n} jobs.",
+          ar: "{plate} سحبت أكثر قطع الصيانة — {v} SAR عبر عملين.",
+        },
+        few: {
+          en: "{plate} drew the most maintenance parts — {v} SAR across {n} jobs.",
+          ar: "{plate} سحبت أكثر قطع الصيانة — {v} SAR عبر {n} أعمال.",
+        },
+        many: {
+          en: "{plate} drew the most maintenance parts — {v} SAR across {n} jobs.",
+          ar: "{plate} سحبت أكثر قطع الصيانة — {v} SAR عبر {n} عملاً.",
+        },
+      },
+      repeatTrucks: {
+        en: "{list} came back for parts more than once this week.",
+        ar: "{list} عادت لطلب قطع أكثر من مرة هذا الأسبوع.",
+      },
+      noWorkOrder: {
+        en: "No work order drew parts this week.",
+        ar: "لم يسحب أي أمر عمل قطعاً هذا الأسبوع.",
+      },
+      noExitPermit: {
+        en: "No parts left on an exit permit this week.",
+        ar: "لم تخرج أي قطع بإذن خروج هذا الأسبوع.",
+      },
+      permits: {
+        one: { en: "{n} exit permit took stock out.", ar: "إذن خروج واحد أخرج مخزوناً." },
+        two: { en: "{n} exit permits took stock out.", ar: "إذنا خروج أخرجا مخزوناً." },
+        few: { en: "{n} exit permits took stock out.", ar: "{n} أذونات خروج أخرجت مخزوناً." },
+        many: { en: "{n} exit permits took stock out.", ar: "{n} إذن خروج أخرج مخزوناً." },
+      },
+      permitsTo: {
+        one: {
+          en: "{n} exit permit took stock out, mostly to {dest} ({v} SAR).",
+          ar: "إذن خروج واحد أخرج مخزوناً، معظمه إلى {dest} ({v} SAR).",
+        },
+        two: {
+          en: "{n} exit permits took stock out, mostly to {dest} ({v} SAR).",
+          ar: "إذنا خروج أخرجا مخزوناً، معظمه إلى {dest} ({v} SAR).",
+        },
+        few: {
+          en: "{n} exit permits took stock out, mostly to {dest} ({v} SAR).",
+          ar: "{n} أذونات خروج أخرجت مخزوناً، معظمه إلى {dest} ({v} SAR).",
+        },
+        many: {
+          en: "{n} exit permits took stock out, mostly to {dest} ({v} SAR).",
+          ar: "{n} إذن خروج أخرج مخزوناً، معظمه إلى {dest} ({v} SAR).",
+        },
+      },
+      // Outstanding returnable stock, no overdue permits. Shared by BOTH call
+      // sites — the quiet-week tail and the normal-week tail print the exact
+      // same English here, so one key is right rather than two.
+      stillOut: {
+        one: {
+          en: "{v} SAR of returnable stock is still out across {q} units.",
+          ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدة واحدة.",
+        },
+        two: {
+          en: "{v} SAR of returnable stock is still out across {q} units.",
+          ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدتين.",
+        },
+        few: {
+          en: "{v} SAR of returnable stock is still out across {q} units.",
+          ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدات.",
+        },
+        many: {
+          en: "{v} SAR of returnable stock is still out across {q} units.",
+          ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدة.",
+        },
+      },
+      // TWO counts in one sentence — units and overdue permits — so the whole
+      // sentence is stored per (unit bucket, overdue bucket) pair. The quiet-week
+      // tail; its English names no noun for the overdue count, and the Arabic
+      // keeps that anaphora with "منها".
+      stillOutOverdue: {
+        one: {
+          one: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدة واحدة — واحد منها تجاوز موعد الإرجاع." },
+          two: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدة واحدة — اثنان منها تجاوزا موعد الإرجاع." },
+          few: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدة واحدة — {o} منها تجاوزت موعد الإرجاع." },
+          many: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدة واحدة — {o} منها تجاوز موعد الإرجاع." },
+        },
+        two: {
+          one: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدتين — واحد منها تجاوز موعد الإرجاع." },
+          two: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدتين — اثنان منها تجاوزا موعد الإرجاع." },
+          few: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدتين — {o} منها تجاوزت موعد الإرجاع." },
+          many: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدتين — {o} منها تجاوز موعد الإرجاع." },
+        },
+        few: {
+          one: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدات — واحد منها تجاوز موعد الإرجاع." },
+          two: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدات — اثنان منها تجاوزا موعد الإرجاع." },
+          few: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدات — {o} منها تجاوزت موعد الإرجاع." },
+          many: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدات — {o} منها تجاوز موعد الإرجاع." },
+        },
+        many: {
+          one: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدة — واحد منها تجاوز موعد الإرجاع." },
+          two: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدة — اثنان منها تجاوزا موعد الإرجاع." },
+          few: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدة — {o} منها تجاوزت موعد الإرجاع." },
+          many: { en: "{v} SAR of returnable stock is still out across {q} units — {o} past its due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدة — {o} منها تجاوز موعد الإرجاع." },
+        },
+      },
+      // The normal-week tail. DIFFERENT English from `stillOutOverdue` above —
+      // it names the permit and switches is/are — so it cannot share those keys
+      // even though the two bullets are cousins.
+      stillOutPermitOverdue: {
+        one: {
+          one: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permit is past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدة واحدة — إذن واحد تجاوز موعد الإرجاع." },
+          two: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدة واحدة — إذنان تجاوزا موعد الإرجاع." },
+          few: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدة واحدة — {o} أذونات تجاوزت موعد الإرجاع." },
+          many: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدة واحدة — {o} إذناً تجاوز موعد الإرجاع." },
+        },
+        two: {
+          one: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permit is past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدتين — إذن واحد تجاوز موعد الإرجاع." },
+          two: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدتين — إذنان تجاوزا موعد الإرجاع." },
+          few: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدتين — {o} أذونات تجاوزت موعد الإرجاع." },
+          many: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر وحدتين — {o} إذناً تجاوز موعد الإرجاع." },
+        },
+        few: {
+          one: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permit is past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدات — إذن واحد تجاوز موعد الإرجاع." },
+          two: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدات — إذنان تجاوزا موعد الإرجاع." },
+          few: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدات — {o} أذونات تجاوزت موعد الإرجاع." },
+          many: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدات — {o} إذناً تجاوز موعد الإرجاع." },
+        },
+        many: {
+          one: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permit is past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدة — إذن واحد تجاوز موعد الإرجاع." },
+          two: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدة — إذنان تجاوزا موعد الإرجاع." },
+          few: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدة — {o} أذونات تجاوزت موعد الإرجاع." },
+          many: { en: "{v} SAR of returnable stock is still out across {q} units — {o} permits are past the due-back date.", ar: "{v} SAR من المخزون القابل للإرجاع لا يزال خارج المستودع عبر {q} وحدة — {o} إذناً تجاوز موعد الإرجاع." },
+        },
+      },
+      // Value and quantity moved in different directions. FOUR leaves, not two:
+      // `delta === 0` has sign 0, so it clears the "signs differ" guard while
+      // still taking the `>= 0` branch — the up/up and down/down pairs are
+      // reachable and were reachable before this conversion too.
+      mixUpUp: {
+        en: "Value went up while quantity went up — the mix shifted toward more expensive parts, not just more of them.",
+        ar: "ارتفعت القيمة وارتفعت الكمية — تحوّل المزيج نحو قطع أغلى، لا مجرد عدد أكبر منها.",
+      },
+      mixUpDown: {
+        en: "Value went up while quantity went down — the mix shifted toward more expensive parts, not just more of them.",
+        ar: "ارتفعت القيمة بينما انخفضت الكمية — تحوّل المزيج نحو قطع أغلى، لا مجرد عدد أكبر منها.",
+      },
+      mixDownUp: {
+        en: "Value went down while quantity went up — the mix shifted toward cheaper parts, not just more of them.",
+        ar: "انخفضت القيمة بينما ارتفعت الكمية — تحوّل المزيج نحو قطع أرخص، لا مجرد عدد أكبر منها.",
+      },
+      mixDownDown: {
+        en: "Value went down while quantity went down — the mix shifted toward cheaper parts, not just more of them.",
+        ar: "انخفضت القيمة وانخفضت الكمية — تحوّل المزيج نحو قطع أرخص، لا مجرد عدد أكبر منها.",
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // PAGE SHELL + EXIT PERMITS TAB — app/consumption/ConsumptionClient.tsx.
+    //
+    // VOCABULARY RULING — REVERSED at Turki's instruction. An exit permit is a
+    // GATE PASS: paper that authorises stock to leave the warehouse for a reason
+    // that is not a repair. The Arabic is «إذن خروج» throughout.
+    //
+    // IT WAS «تصريح خروج», AND THE OLD RULING HERE SAID TO AVOID «إذن» ENTIRELY,
+    // because a stores ISSUE note — which is what a maintenance draw is — is
+    // «إذن صرف», a different document in a Saudi warehouse. Reversing the ruling
+    // did not retire that risk. It SHARPENED it: the two names are now one word
+    // apart. «إذن خروج» is the gate pass, «إذن صرف» is the issue note, nothing on
+    // this route may say «إذن صرف», and a bare «إذن» here is always the gate pass
+    // because the gate pass is the only document this route models.
+    //
+    // Plural «أذونات»; dual «إذنان», or «إذنا خروج» inside the construct, where
+    // the nūn drops. «إذن» is masculine exactly as «تصريح» was, and «أذونات» is a
+    // non-human plural exactly as «تصاريح» was, so no verb or adjective agreement
+    // moved with the swap — which is why the sweep was safe once the two
+    // exceptions above it were pulled out by hand.
+    //
+    // The FIVE STATE WORDS below are the route's spine, so they sit together:
+    // the filter chips, the KPI tiles and the row pill are three views of the
+    // same five states. A state renamed here is renamed in all three places
+    // rather than in one of them.
+    //   - draft   «مسودة»  — written, nothing has moved.
+    //   - out     «خارج»   — stock has physically left. NOT «صادر», which reads
+    //                        as "issued/dispatched" and would suggest the goods
+    //                        are gone for good even on a returnable permit.
+    //   - overdue «متأخر»  — a returnable that is past its due-back date.
+    //   - voided  «ملغى»   — cancelled after exit; the outstanding quantity went
+    //                        back to stock. NOT «محذوف» (deleted): the row and
+    //                        its history survive, which is the whole point.
+    //
+    // `onDate` / `byWho` / `dashReason` are OPTIONAL APPENDAGES, each rendered
+    // only when its column is non-null, so the line grows: "Voided" → "Voided on
+    // {d}" → "Voided on {d} by {who}". THE LEADING SPACE IS PART OF THE VALUE in
+    // both languages — it is what joins the clause to whatever preceded it, and
+    // Arabic joins an appositive the same way. They are not sentence fragments
+    // being spliced into a grammar; they are independent phrases whose presence
+    // is decided by the data.
+    // -----------------------------------------------------------------------
+    client: {
+      tabUsage: { en: "Consumptions", ar: "الاستهلاك" },
+      tabPermits: { en: "Exit Permits", ar: "أذونات الخروج" },
+      tabApprovals: { en: "Approvals", ar: "الاعتمادات" },
+
+      title: { en: "Consumption", ar: "الاستهلاك" },
+      subtitle: {
+        en: "Where parts go when they leave the shelf — usage, exit permits and reporting",
+        ar: "إلى أين تذهب القطع بعد مغادرتها الرف — الاستهلاك وأذونات الخروج والتقارير",
+      },
+      newPermit: { en: "New Exit Permit", ar: "إذن خروج جديد" },
+
+      // deleteExitPermitDraft(). A draft has drawn no stock, which is exactly
+      // why the confirm can promise that nothing is reversed.
+      deleteDraftConfirm: {
+        en: "Delete this draft permit? Nothing has left the warehouse, so nothing is reversed.",
+        ar: "هل تريد حذف هذه المسودة؟ لم يخرج شيء من المستودع، فلا شيء سيُعكس.",
+      },
+      fileOpenFailed: { en: "Could not open file.", ar: "تعذّر فتح الملف." },
+
+      kpiDrafts: { en: "Drafts", ar: "المسودات" },
+      kpiOut: { en: "Out on permit", ar: "خارج بإذن" },
+      kpiOverdue: { en: "Overdue returns", ar: "إرجاعات متأخرة" },
+      kpiValueOut: { en: "Value outstanding", ar: "القيمة القائمة" },
+      kpiValueOutHint: {
+        en: "FIFO cost of what is out and not yet back",
+        ar: "تكلفة ما هو خارج ولم يعُد بعد، بالوارد أولًا",
+      },
+
+      // The five state words — see this namespace's header.
+      statusAll: { en: "All", ar: "الكل" },
+      statusDraft: { en: "Draft", ar: "مسودة" },
+      statusDrafts: { en: "Drafts", ar: "مسودات" },
+      statusOut: { en: "Out", ar: "خارج" },
+      statusOverdue: { en: "Overdue", ar: "متأخر" },
+      statusVoided: { en: "Voided", ar: "ملغى" },
+
+      // Two WHOLE sentences rather than one with a swapped tail. The old code
+      // appended " yet" or " match this filter" to a shared stem — an
+      // English-shaped seam: Arabic negates the whole clause, so the two
+      // sentences do not share a stem there.
+      emptyYet: { en: "No exit permits yet.", ar: "لا توجد أذونات خروج بعد." },
+      emptyFiltered: {
+        en: "No exit permits match this filter.",
+        ar: "لا توجد أذونات خروج تطابق هذه التصفية.",
+      },
+      emptyHint: {
+        en: "A permit is the gate pass for parts leaving for a non-maintenance reason.",
+        ar: "الإذن هو وثيقة مرور القطع من البوابة لسبب غير الصيانة.",
+      },
+
+      // Receiver / Warehouse / Items / Qty out / Outstanding are NOT here —
+      // the modals render the same five headers, so they live in
+      // `consumption.shared`. Only the two this file alone renders stay local.
+      colValueOut: { en: "Value out", ar: "القيمة الخارجة" },
+      colReturned: { en: "Returned", ar: "المُرجَع" },
+
+      // Row detail. `{d}` is a formatDate() result and `{n}` a Latin numeral —
+      // figures and dates stay Latin in both languages, the standing rule.
+      dueOn: { en: "due {d}", ar: "تُستحق {d}" },
+      via: { en: "via {name}", ar: "عبر {name}" },
+      qtyOutstanding: { en: "{n} out", ar: "{n} خارج" },
+      daysOverdue: { en: "{n}d overdue", ar: "متأخر {n} يوم" },
+
+      // `confirmExit` and `voidPermit` are in `consumption.shared` — each names
+      // both the row button HERE and the title of the modal it opens.
+      editDraft: { en: "Edit draft", ar: "تعديل المسودة" },
+      deleteDraft: { en: "Delete draft", ar: "حذف المسودة" },
+      returnBtn: { en: "Return", ar: "إرجاع" },
+      printablePermit: { en: "Printable permit", ar: "إذن للطباعة" },
+
+      noPriceTitle: {
+        en: "Not enough stock in lots to price this item",
+        ar: "لا توجد كمية كافية في الدفعات لتسعير هذا الصنف",
+      },
+      // The tag under a DRAFT's unit cost — the figure is a FIFO preview, not
+      // the stamped cost, because a draft has drawn nothing yet — is
+      // `consumption.shared.previewTag`; the draft form says it too.
+
+      // `{n}` is a Latin numeral inside parentheses, so one form serves every
+      // count in both languages — no plural bucket is needed for a bare tally.
+      returnsHeading: { en: "Returns ({n})", ar: "الإرجاعات ({n})" },
+      attachmentsHeading: { en: "Attachments ({n})", ar: "المرفقات ({n})" },
+      // One returned line inside a return's summary: "3 × Oil filter".
+      returnItem: { en: "{q} × {p}", ar: "{q} × {p}" },
+      // The part behind a return line could not be resolved — a deleted line,
+      // in practice. Arabic has its own question mark.
+      unknownShort: { en: "?", ar: "؟" },
+
+      // Optional appendages — see this namespace's header for the leading space.
+      onDate: { en: " on {d}", ar: " في {d}" },
+      byWho: { en: " by {who}", ar: " بواسطة {who}" },
+      dashReason: { en: " — {reason}", ar: " — {reason}" },
+      voidedNote: {
+        en: "Only the outstanding quantity was restored; anything already returned had gone back with its own return event.",
+        ar: "أُعيدت الكمية القائمة فقط؛ أما ما أُرجع سابقًا فقد عاد بحركة إرجاع خاصة به.",
+      },
+      issuedBy: { en: "Issued by {who}.", ar: "أصدره {who}." },
+      exitedAt: { en: "Exited {d}", ar: "خرج {d}" },
+    },
+
+    // -----------------------------------------------------------------------
+    // APPROVALS TAB — app/consumption/ApprovalsTab.tsx.
+    //
+    // VOCABULARY RULING for review, because this screen is the one that reads
+    // wrong if the Arabic is picked casually: an approval here is a RECORD of
+    // an opinion, not a GATE. Nothing on the screen blocks anything — the
+    // parts already left, the job already happened. So the Arabic says
+    // «سجل» / «قرار مسجَّل» and never «موافقة مطلوبة» or «بانتظار الإفراج»,
+    // which would tell a reader that work is being held up when it is not.
+    //
+    // «اعتماد» is used for the ACT of approving and «سجل الاعتمادات» for the
+    // ledger it lands in, matching archive.approvalsLedger.
+    //
+    // Counted sentences here use the same four-bucket treatment as `weekly`,
+    // even where the count comes from a CONSTANT (APPROVALS_REQUIRED = 2,
+    // LEDGER_LOCK_DAYS = 30). A constant is still a number an Arabic noun has
+    // to agree with, and bucketing it means changing the constant cannot
+    // silently break the grammar. English is written identically across the
+    // four buckets, so whichever fires the English byte is unchanged.
+    // -----------------------------------------------------------------------
+    approvalsTab: {
+      // conflictMessage(). Composed in the app rather than taken from the
+      // 0097 raise, so it can name WHO voted. Two whole sentences rather than
+      // one with a swapped verb: Arabic changes the verb, not a lowercase word.
+      conflictApproved: {
+        en: "Conflict — {who} already approved this. A second vote has to match theirs; a split decision is not allowed.",
+        ar: "تعارض — {who} اعتمد هذا بالفعل. على الصوت الثاني أن يطابق صوته؛ القرار المنقسم غير مسموح.",
+      },
+      conflictRejected: {
+        en: "Conflict — {who} already rejected this. A second vote has to match theirs; a split decision is not allowed.",
+        ar: "تعارض — {who} رفض هذا بالفعل. على الصوت الثاني أن يطابق صوته؛ القرار المنقسم غير مسموح.",
+      },
+
+      filterAll: { en: "All kinds", ar: "كل الأنواع" },
+      // Same text as `consumption.usage.sourceExitPermits` today, deliberately
+      // NOT the same key: one names a filter over approval events, the other
+      // names where a usage row came from. They are free to diverge and a
+      // shared key would silently couple two unrelated rewords.
+      filterExitPermits: { en: "Exit permits", ar: "أذونات الخروج" },
+      filterWorkOrders: { en: "In-house work orders", ar: "أوامر العمل الداخلية" },
+      filterOutsourcedJobs: { en: "Outsourced jobs", ar: "الأعمال الخارجية" },
+
+      kpiPending: { en: "Awaiting a decision", ar: "بانتظار قرار" },
+      kpiOneVote: { en: "Have one vote", ar: "لديها صوت واحد" },
+      kpiOneVoteHint: { en: "Need a matching second", ar: "تحتاج صوتًا ثانيًا مطابقًا" },
+      kpiDecided: { en: "Decided", ar: "محسومة" },
+      kpiDecidedHint: { en: "Moved to the Approvals Ledger", ar: "انتقلت إلى سجل الاعتمادات" },
+      kpiValue: { en: "Value pending", ar: "قيمة معلّقة" },
+      kpiValueHint: {
+        en: "Parts and vendor spend not yet ruled on",
+        ar: "قطع وإنفاق موردين لم يُبتّ فيها بعد",
+      },
+
+      // The Arabic arrow is «←», not «→». In an RTL line the reading order is
+      // right-to-left, so a right-pointing arrow would point back at the
+      // source. Same char class, mirrored, same meaning.
+      explainer: {
+        one: {
+          en: "Two matching votes decide an event — the second voter must agree with the first, and a differing vote is refused. A decision here is a record, not a gate: it moves no stock and changes nothing about the permit, work order or job. Decided events leave this tab for Archive → Approvals Ledger, where they stay changeable for {n} days.",
+          ar: "يُحسم الحدث بصوتين متطابقين — على المصوّت الثاني أن يوافق الأول، ويُرفض أي صوت مخالف. القرار هنا سجل لا بوابة: لا يحرّك مخزونًا ولا يغيّر شيئًا في الإذن أو أمر العمل أو العمل الخارجي. تغادر الأحداث المحسومة هذا التبويب إلى الأرشيف ← سجل الاعتمادات، حيث تبقى قابلة للتغيير يومًا واحدًا.",
+        },
+        two: {
+          en: "Two matching votes decide an event — the second voter must agree with the first, and a differing vote is refused. A decision here is a record, not a gate: it moves no stock and changes nothing about the permit, work order or job. Decided events leave this tab for Archive → Approvals Ledger, where they stay changeable for {n} days.",
+          ar: "يُحسم الحدث بصوتين متطابقين — على المصوّت الثاني أن يوافق الأول، ويُرفض أي صوت مخالف. القرار هنا سجل لا بوابة: لا يحرّك مخزونًا ولا يغيّر شيئًا في الإذن أو أمر العمل أو العمل الخارجي. تغادر الأحداث المحسومة هذا التبويب إلى الأرشيف ← سجل الاعتمادات، حيث تبقى قابلة للتغيير يومين.",
+        },
+        few: {
+          en: "Two matching votes decide an event — the second voter must agree with the first, and a differing vote is refused. A decision here is a record, not a gate: it moves no stock and changes nothing about the permit, work order or job. Decided events leave this tab for Archive → Approvals Ledger, where they stay changeable for {n} days.",
+          ar: "يُحسم الحدث بصوتين متطابقين — على المصوّت الثاني أن يوافق الأول، ويُرفض أي صوت مخالف. القرار هنا سجل لا بوابة: لا يحرّك مخزونًا ولا يغيّر شيئًا في الإذن أو أمر العمل أو العمل الخارجي. تغادر الأحداث المحسومة هذا التبويب إلى الأرشيف ← سجل الاعتمادات، حيث تبقى قابلة للتغيير {n} أيام.",
+        },
+        many: {
+          en: "Two matching votes decide an event — the second voter must agree with the first, and a differing vote is refused. A decision here is a record, not a gate: it moves no stock and changes nothing about the permit, work order or job. Decided events leave this tab for Archive → Approvals Ledger, where they stay changeable for {n} days.",
+          ar: "يُحسم الحدث بصوتين متطابقين — على المصوّت الثاني أن يوافق الأول، ويُرفض أي صوت مخالف. القرار هنا سجل لا بوابة: لا يحرّك مخزونًا ولا يغيّر شيئًا في الإذن أو أمر العمل أو العمل الخارجي. تغادر الأحداث المحسومة هذا التبويب إلى الأرشيف ← سجل الاعتمادات، حيث تبقى قابلة للتغيير {n} يومًا.",
+        },
+      },
+
+      // THREE empty states, because they mean three different things — a
+      // filter that matched nothing, a queue that is genuinely finished, and
+      // a queue that has never had anything in it. The Arabic keeps them
+      // three; collapsing them would blame a filter for a relocation.
+      emptyFiltered: { en: "No events match these filters.", ar: "لا توجد أحداث تطابق هذه المرشّحات." },
+      emptyAllDecided: { en: "Everything has been decided.", ar: "حُسم كل شيء." },
+      emptyNothingYet: { en: "Nothing to approve yet.", ar: "لا شيء للاعتماد بعد." },
+      emptyDecidedHint: {
+        en: "Decided events live in Archive → Approvals Ledger.",
+        ar: "الأحداث المحسومة تعيش في الأرشيف ← سجل الاعتمادات.",
+      },
+      emptyNothingYetHint: {
+        en: "Exited permits, completed in-house work orders that used parts, and outsourced jobs with a vendor payment all show up here.",
+        ar: "تظهر هنا الأذونات التي خرجت، وأوامر العمل الداخلية المكتملة التي استهلكت قطعًا، والأعمال الخارجية التي لها دفعة مورّد.",
+      },
+
+      // No colStatus / colPart / colQty / colNote / cancel here: those are
+      // generic table-and-form chrome and `common` already holds them, spelled
+      // the same way in both languages. No colValue / colTotal either — the
+      // Parts Usage tab's tables need the same two words, so they sit in
+      // `consumption.shared` at the top of this namespace.
+      //
+      // The route-scoped copies that DO stay below (colDate, colRepairer,
+      // colSubtotal, colVat, colDiscount) exist because their only other home
+      // is `mt.*` — the maintenance track's own namespace — and nothing in this
+      // repo reads one route's namespace from another. `common.note` /
+      // `mt.note` are already a matching pair on exactly that reasoning.
+      colReference: { en: "Reference", ar: "المرجع" },
+      colWhat: { en: "What", ar: "ماذا" },
+      colWhen: { en: "When", ar: "متى" },
+      colVotes: { en: "Votes", ar: "الأصوات" },
+
+
+      awaitingSecond: { en: "awaiting a matching second vote", ar: "بانتظار صوت ثانٍ مطابق" },
+      signInToDecide: { en: "Sign in to decide", ar: "سجّل الدخول لتقرّر" },
+      approve: { en: "Approve", ar: "اعتماد" },
+      approveInstead: { en: "Approve instead", ar: "اعتماد بدلًا من ذلك" },
+      reject: { en: "Reject", ar: "رفض" },
+      rejectInstead: { en: "Reject instead", ar: "رفض بدلًا من ذلك" },
+      youApproved: { en: "You approved this", ar: "أنت اعتمدت هذا" },
+      youRejected: { en: "You rejected this", ar: "أنت رفضت هذا" },
+
+      // The expanded-row heading. Three whole labels rather than a kind label
+      // plus a " — parts" / " — vendor payment" tail: the tail is an English
+      // apposition and Arabic wants the noun phrase built differently.
+      detailExitPermit: { en: "Exit permit — parts", ar: "إذن خروج — قطع" },
+      detailWorkOrder: { en: "Work order — parts", ar: "أمر عمل — قطع" },
+      detailOutsourcedJob: { en: "Outsourced job — vendor payment", ar: "عمل خارجي — دفعة مورّد" },
+
+      colInvoice: { en: "Invoice", ar: "الفاتورة" },
+      colDate: { en: "Date", ar: "التاريخ" },
+      colRepairer: { en: "Repairer", ar: "الورشة" },
+      colSubtotal: { en: "Subtotal", ar: "المجموع الفرعي" },
+      colVat: { en: "VAT", ar: "ضريبة القيمة المضافة" },
+      colDiscount: { en: "Discount", ar: "الخصم" },
+
+
+      stillOutNote: {
+        en: "Quantities are what is still OUT — anything returned is back on the shelf and is not counted here.",
+        ar: "الكميات هي ما زال خارجًا — كل ما أُرجع عاد إلى الرف ولا يُحتسب هنا.",
+      },
+
+      // "{n} of {r} votes — needs a matching second to decide". Bucketed on
+      // the vote count: Arabic says «صوت واحد» / «صوتان» / «{n} أصوات».
+      votesOf: {
+        one: {
+          en: "{n} of {r} votes — needs a matching second to decide",
+          ar: "صوت واحد من {r} — يحتاج صوتًا ثانيًا مطابقًا ليُحسم",
+        },
+        two: {
+          en: "{n} of {r} votes — needs a matching second to decide",
+          ar: "صوتان من {r} — يحتاج صوتًا ثانيًا مطابقًا ليُحسم",
+        },
+        few: {
+          en: "{n} of {r} votes — needs a matching second to decide",
+          ar: "{n} أصوات من {r} — يحتاج صوتًا ثانيًا مطابقًا ليُحسم",
+        },
+        many: {
+          en: "{n} of {r} votes — needs a matching second to decide",
+          ar: "{n} صوتًا من {r} — يحتاج صوتًا ثانيًا مطابقًا ليُحسم",
+        },
+      },
+
+      signedBy: { en: "by {who}", ar: "بواسطة {who}" },
+      signedOn: { en: "on {when}", ar: "في {when}" },
+      signedYou: { en: "(you)", ar: "(أنت)" },
+      firstDecided: { en: "first decided {when}", ar: "أول قرار في {when}" },
+
+      notRuled: {
+        one: { en: "Not yet ruled on — needs {n} approvals.", ar: "لم يُبتّ فيه بعد — يحتاج اعتمادًا واحدًا." },
+        two: { en: "Not yet ruled on — needs {n} approvals.", ar: "لم يُبتّ فيه بعد — يحتاج اعتمادين." },
+        few: { en: "Not yet ruled on — needs {n} approvals.", ar: "لم يُبتّ فيه بعد — يحتاج {n} اعتمادات." },
+        many: { en: "Not yet ruled on — needs {n} approvals.", ar: "لم يُبتّ فيه بعد — يحتاج {n} اعتمادًا." },
+      },
+
+      conflictTitle: { en: "Vote not recorded", ar: "لم يُسجَّل الصوت" },
+      conflictGotIt: { en: "Got it", ar: "فهمت" },
+
+      rejectTitle: { en: "Reject {ref}", ar: "رفض {ref}" },
+      // The SEAM. Was `APPROVAL_KIND_LABELS[kind].toLowerCase()` dropped into
+      // the sentence — an English-shaped move (Arabic has no letter case, so
+      // it was a no-op and left a Title-Case noun mid-clause). The kind now
+      // comes from APPROVAL_KIND_INLINE, a proper inline form per language.
+      rejectSubtitle: {
+        en: "This records a rejection against {kind} {ref}. Nothing is reversed and no stock moves.",
+        ar: "يسجّل هذا رفضًا على {kind} {ref}. لا يُعكس شيء ولا يتحرك أي مخزون.",
+      },
+      reasonLabel: { en: "Reason *", ar: "السبب *" },
+      reasonPlaceholder: { en: "What is wrong with this one?", ar: "ما الخطأ في هذا؟" },
+      // `Recording…` is `consumption.shared.recording` — the return popup's
+      // submit button carries the same in-flight label.
+      recordRejection: { en: "Record rejection", ar: "تسجيل الرفض" },
+    },
+
+    // ------------------------------------------------------------------
+    // app/consumption/PartsUsageTab.tsx — the analytics tab.
+    //
+    // PURE READOUT. Every string here is a heading, a hint, a column, an empty
+    // state or a chart legend; the only pressable words are the two "view all"
+    // links and Close. So the Arabic voice here is DESCRIPTIVE, not
+    // imperative — no «اضغط», no «قم بـ».
+    //
+    // WHAT IS DELIBERATELY NOT MINTED HERE:
+    //   - Part / Qty / Truck come from `common`, which already holds them.
+    //   - Value / Total / Destination / Permit / Close come from
+    //     `consumption.shared` — this tab is not their only reader.
+    //   - The two KPI tiles and two of the three source chips say
+    //     "Maintenance" and "Exit permits", which is exactly what
+    //     lib/parts-usage.ts already labels those two sources, so they read
+    //     `consumption.usage.sourceMaintenance` / `sourceExitPermits` rather
+    //     than a second copy that could drift from the bars beside them.
+    //
+    // SAR IS NOT TRANSLATED anywhere in this namespace. It is a currency code
+    // and it stays Latin in both languages, the same standing rule that keeps
+    // every figure and date on this tab in Latin digits.
+    // ------------------------------------------------------------------
+    partsUsage: {
+      emptyTitle: { en: "No parts have left stock yet.", ar: "لم تخرج أي قطع من المخزون بعد." },
+      emptyHint: {
+        en: "Consumption appears here once a work order deducts its parts or an exit permit is confirmed.",
+        ar: "يظهر الاستهلاك هنا بمجرد أن يخصم أمر عمل قطعه أو يُعتمد إذن خروج.",
+      },
+
+      // The line under the period picker. `{cur}` is rendered EMPHASISED, so
+      // the tab splits this string on that token and prints the two halves
+      // around a <span>. That is why `{cur}` MUST come before `{prev}` in
+      // every language: only the tail half has `{prev}` substituted into it.
+      showingAgainst: { en: "Showing {cur} against {prev}", ar: "عرض {cur} مقابل {prev}" },
+
+      kpiConsumed: { en: "Consumed this period", ar: "المستهلك في هذه الفترة" },
+      kpiOutNotBack: { en: "Out and not back", ar: "خارج ولم يعد" },
+      kpiOutNote: { en: "Right now — not period-scoped", ar: "الآن — غير مقيّد بالفترة" },
+      deltaInValue: { en: "in value", ar: "في القيمة" },
+
+      srcAll: { en: "Everything", ar: "كل شيء" },
+      srcMaintenance: { en: "Maintenance only", ar: "الصيانة فقط" },
+      srcExitPermits: { en: "Exit permits only", ar: "أذونات الخروج فقط" },
+      fifoNote: {
+        en: "Every figure is the FIFO cost stamped when the stock moved.",
+        ar: "كل رقم هنا هو تكلفة «الوارد أولاً صادر أولاً» المثبّتة لحظة تحرّك المخزون.",
+      },
+
+      trendTitle: { en: "Total consumption over time", ar: "إجمالي الاستهلاك عبر الزمن" },
+      trendHint: {
+        en: "Everything that left stock — maintenance draws and exit permits together — with a 3-point moving average. Full history, independent of the period picker.",
+        ar: "كل ما خرج من المخزون — سحوبات الصيانة وأذونات الخروج معاً — مع متوسط متحرك من ثلاث نقاط. السجل الكامل، مستقل عن مُحدِّد الفترة.",
+      },
+      monthlyTitle: { en: "Monthly trend — value and quantity", ar: "الاتجاه الشهري — القيمة والكمية" },
+      monthlyHint: {
+        en: "Both measures side by side on their own axes, over the last 12 months. A month with nothing in it stays on the axis.",
+        ar: "المقياسان جنباً إلى جنب، كلٌّ على محوره، خلال آخر 12 شهراً. الشهر الذي لم يحدث فيه شيء يبقى على المحور.",
+      },
+
+      weekTitle: { en: "This week in review", ar: "الأسبوع في سطور" },
+      weekHint: {
+        en: "{w} — rolls over on its own every week, whatever the period picker says",
+        ar: "{w} — يتجدد من تلقاء نفسه كل أسبوع مهما كان اختيار مُحدِّد الفترة",
+      },
+
+      trucksTitle: { en: "Top 5 costly trucks", ar: "أعلى 5 شاحنات تكلفة" },
+      trucksHint: {
+        en: "Maintenance parts drawn per truck this period",
+        ar: "قطع الصيانة المسحوبة لكل شاحنة في هذه الفترة",
+      },
+      viewAllTrucks: { en: "View all trucks", ar: "عرض كل الشاحنات" },
+      viewAllParts: { en: "View all parts", ar: "عرض كل القطع" },
+      truckEmpty: {
+        en: "No maintenance parts were drawn this period.",
+        ar: "لم تُسحب أي قطع صيانة في هذه الفترة.",
+      },
+      colVisits: { en: "Times to maintenance", ar: "مرات دخول الصيانة" },
+      colTruckValue: { en: "Total maintenance value", ar: "إجمالي قيمة الصيانة" },
+
+      topValueTitle: { en: "Top 5 parts by value", ar: "أعلى 5 قطع بالقيمة" },
+      topValueHint: {
+        en: "What consumption is costing most this period",
+        ar: "ما الأكثر كلفة في استهلاك هذه الفترة",
+      },
+      topQtyTitle: { en: "Top 5 parts by quantity", ar: "أعلى 5 قطع بالكمية" },
+      topQtyHint: { en: "What moves most often this period", ar: "ما الأكثر حركة في هذه الفترة" },
+      notUsed: { en: "not used this period", ar: "لم تُستخدم في هذه الفترة" },
+
+      splitTitle: { en: "Maintenance vs exit permits", ar: "الصيانة مقابل أذونات الخروج" },
+      splitHint: { en: "Where this period's consumption went", ar: "إلى أين ذهب استهلاك هذه الفترة" },
+      warehouseTitle: { en: "By warehouse", ar: "حسب المستودع" },
+      warehouseHint: { en: "Which stock room it came out of", ar: "من أي مخزن خرجت" },
+      warehouseEmpty: { en: "No warehouse data this period.", ar: "لا توجد بيانات مستودعات لهذه الفترة." },
+      destTitle: { en: "By destination", ar: "حسب الوجهة" },
+      destHint: {
+        en: "Exit permits only — maintenance has no destination",
+        ar: "أذونات الخروج فقط — الصيانة بلا وجهة",
+      },
+      destEmpty: { en: "No exit permits left this period.", ar: "لم تخرج أي أذونات خروج في هذه الفترة." },
+      // One key, two call sites: the source-split bars and the top-parts
+      // tables print the same sentence when their period is empty.
+      nothingConsumed: { en: "Nothing consumed this period.", ar: "لم يُستهلك شيء في هذه الفترة." },
+
+      outTitle: { en: "Currently out and not back", ar: "خارج حالياً ولم يعد" },
+      outHint: {
+        en: "Returnable permits still holding stock — as of now",
+        ar: "الأذونات القابلة للإرجاع التي ما زالت تحتجز مخزوناً — حتى اللحظة",
+      },
+      outEmpty: {
+        en: "Nothing is out — every returnable permit is back.",
+        ar: "لا شيء خارج — كل إذن قابل للإرجاع قد عاد.",
+      },
+      colDueBack: { en: "Due back", ar: "موعد الإرجاع" },
+
+      recordsTitle: {
+        en: "In-house maintenance consumption history",
+        ar: "سجل استهلاك الصيانة الداخلية",
+      },
+      recordsHint: {
+        en: "Every part each completed work order drew from stock — full history, not period-scoped",
+        ar: "كل قطعة سحبها كل أمر عمل مكتمل من المخزون — السجل الكامل، غير مقيّد بالفترة",
+      },
+      recordsEmpty: {
+        en: "No completed work order has consumed parts yet.",
+        ar: "لا يوجد أمر عمل مكتمل استهلك قطعاً بعد.",
+      },
+      colWorkOrder: { en: "Work order", ar: "أمر العمل" },
+      colJob: { en: "Job", ar: "العمل" },
+      colClosed: { en: "Closed", ar: "تاريخ الإغلاق" },
+      colUnitCost: { en: "Unit cost", ar: "تكلفة الوحدة" },
+      // The leading "·" is a separator between this tag and the SKU before it,
+      // not punctuation belonging to either. It is a neutral character, so the
+      // bidi algorithm places it on the correct side of an Arabic run on its
+      // own — it does not need mirroring.
+      preLedgerTag: { en: "· pre-ledger", ar: "· ما قبل السجل" },
+      // The pre-ledger footnote. English inflected three words off ONE count
+      // (line/lines, predate/predates, its/their); Arabic inflects the noun
+      // four ways and changes the verb with it, so each bucket is written
+      // whole. The English is identical in every bucket and is the exact
+      // sentence the three inline ternaries printed.
+      preLedgerBanner: {
+        one: {
+          en: "{n} line predates the per-lot consumption ledger, so its cost comes from the work order's own stamped unit price instead of the lot breakdown. The figure is the same one the deduction recorded — there is just no per-lot detail behind it.",
+          ar: "سطر واحد يسبق سجل الاستهلاك التفصيلي لكل دفعة، فتأتي تكلفته من سعر الوحدة المثبّت على أمر العمل نفسه بدلاً من تفصيل الدفعات. الرقم هو نفسه الذي سجّله الخصم — لا يوجد خلفه تفصيل لكل دفعة فقط.",
+        },
+        two: {
+          en: "{n} lines predate the per-lot consumption ledger, so their cost comes from the work order's own stamped unit price instead of the lot breakdown. The figure is the same one the deduction recorded — there is just no per-lot detail behind it.",
+          ar: "سطران يسبقان سجل الاستهلاك التفصيلي لكل دفعة، فتأتي تكلفتهما من سعر الوحدة المثبّت على أمر العمل نفسه بدلاً من تفصيل الدفعات. الرقم هو نفسه الذي سجّله الخصم — لا يوجد خلفه تفصيل لكل دفعة فقط.",
+        },
+        few: {
+          en: "{n} lines predate the per-lot consumption ledger, so their cost comes from the work order's own stamped unit price instead of the lot breakdown. The figure is the same one the deduction recorded — there is just no per-lot detail behind it.",
+          ar: "{n} أسطر تسبق سجل الاستهلاك التفصيلي لكل دفعة، فتأتي تكلفتها من سعر الوحدة المثبّت على أمر العمل نفسه بدلاً من تفصيل الدفعات. الرقم هو نفسه الذي سجّله الخصم — لا يوجد خلفه تفصيل لكل دفعة فقط.",
+        },
+        many: {
+          en: "{n} lines predate the per-lot consumption ledger, so their cost comes from the work order's own stamped unit price instead of the lot breakdown. The figure is the same one the deduction recorded — there is just no per-lot detail behind it.",
+          ar: "{n} سطراً تسبق سجل الاستهلاك التفصيلي لكل دفعة، فتأتي تكلفتها من سعر الوحدة المثبّت على أمر العمل نفسه بدلاً من تفصيل الدفعات. الرقم هو نفسه الذي سجّله الخصم — لا يوجد خلفه تفصيل لكل دفعة فقط.",
+        },
+      },
+
+      modalTrucksTitle: { en: "All trucks by maintenance parts", ar: "كل الشاحنات حسب قطع الصيانة" },
+      modalValueTitle: { en: "All parts by value", ar: "كل القطع حسب القيمة" },
+      modalQtyTitle: { en: "All parts by quantity", ar: "كل القطع حسب الكمية" },
+      modalAllPartsSubtitle: {
+        en: "{w} — every part, including those that consumed nothing",
+        ar: "{w} — كل قطعة، بما فيها ما لم يُستهلك منه شيء",
+      },
+
+      chartEmpty: { en: "No consumption yet.", ar: "لا استهلاك بعد." },
+      legendTotal: { en: "Total consumption (SAR)", ar: "إجمالي الاستهلاك (SAR)" },
+      // «ترند» is Turki's call: the transliteration, not «الاتجاه». It applies to
+      // the LEGEND that names the moving-average line. `monthlyTitle` above still
+      // reads «الاتجاه الشهري» — that is a chart TITLE, not a legend, and it is
+      // left alone deliberately rather than swept along by the same word.
+      legendTrend: { en: "Trend (3-point average)", ar: "ترند (متوسط ثلاث نقاط)" },
+      legendValue: { en: "Value (SAR)", ar: "القيمة (SAR)" },
+      legendQty: { en: "Quantity (units)", ar: "الكمية (وحدات)" },
+      // The bare axis caption under the right-hand scale. Not the counted
+      // form below — there is no number beside it.
+      axisUnits: { en: "units", ar: "وحدة" },
+      // Chart tooltips. The tokens carry data (`{l}` a bucket label, `{v}` a
+      // SAR figure, `{q}` the counted-units string) and the dictionary owns the
+      // punctuation and the order, so an RTL tooltip is not stuck with an
+      // English colon-then-value shape it never chose.
+      tipValue: { en: "{l}: {v}", ar: "{l}: {v}" },
+      tipQty: { en: "{l}: {q}", ar: "{l}: {q}" },
+      tipValueQty: { en: "{l}: {v} · {q}", ar: "{l}: {v} · {q}" },
+      // "{n} units" — four sites (the KPI tile, the split bars, and two chart
+      // tooltips). `{n}` is ALWAYS a formatted two-decimal figure, so the
+      // Arabic keeps the numeral in every bucket and inflects only the noun
+      // after it; dropping the numeral for «وحدة واحدة» would throw away the
+      // ".00" the English shows. English is identical in all four buckets.
+      units: {
+        one: { en: "{n} units", ar: "{n} وحدة" },
+        two: { en: "{n} units", ar: "{n} وحدة" },
+        few: { en: "{n} units", ar: "{n} وحدات" },
+        many: { en: "{n} units", ar: "{n} وحدة" },
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // app/consumption/ExitPermitModals.tsx — the draft form, the three popups
+    // that move real stock (confirm exit / return / void), and the printable
+    // gate copy.
+    //
+    // TWO EXACT CROSS-ROUTE DUPLICATES, both kept on purpose. These are the two
+    // the duplicate checker reports — same English AND same Arabic as a key
+    // that already exists under another route:
+    //   - `colOnHand` ("On hand") repeats `mt.onHand`.
+    //   - `uploading` ("Uploading…") repeats `settings.profile.uploading`.
+    // Cross-route reuse is not something this dictionary does: those keys
+    // belong to Maintenance and to Settings, and rewording a column or a
+    // spinner there must not silently reword one here.
+    //
+    // TWO NEAR-MISSES that are NOT duplicates, listed so nobody "dedupes" them:
+    //   - `chooseOption` ("Choose…") sits beside `common.selectPlaceholder`
+    //     ("Select…"). Same Arabic, DIFFERENT English. The English distinction
+    //     is arbitrary — one Arabic word is the honest reading of both — but
+    //     the two English strings must stay separately editable.
+    //   - `printVoided` ("VOIDED") vs `client.statusVoided` ("Voided"): the
+    //     gate copy shouts, the list pill does not.
+    //
+    // REQUIRED-FIELD ASTERISKS sit OUTSIDE the key wherever the noun is one
+    // this route already owns (Kind, Warehouse, Destination, Receiver), so a
+    // word is not minted a second time just to carry a star. Where the label is
+    // unique to this form the star is inside the value.
+    //
+    // A COUNTED SENTENCE IS STORED WHOLE, once per bucket. Note that unlike
+    // `partsUsage.units` the ENGLISH here does inflect — "1 item" vs "2 items"
+    // — so the `one` bucket carries the singular and the other three carry the
+    // plural. `plural()` returns `one` only at exactly 1, which is the same
+    // test the old `=== 1 ? "" : "s"` ternary made, so the English output is
+    // byte-for-byte what it was before.
+    // -----------------------------------------------------------------------
+    modals: {
+      // --- draft form: chrome ---
+      formTitleEdit: { en: "Edit draft permit", ar: "تعديل مسودة الإذن" },
+      formTitleNew: { en: "New exit permit", ar: "إذن خروج جديد" },
+      formSubtitle: {
+        en: "A draft moves no stock. Confirming the exit is what deducts it.",
+        ar: "المسودة لا تحرّك أي مخزون. تأكيد الخروج هو ما يخصم الكمية.",
+      },
+      saveDetails: { en: "Save details", ar: "حفظ البيانات" },
+      createDraft: { en: "Create draft", ar: "إنشاء مسودة" },
+      createFailed: { en: "Could not create the draft.", ar: "تعذّر إنشاء المسودة." },
+      sectionDestReceiver: { en: "Destination & receiver", ar: "الوجهة والمستلم" },
+      sectionAttachments: { en: "Attachments", ar: "المرفقات" },
+
+      // --- draft form: header fields ---
+      // Rendered as `{key} {cond}` so the permanent branch keeps the trailing
+      // space the old JSX produced. Do not fold the star into this value.
+      labelExpectedReturn: { en: "Expected return", ar: "الإرجاع المتوقع" },
+      permanentHint: {
+        en: "Permanent items are not expected back.",
+        ar: "القطع الدائمة غير متوقع رجوعها.",
+      },
+      warehouseLockedHint: {
+        en: "Locked — items were picked from this warehouse.",
+        ar: "مقفل — اختيرت الأصناف من هذا المستودع.",
+      },
+      labelDestType: { en: "Destination type *", ar: "نوع الوجهة *" },
+      destOtherPlaceholder: { en: "Where are these going?", ar: "إلى أين ستذهب؟" },
+      chooseOption: { en: "Choose…", ar: "اختر…" },
+      receiverStaff: { en: "Staff member", ar: "موظف" },
+      receiverExternal: { en: "External (name)", ar: "خارجي (بالاسم)" },
+      receiverNamePlaceholder: { en: "Receiver name", ar: "اسم المستلم" },
+      labelCarrier: { en: "Carrier / driver", ar: "الناقل / السائق" },
+      carrierPlaceholder: { en: "Who is taking them", ar: "من سيأخذها" },
+
+      // --- draft form: the add-an-item row ---
+      choosePart: { en: "Choose a part…", ar: "اختر قطعة…" },
+      // The picker's option line. `{sku}` and `{n}` are Latin in both
+      // languages — a SKU is an identifier and a count is a figure.
+      partOption: { en: "{sku} · {name} ({n} on hand)", ar: "{sku} · {name} (المتوفر {n})" },
+      labelItemNote: { en: "Item note", ar: "ملاحظة الصنف" },
+      noActiveParts: {
+        en: "This warehouse has no active parts.",
+        ar: "لا توجد قطع نشطة في هذا المستودع.",
+      },
+      // Items typed before the draft row exists. The Arabic names the button
+      // («إنشاء مسودة») inside the sentence, matching `createDraft` above.
+      pendingItems: {
+        one: {
+          en: "{n} item will be saved with the permit when you press Create draft.",
+          ar: "سيُحفظ صنف واحد مع الإذن عند الضغط على إنشاء مسودة.",
+        },
+        two: {
+          en: "{n} items will be saved with the permit when you press Create draft.",
+          ar: "سيُحفظ صنفان مع الإذن عند الضغط على إنشاء مسودة.",
+        },
+        few: {
+          en: "{n} items will be saved with the permit when you press Create draft.",
+          ar: "ستُحفظ {n} أصناف مع الإذن عند الضغط على إنشاء مسودة.",
+        },
+        many: {
+          en: "{n} items will be saved with the permit when you press Create draft.",
+          ar: "سيُحفظ {n} صنفًا مع الإذن عند الضغط على إنشاء مسودة.",
+        },
+      },
+
+      // --- draft form: the items table ---
+      colOnHand: { en: "On hand", ar: "المتوفر" },
+      colItemValue: { en: "Item value", ar: "قيمة الصنف" },
+      // The fallback when a line points at a part the page did not load. NOT
+      // `usage.unknownPart` ("Unknown part") — this one sits in a Part column
+      // where the noun is already the header, so it stays the bare adjective.
+      unknownPart: { en: "Unknown", ar: "غير معروف" },
+      titleLotsShort: {
+        en: "Lots cannot cover this quantity",
+        ar: "الدفعات لا تغطي هذه الكمية",
+      },
+      removeItem: { en: "Remove item", ar: "إزالة الصنف" },
+      totalUnitsValue: { en: "Total units value", ar: "إجمالي قيمة الوحدات" },
+      // Items the lots cannot price are EXCLUDED from the total and counted
+      // here, rather than silently added as zero.
+      notPriceable: {
+        one: { en: "({n} item not priceable)", ar: "(صنف واحد غير قابل للتسعير)" },
+        two: { en: "({n} items not priceable)", ar: "(صنفان غير قابلين للتسعير)" },
+        few: { en: "({n} items not priceable)", ar: "({n} أصناف غير قابلة للتسعير)" },
+        many: { en: "({n} items not priceable)", ar: "({n} صنفًا غير قابل للتسعير)" },
+      },
+
+      // --- draft form: attachments ---
+      removeFile: { en: "Remove file", ar: "إزالة الملف" },
+      notUploadedYet: { en: "not uploaded yet", ar: "لم يُرفع بعد" },
+      uploading: { en: "Uploading…", ar: "جارٍ الرفع…" },
+      attachFile: { en: "Attach photo or file", ar: "إرفاق صورة أو ملف" },
+      stagedFiles: {
+        one: {
+          en: "{n} file will upload when you press Create draft.",
+          ar: "سيُرفع ملف واحد عند الضغط على إنشاء مسودة.",
+        },
+        two: {
+          en: "{n} files will upload when you press Create draft.",
+          ar: "سيُرفع ملفان عند الضغط على إنشاء مسودة.",
+        },
+        few: {
+          en: "{n} files will upload when you press Create draft.",
+          ar: "ستُرفع {n} ملفات عند الضغط على إنشاء مسودة.",
+        },
+        many: {
+          en: "{n} files will upload when you press Create draft.",
+          ar: "سيُرفع {n} ملفًا عند الضغط على إنشاء مسودة.",
+        },
+      },
+
+      // --- confirm exit: the money moment ---
+      confirmSubtitle: {
+        en: "This deducts stock and assigns the permit number. It cannot be undone — only voided.",
+        ar: "هذا يخصم المخزون ويمنح الإذن رقمه. لا يمكن التراجع عنه — يمكن إلغاؤه فقط.",
+      },
+      confirming: { en: "Confirming…", ar: "جارٍ التأكيد…" },
+      notEnoughStock: { en: "Not enough stock", ar: "المخزون غير كافٍ" },
+      // One shortfall line. `{name}` can be blank when the part did not load —
+      // the old JSX rendered nothing there, so the token is filled with "".
+      shortLine: { en: "{name}: need {q}, {n} on hand", ar: "{name}: المطلوب {q}، المتوفر {n}" },
+      colOnHandNow: { en: "On hand now", ar: "المتوفر الآن" },
+      colAfter: { en: "After", ar: "بعد الخروج" },
+      returnableDueBack: {
+        en: "Returnable — due back {d}.",
+        ar: "قابلة للإرجاع — تُستحق في {d}.",
+      },
+      willLeave: {
+        one: {
+          en: "{n} item will leave the warehouse. Cost is stamped at FIFO from the oldest stock first.",
+          ar: "سيخرج صنف واحد من المستودع. تُثبَّت التكلفة بالوارد أولًا من أقدم مخزون.",
+        },
+        two: {
+          en: "{n} items will leave the warehouse. Cost is stamped at FIFO from the oldest stock first.",
+          ar: "سيخرج صنفان من المستودع. تُثبَّت التكلفة بالوارد أولًا من أقدم مخزون.",
+        },
+        few: {
+          en: "{n} items will leave the warehouse. Cost is stamped at FIFO from the oldest stock first.",
+          ar: "ستخرج {n} أصناف من المستودع. تُثبَّت التكلفة بالوارد أولًا من أقدم مخزون.",
+        },
+        many: {
+          en: "{n} items will leave the warehouse. Cost is stamped at FIFO from the oldest stock first.",
+          ar: "سيخرج {n} صنفًا من المستودع. تُثبَّت التكلفة بالوارد أولًا من أقدم مخزون.",
+        },
+      },
+
+      // --- record a return ---
+      returnTitle: { en: "Record a return", ar: "تسجيل إرجاع" },
+      returnSubtitle: {
+        en: "Permit {n} — enter what came back. Partial returns are fine.",
+        ar: "إذن {n} — أدخل ما عاد. الإرجاع الجزئي مقبول.",
+      },
+      // `Recording…` is NOT here — it is `consumption.shared.recording`, which
+      // this modal's submit button reads. A second copy sat here until the
+      // duplicate checker found it byte-identical and unreferenced.
+      recordReturn: { en: "Record return", ar: "تسجيل الإرجاع" },
+      labelReturnedOn: { en: "Returned on", ar: "تاريخ الإرجاع" },
+      colItem: { en: "Item", ar: "الصنف" },
+      colReturning: { en: "Returning", ar: "المُرجَع الآن" },
+      // A caption under the part name, appended to the SKU — it opens with the
+      // separator, so the leading space and the "·" are part of the value.
+      alreadyBackCaption: { en: " · {r} of {q} already back", ar: " · عاد {r} من {q}" },
+      onlyNOut: { en: "only {n} out", ar: "القائم {n} فقط" },
+      titleLineLotsShort: {
+        en: "This line's lot history cannot cover that quantity",
+        ar: "سجل دفعات هذا السطر لا يغطي تلك الكمية",
+      },
+      returnFooter: {
+        en: "Returned stock goes back to the exact price lots it came from, so cost stays accurate.",
+        ar: "يعود المخزون المُرجَع إلى دفعات السعر نفسها التي خرج منها، فتبقى التكلفة دقيقة.",
+      },
+
+      // --- void ---
+      voidTitle: { en: "Void this permit", ar: "إلغاء هذا الإذن" },
+      voidSubtitle: {
+        en: "Permit {n} — the record is kept, marked voided.",
+        ar: "إذن {n} — يُحفظ السجل ويُعلَّم كملغى.",
+      },
+      voiding: { en: "Voiding…", ar: "جارٍ الإلغاء…" },
+      voidNothingToRestore: {
+        en: "Everything on this permit has already been returned, so voiding it moves no stock — it only marks the record as void.",
+        ar: "عاد كل ما في هذا الإذن بالفعل، فإلغاؤه لا يحرّك أي مخزون — إنما يعلّم السجل كملغى فقط.",
+      },
+      voidRestoreIntro: {
+        en: "These quantities go back to stock:",
+        ar: "تعود هذه الكميات إلى المخزون:",
+      },
+      colRestoring: { en: "Restoring", ar: "المُعاد" },
+      labelReason: { en: "Reason", ar: "السبب" },
+      voidReasonPlaceholder: { en: "Why is this being voided?", ar: "ما سبب الإلغاء؟" },
+      // The English swaps " has"/"s have", so the two halves of the verb move
+      // with the noun. Stored whole per bucket rather than spliced.
+      alreadyPartlyReturned: {
+        one: {
+          en: "{n} item has already been partly returned. Those quantities were restored by their own return event and are NOT restored again here.",
+          ar: "عاد صنف واحد جزئيًا بالفعل. أُعيدت تلك الكميات إلى المخزون بحدث إرجاعها الخاص ولا تُعاد هنا مرة أخرى.",
+        },
+        two: {
+          en: "{n} items have already been partly returned. Those quantities were restored by their own return event and are NOT restored again here.",
+          ar: "عاد صنفان جزئيًا بالفعل. أُعيدت تلك الكميات إلى المخزون بحدث إرجاعها الخاص ولا تُعاد هنا مرة أخرى.",
+        },
+        few: {
+          en: "{n} items have already been partly returned. Those quantities were restored by their own return event and are NOT restored again here.",
+          ar: "عادت {n} أصناف جزئيًا بالفعل. أُعيدت تلك الكميات إلى المخزون بحدث إرجاعها الخاص ولا تُعاد هنا مرة أخرى.",
+        },
+        many: {
+          en: "{n} items have already been partly returned. Those quantities were restored by their own return event and are NOT restored again here.",
+          ar: "عاد {n} صنفًا جزئيًا بالفعل. أُعيدت تلك الكميات إلى المخزون بحدث إرجاعها الخاص ولا تُعاد هنا مرة أخرى.",
+        },
+      },
+
+      // --- the printable gate copy ---
+      // `{n}` is the permit number and is EMPTY on a draft, which is why the
+      // token sits at the end with a space before it: the old template
+      // produced "Exit permit " in exactly that case.
+      printTitle: { en: "Exit permit {n}", ar: "إذن خروج {n}" },
+      printSubtitle: {
+        en: "Print and send this with the carrier.",
+        ar: "اطبع هذا وأرسله مع الناقل.",
+      },
+      printBtn: { en: "Print", ar: "طباعة" },
+      printDraft: { en: "DRAFT", ar: "مسودة" },
+      printDueBack: { en: " · due back {d}", ar: " · تُستحق في {d}" },
+      printIssued: { en: "Issued", ar: "صدر في" },
+      printVoided: { en: "VOIDED", ar: "ملغى" },
+      printFromWarehouse: { en: "From warehouse", ar: "من مستودع" },
+      // `{kind}` arrives ALREADY TRANSLATED from the caller, which resolves the
+      // destination enum through EXIT_PERMIT_DESTINATION_TKEY.
+      printTo: { en: "To ({kind})", ar: "إلى ({kind})" },
+      colSku: { en: "SKU", ar: "الرمز" },
+      // The unit rides in the header when every line shares one. `{u}` is the
+      // part's own unit string from the database, so it is not translated.
+      colQtyUnit: { en: "Qty ({u})", ar: "الكمية ({u})" },
+      printInternalValue: {
+        en: "Internal value at FIFO cost: {v}",
+        ar: "القيمة الداخلية بتكلفة الوارد أولًا: {v}",
+      },
+      printRoleIssuedBy: { en: "Issued by", ar: "المُصدِر" },
+      printRoleReceivedBy: { en: "Received by", ar: "المُستلِم" },
+      printRoleGate: { en: "Gate / security", ar: "البوابة / الأمن" },
+      signatureLine: { en: "{role} — name & signature", ar: "{role} — الاسم والتوقيع" },
+    },
+  },
 } as const;
 
 /**
@@ -1774,4 +3037,42 @@ export function arText(base: string, ar: string | null | undefined, lang: Lang):
   if (lang !== "ar") return base;
   const trimmed = ar?.trim();
   return trimmed ? trimmed : base;
+}
+
+/**
+ * Which grammatical form a counted noun takes.
+ *
+ * English has two: one / not-one. Arabic has four, and they are not a stylistic
+ * preference — a counted noun changes NUMBER and CASE with the count:
+ *
+ *   1        وحدة واحدة        singular, the numeral usually dropped
+ *   2        وحدتان / وحدتين    DUAL, a form English does not have at all
+ *   3–10     ثلاث وحدات        plural, genitive
+ *   11+      إحدى عشرة وحدة    singular again, accusative
+ *
+ * ZERO takes the 3–10 shape (صفر وحدات), which is why it maps to `few` and not
+ * to a bucket of its own. That also happens to be what English wants: "0 work
+ * orders", the same word the old `n === 1 ? "" : "s"` produced.
+ *
+ * ONE SELECTOR SERVES BOTH LANGUAGES. It is deliberately not wrapped in a
+ * `lang === "ar"` branch: every English value under a bucketed key is written
+ * identically across `two`, `few` and `many`, so whichever bucket fires the
+ * English string is the same one it printed before this conversion. A language
+ * branch in the SELECTOR would have meant two code paths to keep byte-identical
+ * instead of one — and the render provers can only diff a path that runs.
+ *
+ * The `% 100` is what makes 111 behave like 11 rather than like 11-and-a-bit:
+ * Arabic agreement follows the last two digits, so 103 is `few` and 113 is
+ * `many`. Negatives and fractions are normalised away first; no caller passes
+ * one today, and a bucket lookup is the wrong place to discover that.
+ */
+export type PluralBucket = "one" | "two" | "few" | "many";
+
+export function plural(n: number): PluralBucket {
+  const a = Math.abs(Math.trunc(n));
+  if (a === 1) return "one";
+  if (a === 2) return "two";
+  const mod = a % 100;
+  if (a === 0 || (mod >= 3 && mod <= 10)) return "few";
+  return "many";
 }

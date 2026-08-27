@@ -21,8 +21,10 @@ import {
 import { createPortal } from "react-dom";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
+import { useApp } from "@/components/AppShell";
+import { t, plural, arText, type Lang, type TKey } from "@/lib/i18n";
 import {
-  buildApprovalEvents, APPROVAL_KIND_LABELS, APPROVAL_KIND_SHORT,
+  buildApprovalEvents, APPROVAL_KIND_INLINE, APPROVAL_KIND_SHORT,
   APPROVAL_KIND_PILL, APPROVAL_STATUS_LABELS, APPROVAL_STATUS_PILL,
   APPROVALS_REQUIRED,
   type ApprovalEvent, type ApprovalKind,
@@ -35,7 +37,10 @@ import type {
 import { decideConsumptionApproval } from "./actions";
 import ScrollLock from "@/components/ScrollLock";
 
-type PartNameLite = { id: string; name: string; sku: string; unit: string | null };
+// `name_ar` rides along so the part name can go through arText(). It is
+// nullable and arText() returns the base untouched when it is null, so a part
+// with no Arabic name still renders its English one rather than a blank.
+type PartNameLite = { id: string; name: string; name_ar: string | null; sku: string; unit: string | null };
 type TruckLite = { id: string; plate: string };
 
 // The vote that is ALREADY on the event — the one a second voter has to match.
@@ -55,22 +60,44 @@ function otherVote(e: ApprovalEvent, viewer: string | null): ConsumptionApproval
 // since a trigger writing an email into an error string would leak it to any
 // caller. The app already has the row, so it says the useful thing: who, and
 // what they decided.
+//
+// TWO WHOLE SENTENCES, not one with the verb swapped. English can splice
+// "approved"/"rejected" into a fixed frame because only that one word moves;
+// Arabic changes the verb itself, so each decision gets its own sentence.
 function conflictMessage(
   e: ApprovalEvent,
   viewer: string | null,
   attempted: "approved" | "rejected",
+  lang: Lang,
 ): string | null {
   const other = otherVote(e, viewer);
   if (!other || other.decision === attempted) return null;
-  return `Conflict — ${other.decided_by} already ${other.decision === "approved" ? "approved" : "rejected"} this. A second vote has to match theirs; a split decision is not allowed.`;
+  return t(
+    other.decision === "approved"
+      ? "consumption.approvalsTab.conflictApproved"
+      : "consumption.approvalsTab.conflictRejected",
+    lang,
+  ).replace("{who}", () => other.decided_by);
 }
 
-const KIND_FILTERS: { key: ApprovalKind | "all"; label: string }[] = [
-  { key: "all", label: "All kinds" },
-  { key: "exit_permit", label: "Exit permits" },
-  { key: "work_order", label: "In-house work orders" },
-  { key: "outsourced_job", label: "Outsourced jobs" },
+// The option ORDER lives here; the words live in the dictionary. Same shape as
+// every other filter row converted in this phase.
+const KIND_FILTERS: { key: ApprovalKind | "all"; label: TKey }[] = [
+  { key: "all", label: "consumption.approvalsTab.filterAll" },
+  { key: "exit_permit", label: "consumption.approvalsTab.filterExitPermits" },
+  { key: "work_order", label: "consumption.approvalsTab.filterWorkOrders" },
+  { key: "outsourced_job", label: "consumption.approvalsTab.filterOutsourcedJobs" },
 ];
+
+// The expanded-row heading. Three WHOLE labels rather than the kind label plus
+// a " — parts" / " — vendor payment" tail: that tail is an English apposition,
+// and gluing it onto an Arabic noun phrase at render time is the fragment
+// splicing this batch was told to avoid.
+const DETAIL_HEAD_TKEY: Record<ApprovalKind, TKey> = {
+  exit_permit: "consumption.approvalsTab.detailExitPermit",
+  work_order: "consumption.approvalsTab.detailWorkOrder",
+  outsourced_job: "consumption.approvalsTab.detailOutsourcedJob",
+};
 
 export default function ApprovalsTab({
   permits, permitLines, workOrders, workOrderParts, outsourcedJobs,
@@ -94,6 +121,7 @@ export default function ApprovalsTab({
   viewer: string | null;
 }) {
   const router = useRouter();
+  const { lang } = useApp();
   const [kindFilter, setKindFilter] = useState<ApprovalKind | "all">("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [rejecting, setRejecting] = useState<ApprovalEvent | null>(null);
@@ -115,6 +143,7 @@ export default function ApprovalsTab({
         outsourcedJobs, workshopPayments, approvals,
         viewer,
         destinationLabel,
+        lang,
         repairerNames: (jobId) => {
           const ids = jobRepairerIds.get(jobId) ?? [];
           const names = ids.map((id) => repairerNameById.get(id)).filter(Boolean) as string[];
@@ -124,7 +153,7 @@ export default function ApprovalsTab({
     [
       permits, permitLines, workOrders, workOrderParts, outsourcedJobs,
       workshopPayments, approvals, viewer, destinationLabel,
-      jobRepairerIds, repairerNameById,
+      jobRepairerIds, repairerNameById, lang,
     ],
   );
 
@@ -179,8 +208,9 @@ export default function ApprovalsTab({
     setBusyKey(null);
     if (res.error) {
       // A conflict gets the message that names the other voter; anything else
-      // (eligibility, a vanished subject) surfaces the server's own words.
-      return conflictMessage(e, viewer, decision) ?? res.error;
+      // (eligibility, a vanished subject) surfaces the server's own words —
+      // and those stay English, because actions.ts is out of this batch.
+      return conflictMessage(e, viewer, decision, lang) ?? res.error;
     }
     router.refresh();
     return null;
@@ -189,29 +219,31 @@ export default function ApprovalsTab({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Kpi label="Awaiting a decision" value={String(kpis.pending)} />
+        <Kpi label={t("consumption.approvalsTab.kpiPending", lang)} value={String(kpis.pending)} />
         <Kpi
-          label="Have one vote"
+          label={t("consumption.approvalsTab.kpiOneVote", lang)}
           value={String(kpis.awaitingSecond)}
-          hint="Need a matching second"
+          hint={t("consumption.approvalsTab.kpiOneVoteHint", lang)}
         />
         <Kpi
-          label="Decided"
+          label={t("consumption.approvalsTab.kpiDecided", lang)}
           value={String(kpis.decided)}
-          hint="Moved to the Approvals Ledger"
+          hint={t("consumption.approvalsTab.kpiDecidedHint", lang)}
         />
         <Kpi
-          label="Value pending"
+          label={t("consumption.approvalsTab.kpiValue", lang)}
           value={formatSar(kpis.pendingValue)}
-          hint="Parts and vendor spend not yet ruled on"
+          hint={t("consumption.approvalsTab.kpiValueHint", lang)}
         />
       </div>
 
+      {/* The arrow was `&rarr;` in the JSX and is a literal → in the English
+          dictionary value, which renders the same byte. The Arabic value uses
+          ← instead: in an RTL line the reading order is right-to-left, so a
+          right-pointing arrow would point back at the source. */}
       <div className="rounded-lg px-3 py-2 text-[11px] muted bg-black/[0.03] dark:bg-white/[0.04]">
-        Two matching votes decide an event — the second voter must agree with the first, and a
-        differing vote is refused. A decision here is a record, not a gate: it moves no stock and
-        changes nothing about the permit, work order or job. Decided events leave this tab for
-        Archive &rarr; Approvals Ledger, where they stay changeable for {LEDGER_LOCK_DAYS} days.
+        {t(`consumption.approvalsTab.explainer.${plural(LEDGER_LOCK_DAYS)}`, lang)
+          .replace("{n}", () => String(LEDGER_LOCK_DAYS))}
       </div>
 
       {/* No error banner here, and no inline row message either — a refusal
@@ -228,6 +260,7 @@ export default function ApprovalsTab({
           options={KIND_FILTERS}
           active={kindFilter}
           onPick={(k) => setKindFilter(k as ApprovalKind | "all")}
+          lang={lang}
         />
       </div>
 
@@ -241,17 +274,23 @@ export default function ApprovalsTab({
                 "No events match these filters" — blaming a filter for a
                 relocation, when no filter was involved. */}
             <p className="text-sm muted">
-              {pendingEvents.length > 0
-                ? "No events match these filters."
-                : events.length > 0
-                  ? "Everything has been decided."
-                  : "Nothing to approve yet."}
+              {t(
+                pendingEvents.length > 0
+                  ? "consumption.approvalsTab.emptyFiltered"
+                  : events.length > 0
+                    ? "consumption.approvalsTab.emptyAllDecided"
+                    : "consumption.approvalsTab.emptyNothingYet",
+                lang,
+              )}
             </p>
             {pendingEvents.length === 0 && (
               <p className="text-xs muted mt-1">
-                {events.length > 0
-                  ? "Decided events live in Archive → Approvals Ledger."
-                  : "Exited permits, completed in-house work orders that used parts, and outsourced jobs with a vendor payment all show up here."}
+                {t(
+                  events.length > 0
+                    ? "consumption.approvalsTab.emptyDecidedHint"
+                    : "consumption.approvalsTab.emptyNothingYetHint",
+                  lang,
+                )}
               </p>
             )}
           </div>
@@ -262,13 +301,13 @@ export default function ApprovalsTab({
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
                 <TH>{null}</TH>
-                <TH>Reference</TH>
-                <TH>Kind</TH>
-                <TH>What</TH>
-                <TH>When</TH>
-                <TH>Value</TH>
-                <TH>Votes</TH>
-                <TH>Status</TH>
+                <TH>{t("consumption.approvalsTab.colReference", lang)}</TH>
+                <TH>{t("consumption.shared.kind", lang)}</TH>
+                <TH>{t("consumption.approvalsTab.colWhat", lang)}</TH>
+                <TH>{t("consumption.approvalsTab.colWhen", lang)}</TH>
+                <TH>{t("consumption.shared.value", lang)}</TH>
+                <TH>{t("consumption.approvalsTab.colVotes", lang)}</TH>
+                <TH>{t("common.status", lang)}</TH>
                 <TH>{null}</TH>
               </tr>
             </thead>
@@ -287,7 +326,12 @@ export default function ApprovalsTab({
                         <button
                           onClick={() => toggle(k)}
                           className="h-7 w-7 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                          aria-label={open ? "Collapse" : "Expand"}
+                          aria-label={t(
+                            open
+                              ? "consumption.shared.collapseAria"
+                              : "consumption.shared.expandAria",
+                            lang,
+                          )}
                         >
                           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                         </button>
@@ -300,7 +344,7 @@ export default function ApprovalsTab({
                           "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
                           APPROVAL_KIND_PILL[e.kind],
                         )}>
-                          {APPROVAL_KIND_SHORT[e.kind]}
+                          {t(APPROVAL_KIND_SHORT[e.kind], lang)}
                         </span>
                       </TD>
                       <TD className="whitespace-normal max-w-[280px]">
@@ -340,7 +384,9 @@ export default function ApprovalsTab({
                           </div>
                         )}
                         {e.voteCount === 1 && (
-                          <div className="text-[10px] muted italic">awaiting a matching second vote</div>
+                          <div className="text-[10px] muted italic">
+                            {t("consumption.approvalsTab.awaitingSecond", lang)}
+                          </div>
                         )}
                       </TD>
                       <TD>
@@ -348,7 +394,7 @@ export default function ApprovalsTab({
                           "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
                           APPROVAL_STATUS_PILL[e.status],
                         )}>
-                          {APPROVAL_STATUS_LABELS[e.status]}
+                          {t(APPROVAL_STATUS_LABELS[e.status], lang)}
                         </span>
                         {/* THE STANDING DECISION, colour-coded — what the
                             first voter chose, which is what a second vote has
@@ -365,7 +411,7 @@ export default function ApprovalsTab({
                                 : "text-rose-600 dark:text-rose-400",
                             )}
                           >
-                            {APPROVAL_STATUS_LABELS[standing.decision]}
+                            {t(APPROVAL_STATUS_LABELS[standing.decision], lang)}
                           </div>
                         )}
                       </TD>
@@ -377,7 +423,9 @@ export default function ApprovalsTab({
                             event's overall verdict is the pill's job. */}
                         <div className="flex items-center gap-1 justify-end">
                           {!viewer ? (
-                            <span className="text-[11px] muted">Sign in to decide</span>
+                            <span className="text-[11px] muted">
+                              {t("consumption.approvalsTab.signInToDecide", lang)}
+                            </span>
                           ) : (
                             <>
                               {e.mine?.decision !== "approved" && (
@@ -390,7 +438,12 @@ export default function ApprovalsTab({
                                   }}
                                 >
                                   <Check className="h-3.5 w-3.5" />
-                                  {e.mine ? "Approve instead" : "Approve"}
+                                  {t(
+                                    e.mine
+                                      ? "consumption.approvalsTab.approveInstead"
+                                      : "consumption.approvalsTab.approve",
+                                    lang,
+                                  )}
                                 </Btn>
                               )}
                               {e.mine?.decision !== "rejected" && (
@@ -400,7 +453,12 @@ export default function ApprovalsTab({
                                   onClick={() => setRejecting(e)}
                                 >
                                   <X className="h-3.5 w-3.5" />
-                                  {e.mine ? "Reject instead" : "Reject"}
+                                  {t(
+                                    e.mine
+                                      ? "consumption.approvalsTab.rejectInstead"
+                                      : "consumption.approvalsTab.reject",
+                                    lang,
+                                  )}
                                 </Btn>
                               )}
                             </>
@@ -408,7 +466,14 @@ export default function ApprovalsTab({
                         </div>
                         {e.mine && (
                           <div className="text-[11px] muted mt-0.5 text-end">
-                            You {e.mine.decision === "approved" ? "approved" : "rejected"} this
+                            {/* A whole sentence per decision, not "You " + verb
+                                + " this": Arabic puts the verb elsewhere. */}
+                            {t(
+                              e.mine.decision === "approved"
+                                ? "consumption.approvalsTab.youApproved"
+                                : "consumption.approvalsTab.youRejected",
+                              lang,
+                            )}
                           </div>
                         )}
                       </TD>
@@ -419,16 +484,20 @@ export default function ApprovalsTab({
                         <td colSpan={9} className="p-0 border-t" style={{ borderColor: "rgb(var(--border))" }}>
                           <div className="p-4 bg-black/[0.015] dark:bg-white/[0.02] space-y-3">
                             <div className="text-[11px] font-semibold uppercase tracking-wide muted">
-                              {APPROVAL_KIND_LABELS[e.kind]}
-                              {e.kind === "outsourced_job" ? " — vendor payment" : " — parts"}
+                              {t(DETAIL_HEAD_TKEY[e.kind], lang)}
                             </div>
 
                             {e.kind === "outsourced_job" ? (
                               <Table>
                                 <thead>
                                   <tr>
-                                    <TH>Invoice</TH><TH>Date</TH><TH>Repairer</TH>
-                                    <TH>Subtotal</TH><TH>VAT</TH><TH>Discount</TH><TH>Total</TH>
+                                    <TH>{t("consumption.approvalsTab.colInvoice", lang)}</TH>
+                                    <TH>{t("consumption.approvalsTab.colDate", lang)}</TH>
+                                    <TH>{t("consumption.approvalsTab.colRepairer", lang)}</TH>
+                                    <TH>{t("consumption.approvalsTab.colSubtotal", lang)}</TH>
+                                    <TH>{t("consumption.approvalsTab.colVat", lang)}</TH>
+                                    <TH>{t("consumption.approvalsTab.colDiscount", lang)}</TH>
+                                    <TH>{t("consumption.shared.total", lang)}</TH>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -459,8 +528,11 @@ export default function ApprovalsTab({
                               <Table>
                                 <thead>
                                   <tr>
-                                    <TH>Part</TH><TH>Note</TH><TH>Qty</TH>
-                                    <TH>FIFO unit value</TH><TH>Value</TH>
+                                    <TH>{t("common.part", lang)}</TH>
+                                    <TH>{t("common.note", lang)}</TH>
+                                    <TH>{t("common.qty", lang)}</TH>
+                                    <TH>{t("consumption.shared.fifoUnitValue", lang)}</TH>
+                                    <TH>{t("consumption.shared.value", lang)}</TH>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -469,7 +541,11 @@ export default function ApprovalsTab({
                                     return (
                                       <tr key={l.key}>
                                         <TD>
-                                          <span className="text-sm font-medium">{part?.name ?? "Unknown part"}</span>
+                                          <span className="text-sm font-medium">
+                                            {part
+                                              ? arText(part.name, part.name_ar, lang)
+                                              : t("consumption.usage.unknownPart", lang)}
+                                          </span>
                                           <div className="text-[11px] muted">
                                             {part?.sku}{part?.unit ? ` · ${part.unit}` : ""}
                                           </div>
@@ -491,8 +567,7 @@ export default function ApprovalsTab({
 
                             {e.kind === "exit_permit" && (
                               <p className="text-[11px] muted">
-                                Quantities are what is still OUT — anything returned is back on the
-                                shelf and is not counted here.
+                                {t("consumption.approvalsTab.stillOutNote", lang)}
                               </p>
                             )}
 
@@ -513,7 +588,9 @@ export default function ApprovalsTab({
                                   : "bg-rose-500/10 text-rose-800 dark:text-rose-200",
                               )}>
                                 <div className="font-medium">
-                                  {e.voteCount} of {APPROVALS_REQUIRED} votes — needs a matching second to decide
+                                  {t(`consumption.approvalsTab.votesOf.${plural(e.voteCount)}`, lang)
+                                    .replace("{n}", () => String(e.voteCount))
+                                    .replace("{r}", () => String(APPROVALS_REQUIRED))}
                                 </div>
                                 {e.approvals.map((a) => (
                                   <div key={a.id} className="flex flex-wrap items-baseline gap-x-1.5">
@@ -521,20 +598,29 @@ export default function ApprovalsTab({
                                       "font-medium",
                                       a.decision === "rejected" && "text-rose-700 dark:text-rose-300",
                                     )}>
-                                      {APPROVAL_STATUS_LABELS[a.decision]}
+                                      {t(APPROVAL_STATUS_LABELS[a.decision], lang)}
                                     </span>
-                                    <span>by {a.decided_by}</span>
+                                    <span>
+                                      {t("consumption.approvalsTab.signedBy", lang)
+                                        .replace("{who}", () => a.decided_by)}
+                                    </span>
                                     <span className="opacity-70">
-                                      on {formatDateTime(a.decided_at)}
+                                      {t("consumption.approvalsTab.signedOn", lang)
+                                        .replace("{when}", () => formatDateTime(a.decided_at))}
                                     </span>
-                                    {a.decided_by === viewer && <span className="opacity-70">(you)</span>}
+                                    {a.decided_by === viewer && (
+                                      <span className="opacity-70">
+                                        {t("consumption.approvalsTab.signedYou", lang)}
+                                      </span>
+                                    )}
                                     {a.reason && <span className="w-full">{a.reason}</span>}
                                     {/* Only when it was actually changed —
                                         otherwise it repeats the line above. */}
                                     {a.created_at.slice(0, 19) !== a.decided_at.slice(0, 19) && (
                                       <span className="w-full opacity-70 inline-flex items-center gap-1">
                                         <Undo2 className="h-3 w-3" />
-                                        first decided {formatDateTime(a.created_at)}
+                                        {t("consumption.approvalsTab.firstDecided", lang)
+                                          .replace("{when}", () => formatDateTime(a.created_at))}
                                       </span>
                                     )}
                                   </div>
@@ -542,7 +628,8 @@ export default function ApprovalsTab({
                               </div>
                             ) : (
                               <p className="text-[11px] muted">
-                                Not yet ruled on — needs {APPROVALS_REQUIRED} approvals.
+                                {t(`consumption.approvalsTab.notRuled.${plural(APPROVALS_REQUIRED)}`, lang)
+                                  .replace("{n}", () => String(APPROVALS_REQUIRED))}
                               </p>
                             )}
                           </div>
@@ -559,6 +646,7 @@ export default function ApprovalsTab({
 
       {rejecting && (
         <RejectModal
+          lang={lang}
           event={rejecting}
           busy={busyKey === keyOf(rejecting)}
           error={rejectError}
@@ -571,18 +659,21 @@ export default function ApprovalsTab({
         />
       )}
 
-      {notice && <ConflictModal message={notice} onClose={() => setNotice(null)} />}
+      {notice && <ConflictModal lang={lang} message={notice} onClose={() => setNotice(null)} />}
     </div>
   );
 }
 
 function FilterRow({
-  options, active, onPick, badges,
+  options, active, onPick, badges, lang,
 }: {
-  options: { key: string; label: string }[];
+  // `label` is a dictionary KEY, not a word: the option order is the caller's
+  // business, the wording is the dictionary's.
+  options: { key: string; label: TKey }[];
   active: string;
   onPick: (k: string) => void;
   badges?: Record<string, number>;
+  lang: Lang;
 }) {
   return (
     <div className="flex items-center gap-1 flex-wrap">
@@ -597,7 +688,7 @@ function FilterRow({
               : "border-transparent muted hover:bg-black/5 dark:hover:bg-white/5",
           )}
         >
-          {o.label}
+          {t(o.label, lang)}
           {badges?.[o.key] ? (
             <span className="ms-1.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 text-[10px] font-semibold">
               {badges[o.key]}
@@ -612,7 +703,9 @@ function FilterRow({
 // The APPROVE refusal. Approving takes one click with no form behind it, so a
 // failure has nowhere to land in the row without stretching it — a popup says
 // it once, clearly, and leaves the table alone.
-function ConflictModal({ message, onClose }: { message: string; onClose: () => void }) {
+function ConflictModal({
+  message, onClose, lang,
+}: { message: string; onClose: () => void; lang: Lang }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
@@ -629,12 +722,14 @@ function ConflictModal({ message, onClose }: { message: string; onClose: () => v
             <X className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <h2 className="font-semibold">Vote not recorded</h2>
+            <h2 className="font-semibold">{t("consumption.approvalsTab.conflictTitle", lang)}</h2>
             <p className="text-sm muted mt-0.5">{message}</p>
           </div>
         </div>
         <div className="flex justify-end p-4 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-          <Btn variant="primary" onClick={onClose}>Got it</Btn>
+          <Btn variant="primary" onClick={onClose}>
+            {t("consumption.approvalsTab.conflictGotIt", lang)}
+          </Btn>
         </div>
       </div>
     </div>,
@@ -644,10 +739,11 @@ function ConflictModal({ message, onClose }: { message: string; onClose: () => v
 
 // Reject needs a reason, so it gets a popup; approve does not, so it does not.
 function RejectModal({
-  event, busy, error, onCancel, onConfirm,
+  event, busy, error, onCancel, onConfirm, lang,
 }: {
   event: ApprovalEvent;
   busy: boolean;
+  lang: Lang;
   // The refusal, shown BELOW the reason box — the popup stays open on a
   // conflict so the typed reason survives and the reader is told why right
   // where they are, instead of behind a dismissed dialog.
@@ -672,19 +768,32 @@ function RejectModal({
         onClick={(ev) => ev.stopPropagation()}
       >
         <div className="p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
-          <h2 className="font-semibold">Reject {event.reference}</h2>
+          <h2 className="font-semibold">
+            {t("consumption.approvalsTab.rejectTitle", lang)
+              .replace("{ref}", () => event.reference)}
+          </h2>
+          {/* SEAM. This used to be
+              `APPROVAL_KIND_LABELS[event.kind].toLowerCase()` spliced into the
+              sentence — an English-shaped move: Arabic has no letter case, so
+              the call would be a no-op and the clause would carry a
+              Title-Case noun mid-sentence. The kind now comes from
+              APPROVAL_KIND_INLINE, which holds a real inline form per
+              language. English output is unchanged. */}
           <p className="text-[11px] muted">
-            This records a rejection against {APPROVAL_KIND_LABELS[event.kind].toLowerCase()}{" "}
-            {event.reference}. Nothing is reversed and no stock moves.
+            {t("consumption.approvalsTab.rejectSubtitle", lang)
+              .replace("{kind}", () => t(APPROVAL_KIND_INLINE[event.kind], lang))
+              .replace("{ref}", () => event.reference)}
           </p>
         </div>
         <div className="p-4 space-y-2">
-          <label className="text-xs muted block">Reason *</label>
+          <label className="text-xs muted block">
+            {t("consumption.approvalsTab.reasonLabel", lang)}
+          </label>
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={3}
-            placeholder="What is wrong with this one?"
+            placeholder={t("consumption.approvalsTab.reasonPlaceholder", lang)}
             className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full bg-transparent"
             style={{ borderColor: "rgb(var(--border))" }}
           />
@@ -695,13 +804,18 @@ function RejectModal({
           )}
         </div>
         <div className="flex justify-end gap-2 p-4 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-          <Btn variant="outline" onClick={onCancel}>Cancel</Btn>
+          <Btn variant="outline" onClick={onCancel}>{t("common.cancel", lang)}</Btn>
           <Btn
             variant="primary"
             disabled={busy || reason.trim().length === 0}
             onClick={() => onConfirm(reason.trim())}
           >
-            {busy ? "Recording…" : "Record rejection"}
+            {t(
+              busy
+                ? "consumption.shared.recording"
+                : "consumption.approvalsTab.recordRejection",
+              lang,
+            )}
           </Btn>
         </div>
       </div>
