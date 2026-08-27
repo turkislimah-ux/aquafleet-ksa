@@ -10,6 +10,8 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
 import { cn } from "@/lib/utils";
 
@@ -21,8 +23,8 @@ export default function LookupSelect({
   items,
   defaultKey,
   onAdd,
-  addLabel = "+ Add custom…",
-  newPlaceholder = "New name",
+  addLabel,
+  newPlaceholder,
 }: {
   name: string;
   items: { key: string; label: string }[];
@@ -31,6 +33,7 @@ export default function LookupSelect({
   addLabel?: string;
   newPlaceholder?: string;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [extra, setExtra] = useState<{ key: string; label: string }[]>([]);
   const [value, setValue] = useState(defaultKey);
@@ -58,11 +61,11 @@ export default function LookupSelect({
   async function add() {
     const clean = label.trim();
     if (!clean) {
-      setErr("Name is required.");
+      setErr(t("drivers.lookup.nameRequired", lang));
       return;
     }
     if (!canAdd) {
-      setErr("Label must start with a letter.");
+      setErr(t("drivers.lookup.mustStartWithLetter", lang));
       return;
     }
     setBusy(true);
@@ -70,7 +73,7 @@ export default function LookupSelect({
     const res = await onAdd(clean);
     setBusy(false);
     if (res.error || !res.key) {
-      setErr(res.error ?? "Could not add.");
+      setErr(res.error ?? t("drivers.lookup.couldNotAdd", lang));
       return;
     }
     setExtra((x) => [...x, { key: res.key!, label: clean }]);
@@ -100,14 +103,14 @@ export default function LookupSelect({
           {options.map((o) => (
             <option key={o.key} value={o.key}>{o.label}</option>
           ))}
-          <option value="__add__">{addLabel}</option>
+          <option value="__add__">{addLabel ?? t("drivers.lookup.addCustom", lang)}</option>
         </select>
       ) : (
         <div className="flex gap-2">
           <input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder={newPlaceholder}
+            placeholder={newPlaceholder ?? t("drivers.lookup.newName", lang)}
             className={INPUT}
             style={INPUT_STYLE}
             autoFocus
@@ -118,15 +121,15 @@ export default function LookupSelect({
             onClick={add}
             className={cn(!canAdd && "opacity-50 pointer-events-none")}
           >
-            {busy ? "…" : "Add"}
+            {busy ? "…" : t("common.add", lang)}
           </Btn>
-          <Btn type="button" variant="outline" onClick={() => { setAdding(false); setErr(null); }}>Cancel</Btn>
+          <Btn type="button" variant="outline" onClick={() => { setAdding(false); setErr(null); }}>{t("common.cancel", lang)}</Btn>
         </div>
       )}
       {adding && label.trim() !== "" && slug !== "" && (
         validSlug
-          ? <p className="text-xs muted">Will be saved as: {slug}</p>
-          : <p className="text-xs text-rose-600 dark:text-rose-400">Label must start with a letter.</p>
+          ? <p className="text-xs muted">{t("drivers.lookup.savedAs", lang)} <span dir="ltr">{slug}</span></p>
+          : <p className="text-xs text-rose-600 dark:text-rose-400">{t("drivers.lookup.mustStartWithLetter", lang)}</p>
       )}
       {err && <p className="text-xs text-rose-600 dark:text-rose-400">{err}</p>}
       <input type="hidden" name={name} value={value} />

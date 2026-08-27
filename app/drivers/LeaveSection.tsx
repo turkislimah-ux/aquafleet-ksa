@@ -15,6 +15,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Trash2 } from "lucide-react";
 import { Btn } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural } from "@/lib/i18n";
 import { isOnLeaveToday, periodCoversToday, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { formatDate } from "@/lib/utils";
 import { addLeave, updateLeave, deleteLeave, addLeaveType } from "./actions";
@@ -22,6 +24,13 @@ import LookupSelect from "./LookupSelect";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
+
+// The four `leave_types.is_default = true` keys (0012). A const tuple so that
+// `drivers.leaveType.${key}` types as four real TKeys rather than `string`.
+const BUILTIN_LEAVE_TYPE_KEYS = ["paid", "sick", "unpaid", "off_duty"] as const;
+type BuiltinLeaveTypeKey = (typeof BUILTIN_LEAVE_TYPE_KEYS)[number];
+const isBuiltinLeaveType = (key: string): key is BuiltinLeaveTypeKey =>
+  (BUILTIN_LEAVE_TYPE_KEYS as readonly string[]).includes(key);
 
 // ISO date (YYYY-MM-DD) → local display, anchored at midnight so no TZ shift.
 function fmtDate(iso: string): string {
@@ -46,6 +55,7 @@ export default function LeaveSection({
   today: string;
   warning?: React.ReactNode;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<LeavePeriod | null>(null);
@@ -56,8 +66,15 @@ export default function LeaveSection({
   // Current-year total (Riyadh local date, via the `today` the caller already
   // derived from todayKey() — never re-derived here with `new Date()`).
   const yearDays = leaveDaysInYear(periods, Number(today.slice(0, 4)));
-  const typeLabel = (key: string) => leaveTypes.find((t) => t.key === key)?.label ?? key;
-  const defaultType = leaveTypes.find((t) => t.is_default)?.key ?? leaveTypes[0]?.key ?? "";
+  // The four built-ins translate off their immutable `key`; every custom type
+  // shows its stored `label` verbatim, because `leave_types` has no `label_ar`
+  // column to switch on. Row identity is `key`, never either label — and note
+  // the built-in arm does NOT consult `leaveTypes`, so a built-in still reads
+  // correctly if its row were ever deactivated out of the passed-in list.
+  // The callback param is `lt`, not `t` — `t` is the translator in this file now.
+  const typeLabel = (key: string) =>
+    isBuiltinLeaveType(key) ? t(`drivers.leaveType.${key}`, lang) : leaveTypes.find((lt) => lt.key === key)?.label ?? key;
+  const defaultType = leaveTypes.find((lt) => lt.is_default)?.key ?? leaveTypes[0]?.key ?? "";
 
   // Newest start first.
   const sorted = [...periods].sort((a, b) => (a.start_date < b.start_date ? 1 : -1));
@@ -84,11 +101,11 @@ export default function LeaveSection({
     const start = String(fd.get("start_date") ?? "");
     const end = String(fd.get("end_date") ?? "");
     if (!start || !end) {
-      setError("Pick start and end dates.");
+      setError(t("drivers.leave.errDates", lang));
       return;
     }
     if (end < start) {
-      setError("End date must be on or after the start date.");
+      setError(t("drivers.leave.errOrder", lang));
       return;
     }
     setSaving(true);
@@ -104,7 +121,7 @@ export default function LeaveSection({
   }
 
   async function onDelete(p: LeavePeriod) {
-    if (!confirm(`Delete this ${typeLabel(p.leave_type)} period?`)) return;
+    if (!confirm(fill(t("drivers.leave.confirmDelete", lang), { type: typeLabel(p.leave_type) }))) return;
     const res = await deleteLeave(p.id);
     if (res.error) {
       alert(res.error);
@@ -117,21 +134,25 @@ export default function LeaveSection({
     <div className="card p-3">
       <div className="flex items-center justify-between mb-2 gap-2">
         <div className="flex items-center gap-2">
-          <h4 className="font-semibold text-sm">Leave &amp; absence</h4>
+          <h4 className="font-semibold text-sm">{t("drivers.leave.title", lang)}</h4>
           {onLeave ? (
             <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400">
-              On leave today
+              {t("drivers.leave.onLeaveToday", lang)}
             </span>
           ) : (
             <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-              Available
+              {t("drivers.leave.available", lang)}
             </span>
           )}
-          <span className="text-xs muted">{yearDays} day{yearDays === 1 ? "" : "s"} this year</span>
+          {/* WHOLE sentence per bucket — the count is never spliced into a
+              fragment, because Arabic inflects the noun on the number. */}
+          <span className="text-xs muted">
+            {fill(t(`drivers.count.leaveDays.${plural(yearDays)}`, lang), { n: yearDays })}
+          </span>
         </div>
         {!formOpen && (
           <Btn variant="outline" onClick={openNew}>
-            <Plus className="h-3.5 w-3.5" /> Add leave
+            <Plus className="h-3.5 w-3.5" /> {t("drivers.leave.add", lang)}
           </Btn>
         )}
       </div>
@@ -144,7 +165,7 @@ export default function LeaveSection({
 
       {/* Recorded periods. */}
       {sorted.length === 0 ? (
-        <p className="muted text-xs py-2">No leave recorded.</p>
+        <p className="muted text-xs py-2">{t("drivers.leave.none", lang)}</p>
       ) : (
         <ul className="space-y-1.5">
           {sorted.map((p) => {
@@ -159,11 +180,14 @@ export default function LeaveSection({
                     <span className="truncate">{typeLabel(p.leave_type)}</span>
                     {covers && (
                       <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                        now
+                        {t("drivers.leave.now", lang)}
                       </span>
                     )}
                   </div>
-                  <div className="text-xs muted">{fmtRange(p.start_date, p.end_date)}</div>
+                  {/* dir on the span, not the row — see the cell-vs-span note in
+                      MechanicCommissionsSection: a date range is Latin in both
+                      languages and must not be reordered by RTL. */}
+                  <div className="text-xs muted"><span dir="ltr">{fmtRange(p.start_date, p.end_date)}</span></div>
                   {p.note && <div className="text-xs muted truncate">{p.note}</div>}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
@@ -171,7 +195,7 @@ export default function LeaveSection({
                     type="button"
                     onClick={() => openEdit(p)}
                     className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 muted"
-                    aria-label="Edit leave"
+                    aria-label={t("drivers.leave.edit", lang)}
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
@@ -179,7 +203,7 @@ export default function LeaveSection({
                     type="button"
                     onClick={() => onDelete(p)}
                     className="p-1.5 rounded-md text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                    aria-label="Delete leave"
+                    aria-label={t("drivers.leave.del", lang)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -196,43 +220,49 @@ export default function LeaveSection({
           <input type="hidden" name="kind" value={kind} />
           <input type="hidden" name="person_id" value={personId} />
           <div className="flex items-center justify-between sm:col-span-2">
-            <span className="text-sm font-medium">{editing ? "Edit leave period" : "Record leave"}</span>
+            <span className="text-sm font-medium">{editing ? t("drivers.leave.editPeriod", lang) : t("drivers.leave.record", lang)}</span>
             <button type="button" onClick={closeForm} className="muted hover:text-[rgb(var(--fg))]">
               <X className="h-4 w-4" />
             </button>
           </div>
 
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted">Leave type</span>
+            <span className="muted">{t("drivers.leave.fType", lang)}</span>
             <LookupSelect
               name="leave_type"
-              items={leaveTypes.map((t) => ({ key: t.key, label: t.label }))}
+              // Through `typeLabel`, not `lt.label` — the picker is the third
+              // render site and must agree with the row and the delete confirm.
+              // `key` is what the form submits, so translating the label here
+              // cannot change what is written.
+              items={leaveTypes.map((lt) => ({ key: lt.key, label: typeLabel(lt.key) }))}
               defaultKey={editing?.leave_type ?? defaultType}
               onAdd={addLeaveType}
-              addLabel="+ Add custom type…"
-              newPlaceholder="New leave type"
+              addLabel={t("drivers.lookup.addCustomType", lang)}
+              newPlaceholder={t("drivers.leave.newType", lang)}
             />
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Start date</span>
+            <span className="muted">{t("drivers.leave.fStart", lang)}</span>
             <input name="start_date" type="date" required defaultValue={editing?.start_date ?? ""} className={INPUT} style={INPUT_STYLE} />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">End date</span>
+            <span className="muted">{t("drivers.leave.fEnd", lang)}</span>
             <input name="end_date" type="date" required defaultValue={editing?.end_date ?? ""} className={INPUT} style={INPUT_STYLE} />
           </label>
 
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted">Note (optional)</span>
-            <input name="note" defaultValue={editing?.note ?? ""} placeholder="e.g. annual leave, medical" className={INPUT} style={INPUT_STYLE} />
+            <span className="muted">{t("drivers.noteOptional", lang)}</span>
+            <input name="note" defaultValue={editing?.note ?? ""} placeholder={t("drivers.leave.phNote", lang)} className={INPUT} style={INPUT_STYLE} />
           </label>
 
           {error && <p className="text-xs text-rose-600 dark:text-rose-400 sm:col-span-2">{error}</p>}
 
           <div className="flex justify-end gap-2 sm:col-span-2">
-            <Btn variant="outline" onClick={closeForm}>Cancel</Btn>
-            <Btn type="submit" variant="primary">{saving ? "Saving…" : editing ? "Save" : "Add leave"}</Btn>
+            <Btn variant="outline" onClick={closeForm}>{t("common.cancel", lang)}</Btn>
+            <Btn type="submit" variant="primary">
+              {saving ? t("common.saving", lang) : editing ? t("common.save", lang) : t("drivers.leave.add", lang)}
+            </Btn>
           </div>
         </form>
       )}

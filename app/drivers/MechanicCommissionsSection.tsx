@@ -27,6 +27,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X, Pencil, Trash2 } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, fill, arText } from "@/lib/i18n";
 import { formatDate, formatSar } from "@/lib/utils";
 import type { Staff, StaffCommission, StaffCommissionType } from "@/lib/db-types";
 import { addStaffCommission, updateStaffCommission, deleteStaffCommission, addStaffCommissionType } from "./actions";
@@ -48,6 +50,7 @@ export default function MechanicCommissionsSection({
   commissions: StaffCommission[];
   commissionTypes: StaffCommissionType[];
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<StaffCommission | null>(null);
@@ -60,7 +63,11 @@ export default function MechanicCommissionsSection({
   const eligible = mechanic.active && !mechanic.terminated_at;
   if (!eligible) return null;
 
-  const typeLabel = (key: string) => commissionTypes.find((c) => c.key === key)?.label_en ?? key;
+  // DISPLAY only — the row is still found by `key`, never by either label.
+  const typeLabel = (key: string) => {
+    const ct = commissionTypes.find((c) => c.key === key);
+    return ct ? arText(ct.label_en, ct.label_ar, lang) : key;
+  };
   const defaultType = commissionTypes[0]?.key ?? "";
 
   // Newest first.
@@ -87,11 +94,11 @@ export default function MechanicCommissionsSection({
     // Client mirror of the server validation (server is the real gate).
     const amount = Number(fd.get("amount_sar"));
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError("Enter an amount greater than 0.");
+      setError(t("drivers.mech.errAmount", lang));
       return;
     }
     if (!fd.get("commission_date")) {
-      setError("Pick a date.");
+      setError(t("drivers.mech.errDate", lang));
       return;
     }
     setSaving(true);
@@ -107,7 +114,7 @@ export default function MechanicCommissionsSection({
   }
 
   async function onDelete(c: StaffCommission) {
-    if (!confirm(`Delete this ${typeLabel(c.commission_type)} commission?`)) return;
+    if (!confirm(fill(t("drivers.mech.confirmDelete", lang), { type: typeLabel(c.commission_type) }))) return;
     const res = await deleteStaffCommission(c.id);
     if (res.error) {
       alert(res.error);
@@ -119,24 +126,24 @@ export default function MechanicCommissionsSection({
   return (
     <div className="card p-3">
       <div className="flex items-center justify-between mb-2 gap-2">
-        <h4 className="font-semibold text-sm">Commissions</h4>
+        <h4 className="font-semibold text-sm">{t("drivers.mech.title", lang)}</h4>
         {!formOpen && (
           <Btn variant="outline" onClick={openNew}>
-            <Plus className="h-3.5 w-3.5" /> Add commission
+            <Plus className="h-3.5 w-3.5" /> {t("drivers.mech.add", lang)}
           </Btn>
         )}
       </div>
 
       {sorted.length === 0 ? (
-        <p className="muted text-xs py-2">No commissions recorded.</p>
+        <p className="muted text-xs py-2">{t("drivers.mech.none", lang)}</p>
       ) : (
         <Table>
           <thead>
             <tr>
-              <TH>Type</TH>
-              <TH>Amount</TH>
-              <TH>Date</TH>
-              <TH>Note</TH>
+              <TH>{t("common.type", lang)}</TH>
+              <TH>{t("drivers.mech.thAmount", lang)}</TH>
+              <TH>{t("drivers.date", lang)}</TH>
+              <TH>{t("common.note", lang)}</TH>
               <TH></TH>
             </tr>
           </thead>
@@ -144,8 +151,11 @@ export default function MechanicCommissionsSection({
             {sorted.map((c) => (
               <tr key={c.id}>
                 <TD>{typeLabel(c.commission_type)}</TD>
-                <TD className="tabular-nums">{formatSar(c.amount_sar)}</TD>
-                <TD className="text-xs">{fmtDate(c.commission_date)}</TD>
+                {/* dir on an inner span, never on the cell — `text-align: start`
+                    resolves against the cell's OWN direction, so dir="ltr" there
+                    would left-align the column in Arabic. */}
+                <TD className="tabular-nums"><span dir="ltr">{formatSar(c.amount_sar)}</span></TD>
+                <TD className="text-xs"><span dir="ltr">{fmtDate(c.commission_date)}</span></TD>
                 <TD className="text-xs muted truncate max-w-[200px]">{c.note || "—"}</TD>
                 <TD>
                   <div className="flex items-center gap-1 justify-end">
@@ -153,7 +163,7 @@ export default function MechanicCommissionsSection({
                       type="button"
                       onClick={() => openEdit(c)}
                       className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 muted"
-                      aria-label="Edit commission"
+                      aria-label={t("drivers.mech.edit", lang)}
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
@@ -161,7 +171,7 @@ export default function MechanicCommissionsSection({
                       type="button"
                       onClick={() => onDelete(c)}
                       className="p-1.5 rounded-md text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                      aria-label="Delete commission"
+                      aria-label={t("drivers.mech.del", lang)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -177,26 +187,26 @@ export default function MechanicCommissionsSection({
         <form onSubmit={onSubmit} className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-app pt-3">
           <input type="hidden" name="staff_id" value={mechanic.id} />
           <div className="flex items-center justify-between sm:col-span-2">
-            <span className="text-sm font-medium">{editing ? "Edit commission" : "Add commission"}</span>
+            <span className="text-sm font-medium">{editing ? t("drivers.mech.edit", lang) : t("drivers.mech.add", lang)}</span>
             <button type="button" onClick={closeForm} className="muted hover:text-[rgb(var(--fg))]">
               <X className="h-4 w-4" />
             </button>
           </div>
 
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted">Commission type</span>
+            <span className="muted">{t("drivers.mech.fType", lang)}</span>
             <LookupSelect
               name="commission_type"
-              items={commissionTypes.map((c) => ({ key: c.key, label: c.label_en }))}
+              items={commissionTypes.map((c) => ({ key: c.key, label: arText(c.label_en, c.label_ar, lang) }))}
               defaultKey={editing?.commission_type ?? defaultType}
               onAdd={addStaffCommissionType}
-              addLabel="+ Add custom type…"
-              newPlaceholder="New commission type"
+              addLabel={t("drivers.lookup.addCustomType", lang)}
+              newPlaceholder={t("drivers.mech.newType", lang)}
             />
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Amount (SAR)</span>
+            <span className="muted">{t("drivers.mech.fAmount", lang)}</span>
             <input
               name="amount_sar"
               type="number"
@@ -209,7 +219,7 @@ export default function MechanicCommissionsSection({
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Date</span>
+            <span className="muted">{t("drivers.date", lang)}</span>
             <input
               name="commission_date"
               type="date"
@@ -221,15 +231,17 @@ export default function MechanicCommissionsSection({
           </label>
 
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted">Note (optional)</span>
-            <input name="note" defaultValue={editing?.note ?? ""} placeholder="e.g. reason or context" className={INPUT} style={INPUT_STYLE} />
+            <span className="muted">{t("drivers.noteOptional", lang)}</span>
+            <input name="note" defaultValue={editing?.note ?? ""} placeholder={t("drivers.mech.phNote", lang)} className={INPUT} style={INPUT_STYLE} />
           </label>
 
           {error && <p className="text-xs text-rose-600 dark:text-rose-400 sm:col-span-2">{error}</p>}
 
           <div className="flex justify-end gap-2 sm:col-span-2">
-            <Btn variant="outline" onClick={closeForm}>Cancel</Btn>
-            <Btn type="submit" variant="primary">{saving ? "Saving…" : editing ? "Save" : "Add commission"}</Btn>
+            <Btn variant="outline" onClick={closeForm}>{t("common.cancel", lang)}</Btn>
+            <Btn type="submit" variant="primary">
+              {saving ? t("common.saving", lang) : editing ? t("common.save", lang) : t("drivers.mech.add", lang)}
+            </Btn>
           </div>
         </form>
       )}

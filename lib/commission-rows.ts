@@ -38,11 +38,13 @@
 // adjustments and the cycle row all carry their own month_key text column and
 // are matched on it, byte-for-byte, the same way the RPC matches them.
 
-// TWO IMPORTS, BOTH DELIBERATE LEAVES. Neither pulls in React, Supabase or
+// THREE IMPORTS, ALL DELIBERATE LEAVES. None pulls in React, Supabase or
 // anything else that would stop scripts/commission-rows-check.ts running this
 // module directly — verified by running it, not assumed. lib/commission's only
-// import is a TYPE (erased at runtime) and lib/db-types imports nothing at all,
-// so this file's runtime dependency graph is still effectively empty.
+// import is a TYPE (erased at runtime), lib/db-types imports nothing at all, and
+// lib/i18n has no import line whatsoever (it is a dictionary literal plus four
+// pure functions), so this file's runtime dependency graph is still effectively
+// empty.
 //
 // monthKeyOf USED TO BE DEFINED HERE TOO, byte-identically, with a comment
 // admitting it "matches lib/commission monthKeyOf". It had no external consumer
@@ -55,6 +57,7 @@
 // currentMonthKey is the opposite question — which month the USER is in now, on
 // the local clock — and lives in lib/utils beside todayKey. Do not merge the two.
 import { monthKeyOf } from "./commission";
+import { t, type Lang } from "./i18n";
 import { currentMonthKey } from "./utils";
 
 export type CommTrip = {
@@ -158,11 +161,15 @@ export { currentMonthKey };
 // for — and two copies of the month naming is exactly how the two screens start
 // captioning the same payout differently. PURE display: it computes no money and
 // is never parsed back into a key.
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-export function monthLabel(monthKey: string): string {
-  const m = Number(monthKey.slice(5, 7));
-  const name = MONTH_NAMES[m - 1];
-  return name ? `${name} ${monthKey.slice(0, 4)}` : monthKey;
+//
+// `lang` is REQUIRED, not defaulted: a default would let a call site keep
+// rendering English forever without tsc ever mentioning it.
+// Indexing a const tuple types the element as the union of its twelve members,
+// so `drivers.months.${key}` is twelve real TKeys rather than `string`.
+const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
+export function monthLabel(monthKey: string, lang: Lang): string {
+  const key = MONTH_KEYS[Number(monthKey.slice(5, 7)) - 1];
+  return key ? `${t(`drivers.months.${key}`, lang)} ${monthKey.slice(0, 4)}` : monthKey;
 }
 
 // `buildBaseLines` USED TO LIVE HERE and was deleted: zero call sites, in app

@@ -22,6 +22,8 @@
 import { useMemo, useState } from "react";
 import { Eye, X, Printer, History as HistoryIcon } from "lucide-react";
 import { Stat, StatusPill, Table, TH, TD } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 import { formatDateTime, formatSar } from "@/lib/utils";
 import {
   buildHistoryRows,
@@ -47,6 +49,23 @@ function fmtDate(iso: string): string {
   });
 }
 
+/**
+ * The "some payouts are hidden" note. ONE WHOLE SENTENCE per plural bucket —
+ * Arabic inflects the counted noun, so there is no "{n} + word" seam to splice.
+ * `{months}` survives `fill()` untouched and is the seam the <em> goes into,
+ * the same inline-token device PartsUsageTab uses for `{cur}`.
+ */
+function UnmonthedNote({ n, lang }: { n: number; lang: Lang }) {
+  const [before, after] = fill(t(`drivers.count.unmonthedHidden.${plural(n)}`, lang), { n }).split("{months}");
+  return (
+    <>
+      {before}
+      <em>{t("drivers.hist.allMonths", lang)}</em>
+      {after}
+    </>
+  );
+}
+
 export default function HistoryTab({
   payouts,
   drivers,
@@ -58,15 +77,22 @@ export default function HistoryTab({
   // Active ∪ terminated-with-payout-history — scopes the "Driver" filter <select>.
   dropdownDrivers: DriverLite[];
 }) {
+  const { lang } = useApp();
   const [driverFilter, setDriverFilter] = useState<string>("all");
   const [monthFilter, setMonthFilter] = useState<string>("all");
   const [open, setOpen] = useState<CommPayout | null>(null);
 
-  const nameById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const d of drivers) m.set(d.id, d.name);
+  // The map holds the ROW, not a rendered name: a display string built inside a
+  // memo keyed on data alone would survive a language flip unchanged.
+  const driverById = useMemo(() => {
+    const m = new Map<string, DriverLite>();
+    for (const d of drivers) m.set(d.id, d);
     return m;
   }, [drivers]);
+  const displayName = (id: string) => {
+    const d = driverById.get(id);
+    return d ? arText(d.name, d.name_ar, lang) : "—";
+  };
 
   // Only months that a record actually settled — this is history, so unlike the
   // Commissions lens the current month is NOT added. An empty month here would
@@ -110,24 +136,24 @@ export default function HistoryTab({
   return (
     <div>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
-        <Stat label="Payouts" value={count} tone="info" />
-        <Stat label="Total Paid" value={formatSar(totalPaid)} tone="ok" />
-        <Stat label="Drivers Paid" value={drivenSet} tone="info" />
+        <Stat label={t("drivers.hist.statPayouts", lang)} value={count} tone="info" />
+        <Stat label={t("drivers.hist.statTotalPaid", lang)} value={formatSar(totalPaid)} tone="ok" />
+        <Stat label={t("drivers.hist.statDriversPaid", lang)} value={drivenSet} tone="info" />
       </div>
 
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
         <div className="flex items-center gap-3 text-sm flex-wrap">
           <div className="flex items-center gap-2">
-            <span className="muted">Driver</span>
+            <span className="muted">{t("common.driver", lang)}</span>
             <select
               value={driverFilter}
               onChange={(e) => setDriverFilter(e.target.value)}
               className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
               style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
             >
-              <option value="all">All drivers</option>
+              <option value="all">{t("drivers.hist.allDrivers", lang)}</option>
               {dropdownDrivers.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
+                <option key={d.id} value={d.id}>{arText(d.name, d.name_ar, lang)}</option>
               ))}
             </select>
           </div>
@@ -136,16 +162,16 @@ export default function HistoryTab({
               in the table, and they routinely differ: August's settlement run
               pays July's work. */}
           <div className="flex items-center gap-2">
-            <span className="muted">Month settled</span>
+            <span className="muted">{t("drivers.hist.monthSettled", lang)}</span>
             <select
               value={monthFilter}
               onChange={(e) => setMonthFilter(e.target.value)}
               className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
               style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
             >
-              <option value="all">All months</option>
+              <option value="all">{t("drivers.hist.allMonths", lang)}</option>
               {monthOptions.map((k) => (
-                <option key={k} value={k}>{monthLabel(k)}</option>
+                <option key={k} value={k}>{monthLabel(k, lang)}</option>
               ))}
             </select>
           </div>
@@ -154,9 +180,7 @@ export default function HistoryTab({
 
       {unmonthedHidden > 0 && (
         <p className="mb-3 text-xs muted">
-          {unmonthedHidden} earlier {unmonthedHidden === 1 ? "payout" : "payouts"} settled every unpaid month at once
-          and record no single month — hidden while a month is picked. Choose <em>All months</em> to see{" "}
-          {unmonthedHidden === 1 ? "it" : "them"}.
+          <UnmonthedNote n={unmonthedHidden} lang={lang} />
         </p>
       )}
 
@@ -164,15 +188,15 @@ export default function HistoryTab({
         <Table>
           <thead>
             <tr>
-              <TH>Paid</TH>
-              <TH>Driver</TH>
-              <TH>Month settled</TH>
-              <TH>Payout run</TH>
-              <TH className="text-end">Base</TH>
-              <TH className="text-end">Specials</TH>
-              <TH className="text-end">Adjustments</TH>
-              <TH className="text-end">Bonus</TH>
-              <TH className="text-end">Total</TH>
+              <TH>{t("drivers.hist.thPaid", lang)}</TH>
+              <TH>{t("common.driver", lang)}</TH>
+              <TH>{t("drivers.hist.monthSettled", lang)}</TH>
+              <TH>{t("drivers.hist.thPayoutRun", lang)}</TH>
+              <TH className="text-end">{t("drivers.comm.base", lang)}</TH>
+              <TH className="text-end">{t("drivers.comm.specials", lang)}</TH>
+              <TH className="text-end">{t("drivers.comm.adjustments", lang)}</TH>
+              <TH className="text-end">{t("drivers.comm.bonus", lang)}</TH>
+              <TH className="text-end">{t("drivers.comm.total", lang)}</TH>
               <TH className="text-end" />
             </tr>
           </thead>
@@ -182,30 +206,32 @@ export default function HistoryTab({
                 <td colSpan={10} className="py-8 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                   <HistoryIcon className="h-5 w-5 mx-auto mb-2 opacity-50" />
                   {monthFilter === "all"
-                    ? "No paid commissions yet."
-                    : `Nothing paid for ${monthLabel(monthFilter)} under this filter.`}
+                    ? t("drivers.hist.noneYet", lang)
+                    : fill(t("drivers.hist.noneForMonth", lang), { month: monthLabel(monthFilter, lang) })}
                 </td>
               </tr>
             )}
             {rows.map((r) => (
               <tr key={r.id} className="hover:bg-black/5 dark:hover:bg-white/5">
-                <TD className="whitespace-nowrap">{fmtDate(r.paidAt)}</TD>
-                <TD className="font-medium">{nameById.get(r.driverId) ?? "—"}</TD>
+                <TD className="whitespace-nowrap"><span dir="ltr">{fmtDate(r.paidAt)}</span></TD>
+                <TD className="font-medium">{displayName(r.driverId)}</TD>
                 {/* Em dash for a pre-0131 sweep — it settled no single month, and
                     a month must never be back-derived from the run caption. */}
                 <TD className="whitespace-nowrap">
                   {r.monthKey ? (
-                    <span className="font-medium">{monthLabel(r.monthKey)}</span>
+                    <span className="font-medium">{monthLabel(r.monthKey, lang)}</span>
                   ) : (
-                    <span className="muted" title="Paid before commissions were settled one month at a time">—</span>
+                    <span className="muted" title={t("drivers.hist.unmonthedTitle", lang)}>—</span>
                   )}
                 </TD>
                 <TD className="muted">{r.periodLabel}</TD>
-                <TD className="text-end tabular-nums">{formatSar(r.base)}</TD>
-                <TD className="text-end tabular-nums">{formatSar(r.specials)}</TD>
-                <TD className="text-end tabular-nums">{formatSar(r.adjustments)}</TD>
-                <TD className="text-end tabular-nums">{formatSar(r.bonus)}</TD>
-                <TD className="text-end tabular-nums font-semibold">{formatSar(r.total)}</TD>
+                {/* Money is `en-US` in both languages — isolated on an inner span,
+                    never with dir on the cell (that would flip `text-align: start`). */}
+                <TD className="text-end tabular-nums"><span dir="ltr">{formatSar(r.base)}</span></TD>
+                <TD className="text-end tabular-nums"><span dir="ltr">{formatSar(r.specials)}</span></TD>
+                <TD className="text-end tabular-nums"><span dir="ltr">{formatSar(r.adjustments)}</span></TD>
+                <TD className="text-end tabular-nums"><span dir="ltr">{formatSar(r.bonus)}</span></TD>
+                <TD className="text-end tabular-nums font-semibold"><span dir="ltr">{formatSar(r.total)}</span></TD>
                 <TD className="text-end">
                   <button
                     type="button"
@@ -213,7 +239,7 @@ export default function HistoryTab({
                     className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium hover:bg-black/5 dark:hover:bg-white/5"
                     style={{ borderColor: "rgb(var(--border))" }}
                   >
-                    <Eye className="h-3.5 w-3.5" /> View
+                    <Eye className="h-3.5 w-3.5" /> {t("common.view", lang)}
                   </button>
                 </TD>
               </tr>
@@ -225,7 +251,7 @@ export default function HistoryTab({
       {open && (
         <PayoutDetail
           payout={open}
-          driverName={nameById.get(open.driver_id) ?? "—"}
+          driverName={displayName(open.driver_id)}
           onClose={() => setOpen(null)}
         />
       )}
@@ -242,6 +268,7 @@ function PayoutDetail({
   driverName: string;
   onClose: () => void;
 }) {
+  const { lang } = useApp();
   // Snapshot is frozen jsonb — render straight from it (computed-truth at pay time).
   const snap = payout.snapshot as PayoutSnapshot | null;
 
@@ -253,7 +280,7 @@ function PayoutDetail({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between mb-4 no-print">
-          <h2 className="text-lg font-semibold">Payout — {driverName}</h2>
+          <h2 className="text-lg font-semibold">{fill(t("drivers.hist.payoutOf", lang), { name: driverName })}</h2>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -261,7 +288,7 @@ function PayoutDetail({
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5"
               style={{ borderColor: "rgb(var(--border))" }}
             >
-              <Printer className="h-4 w-4" /> Print
+              <Printer className="h-4 w-4" /> {t("drivers.hist.print", lang)}
             </button>
             <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]">
               <X className="h-5 w-5" />
@@ -280,41 +307,46 @@ function PayoutDetail({
                   smaller fact. A legacy sweep has no month and shows only the
                   caption — nothing is invented to fill the gap. */}
               {snap?.monthKey ? (
-                <div className="text-sm font-semibold">{monthLabel(snap.monthKey)}</div>
+                <div className="text-sm font-semibold">{monthLabel(snap.monthKey, lang)}</div>
               ) : (
-                <div className="text-xs muted">Settled every unpaid month at once</div>
+                <div className="text-xs muted">{t("drivers.hist.sweptAll", lang)}</div>
               )}
               <div className="text-xs muted uppercase tracking-wide">{payout.period_label}</div>
-              <div className="text-xs muted">Paid {fmtDate(payout.paid_at)}</div>
-              {payout.approved_by && <div className="text-xs muted">Approved by {payout.approved_by}</div>}
+              <div className="text-xs muted">{fill(t("drivers.hist.paidAt", lang), { when: fmtDate(payout.paid_at) })}</div>
+              {payout.approved_by && (
+                <div className="text-xs muted">{fill(t("drivers.hist.approvedBy", lang), { who: payout.approved_by })}</div>
+              )}
             </div>
           </div>
 
           {/* Base lines (per project) */}
           <div>
-            <h4 className="font-semibold text-sm mb-2">Base — delivered trips</h4>
+            <h4 className="font-semibold text-sm mb-2">{t("drivers.hist.baseHeading", lang)}</h4>
             <div className="card p-0 overflow-hidden">
               <Table>
                 <thead>
                   <tr>
-                    <TH>Project</TH>
-                    <TH className="text-end">Trips</TH>
-                    <TH className="text-end">Amount</TH>
+                    <TH>{t("drivers.comm.project", lang)}</TH>
+                    <TH className="text-end">{t("drivers.comm.trips", lang)}</TH>
+                    <TH className="text-end">{t("drivers.comm.amount", lang)}</TH>
                   </tr>
                 </thead>
                 <tbody>
                   {(snap?.baseLines ?? []).length === 0 && (
                     <tr>
                       <td colSpan={3} className="py-4 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                        No base trips.
+                        {t("drivers.hist.noBaseTrips", lang)}
                       </td>
                     </tr>
                   )}
                   {(snap?.baseLines ?? []).map((l, i) => (
                     <tr key={i}>
-                      <TD>{l.projectName}</TD>
+                      {/* Discriminate on the VALUE (`projectId == null`), never on
+                          the frozen English label — the snapshot is jsonb written
+                          at pay time and is never rewritten. */}
+                      <TD>{l.projectId ? l.projectName : t("drivers.comm.adhoc", lang)}</TD>
                       <TD className="text-end tabular-nums">{l.trips}</TD>
-                      <TD className="text-end tabular-nums">{formatSar(l.amount)}</TD>
+                      <TD className="text-end tabular-nums"><span dir="ltr">{formatSar(l.amount)}</span></TD>
                     </tr>
                   ))}
                 </tbody>
@@ -324,22 +356,22 @@ function PayoutDetail({
 
           {/* Items (specials / adjustments / bonus) */}
           <div>
-            <h4 className="font-semibold text-sm mb-2">Items</h4>
+            <h4 className="font-semibold text-sm mb-2">{t("drivers.hist.items", lang)}</h4>
             <div className="card p-0 overflow-hidden">
               <Table>
                 <thead>
                   <tr>
-                    <TH>Item</TH>
-                    <TH>Type</TH>
-                    <TH>Status</TH>
-                    <TH className="text-end">Amount</TH>
+                    <TH>{t("drivers.hist.thItem", lang)}</TH>
+                    <TH>{t("common.type", lang)}</TH>
+                    <TH>{t("common.status", lang)}</TH>
+                    <TH className="text-end">{t("drivers.comm.amount", lang)}</TH>
                   </tr>
                 </thead>
                 <tbody>
                   {(snap?.items ?? []).length === 0 && (
                     <tr>
                       <td colSpan={4} className="py-4 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                        No items.
+                        {t("drivers.hist.noItems", lang)}
                       </td>
                     </tr>
                   )}
@@ -350,12 +382,22 @@ function PayoutDetail({
                         <TD className={denied ? "line-through" : ""}>
                           {it.label}
                           {denied && it.deny_reason && (
-                            <span className="block text-[11px] muted no-underline">Denied: {it.deny_reason}</span>
+                            <span className="block text-[11px] muted no-underline">
+                              {fill(t("drivers.hist.deniedReason", lang), { reason: it.deny_reason })}
+                            </span>
                           )}
                         </TD>
-                        <TD className="capitalize">{it.kind}</TD>
-                        <TD><StatusPill status={denied ? "denied" : "approved"} label={denied ? "Denied" : "Approved"} /></TD>
-                        <TD className={"text-end tabular-nums " + (denied ? "line-through" : "")}>{formatSar(it.amount)}</TD>
+                        {/* Keyed off the stored `kind` enum, not off any label. */}
+                        <TD className="capitalize">{t(`drivers.comm.kind.${it.kind}`, lang)}</TD>
+                        <TD>
+                          <StatusPill
+                            status={denied ? "denied" : "approved"}
+                            label={denied ? t("drivers.comm.denied", lang) : t("drivers.comm.approved", lang)}
+                          />
+                        </TD>
+                        <TD className={"text-end tabular-nums " + (denied ? "line-through" : "")}>
+                          <span dir="ltr">{formatSar(it.amount)}</span>
+                        </TD>
                       </tr>
                     );
                   })}
@@ -366,11 +408,11 @@ function PayoutDetail({
 
           {/* Totals — frozen, paid amounts (denied excluded) */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
-            <Totline label="Base" value={payout.base_sar} />
-            <Totline label="Specials" value={payout.specials_sar} />
-            <Totline label="Adjustments" value={payout.adjustments_sar} />
-            <Totline label="Bonus" value={payout.bonus_sar} />
-            <Totline label="Total" value={payout.total_sar} strong />
+            <Totline label={t("drivers.comm.base", lang)} value={payout.base_sar} />
+            <Totline label={t("drivers.comm.specials", lang)} value={payout.specials_sar} />
+            <Totline label={t("drivers.comm.adjustments", lang)} value={payout.adjustments_sar} />
+            <Totline label={t("drivers.comm.bonus", lang)} value={payout.bonus_sar} />
+            <Totline label={t("drivers.comm.total", lang)} value={payout.total_sar} strong />
           </div>
         </div>
 
@@ -381,7 +423,7 @@ function PayoutDetail({
             className="rounded-lg border px-3 py-1.5 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5"
             style={{ borderColor: "rgb(var(--border))" }}
           >
-            Close
+            {t("drivers.close", lang)}
           </button>
         </div>
       </div>

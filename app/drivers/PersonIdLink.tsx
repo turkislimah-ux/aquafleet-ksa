@@ -15,6 +15,8 @@
 // number nobody has entered yet would be a dead end.
 
 import Link from "next/link";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 export default function PersonIdLink({
   personId,
@@ -26,12 +28,16 @@ export default function PersonIdLink({
   sub: "drivers" | "management";
   value: string | null;
 }) {
+  const { lang } = useApp();
   if (!value) return <span className="muted">—</span>;
   return (
     <Link
       href={`/archive?tab=staff&sub=${sub}&person=${personId}`}
       className="font-mono text-xs text-brand-600 dark:text-brand-300 hover:underline"
-      title="Open this person's documents in the Archive"
+      // An Iqama/licence number is a Latin identifier, so it is isolated from the
+      // paragraph direction — otherwise RTL reorders its digit groups on screen.
+      dir="ltr"
+      title={t("drivers.idLinkTitle", lang)}
     >
       {value}
     </Link>

@@ -32,10 +32,12 @@ import {
   type StaffCommissionType,
 } from "@/lib/db-types";
 import OperationStationField from "@/components/OperationStationField";
-import { TRIP_STAGE_LABELS, type TripStage } from "@/lib/db-types";
+import { STAGE_ORDER, type TripStage } from "@/lib/db-types";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, type Lang } from "@/lib/i18n";
 import { onLeaveTodaySet, type LeavePeriod, type LeaveType } from "@/lib/leave";
-import { DRIVER_STATE_LABELS, DRIVER_STATE_TONE, type DriverState } from "@/lib/driver-state";
-import { TRUCK_OPS_STATE_LABELS, type TruckOpsState } from "@/lib/truck-status";
+import { DRIVER_STATE_TONE, type DriverState } from "@/lib/driver-state";
+import { type TruckOpsState } from "@/lib/truck-status";
 import {
   createDriver,
   updateDriver,
@@ -118,8 +120,20 @@ function initials(name: string): string {
 // yellow) conflicts with what those same strings mean on truck, invoice and
 // trip pills, where `idle` and `off_duty` are both blue. Routing it through the
 // global map would have recoloured four unrelated surfaces to fix one.
-function driverStatePill(s: DriverState) {
-  return <StatusPill status={s} label={DRIVER_STATE_LABELS[s]} tone={DRIVER_STATE_TONE[s]} />;
+//
+// Module-level, so there is no hook to read `lang` from — it is threaded in as
+// an explicit parameter at all three call sites. The LABEL is keyed off the
+// DriverState enum (`fleet.driverState.*`), never read from DRIVER_STATE_LABELS:
+// that map stays as the English single source and is still rendered by Fleet.
+function driverStatePill(s: DriverState, lang: Lang) {
+  return <StatusPill status={s} label={t(`fleet.driverState.${s}`, lang)} tone={DRIVER_STATE_TONE[s]} />;
+}
+
+// Trip stage as a dictionary key. `RecentTrip.stage` is a bare `string` off the
+// row, so it is narrowed against STAGE_ORDER — the ordered list db-types already
+// exports — rather than a second copy of the four values coined here.
+function isTripStage(s: string): s is TripStage {
+  return (STAGE_ORDER as readonly string[]).includes(s);
 }
 
 // The 4 derived states in precedence order (lib/driver-state) — fixed, so the
@@ -136,14 +150,19 @@ const DRIVER_STATE_ORDER: DriverState[] = ["active", "idle", "off_duty", "on_lea
 //
 // Returns null at zero rather than "None": the KPI already reads 0, and a second
 // element saying so is noise on the three cards where it would render.
-function KpiNames({ names, max = 3 }: { names: string[]; max?: number }) {
+function KpiNames({ names, max = 3, lang }: { names: string[]; max?: number; lang: Lang }) {
   if (names.length === 0) return null;
   const shown = names.slice(0, max);
   const rest = names.length - shown.length;
   return (
     <span title={names.join(", ")} className="block truncate">
       {shown.join(", ")}
-      {rest > 0 ? <span className="opacity-70"> +{rest} more</span> : null}
+      {/* WHOLE phrase per bucket — Arabic inflects the elided noun on the
+          count, so "+N" is never spliced into a fragment. The leading space
+          stays OUTSIDE the filled string, where it was. */}
+      {rest > 0 ? (
+        <span className="opacity-70"> {fill(t(`drivers.count.more.${plural(rest)}`, lang), { n: rest })}</span>
+      ) : null}
     </span>
   );
 }
@@ -170,12 +189,14 @@ function KpiNames({ names, max = 3 }: { names: string[]; max?: number }) {
 // Colours are PILL_TONE_CLS[DRIVER_STATE_TONE[s]] — the exact mapping the status
 // pills in the table below use — so a colour means the same state in both places.
 // There is no second palette here to drift.
-function OnDutyBar({ counts, total }: { counts: Record<DriverState, number>; total: number }) {
+function OnDutyBar({ counts, total, lang }: { counts: Record<DriverState, number>; total: number; lang: Lang }) {
   return (
     <div className="card p-4 h-full flex flex-col">
       <div className="flex items-baseline justify-between gap-3 mb-1.5">
-        <div className="text-xs muted uppercase tracking-wide">On Duty</div>
-        <div className="text-xs muted tabular-nums">{total} drivers</div>
+        <div className="text-xs muted uppercase tracking-wide">{t("drivers.onDuty.title", lang)}</div>
+        <div className="text-xs muted tabular-nums">
+          {fill(t(`drivers.count.drivers.${plural(total)}`, lang), { n: total })}
+        </div>
       </div>
 
       <div className="flex-1 flex flex-col justify-center gap-1">
@@ -189,12 +210,16 @@ function OnDutyBar({ counts, total }: { counts: Record<DriverState, number>; tot
             <div key={s} className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-2">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", tone.dot)} />
-                <span className="text-[10px] muted truncate leading-none">{DRIVER_STATE_LABELS[s]}</span>
+                <span className="text-[10px] muted truncate leading-none">{t(`fleet.driverState.${s}`, lang)}</span>
               </div>
 
               <div
                 className="h-1 rounded-full overflow-hidden bg-black/5 dark:bg-white/10"
-                title={`${DRIVER_STATE_LABELS[s]}: ${counts[s]} of ${total}`}
+                title={fill(t("drivers.onDuty.barTitle", lang), {
+                  state: t(`fleet.driverState.${s}`, lang),
+                  n: counts[s],
+                  total,
+                })}
               >
                 <div className={cn("h-full rounded-full transition-[width]", tone.dot)} style={{ width: `${pct}%` }} />
               </div>
@@ -214,10 +239,11 @@ function OnDutyBar({ counts, total }: { counts: Record<DriverState, number>; tot
 // true = Yes (green), false = No (red), null = a neutral dash. null is NOT
 // styled as No: "never recorded" is a data gap, and painting it red would
 // assert a fact about the driver that nobody has established.
-function healthInsuranceCell(v: boolean | null) {
-  if (v === true) return <span className="font-semibold text-emerald-600 dark:text-emerald-400">Yes</span>;
-  if (v === false) return <span className="font-semibold text-rose-600 dark:text-rose-400">No</span>;
-  return <span className="muted" title="Not recorded">—</span>;
+// Module-level like driverStatePill — `lang` arrives as a parameter.
+function healthInsuranceCell(v: boolean | null, lang: Lang) {
+  if (v === true) return <span className="font-semibold text-emerald-600 dark:text-emerald-400">{t("drivers.health.yes", lang)}</span>;
+  if (v === false) return <span className="font-semibold text-rose-600 dark:text-rose-400">{t("drivers.health.no", lang)}</span>;
+  return <span className="muted" title={t("drivers.health.notRecorded", lang)}>—</span>;
 }
 
 export default function DriversClient({
@@ -298,6 +324,7 @@ export default function DriversClient({
   openWoByMechanic: Record<string, number>;
   error: string | null;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   // Tab lives in the URL so global search can deep-link a sub-page.
   const [tab, setTab] = useTabParam<Tab>(DRIVER_TABS, "drivers");
@@ -409,7 +436,7 @@ export default function DriversClient({
     }
     return m;
   }, [driverIncidents]);
-  const pillFor = (d: Driver) => driverStatePill(driverStateById[d.id] ?? "off_duty");
+  const pillFor = (d: Driver) => driverStatePill(driverStateById[d.id] ?? "off_duty", lang);
 
   // KPIs — honest: sums skip null, "On Duty" derived from assignment.
   const total = drivers.length;
@@ -469,12 +496,16 @@ export default function DriversClient({
     for (const i of incidentsInWindow) per.set(i.driver_id, (per.get(i.driver_id) ?? 0) + 1);
     return [...per.entries()]
       .map(([id, n]) => {
-        const label = driverLabelById.get(id) ?? "Unknown driver";
+        const label = driverLabelById.get(id) ?? t("drivers.kpi.unknownDriver", lang);
+        // "(2)" is a bare parenthesised figure, not a counted noun — there is
+        // no noun to inflect, so it needs no plural bucket.
         return { label: n > 1 ? `${label} (${n})` : label, n };
       })
       .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label))
       .map((x) => x.label);
-  }, [incidentsInWindow, driverLabelById]);
+    // `lang` IS a dependency: this memo composes a display string, so without
+    // it the fallback label would keep the old language after a language flip.
+  }, [incidentsInWindow, driverLabelById, lang]);
 
   const yearEnd = yearEndKey(today);
 
@@ -550,8 +581,8 @@ export default function DriversClient({
       const target = trucks.find((tr) => tr.id === truckId);
       const occupant = target?.assigned_driver_id;
       if (occupant && occupant !== editing?.id) {
-        const who = driverNameById.get(occupant) ?? "another driver";
-        if (!confirm(`That truck is currently assigned to ${who}. Reassign it?`)) return;
+        const who = driverNameById.get(occupant) ?? t("drivers.form.anotherDriver", lang);
+        if (!confirm(fill(t("drivers.form.confirmReassign", lang), { who }))) return;
       }
     }
 
@@ -574,15 +605,21 @@ export default function DriversClient({
       {/* Header — action is tab-aware (New driver on Drivers tab). */}
       <div className="flex items-start justify-between mb-5 gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Staff</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("nav.drivers", lang)}</h1>
+          {/* TWO independent counts joined by a bullet, so each is a WHOLE
+              sentence of its own rather than one sentence carrying two figures
+              — no 4×4 cross product is needed here. The " · " between them is a
+              separator, not part of either phrase. */}
           <p className="muted text-sm mt-1">
-            {total} drivers · {staff.length} support staff
+            {fill(t(`drivers.count.drivers.${plural(total)}`, lang), { n: total })}
+            {" · "}
+            {fill(t(`drivers.count.supportStaff.${plural(staff.length)}`, lang), { n: staff.length })}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {tab === "drivers" && (
             <Btn variant="primary" onClick={openNew}>
-              <Plus className="h-4 w-4" /> New driver
+              <Plus className="h-4 w-4" /> {t("drivers.newDriver", lang)}
             </Btn>
           )}
           {/* Item 5 — same slot, same treatment as New driver, so the two tabs
@@ -593,7 +630,7 @@ export default function DriversClient({
               — a ref handle would have been more machinery for the same effect. */}
           {tab === "staff" && (
             <Btn variant="primary" onClick={() => setAddStaffSignal((n) => n + 1)}>
-              <Plus className="h-4 w-4" /> Add staff
+              <Plus className="h-4 w-4" /> {t("drivers.addStaff", lang)}
             </Btn>
           )}
         </div>
@@ -601,7 +638,7 @@ export default function DriversClient({
 
       {/* Tab bar — underline style mirrors the demo. */}
       <div className="flex items-center gap-1 border-b mb-4 flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
-        <TabBtn active={tab === "drivers"} onClick={() => setTab("drivers")} label="Drivers" badge={total} />
+        <TabBtn active={tab === "drivers"} onClick={() => setTab("drivers")} label={t("drivers.tab.drivers", lang)} badge={total} />
         {/* Item 1 — Commission owns History now, as a sub-tab. The top-level
             button therefore reads active for BOTH values. "history" stays in
             DRIVER_TABS and in the Tab union deliberately: it is a real URL
@@ -610,14 +647,14 @@ export default function DriversClient({
         <TabBtn
           active={tab === "commissions" || tab === "history"}
           onClick={() => setTab("commissions")}
-          label="Commissions"
+          label={t("drivers.tab.commissions", lang)}
           badge={pendingPayouts}
         />
-        <TabBtn active={tab === "staff"} onClick={() => setTab("staff")} label="Management & Staff" badge={staff.length} />
+        <TabBtn active={tab === "staff"} onClick={() => setTab("staff")} label={t("drivers.tab.staff", lang)} badge={staff.length} />
       </div>
 
       {error && (
-        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">Failed to load: {error}</p>
+        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{t("drivers.loadFailed", lang)} {error}</p>
       )}
 
       {tab === "drivers" && (
@@ -630,20 +667,20 @@ export default function DriversClient({
               itself is untouched in the DB. */}
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
             <div className="col-span-2 md:col-span-3">
-              <OnDutyBar counts={stateCounts} total={total} />
+              <OnDutyBar counts={stateCounts} total={total} lang={lang} />
             </div>
-            <Stat label="On Duty Now" value={`${onDuty}/${total}`} tone="ok" />
+            <Stat label={t("drivers.kpi.onDutyNow", lang)} value={`${onDuty}/${total}`} tone="ok" />
             <Stat
-              label="Incidents (12mo)"
+              label={t("drivers.kpi.incidents12mo", lang)}
               value={incidents}
               tone={incidents > 5 ? "warn" : "ok"}
-              sub={<KpiNames names={incidentDriverNames} />}
+              sub={<KpiNames names={incidentDriverNames} lang={lang} />}
             />
             <Stat
-              label="License Exp (this year)"
+              label={t("drivers.kpi.licenseExpYear", lang)}
               value={expiring}
               tone={expiring > 5 ? "warn" : "info"}
-              sub={<KpiNames names={expiringNames} />}
+              sub={<KpiNames names={expiringNames} lang={lang} />}
             />
           </div>
 
@@ -651,18 +688,18 @@ export default function DriversClient({
             <Table>
               <thead>
                 <tr>
-                  <TH>Driver</TH>
-                  <TH>Station</TH>
-                  <TH>Status</TH>
-                  <TH>Truck</TH>
-                  <TH>Assigned Project</TH>
-                  <TH>Trips 30d</TH>
-                  <TH>Salary</TH>
+                  <TH>{t("common.driver", lang)}</TH>
+                  <TH>{t("drivers.station", lang)}</TH>
+                  <TH>{t("common.status", lang)}</TH>
+                  <TH>{t("common.truck", lang)}</TH>
+                  <TH>{t("drivers.col.assignedProject", lang)}</TH>
+                  <TH>{t("drivers.col.trips30d", lang)}</TH>
+                  <TH>{t("drivers.col.salary", lang)}</TH>
                   {/* Item 9 — ALL-PERIODS unpaid commission, not month-scoped:
                       this is "total owed", the same all-time basis the roster
                       balance and the Commissions badge already use. */}
-                  <TH>Unpaid Commission</TH>
-                  <TH>License Exp</TH>
+                  <TH>{t("drivers.col.unpaidCommission", lang)}</TH>
+                  <TH>{t("drivers.col.licenseExp", lang)}</TH>
                   <TH className="text-end" />
                 </tr>
               </thead>
@@ -670,7 +707,7 @@ export default function DriversClient({
                 {drivers.length === 0 && (
                   <tr>
                     <td colSpan={10} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                      No drivers yet.
+                      {t("drivers.none", lang)}
                     </td>
                   </tr>
                 )}
@@ -717,8 +754,11 @@ export default function DriversClient({
                         )}
                       </TD>
                       <TD className="tabular-nums">{trips30dByDriver[d.id] ?? 0}</TD>
+                      {/* Money is `en-US`-formatted in both languages. `dir` goes
+                          on the SPAN, never on the <TD>: the cell's own
+                          direction is what `text-end` resolves against. */}
                       <TD className="tabular-nums">
-                        {d.salary_sar != null ? formatSar(d.salary_sar) : <span className="muted">—</span>}
+                        {d.salary_sar != null ? <span dir="ltr">{formatSar(d.salary_sar)}</span> : <span className="muted">—</span>}
                       </TD>
                       {/* Item 9. Zero is a REAL answer here (nothing owed), not
                           missing data, so it prints as a figure rather than the
@@ -728,18 +768,20 @@ export default function DriversClient({
                         {(() => {
                           const bal = balanceByDriver[d.id] ?? 0;
                           return bal !== 0 ? (
-                            <span className="font-semibold">{formatSar(bal)}</span>
+                            <span className="font-semibold" dir="ltr">{formatSar(bal)}</span>
                           ) : (
-                            <span className="muted">{formatSar(0)}</span>
+                            <span className="muted" dir="ltr">{formatSar(0)}</span>
                           );
                         })()}
                       </TD>
+                      {/* Raw ISO date — Latin in both languages, isolated on its
+                          own span for the same reason the money cell is. */}
                       <TD className={expSoon ? "text-amber-600 dark:text-amber-400 font-medium" : ""}>
-                        {d.license_expiry ?? <span className="muted">—</span>}
+                        {d.license_expiry ? <span dir="ltr">{d.license_expiry}</span> : <span className="muted">—</span>}
                       </TD>
                       <TD className="text-end">
                         <Btn variant="outline" onClick={() => setDetail(d)}>
-                          <Eye className="h-3.5 w-3.5" /> View
+                          <Eye className="h-3.5 w-3.5" /> {t("common.view", lang)}
                         </Btn>
                       </TD>
                     </tr>
@@ -771,8 +813,8 @@ export default function DriversClient({
               className="inline-flex items-center gap-1 rounded-lg border p-1"
               style={{ borderColor: "rgb(var(--border))" }}
             >
-              <SubTabBtn active={tab === "commissions"} onClick={() => setTab("commissions")} label="Commissions" badge={pendingPayouts} />
-              <SubTabBtn active={tab === "history"} onClick={() => setTab("history")} label="Historical" badge={payouts.length} />
+              <SubTabBtn active={tab === "commissions"} onClick={() => setTab("commissions")} label={t("drivers.tab.commissions", lang)} badge={pendingPayouts} />
+              <SubTabBtn active={tab === "history"} onClick={() => setTab("history")} label={t("drivers.tab.historical", lang)} badge={payouts.length} />
             </div>
 
             {/* CommissionsTab portals its own controls in here. The node is
@@ -842,15 +884,17 @@ export default function DriversClient({
         <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={closeForm}>
           <ScrollLock />
           <div className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-semibold mb-4">{editing ? "Edit driver" : "New driver"}</h2>
+            <h2 className="text-lg font-semibold mb-4">{editing ? t("drivers.form.editTitle", lang) : t("drivers.newDriver", lang)}</h2>
             <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Name *">
+              <Field label={t("drivers.form.fName", lang)}>
                 <input name="name" required defaultValue={editing?.name ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Name (Arabic)">
-                <input name="name_ar" defaultValue={editing?.name_ar ?? ""} className={INPUT} style={INPUT_STYLE} />
+              {/* The one input that is Arabic BY DEFINITION — `dir` is a property
+                  of the field's content, not of the interface language. */}
+              <Field label={t("drivers.form.fNameAr", lang)}>
+                <input name="name_ar" dir="rtl" defaultValue={editing?.name_ar ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Phone">
+              <Field label={t("drivers.form.fPhone", lang)}>
                 <input name="phone" defaultValue={editing?.phone ?? ""} placeholder="+966 5…" className={INPUT} style={INPUT_STYLE} />
               </Field>
               {/* LINKED IDENTITY FIELDS (0088/0089) — editable ONLY at
@@ -862,7 +906,7 @@ export default function DriversClient({
                   Read-only is rendered as a real disabled box (not a removed
                   field) so the value stays visible where people expect it —
                   with a link straight to where it IS edited. */}
-              <Field label="Iqama ID">
+              <Field label={t("drivers.form.fIqama", lang)}>
                 <LinkedIdField
                   name="iqama_number"
                   value={editing?.iqama_number ?? ""}
@@ -870,7 +914,7 @@ export default function DriversClient({
                   archiveHref={editing?.id ? `/archive?tab=staff&sub=drivers&person=${editing.id}` : null}
                 />
               </Field>
-              <Field label="Iqama expiry">
+              <Field label={t("drivers.form.fIqamaExp", lang)}>
                 <LinkedIdField
                   name="iqama_expiry"
                   type="date"
@@ -879,7 +923,7 @@ export default function DriversClient({
                   archiveHref={editing?.id ? `/archive?tab=staff&sub=drivers&person=${editing.id}` : null}
                 />
               </Field>
-              <Field label="License ID">
+              <Field label={t("drivers.form.fLicense", lang)}>
                 <LinkedIdField
                   name="license_number"
                   value={editing?.license_number ?? ""}
@@ -887,7 +931,7 @@ export default function DriversClient({
                   archiveHref={editing?.id ? `/archive?tab=staff&sub=drivers&person=${editing.id}` : null}
                 />
               </Field>
-              <Field label="License expiry">
+              <Field label={t("drivers.form.fLicenseExp", lang)}>
                 <LinkedIdField
                   name="license_expiry"
                   type="date"
@@ -896,14 +940,14 @@ export default function DriversClient({
                   archiveHref={editing?.id ? `/archive?tab=staff&sub=drivers&person=${editing.id}` : null}
                 />
               </Field>
-              <Field label="Hire date">
+              <Field label={t("drivers.form.fHireDate", lang)}>
                 <input name="hire_date" type="date" defaultValue={editing?.hire_date ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
               <OperationStationField
                 name="home_station"
                 stations={operationStations}
                 defaultValue={editing?.home_station ?? null}
-                label="Station"
+                label={t("drivers.station", lang)}
               />
 
               {/* Add incident — existing driver only (no id to attach to on a
@@ -912,15 +956,15 @@ export default function DriversClient({
                   Full incident list + Edit/Delete live in the driver View. */}
               <div className="sm:col-span-2 rounded-lg border p-3 space-y-2" style={{ borderColor: "rgb(var(--border))" }}>
                 <div className="flex items-center gap-2 text-sm font-medium">
-                  <AlertTriangle className="h-4 w-4 muted" /> Add incident
+                  <AlertTriangle className="h-4 w-4 muted" /> {t("drivers.inc.add", lang)}
                 </div>
                 {!editing ? (
-                  <p className="text-xs muted">Save this driver first to add incidents.</p>
+                  <p className="text-xs muted">{t("drivers.inc.saveFirst", lang)}</p>
                 ) : (
                   <>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <label className="flex flex-col gap-1 text-sm">
-                        <span className="muted">Incident date</span>
+                        <span className="muted">{t("drivers.inc.fDate", lang)}</span>
                         <input
                           type="date"
                           value={incidentDate}
@@ -931,17 +975,17 @@ export default function DriversClient({
                         />
                       </label>
                       <label className="flex flex-col gap-1 text-sm">
-                        <span className="muted">Type</span>
+                        <span className="muted">{t("common.type", lang)}</span>
                         <input
                           value={incidentType}
                           onChange={(e) => setIncidentType(e.target.value)}
-                          placeholder="e.g. Work accident, Truck accident"
+                          placeholder={t("drivers.inc.phType", lang)}
                           className={INPUT}
                           style={INPUT_STYLE}
                         />
                       </label>
                       <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                        <span className="muted">Description (optional)</span>
+                        <span className="muted">{t("drivers.inc.fDesc", lang)}</span>
                         <textarea
                           value={incidentDesc}
                           onChange={(e) => setIncidentDesc(e.target.value)}
@@ -952,7 +996,7 @@ export default function DriversClient({
                       </label>
                     </div>
                     {incidentError && <p className="text-xs text-rose-600 dark:text-rose-400">{incidentError}</p>}
-                    {incidentAdded && <p className="text-xs text-emerald-600 dark:text-emerald-400">Incident added.</p>}
+                    {incidentAdded && <p className="text-xs text-emerald-600 dark:text-emerald-400">{t("drivers.inc.added", lang)}</p>}
                     <div className="flex justify-end">
                       <button
                         type="button"
@@ -961,25 +1005,25 @@ export default function DriversClient({
                         className="h-9 px-3 rounded-lg text-sm font-medium border disabled:opacity-50"
                         style={INPUT_STYLE}
                       >
-                        {incidentSaving ? "Adding…" : "Add incident"}
+                        {incidentSaving ? t("drivers.inc.adding", lang) : t("drivers.inc.add", lang)}
                       </button>
                     </div>
                   </>
                 )}
               </div>
 
-              <Field label="Current truck">
+              <Field label={t("drivers.form.fTruck", lang)}>
                 <select name="truck_id" defaultValue={currentTruckId} className={INPUT} style={INPUT_STYLE}>
-                  <option value="">Unassigned</option>
+                  <option value="">{t("drivers.form.unassigned", lang)}</option>
                   {trucks.map((tr) => (
                     <option key={tr.id} value={tr.id}>{tr.plate}</option>
                   ))}
                 </select>
               </Field>
-              <Field label="Duty hours">
+              <Field label={t("drivers.form.fDutyHours", lang)}>
                 <input name="duty_hours" type="number" step="1" min="0" defaultValue={editing?.duty_hours ?? 10} className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Salary (SAR / month)">
+              <Field label={t("drivers.form.fSalary", lang)}>
                 <input name="salary_sar" type="number" step="0.01" min="0" defaultValue={editing?.salary_sar ?? ""} placeholder="—" className={INPUT} style={INPUT_STYLE} />
               </Field>
               {/* Health insurance (0132). THREE options, not a checkbox: a
@@ -987,23 +1031,23 @@ export default function DriversClient({
                   real third answer ("nobody has recorded it"). The empty value
                   is the DEFAULT for a new driver, so saving a form nobody filled
                   in asserts nothing. boolOrNull() in actions.ts maps "" -> null. */}
-              <Field label="Health insurance">
+              <Field label={t("drivers.health.label", lang)}>
                 <select
                   name="health_insurance"
                   defaultValue={editing?.health_insurance == null ? "" : editing.health_insurance ? "true" : "false"}
                   className={INPUT}
                   style={INPUT_STYLE}
                 >
-                  <option value="">Not recorded</option>
-                  <option value="true">Yes</option>
-                  <option value="false">No</option>
+                  <option value="">{t("drivers.health.notRecorded", lang)}</option>
+                  <option value="true">{t("drivers.health.yes", lang)}</option>
+                  <option value="false">{t("drivers.health.no", lang)}</option>
                 </select>
               </Field>
               {formError && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{formError}</p>}
 
               <div className="flex justify-end gap-2 sm:col-span-2 mt-2">
-                <Btn variant="outline" onClick={closeForm}>Cancel</Btn>
-                <Btn type="submit" variant="primary">{saving ? "Saving…" : "Save"}</Btn>
+                <Btn variant="outline" onClick={closeForm}>{t("common.cancel", lang)}</Btn>
+                <Btn type="submit" variant="primary">{saving ? t("common.saving", lang) : t("common.save", lang)}</Btn>
               </div>
             </form>
           </div>
@@ -1122,6 +1166,7 @@ function DriverDetail({
   onClose: () => void;
   onEdit: () => void;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   // Salary-history modal target. Local to the detail panel — it is opened from
   // the Salary cell and nothing above needs to know about it.
@@ -1179,7 +1224,7 @@ function DriverDetail({
       <ScrollLock />
       <div className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-semibold">Driver Details — {d.name}</h2>
+          <h2 className="text-lg font-semibold">{fill(t("drivers.detail.title", lang), { name: d.name })}</h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
 
@@ -1191,45 +1236,50 @@ function DriverDetail({
               <div className="font-semibold">{d.name}{d.name_ar ? <span className="muted font-normal"> · {d.name_ar}</span> : null}</div>
               <div className="text-xs muted">{stationName(d.home_station) ?? "—"}</div>
             </div>
-            {driverStatePill(state)}
+            {driverStatePill(state, lang)}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {/* Contact & ID */}
             <div className="card p-3">
-              <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><Phone className="h-4 w-4" /> Contact &amp; ID</h4>
+              <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><Phone className="h-4 w-4" /> {t("drivers.detail.contactId", lang)}</h4>
               <div className="grid grid-cols-2 gap-2">
-                <Cell label="Phone">{d.phone ?? <span className="muted">—</span>}</Cell>
+                <Cell label={t("drivers.form.fPhone", lang)}>{d.phone ? <span dir="ltr">{d.phone}</span> : <span className="muted">—</span>}</Cell>
                 {/* Both ID numbers DEEP-LINK into the archive, to this
                     driver's own row in the Drivers matrix — the documents
                     that carry these numbers live there. */}
-                <Cell label="Iqama ID"><PersonIdLink personId={d.id} sub="drivers" value={d.iqama_number} /></Cell>
-                <Cell label="Iqama expiry">{d.iqama_expiry ?? <span className="muted">—</span>}</Cell>
-                <Cell label="License ID"><PersonIdLink personId={d.id} sub="drivers" value={d.license_number} /></Cell>
-                <Cell label="License expiry"><span className={expSoon ? "text-amber-600 dark:text-amber-400 font-medium" : ""}>{d.license_expiry ?? "—"}</span></Cell>
-                <Cell label="Hire date">{d.hire_date ?? <span className="muted">—</span>}</Cell>
+                <Cell label={t("drivers.form.fIqama", lang)}><PersonIdLink personId={d.id} sub="drivers" value={d.iqama_number} /></Cell>
+                {/* ISO dates stay Latin in both languages — `dir` on the span. */}
+                <Cell label={t("drivers.form.fIqamaExp", lang)}>{d.iqama_expiry ? <span dir="ltr">{d.iqama_expiry}</span> : <span className="muted">—</span>}</Cell>
+                <Cell label={t("drivers.form.fLicense", lang)}><PersonIdLink personId={d.id} sub="drivers" value={d.license_number} /></Cell>
+                <Cell label={t("drivers.form.fLicenseExp", lang)}><span dir="ltr" className={expSoon ? "text-amber-600 dark:text-amber-400 font-medium" : ""}>{d.license_expiry ?? "—"}</span></Cell>
+                <Cell label={t("drivers.form.fHireDate", lang)}>{d.hire_date ? <span dir="ltr">{d.hire_date}</span> : <span className="muted">—</span>}</Cell>
               </div>
             </div>
 
             {/* Employment */}
             <div className="card p-3">
-              <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><Shield className="h-4 w-4" /> Employment</h4>
+              <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><Shield className="h-4 w-4" /> {t("drivers.detail.employment", lang)}</h4>
               <div className="grid grid-cols-2 gap-2">
-                <Cell label="Trips 30d"><span className="font-semibold tabular-nums">{trips30d}</span></Cell>
-                <Cell label="Duty hours"><span className="font-semibold tabular-nums">{d.duty_hours}</span></Cell>
+                <Cell label={t("drivers.col.trips30d", lang)}><span className="font-semibold tabular-nums">{trips30d}</span></Cell>
+                <Cell label={t("drivers.form.fDutyHours", lang)}><span className="font-semibold tabular-nums">{d.duty_hours}</span></Cell>
                 {/* Live count — reuses the `incidents` prop already passed in
                     (driverIncidentsById lookup one level up), no new fetch. */}
-                <Cell label="Incidents">
+                <Cell label={t("drivers.inc.title", lang)}>
+                  {/* WHOLE sentence per bucket. The English source pluralised
+                      by splicing an "s" onto a fragment; Arabic inflects the
+                      noun itself at 1 / 2 / 3–10 / 11+, so the count and its
+                      noun are stored together and never assembled here. */}
                   <span className={incidents.length > 0 ? "text-rose-600 dark:text-rose-400 font-semibold" : "font-semibold"}>
-                    {incidents.length} incident{incidents.length === 1 ? "" : "s"}
+                    {fill(t(`drivers.count.incidents.${plural(incidents.length)}`, lang), { n: incidents.length })}
                   </span>
                 </Cell>
                 {/* Item 8 — occupies the slot Rating held before 0132 dropped
                     it. Tri-state: Yes / No / a neutral dash for never-recorded. */}
-                <Cell label="Health insurance">{healthInsuranceCell(d.health_insurance)}</Cell>
-                <Cell label="Salary (monthly)">
+                <Cell label={t("drivers.health.label", lang)}>{healthInsuranceCell(d.health_insurance, lang)}</Cell>
+                <Cell label={t("drivers.salary.monthly", lang)}>
                   <span className="flex items-center gap-2">
-                    <span className="font-semibold tabular-nums">{d.salary_sar != null ? formatSar(d.salary_sar) : "—"}</span>
+                    <span className="font-semibold tabular-nums" dir="ltr">{d.salary_sar != null ? formatSar(d.salary_sar) : "—"}</span>
                     {/* The figure above is the CURRENT salary; this opens the
                         effective-dated timeline every payroll month resolves
                         through, and is the only place a back-dated change can
@@ -1238,9 +1288,9 @@ function DriverDetail({
                       type="button"
                       onClick={() => setSalaryHistoryFor({ id: d.id, name: d.name, salary: d.salary_sar ?? null })}
                       className="text-brand-600 dark:text-brand-300 hover:underline text-xs inline-flex items-center gap-1"
-                      title="View salary history / record a dated change"
+                      title={t("drivers.salary.openTitle", lang)}
                     >
-                      <History className="h-3.5 w-3.5" /> History
+                      <History className="h-3.5 w-3.5" /> {t("drivers.salary.openBtn", lang)}
                     </button>
                   </span>
                 </Cell>
@@ -1257,7 +1307,7 @@ function DriverDetail({
 
           {/* Assignment */}
           <div className="card p-3">
-            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><TruckIcon className="h-4 w-4" /> Current Assignment</h4>
+            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><TruckIcon className="h-4 w-4" /> {t("drivers.detail.assignment", lang)}</h4>
             {truck ? (
               <div className="flex items-center gap-3 text-sm">
                 <div className="h-10 w-10 rounded-lg grid place-items-center" style={{ background: "rgba(11,126,234,.12)", color: "#0b7eea" }}>
@@ -1269,22 +1319,24 @@ function DriverDetail({
                   </div>
                   <div className="text-xs muted">{[truck.model, stationName(truck.home_station)].filter(Boolean).join(" · ") || "—"}</div>
                 </div>
-                <StatusPill status={truckStatusById[truck.id] ?? "idle"} label={TRUCK_OPS_STATE_LABELS[truckStatusById[truck.id] ?? "idle"]} />
+                {/* Keyed off the derived TruckOpsState enum, not off the label
+                    map — `fleet.truckState.*` carries the same three values. */}
+                <StatusPill status={truckStatusById[truck.id] ?? "idle"} label={t(`fleet.truckState.${truckStatusById[truck.id] ?? "idle"}`, lang)} />
                 <Btn variant="outline" onClick={onUnassignTruck} className="shrink-0">
-                  {unassigning ? "Unassigning…" : "Unassign"}
+                  {unassigning ? t("drivers.detail.unassigning", lang) : t("drivers.detail.unassign", lang)}
                 </Btn>
               </div>
             ) : (
-              <p className="muted text-sm">No truck assigned</p>
+              <p className="muted text-sm">{t("drivers.detail.noTruck", lang)}</p>
             )}
             {unassignErr && <p className="text-sm text-rose-600 dark:text-rose-400 mt-2">{unassignErr}</p>}
           </div>
 
           {/* Recent trips */}
           <div className="card p-3">
-            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><RouteIcon className="h-4 w-4" /> Recent Trips</h4>
+            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2"><RouteIcon className="h-4 w-4" /> {t("drivers.detail.recentTrips", lang)}</h4>
             {recent.length === 0 ? (
-              <p className="muted text-sm">No recent trips</p>
+              <p className="muted text-sm">{t("drivers.detail.noRecentTrips", lang)}</p>
             ) : (
               recent.map((tr, i) => (
                 <div key={i} className="py-2 border-t first:border-0" style={{ borderColor: "rgb(var(--border))" }}>
@@ -1292,9 +1344,15 @@ function DriverDetail({
                     <div className="font-medium text-sm">
                       {tr.ref ?? "—"}{tr.dest ? <span className="muted font-normal"> → {tr.dest}</span> : null}
                     </div>
-                    <StatusPill status={tr.stage} label={TRIP_STAGE_LABELS[tr.stage as TripStage] ?? tr.stage} />
+                    {/* The stage arrives as a bare string off the row, so it is
+                        narrowed to the enum before it can key the dictionary;
+                        anything unrecognised falls through as its own value,
+                        exactly as the label map did. */}
+                    <StatusPill status={tr.stage} label={isTripStage(tr.stage) ? t(`drivers.tripStage.${tr.stage}`, lang) : tr.stage} />
                   </div>
-                  <div className="text-xs muted">
+                  {/* `m³` and the ISO date are app-formatted Latin tokens in
+                      both languages — one span, one direction. */}
+                  <div className="text-xs muted" dir="ltr">
                     {tr.tank_size_m3 != null ? `${tr.tank_size_m3} m³ · ` : ""}{tr.trip_date}
                   </div>
                 </div>
@@ -1316,7 +1374,7 @@ function DriverDetail({
             today={today}
             warning={
               truckConflict
-                ? `On leave today but still assigned to ${truck!.plate}. Reassign the truck if someone else needs to drive it.`
+                ? fill(t("drivers.detail.leaveTruckWarning", lang), { plate: truck!.plate })
                 : undefined
             }
           />
@@ -1326,14 +1384,14 @@ function DriverDetail({
           {!d.terminated_at && (
             <section className="space-y-3 border-t border-rose-500/30 pt-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
-                Danger zone
+                {t("drivers.term.dangerZone", lang)}
               </h3>
               {!confirmingTerminate ? (
                 <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 flex items-center justify-between gap-3">
                   <div className="text-sm">
-                    <div className="font-medium">Terminate driver</div>
+                    <div className="font-medium">{t("drivers.term.terminateDriver", lang)}</div>
                     <div className="muted text-[11px]">
-                      Removes {d.name} from all active views. History and balance are preserved.
+                      {fill(t("drivers.term.removes", lang), { name: d.name })}
                     </div>
                   </div>
                   <button
@@ -1341,18 +1399,18 @@ function DriverDetail({
                     onClick={() => setConfirmingTerminate(true)}
                     className="shrink-0 rounded-lg border border-rose-500/40 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
                   >
-                    Terminate driver
+                    {t("drivers.term.terminateDriver", lang)}
                   </button>
                 </div>
               ) : (
                 <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 space-y-3">
+                  {/* Two fragments around an inline <b>, not one filled string:
+                      the name has to stay a real element so it keeps its bold. */}
                   <p className="text-sm text-rose-700 dark:text-rose-300">
-                    This will terminate <b>{d.name}</b> and remove them from all active views.
-                    Their history and any unsettled commission balance are preserved. This can
-                    be restored later from the Archive page.
+                    {t("drivers.term.confirmBefore", lang)} <b>{d.name}</b> {t("drivers.term.confirmAfter", lang)}
                   </p>
                   <label className="flex flex-col gap-1 text-sm">
-                    <span className="muted">Termination date *</span>
+                    <span className="muted">{t("drivers.term.fDate", lang)}</span>
                     <input
                       type="date"
                       required
@@ -1364,7 +1422,11 @@ function DriverDetail({
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
-                    <span className="muted">Type &quot;{d.name}&quot; to confirm</span>
+                    {/* Filled with the RAW stored name — never arText(). The
+                        gate below compares the typed text against `d.name`, so
+                        an Arabic display name here would ask for a string the
+                        gate will not accept. */}
+                    <span className="muted">{fill(t("drivers.term.typeToConfirm", lang), { name: d.name })}</span>
                     <input
                       value={confirmText}
                       onChange={(e) => setConfirmText(e.target.value)}
@@ -1383,7 +1445,7 @@ function DriverDetail({
                         setTermError(null);
                       }}
                     >
-                      Cancel
+                      {t("common.cancel", lang)}
                     </Btn>
                     <button
                       type="button"
@@ -1394,7 +1456,7 @@ function DriverDetail({
                         (!terminateMatch || !terminationDate || terminating ? "opacity-50 pointer-events-none" : "")
                       }
                     >
-                      {terminating ? "Terminating…" : "Terminate driver"}
+                      {terminating ? t("drivers.term.terminating", lang) : t("drivers.term.terminateDriver", lang)}
                     </button>
                   </div>
                 </div>
@@ -1404,8 +1466,8 @@ function DriverDetail({
         </div>
 
         <div className="flex justify-end gap-2 mt-5">
-          <Btn variant="outline" onClick={onClose}>Close</Btn>
-          <Btn variant="primary" onClick={onEdit}><Pencil className="h-3.5 w-3.5" /> Edit</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("drivers.close", lang)}</Btn>
+          <Btn variant="primary" onClick={onEdit}><Pencil className="h-3.5 w-3.5" /> {t("common.edit", lang)}</Btn>
         </div>
       </div>
     </div>
@@ -1419,6 +1481,7 @@ function DriverDetail({
 // entry, not a financial/operational record) — small window.confirm() gate,
 // same pattern as LeaveSection's onDelete.
 function IncidentsSection({ incidents }: { incidents: DriverIncident[] }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [editing, setEditing] = useState<DriverIncident | null>(null);
   const [editDate, setEditDate] = useState("");
@@ -1461,7 +1524,8 @@ function IncidentsSection({ incidents }: { incidents: DriverIncident[] }) {
   }
 
   async function onDelete(inc: DriverIncident) {
-    if (!confirm(`Delete this "${inc.type}" incident?`)) return;
+    // `{type}` is the operator's own free text — quoted verbatim, never translated.
+    if (!confirm(fill(t("drivers.inc.confirmDelete", lang), { type: inc.type }))) return;
     setDeletingId(inc.id);
     const res = await deleteDriverIncident(inc.id);
     setDeletingId(null);
@@ -1475,10 +1539,10 @@ function IncidentsSection({ incidents }: { incidents: DriverIncident[] }) {
   return (
     <div className="card p-3">
       <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
-        <AlertTriangle className="h-4 w-4" /> Incidents
+        <AlertTriangle className="h-4 w-4" /> {t("drivers.inc.title", lang)}
       </h4>
       {sorted.length === 0 ? (
-        <p className="muted text-sm">No incidents recorded.</p>
+        <p className="muted text-sm">{t("drivers.inc.none", lang)}</p>
       ) : (
         <ul className="space-y-1.5">
           {sorted.map((inc) => (
@@ -1509,15 +1573,15 @@ function IncidentsSection({ incidents }: { incidents: DriverIncident[] }) {
                   />
                   {error && <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
                   <div className="flex justify-end gap-2">
-                    <Btn variant="outline" onClick={closeEdit}>Cancel</Btn>
-                    <Btn variant="primary" onClick={onSave}>{saving ? "Saving…" : "Save"}</Btn>
+                    <Btn variant="outline" onClick={closeEdit}>{t("common.cancel", lang)}</Btn>
+                    <Btn variant="primary" onClick={onSave}>{saving ? t("common.saving", lang) : t("common.save", lang)}</Btn>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-sm font-medium">{inc.type}</div>
-                    <div className="text-xs muted">{inc.incident_date}</div>
+                    <div className="text-xs muted"><span dir="ltr">{inc.incident_date}</span></div>
                     {inc.description && <div className="text-xs muted mt-0.5">{inc.description}</div>}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
@@ -1525,7 +1589,7 @@ function IncidentsSection({ incidents }: { incidents: DriverIncident[] }) {
                       type="button"
                       onClick={() => openEdit(inc)}
                       className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 muted"
-                      aria-label="Edit incident"
+                      aria-label={t("drivers.inc.edit", lang)}
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
@@ -1534,7 +1598,7 @@ function IncidentsSection({ incidents }: { incidents: DriverIncident[] }) {
                       onClick={() => onDelete(inc)}
                       disabled={deletingId === inc.id}
                       className="p-1.5 rounded-md text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"
-                      aria-label="Delete incident"
+                      aria-label={t("drivers.inc.del", lang)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>

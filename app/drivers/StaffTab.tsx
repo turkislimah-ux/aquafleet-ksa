@@ -13,6 +13,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, Pencil, Ban, History, Wrench } from "lucide-react";
 import { Btn, Stat } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 import { type Staff, type StaffRole, type OperationStation, type StaffCommission, type StaffCommissionType } from "@/lib/db-types";
 import { onLeaveTodaySet, leaveDaysInYear, type LeavePeriod, type LeaveType } from "@/lib/leave";
 import { addDaysToKey, formatDate, formatSar } from "@/lib/utils";
@@ -29,6 +31,13 @@ import ScrollLock from "@/components/ScrollLock";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
+
+// The five `staff_roles.is_default = true` keys (0011). A const tuple so that
+// `drivers.role.${key}` types as five real TKeys rather than `string`.
+const BUILTIN_ROLE_KEYS = ["fleet_manager", "ops_supervisor", "mechanic", "inventory_clerk", "dispatcher"] as const;
+type BuiltinRoleKey = (typeof BUILTIN_ROLE_KEYS)[number];
+const isBuiltinRole = (key: string): key is BuiltinRoleKey =>
+  (BUILTIN_ROLE_KEYS as readonly string[]).includes(key);
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -75,6 +84,7 @@ export default function StaffTab({
   // Total non-terminated trucks, for the mechanics-to-truck ratio.
   truckCount: number;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [detail, setDetail] = useState<Staff | null>(null);
   // Salary-history modal target. Same screen the driver detail opens — the modal
@@ -94,9 +104,12 @@ export default function StaffTab({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // staff_roles holds only active roles; an assigned role that was later
-  // deactivated falls back to showing its raw key.
-  const roleName = (key: string) => staffRoles.find((r) => r.key === key)?.label ?? key;
+  // The five built-ins translate off their immutable `key`; every custom role
+  // shows its stored `label` verbatim, because `staff_roles` has no `label_ar`
+  // column to switch on. staff_roles holds only active roles; an assigned role
+  // that was later deactivated still falls back to showing its raw key.
+  const roleName = (key: string) =>
+    isBuiltinRole(key) ? t(`drivers.role.${key}`, lang) : staffRoles.find((r) => r.key === key)?.label ?? key;
   // uuid -> name, built from ALL operation_stations rows (active + inactive) so
   // a staff member based at a since-deactivated station still resolves here.
   const stationNameById = useMemo(
@@ -187,13 +200,19 @@ export default function StaffTab({
   // Headcount per branch of operation. A staff member with no station gets a
   // real "Unassigned" row rather than being dropped — an unbased employee is
   // something to notice, not something to hide.
+  //
+  // The bucket carries NULL for that row, not the word: a display string
+  // composed inside a memo keyed on data alone would keep the old language
+  // after a lang flip. Grouping is still by resolved NAME (not by station id),
+  // so an id that no longer resolves keeps merging into the same bucket as a
+  // staff member with no station at all — one "Unassigned" row, as before.
   const byStation = useMemo(() => {
-    const m = new Map<string, number>();
+    const m = new Map<string | null, number>();
     for (const s of staff) {
-      const label = stationName(s.station) ?? "Unassigned";
-      m.set(label, (m.get(label) ?? 0) + 1);
+      const name = stationName(s.station);
+      m.set(name, (m.get(name) ?? 0) + 1);
     }
-    return Array.from(m, ([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+    return Array.from(m, ([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
     // stationName closes over stationNameById; that map is the real dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staff, stationNameById]);
@@ -232,7 +251,7 @@ export default function StaffTab({
   }
 
   async function onTerminate(s: Staff) {
-    if (!confirm(`Terminate ${s.name}? The record is kept but removed from the active list.`)) return;
+    if (!confirm(fill(t("drivers.staff.confirmTerminate", lang), { name: arText(s.name, s.name_ar, lang) }))) return;
     const res = await terminateStaff(s.id);
     if (res.error) {
       alert(res.error);
@@ -250,22 +269,24 @@ export default function StaffTab({
           breakdown squeezed into a quarter-width Stat card would be unreadable
           at exactly the moment it stops being one line long. */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
-        <Stat label="Active staff" value={activeHeadcount} tone="ok" />
+        <Stat label={t("drivers.staff.kpiActive", lang)} value={activeHeadcount} tone="ok" />
         <Stat
-          label="Iqama exp (90d)"
+          label={t("drivers.staff.kpiIqama", lang)}
           value={iqamaSoon}
           tone={iqamaSoon > 0 ? "warn" : "ok"}
         />
 
         <div className="card p-4 col-span-2">
-          <div className="text-xs muted mb-2">Headcount by branch</div>
+          <div className="text-xs muted mb-2">{t("drivers.staff.byBranch", lang)}</div>
           {byStation.length === 0 ? (
-            <p className="muted text-sm">No staff yet.</p>
+            <p className="muted text-sm">{t("drivers.staff.none", lang)}</p>
           ) : (
             <div className="flex flex-col gap-1">
               {byStation.map((s) => (
-                <div key={s.label} className="flex items-baseline justify-between gap-3 text-sm">
-                  <span className="truncate">{s.label}</span>
+                <div key={s.name ?? ""} className="flex items-baseline justify-between gap-3 text-sm">
+                  {/* Station names are stored English — operation_stations has
+                      no name_ar column. Only the no-branch bucket translates. */}
+                  <span className="truncate">{s.name ?? t("drivers.staff.unassigned", lang)}</span>
                   <span className="font-semibold tabular-nums">{s.count}</span>
                 </div>
               ))}
@@ -275,28 +296,30 @@ export default function StaffTab({
 
         <div className="card p-4 col-span-2">
           <div className="flex items-center gap-1.5 text-xs muted mb-2">
-            <Wrench className="h-3.5 w-3.5" /> Mechanics team
+            <Wrench className="h-3.5 w-3.5" /> {t("drivers.staff.mechTeam", lang)}
           </div>
           <div className="flex items-baseline gap-2 mb-2">
             <span className="text-2xl font-semibold tabular-nums">{mechanics.length}</span>
-            <span className="text-xs muted">mechanics</span>
+            <span className="text-xs muted">{t("drivers.staff.mechCount", lang)}</span>
           </div>
           <div className="flex flex-col gap-1 text-sm">
             <div className="flex items-baseline justify-between gap-3">
-              <span className="muted">Open work orders</span>
+              <span className="muted">{t("drivers.staff.openWo", lang)}</span>
               <span className="font-semibold tabular-nums">{mechanicOpenWo}</span>
             </div>
             <div className="flex items-baseline justify-between gap-3">
-              <span className="muted">Trucks per mechanic</span>
-              <span className="font-semibold tabular-nums">
+              <span className="muted">{t("drivers.staff.trucksPer", lang)}</span>
+              {/* A ratio is Latin in both languages — isolated on the span it
+                  is rendered in, never on the row. */}
+              <span className="font-semibold tabular-nums" dir="ltr">
                 {trucksPerMechanic == null ? "—" : `${trucksPerMechanic.toFixed(1)} : 1`}
               </span>
             </div>
             <div className="flex items-baseline justify-between gap-3">
               {/* Wording is load-bearing: duty_hours is a shift LENGTH, so this
                   is "has a shift on record", never "is clocked in now". */}
-              <span className="muted">With duty hours set</span>
-              <span className="font-semibold tabular-nums">
+              <span className="muted">{t("drivers.staff.withDuty", lang)}</span>
+              <span className="font-semibold tabular-nums" dir="ltr">
                 {mechanicsWithDuty}/{mechanics.length}
               </span>
             </div>
@@ -310,11 +333,11 @@ export default function StaffTab({
               the page header beside New driver, so both tabs offer their
               primary action from the same slot. The form itself still lives
               here, opened by the openAddSignal effect above. */}
-          <h3 className="font-semibold text-sm">Management &amp; Support Staff</h3>
+          <h3 className="font-semibold text-sm">{t("drivers.staff.title", lang)}</h3>
         </div>
 
         {staff.length === 0 ? (
-          <p className="muted text-sm py-6 text-center">No staff yet.</p>
+          <p className="muted text-sm py-6 text-center">{t("drivers.staff.none", lang)}</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {staff.map((p) => {
@@ -334,10 +357,10 @@ export default function StaffTab({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate flex items-center gap-1.5">
-                    <span className="truncate">{p.name}</span>
+                    <span className="truncate">{arText(p.name, p.name_ar, lang)}</span>
                     {onLeaveStaff.has(p.id) && (
                       <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
-                        On leave
+                        {t("drivers.staff.onLeavePill", lang)}
                       </span>
                     )}
 
@@ -379,10 +402,18 @@ export default function StaffTab({
                     {leaveDays > 0 && (
                       <span
                         className="shrink-0 inline-flex items-baseline gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                        title={`${leaveDays} leave day${leaveDays === 1 ? "" : "s"} taken since 1 January ${currentYear}`}
+                        title={fill(t(`drivers.staff.leaveSince.${plural(leaveDays)}`, lang), {
+                          n: leaveDays,
+                          year: currentYear,
+                        })}
                       >
-                        <span className="font-semibold tabular-nums">{leaveDays}d</span>
-                        <span className="opacity-80">since Jan 1</span>
+                        {/* The "d" stays Latin in both languages: the two spans
+                            are styled differently, so the count cannot be folded
+                            into one whole-sentence key, and splicing an Arabic
+                            unit onto a number here is exactly the fragment seam
+                            ruling 6 forbids. The full sentence is in the tooltip. */}
+                        <span className="font-semibold tabular-nums" dir="ltr">{leaveDays}d</span>
+                        <span className="opacity-80">{t("drivers.staff.sinceJan1", lang)}</span>
                       </span>
                     )}
                   </div>
@@ -405,7 +436,7 @@ export default function StaffTab({
           <ScrollLock />
           <div className="card p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-semibold">Staff Member</h2>
+              <h2 className="text-lg font-semibold">{t("drivers.staff.detailTitle", lang)}</h2>
               <button type="button" onClick={() => setDetail(null)} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
             </div>
 
@@ -420,35 +451,39 @@ export default function StaffTab({
                   </div>
                   <div className="text-xs muted">{roleName(detail.role)}</div>
                 </div>
-                <StatusBadge s={detail} onLeave={onLeaveStaff.has(detail.id)} />
+                <StatusBadge s={detail} onLeave={onLeaveStaff.has(detail.id)} lang={lang} />
               </div>
 
               <div className="card p-3 grid grid-cols-2 gap-2">
-                <Cell label="Role">{roleName(detail.role)}</Cell>
-                <Cell label="Branch of operation">{stationName(detail.station) ?? <span className="muted">—</span>}</Cell>
-                <Cell label="Email">{detail.email ?? <span className="muted">—</span>}</Cell>
-                <Cell label="Phone">{detail.phone ?? <span className="muted">—</span>}</Cell>
+                <Cell label={t("drivers.staff.fRole", lang)}>{roleName(detail.role)}</Cell>
+                <Cell label={t("drivers.staff.fBranch", lang)}>{stationName(detail.station) ?? <span className="muted">—</span>}</Cell>
+                <Cell label={t("drivers.staff.fEmail", lang)}>{detail.email ?? <span className="muted">—</span>}</Cell>
+                <Cell label={t("drivers.staff.fPhone", lang)}>{detail.phone ?? <span className="muted">—</span>}</Cell>
                 {/* Deep-links to this staff member's own row in the archive's
                     Management Staff matrix. */}
-                <Cell label="Iqama ID">
+                <Cell label={t("drivers.staff.fIqama", lang)}>
                   <PersonIdLink personId={detail.id} sub="management" value={detail.iqama_number} />
                 </Cell>
-                <Cell label="Iqama expiry">{detail.iqama_expiry ?? <span className="muted">—</span>}</Cell>
-                <Cell label="Status">
+                <Cell label={t("drivers.staff.fIqamaExp", lang)}>{detail.iqama_expiry ?? <span className="muted">—</span>}</Cell>
+                {/* Every branch here tests DATA — `terminated_at`, the computed
+                    on-leave set, `active` — never a rendered word. */}
+                <Cell label={t("drivers.staff.fStatus", lang)}>
                   {detail.terminated_at
-                    ? `Terminated · ${formatDate(detail.terminated_at)}`
+                    ? fill(t("drivers.staff.terminatedOn", lang), { d: formatDate(detail.terminated_at) })
                     : onLeaveStaff.has(detail.id)
-                      ? "On leave today"
-                      : detail.active ? "Active" : "Inactive"}
+                      ? t("drivers.staff.stOnLeaveToday", lang)
+                      : detail.active ? t("drivers.staff.stActive", lang) : t("drivers.staff.stInactive", lang)}
                 </Cell>
                 {/* Staff salary had NO cell here at all — it was only editable
                     on the form and never shown. It is added alongside the
                     history link rather than separately, because a figure with
                     no timeline beside it is what let salary drift unnoticed in
                     the first place. Mirrors the driver detail exactly. */}
-                <Cell label="Salary (monthly)">
+                <Cell label={t("drivers.salary.monthly", lang)}>
                   <span className="flex items-center gap-2">
-                    <span className="font-semibold tabular-nums">
+                    {/* Money is `en-US`-formatted in both languages — isolated
+                        on its own span, never on the cell. */}
+                    <span className="font-semibold tabular-nums" dir="ltr">
                       {detail.monthly_salary_sar != null ? formatSar(detail.monthly_salary_sar) : "—"}
                     </span>
                     <button
@@ -457,9 +492,9 @@ export default function StaffTab({
                         id: detail.id, name: detail.name, salary: detail.monthly_salary_sar ?? null,
                       })}
                       className="text-brand-600 dark:text-brand-300 hover:underline text-xs inline-flex items-center gap-1"
-                      title="View salary history / record a dated change"
+                      title={t("drivers.salary.openTitle", lang)}
                     >
-                      <History className="h-3.5 w-3.5" /> History
+                      <History className="h-3.5 w-3.5" /> {t("drivers.salary.openBtn", lang)}
                     </button>
                   </span>
                 </Cell>
@@ -493,18 +528,18 @@ export default function StaffTab({
             </div>
 
             <div className="flex justify-end gap-2 mt-5">
-              <Btn variant="outline" onClick={() => setDetail(null)}>Close</Btn>
+              <Btn variant="outline" onClick={() => setDetail(null)}>{t("drivers.close", lang)}</Btn>
               {!detail.terminated_at && (
                 <button
                   type="button"
                   onClick={() => onTerminate(detail)}
                   className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition"
                 >
-                  <Ban className="h-3.5 w-3.5" /> Terminate
+                  <Ban className="h-3.5 w-3.5" /> {t("drivers.staff.terminate", lang)}
                 </button>
               )}
               <Btn variant="primary" onClick={() => { const s = detail; setDetail(null); openEdit(s); }}>
-                <Pencil className="h-3.5 w-3.5" /> Edit
+                <Pencil className="h-3.5 w-3.5" /> {t("common.edit", lang)}
               </Btn>
             </div>
           </div>
@@ -516,39 +551,42 @@ export default function StaffTab({
         <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={closeForm}>
           <ScrollLock />
           <div className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-semibold mb-4">{editing ? "Edit staff member" : "Add Staff Member"}</h2>
+            <h2 className="text-lg font-semibold mb-4">{editing ? t("drivers.staff.editTitle", lang) : t("drivers.staff.addTitle", lang)}</h2>
             <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Name *">
-                <input name="name" required defaultValue={editing?.name ?? ""} placeholder="e.g. Omar Al-Qahtani" className={INPUT} style={INPUT_STYLE} />
+              <Field label={t("drivers.staff.fName", lang)}>
+                <input name="name" required defaultValue={editing?.name ?? ""} placeholder={t("drivers.staff.phName", lang)} className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Name (Arabic)">
+              <Field label={t("drivers.staff.fNameAr", lang)}>
                 <input name="name_ar" dir="rtl" defaultValue={editing?.name_ar ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Role">
+              <Field label={t("drivers.staff.fRole", lang)}>
                 {/* LookupSelect IS the generalized RoleSelect — this page carried
                     both, line for line the same component, until the cleanup.
                     `addStaffRole` already matches its `onAdd` signature exactly,
-                    so no adapter is needed; only the copy is passed in. */}
+                    so no adapter is needed; only the copy is passed in.
+                    Options run through the same roleName() the rest of the tab
+                    uses, so the five built-ins read the same in the dropdown as
+                    they do on the card. */}
                 <LookupSelect
                   name="role"
-                  items={staffRoles}
+                  items={staffRoles.map((r) => ({ key: r.key, label: roleName(r.key) }))}
                   defaultKey={editing?.role ?? staffRoles[0]?.key ?? ""}
                   onAdd={addStaffRole}
-                  addLabel="+ Add custom role…"
-                  newPlaceholder="New role name"
+                  addLabel={t("drivers.staff.addRole", lang)}
+                  newPlaceholder={t("drivers.staff.phNewRole", lang)}
                 />
               </Field>
-              <Field label="Duty hours">
+              <Field label={t("drivers.staff.fDutyHours", lang)}>
                 <input name="duty_hours" type="number" step="1" min="0" defaultValue={editing?.duty_hours ?? 10} className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Monthly salary (SAR)">
+              <Field label={t("drivers.staff.fSalaryInput", lang)}>
                 <input
                   name="monthly_salary_sar"
                   type="number"
                   step="0.01"
                   min="0"
                   defaultValue={editing?.monthly_salary_sar ?? ""}
-                  placeholder="e.g. 4500"
+                  placeholder={t("drivers.staff.phSalary", lang)}
                   className={INPUT}
                   style={INPUT_STYLE}
                 />
@@ -557,21 +595,21 @@ export default function StaffTab({
                 name="station"
                 stations={operationStations}
                 defaultValue={editing?.station ?? null}
-                label="Branch of operation"
+                label={t("drivers.staff.fBranch", lang)}
               />
-              <Field label="Email">
-                <input name="email" type="email" defaultValue={editing?.email ?? ""} placeholder="name@aquafleet.sa" className={INPUT} style={INPUT_STYLE} />
+              <Field label={t("drivers.staff.fEmail", lang)}>
+                <input name="email" type="email" defaultValue={editing?.email ?? ""} placeholder={t("drivers.staff.phEmail", lang)} className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Phone">
-                <input name="phone" defaultValue={editing?.phone ?? ""} placeholder="+966 5…" className={INPUT} style={INPUT_STYLE} />
+              <Field label={t("drivers.staff.fPhone", lang)}>
+                <input name="phone" defaultValue={editing?.phone ?? ""} placeholder={t("drivers.staff.phPhone", lang)} className={INPUT} style={INPUT_STYLE} />
               </Field>
-              <Field label="Hiring date">
+              <Field label={t("drivers.staff.fHireDate", lang)}>
                 <input name="hire_date" type="date" defaultValue={editing?.hire_date ?? ""} className={INPUT} style={INPUT_STYLE} />
               </Field>
               {/* LINKED IDENTITY FIELDS (0088/0089) — seed at creation, then
                   read-only. The Archive is the single edit point; see the
                   matching block in DriversClient.tsx for the full reasoning. */}
-              <Field label="Iqama ID">
+              <Field label={t("drivers.staff.fIqama", lang)}>
                 <LinkedIdField
                   name="iqama_number"
                   value={editing?.iqama_number ?? ""}
@@ -579,7 +617,7 @@ export default function StaffTab({
                   archiveHref={editing?.id ? `/archive?tab=staff&sub=management&person=${editing.id}` : null}
                 />
               </Field>
-              <Field label="Iqama expiry">
+              <Field label={t("drivers.staff.fIqamaExp", lang)}>
                 <LinkedIdField
                   name="iqama_expiry"
                   type="date"
@@ -590,14 +628,14 @@ export default function StaffTab({
               </Field>
               <label className="flex items-center gap-2 text-sm sm:col-span-2">
                 <input name="active" type="checkbox" defaultChecked={editing ? editing.active : true} />
-                <span>Active</span>
+                <span>{t("drivers.staff.fActive", lang)}</span>
               </label>
 
               {formError && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-2">{formError}</p>}
 
               <div className="flex justify-end gap-2 sm:col-span-2 mt-2">
-                <Btn variant="outline" onClick={closeForm}>Cancel</Btn>
-                <Btn type="submit" variant="primary">{saving ? "Saving…" : editing ? "Save" : "Add Staff Member"}</Btn>
+                <Btn variant="outline" onClick={closeForm}>{t("common.cancel", lang)}</Btn>
+                <Btn type="submit" variant="primary">{saving ? t("common.saving", lang) : editing ? t("common.save", lang) : t("drivers.staff.addTitle", lang)}</Btn>
               </div>
             </form>
           </div>
@@ -615,14 +653,18 @@ export default function StaffTab({
 // re-add a role-specific copy: the role wording that users actually see is
 // passed in through `addLabel`/`newPlaceholder`.
 
-function StatusBadge({ s, onLeave }: { s: Staff; onLeave: boolean }) {
+// Staff carry their OWN four status words — this badge does not read
+// DRIVER_STATE_LABELS and must not start to: a staff member has no derived
+// driver state, and `Inactive` has no counterpart on the driver side at all.
+function StatusBadge({ s, onLeave, lang }: { s: Staff; onLeave: boolean; lang: Lang }) {
   const base = "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ";
   // Terminated wins; on-leave-today (computed) outranks plain active/inactive.
-  if (s.terminated_at) return <span className={base + "bg-rose-500/10 text-rose-600 dark:text-rose-400"}>Terminated</span>;
-  if (onLeave) return <span className={base + "bg-amber-500/10 text-amber-600 dark:text-amber-400"}>On leave</span>;
+  // Every test is on data, never on the word the previous branch would render.
+  if (s.terminated_at) return <span className={base + "bg-rose-500/10 text-rose-600 dark:text-rose-400"}>{t("drivers.staff.stTerminated", lang)}</span>;
+  if (onLeave) return <span className={base + "bg-amber-500/10 text-amber-600 dark:text-amber-400"}>{t("drivers.staff.stOnLeave", lang)}</span>;
   return s.active
-    ? <span className={base + "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}>Active</span>
-    : <span className={base + "bg-slate-500/10 text-slate-600 dark:text-slate-400"}>Inactive</span>;
+    ? <span className={base + "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}>{t("drivers.staff.stActive", lang)}</span>
+    : <span className={base + "bg-slate-500/10 text-slate-600 dark:text-slate-400"}>{t("drivers.staff.stInactive", lang)}</span>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

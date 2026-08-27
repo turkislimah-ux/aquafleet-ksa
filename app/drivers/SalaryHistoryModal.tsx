@@ -43,6 +43,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, Plus, Trash2, Lock, TriangleAlert } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, type Lang } from "@/lib/i18n";
 import { formatSar, todayKey } from "@/lib/utils";
 import {
   fetchSalaryHistory,
@@ -57,16 +59,24 @@ const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Indexing a const tuple types the element as the union of its twelve members,
+// so `drivers.months.${key}` is twelve real TKeys rather than `string`. Same
+// device as app/fleet/FleetClient.tsx's own monthLabel.
+const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
+
+function monthName(m: string, lang: Lang): string | null {
+  const key = MONTH_KEYS[Number(m) - 1];
+  return key ? t(`drivers.months.${key}`, lang) : null;
+}
 
 /** "2026-03-14" → "Mar 2026". Pure string work — no Date, no timezone. */
-function monthLabel(iso: string): string {
+function monthLabel(iso: string, lang: Lang): string {
   const [y, m] = iso.split("-");
-  return `${MONTHS[Number(m) - 1] ?? m} ${y}`;
+  return `${monthName(m, lang) ?? m} ${y}`;
 }
-function dateLabel(iso: string): string {
+function dateLabel(iso: string, lang: Lang): string {
   const [y, m, d] = iso.split("-");
-  return `${d} ${MONTHS[Number(m) - 1] ?? m} ${y}`;
+  return `${d} ${monthName(m, lang) ?? m} ${y}`;
 }
 
 export default function SalaryHistoryModal({
@@ -83,6 +93,7 @@ export default function SalaryHistoryModal({
   /** The person's current salary — what the edit form owns. Shown for contrast. */
   currentSalary: number | null;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [rows, setRows] = useState<SalaryHistoryRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -127,6 +138,10 @@ export default function SalaryHistoryModal({
    * Deliberately computed from the DATE ALONE rather than by asking the server
    * what would move: the point is to state the rule the reader can check, not to
    * preview a number they would have to trust.
+   *
+   * Carries the ISO month, NOT its label: a display string composed inside a
+   * memo keyed on data alone would keep the old language after a lang flip.
+   * The label is built at render, where `lang` is in scope.
    */
   const impact = useMemo(() => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) return null;
@@ -135,7 +150,7 @@ export default function SalaryHistoryModal({
     return {
       backdated: effectiveFrom < today,
       startsThisMonthOrLater,
-      fromMonth: monthLabel(effectiveFrom),
+      fromMonthIso: effectiveFrom,
     };
   }, [effectiveFrom]);
 
@@ -143,7 +158,7 @@ export default function SalaryHistoryModal({
     if (!subject) return;
     const value = Number(amount);
     if (!Number.isFinite(value) || value < 0) {
-      setError("Salary must be zero or greater.");
+      setError(t("drivers.salary.errSalary", lang));
       return;
     }
     setSaving(true);
@@ -161,7 +176,7 @@ export default function SalaryHistoryModal({
   }
 
   async function remove(id: string) {
-    if (!confirm("Remove this salary change? Months from its date forward will be re-costed.")) return;
+    if (!confirm(t("drivers.salary.confirmRemove", lang))) return;
     setSaving(true);
     setError(null);
     const res = await removeSalaryChange(id);
@@ -185,19 +200,19 @@ export default function SalaryHistoryModal({
       <div className="card w-full max-w-[760px] max-h-[88vh] overflow-auto p-5">
         <div className="flex items-start justify-between gap-3 mb-1">
           <div>
-            <h3 className="text-lg font-semibold">Salary history</h3>
+            <h3 className="text-lg font-semibold">{t("drivers.salary.title", lang)}</h3>
             <p className="text-sm muted">{personName}</p>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10" aria-label="Close">
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10" aria-label={t("drivers.close", lang)}>
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <p className="text-xs muted mb-4">
-          Every payroll figure resolves through this timeline: a month is costed at the
-          salary in effect on the last day of that month. The current salary
-          {currentSalary != null ? <> — <span className="font-medium">{formatSar(currentSalary)}</span> — </> : " "}
-          is edited on the person&apos;s own form; this screen records <em>when</em> each figure applied.
+          {t("drivers.salary.introBefore", lang)}
+          {currentSalary != null ? <> — <span className="font-medium" dir="ltr">{formatSar(currentSalary)}</span> — </> : " "}
+          {t("drivers.salary.introMid", lang)} <em>{t("drivers.salary.introWhen", lang)}</em>{" "}
+          {t("drivers.salary.introAfter", lang)}
         </p>
 
         {error && (
@@ -205,14 +220,14 @@ export default function SalaryHistoryModal({
         )}
 
         {loading ? (
-          <p className="text-sm muted py-6 text-center">Loading…</p>
+          <p className="text-sm muted py-6 text-center">{t("common.loading", lang)}</p>
         ) : (
           <Table>
             <thead>
               <tr>
-                <TH>Effective from</TH>
-                <TH>Salary</TH>
-                <TH>Note</TH>
+                <TH>{t("drivers.salary.thEffective", lang)}</TH>
+                <TH>{t("drivers.salary.thSalary", lang)}</TH>
+                <TH>{t("common.note", lang)}</TH>
                 <TH></TH>
               </tr>
             </thead>
@@ -220,18 +235,21 @@ export default function SalaryHistoryModal({
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={4} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                    No salary recorded for this person.
+                    {t("drivers.salary.none", lang)}
                   </td>
                 </tr>
               )}
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <TD className="tabular-nums">{dateLabel(r.effective_from)}</TD>
-                  <TD className="tabular-nums font-medium">{formatSar(r.salary_sar)}</TD>
+                  <TD className="tabular-nums">{dateLabel(r.effective_from, lang)}</TD>
+                  {/* Money is `en-US`-formatted in both languages, so it is
+                      direction-isolated on an inner span — never on the cell,
+                      where `text-align: start` would resolve against it. */}
+                  <TD className="tabular-nums font-medium"><span dir="ltr">{formatSar(r.salary_sar)}</span></TD>
                   <TD className="text-xs muted">
                     {r.is_baseline ? (
                       <span className="inline-flex items-center gap-1.5">
-                        <Lock className="h-3 w-3" /> Opening salary — earlier months are costed at this
+                        <Lock className="h-3 w-3" /> {t("drivers.salary.baseline", lang)}
                       </span>
                     ) : (
                       r.note ?? "—"
@@ -248,7 +266,7 @@ export default function SalaryHistoryModal({
                         onClick={() => remove(r.id)}
                         disabled={saving}
                         className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50"
-                        title="Remove this change"
+                        title={t("drivers.salary.removeChange", lang)}
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -263,15 +281,15 @@ export default function SalaryHistoryModal({
         {!adding ? (
           <div className="mt-4">
             <Btn variant="outline" onClick={() => setAdding(true)}>
-              <Plus className="h-4 w-4" /> Record a salary change
+              <Plus className="h-4 w-4" /> {t("drivers.salary.recordChange", lang)}
             </Btn>
           </div>
         ) : (
           <div className="mt-4 card p-3">
-            <h4 className="font-semibold text-sm mb-3">Record a salary change</h4>
+            <h4 className="font-semibold text-sm mb-3">{t("drivers.salary.recordChange", lang)}</h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Monthly salary *</span>
+                <span className="muted">{t("drivers.salary.fMonthly", lang)}</span>
                 <input
                   type="number" step="0.01" min="0" value={amount}
                   onChange={(e) => setAmount(e.target.value)}
@@ -279,7 +297,7 @@ export default function SalaryHistoryModal({
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Effective from *</span>
+                <span className="muted">{t("drivers.salary.fEffective", lang)}</span>
                 <input
                   type="date" value={effectiveFrom}
                   onChange={(e) => setEffectiveFrom(e.target.value)}
@@ -287,10 +305,10 @@ export default function SalaryHistoryModal({
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Note</span>
+                <span className="muted">{t("common.note", lang)}</span>
                 <input
                   value={note} onChange={(e) => setNote(e.target.value)}
-                  className={INPUT} style={INPUT_STYLE} placeholder="Optional"
+                  className={INPUT} style={INPUT_STYLE} placeholder={t("drivers.salary.phOptional", lang)}
                 />
               </label>
             </div>
@@ -314,16 +332,16 @@ export default function SalaryHistoryModal({
                 <span>
                   {impact.backdated ? (
                     <>
-                      <strong>This is back-dated.</strong> Payroll and profit will be
-                      recalculated for <strong>{impact.fromMonth}</strong> and every month
-                      after it — including months that have already been reported. That is
-                      correct if this salary really did apply from then; it will change
-                      figures someone may have already seen.
+                      <strong>{t("drivers.salary.backdatedStrong", lang)}</strong>{" "}
+                      {t("drivers.salary.backdatedBefore", lang)}{" "}
+                      <strong>{monthLabel(impact.fromMonthIso, lang)}</strong>{" "}
+                      {t("drivers.salary.backdatedAfter", lang)}
                     </>
                   ) : (
                     <>
-                      Applies from <strong>{impact.fromMonth}</strong> onward. Earlier months
-                      keep the salary recorded for them and will not change.
+                      {t("drivers.salary.forwardBefore", lang)}{" "}
+                      <strong>{monthLabel(impact.fromMonthIso, lang)}</strong>{" "}
+                      {t("drivers.salary.forwardAfter", lang)}
                     </>
                   )}
                 </span>
@@ -331,21 +349,20 @@ export default function SalaryHistoryModal({
             )}
 
             <p className="text-xs muted mt-2">
-              Issued payslips are never affected — each one keeps the figures frozen onto it
-              when it was issued.
+              {t("drivers.salary.payslipsNote", lang)}
             </p>
 
             <div className="flex justify-end gap-2 mt-3">
-              <Btn variant="outline" onClick={resetForm}>Cancel</Btn>
+              <Btn variant="outline" onClick={resetForm}>{t("common.cancel", lang)}</Btn>
               <Btn onClick={submit} disabled={saving || amount === ""}>
-                {saving ? "Saving…" : "Save change"}
+                {saving ? t("common.saving", lang) : t("drivers.salary.saveChange", lang)}
               </Btn>
             </div>
           </div>
         )}
 
         <div className="flex justify-end mt-4">
-          <Btn variant="outline" onClick={onClose}>Close</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("drivers.close", lang)}</Btn>
         </div>
       </div>
     </div>

@@ -4695,6 +4695,754 @@ export const dict = {
       // two callers is what moved it out of here.
     },
   },
+
+  // ===========================================================================
+  // DRIVERS ROUTE — the four tabs (drivers / commissions / history / staff),
+  // their shared sections, and the two lib strings that render inside them.
+  // ===========================================================================
+  // Reuse policy matches the rest of this file: `common.*` is shared freely,
+  // `fleet.driverState.*` is shared because the driver-state enum is ONE enum
+  // wherever it is painted, and everything else is coined here. Reports, Fleet,
+  // Settings and Consumption each already keep their own "Close" for the same
+  // reason — a wording change in one route must not walk into another.
+  drivers: {
+    close: { en: "Close", ar: "إغلاق" },
+    date: { en: "Date", ar: "التاريخ" },
+    noteOptional: { en: "Note (optional)", ar: "ملاحظة (اختياري)" },
+
+    // ---- Drivers tab: page chrome, tabs, KPIs, roster ----------------------
+    // The <h1> is `nav.drivers` — the sidebar item and the page heading have
+    // always been the same word, so there is nothing to coin for it here.
+    // `Driver`, `Status` and `Truck` (roster columns) are common.*.
+    newDriver: { en: "New driver", ar: "سائق جديد" },
+    addStaff: { en: "Add staff", ar: "إضافة موظف" },
+    loadFailed: { en: "Failed to load:", ar: "تعذّر التحميل:" },
+    none: { en: "No drivers yet.", ar: "لا يوجد سائقون بعد." },
+    // ONE key for the roster column and the two forms that set the field —
+    // three renderings of the same fact about a person.
+    station: { en: "Station", ar: "المحطة" },
+
+    tab: {
+      drivers: { en: "Drivers", ar: "السائقون" },
+      // Rendered TWICE — as the top-level tab and as the sub-tab beneath it,
+      // which is why it is one key and not two.
+      commissions: { en: "Commissions", ar: "العمولات" },
+      // Not `staff.title` ("Management & Support Staff"): the tab is the short
+      // form and the card heading inside it is the long one.
+      staff: { en: "Management & Staff", ar: "الإدارة والموظفون" },
+      historical: { en: "Historical", ar: "السابقة" },
+    },
+
+    kpi: {
+      onDutyNow: { en: "On Duty Now", ar: "على رأس العمل الآن" },
+      incidents12mo: { en: "Incidents (12mo)", ar: "الحوادث (١٢ شهراً)" },
+      licenseExpYear: { en: "License Exp (this year)", ar: "رخص تنتهي (هذا العام)" },
+      // Unreachable in practice — the incident list and the label map are built
+      // from the same roster array — but the lookup is still a Map.get, and a
+      // translated fallback is what keeps the memo honest about `lang`.
+      unknownDriver: { en: "Unknown driver", ar: "سائق غير معروف" },
+    },
+
+    // The four-bar roster split. `barTitle` is one bar's tooltip; `{state}` is
+    // filled with a `fleet.driverState.*` LABEL, resolved from the enum — the
+    // sentence never sees a raw state value.
+    onDuty: {
+      title: { en: "On Duty", ar: "على رأس العمل" },
+      barTitle: { en: "{state}: {n} of {total}", ar: "{state}: {n} من {total}" },
+    },
+
+    col: {
+      assignedProject: { en: "Assigned Project", ar: "المشروع المُسند" },
+      // Also the Trips figure on the driver detail — same count, same wording.
+      trips30d: { en: "Trips 30d", ar: "رحلات ٣٠ يوماً" },
+      salary: { en: "Salary", ar: "الراتب" },
+      unpaidCommission: { en: "Unpaid Commission", ar: "عمولة غير مدفوعة" },
+      licenseExp: { en: "License Exp", ar: "انتهاء الرخصة" },
+    },
+
+    // Health insurance (0132) is TRI-STATE and the third value is the point:
+    // null means "nobody has recorded it", which is a different fact from No.
+    // Three words here, rendered by both the detail cell and the form's three
+    // <option>s, so the cell and the picker can never disagree.
+    health: {
+      label: { en: "Health insurance", ar: "التأمين الصحي" },
+      yes: { en: "Yes", ar: "نعم" },
+      no: { en: "No", ar: "لا" },
+      notRecorded: { en: "Not recorded", ar: "غير مسجَّل" },
+    },
+
+    // TRIP_STAGE_LABELS (lib/db-types.ts), keyed off the ENUM. `dashboard.stage`
+    // cannot serve: its key is `inTransit` where the enum value is `in_transit`,
+    // so keying off it would need a second map from value to key — the exact
+    // label-discrimination seam this conversion removes. The label map itself
+    // is untouched; the trips route still renders it.
+    tripStage: {
+      scheduled: { en: "Scheduled", ar: "مجدولة" },
+      loading: { en: "Loading", ar: "تحميل" },
+      in_transit: { en: "In transit", ar: "في الطريق" },
+      delivered: { en: "Delivered", ar: "مسلَّمة" },
+    },
+
+    // Add / edit driver form.
+    form: {
+      editTitle: { en: "Edit driver", ar: "تعديل سائق" },
+      fName: { en: "Name *", ar: "الاسم *" },
+      fNameAr: { en: "Name (Arabic)", ar: "الاسم بالعربية" },
+      // These six are rendered by the form AND by the detail modal's Contact
+      // and Employment cards — one field, one label, wherever it is shown.
+      fPhone: { en: "Phone", ar: "الهاتف" },
+      fIqama: { en: "Iqama ID", ar: "رقم الإقامة" },
+      fIqamaExp: { en: "Iqama expiry", ar: "انتهاء الإقامة" },
+      fLicense: { en: "License ID", ar: "رقم الرخصة" },
+      fLicenseExp: { en: "License expiry", ar: "انتهاء الرخصة" },
+      fHireDate: { en: "Hire date", ar: "تاريخ التعيين" },
+      fDutyHours: { en: "Duty hours", ar: "ساعات الدوام" },
+      fTruck: { en: "Current truck", ar: "الشاحنة الحالية" },
+      fSalary: { en: "Salary (SAR / month)", ar: "الراتب (ريال / شهر)" },
+      // The blank <option> on the TRUCK picker. Deliberately not
+      // `staff.unassigned` (بلا فرع) — that one is a missing BRANCH. Two
+      // different blanks, two words in Arabic, two keys.
+      unassigned: { en: "Unassigned", ar: "بلا شاحنة" },
+      // The occupant of a truck being taken over, when their row no longer
+      // resolves to a name. Read inside an event handler, never memoised.
+      anotherDriver: { en: "another driver", ar: "سائق آخر" },
+      confirmReassign: {
+        en: "That truck is currently assigned to {who}. Reassign it?",
+        ar: "هذه الشاحنة مُسندة حالياً إلى {who}. هل تُعاد إسنادها؟",
+      },
+    },
+
+    // Driver incidents. Added from the driver form, edited and deleted from the
+    // detail modal — one vocabulary across both, since it is one record type.
+    // The `Type` field label is common.type.
+    inc: {
+      title: { en: "Incidents", ar: "الحوادث" },
+      add: { en: "Add incident", ar: "إضافة حادثة" },
+      adding: { en: "Adding…", ar: "جارٍ الإضافة…" },
+      added: { en: "Incident added.", ar: "تمت إضافة الحادثة." },
+      saveFirst: {
+        en: "Save this driver first to add incidents.",
+        ar: "احفظ بيانات السائق أولاً لإضافة الحوادث.",
+      },
+      fDate: { en: "Incident date", ar: "تاريخ الحادثة" },
+      phType: { en: "e.g. Work accident, Truck accident", ar: "مثال: حادث عمل، حادث شاحنة" },
+      fDesc: { en: "Description (optional)", ar: "الوصف (اختياري)" },
+      none: { en: "No incidents recorded.", ar: "لا توجد حوادث مسجَّلة." },
+      edit: { en: "Edit incident", ar: "تعديل حادثة" },
+      del: { en: "Delete incident", ar: "حذف حادثة" },
+      // `{type}` is the operator's own free text — DATA, quoted verbatim.
+      confirmDelete: { en: 'Delete this "{type}" incident?', ar: 'حذف حادثة "{type}" هذه؟' },
+    },
+
+    // Driver detail modal. Its salary row is drivers.salary.monthly / .openBtn
+    // / .openTitle, shared with the staff detail.
+    detail: {
+      title: { en: "Driver Details — {name}", ar: "بيانات السائق — {name}" },
+      contactId: { en: "Contact & ID", ar: "الاتصال والهوية" },
+      employment: { en: "Employment", ar: "التوظيف" },
+      assignment: { en: "Current Assignment", ar: "الإسناد الحالي" },
+      unassign: { en: "Unassign", ar: "إلغاء الإسناد" },
+      unassigning: { en: "Unassigning…", ar: "جارٍ إلغاء الإسناد…" },
+      noTruck: { en: "No truck assigned", ar: "لا توجد شاحنة مُسندة" },
+      recentTrips: { en: "Recent Trips", ar: "الرحلات الأخيرة" },
+      noRecentTrips: { en: "No recent trips", ar: "لا توجد رحلات أخيرة" },
+      // Posture 2: leave never unassigns. This is a NOTICE about a conflict the
+      // parent computed, not an action — the wording must not imply the app
+      // will move the truck.
+      leaveTruckWarning: {
+        en: "On leave today but still assigned to {plate}. Reassign the truck if someone else needs to drive it.",
+        ar: "في إجازة اليوم لكنه ما زال مُسنداً إلى {plate}. أعد إسناد الشاحنة إن احتاجها سائق آخر.",
+      },
+    },
+
+    // Danger zone — soft-delete termination. Mirrors `fleet.term.*`, which does
+    // the same job for a truck; the two stay separate because Arabic agrees the
+    // verb with the thing being retired (a سائق, not a شاحنة).
+    term: {
+      dangerZone: { en: "Danger zone", ar: "منطقة الخطر" },
+      // Rendered three times: the row title, its button, and the confirm
+      // button at the end of the flow.
+      terminateDriver: { en: "Terminate driver", ar: "إنهاء خدمة السائق" },
+      removes: {
+        en: "Removes {name} from all active views. History and balance are preserved.",
+        ar: "يزيل {name} من جميع الشاشات النشطة. يُحفظ السجل والرصيد.",
+      },
+      // Two fragments around an inline <b>{name}</b>, same shape as
+      // fleet.term.confirmLead / confirmTail.
+      confirmBefore: { en: "This will terminate", ar: "سيؤدي هذا إلى إنهاء خدمة" },
+      confirmAfter: {
+        en: "and remove them from all active views. Their history and any unsettled commission balance are preserved. This can be restored later from the Archive page.",
+        ar: "وإزالته من جميع الشاشات النشطة. يُحفظ سجله وأي رصيد عمولة غير مُسوّى، ويمكن استعادته لاحقاً من صفحة الأرشيف.",
+      },
+      fDate: { en: "Termination date *", ar: "تاريخ إنهاء الخدمة *" },
+      // `{name}` is `drivers.name`, the STORED value — the gate compares the
+      // typed text against that column, so the quoted string has to be the
+      // English name in Arabic too. Never arText() here, or the instruction
+      // would ask for a string the gate will not accept.
+      typeToConfirm: { en: 'Type "{name}" to confirm', ar: 'اكتب "{name}" للتأكيد' },
+      terminating: { en: "Terminating…", ar: "جارٍ إنهاء الخدمة…" },
+    },
+
+    // Month abbreviations for lib/commission-rows.ts monthLabel(). `fleet.months.*`
+    // cannot serve: it carries FULL English names ("January"), and this renders
+    // as "Aug 2026" inside a heading. The Arabic matches fleet's because Arabic
+    // has no abbreviated month forms to differ in.
+    // Keys are QUOTED, same as fleet.months — a bare numeric key becomes a number
+    // in the object type and LeafPaths drops it, so `drivers.months.8` would not
+    // typecheck as a TKey.
+    months: {
+      "1": { en: "Jan", ar: "يناير" },
+      "2": { en: "Feb", ar: "فبراير" },
+      "3": { en: "Mar", ar: "مارس" },
+      "4": { en: "Apr", ar: "أبريل" },
+      "5": { en: "May", ar: "مايو" },
+      "6": { en: "Jun", ar: "يونيو" },
+      "7": { en: "Jul", ar: "يوليو" },
+      "8": { en: "Aug", ar: "أغسطس" },
+      "9": { en: "Sep", ar: "سبتمبر" },
+      "10": { en: "Oct", ar: "أكتوبر" },
+      "11": { en: "Nov", ar: "نوفمبر" },
+      "12": { en: "Dec", ar: "ديسمبر" },
+    },
+
+    // The inline "+ Add custom …" lookup (LookupSelect), shared by the leave-type
+    // and the mechanic-commission-type pickers.
+    lookup: {
+      addCustomType: { en: "+ Add custom type…", ar: "+ إضافة نوع مخصّص…" },
+      // The generic fallbacks. Both current callers pass their own wording, so
+      // these only render for a caller that has not named its thing yet — which
+      // is exactly when a translated default is worth having.
+      addCustom: { en: "+ Add custom…", ar: "+ إضافة مخصّصة…" },
+      newName: { en: "New name", ar: "اسم جديد" },
+      savedAs: { en: "Will be saved as:", ar: "سيُحفظ باسم:" },
+      // Rendered twice — as the inline preview's error and as the submit guard's.
+      // One string, so the two can never drift apart.
+      mustStartWithLetter: { en: "Label must start with a letter.", ar: "يجب أن يبدأ الاسم بحرف." },
+      nameRequired: { en: "Name is required.", ar: "الاسم مطلوب." },
+      couldNotAdd: { en: "Could not add.", ar: "تعذّرت الإضافة." },
+    },
+
+    // PersonIdLink — the Iqama/licence number that deep-links into the Archive.
+    idLinkTitle: {
+      en: "Open this person's documents in the Archive",
+      ar: "افتح مستندات هذا الشخص في الأرشيف",
+    },
+
+    // Leave & absence (LeaveSection), rendered on BOTH the driver and the staff
+    // detail modal.
+    leave: {
+      title: { en: "Leave & absence", ar: "الإجازات والغياب" },
+      onLeaveToday: { en: "On leave today", ar: "في إجازة اليوم" },
+      available: { en: "Available", ar: "متاح" },
+      now: { en: "now", ar: "حالياً" },
+      add: { en: "Add leave", ar: "إضافة إجازة" },
+      none: { en: "No leave recorded.", ar: "لا توجد إجازات مسجَّلة." },
+      edit: { en: "Edit leave", ar: "تعديل إجازة" },
+      del: { en: "Delete leave", ar: "حذف إجازة" },
+      editPeriod: { en: "Edit leave period", ar: "تعديل فترة إجازة" },
+      record: { en: "Record leave", ar: "تسجيل إجازة" },
+      fType: { en: "Leave type", ar: "نوع الإجازة" },
+      fStart: { en: "Start date", ar: "تاريخ البداية" },
+      fEnd: { en: "End date", ar: "تاريخ الانتهاء" },
+      phNote: { en: "e.g. annual leave, medical", ar: "مثال: إجازة سنوية، مرضية" },
+      newType: { en: "New leave type", ar: "نوع إجازة جديد" },
+      confirmDelete: { en: "Delete this {type} period?", ar: "حذف فترة {type} هذه؟" },
+      errDates: { en: "Pick start and end dates.", ar: "اختر تاريخي البداية والانتهاء." },
+      errOrder: {
+        en: "End date must be on or after the start date.",
+        ar: "يجب ألا يسبق تاريخ الانتهاء تاريخ البداية.",
+      },
+    },
+
+    // Mechanic commissions — a standalone per-mechanic list, deliberately
+    // unrelated to the driver trip-commission system the Commissions tab runs.
+    mech: {
+      title: { en: "Commissions", ar: "العمولات" },
+      add: { en: "Add commission", ar: "إضافة عمولة" },
+      edit: { en: "Edit commission", ar: "تعديل عمولة" },
+      del: { en: "Delete commission", ar: "حذف عمولة" },
+      none: { en: "No commissions recorded.", ar: "لا توجد عمولات مسجَّلة." },
+      fType: { en: "Commission type", ar: "نوع العمولة" },
+      fAmount: { en: "Amount (SAR)", ar: "المبلغ (ر.س)" },
+      thAmount: { en: "Amount", ar: "المبلغ" },
+      phNote: { en: "e.g. reason or context", ar: "مثال: السبب أو السياق" },
+      newType: { en: "New commission type", ar: "نوع عمولة جديد" },
+      confirmDelete: { en: "Delete this {type} commission?", ar: "حذف عمولة {type} هذه؟" },
+      errAmount: { en: "Enter an amount greater than 0.", ar: "أدخل مبلغاً أكبر من 0." },
+      errDate: { en: "Pick a date.", ar: "اختر تاريخاً." },
+    },
+
+    // Salary history — the effective-dated timeline every payroll figure resolves
+    // through, and the back-dating warning that has to be read before a save.
+    salary: {
+      title: { en: "Salary history", ar: "سجل الرواتب" },
+      // Four fragments: the sentence carries an inline amount and an inline <em>.
+      // Same shape as reports.vat.note4Before / note4Strong.
+      introBefore: {
+        en: "Every payroll figure resolves through this timeline: a month is costed at the salary in effect on the last day of that month. The current salary",
+        ar: "كل رقم في كشوف الرواتب يُحسم عبر هذا المسار الزمني: يُكلَّف الشهر بالراتب الساري في آخر يوم منه. الراتب الحالي",
+      },
+      introMid: {
+        en: "is edited on the person's own form; this screen records",
+        ar: "يُعدَّل من نموذج الشخص نفسه؛ وهذه الشاشة تسجّل",
+      },
+      introWhen: { en: "when", ar: "متى" },
+      introAfter: { en: "each figure applied.", ar: "طُبِّق كل رقم." },
+      thEffective: { en: "Effective from", ar: "ساري من" },
+      thSalary: { en: "Salary", ar: "الراتب" },
+      none: { en: "No salary recorded for this person.", ar: "لا يوجد راتب مسجَّل لهذا الشخص." },
+      baseline: {
+        en: "Opening salary — earlier months are costed at this",
+        ar: "الراتب الافتتاحي — تُكلَّف الأشهر السابقة به",
+      },
+      removeChange: { en: "Remove this change", ar: "إزالة هذا التغيير" },
+      recordChange: { en: "Record a salary change", ar: "تسجيل تغيير راتب" },
+      fMonthly: { en: "Monthly salary *", ar: "الراتب الشهري *" },
+      fEffective: { en: "Effective from *", ar: "ساري من *" },
+      phOptional: { en: "Optional", ar: "اختياري" },
+      saveChange: { en: "Save change", ar: "حفظ التغيير" },
+      errSalary: { en: "Salary must be zero or greater.", ar: "يجب ألا يقل الراتب عن صفر." },
+      confirmRemove: {
+        en: "Remove this salary change? Months from its date forward will be re-costed.",
+        ar: "إزالة تغيير الراتب هذا؟ ستُعاد تكلفة الأشهر من تاريخه فصاعداً.",
+      },
+      backdatedStrong: { en: "This is back-dated.", ar: "هذا بأثر رجعي." },
+      backdatedBefore: {
+        en: "Payroll and profit will be recalculated for",
+        ar: "ستُعاد حسبة الرواتب والأرباح لشهر",
+      },
+      backdatedAfter: {
+        en: "and every month after it — including months that have already been reported. That is correct if this salary really did apply from then; it will change figures someone may have already seen.",
+        ar: "وكل شهر بعده — بما في ذلك أشهر صدرت تقاريرها. وهذا صحيح إن كان هذا الراتب سارياً فعلاً من ذلك التاريخ؛ لكنه سيغيّر أرقاماً ربما اطّلع عليها أحد.",
+      },
+      forwardBefore: { en: "Applies from", ar: "يسري من" },
+      forwardAfter: {
+        en: "onward. Earlier months keep the salary recorded for them and will not change.",
+        ar: "فصاعداً. تحتفظ الأشهر السابقة بالراتب المسجَّل لها ولن تتغيّر.",
+      },
+      payslipsNote: {
+        en: "Issued payslips are never affected — each one keeps the figures frozen onto it when it was issued.",
+        ar: "قسائم الرواتب الصادرة لا تتأثر أبداً — تحتفظ كل قسيمة بالأرقام المجمَّدة عليها وقت إصدارها.",
+      },
+      // The Cell label and the button that OPENS this modal, on the driver
+      // detail and the staff detail alike. They live here, beside the modal
+      // they describe, rather than once per detail panel — two panels opening
+      // one screen must not label it two ways.
+      monthly: { en: "Salary (monthly)", ar: "الراتب (شهري)" },
+      openTitle: { en: "View salary history / record a dated change", ar: "عرض سجل الراتب / تسجيل تغيير بتاريخ" },
+      openBtn: { en: "History", ar: "السجل" },
+    },
+
+    // COUNT SENTENCES — one WHOLE sentence per bucket, never spliced from
+    // fragments. Arabic inflects the counted noun with the number, so there is no
+    // stable "{n} + word" seam to build one out of. The English `two`/`few`/`many`
+    // are identical by construction: that is what keeps the rendered English
+    // byte-identical while Arabic gets its four real forms. `plural()` picks the
+    // bucket on %100 and folds zero into `few`.
+    count: {
+      leaveDays: {
+        one: { en: "{n} day this year", ar: "يوم واحد هذا العام" },
+        two: { en: "{n} days this year", ar: "يومان هذا العام" },
+        few: { en: "{n} days this year", ar: "{n} أيام هذا العام" },
+        many: { en: "{n} days this year", ar: "{n} يوماً هذا العام" },
+      },
+      // Roster headcounts, rendered on the page subtitle and again as the On
+      // Duty bar's own total. The English source had NO singular form at either
+      // site — it printed "drivers" unconditionally — so `one` keeps "{n}
+      // drivers" verbatim. Fixing that here would change rendered English,
+      // which this conversion does not do; it is a separate call to make.
+      drivers: {
+        one: { en: "{n} drivers", ar: "سائق واحد" },
+        two: { en: "{n} drivers", ar: "سائقان" },
+        few: { en: "{n} drivers", ar: "{n} سائقين" },
+        many: { en: "{n} drivers", ar: "{n} سائقاً" },
+      },
+      // "support staff" is invariant in English — it is already a mass noun —
+      // so the four `en` values agree by nature rather than by construction.
+      supportStaff: {
+        one: { en: "{n} support staff", ar: "موظف مساند واحد" },
+        two: { en: "{n} support staff", ar: "موظفان مساندان" },
+        few: { en: "{n} support staff", ar: "{n} موظفين مساندين" },
+        many: { en: "{n} support staff", ar: "{n} موظفاً مسانداً" },
+      },
+      incidents: {
+        one: { en: "{n} incident", ar: "حادثة واحدة" },
+        two: { en: "{n} incidents", ar: "حادثتان" },
+        few: { en: "{n} incidents", ar: "{n} حوادث" },
+        many: { en: "{n} incidents", ar: "{n} حادثة" },
+      },
+      // The commission base cell reads "(3 trips · 2 projects)" — TWO counts,
+      // but two INDEPENDENT phrases either side of a separator, so they are two
+      // whole sentences and not a 4×4 cross product. Same shape as the page
+      // subtitle. English had no singular at this site (it printed "trips"
+      // unconditionally), so `one` keeps it verbatim.
+      trips: {
+        one: { en: "{n} trips", ar: "رحلة واحدة" },
+        two: { en: "{n} trips", ar: "رحلتان" },
+        few: { en: "{n} trips", ar: "{n} رحلات" },
+        many: { en: "{n} trips", ar: "{n} رحلة" },
+      },
+      projects: {
+        one: { en: "{n} projects", ar: "مشروع واحد" },
+        two: { en: "{n} projects", ar: "مشروعان" },
+        few: { en: "{n} projects", ar: "{n} مشاريع" },
+        many: { en: "{n} projects", ar: "{n} مشروعاً" },
+      },
+      // A base line's own trip count, which DID carry an English singular.
+      deliveredTrips: {
+        one: { en: "{n} delivered trip", ar: "رحلة مسلَّمة واحدة" },
+        two: { en: "{n} delivered trips", ar: "رحلتان مسلَّمتان" },
+        few: { en: "{n} delivered trips", ar: "{n} رحلات مسلَّمة" },
+        many: { en: "{n} delivered trips", ar: "{n} رحلة مسلَّمة" },
+      },
+      // The tail of a truncated KPI name list: "Ali, Fahad, Omar +2 more".
+      // The counted noun is ELIDED in both languages ("+2 more [names]"), which
+      // is why Arabic inflects a bare adjective here and not a noun.
+      more: {
+        one: { en: "+{n} more", ar: "+{n} آخر" },
+        two: { en: "+{n} more", ar: "+{n} آخران" },
+        few: { en: "+{n} more", ar: "+{n} آخرين" },
+        many: { en: "+{n} more", ar: "+{n} آخر" },
+      },
+      // `{months}` is NOT filled by `fill()` — it is the seam the renderer splits
+      // on to drop an <em>All months</em> in place, the same inline-token device
+      // PartsUsageTab uses for `{cur}`. Keep it in every bucket.
+      unmonthedHidden: {
+        one: {
+          en: "{n} earlier payout settled every unpaid month at once and record no single month — hidden while a month is picked. Choose {months} to see it.",
+          ar: "دفعة سابقة واحدة سوَّت كل الأشهر غير المدفوعة دفعةً واحدة ولا تسجّل شهراً بعينه — وهي مخفية ما دام هناك شهر محدَّد. اختر {months} لعرضها.",
+        },
+        two: {
+          en: "{n} earlier payouts settled every unpaid month at once and record no single month — hidden while a month is picked. Choose {months} to see them.",
+          ar: "دفعتان سابقتان سوَّتا كل الأشهر غير المدفوعة دفعةً واحدة ولا تسجّلان شهراً بعينه — وهما مخفيتان ما دام هناك شهر محدَّد. اختر {months} لعرضهما.",
+        },
+        few: {
+          en: "{n} earlier payouts settled every unpaid month at once and record no single month — hidden while a month is picked. Choose {months} to see them.",
+          ar: "{n} دفعات سابقة سوَّت كل الأشهر غير المدفوعة دفعةً واحدة ولا تسجّل شهراً بعينه — وهي مخفية ما دام هناك شهر محدَّد. اختر {months} لعرضها.",
+        },
+        many: {
+          en: "{n} earlier payouts settled every unpaid month at once and record no single month — hidden while a month is picked. Choose {months} to see them.",
+          ar: "{n} دفعةً سابقة سوَّت كل الأشهر غير المدفوعة دفعةً واحدة ولا تسجّل شهراً بعينه — وهي مخفية ما دام هناك شهر محدَّد. اختر {months} لعرضها.",
+        },
+      },
+    },
+
+    // Commission vocabulary SHARED by the Commissions tab and the History tab.
+    // These five totals are the same five columns on both screens and in the
+    // frozen payout snapshot — one wording, or the two screens drift apart.
+    comm: {
+      base: { en: "Base", ar: "الأساس" },
+      specials: { en: "Specials", ar: "الاستثنائية" },
+      adjustments: { en: "Adjustments", ar: "التسويات" },
+      bonus: { en: "Bonus", ar: "المكافأة" },
+      total: { en: "Total", ar: "الإجمالي" },
+      amount: { en: "Amount", ar: "المبلغ" },
+      trips: { en: "Trips", ar: "الرحلات" },
+      project: { en: "Project", ar: "المشروع" },
+      denied: { en: "Denied", ar: "مرفوضة" },
+      approved: { en: "Approved", ar: "معتمدة" },
+      // Rendered when a base line carries NO project id. The frozen snapshot
+      // still stores the English words (it is jsonb written at pay time and must
+      // never be rewritten); the switch is on `projectId == null`, a VALUE.
+      adhoc: { en: "Ad-hoc · no project", ar: "بدون مشروع" },
+      // `kind` on a snapshot item. Keyed off the stored enum, never off a label.
+      kind: {
+        special: { en: "special", ar: "استثنائية" },
+        adjustment: { en: "adjustment", ar: "تسوية" },
+        bonus: { en: "bonus", ar: "مكافأة" },
+      },
+      // The three-state review enum (`ReviewStatus`), on the pill beside every
+      // special / adjustment / bonus and on the payout itself. Indexed by the
+      // stored value, which is what replaced CommissionsTab's STATUS_LABEL map.
+      // `.approved` / `.denied` above are the History tab's DENIED-or-not pair
+      // and read a boolean, not this enum — same words, different question.
+      status: {
+        approved: { en: "Approved", ar: "معتمدة" },
+        pending: { en: "Pending", ar: "معلَّقة" },
+        denied: { en: "Denied", ar: "مرفوضة" },
+      },
+    },
+
+    // Commissions tab — the WORKING screen (`hist` below is its read-only twin).
+    // EVERY sentence here is scoped to the month lens, so `{month}` is always a
+    // monthLabel() output — itself translated — and a sentence carrying one is
+    // stored WHOLE with the month as a placeholder rather than split around it.
+    commTab: {
+      month: { en: "Month", ar: "الشهر" },
+      exportCsv: { en: "Export CSV", ar: "تصدير CSV" },
+      title: { en: "Driver Commissions", ar: "عمولات السائقين" },
+      unpaidBalance: { en: "Unpaid balance", ar: "الرصيد غير المدفوع" },
+      statPool: { en: "Current Pool", ar: "المجمَّع الحالي" },
+      statApproved: { en: "Approved (awaiting pay)", ar: "معتمدة (بانتظار الصرف)" },
+      statPending: { en: "Pending Review", ar: "قيد المراجعة" },
+      statAvg: { en: "Avg per Driver", ar: "المتوسط لكل سائق" },
+      thBase: { en: "Base (Projects × Trips)", ar: "الأساس (المشاريع × الرحلات)" },
+      specialsBonuses: { en: "Specials / Bonuses", ar: "الاستثنائية / المكافآت" },
+      thPayout: { en: "Payout", ar: "الصرف" },
+      breakdown: { en: "Breakdown", ar: "التفصيل" },
+      noneInMonth: { en: "No commission activity in {month}.", ar: "لا يوجد نشاط عمولات في {month}." },
+      rules: {
+        en: "Rules: commission accrues per delivered trip based on the project's rate (auto-derived — not editable here), and lands in the month the trip ran. Specials, the bonus & adjustments are added on top of the month they are filed under. Review each line in the Breakdown — pending & approved count, denied is excluded. Approve the payout, then Pay to freeze a History record and settle {month}. Every other month is untouched and stays payable on its own.",
+        ar: "القواعد: تُحتسب العمولة عن كل رحلة مسلَّمة وفق سعر المشروع (يُشتق تلقائياً — وغير قابل للتعديل هنا)، وتُقيَّد في الشهر الذي جرت فيه الرحلة. أما البنود الاستثنائية والمكافأة والتسويات فتُضاف فوق الشهر المقيَّدة تحته. راجع كل بند في التفصيل — المعلَّقة والمعتمدة تُحتسبان والمرفوضة تُستبعد. اعتمد الصرف، ثم ادفع لتجميد سجل في السجلّ وتسوية {month}. تبقى كل الأشهر الأخرى كما هي وقابلة للصرف كلٌّ على حدة.",
+      },
+      approve: { en: "Approve", ar: "اعتماد" },
+      deny: { en: "Deny", ar: "رفض" },
+      restore: { en: "Restore", ar: "استعادة" },
+      breakdownTitle: { en: "Commission Breakdown — {name}", ar: "تفصيل العمولة — {name}" },
+      // Four fragments because the English carries TWO inline <strong> runs.
+      // Splitting around MARKUP is not the counted-noun trap: no word here
+      // inflects, and the pieces are whole clauses, not a noun and its number.
+      reviewPre: { en: "Everything below is", ar: "كل ما يلي يخص" },
+      reviewMid: {
+        en: "only. Review each line (Approve / Deny / Restore), then",
+        ar: "وحده. راجع كل بند (اعتماد / رفض / استعادة)، ثم",
+      },
+      approvePayout: { en: "Approve payout", ar: "اعتماد الصرف" },
+      reviewPost: {
+        en: ". Pending and approved both count toward the total; denied is excluded.",
+        ar: ". المعلَّقة والمعتمدة تُحتسبان في الإجمالي، والمرفوضة تُستبعد.",
+      },
+      // Two WHOLE sentences chosen on `cycle.approved_by` — a DATA presence
+      // check — rather than one sentence with a " by {who}" tail spliced on.
+      approvedByWho: { en: "{month} approved by {who} — ready to pay.", ar: "اعتمد {who} شهر {month} — جاهز للصرف." },
+      approvedNoWho: { en: "{month} approved — ready to pay.", ar: "{month} معتمد — جاهز للصرف." },
+      pay: { en: "Pay", ar: "دفع" },
+      payFreezes: {
+        en: "freezes a History record and settles {month}; every other month stays payable on its own. Reopen to edit again.",
+        ar: "يُجمِّد سجلاً في السجلّ ويُسوّي {month}، وتبقى كل الأشهر الأخرى قابلة للصرف كلٌّ على حدة. أعد الفتح للتعديل من جديد.",
+      },
+      baseProjects: { en: "Base (projects)", ar: "الأساس (المشاريع)" },
+      extrasSum: { en: "Specials + Adjustments + Bonus", ar: "الاستثنائية + التسويات + المكافأة" },
+      currentTotal: { en: "Current Total", ar: "الإجمالي الحالي" },
+      basePayHeading: { en: "Projects & Base Pay", ar: "المشاريع والأجر الأساسي" },
+      noBaseLines: {
+        en: "No unpaid delivered trips for this driver in {month}.",
+        ar: "لا توجد رحلات مسلَّمة غير مدفوعة لهذا السائق في {month}.",
+      },
+      basePayNote: {
+        en: "Base pay is auto-derived from each delivered trip's stamped commission. Edit specials, the bonus, or adjustments from the row buttons.",
+        ar: "يُشتق الأجر الأساسي تلقائياً من العمولة المختومة على كل رحلة مسلَّمة. عدّل البنود الاستثنائية أو المكافأة أو التسويات من أزرار الصف.",
+      },
+      noSpecials: { en: "No specials.", ar: "لا توجد بنود استثنائية." },
+      specialTrip: { en: "Special trip", ar: "رحلة استثنائية" },
+      reason: { en: "Reason: {reason}", ar: "السبب: {reason}" },
+      managerBonus: { en: "Manager Bonus", ar: "مكافأة المدير" },
+      noBonus: { en: "No bonus set.", ar: "لم تُحدَّد مكافأة." },
+      discretionaryFor: { en: "Discretionary bonus for {month}.", ar: "مكافأة تقديرية عن {month}." },
+      noAdjustments: { en: "No adjustments.", ar: "لا توجد تسويات." },
+      approveMonthPayout: { en: "Approve {month} payout", ar: "اعتماد صرف {month}" },
+      reopen: { en: "Reopen", ar: "إعادة فتح" },
+      confirmPay: {
+        en: "Pay {name} {amount} for {month}? This freezes a History record and settles that month. Other months are untouched.",
+        ar: "دفع {amount} إلى {name} عن {month}؟ سيُجمَّد بذلك سجل في السجلّ ويُسوَّى ذلك الشهر. لن تتأثر بقية الأشهر.",
+      },
+      payBtn: { en: "Pay {amount} · {month}", ar: "دفع {amount} · {month}" },
+      denyKind: { en: "Deny {kind}", ar: "رفض {kind}" },
+      denyPrompt: {
+        en: 'Deny "{label}" ({amount}). It stays visible but is excluded from the total until restored.',
+        ar: 'رفض "{label}" ({amount}). سيبقى ظاهراً لكنه يُستبعد من الإجمالي حتى يُستعاد.',
+      },
+      specialsTitle: { en: "Specials & Bonuses — {name}", ar: "البنود الاستثنائية والمكافآت — {name}" },
+      addSpecial: { en: "Add special", ar: "إضافة بند استثنائي" },
+      editSpecial: { en: "Edit special", ar: "تعديل بند استثنائي" },
+      updateSpecial: { en: "Update special", ar: "تحديث البند" },
+      fLabel: { en: "Label", ar: "الوصف" },
+      fAmount: { en: "Amount (SAR)", ar: "المبلغ (ريال)" },
+      phSpecialLabel: { en: "e.g. Emergency desert run", ar: "مثال: رحلة صحراوية طارئة" },
+      countsAsSpecialTrip: { en: "Counts as a special trip", ar: "تُحتسب رحلةً استثنائية" },
+      cancelEdit: { en: "Cancel edit", ar: "إلغاء التعديل" },
+      noSpecialsOrBonus: {
+        en: "No specials or bonus for {month} yet.",
+        ar: "لا توجد بنود استثنائية أو مكافأة عن {month} بعد.",
+      },
+      confirmDeleteSpecial: { en: "Delete this special permanently?", ar: "حذف هذا البند الاستثنائي نهائياً؟" },
+      discretionaryCurrent: {
+        en: "Discretionary bonus for {month} (current: {amount}).",
+        ar: "مكافأة تقديرية عن {month} (الحالية: {amount}).",
+      },
+      discretionaryPick: {
+        en: "Discretionary bonus — pick the month it is filed against.",
+        ar: "مكافأة تقديرية — اختر الشهر المقيَّدة تحته.",
+      },
+      bonusMonth: { en: "Bonus month", ar: "شهر المكافأة" },
+      selectMonth: { en: "Select month…", ar: "اختر الشهر…" },
+      set: { en: "Set", ar: "تعيين" },
+      confirmRemoveBonus: { en: "Remove the {month} manager bonus?", ar: "إزالة مكافأة المدير عن {month}؟" },
+      removeBonus: { en: "Remove bonus", ar: "إزالة المكافأة" },
+      noMonthSelected: {
+        en: "No month selected — a bonus cannot be saved until you pick the month it belongs to.",
+        ar: "لم يُختر شهر — لا يمكن حفظ المكافأة حتى تختار الشهر الذي تنتمي إليه.",
+      },
+      // `{bonusMonth}` appears TWICE; fill() replaces every occurrence, so the
+      // sentence stays one string instead of being cut at the repeat.
+      filingAgainst: {
+        en: "Filing against {bonusMonth}, not {lensMonth} — this amount will not appear in the view you are in. Switch the tab's month lens to {bonusMonth} to review and pay it.",
+        ar: "التقييد تحت {bonusMonth} لا {lensMonth} — لن يظهر هذا المبلغ في الشاشة التي أنت فيها. حوِّل عدسة الشهر في التبويب إلى {bonusMonth} لمراجعته وصرفه.",
+      },
+      adjustmentsTitle: { en: "Adjustments — {name}", ar: "التسويات — {name}" },
+      addAdjustment: { en: "Add adjustment", ar: "إضافة تسوية" },
+      editAdjustment: { en: "Edit adjustment", ar: "تعديل تسوية" },
+      updateAdjustment: { en: "Update adjustment", ar: "تحديث التسوية" },
+      adjustmentNote: {
+        en: "Positive adds, negative deducts (e.g. uniform deduction). No limit.",
+        ar: "الموجب يُضيف والسالب يخصم (مثل خصم الزي). بلا حد.",
+      },
+      phAdjustmentLabel: { en: "e.g. Uniform deduction", ar: "مثال: خصم الزي" },
+      noAdjustmentsForMonth: { en: "No adjustments for {month} yet.", ar: "لا توجد تسويات عن {month} بعد." },
+      confirmDeleteAdjustment: { en: "Delete this adjustment permanently?", ar: "حذف هذه التسوية نهائياً؟" },
+      errReason: { en: "Enter a reason.", ar: "أدخل سبباً." },
+      fReason: { en: "Reason (required)", ar: "السبب (مطلوب)" },
+      phReason: { en: "Why is this being denied?", ar: "لماذا يُرفض هذا؟" },
+      denying: { en: "Denying…", ar: "جارٍ الرفض…" },
+    },
+
+    // Commission History — VIEW ONLY. Also rendered inside the Archive page,
+    // which imports this same component.
+    hist: {
+      statPayouts: { en: "Payouts", ar: "الدفعات" },
+      statTotalPaid: { en: "Total Paid", ar: "إجمالي المدفوع" },
+      statDriversPaid: { en: "Drivers Paid", ar: "السائقون المدفوع لهم" },
+      allDrivers: { en: "All drivers", ar: "كل السائقين" },
+      monthSettled: { en: "Month settled", ar: "الشهر المُسوَّى" },
+      allMonths: { en: "All months", ar: "كل الأشهر" },
+      thPaid: { en: "Paid", ar: "تاريخ الدفع" },
+      thPayoutRun: { en: "Payout run", ar: "دورة الصرف" },
+      noneYet: { en: "No paid commissions yet.", ar: "لا توجد عمولات مدفوعة بعد." },
+      noneForMonth: {
+        en: "Nothing paid for {month} under this filter.",
+        ar: "لم يُدفع شيء عن {month} ضمن هذا التصفية.",
+      },
+      unmonthedTitle: {
+        en: "Paid before commissions were settled one month at a time",
+        ar: "دُفعت قبل أن تُسوَّى العمولات شهراً بشهر",
+      },
+      payoutOf: { en: "Payout — {name}", ar: "دفعة — {name}" },
+      print: { en: "Print", ar: "طباعة" },
+      sweptAll: { en: "Settled every unpaid month at once", ar: "سوَّت كل الأشهر غير المدفوعة دفعةً واحدة" },
+      paidAt: { en: "Paid {when}", ar: "دُفعت في {when}" },
+      approvedBy: { en: "Approved by {who}", ar: "اعتمدها {who}" },
+      baseHeading: { en: "Base — delivered trips", ar: "الأساس — الرحلات المسلَّمة" },
+      noBaseTrips: { en: "No base trips.", ar: "لا توجد رحلات أساسية." },
+      items: { en: "Items", ar: "البنود" },
+      thItem: { en: "Item", ar: "البند" },
+      noItems: { en: "No items.", ar: "لا توجد بنود." },
+      deniedReason: { en: "Denied: {reason}", ar: "مرفوضة: {reason}" },
+    },
+
+    // The FIVE BUILT-IN staff roles (`staff_roles.is_default = true`, seeded by
+    // 0011). Keyed off the immutable `staff_roles.key`, NEVER off the stored
+    // `label` — and DISPLAY-ONLY: no column is written, no row is rewritten, so
+    // `staff.role` is still the same FK it always was. Any other role (the live
+    // DB carries `finance`, `head_of_maintenance`, `night_dispatcher`) falls
+    // through to its stored English `label`; a `label_ar` column is a separate
+    // later batch.
+    //
+    // Each `en` here must stay byte-identical to the seeded `label`, because
+    // English used to render straight from the row. If a built-in is ever
+    // renamed in the DB, this is the second place to change.
+    role: {
+      fleet_manager: { en: "Fleet Manager", ar: "مدير الأسطول" },
+      ops_supervisor: { en: "Ops Supervisor", ar: "مشرف العمليات" },
+      mechanic: { en: "Mechanic", ar: "فني ميكانيكي" },
+      inventory_clerk: { en: "Inventory Clerk", ar: "أمين المستودع" },
+      dispatcher: { en: "Dispatcher", ar: "منسّق الحركة" },
+    },
+
+    // The FOUR BUILT-IN leave types (`leave_types.is_default = true`, seeded by
+    // 0012). Exactly the `role` arrangement above, for exactly the same reasons:
+    // keyed off the immutable `leave_types.key`, DISPLAY-ONLY — no column added,
+    // no row rewritten, `leave_periods.leave_type` is still the same FK. The two
+    // custom types in the live DB ("travel meeting", "Night off") fall through to
+    // their stored English `label`; a `label_ar` column is a separate later batch.
+    //
+    // Each `en` is byte-identical to 0012's seeded `label` — "Paid leave", not
+    // "Paid" — because English rendered straight from the row until now.
+    leaveType: {
+      paid: { en: "Paid leave", ar: "إجازة مدفوعة" },
+      sick: { en: "Sick leave", ar: "إجازة مرضية" },
+      unpaid: { en: "Unpaid leave", ar: "إجازة بدون راتب" },
+      off_duty: { en: "Off duty", ar: "خارج الخدمة" },
+    },
+
+    staff: {
+      // KPI row.
+      kpiActive: { en: "Active staff", ar: "الموظفون النشطون" },
+      kpiIqama: { en: "Iqama exp (90d)", ar: "إقامات تنتهي (٩٠ يوماً)" },
+      byBranch: { en: "Headcount by branch", ar: "عدد الموظفين حسب الفرع" },
+      none: { en: "No staff yet.", ar: "لا يوجد موظفون بعد." },
+      // A staff member with no branch, or one whose branch row no longer
+      // resolves. Its own key: this counts PEOPLE, not vehicles or parts.
+      unassigned: { en: "Unassigned", ar: "بلا فرع" },
+      mechTeam: { en: "Mechanics team", ar: "فريق الميكانيكيين" },
+      mechCount: { en: "mechanics", ar: "ميكانيكي" },
+      openWo: { en: "Open work orders", ar: "أوامر عمل مفتوحة" },
+      trucksPer: { en: "Trucks per mechanic", ar: "شاحنات لكل ميكانيكي" },
+      // Load-bearing wording: `duty_hours` is a shift LENGTH, so this says
+      // "has a shift on record", never "is clocked in now".
+      withDuty: { en: "With duty hours set", ar: "لديهم ساعات دوام مسجَّلة" },
+
+      // Grid.
+      title: { en: "Management & Support Staff", ar: "الإدارة والموظفون المساندون" },
+      onLeavePill: { en: "On leave", ar: "في إجازة" },
+      sinceJan1: { en: "since Jan 1", ar: "منذ ١ يناير" },
+      // WHOLE sentence per bucket — the `title` tooltip on the leave chip.
+      // `{year}` is a Latin numeral in both languages.
+      leaveSince: {
+        one: { en: "{n} leave day taken since 1 January {year}", ar: "يوم إجازة واحد مأخوذ منذ ١ يناير {year}" },
+        two: { en: "{n} leave days taken since 1 January {year}", ar: "يوما إجازة مأخوذان منذ ١ يناير {year}" },
+        few: { en: "{n} leave days taken since 1 January {year}", ar: "{n} أيام إجازة مأخوذة منذ ١ يناير {year}" },
+        many: { en: "{n} leave days taken since 1 January {year}", ar: "{n} يوماً من الإجازة مأخوذة منذ ١ يناير {year}" },
+      },
+
+      // Detail modal.
+      detailTitle: { en: "Staff Member", ar: "موظف" },
+      fRole: { en: "Role", ar: "الوظيفة" },
+      fBranch: { en: "Branch of operation", ar: "فرع العمل" },
+      fEmail: { en: "Email", ar: "البريد الإلكتروني" },
+      fPhone: { en: "Phone", ar: "الهاتف" },
+      fIqama: { en: "Iqama ID", ar: "رقم الإقامة" },
+      fIqamaExp: { en: "Iqama expiry", ar: "انتهاء الإقامة" },
+      fStatus: { en: "Status", ar: "الحالة" },
+      // The salary Cell, its History button and that button's tooltip are
+      // `drivers.salary.monthly` / `.openBtn` / `.openTitle` — shared with the
+      // driver detail, which opens the same modal.
+      terminate: { en: "Terminate", ar: "إنهاء الخدمة" },
+      // `{name}` is the staff member's own stored name — DATA, never translated.
+      confirmTerminate: {
+        en: "Terminate {name}? The record is kept but removed from the active list.",
+        ar: "إنهاء خدمة {name}؟ يُحتفظ بالسجل لكنه يُزال من قائمة النشطين.",
+      },
+
+      // The four STATUS words, in the priority the badge applies them. The
+      // priority test is on data (`terminated_at`, the computed on-leave set,
+      // `active`), never on these words. `stTerminated` deliberately matches
+      // payroll.statusTerminated's wording — a PERSON whose service ended —
+      // and NOT fleet.availability.terminated (مشطوب), which strikes off a truck.
+      stTerminated: { en: "Terminated", ar: "منتهية خدمته" },
+      stOnLeave: { en: "On leave", ar: "في إجازة" },
+      stOnLeaveToday: { en: "On leave today", ar: "في إجازة اليوم" },
+      stActive: { en: "Active", ar: "نشط" },
+      stInactive: { en: "Inactive", ar: "غير نشط" },
+      // `{d}` is an app-formatted date — Latin in both languages.
+      terminatedOn: { en: "Terminated · {d}", ar: "منتهية خدمته · {d}" },
+
+      // Add / edit form.
+      addTitle: { en: "Add Staff Member", ar: "إضافة موظف" },
+      editTitle: { en: "Edit staff member", ar: "تعديل بيانات موظف" },
+      fName: { en: "Name *", ar: "الاسم *" },
+      phName: { en: "e.g. Omar Al-Qahtani", ar: "مثال: عمر القحطاني" },
+      fNameAr: { en: "Name (Arabic)", ar: "الاسم بالعربية" },
+      fDutyHours: { en: "Duty hours", ar: "ساعات الدوام" },
+      fSalaryInput: { en: "Monthly salary (SAR)", ar: "الراتب الشهري (ريال)" },
+      phSalary: { en: "e.g. 4500", ar: "مثال: 4500" },
+      phEmail: { en: "name@aquafleet.sa", ar: "name@aquafleet.sa" },
+      phPhone: { en: "+966 5…", ar: "+966 5…" },
+      fHireDate: { en: "Hiring date", ar: "تاريخ التعيين" },
+      fActive: { en: "Active", ar: "نشط" },
+      addRole: { en: "+ Add custom role…", ar: "+ إضافة وظيفة مخصّصة…" },
+      phNewRole: { en: "New role name", ar: "اسم الوظيفة الجديدة" },
+    },
+  },
 } as const;
 
 /**

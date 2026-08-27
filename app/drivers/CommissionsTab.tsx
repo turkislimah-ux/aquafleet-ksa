@@ -41,6 +41,8 @@ import { useRouter } from "next/navigation";
 import { Download, Plus, Pencil, Eye, Save, Trash2, Check, X, Banknote, Info, Ban, RotateCcw } from "lucide-react";
 import { Stat, StatusPill } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural } from "@/lib/i18n";
 import {
   addCommissionSpecial,
   updateCommissionSpecial,
@@ -104,11 +106,9 @@ const STATUS_TONE: Record<ReviewStatus, string> = {
   pending: "warning",
   denied: "critical",
 };
-const STATUS_LABEL: Record<ReviewStatus, string> = {
-  approved: "Approved",
-  pending: "Pending",
-  denied: "Denied",
-};
+// The matching LABEL map is gone: a review pill now reads
+// t(`drivers.comm.status.${status}`) straight off the stored enum, so there is
+// no second English-only table to keep in step with the dictionary.
 
 function csvCell(v: string | number): string {
   const s = String(v ?? "");
@@ -308,6 +308,7 @@ export default function CommissionsTab({
   // module-private, so the parent could not build the option list anyway.
   controlsHost?: HTMLElement | null;
 }) {
+  const { lang } = useApp();
   const [filter, setFilter] = useState<Filter>("all");
   const [breakdownFor, setBreakdownFor] = useState<string | null>(null);
   // Manage popups: each holds a driverId; the popup itself reads live props.
@@ -366,7 +367,7 @@ export default function CommissionsTab({
           not a filter over a rolling balance. Deliberately sized and labelled
           like a scope control rather than dropped in among the status chips. */}
       <label className="flex items-center gap-2 h-9 ps-3 pe-1 rounded-lg border" style={BORDER}>
-        <span className="text-xs muted uppercase tracking-[.05em]">Month</span>
+        <span className="text-xs muted uppercase tracking-[.05em]">{t("drivers.commTab.month", lang)}</span>
         <select
           value={monthKey}
           onChange={(e) => setMonthKey(e.target.value)}
@@ -374,7 +375,7 @@ export default function CommissionsTab({
         >
           {monthOptions.map((k) => (
             <option key={k} value={k}>
-              {monthLabel(k)}
+              {monthLabel(k, lang)}
             </option>
           ))}
         </select>
@@ -387,7 +388,7 @@ export default function CommissionsTab({
         className="h-9 px-3 rounded-lg text-sm font-medium inline-flex items-center gap-2 border hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
         style={BORDER}
       >
-        <Download className="h-4 w-4" /> Export CSV
+        <Download className="h-4 w-4" /> {t("drivers.commTab.exportCsv", lang)}
       </button>
     </div>
   );
@@ -400,9 +401,9 @@ export default function CommissionsTab({
         <div className="flex items-center gap-2">
           <span className="text-emerald-600 dark:text-emerald-400 text-lg">﷼</span>
           <div>
-            <h3 className="font-semibold">Driver Commissions</h3>
+            <h3 className="font-semibold">{t("drivers.commTab.title", lang)}</h3>
             <p className="text-xs muted">
-              Unpaid balance <span className="text-brand-600 dark:text-brand-300">· {monthLabel(monthKey)}</span>
+              {t("drivers.commTab.unpaidBalance", lang)} <span className="text-brand-600 dark:text-brand-300">· {monthLabel(monthKey, lang)}</span>
             </p>
           </div>
         </div>
@@ -423,7 +424,7 @@ export default function CommissionsTab({
                 }
                 style={filter === s ? undefined : BORDER}
               >
-                {s === "all" ? "All" : STATUS_LABEL[s]} <span className={filter === s ? "opacity-80" : "muted"}>{chipCount(s)}</span>
+                {s === "all" ? t("common.all", lang) : t(`drivers.comm.status.${s}`, lang)} <span className={filter === s ? "opacity-80" : "muted"}>{chipCount(s)}</span>
               </button>
             ))}
           </div>
@@ -433,22 +434,22 @@ export default function CommissionsTab({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        <Stat label="Current Pool" value={formatSar(pool)} tone="info" />
-        <Stat label="Approved (awaiting pay)" value={formatSar(approvedSum)} tone="ok" />
-        <Stat label="Pending Review" value={formatSar(pendingSum)} tone="warn" />
-        <Stat label="Avg per Driver" value={formatSar(avg)} />
+        <Stat label={t("drivers.commTab.statPool", lang)} value={formatSar(pool)} tone="info" />
+        <Stat label={t("drivers.commTab.statApproved", lang)} value={formatSar(approvedSum)} tone="ok" />
+        <Stat label={t("drivers.commTab.statPending", lang)} value={formatSar(pendingSum)} tone="warn" />
+        <Stat label={t("drivers.commTab.statAvg", lang)} value={formatSar(avg)} />
       </div>
 
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full text-sm">
           <thead>
             <tr>
-              <th className={TH_CLS}>Driver</th>
-              <th className={TH_CLS}>Base (Projects × Trips)</th>
-              <th className={TH_CLS}>Specials / Bonuses</th>
-              <th className={TH_CLS}>Adjustments</th>
-              <th className={TH_CLS}>Total</th>
-              <th className={TH_CLS}>Payout</th>
+              <th className={TH_CLS}>{t("common.driver", lang)}</th>
+              <th className={TH_CLS}>{t("drivers.commTab.thBase", lang)}</th>
+              <th className={TH_CLS}>{t("drivers.commTab.specialsBonuses", lang)}</th>
+              <th className={TH_CLS}>{t("drivers.comm.adjustments", lang)}</th>
+              <th className={TH_CLS}>{t("drivers.comm.total", lang)}</th>
+              <th className={TH_CLS}>{t("drivers.commTab.thPayout", lang)}</th>
               <th className="py-2 px-3 bg-black/[.02] dark:bg-white/[.02]" />
             </tr>
           </thead>
@@ -456,7 +457,7 @@ export default function CommissionsTab({
             {list.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-6 px-3 border-t text-center muted text-sm" style={BORDER}>
-                  No commission activity in {monthLabel(monthKey)}.
+                  {fill(t("drivers.commTab.noneInMonth", lang), { month: monthLabel(monthKey, lang) })}
                 </td>
               </tr>
             )}
@@ -476,15 +477,18 @@ export default function CommissionsTab({
                     </div>
                   </td>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap tabular-nums" style={BORDER}>
-                    <span className="font-medium">{formatSar(r.base)}</span>
-                    <span className="muted text-[11px] ms-1">({r.trips} trips · {r.projects} projects)</span>
+                    <span className="font-medium" dir="ltr">{formatSar(r.base)}</span>
+                    {/* Two counts, but two INDEPENDENT phrases either side of a
+                        separator — so two whole sentences, not a 4×4 cross
+                        product. The parentheses stay in the JSX. */}
+                    <span className="muted text-[11px] ms-1">({fill(t(`drivers.count.trips.${plural(r.trips)}`, lang), { n: r.trips })} · {fill(t(`drivers.count.projects.${plural(r.projects)}`, lang), { n: r.projects })})</span>
                   </td>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap tabular-nums" style={BORDER}>
-                    {r.specials + r.bonus > 0 ? <span className="text-emerald-600 dark:text-emerald-400 font-medium">+{formatSar(r.specials + r.bonus)}</span> : <span className="muted">—</span>}
+                    {r.specials + r.bonus > 0 ? <span className="text-emerald-600 dark:text-emerald-400 font-medium" dir="ltr">+{formatSar(r.specials + r.bonus)}</span> : <span className="muted">—</span>}
                   </td>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap tabular-nums" style={BORDER}>
                     {r.adjustments !== 0 ? (
-                      <span className={r.adjustments > 0 ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-rose-600 dark:text-rose-400 font-medium"}>
+                      <span className={r.adjustments > 0 ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-rose-600 dark:text-rose-400 font-medium"} dir="ltr">
                         {r.adjustments > 0 ? "+" : ""}{formatSar(r.adjustments)}
                       </span>
                     ) : (
@@ -492,25 +496,25 @@ export default function CommissionsTab({
                     )}
                   </td>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap tabular-nums font-semibold text-brand-600 dark:text-brand-300" style={BORDER}>
-                    {formatSar(r.total)}
+                    <span dir="ltr">{formatSar(r.total)}</span>
                   </td>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap" style={BORDER}>
-                    <StatusPill status={STATUS_TONE[r.payoutStatus]} label={STATUS_LABEL[r.payoutStatus]} />
+                    <StatusPill status={STATUS_TONE[r.payoutStatus]} label={t(`drivers.comm.status.${r.payoutStatus}`, lang)} />
                   </td>
                   <td className="py-2.5 px-3 border-t whitespace-nowrap" style={BORDER}>
                     <div className="flex items-center justify-end gap-1.5">
                       {editable && (
                         <>
                           <OutlineBtn onClick={() => setSpecialsFor(r.driverId)}>
-                            <Plus className="h-3.5 w-3.5" /> Specials / Bonuses
+                            <Plus className="h-3.5 w-3.5" /> {t("drivers.commTab.specialsBonuses", lang)}
                           </OutlineBtn>
                           <OutlineBtn onClick={() => setAdjustmentsFor(r.driverId)}>
-                            <Plus className="h-3.5 w-3.5" /> Adjustments
+                            <Plus className="h-3.5 w-3.5" /> {t("drivers.comm.adjustments", lang)}
                           </OutlineBtn>
                         </>
                       )}
                       <OutlineBtn onClick={() => setBreakdownFor(r.driverId)}>
-                        <Eye className="h-3.5 w-3.5" /> Breakdown
+                        <Eye className="h-3.5 w-3.5" /> {t("drivers.commTab.breakdown", lang)}
                       </OutlineBtn>
                     </div>
                   </td>
@@ -522,11 +526,7 @@ export default function CommissionsTab({
       </div>
 
       <div className="text-[11px] muted mt-3 leading-relaxed">
-        Rules: commission accrues per delivered trip based on the project&apos;s rate (auto-derived — not editable here),
-        and lands in the month the trip ran. Specials, the bonus &amp; adjustments are added on top of the month they are
-        filed under. Review each line in the Breakdown — pending &amp; approved count, denied is excluded. Approve the
-        payout, then Pay to freeze a History record and settle {monthLabel(monthKey)}. Every other month is untouched
-        and stays payable on its own.
+        {fill(t("drivers.commTab.rules", lang), { month: monthLabel(monthKey, lang) })}
       </div>
 
       {breakdownFor && (
@@ -607,6 +607,7 @@ function BreakdownModal({
   projectsById: Record<string, string>;
   onClose: () => void;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -655,11 +656,11 @@ function BreakdownModal({
     return (
       <div className="flex items-center gap-1.5">
         {status === "denied" ? (
-          <OutlineBtn onClick={onRestore} disabled={busy}><RotateCcw className="h-3.5 w-3.5" /> Restore</OutlineBtn>
+          <OutlineBtn onClick={onRestore} disabled={busy}><RotateCcw className="h-3.5 w-3.5" /> {t("drivers.commTab.restore", lang)}</OutlineBtn>
         ) : (
           <>
             {status === "pending" && (
-              <OutlineBtn onClick={onApprove} disabled={busy}><Check className="h-3.5 w-3.5" /> Approve</OutlineBtn>
+              <OutlineBtn onClick={onApprove} disabled={busy}><Check className="h-3.5 w-3.5" /> {t("drivers.commTab.approve", lang)}</OutlineBtn>
             )}
             <button
               type="button"
@@ -667,7 +668,7 @@ function BreakdownModal({
               onClick={onDeny}
               className="h-8 px-2.5 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 border border-rose-300/60 dark:border-rose-500/40 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"
             >
-              <Ban className="h-3.5 w-3.5" /> Deny
+              <Ban className="h-3.5 w-3.5" /> {t("drivers.commTab.deny", lang)}
             </button>
           </>
         )}
@@ -688,9 +689,9 @@ function BreakdownModal({
       <div className="card p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-semibold">
-            Commission Breakdown — {driverName}
+            {fill(t("drivers.commTab.breakdownTitle", lang), { name: driverName })}
             {driver?.name_ar ? <span className="muted font-normal"> · {driver.name_ar}</span> : null}
-            <span className="muted font-normal"> · {monthLabel(monthKey)}</span>
+            <span className="muted font-normal"> · {monthLabel(monthKey, lang)}</span>
           </h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
@@ -700,32 +701,34 @@ function BreakdownModal({
           {canReview ? (
             <div className="rounded-lg p-3 text-xs flex items-start gap-2" style={{ background: "rgba(100,116,139,.10)", border: "1px solid rgb(var(--border))" }}>
               <Info className="h-4 w-4 muted mt-0.5 shrink-0" />
-              <span>Everything below is <strong>{monthLabel(monthKey)}</strong> only. Review each line (Approve / Deny / Restore), then <strong>Approve payout</strong>. Pending and approved both count toward the total; denied is excluded.</span>
+              <span>{t("drivers.commTab.reviewPre", lang)} <strong>{monthLabel(monthKey, lang)}</strong> {t("drivers.commTab.reviewMid", lang)} <strong>{t("drivers.commTab.approvePayout", lang)}</strong>{t("drivers.commTab.reviewPost", lang)}</span>
             </div>
           ) : (
             <div className="rounded-lg p-3 text-xs flex items-start gap-2" style={{ background: "rgba(16,185,129,.10)", border: "1px solid rgba(16,185,129,.30)" }}>
               <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
-              <span className="text-emerald-700 dark:text-emerald-300">{monthLabel(monthKey)} approved{cycle?.approved_by ? ` by ${cycle.approved_by}` : ""} — ready to pay. <strong>Pay</strong> freezes a History record and settles {monthLabel(monthKey)}; every other month stays payable on its own. Reopen to edit again.</span>
+              <span className="text-emerald-700 dark:text-emerald-300">{cycle?.approved_by
+                ? fill(t("drivers.commTab.approvedByWho", lang), { month: monthLabel(monthKey, lang), who: cycle.approved_by })
+                : fill(t("drivers.commTab.approvedNoWho", lang), { month: monthLabel(monthKey, lang) })} <strong>{t("drivers.commTab.pay", lang)}</strong> {fill(t("drivers.commTab.payFreezes", lang), { month: monthLabel(monthKey, lang) })}</span>
             </div>
           )}
 
           {/* Summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <SummaryCard label="Driver">
+            <SummaryCard label={t("common.driver", lang)}>
               <div className="font-medium">{driverName}</div>
-              <div className="text-[11px] muted">{monthLabel(monthKey)}</div>
+              <div className="text-[11px] muted">{monthLabel(monthKey, lang)}</div>
             </SummaryCard>
-            <SummaryCard label="Base (projects)">
-              <div className="text-lg font-semibold tabular-nums">{formatSar(base)}</div>
+            <SummaryCard label={t("drivers.commTab.baseProjects", lang)}>
+              <div className="text-lg font-semibold tabular-nums"><span dir="ltr">{formatSar(base)}</span></div>
             </SummaryCard>
-            <SummaryCard label="Specials + Adjustments + Bonus">
+            <SummaryCard label={t("drivers.commTab.extrasSum", lang)}>
               <div className={"text-lg font-semibold tabular-nums " + (spSum + adjSum + bonusInTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : spSum + adjSum + bonusInTotal < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
-                {formatSar(spSum + adjSum + bonusInTotal)}
+                <span dir="ltr">{formatSar(spSum + adjSum + bonusInTotal)}</span>
               </div>
             </SummaryCard>
-            <SummaryCard label="Current Total">
-              <div className="text-lg font-semibold tabular-nums text-brand-600 dark:text-brand-300">{formatSar(total)}</div>
-              <div className="mt-0.5"><StatusPill status={STATUS_TONE[payoutStatus]} label={STATUS_LABEL[payoutStatus]} /></div>
+            <SummaryCard label={t("drivers.commTab.currentTotal", lang)}>
+              <div className="text-lg font-semibold tabular-nums text-brand-600 dark:text-brand-300"><span dir="ltr">{formatSar(total)}</span></div>
+              <div className="mt-0.5"><StatusPill status={STATUS_TONE[payoutStatus]} label={t(`drivers.comm.status.${payoutStatus}`, lang)} /></div>
             </SummaryCard>
           </div>
 
@@ -734,23 +737,23 @@ function BreakdownModal({
 
           {/* Base lines (read-only — computed-truth) */}
           <section>
-            <h4 className="font-semibold text-sm mb-2">Projects &amp; Base Pay</h4>
+            <h4 className="font-semibold text-sm mb-2">{t("drivers.commTab.basePayHeading", lang)}</h4>
             {baseLines.length === 0 ? (
-              <p className="muted text-sm">No unpaid delivered trips for this driver in {monthLabel(monthKey)}.</p>
+              <p className="muted text-sm">{fill(t("drivers.commTab.noBaseLines", lang), { month: monthLabel(monthKey, lang) })}</p>
             ) : (
               <div className="space-y-2">
                 {baseLines.map((l) => (
                   <div key={l.projectId ?? "—"} className="rounded-lg border p-3 flex items-center gap-3 flex-wrap" style={BORDER}>
                     <div className="flex-1 min-w-[180px]">
                       <div className="font-medium text-sm">{l.projectName}</div>
-                      <div className="text-[11px] muted">{l.trips} delivered {l.trips === 1 ? "trip" : "trips"}</div>
+                      <div className="text-[11px] muted">{fill(t(`drivers.count.deliveredTrips.${plural(l.trips)}`, lang), { n: l.trips })}</div>
                     </div>
-                    <div className="font-semibold tabular-nums">{formatSar(l.amount)}</div>
+                    <div className="font-semibold tabular-nums"><span dir="ltr">{formatSar(l.amount)}</span></div>
                   </div>
                 ))}
               </div>
             )}
-            <div className="text-[11px] muted mt-2">Base pay is auto-derived from each delivered trip&apos;s stamped commission. Edit specials, the bonus, or adjustments from the row buttons.</div>
+            <div className="text-[11px] muted mt-2">{t("drivers.commTab.basePayNote", lang)}</div>
           </section>
 
           {/* Separator — sets Base Pay apart from Specials/Bonus/Adjustments below. */}
@@ -758,9 +761,9 @@ function BreakdownModal({
 
           {/* Specials — review each */}
           <section>
-            <h4 className="font-semibold text-sm mb-2">Specials</h4>
+            <h4 className="font-semibold text-sm mb-2">{t("drivers.comm.specials", lang)}</h4>
             {mySpecials.length === 0 ? (
-              <p className="muted text-sm">No specials.</p>
+              <p className="muted text-sm">{t("drivers.commTab.noSpecials", lang)}</p>
             ) : (
               <div className="space-y-2">
                 {mySpecials.map((sp) => {
@@ -769,14 +772,17 @@ function BreakdownModal({
                     <div key={sp.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
                       <div className="flex-1 min-w-[200px]">
                         <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
-                          {sp.is_special_trip && <StatusPill status="scheduled" label="Special trip" />}
-                          <StatusPill status={STATUS_TONE[sp.status]} label={STATUS_LABEL[sp.status]} />
+                          {sp.is_special_trip && <StatusPill status="scheduled" label={t("drivers.commTab.specialTrip", lang)} />}
+                          <StatusPill status={STATUS_TONE[sp.status]} label={t(`drivers.comm.status.${sp.status}`, lang)} />
                           <span className={denied ? "line-through" : ""}>{sp.label}</span>
                         </div>
+                        {/* No dir override: this joins an ISO date with a FREE-TEXT
+                            note, and forcing the pair LTR would mis-order an Arabic
+                            note to straighten a date that bidi already handles. */}
                         <div className="text-[11px] muted">{[sp.date, sp.note].filter(Boolean).join(" · ") || "—"}</div>
-                        {denied && sp.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {sp.deny_reason}</div>}
+                        {denied && sp.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">{fill(t("drivers.commTab.reason", lang), { reason: sp.deny_reason })}</div>}
                       </div>
-                      <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}>+{formatSar(sp.amount_sar)}</div>
+                      <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}><span dir="ltr">+{formatSar(sp.amount_sar)}</span></div>
                       {itemControls(
                         sp.status,
                         () => run(() => setSpecialStatus(sp.id, "approved")),
@@ -792,25 +798,25 @@ function BreakdownModal({
 
           {/* Bonus — reviewable line */}
           <section>
-            <h4 className="font-semibold text-sm mb-2">Manager Bonus</h4>
+            <h4 className="font-semibold text-sm mb-2">{t("drivers.commTab.managerBonus", lang)}</h4>
             {bonusAmt === 0 ? (
-              <p className="muted text-sm">No bonus set.</p>
+              <p className="muted text-sm">{t("drivers.commTab.noBonus", lang)}</p>
             ) : (
               <div className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (bonusStatus === "denied" ? "opacity-60" : "")} style={BORDER}>
                 <div className="flex-1 min-w-[200px]">
                   <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
                     <Banknote className="h-4 w-4 muted" />
-                    <StatusPill status={STATUS_TONE[bonusStatus]} label={STATUS_LABEL[bonusStatus]} />
-                    <span className={bonusStatus === "denied" ? "line-through" : ""}>Manager Bonus</span>
+                    <StatusPill status={STATUS_TONE[bonusStatus]} label={t(`drivers.comm.status.${bonusStatus}`, lang)} />
+                    <span className={bonusStatus === "denied" ? "line-through" : ""}>{t("drivers.commTab.managerBonus", lang)}</span>
                   </div>
-                  <div className="text-[11px] muted">Discretionary bonus for {monthLabel(monthKey)}.</div>
-                  {bonusStatus === "denied" && cycle?.bonus_deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {cycle.bonus_deny_reason}</div>}
+                  <div className="text-[11px] muted">{fill(t("drivers.commTab.discretionaryFor", lang), { month: monthLabel(monthKey, lang) })}</div>
+                  {bonusStatus === "denied" && cycle?.bonus_deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">{fill(t("drivers.commTab.reason", lang), { reason: cycle.bonus_deny_reason })}</div>}
                 </div>
-                <div className={"font-semibold tabular-nums " + (bonusStatus === "denied" ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}>+{formatSar(bonusAmt)}</div>
+                <div className={"font-semibold tabular-nums " + (bonusStatus === "denied" ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}><span dir="ltr">+{formatSar(bonusAmt)}</span></div>
                 {itemControls(
                   bonusStatus,
                   () => run(() => setBonusStatus(driverId, monthKey, "approved")),
-                  () => setDenyTarget({ kind: "bonus", id: null, label: "Manager Bonus", amount: bonusAmt }),
+                  () => setDenyTarget({ kind: "bonus", id: null, label: t("drivers.commTab.managerBonus", lang), amount: bonusAmt }),
                   () => run(() => setBonusStatus(driverId, monthKey, "pending")),
                 )}
               </div>
@@ -819,9 +825,9 @@ function BreakdownModal({
 
           {/* Adjustments — review each */}
           <section>
-            <h4 className="font-semibold text-sm mb-2">Adjustments</h4>
+            <h4 className="font-semibold text-sm mb-2">{t("drivers.comm.adjustments", lang)}</h4>
             {myAdjustments.length === 0 ? (
-              <p className="muted text-sm">No adjustments.</p>
+              <p className="muted text-sm">{t("drivers.commTab.noAdjustments", lang)}</p>
             ) : (
               <div className="space-y-2">
                 {myAdjustments.map((a) => {
@@ -830,14 +836,16 @@ function BreakdownModal({
                     <div key={a.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
                       <div className="flex-1 min-w-[200px]">
                         <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
-                          <StatusPill status={STATUS_TONE[a.status]} label={STATUS_LABEL[a.status]} />
+                          <StatusPill status={STATUS_TONE[a.status]} label={t(`drivers.comm.status.${a.status}`, lang)} />
                           <span className={denied ? "line-through" : ""}>{a.label}</span>
                         </div>
+                        {/* No dir override: same reason as the specials line above —
+                            the note is free text and may be Arabic. */}
                         <div className="text-[11px] muted">{[a.date, a.note].filter(Boolean).join(" · ") || "—"}</div>
-                        {denied && a.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">Reason: {a.deny_reason}</div>}
+                        {denied && a.deny_reason && <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">{fill(t("drivers.commTab.reason", lang), { reason: a.deny_reason })}</div>}
                       </div>
                       <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : a.amount_sar > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
-                        {a.amount_sar > 0 ? "+" : ""}{formatSar(a.amount_sar)}
+                        <span dir="ltr">{a.amount_sar > 0 ? "+" : ""}{formatSar(a.amount_sar)}</span>
                       </div>
                       {itemControls(
                         a.status,
@@ -857,26 +865,30 @@ function BreakdownModal({
 
         {/* Footer — Approve payout → strict Pay. */}
         <div className="flex justify-end gap-2 mt-5 flex-wrap">
-          <OutlineBtn onClick={onClose}>Close</OutlineBtn>
+          <OutlineBtn onClick={onClose}>{t("drivers.close", lang)}</OutlineBtn>
           {payoutStatus === "pending" && (
             <SuccessBtn onClick={() => run(() => approvePayout(driverId, monthKey))} disabled={busy}>
-              <Check className="h-3.5 w-3.5" /> Approve {monthLabel(monthKey)} payout
+              <Check className="h-3.5 w-3.5" /> {fill(t("drivers.commTab.approveMonthPayout", lang), { month: monthLabel(monthKey, lang) })}
             </SuccessBtn>
           )}
           {payoutStatus === "approved" && (
             <>
               <OutlineBtn onClick={() => run(() => reopenPayout(driverId, monthKey))} disabled={busy}>
-                <RotateCcw className="h-3.5 w-3.5" /> Reopen
+                <RotateCcw className="h-3.5 w-3.5" /> {t("drivers.commTab.reopen", lang)}
               </OutlineBtn>
               <PrimaryBtn
                 onClick={() =>
                   confirm(
-                    `Pay ${driverName} ${formatSar(total)} for ${monthLabel(monthKey)}? This freezes a History record and settles that month. Other months are untouched.`,
+                    fill(t("drivers.commTab.confirmPay", lang), {
+                      name: driverName,
+                      amount: formatSar(total),
+                      month: monthLabel(monthKey, lang),
+                    }),
                   ) && run(() => payCommission(driverId, monthKey))
                 }
                 disabled={busy}
               >
-                <Banknote className="h-3.5 w-3.5" /> Pay {formatSar(total)} · {monthLabel(monthKey)}
+                <Banknote className="h-3.5 w-3.5" /> {fill(t("drivers.commTab.payBtn", lang), { amount: formatSar(total), month: monthLabel(monthKey, lang) })}
               </PrimaryBtn>
             </>
           )}
@@ -885,8 +897,8 @@ function BreakdownModal({
 
       {denyTarget && (
         <DenyModal
-          title={`Deny ${denyTarget.kind}`}
-          prompt={`Deny "${denyTarget.label}" (${formatSar(denyTarget.amount)}). It stays visible but is excluded from the total until restored.`}
+          title={fill(t("drivers.commTab.denyKind", lang), { kind: t(`drivers.comm.kind.${denyTarget.kind}`, lang) })}
+          prompt={fill(t("drivers.commTab.denyPrompt", lang), { label: denyTarget.label, amount: formatSar(denyTarget.amount) })}
           onConfirm={onDenyConfirm}
           onClose={() => setDenyTarget(null)}
         />
@@ -928,6 +940,7 @@ function SpecialsModal({
   cycles: CommCycle[];
   onClose: () => void;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [editId, setEditId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -996,42 +1009,42 @@ function SpecialsModal({
       <ScrollLock />
       <div className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-semibold">Specials &amp; Bonuses — {driverName} <span className="muted font-normal text-sm">· {monthLabel(monthKey)}</span></h2>
+          <h2 className="text-lg font-semibold">{fill(t("drivers.commTab.specialsTitle", lang), { name: driverName })} <span className="muted font-normal text-sm">· {monthLabel(monthKey, lang)}</span></h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
 
         {/* Add / edit special form */}
         <form key={editId ?? "new"} onSubmit={onSubmit} className="rounded-lg border p-3 grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4" style={BORDER}>
-          <div className="sm:col-span-2 text-sm font-semibold">{editId ? "Edit special" : "Add special"}</div>
+          <div className="sm:col-span-2 text-sm font-semibold">{editId ? t("drivers.commTab.editSpecial", lang) : t("drivers.commTab.addSpecial", lang)}</div>
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted text-xs">Label</span>
-            <input name="label" required defaultValue={editing?.label ?? ""} placeholder="e.g. Emergency desert run" className={INPUT} style={INPUT_STYLE} />
+            <span className="muted text-xs">{t("drivers.commTab.fLabel", lang)}</span>
+            <input name="label" required defaultValue={editing?.label ?? ""} placeholder={t("drivers.commTab.phSpecialLabel", lang)} className={INPUT} style={INPUT_STYLE} />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted text-xs">Amount (SAR)</span>
+            <span className="muted text-xs">{t("drivers.commTab.fAmount", lang)}</span>
             <input name="amount_sar" type="number" min="0" step="10" required defaultValue={editing?.amount_sar ?? 250} className={INPUT} style={INPUT_STYLE} />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted text-xs">Date</span>
+            <span className="muted text-xs">{t("drivers.date", lang)}</span>
             <input name="date" type="date" defaultValue={editing?.date ?? ""} className={INPUT} style={INPUT_STYLE} />
           </label>
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted text-xs">Note</span>
+            <span className="muted text-xs">{t("common.note", lang)}</span>
             <input name="note" defaultValue={editing?.note ?? ""} className={INPUT} style={INPUT_STYLE} />
           </label>
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <input name="is_special_trip" type="checkbox" defaultChecked={editing ? editing.is_special_trip : true} /> <span className="muted">Counts as a special trip</span>
+            <input name="is_special_trip" type="checkbox" defaultChecked={editing ? editing.is_special_trip : true} /> <span className="muted">{t("drivers.commTab.countsAsSpecialTrip", lang)}</span>
           </label>
           <div className="flex justify-end gap-2 sm:col-span-2">
-            {editId && <OutlineBtn onClick={() => setEditId(null)}>Cancel edit</OutlineBtn>}
-            <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : editId ? "Update special" : "Add special"}</PrimaryBtn>
+            {editId && <OutlineBtn onClick={() => setEditId(null)}>{t("drivers.commTab.cancelEdit", lang)}</OutlineBtn>}
+            <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? t("common.saving", lang) : editId ? t("drivers.commTab.updateSpecial", lang) : t("drivers.commTab.addSpecial", lang)}</PrimaryBtn>
           </div>
         </form>
 
         {/* Combined list: specials (edit/delete) + the manager bonus row */}
         <div className="space-y-2">
           {mySpecials.length === 0 && bonus === 0 && (
-            <p className="muted text-sm">No specials or bonus for {monthLabel(monthKey)} yet.</p>
+            <p className="muted text-sm">{fill(t("drivers.commTab.noSpecialsOrBonus", lang), { month: monthLabel(monthKey, lang) })}</p>
           )}
 
           {mySpecials.map((sp) => {
@@ -1040,16 +1053,17 @@ function SpecialsModal({
               <div key={sp.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
                 <div className="flex-1 min-w-[180px]">
                   <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
-                    {sp.is_special_trip && <StatusPill status="scheduled" label="Special trip" />}
-                    <StatusPill status={STATUS_TONE[sp.status]} label={STATUS_LABEL[sp.status]} />
+                    {sp.is_special_trip && <StatusPill status="scheduled" label={t("drivers.commTab.specialTrip", lang)} />}
+                    <StatusPill status={STATUS_TONE[sp.status]} label={t(`drivers.comm.status.${sp.status}`, lang)} />
                     <span className={denied ? "line-through" : ""}>{sp.label}</span>
                   </div>
+                  {/* No dir override — the note is free text and may be Arabic. */}
                   <div className="text-[11px] muted">{[sp.date, sp.note].filter(Boolean).join(" · ") || "—"}</div>
                 </div>
-                <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}>+{formatSar(sp.amount_sar)}</div>
+                <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : "text-emerald-600 dark:text-emerald-400")}><span dir="ltr">+{formatSar(sp.amount_sar)}</span></div>
                 <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => setEditId(sp.id)} className="muted hover:text-[rgb(var(--fg))]" title="Edit"><Pencil className="h-4 w-4" /></button>
-                  <button type="button" disabled={busy} onClick={() => confirm("Delete this special permanently?") && run(() => removeCommissionSpecial(sp.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                  <button type="button" onClick={() => setEditId(sp.id)} className="muted hover:text-[rgb(var(--fg))]" title={t("common.edit", lang)}><Pencil className="h-4 w-4" /></button>
+                  <button type="button" disabled={busy} onClick={() => confirm(t("drivers.commTab.confirmDeleteSpecial", lang)) && run(() => removeCommissionSpecial(sp.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title={t("common.delete", lang)}><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
             );
@@ -1059,11 +1073,11 @@ function SpecialsModal({
               (approve/deny) is in the Breakdown, under whichever month it was filed. */}
           <div className="rounded-lg border p-3 flex items-center gap-3 flex-wrap" style={{ ...BORDER, background: "rgba(100,116,139,.06)" }}>
             <div className="flex-1 min-w-[180px]">
-              <div className="font-medium text-sm flex items-center gap-2"><Banknote className="h-4 w-4 muted" /> Manager Bonus</div>
+              <div className="font-medium text-sm flex items-center gap-2"><Banknote className="h-4 w-4 muted" /> {t("drivers.commTab.managerBonus", lang)}</div>
               <div className="text-[11px] muted">
                 {bonusMonth
-                  ? `Discretionary bonus for ${monthLabel(bonusMonth)} (current: ${formatSar(bonus)}).`
-                  : "Discretionary bonus — pick the month it is filed against."}
+                  ? fill(t("drivers.commTab.discretionaryCurrent", lang), { month: monthLabel(bonusMonth, lang), amount: formatSar(bonus) })
+                  : t("drivers.commTab.discretionaryPick", lang)}
               </div>
             </div>
             <select
@@ -1072,12 +1086,12 @@ function SpecialsModal({
               disabled={busy}
               className="px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 disabled:opacity-60"
               style={INPUT_STYLE}
-              aria-label="Bonus month"
+              aria-label={t("drivers.commTab.bonusMonth", lang)}
             >
-              <option value="">Select month…</option>
+              <option value="">{t("drivers.commTab.selectMonth", lang)}</option>
               {monthOptions.map((k) => (
                 <option key={k} value={k}>
-                  {monthLabel(k)}
+                  {monthLabel(k, lang)}
                 </option>
               ))}
             </select>
@@ -1094,28 +1108,30 @@ function SpecialsModal({
             {/* Both the amount and Set are gated on the month, not just Set — an
                 editable amount beside a greyed-out Set reads as a broken button. */}
             <OutlineBtn onClick={() => run(() => setCommissionBonus(driverId, bonusMonth, Number(bonusVal) || 0))} disabled={busy || !bonusMonth}>
-              <Save className="h-3.5 w-3.5" /> Set
+              <Save className="h-3.5 w-3.5" /> {t("drivers.commTab.set", lang)}
             </OutlineBtn>
             {bonus !== 0 && (
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => confirm(`Remove the ${monthLabel(bonusMonth)} manager bonus?`) && run(() => setCommissionBonus(driverId, bonusMonth, 0))}
+                onClick={() => confirm(fill(t("drivers.commTab.confirmRemoveBonus", lang), { month: monthLabel(bonusMonth, lang) })) && run(() => setCommissionBonus(driverId, bonusMonth, 0))}
                 className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50"
-                title="Remove bonus"
+                title={t("drivers.commTab.removeBonus", lang)}
               >
                 <Trash2 className="h-4 w-4" />
               </button>
             )}
             {!bonusMonth && (
               <p className="basis-full text-[11px] muted">
-                No month selected — a bonus cannot be saved until you pick the month it belongs to.
+                {t("drivers.commTab.noMonthSelected", lang)}
               </p>
             )}
             {bonusMonth !== "" && bonusMonth !== monthKey && (
               <p className="basis-full text-[11px] text-amber-600 dark:text-amber-400">
-                Filing against {monthLabel(bonusMonth)}, not {monthLabel(monthKey)} — this amount will not appear in
-                the view you are in. Switch the tab&apos;s month lens to {monthLabel(bonusMonth)} to review and pay it.
+                {/* ONE stored sentence, not three fragments: `fill` replaces every
+                    occurrence, so {bonusMonth} appearing twice is fine — and Arabic
+                    is free to order the two months however it reads. */}
+                {fill(t("drivers.commTab.filingAgainst", lang), { bonusMonth: monthLabel(bonusMonth, lang), lensMonth: monthLabel(monthKey, lang) })}
               </p>
             )}
           </div>
@@ -1124,7 +1140,7 @@ function SpecialsModal({
         {err && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{err}</p>}
 
         <div className="flex justify-end gap-2 mt-5">
-          <OutlineBtn onClick={onClose}>Close</OutlineBtn>
+          <OutlineBtn onClick={onClose}>{t("drivers.close", lang)}</OutlineBtn>
         </div>
       </div>
     </div>
@@ -1153,6 +1169,7 @@ function AdjustmentsModal({
   adjustments: CommAdjustmentRow[];
   onClose: () => void;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [editId, setEditId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1197,56 +1214,57 @@ function AdjustmentsModal({
       <ScrollLock />
       <div className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-semibold">Adjustments — {driverName} <span className="muted font-normal text-sm">· {monthLabel(monthKey)}</span></h2>
+          <h2 className="text-lg font-semibold">{fill(t("drivers.commTab.adjustmentsTitle", lang), { name: driverName })} <span className="muted font-normal text-sm">· {monthLabel(monthKey, lang)}</span></h2>
           <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]"><X className="h-5 w-5" /></button>
         </div>
 
         {/* Add / edit adjustment form */}
         <form key={editId ?? "new"} onSubmit={onSubmit} className="rounded-lg border p-3 grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4" style={BORDER}>
-          <div className="sm:col-span-2 text-sm font-semibold">{editId ? "Edit adjustment" : "Add adjustment"}</div>
-          <p className="text-[11px] muted sm:col-span-2">Positive adds, negative deducts (e.g. uniform deduction). No limit.</p>
+          <div className="sm:col-span-2 text-sm font-semibold">{editId ? t("drivers.commTab.editAdjustment", lang) : t("drivers.commTab.addAdjustment", lang)}</div>
+          <p className="text-[11px] muted sm:col-span-2">{t("drivers.commTab.adjustmentNote", lang)}</p>
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted text-xs">Label</span>
-            <input name="label" required defaultValue={editing?.label ?? ""} placeholder="e.g. Uniform deduction" className={INPUT} style={INPUT_STYLE} />
+            <span className="muted text-xs">{t("drivers.commTab.fLabel", lang)}</span>
+            <input name="label" required defaultValue={editing?.label ?? ""} placeholder={t("drivers.commTab.phAdjustmentLabel", lang)} className={INPUT} style={INPUT_STYLE} />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted text-xs">Amount (SAR)</span>
+            <span className="muted text-xs">{t("drivers.commTab.fAmount", lang)}</span>
             <input name="amount_sar" type="number" step="10" required defaultValue={editing?.amount_sar ?? -100} className={INPUT} style={INPUT_STYLE} />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted text-xs">Date</span>
+            <span className="muted text-xs">{t("drivers.date", lang)}</span>
             <input name="date" type="date" defaultValue={editing?.date ?? ""} className={INPUT} style={INPUT_STYLE} />
           </label>
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            <span className="muted text-xs">Note</span>
+            <span className="muted text-xs">{t("common.note", lang)}</span>
             <input name="note" defaultValue={editing?.note ?? ""} className={INPUT} style={INPUT_STYLE} />
           </label>
           <div className="flex justify-end gap-2 sm:col-span-2">
-            {editId && <OutlineBtn onClick={() => setEditId(null)}>Cancel edit</OutlineBtn>}
-            <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : editId ? "Update adjustment" : "Add adjustment"}</PrimaryBtn>
+            {editId && <OutlineBtn onClick={() => setEditId(null)}>{t("drivers.commTab.cancelEdit", lang)}</OutlineBtn>}
+            <PrimaryBtn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> {busy ? t("common.saving", lang) : editId ? t("drivers.commTab.updateAdjustment", lang) : t("drivers.commTab.addAdjustment", lang)}</PrimaryBtn>
           </div>
         </form>
 
         {/* Adjustments list */}
         <div className="space-y-2">
-          {myAdjustments.length === 0 && <p className="muted text-sm">No adjustments for {monthLabel(monthKey)} yet.</p>}
+          {myAdjustments.length === 0 && <p className="muted text-sm">{fill(t("drivers.commTab.noAdjustmentsForMonth", lang), { month: monthLabel(monthKey, lang) })}</p>}
           {myAdjustments.map((a) => {
             const denied = a.status === "denied";
             return (
               <div key={a.id} className={"rounded-lg border p-3 flex items-center gap-3 flex-wrap " + (denied ? "opacity-60" : "")} style={BORDER}>
                 <div className="flex-1 min-w-[180px]">
                   <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
-                    <StatusPill status={STATUS_TONE[a.status]} label={STATUS_LABEL[a.status]} />
+                    <StatusPill status={STATUS_TONE[a.status]} label={t(`drivers.comm.status.${a.status}`, lang)} />
                     <span className={denied ? "line-through" : ""}>{a.label}</span>
                   </div>
+                  {/* No dir override — the note is free text and may be Arabic. */}
                   <div className="text-[11px] muted">{[a.date, a.note].filter(Boolean).join(" · ") || "—"}</div>
                 </div>
                 <div className={"font-semibold tabular-nums " + (denied ? "muted line-through" : a.amount_sar > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
-                  {a.amount_sar > 0 ? "+" : ""}{formatSar(a.amount_sar)}
+                  <span dir="ltr">{a.amount_sar > 0 ? "+" : ""}{formatSar(a.amount_sar)}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => setEditId(a.id)} className="muted hover:text-[rgb(var(--fg))]" title="Edit"><Pencil className="h-4 w-4" /></button>
-                  <button type="button" disabled={busy} onClick={() => confirm("Delete this adjustment permanently?") && run(() => removeCommissionAdjustment(a.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                  <button type="button" onClick={() => setEditId(a.id)} className="muted hover:text-[rgb(var(--fg))]" title={t("common.edit", lang)}><Pencil className="h-4 w-4" /></button>
+                  <button type="button" disabled={busy} onClick={() => confirm(t("drivers.commTab.confirmDeleteAdjustment", lang)) && run(() => removeCommissionAdjustment(a.id))} className="text-rose-600 dark:text-rose-400 hover:opacity-70 disabled:opacity-50" title={t("common.delete", lang)}><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
             );
@@ -1256,7 +1274,7 @@ function AdjustmentsModal({
         {err && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{err}</p>}
 
         <div className="flex justify-end gap-2 mt-5">
-          <OutlineBtn onClick={onClose}>Close</OutlineBtn>
+          <OutlineBtn onClick={onClose}>{t("drivers.close", lang)}</OutlineBtn>
         </div>
       </div>
     </div>
@@ -1278,6 +1296,7 @@ function DenyModal({
   onConfirm: (reason: string) => Promise<ActionResult>;
   onClose: () => void;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1285,7 +1304,7 @@ function DenyModal({
 
   async function submit() {
     if (!reason.trim()) {
-      setErr("Enter a reason.");
+      setErr(t("drivers.commTab.errReason", lang));
       return;
     }
     setBusy(true);
@@ -1310,21 +1329,21 @@ function DenyModal({
         </div>
         <p className="text-sm muted mb-3">{prompt}</p>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="muted text-xs">Reason (required)</span>
+          <span className="muted text-xs">{t("drivers.commTab.fReason", lang)}</span>
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={3}
             autoFocus
-            placeholder="Why is this being denied?"
+            placeholder={t("drivers.commTab.phReason", lang)}
             className="px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full"
             style={INPUT_STYLE}
           />
         </label>
         {err && <p className="text-sm text-rose-600 dark:text-rose-400 mt-2">{err}</p>}
         <div className="flex justify-end gap-2 mt-4">
-          <OutlineBtn onClick={onClose}>Cancel</OutlineBtn>
-          <DangerBtn onClick={submit} disabled={busy}><Ban className="h-3.5 w-3.5" /> {busy ? "Denying…" : "Deny"}</DangerBtn>
+          <OutlineBtn onClick={onClose}>{t("common.cancel", lang)}</OutlineBtn>
+          <DangerBtn onClick={submit} disabled={busy}><Ban className="h-3.5 w-3.5" /> {busy ? t("drivers.commTab.denying", lang) : t("drivers.commTab.deny", lang)}</DangerBtn>
         </div>
       </div>
     </div>
