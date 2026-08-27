@@ -31,12 +31,21 @@
 // caveat (operating_profit, operations, os_cost); those metrics carry no
 // warning, which is a different claim from a warning we failed to load. Same
 // rule as the compliance pills: absent never renders as a value.
+//
+// EVERY METRIC ROW STAYS ENGLISH. label / meaning / formula / grain /
+// source_view / caveat / unit are COLUMNS of `report_metrics`, so translating
+// them is a MIGRATION, not a dictionary key, and this batch runs none. What is
+// keyed is this popup's own chrome and the four basis notes (reports.glossary.*)
+// plus the four basis NAMES (reports.basis.*, shared with the builder and the
+// generated report) — everything the app itself writes.
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { formatNum } from "@/lib/utils";
-import type { MetricDictionaryRow } from "@/lib/reports";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
+import { basisLabel, type MetricDictionaryRow } from "@/lib/reports";
 import { Disclosure, EmptyNote } from "./OverviewTab";
 import ScrollLock from "@/components/ScrollLock";
 
@@ -44,16 +53,28 @@ import ScrollLock from "@/components/ScrollLock";
 const BASIS_ORDER = ["accrual", "cash", "state", "operational"];
 
 /**
+ * The group HEADING for a basis comes from basisLabel() in lib/reports — the
+ * same helper the builder's picker and the generated report's column heading
+ * read, because all three printed the raw column value before this commit and
+ * three copies of one map is how a fourth surface gets a fifth spelling. It
+ * falls through to the raw string on a miss, which is what keeps the promise
+ * the grouping below makes: an unrecognised basis still appears.
+ */
+
+/**
  * What a basis MEANS, beside the group it labels. This is the distinction the
  * report builder is built to protect (migration 0100): accrual and cash measure
  * the same riyal at two different moments, so adding them double-counts. Saying
  * so once here beats hoping the reader knows.
+ *
+ * The four sentences moved into the dictionary; this map is now the ENUM → key
+ * lookup, which is what it always was in substance.
  */
-const BASIS_NOTE: Record<string, string> = {
-  accrual: "Earned or incurred in the period — whether or not the money has moved yet.",
-  cash: "Money that actually moved in the period. Never added to an accrual figure: a commission payout's base IS the trip commission the accrual side already counted.",
-  state: "A position as of now, not a total for a period. A state figure does not belong in a period column.",
-  operational: "Counts and activity rather than money.",
+const BASIS_NOTE: Record<string, TKey> = {
+  accrual: "reports.glossary.basisNote.accrual",
+  cash: "reports.glossary.basisNote.cash",
+  state: "reports.glossary.basisNote.state",
+  operational: "reports.glossary.basisNote.operational",
 };
 
 export default function MetricsGlossaryModal({
@@ -63,6 +84,7 @@ export default function MetricsGlossaryModal({
   onClose: () => void;
   metrics: MetricDictionaryRow[];
 }) {
+  const { lang } = useApp();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -114,7 +136,7 @@ export default function MetricsGlossaryModal({
       onClick={onClose}>
       <ScrollLock />
       <div className="card w-full max-w-[1200px] max-h-[92vh] flex flex-col p-0"
-        role="dialog" aria-modal="true" aria-label="Metrics dictionary"
+        role="dialog" aria-modal="true" aria-label={t("reports.shell.metricsDictionary", lang)}
         onClick={(e) => e.stopPropagation()}>
 
         {/* Header stays put while the list scrolls — the filter is the control
@@ -122,16 +144,20 @@ export default function MetricsGlossaryModal({
         <div className="flex items-start justify-between gap-4 p-4 border-b shrink-0"
           style={{ borderColor: "rgb(var(--border))" }}>
           <div className="min-w-0">
-            <h2 className="font-semibold">Metrics dictionary</h2>
+            <h2 className="font-semibold">{t("reports.shell.metricsDictionary", lang)}</h2>
+            {/* The `{" "}` either side of the <code> is JSX, not part of the
+                sentence: the dictionary values carry no edge whitespace, so
+                trimming one there could not silently join two words. */}
             <p className="text-[11px] muted leading-relaxed mt-0.5">
-              Every number on this page is defined once, in SQL — this is that
-              definition, read straight from <code className="font-mono">report_metrics</code>.
-              It is also the vocabulary the custom-report builder is fenced to: a
-              metric it cannot offer is a metric that is not listed here.{" "}
+              {t("reports.glossary.intro.beforeCode", lang)}{" "}
+              <code className="font-mono">report_metrics</code>
+              {t("reports.glossary.intro.afterCode", lang)}{" "}
               <span className="tabular-nums">
                 {q.trim()
-                  ? `${formatNum(shown)} of ${formatNum(metrics.length)} shown.`
-                  : `${formatNum(metrics.length)} metrics.`}
+                  ? fill(t("reports.glossary.shownOf", lang),
+                      { n: formatNum(shown), m: formatNum(metrics.length) })
+                  : fill(t(`reports.glossary.count.${plural(metrics.length)}`, lang),
+                      { n: formatNum(metrics.length) })}
               </span>
             </p>
           </div>
@@ -141,12 +167,12 @@ export default function MetricsGlossaryModal({
               type="search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Filter metrics"
-              aria-label="Filter metrics"
+              placeholder={t("reports.glossary.filter", lang)}
+              aria-label={t("reports.glossary.filter", lang)}
               className="w-40 sm:w-56 rounded-lg border bg-transparent px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-brand-500/40"
               style={{ borderColor: "rgb(var(--border))" }}
             />
-            <button onClick={onClose} aria-label="Close"
+            <button onClick={onClose} aria-label={t("reports.close", lang)}
               className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5">
               <X className="h-4 w-4" />
             </button>
@@ -158,25 +184,29 @@ export default function MetricsGlossaryModal({
             // A failed read is not an empty dictionary. Same rule as the
             // Dashboard's queues — "nothing there" and "could not read" are
             // different claims and must never share a message.
-            <EmptyNote>The dictionary could not be read.</EmptyNote>
+            <EmptyNote>{t("reports.glossary.readFailed", lang)}</EmptyNote>
           ) : shown === 0 ? (
-            <EmptyNote>No metric matches “{q.trim()}”.</EmptyNote>
+            <EmptyNote>{fill(t("reports.glossary.noMatch", lang), { q: q.trim() })}</EmptyNote>
           ) : (
             <div className="space-y-6">
               {groups.map((g) => (
                 <div key={g.basis}>
                   <div className="flex flex-wrap items-baseline gap-x-2">
-                    <h4 className="text-xs font-semibold uppercase tracking-wide">{g.basis}</h4>
+                    <h4 className="text-xs font-semibold uppercase tracking-wide">
+                      {basisLabel(g.basis, lang)}
+                    </h4>
                     <span className="text-[11px] muted tabular-nums">
                       {formatNum(g.rows.length)}
                     </span>
                   </div>
                   {BASIS_NOTE[g.basis] && (
-                    <p className="mt-0.5 text-[11px] muted leading-relaxed">{BASIS_NOTE[g.basis]}</p>
+                    <p className="mt-0.5 text-[11px] muted leading-relaxed">
+                      {t(BASIS_NOTE[g.basis], lang)}
+                    </p>
                   )}
                   <div className="mt-2 grid gap-x-8 xl:grid-cols-2">
                     {g.rows.map((m) => (
-                      <MetricEntry key={m.metric_key} m={m} />
+                      <MetricEntry key={m.metric_key} m={m} lang={lang} />
                     ))}
                   </div>
                 </div>
@@ -190,7 +220,10 @@ export default function MetricsGlossaryModal({
   );
 }
 
-function MetricEntry({ m }: { m: MetricDictionaryRow }) {
+// `lang` arrives as a PROP rather than through useApp(): this renders once per
+// metric, up to 30 times per open, and the three <dt> labels are the only thing
+// on the block that is not database content.
+function MetricEntry({ m, lang }: { m: MetricDictionaryRow; lang: Lang }) {
   return (
     <div className="py-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -204,13 +237,13 @@ function MetricEntry({ m }: { m: MetricDictionaryRow }) {
       {/* `minmax(0,1fr)` on the value track — see the note above; a bare `1fr`
           is what lets a long source_view pointer overflow instead of wrap. */}
       <dl className="mt-2 grid gap-x-4 gap-y-1 text-[11px] sm:grid-cols-[6.5rem_minmax(0,1fr)]">
-        <dt className="muted uppercase tracking-wide">Formula</dt>
+        <dt className="muted uppercase tracking-wide">{t("reports.glossary.formula", lang)}</dt>
         <dd className="min-w-0 break-words font-mono">{m.formula}</dd>
 
-        <dt className="muted uppercase tracking-wide">Grain</dt>
+        <dt className="muted uppercase tracking-wide">{t("reports.glossary.grain", lang)}</dt>
         <dd className="min-w-0 break-words">{m.grain}</dd>
 
-        <dt className="muted uppercase tracking-wide">Source view</dt>
+        <dt className="muted uppercase tracking-wide">{t("reports.glossary.sourceView", lang)}</dt>
         <dd className="min-w-0 break-words font-mono">{m.source_view}</dd>
       </dl>
 

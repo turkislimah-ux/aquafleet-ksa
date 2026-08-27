@@ -142,6 +142,16 @@ export const dict = {
     tryAgain: { en: "Try again", ar: "إعادة المحاولة" },
     saved: { en: "Saved", ar: "تم الحفظ" },
     note: { en: "Note", ar: "ملاحظة" },
+    // Added in Phase 3 Batch 6, on the same test the groups above were added
+    // under. `Delete` is the accessible name of an icon button in BOTH of the
+    // files in this batch that have one — the expenses modal's row action and
+    // the daily side-log's — and it was `reports.expenses.delete` only while
+    // one of them existed. A second caller is what promotes it.
+    //
+    // `mt.delete` stays where it is: the maintenance track was not converted in
+    // this batch, so folding it in would move a key out of a file this commit
+    // does not otherwise touch, for no reader's benefit.
+    delete: { en: "Delete", ar: "حذف" },
   },
   mt: {
     calendar: { en: "Maintenance Calendar", ar: "تقويم الصيانة" },
@@ -2952,6 +2962,1739 @@ export const dict = {
       signatureLine: { en: "{role} — name & signature", ar: "{role} — الاسم والتوقيع" },
     },
   },
+
+  // ===========================================================================
+  // REPORTS
+  // ===========================================================================
+  // The accounting vocabulary here is the standard Saudi/IFRS Arabic, not a
+  // fresh translation: الإيرادات / التكاليف التشغيلية / الربح التشغيلي / صافي
+  // الربح / هامش التشغيل / الذمم المدينة / ضريبة القيمة المضافة / الزكاة. Where
+  // the same concept is already keyed elsewhere in this file the site points at
+  // THAT key rather than restating it — dashboard.costType.* for the five cost
+  // buckets, mt.vat / mt.subtotal / mt.discount for the money vocabulary, and
+  // nav.* for the nine statement names.
+  //
+  // What is NOT translated, deliberately:
+  //   · every figure — money, percent, dates — stays Latin through the existing
+  //     formatters, which are pinned to en-US;
+  //   · period labels ("Aug 2026", "Q3 2026") are produced by the VIEW
+  //     (to_char in 0100), not by this app;
+  //   · report_metrics prose is database content (0098).
+  reports: {
+    // --- the page shell ----------------------------------------------------
+    // The page TITLE and the second tab both say "Reports" and both point at
+    // nav.reports; the first tab says "Overview" and points at
+    // dashboard.overview. Same word, same meaning, already keyed.
+    shell: {
+      subtitle: {
+        en: "Revenue, cost and profit — every figure from one shared definition",
+        ar: "الإيرادات والتكاليف والأرباح — كل رقم من تعريف واحد مشترك",
+      },
+      period: { en: "Period", ar: "الفترة" },
+      metricsDictionary: { en: "Metrics dictionary", ar: "قاموس المقاييس" },
+    },
+
+    // The period grain. `key` is the enum ("month"), `label` is this.
+    grain: {
+      month: { en: "Monthly", ar: "شهري" },
+      quarter: { en: "Quarterly", ar: "ربع سنوي" },
+      year: { en: "Yearly", ar: "سنوي" },
+    },
+
+    // --- the semantic layer's own vocabulary --------------------------------
+    // ONE NAME PER METRIC, read by BOTH consumers: the custom-report builder's
+    // catalogue (BUILDER_METRICS, which is keyed by `${metric_key}::${field}` —
+    // data, not this label; see metricId()) and the Overview's stat cards and
+    // chart series. It sat under `builder` for one draft, which described only
+    // half of who reads it: "Net profit" is the same words on a KPI card as in
+    // a generated column, and two entries for one metric is how a name drifts.
+    metric: {
+      revenue: { en: "Revenue", ar: "الإيرادات" },
+      revenueAllocated: { en: "Revenue (allocated)", ar: "الإيرادات (موزَّعة)" },
+      partsCost: { en: "Parts cost", ar: "تكلفة قطع الغيار" },
+      osCost: { en: "Outsourced cost", ar: "تكلفة الأعمال الخارجية" },
+      payroll: { en: "Payroll", ar: "الرواتب" },
+      commissions: { en: "Commissions", ar: "العمولات" },
+      fillingCost: { en: "Water filling cost", ar: "تكلفة تعبئة المياه" },
+      operatingCost: { en: "Operating cost", ar: "التكاليف التشغيلية" },
+      operatingProfit: { en: "Operating profit", ar: "الربح التشغيلي" },
+      netProfit: { en: "Net profit", ar: "صافي الربح" },
+      otherExpenses: { en: "Other expenses", ar: "مصروفات أخرى" },
+      operatingMargin: { en: "Operating margin", ar: "هامش التشغيل" },
+      collections: { en: "Collections", ar: "المتحصّلات" },
+      purchasingSpend: { en: "Purchasing spend", ar: "إنفاق المشتريات" },
+      tripsDelivered: { en: "Trips delivered", ar: "الرحلات المسلَّمة" },
+      invoices: { en: "Invoices", ar: "الفواتير" },
+      outstandingPeriod: {
+        en: "Outstanding on period invoices",
+        ar: "المستحق على فواتير الفترة",
+      },
+      maintParts: { en: "Maintenance parts", ar: "قطع غيار الصيانة" },
+      maintOs: { en: "Outsourced repairs", ar: "إصلاحات خارجية" },
+      maintTotal: { en: "Total maintenance", ar: "إجمالي الصيانة" },
+    },
+
+    // --- the `basis` enum, in words -----------------------------------------
+    // WHAT A FIGURE IS MEASURED ON, and the one distinction the report builder
+    // exists to protect (0100). It lived under `glossary` while the dictionary
+    // popup was the only surface that printed it; THREE now do — the popup's
+    // group headings, the builder's metric picker, and the generated report's
+    // column sub-heading — so it sits beside `metric` where both belong to the
+    // semantic layer rather than to any one component.
+    //
+    // ENGLISH IS BYTE-IDENTICAL TO THE COLUMN VALUE, lower-case, because every
+    // one of those three sites renders the raw enum today and uppercases it in
+    // CSS. The ENUM → key lookup is basisLabel() in lib/reports, one copy for
+    // all three, and a miss falls through to the raw string there — so a fifth
+    // basis added by a future migration still appears.
+    basis: {
+      accrual: { en: "accrual", ar: "الاستحقاق" },
+      cash: { en: "cash", ar: "النقدي" },
+      state: { en: "state", ar: "المركز" },
+      operational: { en: "operational", ar: "التشغيلي" },
+    },
+
+    // --- ONE WORD PER COLUMN, for every table on the route ------------------
+    // The Overview held seven of these (`thTrips`, `thTotal`, …) while it was
+    // the only converted tab. The statements print the SAME words — a
+    // Receivables table with its own "Customer" and the Overview's oldest-unpaid
+    // table with another is two entries for one column, and that is how a
+    // heading drifts. Lifted here on the same argument that moved
+    // `builder.metric` up to `reports.metric`.
+    //
+    // `Truck`, `Revenue`, `Cost`, `Driver`, `Status`, `Note`, `Actions` are NOT
+    // here — they are already in `common`, and `Trips delivered` is already
+    // `reports.metric.tripsDelivered`. A column whose word exists elsewhere
+    // reads it from there.
+    //
+    // The bare `%` header on the P&L variance column is left as a literal in
+    // the JSX: it is a symbol, identical in both languages, and keying it would
+    // mint an entry that can never differ.
+    th: {
+      amount: { en: "Amount", ar: "المبلغ" },
+      band: { en: "Band", ar: "الشريحة" },
+      basis: { en: "Basis", ar: "الأساس" },
+      category: { en: "Category", ar: "الفئة" },
+      commission: { en: "Commission", ar: "العمولة" },
+      commissionEarned: { en: "Commission earned", ar: "العمولة المكتسبة" },
+      completion: { en: "Completion", ar: "الإنجاز" },
+      completionRate: { en: "Completion rate", ar: "نسبة الإنجاز" },
+      // The DATE an invoice was confirmed, not a yes/no flag — the column holds
+      // a date, so the Arabic says so rather than leaving it to be inferred.
+      confirmed: { en: "Confirmed", ar: "تاريخ التأكيد" },
+      customer: { en: "Customer", ar: "العميل" },
+      date: { en: "Date", ar: "التاريخ" },
+      days: { en: "Days", ar: "الأيام" },
+      delivered: { en: "Delivered", ar: "المسلَّمة" },
+      enteredBy: { en: "Entered by", ar: "أدخلها" },
+      fills: { en: "Fills", ar: "التعبئات" },
+      invoice: { en: "Invoice", ar: "الفاتورة" },
+      invoices: { en: "Invoices", ar: "الفواتير" },
+      measure: { en: "Measure", ar: "المقياس" },
+      month: { en: "Month", ar: "الشهر" },
+      net: { en: "Net", ar: "الصافي" },
+      notDelivered: { en: "Not delivered", ar: "غير مسلَّمة" },
+      // Two English spellings of one idea — the by-month table abbreviates
+      // because eight columns share the width. Arabic has no abbreviation to
+      // match, so both read the same there; the keys stay separate because the
+      // English differs and byte-identity is per-key.
+      osJobs: { en: "OS jobs", ar: "أعمال خارجية" },
+      outsourced: { en: "Outsourced", ar: "أعمال خارجية" },
+      outstanding: { en: "Outstanding", ar: "المستحق" },
+      paid: { en: "Paid", ar: "المسدد" },
+      parts: { en: "Parts", ar: "قطع الغيار" },
+      permits: { en: "Permits", ar: "التصاريح" },
+      projectsServed: { en: "Projects served", ar: "المشاريع المخدومة" },
+      reason: { en: "Reason", ar: "السبب" },
+      // Sales-Returns-only header, despite living in the shared `th` block:
+      // StatementViews.tsx:220 is its ONE call site (the reversed-invoicing
+      // table). Scope was checked before the Arabic moved from "المعكوس".
+      reversed: { en: "Reversed", ar: "المرتجع" },
+      salary: { en: "Salary", ar: "الراتب" },
+      share: { en: "Share", ar: "الحصة" },
+      shareDelivered: { en: "Share of delivered trips", ar: "حصة الرحلات المسلَّمة" },
+      shareScheduled: { en: "Share of scheduled trips", ar: "حصة الرحلات المجدولة" },
+      source: { en: "Source", ar: "المصدر" },
+      station: { en: "Station", ar: "المحطة" },
+      total: { en: "Total", ar: "الإجمالي" },
+      trips: { en: "Trips", ar: "الرحلات" },
+      tripsScheduled: { en: "Trips scheduled", ar: "الرحلات المجدولة" },
+      // Beside `common.truck`, not instead of it: this is a COLUMN HEADING and
+      // the headings in this block are definite ("العميل", "الفاتورة"), while
+      // common.truck is the bare noun read mid-sentence. Same English, so the
+      // split costs nothing and keeps the Arabic table reading as a table.
+      truck: { en: "Truck", ar: "الشاحنة" },
+      trucks: { en: "Trucks", ar: "الشاحنات" },
+      uncosted: { en: "Uncosted", ar: "غير مكلَّفة" },
+      variance: { en: "Variance", ar: "الفرق" },
+      value: { en: "Value", ar: "القيمة" },
+      waterType: { en: "Water type", ar: "نوع المياه" },
+      wos: { en: "WOs", ar: "أوامر العمل" },
+    },
+
+    // Said by the Overview's receivables panel and by the Receivables
+    // statement, in those exact words, so it is keyed once above both.
+    nothingOutstanding: {
+      en: "Nothing outstanding — every confirmed invoice is paid.",
+      ar: "لا شيء مستحق — كل فاتورة مؤكدة مسددة.",
+    },
+    // Two modals on this route close themselves. It sat under `glossary` while
+    // that was the only one converted.
+    close: { en: "Close", ar: "إغلاق" },
+
+    // --- tab 1, the Overview (OverviewTab.tsx) ------------------------------
+    // The four KPI cards, the six supporting stats and three of the five chart
+    // series take their NAMES from reports.metric.* above — the same words the
+    // report builder offers, because they are the same figures. What is keyed
+    // here is everything that is only ever said on this tab.
+    overview: {
+      empty: {
+        title: { en: "No periods to report on yet", ar: "لا توجد فترات للتقرير عنها بعد" },
+        body: {
+          en: "The month spine builds itself from real activity. Once there is a confirmed invoice, a trip or a parts consumption, this page fills in.",
+          ar: "يبني عمود الأشهر نفسه من النشاط الفعلي. وبمجرد وجود فاتورة مؤكدة أو رحلة أو استهلاك قطع، تمتلئ هذه الصفحة.",
+        },
+      },
+
+      // The partial-month banner. Three leaves because the first clause is
+      // <strong> and the last is conditional on a prior month existing; the
+      // spaces between them are JSX, not part of any value.
+      inProgress: {
+        strong: { en: "{p} is still in progress.", ar: "{p} لم تنتهِ بعد." },
+        body: {
+          en: "Costs accrue day by day, but revenue is only recognised when an invoice is confirmed — usually at the end of the period. Expect this month to look cost-heavy until then.",
+          ar: "تتراكم التكاليف يومًا بيوم، بينما لا يُعترف بالإيراد إلا عند تأكيد الفاتورة — عادةً في نهاية الفترة. فتوقّع أن يبدو هذا الشهر ثقيل التكلفة حتى ذلك الحين.",
+        },
+        switch: {
+          en: "For a complete picture, switch the period to {p}.",
+          ar: "للحصول على صورة كاملة، بدّل الفترة إلى {p}.",
+        },
+      },
+
+      // Card names that exist nowhere else. The other eight point at
+      // reports.metric.*.
+      outstandingReceivables: { en: "Outstanding receivables", ar: "الذمم المدينة المستحقة" },
+      trucksActive: { en: "Trucks active", ar: "الشاحنات النشطة" },
+      stockPurchased: { en: "Stock purchased", ar: "المخزون المشترى" },
+
+      // The small print under each KPI.
+      note: {
+        revenue: {
+          en: "Confirmed invoices, net of VAT",
+          ar: "فواتير مؤكدة، بعد استبعاد ضريبة القيمة المضافة",
+        },
+        operatingProfit: { en: "Before other expenses", ar: "قبل المصروفات الأخرى" },
+        collections: {
+          en: "Cash received, VAT included",
+          ar: "نقد محصَّل، شامل ضريبة القيمة المضافة",
+        },
+        receivables: {
+          en: "As of today, not the picked period",
+          ar: "كما هو اليوم، لا الفترة المختارة",
+        },
+      },
+
+      // FOUR COUNT FAMILIES, each its own noun phrase rather than one long
+      // sentence: the revenue card prints "{invoices} · {customers}" and the
+      // separator is a bullet, not grammar, so the two halves inflect
+      // independently in both languages. English pluralises with a bare "s",
+      // which is why its `one` differs and its other three do not.
+      invoiceCount: {
+        one: { en: "{n} invoice", ar: "فاتورة واحدة" },
+        two: { en: "{n} invoices", ar: "فاتورتان" },
+        few: { en: "{n} invoices", ar: "{n} فواتير" },
+        many: { en: "{n} invoices", ar: "{n} فاتورة" },
+      },
+      customerCount: {
+        one: { en: "{n} customer", ar: "عميل واحد" },
+        two: { en: "{n} customers", ar: "عميلان" },
+        few: { en: "{n} customers", ar: "{n} عملاء" },
+        many: { en: "{n} customers", ar: "{n} عميلًا" },
+      },
+      unpaidInvoices: {
+        one: { en: "{n} unpaid invoice", ar: "فاتورة واحدة غير مسددة" },
+        two: { en: "{n} unpaid invoices", ar: "فاتورتان غير مسددتين" },
+        few: { en: "{n} unpaid invoices", ar: "{n} فواتير غير مسددة" },
+        many: { en: "{n} unpaid invoices", ar: "{n} فاتورة غير مسددة" },
+      },
+      workOrders: {
+        one: { en: "{n} work order", ar: "أمر عمل واحد" },
+        two: { en: "{n} work orders", ar: "أمرا عمل" },
+        few: { en: "{n} work orders", ar: "{n} أوامر عمل" },
+        many: { en: "{n} work orders", ar: "{n} أمر عمل" },
+      },
+
+      // {v} is a percentage, {n} a count — both already formatted, both Latin.
+      marginFoot: { en: "Margin {v}", ar: "الهامش {v}" },
+      ofRevenue: { en: "{v} of revenue", ar: "{v} من الإيرادات" },
+      ofTotal: { en: "of {n} total", ar: "من {n} إجمالًا" },
+      expensesNone: { en: "none recorded — add", ar: "لا شيء مسجَّل — أضف" },
+      expensesManage: { en: "manage", ar: "إدارة" },
+      notPnlCost: { en: "not a P&L cost", ar: "ليست تكلفة في قائمة الأرباح والخسائر" },
+      // NOT reports.metric.otherExpenses with a suffix bolted on: the cost
+      // panel's last row exists to say this figure sits OUTSIDE the operating
+      // cost it is printed under, and "(separate)" is that whole claim.
+      otherExpensesSeparate: { en: "Other expenses (separate)", ar: "مصروفات أخرى (منفصلة)" },
+      noChange: { en: "no change", ar: "لا تغيير" },
+      vs: { en: "vs {p}", ar: "مقابل {p}" },
+
+      // {p} is the month label the app formats — "Aug 2026", Latin.
+      section: {
+        revCostMargin: { en: "Revenue, cost and margin", ar: "الإيرادات والتكاليف والهامش" },
+        whereMoneyWent: { en: "Where the money went · {p}", ar: "أين ذهب المال · {p}" },
+        earnedVsCollected: { en: "Earned vs collected", ar: "المكتسب مقابل المحصَّل" },
+        revenueByTruck: { en: "Revenue by truck · {p}", ar: "الإيرادات حسب الشاحنة · {p}" },
+        maintByTruck: {
+          en: "Maintenance cost by truck · {p}",
+          ar: "تكلفة الصيانة حسب الشاحنة · {p}",
+        },
+        aging: { en: "Receivables aging", ar: "أعمار الذمم المدينة" },
+        oldestUnpaid: { en: "Oldest unpaid invoices", ar: "أقدم الفواتير غير المسددة" },
+      },
+
+      // Chart series names. THEY ARE LABELS ONLY NOW: the revenue/cost/margin
+      // tooltip used to pick its formatter by comparing the series NAME to
+      // "Margin", which would have sent every margin through the SAR formatter
+      // the moment that name became translatable. It reads `dataKey` instead.
+      series: {
+        revenueEarned: { en: "Revenue earned", ar: "الإيرادات المكتسبة" },
+        cashCollected: { en: "Cash collected", ar: "النقد المحصَّل" },
+      },
+      // The table headers this tab prints — Trips, Parts, Outsourced, Total,
+      // Invoice, Customer, Days — and the word the aging tooltip labels its
+      // series with are all reports.th.*, shared with the statements.
+
+      noTruckRevenue: {
+        en: "No invoiced trips reached a truck this period.",
+        ar: "لم تصل أي رحلة مفوترة إلى شاحنة في هذه الفترة.",
+      },
+      noTruckMaint: {
+        en: "No maintenance spend reached a truck this period.",
+        ar: "لم يصل أي إنفاق صيانة إلى شاحنة في هذه الفترة.",
+      },
+
+      // The caveats the semantic layer exposed on purpose.
+      payroll: {
+        // The <strong> lands on ONE word, and it is not the same word in the
+        // same place: English emphasises "current" before the noun, Arabic
+        // after it. Three leaves is what lets each language put it where its
+        // own grammar does.
+        before: { en: "Payroll uses each person's", ar: "تستخدم الرواتب راتب كل شخص" },
+        current: { en: "current", ar: "الحالي" },
+        after: {
+          en: "salary applied to whoever was employed that month — salaries are not effective-dated, so a raise changes past periods too.",
+          ar: "مطبَّقًا على من كان موظفًا في ذلك الشهر — الرواتب ليست مؤرَّخة السريان، فالزيادة تغيّر الفترات السابقة أيضًا.",
+        },
+        // English inflects THREE times in one sentence (person/people, has/have,
+        // counts/count), which is exactly why it is stored whole.
+        missing: {
+          one: {
+            en: "{n} employed person has no salary recorded and counts as zero.",
+            ar: "موظف واحد لا راتب مسجَّل له ويُحتسب صفرًا.",
+          },
+          two: {
+            en: "{n} employed people have no salary recorded and count as zero.",
+            ar: "موظفان لا راتب مسجَّل لهما ويُحتسبان صفرًا.",
+          },
+          few: {
+            en: "{n} employed people have no salary recorded and count as zero.",
+            ar: "{n} موظفين لا راتب مسجَّل لهم ويُحتسبون صفرًا.",
+          },
+          many: {
+            en: "{n} employed people have no salary recorded and count as zero.",
+            ar: "{n} موظفًا لا راتب مسجَّل لهم ويُحتسبون صفرًا.",
+          },
+        },
+      },
+      allocationNote: {
+        en: "An allocation, not a measurement: a trip carries no rate of its own in this schema, so each invoice's revenue is split equally across its trips and follows them to their trucks.",
+        ar: "توزيع لا قياس: الرحلة لا تحمل سعرًا خاصًا بها في هذا المخطط، فتُقسَّم إيرادات كل فاتورة بالتساوي على رحلاتها وتتبعها إلى شاحناتها.",
+      },
+      maintNote: {
+        en: "Parts are the FIFO cost of what each truck's work orders consumed; outsourced is what outside workshops were paid for that truck. Labour on in-house work orders is not costed anywhere in this schema, so it is in neither column.",
+        ar: "قطع الغيار هي تكلفة الوارد أولًا صادر أولًا لما استهلكته أوامر عمل كل شاحنة؛ والأعمال الخارجية هي ما دُفع للورش الخارجية عن تلك الشاحنة. أما العمالة على أوامر العمل الداخلية فغير مكلَّفة في هذا المخطط، فلا ترد في أي من العمودين.",
+      },
+      maintSplit: {
+        en: "This period outsourced spend is {o} against {p} of parts — a parts-only view would show roughly {s} of the real cost.",
+        ar: "إنفاق الأعمال الخارجية هذه الفترة {o} مقابل {p} من قطع الغيار — والعرض المقتصر على القطع سيُظهر نحو {s} من التكلفة الحقيقية.",
+      },
+      basesNote: {
+        en: "These are different bases on purpose. Revenue is earned when an invoice is confirmed and excludes VAT; collections are cash banked when it is paid and include VAT. They are never added together.",
+        ar: "هذان أساسان مختلفان عن قصد. يُكتسب الإيراد عند تأكيد الفاتورة ولا يشمل ضريبة القيمة المضافة؛ والمتحصّلات نقد يُودع عند السداد ويشمل الضريبة. ولا يُجمعان أبدًا.",
+      },
+      topupsNote: {
+        en: "Prepaid top-ups of {v} this month are cash in but are neither revenue nor an invoice payment, so they appear in neither line.",
+        ar: "شحنات الرصيد المدفوع مقدمًا هذا الشهر وقدرها {v} نقد وارد لكنها ليست إيرادًا ولا سداد فاتورة، فلا تظهر في أي من الخطين.",
+      },
+      agingNote: {
+        en: "Aged from the date each invoice was confirmed — this schema has no payment-terms column to age from a due date.",
+        ar: "تُحتسب الأعمار من تاريخ تأكيد كل فاتورة — لا يوجد في هذا المخطط عمود لشروط السداد ليُحتسب العمر من تاريخ استحقاق.",
+      },
+    },
+
+    // --- tab 2: the statement pack's own chrome -----------------------------
+    // The names of the nine statements, the two controls above them, and the
+    // one-line title the builder's output carries. Everything a statement SAYS
+    // is under `pnl` / `vat` below or in its own namespace; this is only what
+    // the pack around them says.
+    statements: {
+      // `revenue` is NOT here — the tab is the same word as the metric, so
+      // STATEMENTS points at reports.metric.revenue. Same call ReportsClient
+      // makes for its own two tabs. `custom` IS here rather than reading
+      // settings' identical leaf: that one names a threshold preset, and one
+      // word shared by accident is not one word shared on purpose.
+      tab: {
+        pnl: { en: "P&L", ar: "الأرباح والخسائر" },
+        receivables: { en: "Receivables", ar: "الذمم المدينة" },
+        cost: { en: "Costs", ar: "التكاليف" },
+        operations: { en: "Operations", ar: "العمليات" },
+        daily: { en: "Daily Trips", ar: "الرحلات اليومية" },
+        payslips: { en: "Payslips", ar: "قسائم الرواتب" },
+        narrative: { en: "Narrative", ar: "السرد" },
+        custom: { en: "Custom", ar: "مخصص" },
+      },
+      nothingToReport: { en: "Nothing to report yet", ar: "لا شيء لعرضه بعد" },
+      periodsAppear: {
+        en: "Periods appear once there is activity to summarise.",
+        ar: "تظهر الفترات بمجرد وجود نشاط يمكن تلخيصه.",
+      },
+      manageExpenses: { en: "Manage expenses", ar: "إدارة المصروفات" },
+      print: { en: "Print", ar: "طباعة" },
+
+      // Keyed by GRAIN. English spliced the raw `periodType` enum into the
+      // sentence — which is the trap: an Arabic reader got "الشهر السابق"
+      // spelled `month`. Arabic also inflects the noun, so the sentence is
+      // stored whole three times rather than token-filled.
+      priorNote: {
+        month: {
+          en: "Prior-period columns show the immediately preceding month. Per-category expenses are listed for the current period only — the comparison is made on the section total, since categories come and go between periods.",
+          ar: "تعرض أعمدة الفترة السابقة الشهر السابق مباشرة. وتُدرج المصروفات حسب الفئة للفترة الحالية فقط — وتُجرى المقارنة على إجمالي القسم، لأن الفئات تظهر وتختفي بين الفترات.",
+        },
+        quarter: {
+          en: "Prior-period columns show the immediately preceding quarter. Per-category expenses are listed for the current period only — the comparison is made on the section total, since categories come and go between periods.",
+          ar: "تعرض أعمدة الفترة السابقة الربع السابق مباشرة. وتُدرج المصروفات حسب الفئة للفترة الحالية فقط — وتُجرى المقارنة على إجمالي القسم، لأن الفئات تظهر وتختفي بين الفترات.",
+        },
+        year: {
+          en: "Prior-period columns show the immediately preceding year. Per-category expenses are listed for the current period only — the comparison is made on the section total, since categories come and go between periods.",
+          ar: "تعرض أعمدة الفترة السابقة السنة السابقة مباشرة. وتُدرج المصروفات حسب الفئة للفترة الحالية فقط — وتُجرى المقارنة على إجمالي القسم، لأن الفئات تظهر وتختفي بين الفترات.",
+        },
+      },
+
+      // The generated report's own title. `{g}` is a lower-cased grouping name
+      // and `{p}` the view's period label. Keyed by grain for the by-period
+      // branch, same reason as priorNote.
+      customTitle: {
+        month: { en: "{g} · every month", ar: "{g} · كل شهر" },
+        quarter: { en: "{g} · every quarter", ar: "{g} · كل ربع" },
+        year: { en: "{g} · every year", ar: "{g} · كل سنة" },
+        forPeriod: { en: "{g} · {p}", ar: "{g} · {p}" },
+      },
+    },
+
+    // --- the P&L statement --------------------------------------------------
+    // MONEY VOCABULARY, AND THE ARABIC IS THE STANDARD SAUDI/IFRS TERM WHERE
+    // ONE EXISTS — flagged for Turki's reading pass rather than invented.
+    // Nothing here changes a figure: every leaf is a LABEL beside a number the
+    // views already produced.
+    pnl: {
+      title: { en: "Profit & Loss", ar: "الأرباح والخسائر" },
+      // `{p}` is the prior period's own label — "Jul 2026", Latin on purpose.
+      comparedWith: { en: "· compared with {p}", ar: "· مقارنة بـ {p}" },
+      inProgress: {
+        en: "This period is still in progress — costs accrue daily, while revenue is recognised when invoices are confirmed.",
+        ar: "هذه الفترة لم تنتهِ بعد — تتراكم التكاليف يوميًا، بينما لا يُعترف بالإيراد إلا عند تأكيد الفواتير.",
+      },
+
+      // The statement's own line labels. Revenue, Payroll, Commissions,
+      // Operating profit and Operating margin are NOT here — those five say
+      // exactly what reports.metric.* already says, and the P&L reads them
+      // from there. What is left is the four lines this statement words
+      // differently on purpose ("Parts consumed", not "Parts cost": the P&L
+      // records the moment stock LEAVES, which is the FIFO rule 0098 exists
+      // to state) plus the three that only a statement has.
+      //
+      // `lineOs` reads the same two English words as reports.metric.maintOs and
+      // is still its own leaf: that one labels `os_payments_per_truck`, a
+      // PER-TRUCK metric in the builder, and this one is the period-wide
+      // operating-cost bucket. Same words, different grain — and the VAT
+      // footnotes below quote THIS one by name, so it is the one that has to
+      // stay stable. Same call as statements.tab.custom vs settings' custom.
+      lineParts: { en: "Parts consumed", ar: "قطع الغيار المستهلكة" },
+      lineOs: { en: "Outsourced repairs", ar: "الإصلاحات الخارجية" },
+      lineFilling: { en: "Station fill", ar: "تعبئة المحطة" },
+      lineOperatingCost: { en: "Total operating cost", ar: "إجمالي التكاليف التشغيلية" },
+      lineExpenses: { en: "Total other expenses", ar: "إجمالي المصروفات الأخرى" },
+      // The suffix is a POSITION marker, not a rename — the metric is still
+      // net_profit and the dictionary still defines it that way.
+      lineNetProfit: { en: "Net profit — profit before Zakat", ar: "صافي الربح — الربح قبل الزكاة" },
+      lineZakat: { en: "Zakat (2.5%, indicative)", ar: "الزكاة (2.5%، استرشادية)" },
+      lineAfterZakat: { en: "Estimated profit after Zakat", ar: "الربح المقدَّر بعد الزكاة" },
+
+      headCostOfOps: { en: "Cost of operations", ar: "تكلفة العمليات" },
+      headOtherExpenses: { en: "Other expenses (recorded manually)", ar: "مصروفات أخرى (مسجَّلة يدويًا)" },
+      headZakat: { en: "Zakat — indicative estimate", ar: "الزكاة — تقدير استرشادي" },
+
+      // Whole sentence per bucket. English spliced two words at once
+      // ("fill has"/"fills have" AND "its"/"their"); Arabic changes the noun,
+      // the verb and the possessive, so nothing is spliced here at all.
+      uncosted: {
+        one: {
+          en: "{n} fill has no price for its water type in this period — that cost is unknown, not zero, and is not in the figures above.",
+          ar: "تعبئة واحدة بلا سعر لنوع مياهها في هذه الفترة — تلك التكلفة مجهولة لا صفر، وهي ليست ضمن الأرقام أعلاه.",
+        },
+        two: {
+          en: "{n} fills have no price for their water type in this period — that cost is unknown, not zero, and is not in the figures above.",
+          ar: "تعبئتان بلا سعر لنوع مياههما في هذه الفترة — تلك التكلفة مجهولة لا صفر، وهي ليست ضمن الأرقام أعلاه.",
+        },
+        few: {
+          en: "{n} fills have no price for their water type in this period — that cost is unknown, not zero, and is not in the figures above.",
+          ar: "{n} تعبئات بلا سعر لنوع مياهها في هذه الفترة — تلك التكلفة مجهولة لا صفر، وهي ليست ضمن الأرقام أعلاه.",
+        },
+        many: {
+          en: "{n} fills have no price for their water type in this period — that cost is unknown, not zero, and is not in the figures above.",
+          ar: "{n} تعبئة بلا سعر لنوع مياهها في هذه الفترة — تلك التكلفة مجهولة لا صفر، وهي ليست ضمن الأرقام أعلاه.",
+        },
+      },
+
+      noExpenses: {
+        en: "None recorded for this period — net profit therefore equals operating profit.",
+        ar: "لا شيء مسجَّل لهذه الفترة — لذا يساوي صافي الربح الربح التشغيلي.",
+      },
+
+      // THE CAVEAT IS PART OF THE FIGURE, not decoration around it (§7): the
+      // estimate must never print without it.
+      zakatNote: {
+        en: "Estimate only — actual Zakat is assessed on your ZATCA balance-sheet base (capital, reserves and long-term liabilities, less deductible long-term assets), not on profit.",
+        ar: "تقدير فقط — تُربط الزكاة الفعلية على وعاء الميزانية لدى هيئة الزكاة والضريبة والجمارك (رأس المال والاحتياطيات والالتزامات طويلة الأجل، ناقصًا الأصول طويلة الأجل القابلة للحسم)، لا على الربح.",
+      },
+      zakatLoss: {
+        en: "This period is a loss, so the estimate is shown as zero: a negative Zakat credit does not exist.",
+        ar: "هذه الفترة خسارة، فيُعرض التقدير صفرًا: لا وجود لرصيد زكاة سالب.",
+      },
+
+      footer: {
+        en: "Revenue is confirmed invoices net of VAT. Parts are costed FIFO at the moment they leave stock — stock purchases are not a cost here, they become one when consumed. Payroll applies current salaries to whoever was employed in the period, as salaries are not effective-dated. Margin is computed from this period's own revenue, never averaged from its months.",
+        ar: "الإيراد هو الفواتير المؤكدة صافية من ضريبة القيمة المضافة. وتُكلَّف قطع الغيار بطريقة «الوارد أولًا صادر أولًا» لحظة خروجها من المخزون — فمشتريات المخزون ليست تكلفة هنا، وإنما تصبح تكلفة عند الاستهلاك. وتطبّق الرواتب المرتبات الحالية على من كان موظفًا في الفترة، إذ إن المرتبات ليست مؤرَّخة السريان. ويُحسب الهامش من إيراد الفترة نفسها، ولا يُؤخذ كمتوسط لأشهرها.",
+      },
+
+      // Margin's "variance" is a POINT difference, not a percent. `{v}` is the
+      // signed figure, Latin in both languages like every formatted number.
+      pts: { en: "{v} pts", ar: "{v} نقطة" },
+    },
+
+    // --- the VAT panel under the P&L ----------------------------------------
+    // DISPLAY ONLY, and every leaf here exists to keep it that way (§7). There
+    // is no total leaf, no net leaf and no "payable to ZATCA" leaf, because
+    // there is no such row and there must not be one.
+    vat: {
+      title: { en: "VAT by source", ar: "ضريبة القيمة المضافة حسب المصدر" },
+      intro: {
+        en: "Every VAT amount the period recorded, listed beside where it came from. Nothing here is totalled or netted, and none of it forms part of the profit above.",
+        ar: "كل مبلغ ضريبة سجّلته الفترة، مدرَجًا بجانب مصدره. لا شيء هنا يُجمع أو يُقاصّ، ولا يدخل أي منه في الربح أعلاه.",
+      },
+
+      rowSales: { en: "Sales invoices", ar: "فواتير المبيعات" },
+      rowOrdered: { en: "Purchase orders raised", ar: "أوامر الشراء المُصدرة" },
+      rowReceived: { en: "Stock received", ar: "المخزون المستلَم" },
+      rowRepairs: { en: "Workshop — outsourced repairs", ar: "الورشة — الإصلاحات الخارجية" },
+      rowOrderedRejected: { en: "Rejected purchase orders", ar: "أوامر الشراء المرفوضة" },
+      rowReceivedRejected: { en: "Rejected stock receipts", ar: "إيصالات المخزون المرفوضة" },
+
+      // The document count AND the date basis, so any line can be taken to the
+      // screen it came from and checked. FOUR families, not six: the two
+      // rejected lines count the same documents as the two above them, so they
+      // read the same hint rather than minting a duplicate.
+      hintSales: {
+        one: { en: "{n} confirmed invoice · by confirmation date", ar: "فاتورة مؤكدة واحدة · بتاريخ التأكيد" },
+        two: { en: "{n} confirmed invoices · by confirmation date", ar: "فاتورتان مؤكدتان · بتاريخ التأكيد" },
+        few: { en: "{n} confirmed invoices · by confirmation date", ar: "{n} فواتير مؤكدة · بتاريخ التأكيد" },
+        many: { en: "{n} confirmed invoices · by confirmation date", ar: "{n} فاتورة مؤكدة · بتاريخ التأكيد" },
+      },
+      hintOrders: {
+        one: { en: "{n} order · by request date", ar: "أمر واحد · بتاريخ الطلب" },
+        two: { en: "{n} orders · by request date", ar: "أمران · بتاريخ الطلب" },
+        few: { en: "{n} orders · by request date", ar: "{n} أوامر · بتاريخ الطلب" },
+        many: { en: "{n} orders · by request date", ar: "{n} أمرًا · بتاريخ الطلب" },
+      },
+      hintReceipts: {
+        one: { en: "{n} receipt · by received date", ar: "إيصال واحد · بتاريخ الاستلام" },
+        two: { en: "{n} receipts · by received date", ar: "إيصالان · بتاريخ الاستلام" },
+        few: { en: "{n} receipts · by received date", ar: "{n} إيصالات · بتاريخ الاستلام" },
+        many: { en: "{n} receipts · by received date", ar: "{n} إيصالًا · بتاريخ الاستلام" },
+      },
+      hintRepairs: {
+        one: { en: "{n} vendor invoice · by invoice date", ar: "فاتورة مورد واحدة · بتاريخ الفاتورة" },
+        two: { en: "{n} vendor invoices · by invoice date", ar: "فاتورتا مورد · بتاريخ الفاتورة" },
+        few: { en: "{n} vendor invoices · by invoice date", ar: "{n} فواتير موردين · بتاريخ الفاتورة" },
+        many: { en: "{n} vendor invoices · by invoice date", ar: "{n} فاتورة مورد · بتاريخ الفاتورة" },
+      },
+
+      rejectedHead: {
+        en: "Rejected — listed separately, not included above",
+        ar: "مرفوضة — مدرجة على حدة، غير مشمولة أعلاه",
+      },
+
+      // The four footnotes. Each `*Bold` leaf is a COMPLETE SENTENCE that the
+      // paragraph opens with, so splitting there is a sentence boundary and not
+      // a fragment — Arabic keeps its own word order on both sides.
+      note1Bold: { en: "These lines are not added together.", ar: "هذه البنود لا تُجمع معًا." },
+      note1: {
+        en: "Sales VAT is money charged TO customers; the other three are VAT paid TO suppliers. And an order that has since been delivered appears on both “Purchase orders raised” and “Stock received” — the same purchase at two stages, ordered and delivered, not two purchases. A total across this list would be a number that means nothing.",
+        ar: "ضريبة المبيعات مال يُحصَّل مِن العملاء؛ والثلاثة الأخرى ضريبة تُدفع إلى الموردين. كما أن الأمر الذي سُلِّم لاحقًا يظهر في «أوامر الشراء المُصدرة» و«المخزون المستلَم» معًا — وهو الشراء نفسه في مرحلتين، طلبًا وتسليمًا، لا شراءان. وأي إجمالي عبر هذه القائمة سيكون رقمًا بلا معنى.",
+      },
+      note2Bold: { en: "Not a ZATCA return.", ar: "ليس إقرارًا لهيئة الزكاة والضريبة والجمارك." },
+      note2: {
+        en: "Nothing here is netted and no amount payable or reclaimable is computed. Sales VAT is the VAT on the same confirmed invoices the Revenue statement reports, so those two always agree.",
+        ar: "لا شيء هنا يُقاصّ، ولا يُحتسب مبلغ مستحق الدفع أو قابل للاسترداد. وضريبة المبيعات هي ضريبة الفواتير المؤكدة نفسها التي تعرضها قائمة الإيرادات، فالاثنتان متطابقتان دائمًا.",
+      },
+      note3: {
+        en: "Each line is filtered on the date its own source records, matching the statement that already reports those documents: purchase orders by request date, stock receipts by received date (the Costs statement's basis for purchasing spend), repair invoices by supplier invoice date and by entry date where the supplier gave none (the basis behind “Outsourced repairs” above), sales invoices by confirmation date.",
+        ar: "يُصفّى كل بند على التاريخ الذي يسجله مصدره، مطابقًا للقائمة التي تعرض تلك المستندات أصلًا: أوامر الشراء بتاريخ الطلب، وإيصالات المخزون بتاريخ الاستلام (وهو أساس إنفاق المشتريات في قائمة التكاليف)، وفواتير الإصلاح بتاريخ فاتورة المورد وبتاريخ الإدخال حين لا يعطي المورد تاريخًا (وهو الأساس خلف «الإصلاحات الخارجية» أعلاه)، وفواتير المبيعات بتاريخ التأكيد.",
+      },
+      // The one place a `<strong>` sits MID-sentence. Split in three so Arabic
+      // places the emphasised word itself — "هنا فقط ولا مكان آخر" puts it
+      // after the adverb, where English puts it before.
+      note4Before: { en: "Repair VAT appears here and", ar: "تظهر ضريبة الإصلاحات هنا" },
+      note4Strong: { en: "only", ar: "فقط" },
+      note4After: {
+        en: "here — the P&L expenses those invoices net of VAT, so “Outsourced repairs” above does not carry it. One caveat does remain: stock receipts carry no supplier invoice date, so a purchase falls in the month the goods arrived rather than the month the tax invoice was issued.",
+        ar: "ولا مكان آخر — إذ تُحمّل قائمة الأرباح والخسائر تلك الفواتير صافية من الضريبة، فبند «الإصلاحات الخارجية» أعلاه لا يحملها. ويبقى تحفظ واحد: إيصالات المخزون لا تحمل تاريخ فاتورة المورد، فتقع المشتريات في شهر وصول البضاعة لا في شهر إصدار الفاتورة الضريبية.",
+      },
+    },
+
+    // --- the print band, on every statement ---------------------------------
+    // `Bin Slimah Group` above it is NOT keyed and carries `translate="no"`:
+    // it is the identification a filed sheet has when nothing else on the paper
+    // says whose statement it is, and a translated company name defeats that.
+    // `{d}` is todayKey() — a Riyadh-local ISO date, Latin in both languages.
+    print: {
+      generated: { en: "Generated {d}", ar: "صدر في {d}" },
+    },
+
+    // --- the REVENUE statement ----------------------------------------------
+    revenue: {
+      title: { en: "Revenue statement", ar: "قائمة الإيرادات" },
+      empty: {
+        en: "No invoices were confirmed in this period.",
+        ar: "لم تُؤكَّد أي فاتورة في هذه الفترة.",
+      },
+      returnsHead: {
+        en: "Sales returns (reversed invoicing)",
+        ar: "مردودات المبيعات (فواتير المرتجعة)",
+      },
+      noneInPeriod: { en: "None in this period.", ar: "لا شيء في هذه الفترة." },
+      totalReversed: { en: "Total reversed", ar: "إجمالي المرتجع" },
+      note: {
+        en: "Revenue is net of VAT and counts every invoice that has been confirmed, including those since paid. Sales returns are shown on their own line and are already excluded from the revenue above — the two are never netted silently. Outstanding is the amount still due, which on a prepaid account can be less than the invoice value because part was covered by balance.",
+        ar: "الإيراد صافٍ من ضريبة القيمة المضافة ويشمل كل فاتورة مؤكدة، بما فيها المسددة لاحقًا. وتُعرض مردودات المبيعات في بند مستقل وهي مستبعَدة أصلًا من الإيراد أعلاه — فلا تُصافى الاثنتان بصمت. والمستحق هو المبلغ الباقي، وقد يقل في الحساب المدفوع مقدَّمًا عن قيمة الفاتورة لأن جزءًا منها غُطِّي من الرصيد.",
+      },
+    },
+
+    // --- the RECEIVABLES statement ------------------------------------------
+    // `nothingOutstanding` above serves the empty state — the Overview's
+    // receivables panel says the same sentence in the same words.
+    receivables: {
+      title: { en: "Receivables statement", ar: "قائمة الذمم المدينة" },
+      asOfToday: { en: "As of today", ar: "حتى تاريخ اليوم" },
+      // `{b}` is the aging bucket EXACTLY as the view publishes it — "0-30",
+      // "90+". Digits and punctuation only, so it is not translated and not
+      // reformatted; only the word beside it is keyed.
+      bandDays: { en: "{b} days", ar: "{b} يومًا" },
+      openInvoices: { en: "Open invoices, oldest first", ar: "الفواتير المفتوحة، الأقدم أولًا" },
+      note: {
+        en: "A position as of today, not a figure for the selected period — the period picker does not apply to it. Invoices age from the date they were confirmed, because this schema has no payment-terms column to age from a due date.",
+        ar: "هذا مركز حتى تاريخ اليوم، لا رقم للفترة المختارة — فمُحدِّد الفترة لا ينطبق عليه. وتُحتسب أعمار الفواتير من تاريخ تأكيدها، لأن هذا المخطط لا يتضمن عمودًا لشروط السداد يُحتسب منه تاريخ الاستحقاق.",
+      },
+    },
+
+    // --- the COST statements ------------------------------------------------
+    // MONEY VOCABULARY. Same rule as the P&L above: the Arabic is the standard
+    // Saudi/IFRS term where one exists, flagged for Turki rather than invented,
+    // and every leaf labels a number the views already produced.
+    costs: {
+      title: { en: "Cost statements", ar: "قوائم التكاليف" },
+
+      // --- station fill (0112) ---
+      fillHead: { en: "Station fill cost", ar: "تكلفة التعبئة بالمحطات" },
+      // ENGLISH NEVER INFLECTS HERE — the source says "fills costed" whatever
+      // the count is — so all four English buckets are the SAME string and only
+      // the Arabic moves. That is the invariant working as intended, not a
+      // duplicate: `plural()` is an Arabic-shaped function and English opting
+      // out of three of its four buckets is what opting out looks like.
+      //
+      // `{n}` stays RAW at the call site. This count was interpolated directly
+      // and never passed through formatNum, so routing it through one now would
+      // put a thousands separator into a phrase that never had one.
+      fillsCosted: {
+        one: { en: "{n} fills costed", ar: "تعبئة واحدة مكلَّفة" },
+        two: { en: "{n} fills costed", ar: "تعبئتان مكلَّفتان" },
+        few: { en: "{n} fills costed", ar: "{n} تعبئات مكلَّفة" },
+        many: { en: "{n} fills costed", ar: "{n} تعبئة مكلَّفة" },
+      },
+      // The SECOND two-word splice in this batch — English switched "fill
+      // has"/"fills have" AND "its"/"their" off one `=== 1` test. Stored whole
+      // per bucket rather than assembled, same call as reports.pnl.uncosted.
+      uncosted: {
+        one: {
+          en: "{n} fill has no price for its water type — cost unknown, not zero, and not included above",
+          ar: "تعبئة واحدة بلا سعر لنوع مياهها — التكلفة مجهولة لا صفر، وغير مُدرجة أعلاه",
+        },
+        two: {
+          en: "{n} fills have no price for their water type — cost unknown, not zero, and not included above",
+          ar: "تعبئتان بلا سعر لنوع مياههما — التكلفة مجهولة لا صفر، وغير مُدرجة أعلاه",
+        },
+        few: {
+          en: "{n} fills have no price for their water type — cost unknown, not zero, and not included above",
+          ar: "{n} تعبئات بلا سعر لنوع مياهها — التكلفة مجهولة لا صفر، وغير مُدرجة أعلاه",
+        },
+        many: {
+          en: "{n} fills have no price for their water type — cost unknown, not zero, and not included above",
+          ar: "{n} تعبئة بلا سعر لنوع مياهها — التكلفة مجهولة لا صفر، وغير مُدرجة أعلاه",
+        },
+      },
+      noFills: { en: "No fills in this period.", ar: "لا توجد تعبئات في هذه الفترة." },
+      byWaterType: { en: "By water type", ar: "حسب نوع المياه" },
+      byStation: { en: "By station", ar: "حسب المحطة" },
+      // A station whose key no longer resolves to a name. The cost still counts,
+      // so the row is LABELLED rather than dropped — `{k}` is the immutable
+      // station_key (0014), data, and stays Latin.
+      stationRemoved: { en: "{k} (removed)", ar: "{k} (محذوفة)" },
+
+      // --- maintenance ---
+      maintHead: { en: "Maintenance by truck", ar: "الصيانة حسب الشاحنة" },
+      noMaint: {
+        en: "No maintenance spend reached a truck in this period.",
+        ar: "لم يصل أي إنفاق صيانة إلى شاحنة في هذه الفترة.",
+      },
+      maintNote: {
+        en: "Three separate measures, never blended into one figure. Parts is the FIFO cost of what each truck's work orders consumed; outsourced is what outside workshops were paid for that truck. Labour on in-house work orders is not costed anywhere in this schema, so it is in neither column.",
+        ar: "ثلاثة مقاييس منفصلة، لا تُدمج أبدًا في رقم واحد. فقطع الغيار هي تكلفة «الوارد أولًا صادر أولًا» لما استهلكته أوامر عمل كل شاحنة؛ والأعمال الخارجية هي ما دُفع للورش الخارجية عن تلك الشاحنة. أما أجور العمل على أوامر العمل الداخلية فلا تُكلَّف في أي موضع من هذا المخطط، فهي ليست في أي من العمودين.",
+      },
+
+      // --- payroll ---
+      staffSalaries: { en: "Staff salaries", ar: "رواتب الموظفين" },
+      driverSalaries: { en: "Driver salaries", ar: "رواتب السائقين" },
+      totalPayroll: { en: "Total payroll", ar: "إجمالي الرواتب" },
+      // Split at the one MID-sentence <strong>. English emphasises the term
+      // before the preposition; Arabic keeps the same slot, so a three-part
+      // split is enough and no reordering is needed.
+      payrollNoteBefore: {
+        en: "Two things to know about this figure. Salaries are",
+        ar: "أمران يجب معرفتهما عن هذا الرقم. الرواتب",
+      },
+      payrollNoteStrong: { en: "not effective-dated", ar: "غير مؤرَّخة بتاريخ سريان" },
+      payrollNoteAfter: {
+        en: "in this schema, so a past period is costed at each person's current salary — a raise changes history. Only the employment window is historical.",
+        ar: "في هذا المخطط، فتُكلَّف الفترة الماضية براتب كل شخص الحالي — والزيادة تغيّر التاريخ. ونافذة التوظيف وحدها هي التاريخية.",
+      },
+      // A THREE-word English splice off one `=== 1` test — "person has"/"people
+      // have" and "counts"/"count". Whole sentence per bucket.
+      missingSalary: {
+        one: {
+          en: "And in at least one month of this period, {n} employed person has no salary recorded and counts as zero. That is a per-month state, so it is reported as the highest month rather than added up.",
+          ar: "وفي شهر واحد على الأقل من هذه الفترة، هناك موظف واحد بلا راتب مسجَّل ويُحتسب صفرًا. وهذه حالة شهرية، فتُعرض بأعلى شهر لا بالجمع.",
+        },
+        two: {
+          en: "And in at least one month of this period, {n} employed people have no salary recorded and count as zero. That is a per-month state, so it is reported as the highest month rather than added up.",
+          ar: "وفي شهر واحد على الأقل من هذه الفترة، هناك موظفان بلا راتب مسجَّل ويُحتسبان صفرًا. وهذه حالة شهرية، فتُعرض بأعلى شهر لا بالجمع.",
+        },
+        few: {
+          en: "And in at least one month of this period, {n} employed people have no salary recorded and count as zero. That is a per-month state, so it is reported as the highest month rather than added up.",
+          ar: "وفي شهر واحد على الأقل من هذه الفترة، هناك {n} موظفين بلا راتب مسجَّل ويُحتسبون صفرًا. وهذه حالة شهرية، فتُعرض بأعلى شهر لا بالجمع.",
+        },
+        many: {
+          en: "And in at least one month of this period, {n} employed people have no salary recorded and count as zero. That is a per-month state, so it is reported as the highest month rather than added up.",
+          ar: "وفي شهر واحد على الأقل من هذه الفترة، هناك {n} موظفًا بلا راتب مسجَّل ويُحتسبون صفرًا. وهذه حالة شهرية، فتُعرض بأعلى شهر لا بالجمع.",
+        },
+      },
+
+      // --- commissions ---
+      commissionsHead: { en: "Commissions — earned and paid", ar: "العمولات — المكتسبة والمدفوعة" },
+      // The two column heads ARE the basis distinction 0100 exists to protect,
+      // said in the table rather than left to the reader. The word in brackets
+      // is the enum, so it reads what reports.basis.* reads.
+      earnedAccrual: { en: "Earned (accrual)", ar: "المكتسبة (الاستحقاق)" },
+      paidCash: { en: "Paid (cash)", ar: "المدفوعة (النقدي)" },
+      tripCommission: { en: "Trip commission", ar: "عمولة الرحلات" },
+      specials: { en: "Specials", ar: "المدفوعات الخاصة" },
+      adjustments: { en: "Adjustments", ar: "التسويات" },
+      bonuses: { en: "Bonuses", ar: "المكافآت" },
+      totalEarned: { en: "Total earned", ar: "إجمالي المكتسب" },
+      payouts: { en: "Payouts", ar: "الدفعات" },
+      totalPaid: { en: "Total paid", ar: "إجمالي المدفوع" },
+      // The <strong> opens no sentence here, so the split is mid-sentence and
+      // the AFTER part starts with a full stop — no separator space belongs
+      // between it and the emphasis, and the JSX adds none.
+      commissionsNoteBefore: { en: "Side by side, and", ar: "تُعرضان جنبًا إلى جنب، ويجب" },
+      commissionsNoteStrong: { en: "never added together", ar: "ألا تُجمعا أبدًا" },
+      commissionsNoteAfter: {
+        en: ". A payout's base is the same trip commission already counted as earned, so summing the two would count it twice. Earned lands in the month the work was done; paid lands when the payout was made. Adjustments are signed and are often negative deductions, which correctly reduce the earned total.",
+        ar: ". فأساس الدفعة هو نفس عمولة الرحلات المحتسبة أصلًا كمكتسبة، وجمعهما يحتسبها مرتين. المكتسب يقع في شهر إنجاز العمل؛ والمدفوع يقع عند صرف الدفعة. والتسويات موقَّعة وكثيرًا ما تكون خصومًا سالبة، فتخفض إجمالي المكتسب عن حق.",
+      },
+
+      // --- purchasing ---
+      // `&amp;` in the JSX was ESCAPING, not content: this has always rendered a
+      // literal "P&L". The heading shouts NOT because the whole point of the
+      // section is that a purchase is inventory, not an expense.
+      purchasingHead: {
+        en: "Purchasing — procurement and cash, NOT a P&L cost",
+        ar: "المشتريات — توريد ونقد، وليست تكلفة في الأرباح والخسائر",
+      },
+      stockReceived: { en: "Stock received", ar: "المخزون المستلم" },
+      receipts: { en: "Receipts", ar: "الإيصالات" },
+      purchasingNoteBefore: {
+        en: "A procurement and cash view only. This is deliberately",
+        ar: "هذا عرض للتوريد والنقد فقط. وهو عمدًا",
+      },
+      purchasingNoteStrong: { en: "not", ar: "ليس" },
+      purchasingNoteAfter: {
+        en: "a P&L line: a purchase is inventory until it is consumed, and expensing both the purchase and the consumption would double-count. That cost reaches the P&L later, as parts consumed, when the stock is actually used.",
+        ar: "بندًا في الأرباح والخسائر: فالشراء مخزون حتى يُستهلك، وتحميل الشراء والاستهلاك معًا يحتسب التكلفة مرتين. وتلك التكلفة تبلغ الأرباح والخسائر لاحقًا، كقطع غيار مستهلكة، عند استخدام المخزون فعلًا.",
+      },
+    },
+
+    // --- the OPERATIONS statement -------------------------------------------
+    ops: {
+      title: { en: "Operational performance", ar: "الأداء التشغيلي" },
+      noTrips: {
+        en: "No trips were recorded in this period, so there is nothing to break down by driver.",
+        ar: "لم تُسجَّل أي رحلات في هذه الفترة، فلا يوجد ما يُفصَّل حسب السائق.",
+      },
+      // THE NO-DRIVER BUCKET, named. It is app chrome and not a driver record:
+      // the view keeps the row (grouping before the join) so the driver figures
+      // still foot to the period total, and the UI names it rather than
+      // dropping it. Read TWICE — the table cell and the footnote's emphasis —
+      // from this one leaf, because two spellings of one bucket is how a
+      // reader stops believing they are the same row.
+      //
+      // NOTHING BRANCHES ON THIS STRING. The sort and the footnote's condition
+      // both test `key === "__unassigned__"`, which is data, so translating the
+      // label cannot move a row or hide a note.
+      unassigned: { en: "Unassigned", ar: "غير مُسنَدة" },
+      deliveryByDriver: { en: "Delivery by driver", ar: "التسليم حسب السائق" },
+      // Only ever rendered when trucksUsed > 1, so the `one` bucket is
+      // unreachable — it still carries the same English as its siblings, both
+      // because the invariant asks for it and because an unreachable leaf that
+      // disagrees is a trap for whoever makes it reachable.
+      droveTrucks: {
+        one: { en: "drove {n} trucks", ar: "قاد شاحنة واحدة" },
+        two: { en: "drove {n} trucks", ar: "قاد شاحنتين" },
+        few: { en: "drove {n} trucks", ar: "قاد {n} شاحنات" },
+        many: { en: "drove {n} trucks", ar: "قاد {n} شاحنة" },
+      },
+      deliveryNote: {
+        en: "Each driver's completion rate is computed from that driver's own scheduled and delivered counts — never averaged, and never inherited from the period figure below. The plate beside a name is the truck that driver was in; it is context only and is never measured per driver. Drivers are grouped by record, not by name, so two people sharing a first name stay on separate rows — the plate is what tells them apart.",
+        ar: "تُحتسب نسبة إنجاز كل سائق من أعداد رحلاته المجدولة والمسلَّمة وحدها — لا تُتوسَّط أبدًا، ولا تُورَّث من رقم الفترة أدناه. واللوحة بجانب الاسم هي شاحنة ذلك السائق؛ وهي سياق فقط ولا تُقاس أبدًا لكل سائق. ويُجمَّع السائقون حسب السجل لا حسب الاسم، فيبقى شخصان يتشاركان الاسم الأول في صفين منفصلين — واللوحة هي ما يميّز بينهما.",
+      },
+      utilisationHead: { en: "Fleet utilisation by driver", ar: "استغلال الأسطول حسب السائق" },
+      utilisationNote: {
+        en: "Workload shares, so they measure the DRIVER. A truck-level figure never appears in a driver row — trucks that moved and maintenance activity stay in the period summary below. Shares are computed against the period totals and add to 100%.",
+        ar: "هذه حصص من عبء العمل، فهي تقيس السائق. ولا يظهر أي رقم على مستوى الشاحنة في صف سائق — فالشاحنات التي تحركت ونشاط الصيانة يبقيان في ملخص الفترة أدناه. وتُحتسب الحصص مقابل إجماليات الفترة ويبلغ مجموعها 100%.",
+      },
+      unassignedNoteBefore: { en: "One row is", ar: "أحد الصفوف" },
+      unassignedNoteAfter: {
+        en: ": trips recorded with no driver. It is kept so the driver rows still add up to the period total rather than quietly falling short.",
+        ar: ": رحلات سُجِّلت بلا سائق. ويُبقى عليه كي تظل صفوف السائقين تبلغ إجمالي الفترة بدل أن تقصر عنه بصمت.",
+      },
+      periodSummary: { en: "Period summary", ar: "ملخص الفترة" },
+      deliveryCompletionRate: { en: "Delivery completion rate", ar: "نسبة إنجاز التسليم" },
+      trucksThatMoved: { en: "Trucks that moved", ar: "الشاحنات التي تحركت" },
+      // Only on a multi-month period, and it is the honest qualifier on a
+      // NON-ADDITIVE measure — see countsNote below for the rule it applies.
+      mostInAnyMonth: { en: "— most in any one month", ar: "— الأعلى في أي شهر منفرد" },
+      workOrders: { en: "Work orders", ar: "أوامر العمل" },
+      outsourcedJobs: { en: "Outsourced jobs", ar: "الأعمال الخارجية" },
+      maintenanceEvents: { en: "Maintenance events", ar: "أحداث الصيانة" },
+      exitPermits: { en: "Exit permits", ar: "تصاريح الخروج" },
+      byMonth: { en: "By month", ar: "حسب الشهر" },
+      // The <strong> here OPENS a complete sentence, so the split is at a
+      // sentence boundary and both languages read naturally either side.
+      countsNoteBefore: {
+        en: "Trips, work orders, outsourced jobs and permits are event counts, so they add across months.",
+        ar: "الرحلات وأوامر العمل والأعمال الخارجية والتصاريح أعداد أحداث، فتُجمع عبر الأشهر.",
+      },
+      countsNoteStrong: {
+        en: "Trucks that moved does not.",
+        ar: "أما الشاحنات التي تحركت فلا تُجمع.",
+      },
+      countsNoteAfter: {
+        en: "It is a distinct count, and a truck working in two months would be counted twice by a sum — so a multi-month period reports the highest single month. A true period-level distinct count cannot be recovered from monthly rows.",
+        ar: "فهي عدد مميَّز، والشاحنة العاملة في شهرين يحتسبها الجمع مرتين — لذا تعرض الفترة متعددة الأشهر أعلى شهر منفرد. ولا يمكن استخراج عدد مميَّز حقيقي على مستوى الفترة من صفوف شهرية.",
+      },
+      // TWO mid-sentence emphases in one sentence, so five leaves. The middle
+      // one ends in "وكذلك" rather than a bare "و" — the JSX puts a space
+      // before the emphasis, and Arabic will not take a space after a
+      // prefixed conjunction.
+      absentNote1: {
+        en: "Two measures are deliberately absent because the data cannot support them honestly yet:",
+        ar: "مقياسان غائبان عمدًا لأن البيانات لا تدعمهما بأمانة بعد:",
+      },
+      absentStrong1: { en: "idle trucks", ar: "الشاحنات المتوقفة" },
+      absentNote2: {
+        en: "needs the fleet roster alongside these counts, and",
+        ar: "تحتاج إلى سجل الأسطول إلى جانب هذه الأعداد، وكذلك",
+      },
+      absentStrong2: { en: "fleet availability", ar: "جاهزية الأسطول" },
+      absentNote3: {
+        en: "needs the distinct trucks under maintenance in the period. Neither is estimated here.",
+        ar: "تحتاج إلى العدد المميَّز للشاحنات تحت الصيانة في الفترة. ولا يُقدَّر أي منهما هنا.",
+      },
+    },
+
+    // --- the CUSTOM report's own chrome --------------------------------------
+    // The COLUMNS it prints are named by reports.metric.* and their sub-heading
+    // by basisLabel(); the NOTES under it come from reports.builder.note. What
+    // is here is only what this component itself writes.
+    custom: {
+      title: { en: "Custom report", ar: "تقرير مخصص" },
+      noColumns: { en: "No columns selected.", ar: "لم تُختر أي أعمدة." },
+      noMatch: { en: "Nothing matched this selection.", ar: "لا شيء يطابق هذا الاختيار." },
+      note: {
+        en: "Built from defined metrics only, reading the same views as every other report on this page. There is deliberately no total across columns — metrics on different bases must never be added.",
+        ar: "مبني من مقاييس معرَّفة فقط، ويقرأ نفس العروض التي يقرأها كل تقرير آخر في هذه الصفحة. ولا يوجد عمدًا إجمالي عبر الأعمدة — فالمقاييس على أسس مختلفة يجب ألا تُجمع أبدًا.",
+      },
+      changeSelection: { en: "Change selection", ar: "تغيير الاختيار" },
+    },
+
+    // --- PAYSLIPS (0115) — the register and the document --------------------
+    payslips: {
+      empty: {
+        en: "No drivers on the payroll for this period.",
+        ar: "لا يوجد سائقون على كشف الرواتب لهذه الفترة.",
+      },
+      count: {
+        one: { en: "{n} payslip", ar: "قسيمة راتب واحدة" },
+        two: { en: "{n} payslips", ar: "قسيمتا راتب" },
+        few: { en: "{n} payslips", ar: "{n} قسائم رواتب" },
+        many: { en: "{n} payslips", ar: "{n} قسيمة راتب" },
+      },
+      issuedCount: {
+        one: { en: "{n} issued", ar: "واحدة صادرة" },
+        two: { en: "{n} issued", ar: "اثنتان صادرتان" },
+        few: { en: "{n} issued", ar: "{n} صادرة" },
+        many: { en: "{n} issued", ar: "{n} صادرة" },
+      },
+      totalNet: { en: "Total net", ar: "إجمالي الصافي" },
+
+      // The chip that says paid vs earned IN WORDS rather than leaving it to a
+      // colour. Its own two leaves, NOT reports.th.paid: that one heads a money
+      // column ("المسدد"), this one is a state on a commission figure.
+      chipPaid: { en: "Paid", ar: "مدفوعة" },
+      chipEarned: { en: "Earned", ar: "مكتسبة" },
+      chipPaidTitle: {
+        en: "Settled — this commission was actually paid out in this month",
+        ar: "مسوّاة — صُرفت هذه العمولة فعلًا في هذا الشهر",
+      },
+      chipEarnedTitle: {
+        en: "Earned but not yet paid. It will appear again as PAID on the payslip for the month it is settled in.",
+        ar: "مكتسبة ولم تُدفع بعد. وستظهر مرة أخرى كمدفوعة في قسيمة الشهر الذي تُسوّى فيه.",
+      },
+
+      // The four STATUS words, in the priority the register applies them. The
+      // priority test is on data (`doc`, `terminated`, `hire_date_missing`,
+      // `isRunning`), never on these words.
+      statusTerminated: { en: "Terminated", ar: "منتهية خدمته" },
+      statusNoHireDate: { en: "No hire date", ar: "بلا تاريخ تعيين" },
+      statusMonthInProgress: { en: "Month in progress", ar: "الشهر جارٍ" },
+      statusNotIssued: { en: "Not issued", ar: "غير صادرة" },
+      // `{d}` is a stored ISO date, Latin. The suffix is appended with a space
+      // added in code, not carried on the value.
+      leftOn: { en: "Left the company on {d}", ar: "غادر الشركة في {d}" },
+      leftOnNoHire: {
+        en: "· no hire date recorded, so no payslip can be issued",
+        ar: "· لا يوجد تاريخ تعيين مسجَّل، فلا يمكن إصدار قسيمة",
+      },
+      registerNote: {
+        en: "An unissued row is a PREVIEW: its salary is today's salary, and it will change if the salary changes. Issuing freezes the figures and numbers the document — from then on the payslip shows what it showed on the day it was issued, whatever happens to the salary afterwards.",
+        ar: "الصف غير الصادر معاينة: راتبه هو راتب اليوم، وسيتغير إذا تغير الراتب. والإصدار يجمّد الأرقام ويرقّم المستند — ومن تلك اللحظة تعرض القسيمة ما عرضته يوم إصدارها، مهما حدث للراتب بعدها.",
+      },
+
+      // --- the document ---
+      // The arrow is INSIDE the value: in an RTL line the reading order runs
+      // right to left, so a left-pointing arrow would point away from where
+      // "back" is. Same call as the consumption explainer's →.
+      allPayslips: { en: "← All payslips", ar: "→ كل قسائم الرواتب" },
+      // `{d}` is an ISO date; `{b}` is the issuer's name — entity data, not
+      // chrome, and it has no `_ar` column to read.
+      issuedBy: { en: "Issued {d} by {b}", ar: "صدرت في {d} بواسطة {b}" },
+      issuing: { en: "Issuing…", ar: "جارٍ الإصدار…" },
+      issuePayslip: { en: "Issue payslip", ar: "إصدار قسيمة" },
+      noHireTitle: {
+        en: "This driver has no hire date, so a payslip period cannot be established. Set the hire date on the driver first.",
+        ar: "هذا السائق بلا تاريخ تعيين، فلا يمكن تحديد فترة قسيمة. حدّد تاريخ التعيين على السائق أولًا.",
+      },
+      runningTitle: {
+        en: "This month has not finished yet. A payslip can only be issued for a completed month.",
+        ar: "هذا الشهر لم ينتهِ بعد. ولا تُصدر القسيمة إلا عن شهر مكتمل.",
+      },
+      // The word alone — the payslip NUMBER beside it is monospace data.
+      payslipWord: { en: "Payslip", ar: "قسيمة راتب" },
+      payslipNotIssued: { en: "Payslip (not issued)", ar: "قسيمة راتب (غير صادرة)" },
+      blockedNoHire: {
+        en: "This driver has no hire date recorded, so there is no employment period a payslip could cover. Set the hire date on the driver, then issue. The figures below are shown for reference only.",
+        ar: "هذا السائق بلا تاريخ تعيين مسجَّل، فلا توجد فترة توظيف يمكن أن تغطيها قسيمة. حدّد تاريخ التعيين على السائق ثم أصدرها. والأرقام أدناه معروضة للاسترشاد فقط.",
+      },
+      blockedRunning: {
+        en: "This month is still running. A payslip can only be issued once the month has finished, so the figures below are not final.",
+        ar: "هذا الشهر ما زال جاريًا. ولا تُصدر القسيمة إلا بعد انتهاء الشهر، فالأرقام أدناه ليست نهائية.",
+      },
+      notIssuedBefore: {
+        en: "Not issued yet. Salary is shown at",
+        ar: "لم تصدر بعد. الراتب معروض بسعر",
+      },
+      notIssuedStrong: { en: "today's", ar: "اليوم" },
+      notIssuedAfter: {
+        en: "rate — issuing freezes these figures and assigns the payslip number.",
+        ar: "— والإصدار يجمّد هذه الأرقام ويسند رقم القسيمة.",
+      },
+
+      // --- the confirm panel (irreversible, so it asks first) ---
+      confirmTitle: { en: "Issue this payslip?", ar: "إصدار هذه القسيمة؟" },
+      // FOUR FRAGMENTS AROUND THREE BOLD DATA SLOTS — the driver's name, the
+      // month and the net figure — and the slot ORDER is the same in both
+      // languages, so this is a sentence with three inline values rather than
+      // a grammatical unit spliced from parts.
+      //
+      // `confirmAfterName` is the ONE value in this dictionary that carries
+      // edge whitespace, and it is deliberate: English attaches "'s" to the
+      // name with NO space and Arabic needs one, so the difference IS the
+      // translation. Putting a `{" "}` in the JSX would break English; leaving
+      // it out would break Arabic. The space lives on the Arabic value.
+      confirmBefore: { en: "This freezes", ar: "يُجمِّد هذا راتب" },
+      confirmAfterName: { en: "'s pay for", ar: " عن" },
+      confirmAfterMonth: { en: "at", ar: "عند" },
+      confirmTail: {
+        en: "net and gives it a permanent payslip number.",
+        ar: "صافيًا، ويمنحه رقم قسيمة دائمًا.",
+      },
+      confirmUndoStrong: { en: "It cannot be undone from here.", ar: "لا يمكن التراجع عنه من هنا." },
+      confirmUndoAfter: {
+        en: "The figures stop following the driver's salary from this moment — that is the point of issuing, and it is why there is no edit or delete afterwards.",
+        ar: "تتوقف الأرقام عن تتبّع راتب السائق من هذه اللحظة — وهذا هو الغرض من الإصدار، ولهذا لا يوجد تعديل ولا حذف بعده.",
+      },
+      yesIssueIt: { en: "Yes, issue it", ar: "نعم، أصدرها" },
+
+      // --- the figures table ---
+      // `Commission` is reports.th.commission and `Adjustments` is
+      // reports.costs.adjustments — the same words the cost statement uses for
+      // the same money. What is here is what only a payslip says.
+      basicSalary: { en: "Basic salary", ar: "الراتب الأساسي" },
+      specialPayments: { en: "Special payments", ar: "مدفوعات خاصة" },
+      bonus: { en: "Bonus", ar: "مكافأة" },
+      deductions: { en: "Deductions", ar: "الخصومات" },
+      netPay: { en: "Net pay", ar: "صافي الراتب" },
+      // The `one` branch carries NO number in English — the source says
+      // "Settled by payout", not "Settled by 1 payout" — which is exactly the
+      // freedom EN[one] has. fill() simply finds no token to replace.
+      settledBy: {
+        one: { en: "Settled by payout", ar: "سُوِّيت بدفعة واحدة" },
+        two: { en: "Settled by {n} payouts", ar: "سُوِّيت بدفعتين" },
+        few: { en: "Settled by {n} payouts", ar: "سُوِّيت بـ {n} دفعات" },
+        many: { en: "Settled by {n} payouts", ar: "سُوِّيت بـ {n} دفعة" },
+      },
+      covers: {
+        one: { en: "Covers {n} trip worked", ar: "تغطي رحلة واحدة أُنجزت" },
+        two: { en: "Covers {n} trips worked", ar: "تغطي رحلتين أُنجزتا" },
+        few: { en: "Covers {n} trips worked", ar: "تغطي {n} رحلات أُنجزت" },
+        many: { en: "Covers {n} trips worked", ar: "تغطي {n} رحلة أُنجزت" },
+      },
+      earlierMonth: {
+        en: "Some of that work was done in an earlier month; it is paid here because that is when it was settled.",
+        ar: "جزء من ذلك العمل أُنجز في شهر سابق؛ ويُدفع هنا لأن التسوية تمت في هذا الشهر.",
+      },
+      earnedNoteBefore: { en: "This commission is", ar: "هذه العمولة" },
+      earnedNoteStrong: { en: "earned but not yet paid", ar: "مكتسبة ولم تُدفع بعد" },
+      earnedNoteAfter: {
+        en: ". When it is settled it will appear again, as PAID, on the payslip for the month it is paid in — that is a record of two different events, not the same money counted twice.",
+        ar: ". وعند تسويتها ستظهر مرة أخرى، كمدفوعة، في قسيمة الشهر الذي تُدفع فيه — وهذا تسجيل لحدثين مختلفين، لا احتساب لنفس المال مرتين.",
+      },
+      noSalaryRecorded: {
+        en: "No salary is recorded for this driver, so basic salary reads 0.",
+        ar: "لا يوجد راتب مسجَّل لهذا السائق، فالراتب الأساسي يقرأ 0.",
+      },
+    },
+
+    // --- COMMISSION REVIEW (0116) — display only ----------------------------
+    // It sits under the payslip register and reports a DIFFERENT basis on
+    // purpose, so the same driver legitimately shows two totals on one screen.
+    // The heading, the subtitle and the footnote all say "work month" out loud
+    // rather than leaving it to be inferred — which is why `workMonth` is one
+    // leaf read by all three.
+    commissionReview: {
+      title: { en: "Commission earned by driver", ar: "العمولة المكتسبة حسب السائق" },
+      workMonth: { en: "work month", ar: "شهر العمل" },
+      subtitleAfterMonth: {
+        en: "— what each driver earned from the trips he drove in this period,",
+        ar: "— ما كسبه كل سائق من الرحلات التي قادها في هذه الفترة،",
+      },
+      subtitleStrong: {
+        en: "whether or not it has been paid out yet",
+        ar: "سواء صُرفت له بعد أم لا",
+      },
+      printThisTable: { en: "Print this table", ar: "طباعة هذا الجدول" },
+
+      // THE DISTINCTION, STATED WHERE THE NUMBERS ARE. Five emphasised words
+      // inside one paragraph, each a whole grammatical unit occupying the same
+      // slot in both languages.
+      distinct1: { en: "This is", ar: "هذا" },
+      distinctNot: { en: "not", ar: "ليس" },
+      distinct2: {
+        en: "the payslip figure above. The payslip register shows what was",
+        ar: "رقم القسيمة أعلاه. سجل القسائم يعرض ما",
+      },
+      distinctSettled: { en: "settled", ar: "سُوِّي" },
+      distinct3: {
+        en: "in this month; this table shows what was",
+        ar: "في هذا الشهر؛ وهذا الجدول يعرض ما",
+      },
+      distinctEarned: { en: "earned", ar: "اكتُسب" },
+      distinct4: {
+        en: "in the month the work was done. A driver whose June trips were paid in July appears here under",
+        ar: "في الشهر الذي أُنجز فيه العمل. فالسائق الذي دُفعت رحلات يونيو الخاصة به في يوليو يظهر هنا تحت",
+      },
+      // Two MONTH NAMES used as an example, not as data — they are part of the
+      // sentence and are translated with it.
+      distinctJune: { en: "June", ar: "يونيو" },
+      distinct5: { en: "and on his payslip under", ar: "وفي قسيمته تحت" },
+      distinctJuly: { en: "July", ar: "يوليو" },
+      distinct6: {
+        en: ", so the two totals differing is expected, not an error.",
+        ar: "، فاختلاف الإجماليين متوقع لا خطأ.",
+      },
+
+      noDeliveredTrips: {
+        en: "No delivered trips in this period.",
+        ar: "لا توجد رحلات مسلَّمة في هذه الفترة.",
+      },
+      // A NULL project is a direct-customer trip — real work with real
+      // commission, kept by the view rather than dropped. Read TWICE, like
+      // ops.unassigned: the project chip and the footnote's emphasis.
+      directCustomer: { en: "Direct customer", ar: "عميل مباشر" },
+      reviewNote: {
+        en: "Delivered trips only — commission is earned on delivery, so a scheduled or in-transit trip has earned nothing yet and is not counted here. The small number beside each project is that project's trip count. Trips taken for a direct customer rather than a project are grouped as",
+        ar: "الرحلات المسلَّمة فقط — فالعمولة تُكتسب عند التسليم، والرحلة المجدولة أو الجارية لم تكسب شيئًا بعد ولا تُحتسب هنا. والرقم الصغير بجانب كل مشروع هو عدد رحلات ذلك المشروع. أما الرحلات المنفَّذة لعميل مباشر لا لمشروع فتُجمَّع تحت",
+      },
+    },
+
+    // --- Daily Trips (DailyTripsTab + lib/daily-trips) -----------------------
+    // The one statement in the pack that fetches its own data, owns its own
+    // period control, and has a WRITE surface (the manual side-log, 0166).
+    //
+    // Most of what it says is already keyed and is read from there rather than
+    // copied: the on-screen heading is reports.statements.tab.daily (one
+    // statement, one spelling), the table headings are reports.th.* and
+    // common.* — the same leaves the cost and revenue tables read — and Print /
+    // Cancel / Saving… / Add / Edit / Delete / Loading… / Try again are shared
+    // chrome. What is below is only what this tab alone writes.
+    //
+    // `Revenue` reads common.revenue, whose Arabic is "الإيرادات"; this tab
+    // said "الإيراد" before this commit. One spelling, and it is the one the
+    // rest of Reports already prints.
+    //
+    // NOT KEYED, DELIBERATELY: validateDeferred()'s six messages and the two
+    // load/save fallbacks. That validator runs on BOTH sides — the form calls
+    // it and so does the server action, which returns its string to the client
+    // as `error`. Translating the client half alone would make one validation
+    // failure read Arabic when caught locally and English when caught by the
+    // server. Server strings are out of this batch's scope; flagged instead.
+    daily: {
+      // The print-only band. Different words from the on-screen heading on
+      // purpose: on paper there is no tab strip around the table, so the record
+      // has to name itself as a REPORT.
+      printTitle: { en: "Daily Trips Report", ar: "تقرير الرحلات اليومي" },
+      subtitle: {
+        en: "A printable daily record — every active project, every assigned driver.",
+        ar: "سجل يومي قابل للطباعة — كل مشروع نشط، وكل سائق مُسنَد.",
+      },
+
+      // THE FIVE SEGMENTED PERIOD BUTTONS. These were `en`/`ar` COLUMNS on
+      // DAILY_PERIODS in lib/daily-trips.ts — display text living in a lib that
+      // displays nothing, which is the shape CLAUDE.md §7 records for
+      // DailyOps.revenue. That list is keys now and the names are read here.
+      //
+      // Indefinite ("شهر", not reports.th.month's "الشهر"): these NAME period
+      // lengths on a toggle, they do not head a column.
+      period: {
+        day: { en: "Day", ar: "يوم" },
+        week: { en: "Week", ar: "أسبوع" },
+        month: { en: "Month", ar: "شهر" },
+        quarter: { en: "Quarter", ar: "ربع" },
+        year: { en: "Year", ar: "سنة" },
+      },
+
+      // No trailing space in the value — the gap before the period is a JSX
+      // `{" "}` at the call site, so neither language stores edge whitespace.
+      showing: { en: "Showing:", ar: "الفترة:" },
+      // Lowercase, and NOT common.loading: this one is spliced mid-line after a
+      // bullet ("· loading…"), where a standalone "Loading…" would read as the
+      // start of a new sentence. The bullet is punctuation and stays in the JSX.
+      loadingInline: { en: "loading…", ar: "جارٍ التحميل…" },
+      noActiveProjects: { en: "No active projects.", ar: "لا توجد مشاريع نشطة." },
+      // An assigned driver who drove nothing STILL GETS A ROW — on a printout
+      // an absent name and an idle driver must not look the same. This marks
+      // the difference between them.
+      noTrips: { en: "(no trips)", ar: "(لم يقد)" },
+      // WHOLE SENTENCE PER COUNT BUCKET. English spliced only the noun off a
+      // `=== 1` test and Arabic used one form for every count — the splice this
+      // batch exists to remove. `{n}` goes in RAW at the call site: it was
+      // interpolated directly and formatNum would add a thousands separator the
+      // line never had.
+      assignedDrivers: {
+        one: { en: "{n} assigned driver", ar: "سائق مُسنَد واحد" },
+        two: { en: "{n} assigned drivers", ar: "سائقان مُسنَدان" },
+        few: { en: "{n} assigned drivers", ar: "{n} سائقين مُسنَدين" },
+        many: { en: "{n} assigned drivers", ar: "{n} سائقًا مُسنَدًا" },
+      },
+      projectTotal: { en: "Project total", ar: "إجمالي المشروع" },
+
+      // THE UNPRICED MARKER. A delivered trip with no rate contributes 0 to
+      // revenue, so the money beside it is short by an unknown amount whenever
+      // one exists — the same reasoning the cost statement's uncosted count
+      // uses. English writes "trip(s)" and never inflects, so all four buckets
+      // carry the same string; that is the EN invariant working, not a copy.
+      unpricedTitle: {
+        one: {
+          en: "{n} delivered trip(s) with no rate — contributing 0 revenue",
+          ar: "رحلة واحدة بدون سعر — لا تضيف إيرادًا",
+        },
+        two: {
+          en: "{n} delivered trip(s) with no rate — contributing 0 revenue",
+          ar: "رحلتان بدون سعر — لا تضيفان إيرادًا",
+        },
+        few: {
+          en: "{n} delivered trip(s) with no rate — contributing 0 revenue",
+          ar: "{n} رحلات بدون سعر — لا تضيف إيرادًا",
+        },
+        many: {
+          en: "{n} delivered trip(s) with no rate — contributing 0 revenue",
+          ar: "{n} رحلة بدون سعر — لا تضيف إيرادًا",
+        },
+      },
+      // NO count buckets, and that is not an oversight: the chip names no noun
+      // to inflect in either language — "unpriced" / "بدون سعر" reads the same
+      // beside 1 as beside 40.
+      unpricedChip: { en: "{n} unpriced", ar: "{n} بدون سعر" },
+
+      // --- the manual side-log (deferred_deliveries, 0166) ---
+      // Hand-typed figures carrying none of the provenance the money model
+      // depends on. They appear HERE and nowhere else, and are totalled
+      // separately — 0166's own self-assert fails if any view reads that table.
+      deferredTitle: { en: "Deferred location", ar: "توصيلات خارج المشاريع" },
+      deferredNote: {
+        en: "Manual log — diesel transport, ad-hoc customer filling. Appears in this report only; never counted into P&L, revenue or commission.",
+        ar: "سجل يدوي — نقل ديزل، تعبئة عملاء متفرقة. يظهر في هذا التقرير فقط ولا يدخل في الأرباح أو العمولات.",
+      },
+      // "Add entry" OPENS the form; the form's own submit button says just
+      // "Add" (common.add). Two controls, two English strings, so the opener
+      // keeps a leaf of its own even though the Arabic coincides.
+      addEntry: { en: "Add entry", ar: "إضافة" },
+      // "Choose…", not common.selectPlaceholder's "Select…" — same Arabic,
+      // different English, and byte-identity is per key.
+      choose: { en: "Choose…", ar: "اختر…" },
+      description: { en: "Description", ar: "الوصف" },
+      // An EXAMPLE of what to type, not one of a fixed list — the same shape as
+      // the expenses modal's category placeholder.
+      descriptionPlaceholder: { en: "e.g. diesel transport", ar: "مثال: نقل ديزل" },
+      update: { en: "Update", ar: "تحديث" },
+      noManualEntries: {
+        en: "No manual entries for this period.",
+        ar: "لا توجد إدخالات لهذه الفترة.",
+      },
+      // The inline delete confirm's tick. Its cross is common.cancel, and the
+      // row's two resting icons are common.edit and common.delete.
+      confirmDelete: { en: "Confirm delete", ar: "تأكيد الحذف" },
+      manualTotal: { en: "Manual total", ar: "الإجمالي اليدوي" },
+      // SEPARATE TOTALS, NEVER COMBINED — 0166's isolation rule, said on
+      // screen. The Arabic stopped at the project totals before this commit and
+      // dropped the English clause about financial reports, which is the half
+      // that matters most; it carries both now.
+      separateNote: {
+        en: "Totalled separately. These figures are never added into the project totals above, or into any financial report.",
+        ar: "يُحتسب هذا الجدول بشكل منفصل، ولا تُضاف أرقامه إلى إجماليات المشاريع أعلاه ولا إلى أي تقرير مالي.",
+      },
+    },
+
+    // --- the custom report builder ------------------------------------------
+    // TWO consumers, split by what they say rather than by where they live:
+    // `grouping` and `note` are read by lib/report-builder.ts (the engine),
+    // everything after them by CustomReportModal (the chrome). Kept in one
+    // namespace because the modal's own footer prints a grouping name too, and
+    // a second copy of "By customer" is exactly what one namespace prevents.
+    builder: {
+      grouping: {
+        period: { en: "By period", ar: "حسب الفترة" },
+        customer: { en: "By customer", ar: "حسب العميل" },
+        truck: { en: "By truck", ar: "حسب الشاحنة" },
+      },
+
+      // The honest notes printed under a generated report.
+      note: {
+        // Keyed by GRAIN rather than token-filled: English drops the enum value
+        // in ("Every month is listed"), Arabic needs a different plural noun for
+        // each grain, so the sentence is stored whole three times.
+        everyPeriod: {
+          month: {
+            en: "Every month is listed, newest first — the period picker does not filter a by-period report.",
+            ar: "تُدرج كل الأشهر، الأحدث أولًا — منتقي الفترة لا يصفّي تقريرًا حسب الفترة.",
+          },
+          quarter: {
+            en: "Every quarter is listed, newest first — the period picker does not filter a by-period report.",
+            ar: "تُدرج كل الأرباع، الأحدث أولًا — منتقي الفترة لا يصفّي تقريرًا حسب الفترة.",
+          },
+          year: {
+            en: "Every year is listed, newest first — the period picker does not filter a by-period report.",
+            ar: "تُدرج كل السنوات، الأحدث أولًا — منتقي الفترة لا يصفّي تقريرًا حسب الفترة.",
+          },
+        },
+        // `{p}` is the VIEW's own period label — "Aug 2026". Latin on purpose.
+        rowsCover: { en: "Rows cover {p} only.", ar: "تغطي الصفوف {p} فقط." },
+        noPeriod: { en: "No period selected.", ar: "لم تُحدَّد فترة." },
+        outstandingPeriodOnly: {
+          en: "Outstanding is measured on this period's own invoices, not the all-time receivables position.",
+          ar: "يُقاس المستحق على فواتير هذه الفترة وحدها، لا على مركز الذمم المدينة الكلي.",
+        },
+        outstandingPrepaid: {
+          en: "Outstanding reflects the customer's current prepaid balance, capped at each invoice's own amount due — it can never exceed the document.",
+          ar: "يعكس المستحق رصيد العميل المدفوع مقدمًا كما هو الآن، محدودًا بالمبلغ المستحق على كل فاتورة — فلا يتجاوز المستند أبدًا.",
+        },
+        allocation: {
+          en: "Revenue per truck is an allocation: each invoice's revenue is split equally across its trips.",
+          ar: "الإيراد لكل شاحنة توزيع: تُقسَّم إيرادات كل فاتورة بالتساوي على رحلاتها.",
+        },
+        mixedBases: {
+          en: "Columns use different bases (accrual, cash, operational). They are shown side by side and are never added together — each column stands on its own.",
+          ar: "تستخدم الأعمدة أُسسًا مختلفة (الاستحقاق، النقدي، التشغيلي). تُعرض جنبًا إلى جنب ولا تُجمع أبدًا — كل عمود قائم بذاته.",
+        },
+        ratios: {
+          en: "Ratio columns are computed from each row's own totals, never averaged from smaller periods.",
+          ar: "تُحسب أعمدة النسب من إجماليات كل صف نفسه، ولا تُؤخذ كمتوسط لفترات أصغر.",
+        },
+      },
+
+      // --- the modal's own chrome ------------------------------------------
+      // `title` is said in THREE places — the modal heading, the button on the
+      // statements tab that opens it, and the heading of the report it
+      // generates — so it is one leaf, not three.
+      title: { en: "Custom report", ar: "تقرير مخصص" },
+      intro: {
+        en: "Combine defined metrics into a table. Everything here reads the same views the rest of the page does, so it cannot disagree with them.",
+        ar: "اجمع مقاييس معرَّفة في جدول واحد. كل ما هنا يقرأ العروض نفسها التي تقرأها بقية الصفحة، فلا يمكن أن يخالفها.",
+      },
+      // The three numbered steps. `·` is punctuation, identical in both, and
+      // the DIGIT stays Latin like every other figure the app writes.
+      step1: { en: "1 · Group rows by", ar: "1 · تجميع الصفوف حسب" },
+      step2: { en: "2 · Columns", ar: "2 · الأعمدة" },
+      step3: { en: "3 · Period", ar: "3 · الفترة" },
+
+      // Why a disabled control is disabled — the reason a vanished control
+      // could not have given.
+      groupingUnavailable: {
+        en: "The metrics you picked cannot be grouped this way",
+        ar: "المقاييس التي اخترتها لا يمكن تجميعها بهذه الطريقة",
+      },
+      // `{g}` is a reports.builder.grouping.* value, lower-cased AFTER the
+      // lookup at the call site — English needs "by customer" mid-sentence,
+      // and Arabic has no case to change, so the same call is a no-op there.
+      notAvailable: { en: "Not available {g}", ar: "غير متاح {g}" },
+
+      // Keyed by GRAIN, not token-filled. English drops the raw enum straight
+      // into the sentence ("every month as a row") — which is also the trap
+      // this fixes, since that enum was rendering English in Arabic — and
+      // Arabic needs a different noun per grain, so the sentence is stored
+      // whole three times. Same shape as note.everyPeriod above.
+      byPeriodNote: {
+        month: {
+          en: "A by-period report lists every month as a row, so it is not filtered to one.",
+          ar: "التقرير حسب الفترة يُدرج كل شهر كصف، فلا يُصفّى إلى شهر واحد.",
+        },
+        quarter: {
+          en: "A by-period report lists every quarter as a row, so it is not filtered to one.",
+          ar: "التقرير حسب الفترة يُدرج كل ربع كصف، فلا يُصفّى إلى ربع واحد.",
+        },
+        year: {
+          en: "A by-period report lists every year as a row, so it is not filtered to one.",
+          ar: "التقرير حسب الفترة يُدرج كل سنة كصف، فلا يُصفّى إلى سنة واحدة.",
+        },
+      },
+
+      // Said BEFORE generating, where note.mixedBases above is printed UNDER
+      // the finished report. Two different moments and two different sentences
+      // — this one warns, that one records. Not folded into one leaf.
+      mixedBases: {
+        en: "You have mixed bases selected. They will appear as separate columns and are never added together — accrual and cash answer different questions.",
+        ar: "لديك أُسس مختلطة في التحديد. ستظهر كأعمدة منفصلة ولا تُجمع أبدًا — الاستحقاق والنقدي يجيبان عن سؤالين مختلفين.",
+      },
+
+      // The footer's running count. `{n}` is the raw column count and `{g}` a
+      // lower-cased grouping name. Whole sentence per bucket, not an "s"
+      // spliced onto a noun.
+      columnsCount: {
+        one: { en: "{n} column · {g}", ar: "عمود واحد · {g}" },
+        two: { en: "{n} columns · {g}", ar: "عمودان · {g}" },
+        few: { en: "{n} columns · {g}", ar: "{n} أعمدة · {g}" },
+        many: { en: "{n} columns · {g}", ar: "{n} عمودًا · {g}" },
+      },
+      pickOne: { en: "Pick at least one column.", ar: "اختر عمودًا واحدًا على الأقل." },
+      generate: { en: "Generate", ar: "إنشاء" },
+
+      // --- the natural-language seam, deliberately not wired ----------------
+      nl: {
+        heading: { en: "Ask in plain language", ar: "اسأل بلغة عادية" },
+        comingSoon: { en: "Coming soon", ar: "قريبًا" },
+        placeholder: {
+          en: "e.g. Revenue and outstanding for each customer last quarter",
+          ar: "مثال: الإيرادات والمستحق لكل عميل في الربع الماضي",
+        },
+        disabledTitle: {
+          en: "Natural-language reports are not wired up yet",
+          ar: "التقارير باللغة العادية غير مفعَّلة بعد",
+        },
+        interpret: { en: "Interpret", ar: "تفسير" },
+        notWired: {
+          en: "Not wired up — nothing typed here is sent anywhere. When it is switched on, its only job will be to fill in the builder on the left. It will never write its own query, so a generated report can only ever say what the builder can already say correctly.",
+          ar: "غير مفعَّل — لا يُرسل ما يُكتب هنا إلى أي جهة. وعند تفعيله ستكون مهمته الوحيدة تعبئة المُنشئ على اليسار. ولن يكتب استعلامه الخاص أبدًا، فالتقرير المُنشأ لا يقول إلا ما يستطيع المُنشئ قوله بصورة صحيحة أصلًا.",
+        },
+      },
+    },
+
+    // --- the generated narrative (buildNarrative in lib/reports.ts) ---------
+    // Every bullet is stored as a WHOLE sentence per branch. Where English
+    // splices a word into the middle of a sentence — "up"/"down"/"level", the
+    // "— a 12.4% margin" clause, the "s" on trucks and work orders — the branch
+    // gets its own leaf instead, because Arabic changes more than that one word.
+    narrative: {
+      // {p} = the view's period label.
+      inProgress: {
+        en: "{p} is still running. Costs accumulate daily while revenue is only recognised when an invoice is confirmed, so the figures below understate how the period will finish.",
+        ar: "{p} لم تنتهِ بعد. تتراكم التكاليف يوميًا بينما لا يُعترف بالإيراد إلا عند تأكيد الفاتورة، فالأرقام أدناه أقل مما ستنتهي إليه الفترة.",
+      },
+      noRevenue: {
+        en: "No revenue was recognised in {p} — no invoice was confirmed. Costs of {c} still landed.",
+        ar: "لم يُعترف بأي إيراد في {p} — لم تُؤكَّد أي فاتورة. ومع ذلك وقعت تكاليف قدرها {c}.",
+      },
+      revenueUp: { en: "Revenue was {v}, up {d} on {p}.", ar: "بلغت الإيرادات {v}، بارتفاع {d} عن {p}." },
+      revenueDown: { en: "Revenue was {v}, down {d} on {p}.", ar: "بلغت الإيرادات {v}، بانخفاض {d} عن {p}." },
+      revenueFlat: { en: "Revenue was {v}, level {d} on {p}.", ar: "بلغت الإيرادات {v}، بثبات {d} عن {p}." },
+      revenueBare: { en: "Revenue was {v}.", ar: "بلغت الإيرادات {v}." },
+      revenueVsNothing: {
+        en: "Revenue was {v}, against nothing in {p}.",
+        ar: "بلغت الإيرادات {v}، مقابل لا شيء في {p}.",
+      },
+      profitWithMargin: {
+        en: "Operating profit was {v} — a {m} margin, after {c} of operating cost.",
+        ar: "بلغ الربح التشغيلي {v} — بهامش {m}، بعد تكاليف تشغيلية قدرها {c}.",
+      },
+      profitNoMargin: {
+        en: "Operating profit was {v}, after {c} of operating cost.",
+        ar: "بلغ الربح التشغيلي {v}، بعد تكاليف تشغيلية قدرها {c}.",
+      },
+      loss: {
+        en: "The period ran at a loss of {l}: {c} of cost against {r} of revenue.",
+        ar: "أُغلقت الفترة بخسارة قدرها {l}: تكاليف {c} مقابل إيرادات {r}.",
+      },
+      // {b} arrives ALREADY TRANSLATED from narrativeBucket below.
+      largestCostWithShare: {
+        en: "The largest cost was {b} at {v}, {s} of operating cost.",
+        ar: "أكبر بند تكلفة كان {b} بمبلغ {v}، أي {s} من التكاليف التشغيلية.",
+      },
+      largestCost: {
+        en: "The largest cost was {b} at {v}.",
+        ar: "أكبر بند تكلفة كان {b} بمبلغ {v}.",
+      },
+      expenses: {
+        en: "Manually recorded expenses of {e} bring net profit to {n}. These are tracked separately from the four operational buckets.",
+        ar: "مصروفات مسجَّلة يدويًا قدرها {e} تُنزل صافي الربح إلى {n}. وتُتابَع هذه منفصلة عن بنود التشغيل الأربعة.",
+      },
+      collected: {
+        en: "{v} of cash was collected in the period. Collections are VAT-inclusive and land when an invoice is paid, so they will not equal revenue.",
+        ar: "حُصِّل {v} نقدًا خلال الفترة. المتحصّلات شاملة لضريبة القيمة المضافة وتقع عند سداد الفاتورة، فلن تساوي الإيرادات.",
+      },
+      noCash: {
+        en: "No cash was collected against invoices in this period.",
+        ar: "لم يُحصَّل أي مبلغ نقدي مقابل الفواتير في هذه الفترة.",
+      },
+      outstanding: {
+        en: "{v} remains outstanding across all unpaid invoices. This is a position as of today, not a figure for the period.",
+        ar: "لا يزال {v} مستحقًا على مجموع الفواتير غير المسددة. وهذا مركز كما هو اليوم، لا رقم يخص الفترة.",
+      },
+      // English says "days" at every count; Arabic does not, so the age clause
+      // is bucketed. The four English values are identical on purpose.
+      outstandingAged: {
+        one: {
+          en: "{v} remains outstanding across all unpaid invoices, the oldest {d} days since confirmation. This is a position as of today, not a figure for the period.",
+          ar: "لا يزال {v} مستحقًا على مجموع الفواتير غير المسددة، وأقدمها مضى على تأكيدها يوم واحد. وهذا مركز كما هو اليوم، لا رقم يخص الفترة.",
+        },
+        two: {
+          en: "{v} remains outstanding across all unpaid invoices, the oldest {d} days since confirmation. This is a position as of today, not a figure for the period.",
+          ar: "لا يزال {v} مستحقًا على مجموع الفواتير غير المسددة، وأقدمها مضى على تأكيدها يومان. وهذا مركز كما هو اليوم، لا رقم يخص الفترة.",
+        },
+        few: {
+          en: "{v} remains outstanding across all unpaid invoices, the oldest {d} days since confirmation. This is a position as of today, not a figure for the period.",
+          ar: "لا يزال {v} مستحقًا على مجموع الفواتير غير المسددة، وأقدمها مضى على تأكيدها {d} أيام. وهذا مركز كما هو اليوم، لا رقم يخص الفترة.",
+        },
+        many: {
+          en: "{v} remains outstanding across all unpaid invoices, the oldest {d} days since confirmation. This is a position as of today, not a figure for the period.",
+          ar: "لا يزال {v} مستحقًا على مجموع الفواتير غير المسددة، وأقدمها مضى على تأكيدها {d} يومًا. وهذا مركز كما هو اليوم، لا رقم يخص الفترة.",
+        },
+      },
+      salesReturns: {
+        en: "{v} of previously confirmed invoicing was reversed as sales returns. Revenue above already excludes it — the two are never netted silently.",
+        ar: "عُكس {v} من فوترة مؤكدة سابقًا كمردودات مبيعات. والإيراد أعلاه يستبعده أصلًا — ولا يُصافى الطرفان بصمت أبدًا.",
+      },
+      // {d} of {t} trips … {k} truck(s) … {w} work order(s).
+      //
+      // TWO counted nouns in one sentence, so the family is NESTED: the outer
+      // bucket is the truck count, the inner the work-order count. English
+      // inflects both ("truck"/"trucks", "work order"/"work orders") and Arabic
+      // inflects them differently again, which is why nothing here is spliced.
+      // The leading clause states the trip counts as a PREDICATE
+      // (الرحلات المسلَّمة {d} من {t}) — a construction that does not inflect,
+      // so the trip count does not add a third axis.
+      ops: {
+        one: {
+          en: "{d} of {t} trips were delivered, across at most {k} truck in any single month.",
+          ar: "الرحلات المسلَّمة {d} من {t}، وشاحنة واحدة على الأكثر في أي شهر واحد.",
+        },
+        two: {
+          en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month.",
+          ar: "الرحلات المسلَّمة {d} من {t}، وشاحنتان على الأكثر في أي شهر واحد.",
+        },
+        few: {
+          en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month.",
+          ar: "الرحلات المسلَّمة {d} من {t}، و{k} شاحنات على الأكثر في أي شهر واحد.",
+        },
+        many: {
+          en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month.",
+          ar: "الرحلات المسلَّمة {d} من {t}، و{k} شاحنة على الأكثر في أي شهر واحد.",
+        },
+      },
+      opsWo: {
+        one: {
+          one: {
+            en: "{d} of {t} trips were delivered, across at most {k} truck in any single month, with {w} work order raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، وشاحنة واحدة على الأكثر في أي شهر واحد، مع أمر عمل واحد صادر.",
+          },
+          two: {
+            en: "{d} of {t} trips were delivered, across at most {k} truck in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، وشاحنة واحدة على الأكثر في أي شهر واحد، مع أمرَي عمل صادرين.",
+          },
+          few: {
+            en: "{d} of {t} trips were delivered, across at most {k} truck in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، وشاحنة واحدة على الأكثر في أي شهر واحد، مع {w} أوامر عمل صادرة.",
+          },
+          many: {
+            en: "{d} of {t} trips were delivered, across at most {k} truck in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، وشاحنة واحدة على الأكثر في أي شهر واحد، مع {w} أمر عمل صادرًا.",
+          },
+        },
+        two: {
+          one: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work order raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، وشاحنتان على الأكثر في أي شهر واحد، مع أمر عمل واحد صادر.",
+          },
+          two: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، وشاحنتان على الأكثر في أي شهر واحد، مع أمرَي عمل صادرين.",
+          },
+          few: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، وشاحنتان على الأكثر في أي شهر واحد، مع {w} أوامر عمل صادرة.",
+          },
+          many: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، وشاحنتان على الأكثر في أي شهر واحد، مع {w} أمر عمل صادرًا.",
+          },
+        },
+        few: {
+          one: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work order raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، و{k} شاحنات على الأكثر في أي شهر واحد، مع أمر عمل واحد صادر.",
+          },
+          two: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، و{k} شاحنات على الأكثر في أي شهر واحد، مع أمرَي عمل صادرين.",
+          },
+          few: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، و{k} شاحنات على الأكثر في أي شهر واحد، مع {w} أوامر عمل صادرة.",
+          },
+          many: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، و{k} شاحنات على الأكثر في أي شهر واحد، مع {w} أمر عمل صادرًا.",
+          },
+        },
+        many: {
+          one: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work order raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، و{k} شاحنة على الأكثر في أي شهر واحد، مع أمر عمل واحد صادر.",
+          },
+          two: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، و{k} شاحنة على الأكثر في أي شهر واحد، مع أمرَي عمل صادرين.",
+          },
+          few: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، و{k} شاحنة على الأكثر في أي شهر واحد، مع {w} أوامر عمل صادرة.",
+          },
+          many: {
+            en: "{d} of {t} trips were delivered, across at most {k} trucks in any single month, with {w} work orders raised.",
+            ar: "الرحلات المسلَّمة {d} من {t}، و{k} شاحنة على الأكثر في أي شهر واحد، مع {w} أمر عمل صادرًا.",
+          },
+        },
+      },
+      topCustomerWithShare: {
+        en: "{n} was the largest customer at {v}, {s} of revenue.",
+        ar: "{n} أكبر عميل بمبلغ {v}، أي {s} من الإيرادات.",
+      },
+      topCustomer: {
+        en: "{n} was the largest customer at {v}.",
+        ar: "{n} أكبر عميل بمبلغ {v}.",
+      },
+      // The four buckets the "largest cost" line names. Lower-case in English
+      // because they sit mid-sentence; the five-bucket CHART labels are
+      // dashboard.costType.* and are capitalised.
+      bucket: {
+        payroll: { en: "payroll", ar: "الرواتب" },
+        os: { en: "outsourced repairs", ar: "الإصلاحات الخارجية" },
+        parts: { en: "parts", ar: "قطع الغيار" },
+        commissions: { en: "commissions", ar: "العمولات" },
+      },
+
+      // --- the statement's own CHROME, not the generated sentences ---------
+      // Everything above is buildNarrative's output — sentences the engine
+      // composes from the period's figures. These four are the page furniture
+      // around them, keyed here rather than in a ninth namespace because they
+      // are only ever read by NarrativeStatement.
+      //
+      // The four STAT LABELS under the bullets are NOT here: Revenue,
+      // Operating cost and Operating profit read reports.metric.*, and Margin
+      // reads common.margin. They name the same figures the P&L names, and a
+      // second spelling of "Operating profit" is exactly the drift the metric
+      // namespace exists to stop.
+      stmt: {
+        // {p} = the period label, which arrives already formatted.
+        title: { en: "{p} in review", ar: "{p} في مراجعة" },
+        period: {
+          en: "Computed from the period's own figures",
+          ar: "محسوبة من أرقام الفترة نفسها",
+        },
+        note: {
+          en: "Every sentence above is computed from this period's own figures — nothing is templated prose with numbers dropped in, and each line is a comparison you could redo by hand from the statements on this page.",
+          ar: "كل جملة أعلاه محسوبة من أرقام هذه الفترة نفسها — لا يوجد نص جاهز أُقحمت فيه الأرقام، وكل سطر مقارنة يمكنك إعادتها بنفسك من القوائم في هذه الصفحة.",
+        },
+      },
+    },
+
+    // --- the metrics dictionary popup (MetricsGlossaryModal) ---------------
+    // THE METRIC ROWS THEMSELVES ARE NOT HERE. label / meaning / formula /
+    // grain / source_view / caveat / unit are COLUMNS of `report_metrics`
+    // (migration 0098, extended by 0123/0124) — database content, and moving
+    // them into two languages is a migration, which this batch does not run.
+    // Only the popup's own chrome, the four basis names and the four basis
+    // notes are keyed. The heading and the dialog's aria-label both point at
+    // reports.shell.metricsDictionary — the same words as the button that
+    // opens it, already keyed above.
+    glossary: {
+      // ONE SENTENCE, TWO LEAVES, because `report_metrics` sits in the middle
+      // of it as a <code> element. The split point is the same in both
+      // languages — the pointer lands at the end of the first clause in Arabic
+      // too — so the splice is not silently reordering anything. The space on
+      // either side of the code element is JSX, not part of these values.
+      intro: {
+        beforeCode: {
+          en: "Every number on this page is defined once, in SQL — this is that definition, read straight from",
+          ar: "كل رقم في هذه الصفحة معرَّف مرة واحدة، في SQL — وهذا هو التعريف، مقروءًا مباشرة من",
+        },
+        afterCode: {
+          en: ". It is also the vocabulary the custom-report builder is fenced to: a metric it cannot offer is a metric that is not listed here.",
+          ar: ". وهي أيضًا المفردات التي يقتصر عليها منشئ التقارير المخصصة: المقياس الذي لا يستطيع تقديمه مقياس غير مدرج هنا.",
+        },
+      },
+      // The filtered line elides the noun in English ("3 of 30 shown."), so it
+      // does not inflect and needs no buckets. Arabic states it as a predicate
+      // for the same reason.
+      shownOf: { en: "{n} of {m} shown.", ar: "يُعرض {n} من {m}." },
+      // The unfiltered line DOES count a noun. English never inflects it — it
+      // says "metrics" at every count, including one — so all four English
+      // values are identical on purpose and only the Arabic varies.
+      count: {
+        one: { en: "{n} metrics.", ar: "مقياس واحد." },
+        two: { en: "{n} metrics.", ar: "مقياسان." },
+        few: { en: "{n} metrics.", ar: "{n} مقاييس." },
+        many: { en: "{n} metrics.", ar: "{n} مقياسًا." },
+      },
+      filter: { en: "Filter metrics", ar: "تصفية المقاييس" },
+      readFailed: { en: "The dictionary could not be read.", ar: "تعذّرت قراءة القاموس." },
+      // Straight quotes in the Arabic against curly in the English, the same
+      // pairing as shared.chrome.noMatches and inventory's confirmDelete.
+      noMatch: { en: "No metric matches “{q}”.", ar: "لا يطابق أي مقياس \"{q}\"." },
+      // MetricEntry's three <dt> labels. `Grain` is the data-modelling sense —
+      // what one row of the source view counts — not a texture.
+      formula: { en: "Formula", ar: "الصيغة" },
+      grain: { en: "Grain", ar: "مستوى التفصيل" },
+      sourceView: { en: "Source view", ar: "العرض المصدر" },
+      // THE GROUP HEADINGS ARE THE `basis` ENUM — reports.basis.*, beside
+      // `metric`, because the builder and the generated report print the same
+      // four words. Only the NOTES below are glossary-only.
+      // What a basis MEANS — the distinction the report builder exists to
+      // protect (0100): accrual and cash measure the same riyal at two
+      // different moments, so adding them double-counts.
+      basisNote: {
+        accrual: {
+          en: "Earned or incurred in the period — whether or not the money has moved yet.",
+          ar: "مُكتسَب أو مُتكبَّد خلال الفترة — سواء تحرَّك المال أم لم يتحرَّك بعد.",
+        },
+        cash: {
+          en: "Money that actually moved in the period. Never added to an accrual figure: a commission payout's base IS the trip commission the accrual side already counted.",
+          ar: "مال تحرَّك فعليًا خلال الفترة. ولا يُضاف أبدًا إلى رقم على أساس الاستحقاق: فأساس صرف العمولة هو نفسه عمولة الرحلة التي احتسبها جانب الاستحقاق أصلًا.",
+        },
+        state: {
+          en: "A position as of now, not a total for a period. A state figure does not belong in a period column.",
+          ar: "مركز كما هو الآن، لا إجمالي لفترة. ورقم المركز لا مكان له في عمود فترة.",
+        },
+        operational: {
+          en: "Counts and activity rather than money.",
+          ar: "أعداد ونشاط لا مال.",
+        },
+      },
+    },
+
+    // --- manual expenses (ExpensesModal) ------------------------------------
+    // The ONE write surface on the route. Its heading is the same two words as
+    // the metric it edits the source rows for, so it reads
+    // reports.metric.otherExpenses rather than minting a second copy.
+    //
+    // `Date` / `Category` / `Amount` / `Entered by` are reports.th.*, `Note`,
+    // `Actions`, `Cancel` and `Edit` are common.*, and `Close` is reports.close.
+    // What is left here is only what this modal alone says.
+    expenses: {
+      intro: {
+        en: "Costs the app does not otherwise track. Kept separate from the four operational buckets, never merged into them.",
+        ar: "تكاليف لا يتتبعها التطبيق بطريقة أخرى. تُحفظ منفصلة عن بنود التشغيل الأربعة، ولا تُدمج فيها أبدًا.",
+      },
+      // The currency is spelled in the label, not formatted by the app — this
+      // is a bare number input, so `formatSar` never touches what is typed.
+      amountSar: { en: "Amount (SAR)", ar: "المبلغ (ر.س)" },
+      noteOptional: { en: "Note (optional)", ar: "ملاحظة (اختياري)" },
+      // A free-text combo, so the placeholder is an EXAMPLE of a category the
+      // user might type, not one of a fixed list.
+      categoryExample: { en: "e.g. Rent", ar: "مثال: إيجار" },
+      saveChanges: { en: "Save changes", ar: "حفظ التعديلات" },
+      addExpense: { en: "Add expense", ar: "إضافة مصروف" },
+      empty: {
+        en: "No expenses recorded. Until something is added here, net profit equals operating profit — which the P&L shows honestly rather than implying these costs are zero.",
+        ar: "لا توجد مصروفات مسجَّلة. وإلى أن يُضاف شيء هنا، يساوي صافي الربح الربح التشغيلي — وهو ما تعرضه قائمة الأرباح والخسائر بصدق بدل الإيحاء بأن هذه التكاليف صفر.",
+      },
+      // The inline delete confirm. Three words, and they are this modal's
+      // alone — no other file in this batch asks a yes/no question.
+      confirmDelete: { en: "Delete?", ar: "حذف؟" },
+      yes: { en: "Yes", ar: "نعم" },
+      no: { en: "No", ar: "لا" },
+      // The delete icon's tooltip is common.delete, beside common.edit on the
+      // other one — the daily side-log labels the same icon the same way, and
+      // two callers is what moved it out of here.
+    },
+  },
 } as const;
 
 /**
@@ -3004,6 +4747,28 @@ export function t(path: TKey, lang: Lang): string {
   for (const p of parts) node = node?.[p];
   if (!node) return path;
   return (node as any)[lang] ?? path;
+}
+
+/**
+ * Substitute the `{token}` holes in a dictionary sentence.
+ *
+ * ONE PASS over the template, not one `.replace()` per token. A sequential pass
+ * re-scans text it has just written, so a customer name containing `{v}` could
+ * be substituted a second time by the next token. The replacer-function form
+ * also sidesteps `$&`/`$1` being interpreted inside a value that came out of
+ * the database.
+ *
+ * An unknown token is left standing rather than blanked: a visible `{q}` on
+ * screen is a bug report, a silent empty space is not.
+ *
+ * This is the FIFTH place this function exists — lib/parts-usage.ts and
+ * app/DashboardClient.tsx hold identical copies, and the two Consumption
+ * modals hold a single-token variant with a different signature. It is exported
+ * from here so nothing new has to make a sixth; folding the existing four onto
+ * it is a separate change, because it touches routes this batch is not opening.
+ */
+export function fill(s: string, vals: Record<string, string | number>): string {
+  return s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vals ? String(vals[k]) : m));
 }
 
 // `t()` above translates STATIC copy from the dictionary. `arText()` below is

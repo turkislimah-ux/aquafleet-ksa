@@ -38,6 +38,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Printer, Plus, Pencil, Trash2, X, Check, AlertTriangle } from "lucide-react";
 import { Btn, PILL_TONE_CLS } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
+import { t, fill, plural, type Lang } from "@/lib/i18n";
 import { cn, formatDayKey } from "@/lib/utils";
 import {
   DAILY_PERIODS, periodRange, buildProjectTables, deferredTotals, validateDeferred,
@@ -90,8 +91,16 @@ const EMPTY_FORM = {
  * its uncosted count: a delivered trip with no rate contributes 0 to revenue, so
  * the revenue column is short by an unknown amount whenever one exists. Showing
  * the money without the flag would be showing a total that is quietly wrong.
+ *
+ * `lang` arrives as a PROP rather than through useApp(): this renders once per
+ * truck row and once per totals foot, and both call sites already hold `lang`.
+ *
+ * `{n}` goes in RAW in both strings — it was interpolated directly before this
+ * commit and formatNum would add a thousands separator neither ever had. The
+ * title counts trips, so it inflects per Arabic count bucket; the chip names no
+ * noun and is one leaf.
  */
-function UnpricedFlag({ n, ar }: { n: number; ar: boolean }) {
+function UnpricedFlag({ n, lang }: { n: number; lang: Lang }) {
   if (n <= 0) return null;
   return (
     <span
@@ -99,10 +108,10 @@ function UnpricedFlag({ n, ar }: { n: number; ar: boolean }) {
         "ms-1.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset align-middle",
         PILL_TONE_CLS.warn.chip,
       )}
-      title={ar ? `${n} رحلة بدون سعر — لا تضيف إيرادًا` : `${n} delivered trip(s) with no rate — contributing 0 revenue`}
+      title={fill(t(`reports.daily.unpricedTitle.${plural(n)}`, lang), { n })}
     >
       <AlertTriangle className="h-2.5 w-2.5" aria-hidden />
-      {ar ? `${n} بدون سعر` : `${n} unpriced`}
+      {fill(t("reports.daily.unpricedChip", lang), { n })}
     </span>
   );
 }
@@ -112,7 +121,6 @@ function UnpricedFlag({ n, ar }: { n: number; ar: boolean }) {
 // component that has no other use for it.
 export default function DailyTripsTab({ today }: { today: string }) {
   const { lang } = useApp();
-  const ar = lang === "ar";
 
   const [period, setPeriod] = useState<DailyPeriod>("day");
   const [anchor, setAnchor] = useState(today);
@@ -165,7 +173,9 @@ export default function DailyTripsTab({ today }: { today: string }) {
     [data],
   );
   const truckPlate = useMemo(
-    () => new Map((data?.trucks ?? []).map((t) => [t.id, t.plate])),
+    // `tr`, not `t`: the translator is in scope in this file now, and a map
+    // parameter named `t` shadows it. Same rename the cost statement made.
+    () => new Map((data?.trucks ?? []).map((tr) => [tr.id, tr.plate])),
     [data],
   );
 
@@ -247,23 +257,22 @@ export default function DailyTripsTab({ today }: { today: string }) {
           information; on paper there are no controls, so the record needs to
           state what it is and which day it covers. */}
       <div className="print-only mb-4">
-        <h1 className="text-lg font-bold">{ar ? "تقرير الرحلات اليومي" : "Daily Trips Report"}</h1>
+        <h1 className="text-lg font-bold">{t("reports.daily.printTitle", lang)}</h1>
         <p className="text-sm">{periodLabel}</p>
       </div>
 
       <header className="mb-4 flex flex-wrap items-end justify-between gap-3 no-print">
         <div>
-          <h2 className="text-lg font-semibold">{ar ? "الرحلات اليومية" : "Daily Trips"}</h2>
-          <p className="text-sm muted">
-            {ar
-              ? "سجل يومي قابل للطباعة — كل مشروع نشط، وكل سائق مُسنَد."
-              : "A printable daily record — every active project, every assigned driver."}
-          </p>
+          {/* The TAB's name, not a second spelling of it — one statement, one
+              name, the same call every other statement in the pack makes. The
+              print band above says something different on purpose. */}
+          <h2 className="text-lg font-semibold">{t("reports.statements.tab.daily", lang)}</h2>
+          <p className="text-sm muted">{t("reports.daily.subtitle", lang)}</p>
         </div>
 
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted text-xs">{ar ? "التاريخ" : "Date"}</span>
+            <span className="muted text-xs">{t("reports.th.date", lang)}</span>
             <input
               type="date"
               value={anchor}
@@ -277,19 +286,23 @@ export default function DailyTripsTab({ today }: { today: string }) {
               changes what the whole page means, so it should be visible without
               opening anything. */}
           <div className="inline-flex rounded-lg border p-0.5" style={CARD_STYLE} role="tablist">
+            {/* The list is KEYS now — the `en`/`ar` columns it carried lived in
+                a module that renders nothing, so the names are read here. The
+                selected test is on the key, as it always was; the words below
+                are what the key is rendered AS. */}
             {DAILY_PERIODS.map((p) => (
               <button
-                key={p.key}
+                key={p}
                 type="button"
                 role="tab"
-                aria-selected={period === p.key}
-                onClick={() => setPeriod(p.key)}
+                aria-selected={period === p}
+                onClick={() => setPeriod(p)}
                 className={cn(
                   "focus-ring rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                  period === p.key ? "bg-brand-600 text-white shadow-soft" : "muted hover:text-[rgb(var(--fg))]",
+                  period === p ? "bg-brand-600 text-white shadow-soft" : "muted hover:text-[rgb(var(--fg))]",
                 )}
               >
-                {ar ? p.ar : p.en}
+                {t(`reports.daily.period.${p}`, lang)}
               </button>
             ))}
           </div>
@@ -297,39 +310,45 @@ export default function DailyTripsTab({ today }: { today: string }) {
           <Btn variant="outline" onClick={() => window.print()}>
             <span className="inline-flex items-center gap-1.5">
               <Printer className="h-3.5 w-3.5" aria-hidden />
-              {ar ? "طباعة" : "Print"}
+              {t("reports.statements.print", lang)}
             </span>
           </Btn>
         </div>
       </header>
 
       <p className="mb-4 text-sm muted no-print">
-        {ar ? "الفترة: " : "Showing: "}<span className="font-medium">{periodLabel}</span>
-        {busy && <span className="ms-2">{ar ? "· جارٍ التحميل…" : "· loading…"}</span>}
+        {/* The space after the colon is a JSX `{" "}`; the dictionary value
+            carries no trailing space. The bullet before the loading word is
+            punctuation and stays here — which is also why that word is
+            lowercase and not common.loading. */}
+        {t("reports.daily.showing", lang)}{" "}<span className="font-medium">{periodLabel}</span>
+        {busy && <span className="ms-2">· {t("reports.daily.loadingInline", lang)}</span>}
       </p>
 
       {loadError && (
         <div className="mb-4 rounded-lg px-3 py-2 text-sm bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-1 ring-inset ring-rose-500/20 no-print">
           {loadError}{" "}
           <button onClick={() => void load()} className="focus-ring underline underline-offset-2">
-            {ar ? "إعادة المحاولة" : "Try again"}
+            {t("common.tryAgain", lang)}
           </button>
         </div>
       )}
 
       {data === null && !loadError ? (
-        <div className="py-10 text-center text-sm muted">{ar ? "جارٍ التحميل…" : "Loading…"}</div>
+        <div className="py-10 text-center text-sm muted">{t("common.loading", lang)}</div>
       ) : (
         <>
           {/* ================= PART 1 — PROJECT TABLES ================= */}
           {tables.length === 0 ? (
             <p className="rounded-xl border py-8 text-center text-sm muted" style={CARD_STYLE}>
-              {ar ? "لا توجد مشاريع نشطة." : "No active projects."}
+              {t("reports.daily.noActiveProjects", lang)}
             </p>
           ) : (
             <div className="space-y-6">
-              {tables.map((t) => (
-                <section key={t.projectId} className="rounded-xl border overflow-hidden" style={CARD_STYLE}>
+              {/* `tbl`, not `t` — the translator is in scope and a map
+                  parameter named `t` would shadow it. */}
+              {tables.map((tbl) => (
+                <section key={tbl.projectId} className="rounded-xl border overflow-hidden" style={CARD_STYLE}>
                   {/* NOT BANDED — Turki's call, and it is the right one. This
                       strip is the project's TITLE, not a column heading. The
                       band means "this row is chrome, the rows below it are
@@ -340,24 +359,34 @@ export default function DailyTripsTab({ today }: { today: string }) {
                     className="flex flex-wrap items-baseline justify-between gap-2 border-b px-3 py-2"
                     style={CARD_STYLE}
                   >
-                    <h3 className="text-sm font-semibold">{t.projectName}</h3>
+                    <h3 className="text-sm font-semibold">{tbl.projectName}</h3>
+                    {/* The count and its noun were spliced off a `=== 1` test
+                        in English and left uninflected in Arabic; the phrase is
+                        stored whole per count bucket now. `{n}` RAW — it was
+                        interpolated directly and formatNum would add a
+                        separator this line never had. */}
                     <span className="text-[11px] muted">
-                      {t.drivers.length} {ar ? "سائق مُسنَد" : t.drivers.length === 1 ? "assigned driver" : "assigned drivers"}
+                      {fill(t(`reports.daily.assignedDrivers.${plural(tbl.drivers.length)}`, lang),
+                        { n: tbl.drivers.length })}
                     </span>
                   </div>
 
                   <table className="w-full text-sm">
                     <thead>
+                      {/* The five headings are the leaves the rest of Reports
+                          already reads — common.driver / common.revenue and
+                          three reports.th.*, not five more spellings of words
+                          this app has keyed. */}
                       <tr className="text-start" style={BAND_STYLE}>
-                        <Th>{ar ? "السائق" : "Driver"}</Th>
-                        <Th>{ar ? "الشاحنة" : "Truck"}</Th>
-                        <Th align="end">{ar ? "الرحلات" : "Trips"}</Th>
-                        <Th align="end">{ar ? "العمولة" : "Commission"}</Th>
-                        <Th align="end">{ar ? "الإيراد" : "Revenue"}</Th>
+                        <Th>{t("common.driver", lang)}</Th>
+                        <Th>{t("reports.th.truck", lang)}</Th>
+                        <Th align="end">{t("reports.th.trips", lang)}</Th>
+                        <Th align="end">{t("reports.th.commission", lang)}</Th>
+                        <Th align="end">{t("common.revenue", lang)}</Th>
                       </tr>
                     </thead>
                     <tbody>
-                      {t.drivers.map((g) =>
+                      {tbl.drivers.map((g) =>
                         g.rows.map((r, i) => {
                           const idle = g.totals.trips === 0;
                           return (
@@ -378,17 +407,32 @@ export default function DailyTripsTab({ today }: { today: string }) {
                                   {g.driverName}
                                   {idle && (
                                     <span className="ms-1.5 text-[10px] font-normal muted">
-                                      {ar ? "(لم يقد)" : "(no trips)"}
+                                      {t("reports.daily.noTrips", lang)}
                                     </span>
                                   )}
                                 </td>
                               )}
-                              <td className="px-3 py-2 font-mono text-[12px]" dir="ltr">
-                                {r.plate ?? <span className="muted">—</span>}
+                              {/* ALIGNMENT AND GLYPH ORDER ON DIFFERENT NODES —
+                                  the same split GlobalSearch.tsx documents for
+                                  its shortcut hint. `text-align: start` resolves
+                                  against the element's OWN direction, so a
+                                  dir="ltr" ON THE CELL made "start" mean LEFT
+                                  while the Trucks <Th> (text-start, inheriting
+                                  RTL) sat at the RIGHT — the plate drifted out
+                                  from under its own header in Arabic only.
+                                  The cell now inherits the table's direction and
+                                  the inner span fixes ONLY the glyph order,
+                                  which must stay LTR in every locale because a
+                                  plate is a literal, not prose. LTR is
+                                  unaffected: start was already left there. */}
+                              <td className="px-3 py-2 text-start font-mono text-[12px]">
+                                <span dir="ltr">
+                                  {r.plate ?? <span className="muted">—</span>}
+                                </span>
                               </td>
                               <td className="px-3 py-2 text-end tabular-nums">
                                 {r.trips}
-                                <UnpricedFlag n={r.unpriced} ar={ar} />
+                                <UnpricedFlag n={r.unpriced} lang={lang} />
                               </td>
                               <td className="px-3 py-2 text-end tabular-nums">{money(r.commission)}</td>
                               <td className="px-3 py-2 text-end tabular-nums">{money(r.revenue)}</td>
@@ -397,7 +441,11 @@ export default function DailyTripsTab({ today }: { today: string }) {
                         }),
                       )}
                     </tbody>
-                    <TotalsFoot totals={t.totals} ar={ar} label={ar ? "إجمالي المشروع" : "Project total"} />
+                    <TotalsFoot
+                      totals={tbl.totals}
+                      lang={lang}
+                      label={t("reports.daily.projectTotal", lang)}
+                    />
                   </table>
                 </section>
               ))}
@@ -409,18 +457,17 @@ export default function DailyTripsTab({ today }: { today: string }) {
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
               <div>
                 <h3 className="text-sm font-semibold">
-                  {ar ? "توصيلات خارج المشاريع" : "Deferred location"}
+                  {t("reports.daily.deferredTitle", lang)}
                 </h3>
-                <p className="text-[11px] muted">
-                  {ar
-                    ? "سجل يدوي — نقل ديزل، تعبئة عملاء متفرقة. يظهر في هذا التقرير فقط ولا يدخل في الأرباح أو العمولات."
-                    : "Manual log — diesel transport, ad-hoc customer filling. Appears in this report only; never counted into P&L, revenue or commission."}
-                </p>
+                <p className="text-[11px] muted">{t("reports.daily.deferredNote", lang)}</p>
               </div>
               <Btn onClick={openCreate} className="no-print">
                 <span className="inline-flex items-center gap-1.5">
                   <Plus className="h-3.5 w-3.5" aria-hidden />
-                  {ar ? "إضافة" : "Add entry"}
+                  {/* The OPENER says "Add entry"; the form's own submit button
+                      below says just "Add" (common.add). Two controls, two
+                      English strings — hence two leaves. */}
+                  {t("reports.daily.addEntry", lang)}
                 </span>
               </Btn>
             </div>
@@ -432,7 +479,12 @@ export default function DailyTripsTab({ today }: { today: string }) {
                 style={CARD_STYLE}
               >
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <Field label={ar ? "السائق" : "Driver"}>
+                  {/* The seven field labels are the SAME leaves the tables
+                      above read — the expenses modal does the same with its own
+                      form. `Choose…` is this tab's word and differs from
+                      common.selectPlaceholder's `Select…` in English, so it
+                      keeps a leaf even though the Arabic coincides. */}
+                  <Field label={t("common.driver", lang)}>
                     <select
                       ref={firstFieldRef}
                       value={form.driverId}
@@ -440,26 +492,26 @@ export default function DailyTripsTab({ today }: { today: string }) {
                       className={cn(INPUT, "w-full")}
                       style={INPUT_STYLE}
                     >
-                      <option value="">{ar ? "اختر…" : "Choose…"}</option>
+                      <option value="">{t("reports.daily.choose", lang)}</option>
                       {(data?.drivers ?? []).map((d) => (
                         <option key={d.id} value={d.id}>{d.name}</option>
                       ))}
                     </select>
                   </Field>
-                  <Field label={ar ? "الشاحنة" : "Truck"}>
+                  <Field label={t("reports.th.truck", lang)}>
                     <select
                       value={form.truckId}
                       onChange={(e) => setForm((f) => ({ ...f, truckId: e.target.value }))}
                       className={cn(INPUT, "w-full")}
                       style={INPUT_STYLE}
                     >
-                      <option value="">{ar ? "اختر…" : "Choose…"}</option>
+                      <option value="">{t("reports.daily.choose", lang)}</option>
                       {(data?.trucks ?? []).map((t) => (
                         <option key={t.id} value={t.id}>{t.plate}</option>
                       ))}
                     </select>
                   </Field>
-                  <Field label={ar ? "التاريخ" : "Date"}>
+                  <Field label={t("reports.th.date", lang)}>
                     <input
                       type="date"
                       value={form.deliveryDate}
@@ -468,7 +520,7 @@ export default function DailyTripsTab({ today }: { today: string }) {
                       style={INPUT_STYLE}
                     />
                   </Field>
-                  <Field label={ar ? "الرحلات" : "Trips"}>
+                  <Field label={t("reports.th.trips", lang)}>
                     <input
                       type="number" min={0} step={1} inputMode="numeric"
                       value={form.tripCount}
@@ -477,7 +529,7 @@ export default function DailyTripsTab({ today }: { today: string }) {
                       style={INPUT_STYLE}
                     />
                   </Field>
-                  <Field label={ar ? "العمولة" : "Commission"}>
+                  <Field label={t("reports.th.commission", lang)}>
                     <input
                       type="number" min={0} step="0.01" inputMode="decimal"
                       value={form.commission}
@@ -486,7 +538,7 @@ export default function DailyTripsTab({ today }: { today: string }) {
                       style={INPUT_STYLE}
                     />
                   </Field>
-                  <Field label={ar ? "الإيراد" : "Revenue"}>
+                  <Field label={t("common.revenue", lang)}>
                     <input
                       type="number" min={0} step="0.01" inputMode="decimal"
                       value={form.revenue}
@@ -496,13 +548,13 @@ export default function DailyTripsTab({ today }: { today: string }) {
                     />
                   </Field>
                   <div className="sm:col-span-2">
-                    <Field label={ar ? "الوصف" : "Description"}>
+                    <Field label={t("reports.daily.description", lang)}>
                       <input
                         value={form.description}
                         onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                         className={cn(INPUT, "w-full")}
                         style={INPUT_STYLE}
-                        placeholder={ar ? "مثال: نقل ديزل" : "e.g. diesel transport"}
+                        placeholder={t("reports.daily.descriptionPlaceholder", lang)}
                       />
                     </Field>
                   </div>
@@ -518,10 +570,10 @@ export default function DailyTripsTab({ today }: { today: string }) {
                     onClick={() => { setFormOpen(false); setEditId(null); setFormError(null); }}
                     className="focus-ring rounded-lg px-3 py-1.5 text-sm muted hover:text-[rgb(var(--fg))]"
                   >
-                    {ar ? "إلغاء" : "Cancel"}
+                    {t("common.cancel", lang)}
                   </button>
                   <Btn type="submit" variant="primary" className={saving ? "opacity-50 pointer-events-none" : ""}>
-                    {saving ? (ar ? "جارٍ الحفظ…" : "Saving…") : editId ? (ar ? "تحديث" : "Update") : (ar ? "إضافة" : "Add")}
+                    {saving ? t("common.saving", lang) : editId ? t("reports.daily.update", lang) : t("common.add", lang)}
                   </Btn>
                 </div>
               </form>
@@ -531,12 +583,12 @@ export default function DailyTripsTab({ today }: { today: string }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={BAND_STYLE}>
-                    <Th>{ar ? "السائق" : "Driver"}</Th>
-                    <Th>{ar ? "الشاحنة" : "Truck"}</Th>
-                    <Th>{ar ? "الوصف" : "Description"}</Th>
-                    <Th align="end">{ar ? "الرحلات" : "Trips"}</Th>
-                    <Th align="end">{ar ? "العمولة" : "Commission"}</Th>
-                    <Th align="end">{ar ? "الإيراد" : "Revenue"}</Th>
+                    <Th>{t("common.driver", lang)}</Th>
+                    <Th>{t("reports.th.truck", lang)}</Th>
+                    <Th>{t("reports.daily.description", lang)}</Th>
+                    <Th align="end">{t("reports.th.trips", lang)}</Th>
+                    <Th align="end">{t("reports.th.commission", lang)}</Th>
+                    <Th align="end">{t("common.revenue", lang)}</Th>
                     <th className="w-20 no-print" />
                   </tr>
                 </thead>
@@ -544,15 +596,17 @@ export default function DailyTripsTab({ today }: { today: string }) {
                   {defRows.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-3 py-6 text-center text-sm muted">
-                        {ar ? "لا توجد إدخالات لهذه الفترة." : "No manual entries for this period."}
+                        {t("reports.daily.noManualEntries", lang)}
                       </td>
                     </tr>
                   ) : (
                     defRows.map((r) => (
                       <tr key={r.id} className="border-t" style={CARD_STYLE}>
                         <td className="px-3 py-2">{driverName.get(r.driver_id) ?? "—"}</td>
-                        <td className="px-3 py-2 font-mono text-[12px]" dir="ltr">
-                          {truckPlate.get(r.truck_id) ?? "—"}
+                        {/* Second plate column, same split as the project
+                            tables above — see the note there. */}
+                        <td className="px-3 py-2 text-start font-mono text-[12px]">
+                          <span dir="ltr">{truckPlate.get(r.truck_id) ?? "—"}</span>
                         </td>
                         <td className="px-3 py-2">
                           {r.description ?? <span className="muted">—</span>}
@@ -571,7 +625,7 @@ export default function DailyTripsTab({ today }: { today: string }) {
                               <button
                                 type="button"
                                 onClick={() => void onDelete(r.id)}
-                                aria-label={ar ? "تأكيد الحذف" : "Confirm delete"}
+                                aria-label={t("reports.daily.confirmDelete", lang)}
                                 className="focus-ring rounded-md p-1 text-rose-600 hover:bg-rose-500/10"
                               >
                                 <Check className="h-3.5 w-3.5" aria-hidden />
@@ -579,7 +633,7 @@ export default function DailyTripsTab({ today }: { today: string }) {
                               <button
                                 type="button"
                                 onClick={() => setConfirmDelete(null)}
-                                aria-label={ar ? "إلغاء" : "Cancel"}
+                                aria-label={t("common.cancel", lang)}
                                 className="focus-ring rounded-md p-1 muted hover:text-[rgb(var(--fg))]"
                               >
                                 <X className="h-3.5 w-3.5" aria-hidden />
@@ -590,7 +644,7 @@ export default function DailyTripsTab({ today }: { today: string }) {
                               <button
                                 type="button"
                                 onClick={() => openEdit(r)}
-                                aria-label={ar ? "تعديل" : "Edit"}
+                                aria-label={t("common.edit", lang)}
                                 className="focus-ring rounded-md p-1 muted hover:text-brand-600"
                               >
                                 <Pencil className="h-3.5 w-3.5" aria-hidden />
@@ -598,7 +652,7 @@ export default function DailyTripsTab({ today }: { today: string }) {
                               <button
                                 type="button"
                                 onClick={() => setConfirmDelete(r.id)}
-                                aria-label={ar ? "حذف" : "Delete"}
+                                aria-label={t("common.delete", lang)}
                                 className="focus-ring rounded-md p-1 muted hover:text-rose-600"
                               >
                                 <Trash2 className="h-3.5 w-3.5" aria-hidden />
@@ -616,7 +670,7 @@ export default function DailyTripsTab({ today }: { today: string }) {
                         chrome too, and it was previously tinted `--card`, which
                         is the surface it sits on — no tint at all. */}
                     <tr className="border-t font-medium" style={BAND_BORDERED}>
-                      <td className="px-3 py-2" colSpan={3}>{ar ? "الإجمالي اليدوي" : "Manual total"}</td>
+                      <td className="px-3 py-2" colSpan={3}>{t("reports.daily.manualTotal", lang)}</td>
                       <td className="px-3 py-2 text-end tabular-nums">{defTotals.trips}</td>
                       <td className="px-3 py-2 text-end tabular-nums">{money(defTotals.commission)}</td>
                       <td className="px-3 py-2 text-end tabular-nums">{money(defTotals.revenue)}</td>
@@ -631,11 +685,7 @@ export default function DailyTripsTab({ today }: { today: string }) {
                 project figures would produce one number mixing audited trips
                 with hand-typed ones and no way to tell them apart afterwards —
                 the exact thing 0166's isolation rule exists to prevent. */}
-            <p className="mt-2 text-[11px] muted">
-              {ar
-                ? "يُحتسب هذا الجدول بشكل منفصل ولا يُضاف إلى إجماليات المشاريع أعلاه."
-                : "Totalled separately. These figures are never added into the project totals above, or into any financial report."}
-            </p>
+            <p className="mt-2 text-[11px] muted">{t("reports.daily.separateNote", lang)}</p>
           </section>
         </>
       )}
@@ -665,14 +715,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function TotalsFoot({ totals, ar, label }: { totals: Totals; ar: boolean; label: string }) {
+// `label` arrives ALREADY TRANSLATED and `lang` beside it — the caller composes
+// the one word this foot says, and the flag below needs the language for its
+// own count sentence. Passing `lang` rather than a boolean is what lets the
+// flag read the dictionary directly instead of being handed two strings.
+function TotalsFoot({ totals, lang, label }: { totals: Totals; lang: Lang; label: string }) {
   return (
     <tfoot>
       <tr className="border-t font-medium" style={BAND_BORDERED}>
         <td className="px-3 py-2" colSpan={2}>{label}</td>
         <td className="px-3 py-2 text-end tabular-nums">
           {totals.trips}
-          <UnpricedFlag n={totals.unpriced} ar={ar} />
+          <UnpricedFlag n={totals.unpriced} lang={lang} />
         </td>
         <td className="px-3 py-2 text-end tabular-nums">{money(totals.commission)}</td>
         <td className="px-3 py-2 text-end tabular-nums">{money(totals.revenue)}</td>

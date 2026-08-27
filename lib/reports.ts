@@ -13,6 +13,7 @@
 // cashCoverage below); recomputing either side of that ratio is not.
 
 import { COST_COLOR } from "@/lib/cost-colors";
+import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
 
 // --- View row shapes -------------------------------------------------------
 // One type per view, columns verbatim. Names match the SQL exactly so a
@@ -134,10 +135,10 @@ export type MaintenancePerTruckRow = {
 
 export type PeriodType = "month" | "quarter" | "year";
 
-export const PERIOD_TYPES: { key: PeriodType; label: string }[] = [
-  { key: "month", label: "Monthly" },
-  { key: "quarter", label: "Quarterly" },
-  { key: "year", label: "Yearly" },
+export const PERIOD_TYPES: { key: PeriodType; labelKey: TKey }[] = [
+  { key: "month", labelKey: "reports.grain.month" },
+  { key: "quarter", labelKey: "reports.grain.quarter" },
+  { key: "year", labelKey: "reports.grain.year" },
 ];
 
 export type PnlPeriodRow = {
@@ -409,6 +410,28 @@ export type MetricDictionaryRow = {
 };
 
 /**
+ * The `basis` enum in words — ONE expression, read by all three surfaces that
+ * print it: the dictionary popup's group headings, the builder's metric picker,
+ * and the generated report's column sub-heading. Each of those rendered the raw
+ * column value before, so three copies of this map was the alternative.
+ *
+ * A MISS FALLS THROUGH TO THE RAW STRING rather than rendering nothing. Every
+ * one of those surfaces promises that an unrecognised basis still appears, so a
+ * fifth one added by a future migration shows up untranslated instead of
+ * vanishing. `basis` is typed `string` here for exactly that reason — it is a
+ * database column, not a closed TS union.
+ */
+const BASIS_TKEY: Record<string, TKey> = {
+  accrual: "reports.basis.accrual",
+  cash: "reports.basis.cash",
+  state: "reports.basis.state",
+  operational: "reports.basis.operational",
+};
+
+export const basisLabel = (basis: string, lang: Lang): string =>
+  BASIS_TKEY[basis] ? t(BASIS_TKEY[basis], lang) : basis;
+
+/**
  * Per-driver operations (migration 0101).
  *
  * THE DRIVER IS THE UNIT MEASURED. The truck is context for reading the
@@ -622,6 +645,9 @@ export type NarrativeBullet = {
   text: string;
 };
 
+/** The four buckets the "largest cost" bullet can name — data, not a label. */
+type NarrativeBucketKey = "payroll" | "os" | "parts" | "commissions";
+
 const sar = (n: number) =>
   new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n) + " SAR";
 
@@ -633,6 +659,20 @@ const sar = (n: number) =>
  *
  * Where a figure cannot honestly be stated, the bullet says so instead of
  * being omitted — a silent gap reads as "nothing happened".
+ *
+ * WHY EVERY BRANCH IS ITS OWN DICTIONARY LEAF. English built these lines by
+ * splicing into the middle of a sentence: a bare "up"/"down"/"level", an
+ * optional " — a 12.4% margin" clause, an "s" on trucks and work orders.
+ * None of those survive translation — Arabic changes the verb, the case and
+ * the word order around each of them — so a branch that produced a different
+ * English sentence now looks up a different key, and each key holds the WHOLE
+ * sentence. `plural()` picks the count bucket, and the English values under
+ * `two`/`few`/`many` are written identically wherever English does not
+ * inflect, so whichever bucket fires the English is byte-for-byte what this
+ * function printed before.
+ *
+ * Every FIGURE still comes in through `sar()` / `formatPct()` / `formatShare()`
+ * — Latin digits, en-US, unchanged. Nothing here computes a number.
  */
 export function buildNarrative(args: {
   current: PnlPeriodRow;
@@ -647,17 +687,20 @@ export function buildNarrative(args: {
   workOrders: number;
   salesReturns: number;
   topCustomer: { name: string; revenue: number } | null;
+  lang: Lang;
 }): NarrativeBullet[] {
   const {
     current: c, prior: p, inProgress, collected, outstanding, oldestDays,
-    trips, delivered, peakTrucks, workOrders, salesReturns, topCustomer,
+    trips, delivered, peakTrucks, workOrders, salesReturns, topCustomer, lang,
   } = args;
   const out: NarrativeBullet[] = [];
+  const say = (key: TKey, vals: Record<string, string | number> = {}) =>
+    fill(t(key, lang), vals);
 
   if (inProgress) {
     out.push({
       tone: "info",
-      text: `${c.label} is still running. Costs accumulate daily while revenue is only recognised when an invoice is confirmed, so the figures below understate how the period will finish.`,
+      text: say("reports.narrative.inProgress", { p: c.label }),
     });
   }
 
@@ -665,15 +708,24 @@ export function buildNarrative(args: {
   if (c.revenue_sar === 0) {
     out.push({
       tone: "warn",
-      text: `No revenue was recognised in ${c.label} — no invoice was confirmed. Costs of ${sar(c.operating_cost_sar)} still landed.`,
+      text: say("reports.narrative.noRevenue", {
+        p: c.label, c: sar(c.operating_cost_sar),
+      }),
     });
   } else {
     const d = p ? delta(c.revenue_sar, p.revenue_sar) : null;
     out.push({
       tone: d ? d.dir : "info",
       text: d && d.pct !== null
-        ? `Revenue was ${sar(c.revenue_sar)}, ${d.dir === "up" ? "up" : d.dir === "down" ? "down" : "level"} ${formatPct(d.pct)} on ${p!.label}.`
-        : `Revenue was ${sar(c.revenue_sar)}${p ? `, against nothing in ${p.label}` : ""}.`,
+        ? say(
+            d.dir === "up" ? "reports.narrative.revenueUp"
+              : d.dir === "down" ? "reports.narrative.revenueDown"
+              : "reports.narrative.revenueFlat",
+            { v: sar(c.revenue_sar), d: formatPct(d.pct), p: p!.label },
+          )
+        : p
+          ? say("reports.narrative.revenueVsNothing", { v: sar(c.revenue_sar), p: p.label })
+          : say("reports.narrative.revenueBare", { v: sar(c.revenue_sar) }),
     });
   }
 
@@ -682,22 +734,44 @@ export function buildNarrative(args: {
   out.push({
     tone: profitable ? "up" : "down",
     text: profitable
-      ? `Operating profit was ${sar(c.operating_profit_sar)}${c.operating_margin_pct !== null ? ` — a ${formatShare(c.operating_margin_pct)} margin` : ""}, after ${sar(c.operating_cost_sar)} of operating cost.`
-      : `The period ran at a loss of ${sar(Math.abs(c.operating_profit_sar))}: ${sar(c.operating_cost_sar)} of cost against ${sar(c.revenue_sar)} of revenue.`,
+      ? c.operating_margin_pct !== null
+        ? say("reports.narrative.profitWithMargin", {
+            v: sar(c.operating_profit_sar),
+            m: formatShare(c.operating_margin_pct),
+            c: sar(c.operating_cost_sar),
+          })
+        : say("reports.narrative.profitNoMargin", {
+            v: sar(c.operating_profit_sar), c: sar(c.operating_cost_sar),
+          })
+      : say("reports.narrative.loss", {
+          l: sar(Math.abs(c.operating_profit_sar)),
+          c: sar(c.operating_cost_sar),
+          r: sar(c.revenue_sar),
+        }),
   });
 
   // Largest cost bucket — a fact about composition, not a judgement.
-  const buckets = [
-    { label: "payroll", v: c.payroll_sar },
-    { label: "outsourced repairs", v: c.os_cost_sar },
-    { label: "parts", v: c.parts_cost_sar },
-    { label: "commissions", v: c.commissions_sar },
-  ].sort((a, b) => b.v - a.v);
+  //
+  // Sorted on `v`, then named through `key`. The bucket used to carry its
+  // English name and be identified by it; the name is now a lookup off data, so
+  // the winner is the same row in either language.
+  const buckets: { key: NarrativeBucketKey; v: number }[] = [
+    { key: "payroll", v: c.payroll_sar },
+    { key: "os", v: c.os_cost_sar },
+    { key: "parts", v: c.parts_cost_sar },
+    { key: "commissions", v: c.commissions_sar },
+  ];
+  buckets.sort((a, b) => b.v - a.v);
   if (buckets[0].v > 0) {
     const share = c.operating_cost_sar > 0 ? (buckets[0].v / c.operating_cost_sar) * 100 : null;
+    const b = t(`reports.narrative.bucket.${buckets[0].key}`, lang);
     out.push({
       tone: "info",
-      text: `The largest cost was ${buckets[0].label} at ${sar(buckets[0].v)}${share !== null ? `, ${formatShare(share)} of operating cost` : ""}.`,
+      text: share !== null
+        ? say("reports.narrative.largestCostWithShare", {
+            b, v: sar(buckets[0].v), s: formatShare(share),
+          })
+        : say("reports.narrative.largestCost", { b, v: sar(buckets[0].v) }),
     });
   }
 
@@ -706,7 +780,9 @@ export function buildNarrative(args: {
   if (c.expenses_sar > 0) {
     out.push({
       tone: "info",
-      text: `Manually recorded expenses of ${sar(c.expenses_sar)} bring net profit to ${sar(c.net_profit_sar)}. These are tracked separately from the four operational buckets.`,
+      text: say("reports.narrative.expenses", {
+        e: sar(c.expenses_sar), n: sar(c.net_profit_sar),
+      }),
     });
   }
 
@@ -714,31 +790,42 @@ export function buildNarrative(args: {
   if (collected > 0) {
     out.push({
       tone: "info",
-      text: `${sar(collected)} of cash was collected in the period. Collections are VAT-inclusive and land when an invoice is paid, so they will not equal revenue.`,
+      text: say("reports.narrative.collected", { v: sar(collected) }),
     });
   } else {
-    out.push({ tone: "warn", text: "No cash was collected against invoices in this period." });
+    out.push({ tone: "warn", text: say("reports.narrative.noCash") });
   }
 
   if (outstanding > 0) {
     out.push({
       tone: oldestDays !== null && oldestDays > 60 ? "warn" : "info",
-      text: `${sar(outstanding)} remains outstanding across all unpaid invoices${oldestDays !== null ? `, the oldest ${oldestDays} days since confirmation` : ""}. This is a position as of today, not a figure for the period.`,
+      text: oldestDays !== null
+        ? say(`reports.narrative.outstandingAged.${plural(oldestDays)}`, {
+            v: sar(outstanding), d: oldestDays,
+          })
+        : say("reports.narrative.outstanding", { v: sar(outstanding) }),
     });
   }
 
   if (salesReturns > 0) {
     out.push({
       tone: "warn",
-      text: `${sar(salesReturns)} of previously confirmed invoicing was reversed as sales returns. Revenue above already excludes it — the two are never netted silently.`,
+      text: say("reports.narrative.salesReturns", { v: sar(salesReturns) }),
     });
   }
 
-  // Operations
+  // Operations — TWO counted nouns in one sentence, so the work-order variant
+  // is a nested family: trucks outside, work orders inside.
   if (trips > 0) {
     out.push({
       tone: "info",
-      text: `${delivered} of ${trips} trips were delivered, across at most ${peakTrucks} truck${peakTrucks === 1 ? "" : "s"} in any single month${workOrders > 0 ? `, with ${workOrders} work order${workOrders === 1 ? "" : "s"} raised` : ""}.`,
+      text: workOrders > 0
+        ? say(`reports.narrative.opsWo.${plural(peakTrucks)}.${plural(workOrders)}`, {
+            d: delivered, t: trips, k: peakTrucks, w: workOrders,
+          })
+        : say(`reports.narrative.ops.${plural(peakTrucks)}`, {
+            d: delivered, t: trips, k: peakTrucks,
+          }),
     });
   }
 
@@ -746,14 +833,20 @@ export function buildNarrative(args: {
     const share = c.revenue_sar > 0 ? (topCustomer.revenue / c.revenue_sar) * 100 : null;
     out.push({
       tone: share !== null && share > 50 ? "warn" : "info",
-      text: `${topCustomer.name} was the largest customer at ${sar(topCustomer.revenue)}${share !== null ? `, ${formatShare(share)} of revenue` : ""}.`,
+      text: share !== null
+        ? say("reports.narrative.topCustomerWithShare", {
+            n: topCustomer.name, v: sar(topCustomer.revenue), s: formatShare(share),
+          })
+        : say("reports.narrative.topCustomer", {
+            n: topCustomer.name, v: sar(topCustomer.revenue),
+          }),
     });
   }
 
   return out;
 }
 
-type CostBucket = { key: string; label: string; value: number; color: string };
+type CostBucket = { key: string; labelKey: TKey; value: number; color: string };
 
 /**
  * The four operational buckets, in a fixed order with fixed colours.
@@ -917,13 +1010,18 @@ export type PayslipSnapshot = {
  * `key` is deliberately left as it was — "os", not "outsourced". It is this
  * list's own identity and the Overview bars use it as a React key; renaming it
  * would be churn no reader benefits from. The colour lookup maps it across.
+ *
+ * The NAMES point at dashboard.costType.* rather than at a reports-only copy:
+ * the same five buckets are already keyed there for the Dashboard's cost mix,
+ * with the same English, and two dictionary entries for one bucket is exactly
+ * how the colours drifted apart before lib/cost-colors.ts existed.
  */
 export function costBuckets(row: PnlRow): CostBucket[] {
   return [
-    { key: "parts", label: "Parts", value: row.parts_cost_sar, color: COST_COLOR.parts },
-    { key: "os", label: "Outsourced", value: row.os_cost_sar, color: COST_COLOR.outsourced },
-    { key: "payroll", label: "Payroll", value: row.payroll_sar, color: COST_COLOR.payroll },
-    { key: "commissions", label: "Commissions", value: row.commissions_sar, color: COST_COLOR.commissions },
-    { key: "filling", label: "Station fill", value: row.filling_cost_sar, color: COST_COLOR.filling },
+    { key: "parts", labelKey: "dashboard.costType.parts", value: row.parts_cost_sar, color: COST_COLOR.parts },
+    { key: "os", labelKey: "dashboard.costType.outsourced", value: row.os_cost_sar, color: COST_COLOR.outsourced },
+    { key: "payroll", labelKey: "dashboard.costType.payroll", value: row.payroll_sar, color: COST_COLOR.payroll },
+    { key: "commissions", labelKey: "dashboard.costType.commissions", value: row.commissions_sar, color: COST_COLOR.commissions },
+    { key: "filling", labelKey: "dashboard.costType.filling", value: row.filling_cost_sar, color: COST_COLOR.filling },
   ];
 }

@@ -19,6 +19,8 @@ import { createPortal } from "react-dom";
 import { X, Plus, Pencil, Trash2, Check, AlertTriangle } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
+import { useApp } from "@/components/AppShell";
+import { t, type TKey } from "@/lib/i18n";
 import { createExpense, updateExpense, deleteExpense, type ExpenseInput } from "./actions";
 import ScrollLock from "@/components/ScrollLock";
 
@@ -51,6 +53,9 @@ export default function ExpensesModal({
   today: string;
   onChanged: () => void;
 }) {
+  const { lang } = useApp();
+  const tt = (key: TKey) => t(key, lang);
+
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -138,10 +143,11 @@ export default function ExpensesModal({
 
         <div className="flex items-start justify-between p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
           <div>
-            <h2 className="font-semibold">Other expenses</h2>
+            {/* The same two words as the metric whose SOURCE ROWS this edits,
+                so it reads that key rather than minting a second copy. */}
+            <h2 className="font-semibold">{tt("reports.metric.otherExpenses")}</h2>
             <p className="text-[11px] muted">
-              Costs the app does not otherwise track. Kept separate from the four
-              operational buckets, never merged into them.
+              {tt("reports.expenses.intro")}
             </p>
           </div>
           <button onClick={onClose}
@@ -154,7 +160,7 @@ export default function ExpensesModal({
         <div className="p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <label className="text-sm">
-              <span className="muted text-xs block mb-1">Date</span>
+              <span className="muted text-xs block mb-1">{tt("reports.th.date")}</span>
               <input
                 type="date"
                 value={draft.expense_date}
@@ -165,11 +171,11 @@ export default function ExpensesModal({
             </label>
 
             <label className="text-sm">
-              <span className="muted text-xs block mb-1">Category</span>
+              <span className="muted text-xs block mb-1">{tt("reports.th.category")}</span>
               <input
                 list="expense-categories"
                 value={draft.category}
-                placeholder="e.g. Rent"
+                placeholder={tt("reports.expenses.categoryExample")}
                 onChange={(e) => setDraft({ ...draft, category: e.target.value })}
                 className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
                 style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
@@ -180,7 +186,7 @@ export default function ExpensesModal({
             </label>
 
             <label className="text-sm">
-              <span className="muted text-xs block mb-1">Amount (SAR)</span>
+              <span className="muted text-xs block mb-1">{tt("reports.expenses.amountSar")}</span>
               <input
                 inputMode="decimal"
                 value={draft.amountText}
@@ -192,7 +198,7 @@ export default function ExpensesModal({
             </label>
 
             <label className="text-sm">
-              <span className="muted text-xs block mb-1">Note (optional)</span>
+              <span className="muted text-xs block mb-1">{tt("reports.expenses.noteOptional")}</span>
               <input
                 value={draft.note ?? ""}
                 onChange={(e) => setDraft({ ...draft, note: e.target.value || null })}
@@ -202,6 +208,10 @@ export default function ExpensesModal({
             </label>
           </div>
 
+          {/* `error` is the SERVER ACTION's own message, not a dictionary
+              string. Server strings are out of scope for this batch, and
+              wrapping one in t() would need a key per failure the action can
+              report — which is a change to actions.ts, not to this file. */}
           {error && (
             <div className="mt-3 rounded-lg px-3 py-2 text-sm flex gap-2 bg-rose-500/10 text-rose-700 dark:text-rose-300">
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -211,30 +221,33 @@ export default function ExpensesModal({
 
           <div className="mt-3 flex items-center gap-2">
             <Btn variant="primary" onClick={submit} disabled={!canSubmit}>
-              {editingId ? <><Check className="h-4 w-4" />Save changes</> : <><Plus className="h-4 w-4" />Add expense</>}
+              {editingId
+                ? <><Check className="h-4 w-4" />{tt("reports.expenses.saveChanges")}</>
+                : <><Plus className="h-4 w-4" />{tt("reports.expenses.addExpense")}</>}
             </Btn>
-            {editingId && <Btn variant="outline" onClick={reset} disabled={busy}>Cancel</Btn>}
+            {editingId && <Btn variant="outline" onClick={reset} disabled={busy}>{tt("common.cancel")}</Btn>}
           </div>
         </div>
 
         {/* ---- List ---------------------------------------------------- */}
         <div className="p-4">
+          {/* The `&amp;` in the empty-state sentence was JSX escaping, not
+              content — it has always rendered a literal "P&L", which is what
+              the dictionary value holds. */}
           {sorted.length === 0 ? (
             <div className="py-10 text-center text-sm muted">
-              No expenses recorded. Until something is added here, net profit equals
-              operating profit — which the P&amp;L shows honestly rather than implying
-              these costs are zero.
+              {tt("reports.expenses.empty")}
             </div>
           ) : (
             <Table>
               <thead>
                 <tr>
-                  <TH>Date</TH>
-                  <TH>Category</TH>
-                  <TH>Note</TH>
-                  <TH>Entered by</TH>
-                  <TH className="text-right">Amount</TH>
-                  <TH className="text-right">Actions</TH>
+                  <TH>{tt("reports.th.date")}</TH>
+                  <TH>{tt("reports.th.category")}</TH>
+                  <TH>{tt("common.note")}</TH>
+                  <TH>{tt("reports.th.enteredBy")}</TH>
+                  <TH className="text-right">{tt("reports.th.amount")}</TH>
+                  <TH className="text-right">{tt("common.actions")}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -248,21 +261,21 @@ export default function ExpensesModal({
                     <TD className="text-right">
                       {confirmId === row.id ? (
                         <span className="inline-flex items-center gap-1.5">
-                          <span className="text-xs muted">Delete?</span>
+                          <span className="text-xs muted">{tt("reports.expenses.confirmDelete")}</span>
                           <button onClick={() => remove(row.id)} disabled={busy}
                             className="text-xs font-medium text-rose-600 dark:text-rose-400 hover:underline">
-                            Yes
+                            {tt("reports.expenses.yes")}
                           </button>
                           <button onClick={() => setConfirmId(null)}
-                            className="text-xs muted hover:underline">No</button>
+                            className="text-xs muted hover:underline">{tt("reports.expenses.no")}</button>
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1">
-                          <button onClick={() => startEdit(row)} title="Edit"
+                          <button onClick={() => startEdit(row)} title={tt("common.edit")}
                             className="h-7 w-7 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5">
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
-                          <button onClick={() => setConfirmId(row.id)} title="Delete"
+                          <button onClick={() => setConfirmId(row.id)} title={tt("common.delete")}
                             className="h-7 w-7 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5">
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -277,7 +290,7 @@ export default function ExpensesModal({
         </div>
 
         <div className="flex justify-end p-4 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-          <Btn variant="outline" onClick={onClose}>Close</Btn>
+          <Btn variant="outline" onClick={onClose}>{tt("reports.close")}</Btn>
         </div>
       </div>
     </div>,

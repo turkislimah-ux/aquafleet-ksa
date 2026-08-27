@@ -47,13 +47,21 @@ import type {
   MetricDictionaryRow, PeriodType, InvoiceOutstandingLiveRow,
 } from "./reports";
 import { monthsIn, periodsOf, outstandingLiveIndex } from "./reports";
+import { t, fill, type Lang, type TKey } from "./i18n";
 
 export type Grouping = "period" | "customer" | "truck";
 
-export const GROUPING_LABELS: Record<Grouping, string> = {
-  period: "By period",
-  customer: "By customer",
-  truck: "By truck",
+/**
+ * The grouping names, as dictionary keys rather than English.
+ *
+ * A KEY and not a rendered string because the caller decides the language, and
+ * because two call sites lower-case this for mid-sentence use — which has to
+ * happen after the lookup, not before it.
+ */
+export const GROUPING_TKEY: Record<Grouping, TKey> = {
+  period: "reports.builder.grouping.period",
+  customer: "reports.builder.grouping.customer",
+  truck: "reports.builder.grouping.truck",
 };
 
 type MetricBasis = "accrual" | "cash" | "operational";
@@ -67,7 +75,8 @@ type MetricUnit = "SAR" | "count" | "percent";
  */
 type BuilderMetric = {
   key: string;
-  label: string;
+  /** Dictionary key, not a rendered name — this file never picks a language. */
+  labelKey: TKey;
   basis: MetricBasis;
   unit: MetricUnit;
   groupings: Grouping[];
@@ -138,17 +147,17 @@ const EMPTY: Bucket = {
  * and it is labelled as such.
  */
 const BUILDER_METRICS: BuilderMetric[] = [
-  { key: "revenue", label: "Revenue", basis: "accrual", unit: "SAR",
+  { key: "revenue", labelKey: "reports.metric.revenue", basis: "accrual", unit: "SAR",
     groupings: ["period", "customer"], kind: "sum", field: "revenue" },
-  { key: "revenue", label: "Revenue (allocated)", basis: "accrual", unit: "SAR",
+  { key: "revenue", labelKey: "reports.metric.revenueAllocated", basis: "accrual", unit: "SAR",
     groupings: ["truck"], kind: "sum", field: "allocatedRevenue" },
-  { key: "parts_cost_at_consumption", label: "Parts cost", basis: "accrual", unit: "SAR",
+  { key: "parts_cost_at_consumption", labelKey: "reports.metric.partsCost", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "parts" },
-  { key: "os_cost", label: "Outsourced cost", basis: "accrual", unit: "SAR",
+  { key: "os_cost", labelKey: "reports.metric.osCost", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "os" },
-  { key: "payroll_cost", label: "Payroll", basis: "accrual", unit: "SAR",
+  { key: "payroll_cost", labelKey: "reports.metric.payroll", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "payroll" },
-  { key: "commissions_cost", label: "Commissions", basis: "accrual", unit: "SAR",
+  { key: "commissions_cost", labelKey: "reports.metric.commissions", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "commissions" },
   // Filling is period-only, exactly like the four buckets around it: its figure
   // comes from PnlPeriodRow, which is per-period. There is no per-customer or
@@ -156,39 +165,51 @@ const BUILDER_METRICS: BuilderMetric[] = [
   // that does not exist. Requires metric_key 'filling_cost' to be live in
   // report_metrics (migration 0124) — until then availableMetrics filters this
   // row out and the block simply does not appear.
-  { key: "filling_cost", label: "Water filling cost", basis: "accrual", unit: "SAR",
+  { key: "filling_cost", labelKey: "reports.metric.fillingCost", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "filling" },
-  { key: "operating_cost", label: "Operating cost", basis: "accrual", unit: "SAR",
+  { key: "operating_cost", labelKey: "reports.metric.operatingCost", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "operatingCost" },
-  { key: "operating_profit", label: "Operating profit", basis: "accrual", unit: "SAR",
+  { key: "operating_profit", labelKey: "reports.metric.operatingProfit", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "operatingProfit" },
-  { key: "net_profit", label: "Net profit", basis: "accrual", unit: "SAR",
+  { key: "net_profit", labelKey: "reports.metric.netProfit", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "netProfit" },
-  { key: "expenses", label: "Other expenses", basis: "accrual", unit: "SAR",
+  { key: "expenses", labelKey: "reports.metric.otherExpenses", basis: "accrual", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "expenses" },
-  { key: "operating_margin", label: "Operating margin", basis: "accrual", unit: "percent",
+  { key: "operating_margin", labelKey: "reports.metric.operatingMargin", basis: "accrual", unit: "percent",
     groupings: ["period"], kind: "ratio",
     ratio: { numerator: "operatingProfit", denominator: "revenue" } },
-  { key: "collections", label: "Collections", basis: "cash", unit: "SAR",
+  { key: "collections", labelKey: "reports.metric.collections", basis: "cash", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "collections" },
-  { key: "purchasing_spend", label: "Purchasing spend", basis: "cash", unit: "SAR",
+  { key: "purchasing_spend", labelKey: "reports.metric.purchasingSpend", basis: "cash", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "purchasing" },
-  { key: "operations", label: "Trips delivered", basis: "operational", unit: "count",
+  { key: "operations", labelKey: "reports.metric.tripsDelivered", basis: "operational", unit: "count",
     groupings: ["period", "truck"], kind: "sum", field: "tripsDelivered" },
-  { key: "revenue", label: "Invoices", basis: "accrual", unit: "count",
+  { key: "revenue", labelKey: "reports.metric.invoices", basis: "accrual", unit: "count",
     groupings: ["customer"], kind: "sum", field: "invoices" },
-  { key: "revenue", label: "Outstanding on period invoices", basis: "accrual", unit: "SAR",
+  { key: "revenue", labelKey: "reports.metric.outstandingPeriod", basis: "accrual", unit: "SAR",
     groupings: ["customer"], kind: "sum", field: "outstanding" },
-  { key: "maintenance_parts_per_truck", label: "Maintenance parts", basis: "accrual", unit: "SAR",
+  { key: "maintenance_parts_per_truck", labelKey: "reports.metric.maintParts", basis: "accrual", unit: "SAR",
     groupings: ["truck"], kind: "sum", field: "maintParts" },
-  { key: "os_payments_per_truck", label: "Outsourced repairs", basis: "accrual", unit: "SAR",
+  { key: "os_payments_per_truck", labelKey: "reports.metric.maintOs", basis: "accrual", unit: "SAR",
     groupings: ["truck"], kind: "sum", field: "maintOs" },
-  { key: "total_maintenance_per_truck", label: "Total maintenance", basis: "accrual", unit: "SAR",
+  { key: "total_maintenance_per_truck", labelKey: "reports.metric.maintTotal", basis: "accrual", unit: "SAR",
     groupings: ["truck"], kind: "sum", field: "maintTotal" },
 ];
 
-/** Stable identity for a block — key alone is not unique (see revenue). */
-export const metricId = (m: BuilderMetric) => `${m.key}::${m.label}`;
+/**
+ * Stable identity for a block — `key` alone is not unique (four blocks read
+ * metric_key "revenue").
+ *
+ * The discriminator is the ACCUMULATOR the block reads, which is data. It was
+ * the block's display LABEL until this commit, and that was a live bug rather
+ * than a matter of taste: `BuilderSelection.metricIds` is React state in
+ * StatementsTab that survives a language switch, so the moment the labels
+ * became translatable an id minted in one language would stop resolving in the
+ * other — `selected` would come back empty and a generated custom report would
+ * go blank on toggle. Nothing renders this string.
+ */
+export const metricId = (m: BuilderMetric) =>
+  `${m.key}::${m.field ?? `${m.ratio!.numerator}/${m.ratio!.denominator}`}`;
 
 /**
  * THE FENCE. Only blocks whose dictionary key is live are offerable.
@@ -209,7 +230,7 @@ export function allowedGroupings(selected: BuilderMetric[]): Grouping[] {
 }
 
 type ReportRow = { label: string; bucket: Bucket };
-type ReportColumn = { id: string; label: string; basis: MetricBasis; unit: MetricUnit };
+type ReportColumn = { id: string; labelKey: TKey; basis: MetricBasis; unit: MetricUnit };
 export type BuiltReport = {
   columns: ReportColumn[];
   rows: { label: string; values: (number | null)[] }[];
@@ -246,11 +267,17 @@ type BuilderData = {
  * Reads the same view rows every other report on the page reads. The only
  * arithmetic is accumulation of additive figures and, for ratio columns, one
  * division per row using that row's OWN totals.
+ *
+ * `lang` reaches this far in only because the NOTES are prose: they are written
+ * here, beside the branch that earns each one, and a caller cannot reconstruct
+ * which fired. Same shape as weeklySummary() in lib/parts-usage.ts. No figure,
+ * no column and no row order depends on it.
  */
 export function buildReport(
   selection: BuilderSelection,
   data: BuilderData,
   dictionary: MetricDictionaryRow[],
+  lang: Lang,
 ): BuiltReport {
   const catalogue = availableMetrics(dictionary);
   const selected = selection.metricIds
@@ -258,7 +285,7 @@ export function buildReport(
     .filter((m): m is BuilderMetric => Boolean(m) && m!.groupings.includes(selection.grouping));
 
   const columns: ReportColumn[] = selected.map((m) => ({
-    id: metricId(m), label: m.label, basis: m.basis, unit: m.unit,
+    id: metricId(m), labelKey: m.labelKey, basis: m.basis, unit: m.unit,
   }));
 
   const rows: ReportRow[] = [];
@@ -267,7 +294,7 @@ export function buildReport(
   if (selection.grouping === "period") {
     // Every period of the chosen grain — a trend, so the single-period picker
     // does not filter here. Said out loud rather than left to be discovered.
-    notes.push(`Every ${selection.periodType} is listed, newest first — the period picker does not filter a by-period report.`);
+    notes.push(t(`reports.builder.note.everyPeriod.${selection.periodType}`, lang));
     for (const p of periodsOf(data.pnlPeriods, selection.periodType)) {
       const b: Bucket = { ...EMPTY };
       b.revenue = p.revenue_sar;
@@ -293,8 +320,8 @@ export function buildReport(
   } else {
     const period = data.pnlPeriods.find(
       (p) => p.period_type === selection.periodType && p.period_start === selection.periodStart);
-    if (!period) return { columns, rows: [], notes: ["No period selected."] };
-    notes.push(`Rows cover ${period.label} only.`);
+    if (!period) return { columns, rows: [], notes: [t("reports.builder.note.noPeriod", lang)] };
+    notes.push(fill(t("reports.builder.note.rowsCover", lang), { p: period.label }));
 
     if (selection.grouping === "customer") {
       // 0137 — outstanding comes from v_invoice_outstanding_live, keyed by
@@ -319,11 +346,11 @@ export function buildReport(
       }
       for (const e of byId.values()) rows.push({ label: e.label, bucket: e.b });
       if (selected.some((m) => m.field === "outstanding")) {
-        notes.push("Outstanding is measured on this period's own invoices, not the all-time receivables position.");
+        notes.push(t("reports.builder.note.outstandingPeriodOnly", lang));
         // Said out loud because the figure can now MOVE without any invoice
         // changing: for a prepaid customer it reflects the balance as it stands
         // right now, so a top-up today reduces what a closed period shows as due.
-        notes.push("Outstanding reflects the customer's current prepaid balance, capped at each invoice's own amount due — it can never exceed the document.");
+        notes.push(t("reports.builder.note.outstandingPrepaid", lang));
       }
     } else {
       const byId = new Map<string, { label: string; b: Bucket }>();
@@ -347,17 +374,17 @@ export function buildReport(
       }
       for (const e of byId.values()) rows.push({ label: e.label, bucket: e.b });
       if (selected.some((m) => m.field === "allocatedRevenue")) {
-        notes.push("Revenue per truck is an allocation: each invoice's revenue is split equally across its trips.");
+        notes.push(t("reports.builder.note.allocation", lang));
       }
     }
   }
 
   const bases = new Set(selected.map((m) => m.basis));
   if (bases.size > 1) {
-    notes.push("Columns use different bases (accrual, cash, operational). They are shown side by side and are never added together — each column stands on its own.");
+    notes.push(t("reports.builder.note.mixedBases", lang));
   }
   if (selected.some((m) => m.kind === "ratio")) {
-    notes.push("Ratio columns are computed from each row's own totals, never averaged from smaller periods.");
+    notes.push(t("reports.builder.note.ratios", lang));
   }
 
   const valueRows = rows.map((r) => ({

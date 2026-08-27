@@ -19,9 +19,18 @@ import { useMemo, useState } from "react";
 import { Info, Printer } from "lucide-react";
 import { Table, TH, TD, Btn } from "@/components/ui";
 import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, type Lang } from "@/lib/i18n";
+// WATER_TYPE_LABELS stays ENGLISH this batch, deliberately. It lives in
+// lib/db-types.ts and is read by 20+ call sites across app/trips/**,
+// lib/invoiceDisplay.ts and a server action — exactly one of them is in
+// app/reports/. Translating it here would reach outside this batch; minting a
+// reports-local copy is how one map becomes three and a fourth surface gets a
+// fifth spelling. It is flagged for the Trips batch instead.
 import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
 import type { BuiltReport } from "@/lib/report-builder";
 import {
+  basisLabel,
   monthsIn, sumOver, peakOver, formatShare, AGING_ORDER, outstandingLiveIndex,
   type InvoiceOutstandingLiveRow,
   type PnlPeriodRow, type RevenueInvoiceRow, type SalesReturnRow,
@@ -55,6 +64,7 @@ function Note({ children }: { children: React.ReactNode }) {
  * to carry its own identification or it becomes an anonymous table of numbers.
  */
 function PrintBand({ title, period }: { title: React.ReactNode; period: string }) {
+  const { lang } = useApp();
   return (
     <div className="print-only" style={{ marginBottom: "10pt", borderBottom: "1px solid #000", paddingBottom: "6pt" }}>
       {/* translate="no" — this line is the whole point of the band: it is the
@@ -73,7 +83,7 @@ function PrintBand({ title, period }: { title: React.ReactNode; period: string }
             statement generated at 01:30 went out stamped yesterday. Of the
             three UTC-slice sites this was the only one whose wrong answer
             ends up on paper in someone else's hands. */}
-        <span>Generated {todayKey()}</span>
+        <span>{fill(t("reports.print.generated", lang), { d: todayKey() })}</span>
       </div>
     </div>
   );
@@ -107,6 +117,7 @@ export function RevenueStatement({
   outstandingLive: InvoiceOutstandingLiveRow[];
   periodStart: string; periodEnd: string; label: string;
 }) {
+  const { lang } = useApp();
   const rows = useMemo(() => {
     const inPeriod = invoices.filter((i) => i.month >= periodStart && i.month <= periodEnd);
     // 0137 — outstanding comes from the view, keyed by invoice_id. The cap
@@ -153,19 +164,19 @@ export function RevenueStatement({
 
   return (
     <div id="revenue-print" className="card p-6">
-      <Head title="Revenue statement" period={label} />
+      <Head title={t("reports.revenue.title", lang)} period={label} />
 
       {rows.length === 0 ? (
-        <Empty>No invoices were confirmed in this period.</Empty>
+        <Empty>{t("reports.revenue.empty", lang)}</Empty>
       ) : (
         <Table>
           <thead>
             <tr>
-              <TH>Customer</TH>
-              <TH className="text-right">Invoices</TH>
-              <TH className="text-right">Revenue</TH>
-              <TH className="text-right">Paid</TH>
-              <TH className="text-right">Outstanding</TH>
+              <TH>{t("reports.th.customer", lang)}</TH>
+              <TH className="text-right">{t("reports.th.invoices", lang)}</TH>
+              <TH className="text-right">{t("reports.metric.revenue", lang)}</TH>
+              <TH className="text-right">{t("reports.th.paid", lang)}</TH>
+              <TH className="text-right">{t("reports.th.outstanding", lang)}</TH>
             </tr>
           </thead>
           <tbody>
@@ -183,7 +194,7 @@ export function RevenueStatement({
               </tr>
             ))}
             <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
-              <TD>Total</TD>
+              <TD>{t("reports.th.total", lang)}</TD>
               <TD className="text-right tabular-nums">{formatNum(sumOver(rows, (r) => r.count))}</TD>
               <TD className="text-right tabular-nums">{formatSar(totals.revenue)}</TD>
               <TD className="text-right tabular-nums">{formatSar(totals.paid)}</TD>
@@ -196,17 +207,17 @@ export function RevenueStatement({
       {/* Returns are a SEPARATE line, never netted into the figures above. */}
       <div className="mt-5">
         <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">
-          Sales returns (reversed invoicing)
+          {t("reports.revenue.returnsHead", lang)}
         </h3>
         {periodReturns.length === 0 ? (
-          <p className="text-sm muted">None in this period.</p>
+          <p className="text-sm muted">{t("reports.revenue.noneInPeriod", lang)}</p>
         ) : (
           <Table>
             <thead>
               <tr>
-                <TH>Invoice</TH>
-                <TH>Reason</TH>
-                <TH className="text-right">Reversed</TH>
+                <TH>{t("reports.th.invoice", lang)}</TH>
+                <TH>{t("reports.th.reason", lang)}</TH>
+                <TH className="text-right">{t("reports.th.reversed", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -218,7 +229,7 @@ export function RevenueStatement({
                 </tr>
               ))}
               <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
-                <TD>Total reversed</TD>
+                <TD>{t("reports.revenue.totalReversed", lang)}</TD>
                 <TD>{""}</TD>
                 <TD className="text-right tabular-nums">{formatSar(returned)}</TD>
               </tr>
@@ -227,13 +238,7 @@ export function RevenueStatement({
         )}
       </div>
 
-      <Note>
-        Revenue is net of VAT and counts every invoice that has been confirmed,
-        including those since paid. Sales returns are shown on their own line and are
-        already excluded from the revenue above — the two are never netted silently.
-        Outstanding is the amount still due, which on a prepaid account can be less
-        than the invoice value because part was covered by balance.
-      </Note>
+      <Note>{t("reports.revenue.note", lang)}</Note>
     </div>
   );
 }
@@ -244,6 +249,7 @@ export function RevenueStatement({
 export function ReceivablesStatement({
   receivables, aging,
 }: { receivables: ReceivableRow[]; aging: AgingRow[] }) {
+  const { lang } = useApp();
   const bands = AGING_ORDER.map((b) => {
     const row = aging.find((a) => a.aging_bucket === b);
     return { bucket: b, value: row?.outstanding_sar ?? 0, count: row?.invoice_count ?? 0 };
@@ -253,25 +259,29 @@ export function ReceivablesStatement({
 
   return (
     <div id="receivables-print" className="card p-6">
-      <Head title="Receivables statement" period="As of today" />
+      <Head title={t("reports.receivables.title", lang)}
+        period={t("reports.receivables.asOfToday", lang)} />
 
       {total === 0 ? (
-        <Empty>Nothing outstanding — every confirmed invoice is paid.</Empty>
+        <Empty>{t("reports.nothingOutstanding", lang)}</Empty>
       ) : (
         <>
           <Table>
             <thead>
               <tr>
-                <TH>Band</TH>
-                <TH className="text-right">Invoices</TH>
-                <TH className="text-right">Outstanding</TH>
-                <TH className="text-right">Share</TH>
+                <TH>{t("reports.th.band", lang)}</TH>
+                <TH className="text-right">{t("reports.th.invoices", lang)}</TH>
+                <TH className="text-right">{t("reports.th.outstanding", lang)}</TH>
+                <TH className="text-right">{t("reports.th.share", lang)}</TH>
               </tr>
             </thead>
             <tbody>
               {bands.map((b) => (
                 <tr key={b.bucket}>
-                  <TD>{b.bucket} days</TD>
+                  {/* `b.bucket` is the view's own aging label — "0-30", "90+".
+                      Digits and punctuation only, so it goes in unchanged and
+                      un-reformatted; only the word beside it is keyed. */}
+                  <TD>{fill(t("reports.receivables.bandDays", lang), { b: b.bucket })}</TD>
                   <TD className="text-right tabular-nums">{formatNum(b.count)}</TD>
                   <TD className="text-right tabular-nums">
                     {b.value === 0 ? <span className="muted">—</span> : formatSar(b.value)}
@@ -282,25 +292,29 @@ export function ReceivablesStatement({
                 </tr>
               ))}
               <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
-                <TD>Total</TD>
+                <TD>{t("reports.th.total", lang)}</TD>
                 <TD className="text-right tabular-nums">{formatNum(sumOver(bands, (b) => b.count))}</TD>
                 <TD className="text-right tabular-nums">{formatSar(total)}</TD>
+                {/* Not keyed: the band shares always total 100 %, so this is a
+                    figure written as a constant, not a sentence. It matches
+                    formatShare()'s output and stays Latin in both languages
+                    like every other number on the page. */}
                 <TD className="text-right tabular-nums">100.0%</TD>
               </tr>
             </tbody>
           </Table>
 
           <h3 className="text-xs uppercase tracking-wide muted font-medium mt-5 mb-2">
-            Open invoices, oldest first
+            {t("reports.receivables.openInvoices", lang)}
           </h3>
           <Table>
             <thead>
               <tr>
-                <TH>Invoice</TH>
-                <TH>Customer</TH>
-                <TH>Confirmed</TH>
-                <TH className="text-right">Days</TH>
-                <TH className="text-right">Outstanding</TH>
+                <TH>{t("reports.th.invoice", lang)}</TH>
+                <TH>{t("reports.th.customer", lang)}</TH>
+                <TH>{t("reports.th.confirmed", lang)}</TH>
+                <TH className="text-right">{t("reports.th.days", lang)}</TH>
+                <TH className="text-right">{t("reports.th.outstanding", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -326,11 +340,7 @@ export function ReceivablesStatement({
         </>
       )}
 
-      <Note>
-        A position as of today, not a figure for the selected period — the period picker
-        does not apply to it. Invoices age from the date they were confirmed, because
-        this schema has no payment-terms column to age from a due date.
-      </Note>
+      <Note>{t("reports.receivables.note", lang)}</Note>
     </div>
   );
 }
@@ -352,6 +362,7 @@ export function CostStatement({
   fillingByStation: FillingByStationRow[];
   periodStart: string; periodEnd: string; label: string;
 }) {
+  const { lang } = useApp();
   // Per truck: sum the three named measures across the period's months. All
   // three are additive money, so this is a sum of view output, not a new
   // definition. They stay SEPARATE columns — the whole point of 0099.
@@ -378,8 +389,17 @@ export function CostStatement({
     sumOver(com, (r) => r.adjustments_sar) + sumOver(com, (r) => r.bonus_sar);
   const paid = sumOver(comPaid, (r) => r.commissions_paid_sar);
 
-  const partsTotal = sumOver(trucks, (t) => t.parts);
-  const osTotal = sumOver(trucks, (t) => t.os);
+  // PEAK, never a sum — people_missing_salary is a per-month STATE, so the
+  // highest month is the honest figure and adding twelve of them would invent
+  // people. Hoisted because the note below read it four times to answer one
+  // question; the count-bucket sentence now asks once.
+  const missingSalary = peakOver(pay, (r) => r.people_missing_salary);
+
+  // `tr`, not `t` — the translator is imported into this scope now, and a
+  // callback parameter named `t` shadows it for the whole body. Same rule as
+  // the period picker in StatementsTab.
+  const partsTotal = sumOver(trucks, (tr) => tr.parts);
+  const osTotal = sumOver(trucks, (tr) => tr.os);
 
   // ---- station fill (0112) ----------------------------------------------
   // Summed across the period's months from the view's own output — no new
@@ -412,12 +432,17 @@ export function CostStatement({
   // BY STATION, keyed on station_key rather than the display name — a renamed
   // station keeps resolving, and two stations could share a name.
   const byStation = useMemo(() => {
-    const m = new Map<string, { name: string; sar: number; costed: number; uncosted: number }>();
+    const m = new Map<string, {
+      key: string; name: string | null; sar: number; costed: number; uncosted: number;
+    }>();
     for (const r of fillRows) {
       const e = m.get(r.station_key) ?? {
         // A null name means the station key no longer exists. The cost still
-        // counts, so the row is labelled rather than dropped from the total.
-        name: r.station_name ?? `${r.station_key} (removed)`,
+        // counts, so the row is labelled rather than dropped from the total —
+        // but the LABEL is built at render, not here. Composing it in the memo
+        // would put a translated string in the dependency array and leave the
+        // table in the previous language until fillRows next changed.
+        key: r.station_key, name: r.station_name,
         sar: 0, costed: 0, uncosted: 0,
       };
       e.sar += r.filling_cost_sar;
@@ -430,7 +455,7 @@ export function CostStatement({
 
   return (
     <div id="cost-print" className="card p-6">
-      <Head title="Cost statements" period={label} />
+      <Head title={t("reports.costs.title", lang)} period={label} />
 
       {/* --- Station fill cost (0112) ------------------------------------
           THE UNCOSTED COUNT IS NOT OPTIONAL DECORATION. sum() skips NULLs,
@@ -439,7 +464,7 @@ export function CostStatement({
           Showing the money alone would be showing a total that is quietly
           wrong, so the count sits beside every total and in both tables. */}
       <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">
-        Station fill cost
+        {t("reports.costs.fillHead", lang)}
       </h3>
       {/* An explicit separator, not just the flex gap. Two adjacent spans have
           NO whitespace between them in JSX, so if the gap ever fails to apply —
@@ -449,37 +474,49 @@ export function CostStatement({
       <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="text-lg font-semibold tabular-nums">{formatSar(fillTotal)}</span>
         <span className="text-xs muted" aria-hidden>·</span>
-        <span className="text-xs muted">{fillCosted} fills costed</span>
+        {/* `{n}` goes in RAW, not through formatNum — this count was
+            interpolated directly before this commit and adding a thousands
+            separator now would change a figure, not translate it. */}
+        <span className="text-xs muted">
+          {fill(t(`reports.costs.fillsCosted.${plural(fillCosted)}`, lang), { n: fillCosted })}
+        </span>
         {fillUncosted > 0 && (
           <>
             <span className="text-xs muted" aria-hidden>·</span>
+            {/* English spliced TWO words off one `=== 1` test — "fill
+                has"/"fills have" and "its"/"their". Arabic changes more than
+                those two words, so the sentence is stored whole per count
+                bucket instead of assembled from fragments. */}
             <span className="text-xs text-amber-700 dark:text-amber-300">
-            {fillUncosted} {fillUncosted === 1 ? "fill has" : "fills have"} no price for
-            {" "}{fillUncosted === 1 ? "its" : "their"} water type — cost unknown, not zero, and
-            not included above
+              {fill(t(`reports.costs.uncosted.${plural(fillUncosted)}`, lang), { n: fillUncosted })}
             </span>
           </>
         )}
       </div>
 
       {fillRows.length === 0 ? (
-        <p className="text-sm muted mb-6">No fills in this period.</p>
+        <p className="text-sm muted mb-6">{t("reports.costs.noFills", lang)}</p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           <div>
-            <h4 className="text-[11px] uppercase tracking-wide muted mb-1">By water type</h4>
+            <h4 className="text-[11px] uppercase tracking-wide muted mb-1">
+              {t("reports.costs.byWaterType", lang)}
+            </h4>
             <Table>
               <thead>
                 <tr>
-                  <TH>Water type</TH>
-                  <TH className="text-right">Fills</TH>
-                  <TH className="text-right">Uncosted</TH>
-                  <TH className="text-right">Cost</TH>
+                  <TH>{t("reports.th.waterType", lang)}</TH>
+                  <TH className="text-right">{t("reports.th.fills", lang)}</TH>
+                  <TH className="text-right">{t("reports.th.uncosted", lang)}</TH>
+                  <TH className="text-right">{t("common.cost", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
                 {byType.map(([wt, v]) => (
                   <tr key={wt}>
+                    {/* Still English in both languages — see the import note.
+                        The map is shared with Trips and translating it is that
+                        batch's job, not a reports-local second copy. */}
                     <TD>{WATER_TYPE_LABELS[wt as WaterType] ?? wt}</TD>
                     <TD className="text-right tabular-nums">{v.costed}</TD>
                     <TD className={cn("text-right tabular-nums",
@@ -490,7 +527,7 @@ export function CostStatement({
                   </tr>
                 ))}
                 <tr className="font-semibold border-t" style={{ borderColor: "rgb(var(--border))" }}>
-                  <TD>Total</TD>
+                  <TD>{t("reports.th.total", lang)}</TD>
                   <TD className="text-right tabular-nums">{fillCosted}</TD>
                   <TD className="text-right tabular-nums">{fillUncosted || "—"}</TD>
                   <TD className="text-right tabular-nums">{formatSar(fillTotal)}</TD>
@@ -500,20 +537,25 @@ export function CostStatement({
           </div>
 
           <div>
-            <h4 className="text-[11px] uppercase tracking-wide muted mb-1">By station</h4>
+            <h4 className="text-[11px] uppercase tracking-wide muted mb-1">
+              {t("reports.costs.byStation", lang)}
+            </h4>
             <Table>
               <thead>
                 <tr>
-                  <TH>Station</TH>
-                  <TH className="text-right">Fills</TH>
-                  <TH className="text-right">Uncosted</TH>
-                  <TH className="text-right">Cost</TH>
+                  <TH>{t("reports.th.station", lang)}</TH>
+                  <TH className="text-right">{t("reports.th.fills", lang)}</TH>
+                  <TH className="text-right">{t("reports.th.uncosted", lang)}</TH>
+                  <TH className="text-right">{t("common.cost", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
                 {byStation.map((v) => (
-                  <tr key={v.name}>
-                    <TD>{v.name}</TD>
+                  // Keyed on station_key, not the display name: the name is
+                  // now nullable, two stations could share one, and 0014 makes
+                  // the key the immutable identity anyway.
+                  <tr key={v.key}>
+                    <TD>{v.name ?? fill(t("reports.costs.stationRemoved", lang), { k: v.key })}</TD>
                     <TD className="text-right tabular-nums">{v.costed}</TD>
                     <TD className={cn("text-right tabular-nums",
                       v.uncosted > 0 && "text-amber-700 dark:text-amber-300")}>
@@ -523,7 +565,7 @@ export function CostStatement({
                   </tr>
                 ))}
                 <tr className="font-semibold border-t" style={{ borderColor: "rgb(var(--border))" }}>
-                  <TD>Total</TD>
+                  <TD>{t("reports.th.total", lang)}</TD>
                   <TD className="text-right tabular-nums">{fillCosted}</TD>
                   <TD className="text-right tabular-nums">{fillUncosted || "—"}</TD>
                   <TD className="text-right tabular-nums">{formatSar(fillTotal)}</TD>
@@ -536,35 +578,37 @@ export function CostStatement({
 
       {/* --- Maintenance per truck --- */}
       <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">
-        Maintenance by truck
+        {t("reports.costs.maintHead", lang)}
       </h3>
       {trucks.length === 0 ? (
-        <p className="text-sm muted">No maintenance spend reached a truck in this period.</p>
+        <p className="text-sm muted">{t("reports.costs.noMaint", lang)}</p>
       ) : (
         <Table>
           <thead>
             <tr>
-              <TH>Truck</TH>
-              <TH className="text-right">Parts</TH>
-              <TH className="text-right">Outsourced</TH>
-              <TH className="text-right">Total</TH>
+              <TH>{t("reports.th.truck", lang)}</TH>
+              <TH className="text-right">{t("reports.th.parts", lang)}</TH>
+              <TH className="text-right">{t("reports.th.outsourced", lang)}</TH>
+              <TH className="text-right">{t("reports.th.total", lang)}</TH>
             </tr>
           </thead>
           <tbody>
-            {trucks.map((t) => (
-              <tr key={t.plate}>
-                <TD>{t.plate}</TD>
+            {/* `tr`, not `t` — a map parameter named `t` shadows the translator
+                for the whole callback body. */}
+            {trucks.map((tr) => (
+              <tr key={tr.plate}>
+                <TD>{tr.plate}</TD>
                 <TD className="text-right tabular-nums muted">
-                  {t.parts === 0 ? "—" : formatSar(t.parts)}
+                  {tr.parts === 0 ? "—" : formatSar(tr.parts)}
                 </TD>
                 <TD className="text-right tabular-nums muted">
-                  {t.os === 0 ? "—" : formatSar(t.os)}
+                  {tr.os === 0 ? "—" : formatSar(tr.os)}
                 </TD>
-                <TD className="text-right tabular-nums font-medium">{formatSar(t.total)}</TD>
+                <TD className="text-right tabular-nums font-medium">{formatSar(tr.total)}</TD>
               </tr>
             ))}
             <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
-              <TD>Total</TD>
+              <TD>{t("reports.th.total", lang)}</TD>
               <TD className="text-right tabular-nums">{formatSar(partsTotal)}</TD>
               <TD className="text-right tabular-nums">{formatSar(osTotal)}</TD>
               <TD className="text-right tabular-nums">{formatSar(partsTotal + osTotal)}</TD>
@@ -572,82 +616,84 @@ export function CostStatement({
           </tbody>
         </Table>
       )}
-      <Note>
-        Three separate measures, never blended into one figure. Parts is the FIFO cost of
-        what each truck&apos;s work orders consumed; outsourced is what outside workshops
-        were paid for that truck. Labour on in-house work orders is not costed anywhere
-        in this schema, so it is in neither column.
-      </Note>
+      <Note>{t("reports.costs.maintNote", lang)}</Note>
 
       {/* --- Payroll --- */}
-      <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">Payroll</h3>
+      <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
+        {t("reports.metric.payroll", lang)}
+      </h3>
       <Table>
         <thead>
           <tr>
-            <TH>Component</TH>
-            <TH className="text-right">Amount</TH>
+            <TH>{t("common.component", lang)}</TH>
+            <TH className="text-right">{t("reports.th.amount", lang)}</TH>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <TD>Staff salaries</TD>
+            <TD>{t("reports.costs.staffSalaries", lang)}</TD>
             <TD className="text-right tabular-nums">{formatSar(sumOver(pay, (r) => r.staff_salary_sar))}</TD>
           </tr>
           <tr>
-            <TD>Driver salaries</TD>
+            <TD>{t("reports.costs.driverSalaries", lang)}</TD>
             <TD className="text-right tabular-nums">{formatSar(sumOver(pay, (r) => r.driver_salary_sar))}</TD>
           </tr>
           <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
-            <TD>Total payroll</TD>
+            <TD>{t("reports.costs.totalPayroll", lang)}</TD>
             <TD className="text-right tabular-nums">
               {formatSar(sumOver(pay, (r) => r.staff_salary_sar + r.driver_salary_sar))}
             </TD>
           </tr>
         </tbody>
       </Table>
+      {/* Split at the one mid-sentence <strong>. The space before it and after
+          `</strong>` is JSX — the dictionary values carry no edge whitespace,
+          so neither seam can silently join two words. */}
       <Note>
-        Two things to know about this figure. Salaries are <strong>not effective-dated</strong> in
-        this schema, so a past period is costed at each person&apos;s current salary — a raise
-        changes history. Only the employment window is historical.
-        {peakOver(pay, (r) => r.people_missing_salary) > 0 && (
-          <> And in at least one month of this period,{" "}
-          {peakOver(pay, (r) => r.people_missing_salary)} employed{" "}
-          {peakOver(pay, (r) => r.people_missing_salary) === 1 ? "person has" : "people have"} no
-          salary recorded and {peakOver(pay, (r) => r.people_missing_salary) === 1 ? "counts" : "count"} as
-          zero. That is a per-month state, so it is reported as the highest month rather
-          than added up.</>
+        {t("reports.costs.payrollNoteBefore", lang)}{" "}
+        <strong>{t("reports.costs.payrollNoteStrong", lang)}</strong>{" "}
+        {t("reports.costs.payrollNoteAfter", lang)}
+        {/* English spliced THREE words off one `=== 1` test — "person
+            has"/"people have" and "counts"/"count". Whole sentence per count
+            bucket; the leading space is JSX, not part of the value. */}
+        {missingSalary > 0 && (
+          <> {fill(t(`reports.costs.missingSalary.${plural(missingSalary)}`, lang),
+            { n: missingSalary })}</>
         )}
       </Note>
 
       {/* --- Commissions --- */}
       <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
-        Commissions — earned and paid
+        {t("reports.costs.commissionsHead", lang)}
       </h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <Table>
             <thead>
-              <tr><TH>Earned (accrual)</TH><TH className="text-right">Amount</TH></tr>
+              <tr>
+                <TH>{t("reports.costs.earnedAccrual", lang)}</TH>
+                <TH className="text-right">{t("reports.th.amount", lang)}</TH>
+              </tr>
             </thead>
             <tbody>
               <tr>
-                <TD>Trip commission</TD>
+                <TD>{t("reports.costs.tripCommission", lang)}</TD>
                 <TD className="text-right tabular-nums">{formatSar(sumOver(com, (r) => r.trip_commission_sar))}</TD>
               </tr>
               <tr>
-                <TD>Specials</TD>
+                <TD>{t("reports.costs.specials", lang)}</TD>
                 <TD className="text-right tabular-nums">{formatSar(sumOver(com, (r) => r.specials_sar))}</TD>
               </tr>
               <tr>
-                <TD>Adjustments</TD>
+                <TD>{t("reports.costs.adjustments", lang)}</TD>
                 <TD className="text-right tabular-nums">{formatSar(sumOver(com, (r) => r.adjustments_sar))}</TD>
               </tr>
               <tr>
-                <TD>Bonuses</TD>
+                <TD>{t("reports.costs.bonuses", lang)}</TD>
                 <TD className="text-right tabular-nums">{formatSar(sumOver(com, (r) => r.bonus_sar))}</TD>
               </tr>
               <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
-                <TD>Total earned</TD>
+                <TD>{t("reports.costs.totalEarned", lang)}</TD>
                 <TD className="text-right tabular-nums">{formatSar(earned)}</TD>
               </tr>
             </tbody>
@@ -656,58 +702,62 @@ export function CostStatement({
         <div>
           <Table>
             <thead>
-              <tr><TH>Paid (cash)</TH><TH className="text-right">Amount</TH></tr>
+              <tr>
+                <TH>{t("reports.costs.paidCash", lang)}</TH>
+                <TH className="text-right">{t("reports.th.amount", lang)}</TH>
+              </tr>
             </thead>
             <tbody>
               <tr>
-                <TD>Payouts</TD>
+                <TD>{t("reports.costs.payouts", lang)}</TD>
                 <TD className="text-right tabular-nums">{formatNum(sumOver(comPaid, (r) => r.payout_count))}</TD>
               </tr>
               <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
-                <TD>Total paid</TD>
+                <TD>{t("reports.costs.totalPaid", lang)}</TD>
                 <TD className="text-right tabular-nums">{formatSar(paid)}</TD>
               </tr>
             </tbody>
           </Table>
         </div>
       </div>
+      {/* No space after `</strong>`: the AFTER value opens with the full stop
+          that closes the emphasised clause. */}
       <Note>
-        Side by side, and <strong>never added together</strong>. A payout&apos;s base is the
-        same trip commission already counted as earned, so summing the two would count it
-        twice. Earned lands in the month the work was done; paid lands when the payout was
-        made. Adjustments are signed and are often negative deductions, which correctly
-        reduce the earned total.
+        {t("reports.costs.commissionsNoteBefore", lang)}{" "}
+        <strong>{t("reports.costs.commissionsNoteStrong", lang)}</strong>
+        {t("reports.costs.commissionsNoteAfter", lang)}
       </Note>
 
       {/* --- Purchasing --- */}
       <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
-        Purchasing — procurement and cash, NOT a P&amp;L cost
+        {/* `&amp;` was JSX ESCAPING, not content — this always rendered a
+            literal "P&L", so that is what the dictionary value holds. */}
+        {t("reports.costs.purchasingHead", lang)}
       </h3>
       <Table>
         <thead>
           <tr>
-            <TH>Measure</TH>
-            <TH className="text-right">Value</TH>
+            <TH>{t("reports.th.measure", lang)}</TH>
+            <TH className="text-right">{t("reports.th.value", lang)}</TH>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <TD>Stock received</TD>
+            <TD>{t("reports.costs.stockReceived", lang)}</TD>
             <TD className="text-right tabular-nums">
               {formatSar(sumOver(pur, (r) => r.received_stock_value_sar))}
             </TD>
           </tr>
           <tr>
-            <TD>Receipts</TD>
+            <TD>{t("reports.costs.receipts", lang)}</TD>
             <TD className="text-right tabular-nums">{formatNum(sumOver(pur, (r) => r.receipt_count))}</TD>
           </tr>
         </tbody>
       </Table>
       <Note>
-        A procurement and cash view only. This is deliberately <strong>not</strong> a P&amp;L
-        line: a purchase is inventory until it is consumed, and expensing both the purchase
-        and the consumption would double-count. That cost reaches the P&amp;L later, as parts
-        consumed, when the stock is actually used.
+        {t("reports.costs.purchasingNoteBefore", lang)}{" "}
+        <strong>{t("reports.costs.purchasingNoteStrong", lang)}</strong>{" "}
+        {t("reports.costs.purchasingNoteAfter", lang)}
       </Note>
     </div>
   );
@@ -725,7 +775,11 @@ export function CostStatement({
  */
 type DriverCol = {
   key: string;
-  name: string;
+  // NULL is the no-driver-recorded bucket, and it stays null all the way to
+  // the cell that renders it. Baking "Unassigned" in here would put a
+  // translated string inside a useMemo keyed on data, so the table would keep
+  // the old language until the rows themselves changed.
+  name: string | null;
   plate: string | null;
   trucksUsed: number;
   scheduled: number;
@@ -742,6 +796,7 @@ export function OperationsStatement({
   periodStart: string; periodEnd: string; label: string;
   multiMonth: boolean;
 }) {
+  const { lang } = useApp();
   const rows = monthsIn(operations, periodStart, periodEnd);
 
   const trips = sumOver(rows, (r) => r.trips_total);
@@ -771,7 +826,7 @@ export function OperationsStatement({
       const key = r.driver_id ?? "__unassigned__";
       const e = acc.get(key) ?? {
         key,
-        name: r.driver_name ?? "Unassigned",
+        name: r.driver_name,
         plate: null, trucksUsed: 0,
         scheduled: 0, delivered: 0, notDelivered: 0, completion: null,
         plateCounts: new Map<string, number>(),
@@ -812,35 +867,42 @@ export function OperationsStatement({
    */
   const driverCell = (d: DriverCol) => (
     <TD>
-      <span className="block font-medium">{d.name}</span>
+      <span className="block font-medium">{d.name ?? t("reports.ops.unassigned", lang)}</span>
       <span className="block text-[10px] muted">{d.plate ?? "—"}</span>
+      {/* `{n}` stays RAW — this count was interpolated directly and passing it
+          through formatNum would add a separator the phrase never had. The
+          `one` bucket is unreachable behind `> 1` and is minted anyway: a leaf
+          missing from the family would not typecheck, and an unreachable
+          branch is cheaper than a template literal that cannot compile. */}
       {d.trucksUsed > 1 && (
-        <span className="block text-[10px] muted">drove {d.trucksUsed} trucks</span>
+        <span className="block text-[10px] muted">
+          {fill(t(`reports.ops.droveTrucks.${plural(d.trucksUsed)}`, lang), { n: d.trucksUsed })}
+        </span>
       )}
     </TD>
   );
 
   return (
     <div id="ops-print" className="card p-6">
-      <Head title="Operational performance" period={label} />
+      <Head title={t("reports.ops.title", lang)} period={label} />
 
       {drivers.length === 0 ? (
-        <Note>No trips were recorded in this period, so there is nothing to break down by driver.</Note>
+        <Note>{t("reports.ops.noTrips", lang)}</Note>
       ) : (
         <>
           {/* --- DELIVERY: one row per driver, measures across the top. --- */}
           <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">
-            Delivery by driver
+            {t("reports.ops.deliveryByDriver", lang)}
           </h3>
           <div className="overflow-x-auto">
             <Table>
               <thead>
                 <tr>
-                  <TH>Driver</TH>
-                  <TH className="text-right">Trips scheduled</TH>
-                  <TH className="text-right">Trips delivered</TH>
-                  <TH className="text-right">Not delivered</TH>
-                  <TH className="text-right">Completion rate</TH>
+                  <TH>{t("common.driver", lang)}</TH>
+                  <TH className="text-right">{t("reports.th.tripsScheduled", lang)}</TH>
+                  <TH className="text-right">{t("reports.metric.tripsDelivered", lang)}</TH>
+                  <TH className="text-right">{t("reports.th.notDelivered", lang)}</TH>
+                  <TH className="text-right">{t("reports.th.completionRate", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -858,26 +920,19 @@ export function OperationsStatement({
               </tbody>
             </Table>
           </div>
-          <Note>
-            Each driver&apos;s completion rate is computed from that driver&apos;s own
-            scheduled and delivered counts — never averaged, and never inherited from
-            the period figure below. The plate beside a name is the truck that driver was
-            in; it is context only and is never measured per driver. Drivers are grouped
-            by record, not by name, so two people sharing a first name stay on separate
-            rows — the plate is what tells them apart.
-          </Note>
+          <Note>{t("reports.ops.deliveryNote", lang)}</Note>
 
           {/* --- FLEET UTILISATION: DRIVER-WORKLOAD measures only. --- */}
           <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
-            Fleet utilisation by driver
+            {t("reports.ops.utilisationHead", lang)}
           </h3>
           <div className="overflow-x-auto">
             <Table>
               <thead>
                 <tr>
-                  <TH>Driver</TH>
-                  <TH className="text-right">Share of scheduled trips</TH>
-                  <TH className="text-right">Share of delivered trips</TH>
+                  <TH>{t("common.driver", lang)}</TH>
+                  <TH className="text-right">{t("reports.th.shareScheduled", lang)}</TH>
+                  <TH className="text-right">{t("reports.th.shareDelivered", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -896,14 +951,15 @@ export function OperationsStatement({
             </Table>
           </div>
           <Note>
-            Workload shares, so they measure the DRIVER. A truck-level figure never
-            appears in a driver row — trucks that moved and maintenance activity stay in
-            the period summary below. Shares are computed against the period totals and
-            add to 100%.
+            {t("reports.ops.utilisationNote", lang)}
+            {/* The branch tests the KEY, not the label — `__unassigned__` is
+                what the memo bucketed a null driver_id under, so the footnote
+                appears for the same rows in both languages. The emphasised
+                word is the same leaf the driver cell renders. */}
             {drivers.some((d) => d.key === "__unassigned__") && (
-              <> One row is <strong>Unassigned</strong>: trips recorded with no driver.
-              It is kept so the driver rows still add up to the period total rather than
-              quietly falling short.</>
+              <> {t("reports.ops.unassignedNoteBefore", lang)}{" "}
+              <strong>{t("reports.ops.unassigned", lang)}</strong>
+              {t("reports.ops.unassignedNoteAfter", lang)}</>
             )}
           </Note>
         </>
@@ -916,45 +972,54 @@ export function OperationsStatement({
               them under a driver column would change what they mean. The
               driver tables lead because the driver is what this statement
               measures; this block is the context they sit in. --- */}
-      <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">Period summary</h3>
+      <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
+        {t("reports.ops.periodSummary", lang)}
+      </h3>
       <Table>
         <thead>
-          <tr><TH>Measure</TH><TH className="text-right">Value</TH></tr>
+          <tr>
+            <TH>{t("reports.th.measure", lang)}</TH>
+            <TH className="text-right">{t("reports.th.value", lang)}</TH>
+          </tr>
         </thead>
         <tbody>
           <tr>
-            <TD>Trips scheduled</TD>
+            <TD>{t("reports.th.tripsScheduled", lang)}</TD>
             <TD className="text-right tabular-nums">{formatNum(trips)}</TD>
           </tr>
           <tr>
-            <TD>Trips delivered</TD>
+            <TD>{t("reports.metric.tripsDelivered", lang)}</TD>
             <TD className="text-right tabular-nums">{formatNum(delivered)}</TD>
           </tr>
           <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
-            <TD>Delivery completion rate</TD>
+            <TD>{t("reports.ops.deliveryCompletionRate", lang)}</TD>
             <TD className="text-right tabular-nums">{formatShare(completion)}</TD>
           </tr>
           <tr>
             <TD>
-              Trucks that moved
-              {multiMonth && <span className="muted text-xs"> — most in any one month</span>}
+              {t("reports.ops.trucksThatMoved", lang)}
+              {/* The space before the qualifier is JSX and sits inside the
+                  span, exactly where it did before. */}
+              {multiMonth && (
+                <span className="muted text-xs"> {t("reports.ops.mostInAnyMonth", lang)}</span>
+              )}
             </TD>
             <TD className="text-right tabular-nums">{formatNum(peakTrucks)}</TD>
           </tr>
           <tr>
-            <TD>Work orders</TD>
+            <TD>{t("reports.ops.workOrders", lang)}</TD>
             <TD className="text-right tabular-nums">{formatNum(workOrders)}</TD>
           </tr>
           <tr>
-            <TD>Outsourced jobs</TD>
+            <TD>{t("reports.ops.outsourcedJobs", lang)}</TD>
             <TD className="text-right tabular-nums">{formatNum(osJobs)}</TD>
           </tr>
           <tr>
-            <TD>Maintenance events</TD>
+            <TD>{t("reports.ops.maintenanceEvents", lang)}</TD>
             <TD className="text-right tabular-nums">{formatNum(maintenanceEvents)}</TD>
           </tr>
           <tr>
-            <TD>Exit permits</TD>
+            <TD>{t("reports.ops.exitPermits", lang)}</TD>
             <TD className="text-right tabular-nums">{formatNum(permits)}</TD>
           </tr>
         </tbody>
@@ -963,19 +1028,19 @@ export function OperationsStatement({
       {rows.length > 1 && (
         <>
           <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
-            By month
+            {t("reports.ops.byMonth", lang)}
           </h3>
           <Table>
             <thead>
               <tr>
-                <TH>Month</TH>
-                <TH className="text-right">Trips</TH>
-                <TH className="text-right">Delivered</TH>
-                <TH className="text-right">Completion</TH>
-                <TH className="text-right">Trucks</TH>
-                <TH className="text-right">WOs</TH>
-                <TH className="text-right">OS jobs</TH>
-                <TH className="text-right">Permits</TH>
+                <TH>{t("reports.th.month", lang)}</TH>
+                <TH className="text-right">{t("reports.th.trips", lang)}</TH>
+                <TH className="text-right">{t("reports.th.delivered", lang)}</TH>
+                <TH className="text-right">{t("reports.th.completion", lang)}</TH>
+                <TH className="text-right">{t("reports.th.trucks", lang)}</TH>
+                <TH className="text-right">{t("reports.th.wos", lang)}</TH>
+                <TH className="text-right">{t("reports.th.osJobs", lang)}</TH>
+                <TH className="text-right">{t("reports.th.permits", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -999,17 +1064,17 @@ export function OperationsStatement({
       )}
 
       <Note>
-        Trips, work orders, outsourced jobs and permits are event counts, so they add
-        across months. <strong>Trucks that moved does not.</strong> It is a distinct
-        count, and a truck working in two months would be counted twice by a sum — so a
-        multi-month period reports the highest single month. A true period-level
-        distinct count cannot be recovered from monthly rows.
+        {t("reports.ops.countsNoteBefore", lang)}{" "}
+        <strong>{t("reports.ops.countsNoteStrong", lang)}</strong>{" "}
+        {t("reports.ops.countsNoteAfter", lang)}
       </Note>
+      {/* TWO mid-sentence emphases, so five leaves and four JSX separators. */}
       <Note>
-        Two measures are deliberately absent because the data cannot support them
-        honestly yet: <strong>idle trucks</strong> needs the fleet roster alongside these
-        counts, and <strong>fleet availability</strong> needs the distinct trucks under
-        maintenance in the period. Neither is estimated here.
+        {t("reports.ops.absentNote1", lang)}{" "}
+        <strong>{t("reports.ops.absentStrong1", lang)}</strong>{" "}
+        {t("reports.ops.absentNote2", lang)}{" "}
+        <strong>{t("reports.ops.absentStrong2", lang)}</strong>{" "}
+        {t("reports.ops.absentNote3", lang)}
       </Note>
     </div>
   );
@@ -1021,6 +1086,9 @@ export function OperationsStatement({
 export function NarrativeStatement({
   bullets, label, pnl,
 }: { bullets: NarrativeBullet[]; label: string; pnl: PnlPeriodRow }) {
+  const { lang } = useApp();
+  // Keyed off the TONE enum, never off the sentence — buildNarrative sets the
+  // tone alongside the text, so the dot stays the right colour in Arabic.
   const dot = (tone: NarrativeBullet["tone"]) =>
     tone === "up" ? "bg-emerald-500" :
     tone === "down" ? "bg-rose-500" :
@@ -1029,7 +1097,11 @@ export function NarrativeStatement({
 
   return (
     <div id="narrative-print" className="card p-6">
-      <Head title={`${label} in review`} period="Computed from the period's own figures" />
+      {/* The bullets themselves arrive already translated — buildNarrative
+          takes `lang` and composes them from reports.narrative.*. Only the
+          furniture around them is keyed here. */}
+      <Head title={fill(t("reports.narrative.stmt.title", lang), { p: label })}
+        period={t("reports.narrative.stmt.period", lang)} />
 
       <ul className="space-y-2.5">
         {bullets.map((b, i) => (
@@ -1042,32 +1114,41 @@ export function NarrativeStatement({
 
       <div className="mt-5 pt-3 border-t grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"
         style={{ borderColor: "rgb(var(--border))" }}>
+        {/* These four name the SAME figures the P&L names, so they read the
+            same leaves. A second spelling of "Operating profit" is exactly the
+            drift the metric namespace exists to stop. */}
         <div>
-          <div className="text-[11px] muted uppercase tracking-wide">Revenue</div>
+          <div className="text-[11px] muted uppercase tracking-wide">
+            {t("reports.metric.revenue", lang)}
+          </div>
           <div className="font-semibold tabular-nums">{formatSar(pnl.revenue_sar)}</div>
         </div>
         <div>
-          <div className="text-[11px] muted uppercase tracking-wide">Operating cost</div>
+          <div className="text-[11px] muted uppercase tracking-wide">
+            {t("reports.metric.operatingCost", lang)}
+          </div>
           <div className="font-semibold tabular-nums">{formatSar(pnl.operating_cost_sar)}</div>
         </div>
         <div>
-          <div className="text-[11px] muted uppercase tracking-wide">Operating profit</div>
+          <div className="text-[11px] muted uppercase tracking-wide">
+            {t("reports.metric.operatingProfit", lang)}
+          </div>
           <div className={cn("font-semibold tabular-nums",
             pnl.operating_profit_sar < 0 && "text-rose-600 dark:text-rose-400")}>
             {formatSar(pnl.operating_profit_sar)}
           </div>
         </div>
         <div>
-          <div className="text-[11px] muted uppercase tracking-wide">Margin</div>
+          {/* common.margin, not a fourth spelling of it — this labels the same
+              ratio the P&L's own margin row labels. */}
+          <div className="text-[11px] muted uppercase tracking-wide">
+            {t("common.margin", lang)}
+          </div>
           <div className="font-semibold tabular-nums">{formatShare(pnl.operating_margin_pct)}</div>
         </div>
       </div>
 
-      <Note>
-        Every sentence above is computed from this period&apos;s own figures — nothing is
-        templated prose with numbers dropped in, and each line is a comparison you could
-        redo by hand from the statements on this page.
-      </Note>
+      <Note>{t("reports.narrative.stmt.note", lang)}</Note>
     </div>
   );
 }
@@ -1083,14 +1164,17 @@ export function NarrativeStatement({
 export function CustomStatement({
   report, title, onEdit,
 }: { report: BuiltReport; title: string; onEdit: () => void }) {
+  const { lang } = useApp();
   return (
     <div id="custom-print" className="card p-6">
-      <Head title="Custom report" period={title} />
+      {/* `title` arrives already composed by the builder and is passed through
+          untouched — it is the PERIOD line, not chrome this component writes. */}
+      <Head title={t("reports.custom.title", lang)} period={title} />
 
       {report.columns.length === 0 ? (
-        <Empty>No columns selected.</Empty>
+        <Empty>{t("reports.custom.noColumns", lang)}</Empty>
       ) : report.rows.length === 0 ? (
-        <Empty>Nothing matched this selection.</Empty>
+        <Empty>{t("reports.custom.noMatch", lang)}</Empty>
       ) : (
         <Table>
           <thead>
@@ -1098,15 +1182,28 @@ export function CustomStatement({
               <TH>{" "}</TH>
               {report.columns.map((c) => (
                 <TH key={c.id} className="text-right">
-                  <span className="block">{c.label}</span>
-                  <span className="block text-[10px] font-normal muted normal-case">{c.basis}</span>
+                  {/* The column carries a KEY, not a label — report-builder
+                      resolved the metric to `labelKey` so the heading and the
+                      builder's own picker cannot drift apart. The basis reads
+                      basisLabel(), the same helper the picker and the metrics
+                      dictionary read; it printed the raw enum before this
+                      commit, which an Arabic reader would have got as `cash`. */}
+                  <span className="block">{t(c.labelKey, lang)}</span>
+                  <span className="block text-[10px] font-normal muted normal-case">
+                    {basisLabel(c.basis, lang)}
+                  </span>
                 </TH>
               ))}
             </tr>
           </thead>
           <tbody>
-            {report.rows.map((r) => (
-              <tr key={r.label}>
+            {report.rows.map((r, i) => (
+              // Keyed on POSITION, not on `r.label`: the label is a period
+              // name in one grouping and a customer or truck name in another,
+              // so it is neither unique (two customers can share a name) nor
+              // stable across a language switch. The rows are one ordered list
+              // rebuilt wholesale by the builder, so the index IS the identity.
+              <tr key={i}>
                 <TD>{r.label}</TD>
                 {r.values.map((v, i) => (
                   <TD key={report.columns[i].id} className="text-right tabular-nums">
@@ -1122,17 +1219,15 @@ export function CustomStatement({
         </Table>
       )}
 
+      {/* The builder's notes arrive already translated — buildReport takes
+          `lang` and composes them from reports.builder.note.*. */}
       {report.notes.map((n, i) => <Note key={i}>{n}</Note>)}
-      <Note>
-        Built from defined metrics only, reading the same views as every other report
-        on this page. There is deliberately no total across columns — metrics on
-        different bases must never be added.
-      </Note>
+      <Note>{t("reports.custom.note", lang)}</Note>
 
       <div className="mt-4 no-print">
         <button onClick={onEdit}
           className="text-sm font-medium text-brand-600 dark:text-brand-300 hover:underline">
-          Change selection
+          {t("reports.custom.changeSelection", lang)}
         </button>
       </div>
     </div>
@@ -1159,8 +1254,15 @@ export function CustomStatement({
 // someone hands out a number that later changes.
 // ---------------------------------------------------------------------------
 
-/** Paid vs earned, said in words rather than left to a colour. */
-function BasisChip({ basis, settled }: { basis: string; settled: boolean }) {
+/**
+ * Paid vs earned, said in words rather than left to a colour.
+ *
+ * `lang` arrives as a PROP: this renders once per register row and once inside
+ * the document, and both call sites already hold `lang` from their own
+ * useApp(). The test stays on the BASIS ENUM and the settled flag — the words
+ * below are what the enum is rendered AS, never what it is read from.
+ */
+function BasisChip({ basis, settled, lang }: { basis: string; settled: boolean; lang: Lang }) {
   const paid = basis === "paid" && settled;
   return (
     <span
@@ -1171,10 +1273,10 @@ function BasisChip({ basis, settled }: { basis: string; settled: boolean }) {
           : "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300",
       )}
       title={paid
-        ? "Settled — this commission was actually paid out in this month"
-        : "Earned but not yet paid. It will appear again as PAID on the payslip for the month it is settled in."}
+        ? t("reports.payslips.chipPaidTitle", lang)
+        : t("reports.payslips.chipEarnedTitle", lang)}
     >
-      {paid ? "Paid" : "Earned"}
+      {paid ? t("reports.payslips.chipPaid", lang) : t("reports.payslips.chipEarned", lang)}
     </span>
   );
 }
@@ -1201,6 +1303,7 @@ export function PayslipsStatement({
   onIssue: (driverId: string, periodStart: string) => void;
   issuingId: string | null;
 }) {
+  const { lang } = useApp();
   const rows = useMemo(
     () => basis
       .filter((r) => r.period_start >= periodStart && r.period_start <= periodEnd)
@@ -1255,30 +1358,47 @@ export function PayslipsStatement({
   return (
     <>
       <div id="payslips-print" className="card p-6">
-      <Head title="Payslips" period={label} />
+      {/* The statement's own name is the TAB's name — one statement, one
+          spelling. `label` is the period line and arrives already formatted. */}
+      <Head title={t("reports.statements.tab.payslips", lang)} period={label} />
 
       {rows.length === 0 ? (
-        <Empty>No drivers on the payroll for this period.</Empty>
+        <Empty>{t("reports.payslips.empty", lang)}</Empty>
       ) : (
         <>
           <div className="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
-            <span className="muted">{rows.length} {rows.length === 1 ? "payslip" : "payslips"}</span>
+            {/* Both counts go in RAW — they were interpolated directly before
+                this commit, and formatNum would add a thousands separator the
+                line never had. English spliced only the noun off a `=== 1`
+                test; Arabic inflects the whole phrase, so it is stored whole
+                per count bucket. */}
+            <span className="muted">
+              {fill(t(`reports.payslips.count.${plural(rows.length)}`, lang), { n: rows.length })}
+            </span>
             <span className="muted" aria-hidden>·</span>
-            <span className="muted">{totals.issued} issued</span>
+            <span className="muted">
+              {fill(t(`reports.payslips.issuedCount.${plural(totals.issued)}`, lang),
+                { n: totals.issued })}
+            </span>
             <span className="muted" aria-hidden>·</span>
-            <span>Total net <b className="tabular-nums">{formatSar(totals.net)}</b></span>
+            {/* The space before <b> is JSX on the same line, exactly where it
+                was — the dictionary value carries no trailing space. */}
+            <span>{t("reports.payslips.totalNet", lang)} <b className="tabular-nums">{formatSar(totals.net)}</b></span>
           </div>
 
           <Table>
             <thead>
               <tr>
-                <TH>Driver</TH>
-                <TH>Month</TH>
-                <TH className="text-right">Salary</TH>
-                <TH className="text-right">Commission</TH>
-                <TH>Basis</TH>
-                <TH className="text-right">Net</TH>
-                <TH>Status</TH>
+                {/* common.driver and common.status, not two more spellings of
+                    words this app already keys; the middle five are the same
+                    reports.th.* leaves the cost and revenue tables read. */}
+                <TH>{t("common.driver", lang)}</TH>
+                <TH>{t("reports.th.month", lang)}</TH>
+                <TH className="text-right">{t("reports.th.salary", lang)}</TH>
+                <TH className="text-right">{t("reports.th.commission", lang)}</TH>
+                <TH>{t("reports.th.basis", lang)}</TH>
+                <TH className="text-right">{t("reports.th.net", lang)}</TH>
+                <TH>{t("common.status", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -1310,6 +1430,7 @@ export function PayslipsStatement({
                       <BasisChip
                         basis={doc ? doc.commission_basis : r.commission_basis}
                         settled={doc ? doc.commission_settled : r.commission_settled}
+                        lang={lang}
                       />
                     </TD>
                     <TD className="text-right tabular-nums font-semibold">{formatSar(net)}</TD>
@@ -1325,20 +1446,31 @@ export function PayslipsStatement({
                       ) : r.terminated ? (
                         <span
                           className="text-[11px] font-bold text-slate-600 dark:text-slate-300"
+                          // `{d}` is a stored ISO date — Latin in both
+                          // languages, like every other date this app writes.
+                          // The suffix is joined with a space added HERE, so
+                          // neither dictionary value carries edge whitespace.
                           title={r.termination_date
-                            ? `Left the company on ${r.termination_date}${r.hire_date_missing ? " · no hire date recorded, so no payslip can be issued" : ""}`
+                            ? fill(t("reports.payslips.leftOn", lang), { d: r.termination_date })
+                              + (r.hire_date_missing
+                                ? " " + t("reports.payslips.leftOnNoHire", lang)
+                                : "")
                             : undefined}
                         >
-                          Terminated
+                          {t("reports.payslips.statusTerminated", lang)}
                         </span>
                       ) : r.hire_date_missing ? (
                         <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300">
-                          No hire date
+                          {t("reports.payslips.statusNoHireDate", lang)}
                         </span>
                       ) : isRunning(r.period_start) ? (
-                        <span className="text-[11px] font-bold muted">Month in progress</span>
+                        <span className="text-[11px] font-bold muted">
+                          {t("reports.payslips.statusMonthInProgress", lang)}
+                        </span>
                       ) : (
-                        <span className="text-[11px] font-bold muted">Not issued</span>
+                        <span className="text-[11px] font-bold muted">
+                          {t("reports.payslips.statusNotIssued", lang)}
+                        </span>
                       )}
                     </TD>
                   </tr>
@@ -1347,12 +1479,7 @@ export function PayslipsStatement({
             </tbody>
           </Table>
 
-          <Note>
-            An unissued row is a PREVIEW: its salary is today&apos;s salary, and it will
-            change if the salary changes. Issuing freezes the figures and numbers the
-            document — from then on the payslip shows what it showed on the day it was
-            issued, whatever happens to the salary afterwards.
-          </Note>
+          <Note>{t("reports.payslips.registerNote", lang)}</Note>
         </>
       )}
       </div>
@@ -1385,6 +1512,7 @@ function PayslipDocument({
   onIssue: (driverId: string, periodStart: string) => void;
   issuing: boolean;
 }) {
+  const { lang } = useApp();
   const f = doc
     ? {
         salary: doc.base_salary_sar, commission: doc.commission_sar,
@@ -1421,35 +1549,48 @@ function PayslipDocument({
           onClick={onBack}
           className="text-sm muted hover:text-[rgb(var(--fg))] focus-ring rounded px-1"
         >
-          ← All payslips
+          {/* The ARROW lives inside the dictionary value and flips in Arabic:
+              an RTL line reads right to left, so a left-pointing arrow would
+              point away from where "back" is. */}
+          {t("reports.payslips.allPayslips", lang)}
         </button>
         {doc ? (
           <span className="text-xs muted">
-            Issued {doc.issued_at.slice(0, 10)} by {doc.issued_by}
+            {/* `{d}` is an ISO date and `{b}` the issuer's name — entity data
+                with no `_ar` column, so both stay as stored. */}
+            {fill(t("reports.payslips.issuedBy", lang),
+              { d: doc.issued_at.slice(0, 10), b: doc.issued_by })}
           </span>
         ) : (
           <button
             type="button"
             disabled={blocked || issuing}
             onClick={() => setConfirming(true)}
+            // Both reasons test DATA — the missing hire date and the running
+            // month — never the words they produce.
             title={
               row.hire_date_missing
-                ? "This driver has no hire date, so a payslip period cannot be established. Set the hire date on the driver first."
+                ? t("reports.payslips.noHireTitle", lang)
                 : running
-                  ? "This month has not finished yet. A payslip can only be issued for a completed month."
+                  ? t("reports.payslips.runningTitle", lang)
                   : undefined
             }
             className="h-9 px-4 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {issuing ? "Issuing…" : "Issue payslip"}
+            {issuing ? t("reports.payslips.issuing", lang) : t("reports.payslips.issuePayslip", lang)}
           </button>
         )}
       </div>
 
       <Head
         title={doc
-          ? <>Payslip <b className="font-mono font-bold">{doc.payslip_number}</b></>
-          : "Payslip (not issued)"}
+          // The space before <b> is JSX on the same line; the payslip NUMBER
+          // beside it is monospace data and is never translated.
+          ? <>{t("reports.payslips.payslipWord", lang)} <b className="font-mono font-bold">{doc.payslip_number}</b></>
+          : t("reports.payslips.payslipNotIssued", lang)}
+        // The driver's name is entity data with no `_ar` column, and
+        // monthLabelOf() writes a Latin month abbreviation in both languages —
+        // the same call every other date on this page makes.
         period={`${row.driver_name} · ${monthLabelOf(row.period_start)}`}
       />
 
@@ -1458,31 +1599,43 @@ function PayslipDocument({
       {!doc && blocked && (
         <div className="mb-4 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[12px] leading-relaxed">
           {row.hire_date_missing
-            ? "This driver has no hire date recorded, so there is no employment period a payslip could cover. Set the hire date on the driver, then issue. The figures below are shown for reference only."
-            : "This month is still running. A payslip can only be issued once the month has finished, so the figures below are not final."}
+            ? t("reports.payslips.blockedNoHire", lang)
+            : t("reports.payslips.blockedRunning", lang)}
         </div>
       )}
 
       {!doc && !blocked && !confirming && (
         <div className="mb-4 rounded-lg border border-brand-500/25 bg-brand-500/5 px-3 py-2 text-[12px] leading-relaxed">
-          Not issued yet. Salary is shown at <b>today&apos;s</b> rate — issuing freezes
-          these figures and assigns the payslip number.
+          {/* Split at the one mid-sentence <b>. Both `{" "}` are JSX — the
+              values carry no edge whitespace, so neither seam can join two
+              words. */}
+          {t("reports.payslips.notIssuedBefore", lang)}{" "}
+          <b>{t("reports.payslips.notIssuedStrong", lang)}</b>{" "}
+          {t("reports.payslips.notIssuedAfter", lang)}
         </div>
       )}
 
       {!doc && confirming && (
         <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 no-print">
-          <div className="text-sm font-semibold">Issue this payslip?</div>
+          <div className="text-sm font-semibold">{t("reports.payslips.confirmTitle", lang)}</div>
+          {/* FOUR FRAGMENTS AROUND THREE BOLD DATA SLOTS — name, month, net —
+              in the same order in both languages. `confirmAfterName` is the
+              one value in the dictionary that carries edge whitespace, and
+              deliberately: English attaches "'s" to the name with no space and
+              Arabic needs one, so the difference IS the translation. Every
+              other seam here is a JSX `{" "}`. */}
           <p className="mt-1 text-[12px] leading-relaxed">
-            This freezes <b>{row.driver_name}</b>&apos;s pay for{" "}
-            <b>{monthLabelOf(row.period_start)}</b> at{" "}
-            <b className="tabular-nums">{formatSar(f.net)}</b> net and gives it a
-            permanent payslip number.
+            {t("reports.payslips.confirmBefore", lang)}{" "}
+            <b>{row.driver_name}</b>
+            {t("reports.payslips.confirmAfterName", lang)}{" "}
+            <b>{monthLabelOf(row.period_start)}</b>{" "}
+            {t("reports.payslips.confirmAfterMonth", lang)}{" "}
+            <b className="tabular-nums">{formatSar(f.net)}</b>{" "}
+            {t("reports.payslips.confirmTail", lang)}
           </p>
           <p className="mt-1.5 text-[12px] leading-relaxed">
-            <b>It cannot be undone from here.</b> The figures stop following the
-            driver&apos;s salary from this moment — that is the point of issuing, and it
-            is why there is no edit or delete afterwards.
+            <b>{t("reports.payslips.confirmUndoStrong", lang)}</b>{" "}
+            {t("reports.payslips.confirmUndoAfter", lang)}
           </p>
           <div className="mt-3 flex gap-2">
             <button
@@ -1491,7 +1644,9 @@ function PayslipDocument({
               onClick={() => { setConfirming(false); onIssue(row.driver_id, row.period_start); }}
               className="h-9 px-4 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white transition disabled:opacity-50"
             >
-              {issuing ? "Issuing…" : "Yes, issue it"}
+              {issuing
+                ? t("reports.payslips.issuing", lang)
+                : t("reports.payslips.yesIssueIt", lang)}
             </button>
             <button
               type="button"
@@ -1499,7 +1654,7 @@ function PayslipDocument({
               className="h-9 px-4 rounded-lg text-sm font-medium ring-1 ring-inset transition hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
               style={{ borderColor: "rgb(var(--border))" }}
             >
-              Cancel
+              {t("common.cancel", lang)}
             </button>
           </div>
         </div>
@@ -1508,34 +1663,37 @@ function PayslipDocument({
       <Table>
         <tbody>
           <tr>
-            <TD className="font-medium">Basic salary</TD>
+            <TD className="font-medium">{t("reports.payslips.basicSalary", lang)}</TD>
             <TD className="text-right tabular-nums">{formatSar(f.salary)}</TD>
           </tr>
           <tr>
             <TD>
-              <span className="font-medium">Commission</span>{" "}
-              <BasisChip basis={f.basis} settled={f.settled} />
+              {/* Commission and Adjustments are the SAME words the cost
+                  statement uses for the same money — reports.th.commission and
+                  reports.costs.adjustments, not payslip-local copies. */}
+              <span className="font-medium">{t("reports.th.commission", lang)}</span>{" "}
+              <BasisChip basis={f.basis} settled={f.settled} lang={lang} />
             </TD>
             <TD className="text-right tabular-nums">{formatSar(f.commission)}</TD>
           </tr>
           <tr>
-            <TD>Special payments</TD>
+            <TD>{t("reports.payslips.specialPayments", lang)}</TD>
             <TD className="text-right tabular-nums">{formatSar(f.specials)}</TD>
           </tr>
           <tr>
-            <TD>Adjustments</TD>
+            <TD>{t("reports.costs.adjustments", lang)}</TD>
             <TD className="text-right tabular-nums">{formatSar(f.adjustments)}</TD>
           </tr>
           <tr>
-            <TD>Bonus</TD>
+            <TD>{t("reports.payslips.bonus", lang)}</TD>
             <TD className="text-right tabular-nums">{formatSar(f.bonus)}</TD>
           </tr>
           <tr>
-            <TD className="muted">Deductions</TD>
+            <TD className="muted">{t("reports.payslips.deductions", lang)}</TD>
             <TD className="text-right tabular-nums muted">{formatSar(f.deductions)}</TD>
           </tr>
           <tr className="border-t-2">
-            <TD className="font-semibold">Net pay</TD>
+            <TD className="font-semibold">{t("reports.payslips.netPay", lang)}</TD>
             <TD className="text-right tabular-nums font-semibold text-base">{formatSar(f.net)}</TD>
           </tr>
         </tbody>
@@ -1545,8 +1703,14 @@ function PayslipDocument({
           document someone is paid against is worth less than no number. */}
       {f.basis === "paid" && payouts.length > 0 && (
         <div className="mt-4 text-[12px]">
+          {/* `{n}` RAW — it was interpolated directly and formatNum would add
+              a separator this line never had. The `one` branch carries NO
+              number in English ("Settled by payout", not "…by 1 payout"),
+              which is exactly the freedom EN[one] has; fill() simply finds no
+              token to replace. */}
           <div className="font-medium mb-1">
-            Settled by {payouts.length === 1 ? "payout" : `${payouts.length} payouts`}
+            {fill(t(`reports.payslips.settledBy.${plural(payouts.length)}`, lang),
+              { n: payouts.length })}
           </div>
           <ul className="space-y-0.5 muted">
             {payouts.map((p) => (
@@ -1556,29 +1720,37 @@ function PayslipDocument({
               </li>
             ))}
           </ul>
+          {/* The two trip dates are stored ISO strings and the dash between
+              them is punctuation — both stay as they are in either language.
+              `{n}` RAW again; the count and its noun were spliced off one
+              `=== 1` test, so the phrase is stored whole per count bucket. The
+              earlier-month test compares two DATE PREFIXES, never a rendered
+              word. */}
           {covered && covered.count > 0 && covered.first_trip && (
             <p className="mt-1 muted">
-              Covers {covered.count} {covered.count === 1 ? "trip" : "trips"} worked{" "}
+              {fill(t(`reports.payslips.covers.${plural(covered.count)}`, lang),
+                { n: covered.count })}{" "}
               {covered.first_trip} – {covered.last_trip}.{" "}
               {covered.first_trip.slice(0, 7) !== row.period_start.slice(0, 7) && (
-                <b>Some of that work was done in an earlier month; it is paid here because
-                that is when it was settled.</b>
+                <b>{t("reports.payslips.earlierMonth", lang)}</b>
               )}
             </p>
           )}
         </div>
       )}
 
+      {/* The branch tests the BASIS ENUM, not the chip's words. No space after
+          `</b>` — the "after" value opens with its own full stop. */}
       {f.basis !== "paid" && (
         <Note>
-          This commission is <b>earned but not yet paid</b>. When it is settled it will
-          appear again, as PAID, on the payslip for the month it is paid in — that is a
-          record of two different events, not the same money counted twice.
+          {t("reports.payslips.earnedNoteBefore", lang)}{" "}
+          <b>{t("reports.payslips.earnedNoteStrong", lang)}</b>
+          {t("reports.payslips.earnedNoteAfter", lang)}
         </Note>
       )}
 
       {row.salary_missing && (
-        <Note>No salary is recorded for this driver, so basic salary reads 0.</Note>
+        <Note>{t("reports.payslips.noSalaryRecorded", lang)}</Note>
       )}
     </>
   );
@@ -1610,6 +1782,7 @@ function CommissionReviewTable({
   rows: DriverCommissionByProjectRow[];
   periodStart: string; periodEnd: string; label: string;
 }) {
+  const { lang } = useApp();
   const drivers = useMemo(() => {
     const inPeriod = rows.filter((r) => r.month >= periodStart && r.month <= periodEnd);
 
@@ -1618,13 +1791,17 @@ function CommissionReviewTable({
     // statement here already does; no metric is defined by this.
     const byDriver = new Map<string, {
       driverId: string; name: string; trips: number; commission: number;
-      projects: Map<string, { name: string; trips: number }>;
+      // NULL is the direct-customer bucket and it stays NULL all the way to
+      // the chip that renders it — naming it here would put a translated
+      // string inside a memo keyed on data, so the table would keep the old
+      // language until the rows themselves changed. Same call as DriverCol.
+      projects: Map<string, { name: string | null; trips: number }>;
     }>();
 
     for (const r of inPeriod) {
       const e = byDriver.get(r.driver_id) ?? {
         driverId: r.driver_id, name: r.driver_name, trips: 0, commission: 0,
-        projects: new Map<string, { name: string; trips: number }>(),
+        projects: new Map<string, { name: string | null; trips: number }>(),
       };
       e.trips += r.trips_delivered;
       e.commission += r.commission_sar;
@@ -1632,8 +1809,7 @@ function CommissionReviewTable({
       // commission, kept by the view rather than dropped. The UI names it, the
       // same way the Operations statement names its unassigned driver row.
       const key = r.project_id ?? "__direct__";
-      const name = r.project_name ?? "Direct customer";
-      const p = e.projects.get(key) ?? { name, trips: 0 };
+      const p = e.projects.get(key) ?? { name: r.project_name, trips: 0 };
       p.trips += r.trips_delivered;
       e.projects.set(key, p);
       byDriver.set(r.driver_id, e);
@@ -1671,40 +1847,61 @@ function CommissionReviewTable({
     <div id="commission-review-print" className="card p-6 mt-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <PrintBand title="Commission earned by driver" period={`${label} · work month`} />
-          <h2 className="text-lg font-semibold no-print">Commission earned by driver</h2>
+          {/* ONE leaf for "work month", read by the print band, the subtitle
+              and the footnote — the phrase is the point of the table, and
+              three spellings of it is how the point gets blurred. */}
+          <PrintBand
+            title={t("reports.commissionReview.title", lang)}
+            period={`${label} · ${t("reports.commissionReview.workMonth", lang)}`}
+          />
+          <h2 className="text-lg font-semibold no-print">
+            {t("reports.commissionReview.title", lang)}
+          </h2>
           <p className="text-sm muted no-print">
-            {label} · <b>work month</b> — what each driver earned from the trips he
-            drove in this period, <b>whether or not it has been paid out yet</b>.
+            {label} · <b>{t("reports.commissionReview.workMonth", lang)}</b>{" "}
+            {t("reports.commissionReview.subtitleAfterMonth", lang)}{" "}
+            <b>{t("reports.commissionReview.subtitleStrong", lang)}</b>.
           </p>
         </div>
         <Btn variant="outline" onClick={printReview} className="no-print">
-          <Printer className="h-4 w-4" /> Print this table
+          {/* The space after the icon is JSX on the same line, as before. */}
+          <Printer className="h-4 w-4" /> {t("reports.commissionReview.printThisTable", lang)}
         </Btn>
       </div>
 
       {/* THE DISTINCTION, STATED WHERE THE NUMBERS ARE. The register above uses
           the settlement month; this uses the work month. Same money, two
           questions — and the totals for one driver will legitimately differ. */}
+      {/* FIVE EMPHASISED WORDS INSIDE ONE PARAGRAPH, each a whole grammatical
+          unit in the same slot in both languages — never a word spliced out of
+          a sentence. The two MONTH NAMES are part of the example sentence, not
+          data, so they are translated with it. Every seam is a JSX `{" "}`
+          except the last, whose value opens with its own comma. */}
       <div className="mt-3 mb-4 rounded-lg border border-brand-500/25 bg-brand-500/5 px-3 py-2 text-[12px] leading-relaxed">
-        This is <b>not</b> the payslip figure above. The payslip register shows what was{" "}
-        <b>settled</b> in this month; this table shows what was <b>earned</b> in the month
-        the work was done. A driver whose June trips were paid in July appears here under{" "}
-        <b>June</b> and on his payslip under <b>July</b>, so the two totals differing is
-        expected, not an error.
+        {t("reports.commissionReview.distinct1", lang)}{" "}
+        <b>{t("reports.commissionReview.distinctNot", lang)}</b>{" "}
+        {t("reports.commissionReview.distinct2", lang)}{" "}
+        <b>{t("reports.commissionReview.distinctSettled", lang)}</b>{" "}
+        {t("reports.commissionReview.distinct3", lang)}{" "}
+        <b>{t("reports.commissionReview.distinctEarned", lang)}</b>{" "}
+        {t("reports.commissionReview.distinct4", lang)}{" "}
+        <b>{t("reports.commissionReview.distinctJune", lang)}</b>{" "}
+        {t("reports.commissionReview.distinct5", lang)}{" "}
+        <b>{t("reports.commissionReview.distinctJuly", lang)}</b>
+        {t("reports.commissionReview.distinct6", lang)}
       </div>
 
       {drivers.length === 0 ? (
-        <Empty>No delivered trips in this period.</Empty>
+        <Empty>{t("reports.commissionReview.noDeliveredTrips", lang)}</Empty>
       ) : (
         <>
           <Table>
             <thead>
               <tr>
-                <TH>Driver</TH>
-                <TH className="text-right">Trips</TH>
-                <TH>Projects served</TH>
-                <TH className="text-right">Commission earned</TH>
+                <TH>{t("common.driver", lang)}</TH>
+                <TH className="text-right">{t("reports.th.trips", lang)}</TH>
+                <TH>{t("reports.th.projectsServed", lang)}</TH>
+                <TH className="text-right">{t("reports.th.commissionEarned", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -1721,11 +1918,15 @@ function CommissionReviewTable({
                   <TD className="text-right tabular-nums align-top">{formatNum(d.trips)}</TD>
                   <TD className="align-top">
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-                      {[...d.projects.values()]
-                        .sort((a, b) => b.trips - a.trips)
-                        .map((p) => (
-                          <span key={p.name} className="whitespace-nowrap">
-                            {p.name}{" "}
+                      {/* Iterated as ENTRIES so the chip can key on the
+                          project id — `p.name` was the React key and it is now
+                          nullable, not unique, and language-dependent. The
+                          direct-customer bucket is named HERE, at render. */}
+                      {[...d.projects.entries()]
+                        .sort((a, b) => b[1].trips - a[1].trips)
+                        .map(([pid, p]) => (
+                          <span key={pid} className="whitespace-nowrap">
+                            {p.name ?? t("reports.commissionReview.directCustomer", lang)}{" "}
                             <span className="text-[11px] muted tabular-nums">
                               {formatNum(p.trips)}
                             </span>
@@ -1739,7 +1940,7 @@ function CommissionReviewTable({
                 </tr>
               ))}
               <tr className="border-t-2">
-                <TD className="font-semibold">Total</TD>
+                <TD className="font-semibold">{t("reports.th.total", lang)}</TD>
                 <TD className="text-right tabular-nums font-semibold">{formatNum(totals.trips)}</TD>
                 <TD>{""}</TD>
                 <TD className="text-right tabular-nums font-semibold">
@@ -1749,11 +1950,12 @@ function CommissionReviewTable({
             </tbody>
           </Table>
 
+          {/* The emphasised name is the SAME leaf the chips above render, so
+              the footnote cannot name a bucket the table spells differently.
+              The full stop is JSX, as it was. */}
           <Note>
-            Delivered trips only — commission is earned on delivery, so a scheduled or
-            in-transit trip has earned nothing yet and is not counted here. The small
-            number beside each project is that project&apos;s trip count. Trips taken for a
-            direct customer rather than a project are grouped as <b>Direct customer</b>.
+            {t("reports.commissionReview.reviewNote", lang)}{" "}
+            <b>{t("reports.commissionReview.directCustomer", lang)}</b>.
           </Note>
         </>
       )}

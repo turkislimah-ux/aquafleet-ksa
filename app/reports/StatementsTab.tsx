@@ -91,8 +91,10 @@ import {
 // reason — the controls at the top of this tab cannot express a single day.
 import DailyTripsTab from "./DailyTripsTab";
 import { issueDriverPayslip } from "./actions";
-import { buildReport, GROUPING_LABELS, type BuilderSelection } from "@/lib/report-builder";
+import { buildReport, GROUPING_TKEY, type BuilderSelection } from "@/lib/report-builder";
 import CustomReportModal from "./CustomReportModal";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
 
 // One statement at a time. That keeps each print id the ONLY print subtree in
 // the DOM, so "Print" prints the statement you are looking at rather than the
@@ -101,20 +103,24 @@ type Statement =
   | "pnl" | "revenue" | "receivables" | "cost" | "operations"
   | "daily" | "payslips" | "narrative" | "custom";
 
-const STATEMENTS: { key: Statement; label: string }[] = [
-  { key: "pnl", label: "P&L" },
-  { key: "revenue", label: "Revenue" },
-  { key: "receivables", label: "Receivables" },
-  { key: "cost", label: "Costs" },
-  { key: "operations", label: "Operations" },
+// `revenue` points at reports.metric.revenue rather than minting a ninth tab
+// leaf: the statement is named after the metric it reports, so a second copy of
+// the word is a second thing to keep in step. Every other tab has a name only a
+// tab has.
+const STATEMENTS: { key: Statement; labelKey: TKey }[] = [
+  { key: "pnl", labelKey: "reports.statements.tab.pnl" },
+  { key: "revenue", labelKey: "reports.metric.revenue" },
+  { key: "receivables", labelKey: "reports.statements.tab.receivables" },
+  { key: "cost", labelKey: "reports.statements.tab.cost" },
+  { key: "operations", labelKey: "reports.statements.tab.operations" },
   // DIRECTLY AFTER OPERATIONS, and that placement is the meaning: Operations is
   // the period-level view of the same activity — trips, trucks, work orders
   // aggregated — and Daily Trips is the day-level record underneath it, one line
   // per driver per truck. Reading them adjacently is reading the same thing at
   // two grains, so the pack goes from summary to source without a jump.
-  { key: "daily", label: "Daily Trips" },
-  { key: "payslips", label: "Payslips" },
-  { key: "narrative", label: "Narrative" },
+  { key: "daily", labelKey: "reports.statements.tab.daily" },
+  { key: "payslips", labelKey: "reports.statements.tab.payslips" },
+  { key: "narrative", labelKey: "reports.statements.tab.narrative" },
 ];
 
 // Every value `?statement=` accepts. "custom" is included even though it is
@@ -169,6 +175,7 @@ export default function StatementsTab({
   filling, fillingByStation,
   collections, metrics, perTruck, opsByDriver, payslipBasis, issuedPayslips, driverCommission, today, onManageExpenses,
 }: Props) {
+  const { lang } = useApp();
   const [periodType, setPeriodType] = useState<PeriodType>("month");
   // Which statement is showing lives in the URL, so global search can open
   // one directly ("P&L", "Receivables", "قائمة الإيرادات" are all real
@@ -239,7 +246,9 @@ export default function StatementsTab({
   // remount, and so its state stays in this scope.
   const selector = (
     <div className="flex items-center gap-1 flex-wrap no-print">
-      {[...STATEMENTS, ...(customSpec ? [{ key: "custom" as Statement, label: "Custom" }] : [])].map((st) => (
+      {[...STATEMENTS, ...(customSpec
+        ? [{ key: "custom" as Statement, labelKey: "reports.statements.tab.custom" as TKey }]
+        : [])].map((st) => (
         <button
           key={st.key}
           onClick={() => setStatement(st.key)}
@@ -250,7 +259,7 @@ export default function StatementsTab({
               : "border-transparent muted hover:text-[rgb(var(--fg))]",
           )}
         >
-          {st.label}
+          {t(st.labelKey, lang)}
         </button>
       ))}
 
@@ -262,7 +271,7 @@ export default function StatementsTab({
                    border-transparent text-brand-600 dark:text-brand-300 hover:bg-brand-500/10"
       >
         <Sparkles className="h-3.5 w-3.5" />
-        Custom report
+        {t("reports.builder.title", lang)}
       </button>
     </div>
   );
@@ -312,9 +321,9 @@ export default function StatementsTab({
   if (!current) {
     return (
       <div className="card p-8 text-center">
-        <div className="text-sm font-medium">Nothing to report yet</div>
+        <div className="text-sm font-medium">{t("reports.statements.nothingToReport", lang)}</div>
         <p className="text-sm muted mt-1">
-          Periods appear once there is activity to summarise.
+          {t("reports.statements.periodsAppear", lang)}
         </p>
       </div>
     );
@@ -371,6 +380,21 @@ export default function StatementsTab({
   const vatOrderedRejected = vatLine(vatPurchaseOrders, true);
   const vatReceivedRejected = vatLine(vatStockReceipts, true);
 
+  // The hint under each VAT row: the document count and the date basis. Every
+  // one of the six was a template literal splicing a `count === 1` ternary into
+  // an English sentence, which is the trap — Arabic has four count buckets and
+  // inflects the noun, so each family stores four whole sentences instead.
+  //
+  // FOUR FAMILIES FOR SIX ROWS: the two rejected lines count the same document
+  // kinds as the two they sit under, so they read the same family rather than
+  // minting a duplicate that could drift.
+  //
+  // `n` stays RAW. These counts were interpolated directly and never passed
+  // through formatNum, so routing them through one now would put a thousands
+  // separator into a sentence that never had one.
+  const vatHint = (family: "hintSales" | "hintOrders" | "hintReceipts" | "hintRepairs", n: number) =>
+    fill(t(`reports.vat.${family}.${plural(n)}`, lang), { n });
+
   // Narrative inputs. Every one is a selection or an additive sum over view
   // output — no ratio and no distinct count is computed here (see the rule in
   // lib/reports.ts). The margin quoted in the narrative comes from the view.
@@ -404,6 +428,7 @@ export default function StatementsTab({
       workOrders: sumOver(monthsCovered, (r) => r.work_orders),
       salesReturns: returned,
       topCustomer: top,
+      lang,
     });
   })();
 
@@ -413,18 +438,20 @@ export default function StatementsTab({
       <div className="flex flex-wrap items-center gap-3 no-print">
         <div className="flex items-center gap-1 rounded-lg border p-1"
           style={{ borderColor: "rgb(var(--border))" }}>
-          {PERIOD_TYPES.map((t) => (
+          {/* `pt`, not `t` — the translator is imported into this scope and a
+              map parameter named `t` shadows it for the whole callback. */}
+          {PERIOD_TYPES.map((pt) => (
             <button
-              key={t.key}
-              onClick={() => { setPeriodType(t.key); setStart(null); }}
+              key={pt.key}
+              onClick={() => { setPeriodType(pt.key); setStart(null); }}
               className={cn(
                 "px-3 py-1.5 rounded-md text-sm font-medium transition",
-                periodType === t.key
+                periodType === pt.key
                   ? "bg-brand-600 text-white"
                   : "muted hover:text-[rgb(var(--fg))]",
               )}
             >
-              {t.label}
+              {t(pt.labelKey, lang)}
             </button>
           ))}
         </div>
@@ -442,10 +469,10 @@ export default function StatementsTab({
 
         <div className="ml-auto flex items-center gap-2">
           <Btn variant="outline" onClick={onManageExpenses}>
-            <Pencil className="h-4 w-4" />Manage expenses
+            <Pencil className="h-4 w-4" />{t("reports.statements.manageExpenses", lang)}
           </Btn>
           <Btn variant="outline" onClick={() => window.print()}>
-            <Printer className="h-4 w-4" />Print
+            <Printer className="h-4 w-4" />{t("reports.statements.print", lang)}
           </Btn>
         </div>
       </div>
@@ -471,15 +498,19 @@ export default function StatementsTab({
       <div id="pnl-print" className="space-y-5">
         <div className="card p-6">
           <header className="mb-5">
-            <h2 className="text-lg font-semibold">Profit &amp; Loss</h2>
+            {/* `&amp;` was JSX escaping, not content — this has always
+                rendered a literal "Profit & Loss". */}
+            <h2 className="text-lg font-semibold">{t("reports.pnl.title", lang)}</h2>
             <p className="text-sm muted">
               {current.label}
-              {prior && <> · compared with {prior.label}</>}
+              {/* The space after `<>` is on the same line as the tag, so JSX
+                  keeps it — it is the separator between the two labels and it
+                  is not part of the dictionary value. */}
+              {prior && <> {fill(t("reports.pnl.comparedWith", lang), { p: prior.label })}</>}
             </p>
             {inProgress && (
               <p className="text-xs mt-1.5 text-amber-600 dark:text-amber-400">
-                This period is still in progress — costs accrue daily, while revenue is
-                recognised when invoices are confirmed.
+                {t("reports.pnl.inProgress", lang)}
               </p>
             )}
           </header>
@@ -490,54 +521,69 @@ export default function StatementsTab({
                 <th className="text-left font-medium muted pb-2">&nbsp;</th>
                 <th className="text-right font-medium muted pb-2 w-[150px]">{current.label}</th>
                 <th className="text-right font-medium muted pb-2 w-[150px]">{prior?.label ?? "—"}</th>
-                <th className="text-right font-medium muted pb-2 w-[130px]">Variance</th>
+                <th className="text-right font-medium muted pb-2 w-[130px]">{t("reports.th.variance", lang)}</th>
+                {/* A bare symbol, left as one. "%" is not English. */}
                 <th className="text-right font-medium muted pb-2 w-[90px]">%</th>
               </tr>
             </thead>
 
             <tbody>
-              <Line label="Revenue" cur={current.revenue_sar} pri={prior?.revenue_sar}
+              {/* Five of these labels come from reports.metric.* rather than a
+                  pnl.* leaf of their own — Revenue, Payroll, Commissions,
+                  Operating profit and Operating margin say exactly what the
+                  dictionary already says they say. */}
+              <Line label={t("reports.metric.revenue", lang)} cur={current.revenue_sar} pri={prior?.revenue_sar}
                 higherIsBetter bold />
 
-              <SectionHead>Cost of operations</SectionHead>
-              <Line label="Parts consumed" cur={current.parts_cost_sar} pri={prior?.parts_cost_sar} indent />
-              <Line label="Outsourced repairs" cur={current.os_cost_sar} pri={prior?.os_cost_sar} indent />
-              <Line label="Payroll" cur={current.payroll_sar} pri={prior?.payroll_sar} indent />
-              <Line label="Commissions" cur={current.commissions_sar} pri={prior?.commissions_sar} indent />
+              <SectionHead>{t("reports.pnl.headCostOfOps", lang)}</SectionHead>
+              <Line label={t("reports.pnl.lineParts", lang)} cur={current.parts_cost_sar} pri={prior?.parts_cost_sar} indent />
+              <Line label={t("reports.pnl.lineOs", lang)} cur={current.os_cost_sar} pri={prior?.os_cost_sar} indent />
+              <Line label={t("reports.metric.payroll", lang)} cur={current.payroll_sar} pri={prior?.payroll_sar} indent />
+              <Line label={t("reports.metric.commissions", lang)} cur={current.commissions_sar} pri={prior?.commissions_sar} indent />
               {/* The FIFTH bucket (0112/0113). Without it the four above do not
                   add up to the total below — the gap was exactly this. */}
-              <Line label="Station fill" cur={current.filling_cost_sar} pri={prior?.filling_cost_sar} indent />
-              <Line label="Total operating cost" cur={current.operating_cost_sar}
+              <Line label={t("reports.pnl.lineFilling", lang)} cur={current.filling_cost_sar} pri={prior?.filling_cost_sar} indent />
+              <Line label={t("reports.pnl.lineOperatingCost", lang)} cur={current.operating_cost_sar}
                 pri={prior?.operating_cost_sar} bold rule />
               {current.filling_uncosted_trips > 0 && (
                 <tr>
+                  {/* English spliced TWO words at once — "fill has"/"fills
+                      have" and "its"/"their" — off one `=== 1` test. Arabic
+                      changes the noun, the verb and the possessive together and
+                      has four count buckets, so the sentence is stored whole per
+                      bucket rather than assembled from fragments. The count
+                      stays RAW: it was never run through formatNum here, and
+                      routing it through one now would insert a thousands
+                      separator this sentence never had. */}
                   <td colSpan={4} className="pb-2 pl-4 text-[11px] text-amber-700 dark:text-amber-300">
-                    {current.filling_uncosted_trips}{" "}
-                    {current.filling_uncosted_trips === 1 ? "fill has" : "fills have"} no price for
-                    {" "}{current.filling_uncosted_trips === 1 ? "its" : "their"} water type in this
-                    period — that cost is unknown, not zero, and is not in the figures above.
+                    {fill(t(`reports.pnl.uncosted.${plural(current.filling_uncosted_trips)}`, lang),
+                      { n: current.filling_uncosted_trips })}
                   </td>
                 </tr>
               )}
 
-              <Line label="Operating profit" cur={current.operating_profit_sar}
+              <Line label={t("reports.metric.operatingProfit", lang)} cur={current.operating_profit_sar}
                 pri={prior?.operating_profit_sar} higherIsBetter bold rule signed />
-              <MarginLine cur={current.operating_margin_pct} pri={prior?.operating_margin_pct ?? null} />
+              <MarginLine cur={current.operating_margin_pct} pri={prior?.operating_margin_pct ?? null} lang={lang} />
 
               {/* Expenses are their OWN section, never folded into the four
                   operational buckets. That separation is a rule from 0098, not a
                   layout preference — merging them would hide which costs the app
                   actually models and which were typed in by hand. */}
-              <SectionHead>Other expenses (recorded manually)</SectionHead>
+              <SectionHead>{t("reports.pnl.headOtherExpenses", lang)}</SectionHead>
               {categories.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-2 pl-4 muted text-xs">
-                    None recorded for this period — net profit therefore equals operating profit.
+                    {t("reports.pnl.noExpenses", lang)}
                   </td>
                 </tr>
               ) : (
                 categories.map((c) => (
                   <tr key={c.category}>
+                    {/* USER DATA, not chrome. Expense categories are free text
+                        typed into ExpensesModal — there is no enum and no
+                        `_ar` column, so this renders whatever was entered, in
+                        whatever language it was entered in. */}
                     <td className="py-1.5 pl-4">{c.category}</td>
                     <td className="py-1.5 text-right tabular-nums">{formatSar(c.expenses_sar)}</td>
                     <td className="py-1.5 text-right tabular-nums muted">—</td>
@@ -546,7 +592,7 @@ export default function StatementsTab({
                   </tr>
                 ))
               )}
-              <Line label="Total other expenses" cur={current.expenses_sar}
+              <Line label={t("reports.pnl.lineExpenses", lang)} cur={current.expenses_sar}
                 pri={prior?.expenses_sar} bold rule />
 
               {/* The metric is still `net_profit` — the dictionary defines it and
@@ -554,26 +600,26 @@ export default function StatementsTab({
                   rename: everything above this line is the P&L, everything below
                   it is an estimate. Showing "Profit before Zakat" as a second row
                   carrying the identical figure would read as a mistake. */}
-              <Line label="Net profit — profit before Zakat" cur={current.net_profit_sar}
+              <Line label={t("reports.pnl.lineNetProfit", lang)} cur={current.net_profit_sar}
                 pri={prior?.net_profit_sar} higherIsBetter bold rule signed />
 
               {/* ZAKAT. NO INCOME-TAX LINE BELONGS HERE OR ANYWHERE ON THIS PAGE:
                   Saudi corporate income tax applies to foreign or mixed
                   ownership, and Bin Slimah Group is 100% Saudi-owned. */}
-              <SectionHead>Zakat — indicative estimate</SectionHead>
-              <Line label="Zakat (2.5%, indicative)" cur={zakat.estimate}
+              <SectionHead>{t("reports.pnl.headZakat", lang)}</SectionHead>
+              <Line label={t("reports.pnl.lineZakat", lang)} cur={zakat.estimate}
                 pri={priorZakat?.estimate} indent estimate />
-              <Line label="Estimated profit after Zakat" cur={zakat.profitAfterZakat}
+              <Line label={t("reports.pnl.lineAfterZakat", lang)} cur={zakat.profitAfterZakat}
                 pri={priorZakat?.profitAfterZakat} higherIsBetter rule signed estimate />
               <tr>
+                {/* THE CAVEAT IS PART OF THE FIGURE (§7) — it must reach the
+                    reader in whichever language they are reading, which is the
+                    whole reason this paragraph is keyed rather than left. The
+                    space is on the same line as `<>`, so JSX keeps it; it is
+                    the sentence separator, not part of either value. */}
                 <td colSpan={5} className="pt-2 pl-4 text-[11px] muted italic leading-relaxed">
-                  Estimate only — actual Zakat is assessed on your ZATCA
-                  balance-sheet base (capital, reserves and long-term liabilities,
-                  less deductible long-term assets), not on profit.
-                  {!zakat.applies && (
-                    <> This period is a loss, so the estimate is shown as zero: a
-                    negative Zakat credit does not exist.</>
-                  )}
+                  {t("reports.pnl.zakatNote", lang)}
+                  {!zakat.applies && <> {t("reports.pnl.zakatLoss", lang)}</>}
                 </td>
               </tr>
             </tbody>
@@ -581,12 +627,10 @@ export default function StatementsTab({
 
           <footer className="mt-5 pt-3 border-t text-[11px] muted leading-relaxed"
             style={{ borderColor: "rgb(var(--border))" }}>
+            {/* `&apos;` was JSX escaping — the rendered character is a plain
+                apostrophe, and that is what the dictionary value holds. */}
             <p>
-              Revenue is confirmed invoices net of VAT. Parts are costed FIFO at the moment
-              they leave stock — stock purchases are not a cost here, they become one when
-              consumed. Payroll applies current salaries to whoever was employed in the
-              period, as salaries are not effective-dated. Margin is computed from this
-              period&apos;s own revenue, never averaged from its months.
+              {t("reports.pnl.footer", lang)}
             </p>
           </footer>
         </div>
@@ -620,20 +664,21 @@ export default function StatementsTab({
             would render on screen and vanish on paper. */}
         <section className="card p-6">
           <div className="flex items-baseline gap-2 flex-wrap">
-            <h3 className="text-base font-semibold">VAT by source</h3>
+            <h3 className="text-base font-semibold">{t("reports.vat.title", lang)}</h3>
             <span className="text-xs muted">{current.label}</span>
           </div>
           <p className="text-xs muted mt-1 mb-4">
-            Every VAT amount the period recorded, listed beside where it came from.
-            Nothing here is totalled or netted, and none of it forms part of the
-            profit above.
+            {t("reports.vat.intro", lang)}
           </p>
 
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b" style={{ borderColor: "rgb(var(--border))" }}>
-                <th className="text-left font-medium muted pb-2">Source</th>
-                <th className="text-right font-medium muted pb-2 w-[170px]">VAT</th>
+                {/* `mt.vat` — the money vocabulary was already keyed by the
+                    maintenance batch, so this heading reads it rather than
+                    minting a second spelling of one word. */}
+                <th className="text-left font-medium muted pb-2">{t("reports.th.source", lang)}</th>
+                <th className="text-right font-medium muted pb-2 w-[170px]">{t("mt.vat", lang)}</th>
               </tr>
             </thead>
             <tbody>
@@ -645,23 +690,23 @@ export default function StatementsTab({
                   AND the date basis, so each line is auditable without the
                   reader scrolling to the notes. */}
               <VatRow
-                label="Sales invoices"
-                hint={`${vatSales.count} confirmed ${vatSales.count === 1 ? "invoice" : "invoices"} · by confirmation date`}
+                label={t("reports.vat.rowSales", lang)}
+                hint={vatHint("hintSales", vatSales.count)}
                 value={vatSales.total}
               />
               <VatRow
-                label="Purchase orders raised"
-                hint={`${vatOrdered.count} ${vatOrdered.count === 1 ? "order" : "orders"} · by request date`}
+                label={t("reports.vat.rowOrdered", lang)}
+                hint={vatHint("hintOrders", vatOrdered.count)}
                 value={vatOrdered.total}
               />
               <VatRow
-                label="Stock received"
-                hint={`${vatReceived.count} ${vatReceived.count === 1 ? "receipt" : "receipts"} · by received date`}
+                label={t("reports.vat.rowReceived", lang)}
+                hint={vatHint("hintReceipts", vatReceived.count)}
                 value={vatReceived.total}
               />
               <VatRow
-                label="Workshop — outsourced repairs"
-                hint={`${vatRepairs.count} vendor ${vatRepairs.count === 1 ? "invoice" : "invoices"} · by invoice date`}
+                label={t("reports.vat.rowRepairs", lang)}
+                hint={vatHint("hintRepairs", vatRepairs.count)}
                 value={vatRepairs.total}
               />
 
@@ -675,14 +720,14 @@ export default function StatementsTab({
               {(vatOrderedRejected.count > 0 || vatReceivedRejected.count > 0) && (
                 <tr>
                   <td colSpan={2} className="pt-4 pb-1 text-xs uppercase tracking-wide muted font-medium">
-                    Rejected — listed separately, not included above
+                    {t("reports.vat.rejectedHead", lang)}
                   </td>
                 </tr>
               )}
               {vatOrderedRejected.count > 0 && (
                 <VatRow
-                  label="Rejected purchase orders"
-                  hint={`${vatOrderedRejected.count} ${vatOrderedRejected.count === 1 ? "order" : "orders"} · by request date`}
+                  label={t("reports.vat.rowOrderedRejected", lang)}
+                  hint={vatHint("hintOrders", vatOrderedRejected.count)}
                   value={vatOrderedRejected.total}
                   indent
                   muted
@@ -690,8 +735,8 @@ export default function StatementsTab({
               )}
               {vatReceivedRejected.count > 0 && (
                 <VatRow
-                  label="Rejected stock receipts"
-                  hint={`${vatReceivedRejected.count} ${vatReceivedRejected.count === 1 ? "receipt" : "receipts"} · by received date`}
+                  label={t("reports.vat.rowReceivedRejected", lang)}
+                  hint={vatHint("hintReceipts", vatReceivedRejected.count)}
                   value={vatReceivedRejected.total}
                   indent
                   muted
@@ -702,33 +747,29 @@ export default function StatementsTab({
 
           <footer className="mt-5 pt-3 border-t text-[11px] muted leading-relaxed space-y-1.5"
             style={{ borderColor: "rgb(var(--border))" }}>
+            {/* FOUR FOOTNOTES, THREE SHAPES OF SPLIT.
+                  * The first two open with a bolded COMPLETE SENTENCE, so the
+                    break between `*Bold` and the body is a sentence boundary —
+                    Arabic keeps its own word order on each side of it.
+                  * The third is one paragraph and one leaf.
+                  * The fourth is the only `<strong>` sitting MID-sentence, so
+                    it is split in three: English emphasises before the adverb
+                    ("here and only here"), Arabic after it ("هنا فقط"), and
+                    only three leaves let each language place its own.
+                Every space around a `<strong>` is on the same line as the tag,
+                which is what makes JSX keep it — none of them is in a value. */}
             <p>
-              <strong>These lines are not added together.</strong> Sales VAT is money
-              charged TO customers; the other three are VAT paid TO suppliers. And an
-              order that has since been delivered appears on both &ldquo;Purchase orders
-              raised&rdquo; and &ldquo;Stock received&rdquo; — the same purchase at two
-              stages, ordered and delivered, not two purchases. A total across this list
-              would be a number that means nothing.
+              <strong>{t("reports.vat.note1Bold", lang)}</strong> {t("reports.vat.note1", lang)}
             </p>
             <p>
-              <strong>Not a ZATCA return.</strong> Nothing here is netted and no amount
-              payable or reclaimable is computed. Sales VAT is the VAT on the same
-              confirmed invoices the Revenue statement reports, so those two always agree.
+              <strong>{t("reports.vat.note2Bold", lang)}</strong> {t("reports.vat.note2", lang)}
             </p>
             <p>
-              Each line is filtered on the date its own source records, matching the
-              statement that already reports those documents: purchase orders by request
-              date, stock receipts by received date (the Costs statement&apos;s basis for
-              purchasing spend), repair invoices by supplier invoice date and by entry
-              date where the supplier gave none (the basis behind &ldquo;Outsourced
-              repairs&rdquo; above), sales invoices by confirmation date.
+              {t("reports.vat.note3", lang)}
             </p>
             <p>
-              Repair VAT appears here and <strong>only</strong> here — the P&amp;L expenses
-              those invoices net of VAT, so &ldquo;Outsourced repairs&rdquo; above does not
-              carry it. One caveat does remain: stock receipts carry no supplier invoice
-              date, so a purchase falls in the month the goods arrived rather than the
-              month the tax invoice was issued.
+              {t("reports.vat.note4Before", lang)} <strong>{t("reports.vat.note4Strong", lang)}</strong>{" "}
+              {t("reports.vat.note4After", lang)}
             </p>
           </footer>
         </section>
@@ -801,8 +842,8 @@ export default function StatementsTab({
           report={buildReport(customSpec, {
             pnlPeriods, collections, purchasing, operations,
             invoices, outstandingLive, perTruck, maintPerTruck,
-          }, metrics)}
-          title={customTitle(customSpec, pnlPeriods)}
+          }, metrics, lang)}
+          title={customTitle(customSpec, pnlPeriods, lang)}
           onEdit={() => setCustomOpen(true)}
         />
       )}
@@ -810,10 +851,13 @@ export default function StatementsTab({
       {statement === "pnl" && (
       <div className="flex gap-2 text-[11px] muted no-print">
         <Info className="h-3.5 w-3.5 shrink-0 mt-px" />
+        {/* RAW-ENUM TRAP, FIXED IN PLACE. English spliced `periodType` straight
+            into the sentence, so it read "the immediately preceding month" only
+            because the enum value happens to be an English word — an Arabic
+            reader would have got `month` spelled in Latin mid-sentence. Keyed by
+            GRAIN, whole sentence per grain, because Arabic inflects the noun. */}
         <p>
-          Prior-period columns show the immediately preceding {periodType}. Per-category
-          expenses are listed for the current period only — the comparison is made on the
-          section total, since categories come and go between periods.
+          {t(`reports.statements.priorNote.${periodType}`, lang)}
         </p>
       </div>
       )}
@@ -823,12 +867,25 @@ export default function StatementsTab({
   );
 }
 
-/** A one-line description of what the generated report is showing. */
-function customTitle(spec: BuilderSelection, periods: PnlPeriodRow[]): string {
-  const g = GROUPING_LABELS[spec.grouping].toLowerCase();
-  if (spec.grouping === "period") return `${g} · every ${spec.periodType}`;
+/**
+ * A one-line description of what the generated report is showing.
+ *
+ * `.toLowerCase()` runs on the LOOKUP RESULT, never on the key, and is a
+ * deliberate no-op in Arabic — the script has no case, so the same call that
+ * gives English its mid-sentence form leaves "حسب العميل" untouched. Same
+ * treatment as the builder modal's own footer, which prints the identical word.
+ *
+ * The by-period branch is keyed by GRAIN rather than filling `{p}` with the
+ * enum: it spliced `spec.periodType` in raw, so "every month" was English only
+ * by accident of the column's values.
+ */
+function customTitle(spec: BuilderSelection, periods: PnlPeriodRow[], lang: Lang): string {
+  const g = t(GROUPING_TKEY[spec.grouping], lang).toLowerCase();
+  if (spec.grouping === "period") {
+    return fill(t(`reports.statements.customTitle.${spec.periodType}`, lang), { g });
+  }
   const p = periods.find((x) => x.period_type === spec.periodType && x.period_start === spec.periodStart);
-  return `${g} · ${p?.label ?? "—"}`;
+  return fill(t("reports.statements.customTitle.forPeriod", lang), { g, p: p?.label ?? "—" });
 }
 
 // --- Rows ------------------------------------------------------------------
@@ -930,19 +987,29 @@ function VatRow({
   );
 }
 
-/** Margin is a ratio, so its "variance" is a point difference, not a percent. */
-function MarginLine({ cur, pri }: { cur: number | null; pri: number | null }) {
+/**
+ * Margin is a ratio, so its "variance" is a point difference, not a percent.
+ *
+ * `lang` arrives as a PROP rather than through useApp(): this is a table row,
+ * and its two strings are a label the dictionary already defines and a unit
+ * suffix. Same call as MetricsGlossaryModal's entry rows.
+ */
+function MarginLine({ cur, pri, lang }: { cur: number | null; pri: number | null; lang: Lang }) {
   const points = cur !== null && pri !== null ? cur - pri : null;
   return (
     <tr>
-      <td className="py-1.5 pl-4 muted">Operating margin</td>
+      <td className="py-1.5 pl-4 muted">{t("reports.metric.operatingMargin", lang)}</td>
       <td className="py-1.5 text-right tabular-nums">{formatShare(cur)}</td>
       <td className="py-1.5 text-right tabular-nums muted">{formatShare(pri)}</td>
       <td className={cn("py-1.5 text-right tabular-nums",
         points === null ? "muted" :
         points > 0 ? "text-emerald-600 dark:text-emerald-400" :
         points < 0 ? "text-rose-600 dark:text-rose-400" : "muted")}>
-        {points === null ? "—" : `${points > 0 ? "+" : ""}${points.toFixed(1)} pts`}
+        {/* The SIGN and the FIGURE stay Latin — `{v}` carries both, and only
+            the unit word is translated. */}
+        {points === null
+          ? "—"
+          : fill(t("reports.pnl.pts", lang), { v: `${points > 0 ? "+" : ""}${points.toFixed(1)}` })}
       </td>
       <td className="py-1.5 text-right muted">—</td>
     </tr>

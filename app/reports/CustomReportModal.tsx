@@ -24,11 +24,13 @@ import { createPortal } from "react-dom";
 import { X, Sparkles, Check, Info } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { PERIOD_TYPES, periodsOf, type MetricDictionaryRow, type PeriodType, type PnlPeriodRow } from "@/lib/reports";
+import { PERIOD_TYPES, periodsOf, basisLabel, type MetricDictionaryRow, type PeriodType, type PnlPeriodRow } from "@/lib/reports";
 import {
-  availableMetrics, allowedGroupings, metricId, GROUPING_LABELS,
+  availableMetrics, allowedGroupings, metricId, GROUPING_TKEY,
   type Grouping, type BuilderSelection,
 } from "@/lib/report-builder";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural } from "@/lib/i18n";
 import ScrollLock from "@/components/ScrollLock";
 
 const BASIS_STYLE: Record<string, string> = {
@@ -48,6 +50,7 @@ export default function CustomReportModal({
   periodStart: string | null;
   onGenerate: (selection: BuilderSelection) => void;
 }) {
+  const { lang } = useApp();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -79,6 +82,15 @@ export default function CustomReportModal({
   // cannot support is never offered, rather than quietly returning zeroes.
   const groupings = useMemo(() => allowedGroupings(selected), [selected]);
   const activeGrouping = groupings.includes(grouping) ? grouping : groupings[0] ?? "period";
+
+  // The active grouping's NAME, mid-sentence. Two call sites want it that way
+  // — a disabled column's tooltip and the footer's running count — so it is
+  // resolved once here rather than lower-cased at each.
+  //
+  // `.toLowerCase()` runs AFTER the lookup, never on the key, and is a
+  // deliberate no-op in Arabic: the script has no case, so the same call that
+  // turns "By customer" into "by customer" leaves "حسب العميل" untouched.
+  const groupingWord = t(GROUPING_TKEY[activeGrouping], lang).toLowerCase();
 
   const periods = useMemo(() => periodsOf(pnlPeriods, grain), [pnlPeriods, grain]);
   const activeStart = start && periods.some((p) => p.period_start === start)
@@ -115,10 +127,9 @@ export default function CustomReportModal({
 
         <div className="flex items-start justify-between p-4 border-b" style={{ borderColor: "rgb(var(--border))" }}>
           <div>
-            <h2 className="font-semibold">Custom report</h2>
+            <h2 className="font-semibold">{t("reports.builder.title", lang)}</h2>
             <p className="text-[11px] muted">
-              Combine defined metrics into a table. Everything here reads the same views
-              the rest of the page does, so it cannot disagree with them.
+              {t("reports.builder.intro", lang)}
             </p>
           </div>
           <button onClick={onClose}
@@ -136,7 +147,7 @@ export default function CustomReportModal({
           <div className="p-4 space-y-4">
             <div>
               <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">
-                1 · Group rows by
+                {t("reports.builder.step1", lang)}
               </h3>
               <div className="flex items-center gap-1 flex-wrap">
                 {(["period", "customer", "truck"] as Grouping[]).map((g) => {
@@ -146,7 +157,7 @@ export default function CustomReportModal({
                       key={g}
                       onClick={() => allowed && setGrouping(g)}
                       disabled={!allowed}
-                      title={allowed ? undefined : "The metrics you picked cannot be grouped this way"}
+                      title={allowed ? undefined : t("reports.builder.groupingUnavailable", lang)}
                       className={cn(
                         "px-3 py-1.5 rounded-lg text-sm font-medium border transition",
                         activeGrouping === g
@@ -156,7 +167,7 @@ export default function CustomReportModal({
                             : "border-transparent muted opacity-40 cursor-not-allowed",
                       )}
                     >
-                      {GROUPING_LABELS[g]}
+                      {t(GROUPING_TKEY[g], lang)}
                     </button>
                   );
                 })}
@@ -165,7 +176,7 @@ export default function CustomReportModal({
 
             <div>
               <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">
-                2 · Columns
+                {t("reports.builder.step2", lang)}
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                 {offerable.map(({ m, legal, on }) => {
@@ -175,7 +186,7 @@ export default function CustomReportModal({
                       key={id}
                       onClick={() => legal && toggle(id)}
                       disabled={!legal}
-                      title={legal ? undefined : `Not available ${GROUPING_LABELS[activeGrouping].toLowerCase()}`}
+                      title={legal ? undefined : fill(t("reports.builder.notAvailable", lang), { g: groupingWord })}
                       className={cn(
                         "flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left text-sm transition",
                         on && legal
@@ -192,12 +203,12 @@ export default function CustomReportModal({
                       )} style={{ borderColor: on && legal ? undefined : "rgb(var(--border))" }}>
                         {on && legal && <Check className="h-3 w-3 text-white" />}
                       </span>
-                      <span className="flex-1 min-w-0 truncate">{m.label}</span>
+                      <span className="flex-1 min-w-0 truncate">{t(m.labelKey, lang)}</span>
                       <span className={cn(
                         "text-[10px] px-1.5 py-0.5 rounded-full ring-1 ring-inset shrink-0",
                         BASIS_STYLE[m.basis],
                       )}>
-                        {m.basis}
+                        {basisLabel(m.basis, lang)}
                       </span>
                     </button>
                   );
@@ -207,21 +218,21 @@ export default function CustomReportModal({
 
             <div>
               <h3 className="text-xs uppercase tracking-wide muted font-medium mb-2">
-                3 · Period
+                {t("reports.builder.step3", lang)}
               </h3>
               <div className="flex items-center gap-2 flex-wrap">
                 <div className="flex items-center gap-1 rounded-lg border p-1"
                   style={{ borderColor: "rgb(var(--border))" }}>
-                  {PERIOD_TYPES.map((t) => (
+                  {PERIOD_TYPES.map((pt) => (
                     <button
-                      key={t.key}
-                      onClick={() => { setGrain(t.key); setStart(null); }}
+                      key={pt.key}
+                      onClick={() => { setGrain(pt.key); setStart(null); }}
                       className={cn(
                         "px-2.5 py-1 rounded-md text-xs font-medium transition",
-                        grain === t.key ? "bg-brand-600 text-white" : "muted hover:text-[rgb(var(--fg))]",
+                        grain === pt.key ? "bg-brand-600 text-white" : "muted hover:text-[rgb(var(--fg))]",
                       )}
                     >
-                      {t.label}
+                      {t(pt.labelKey, lang)}
                     </button>
                   ))}
                 </div>
@@ -239,7 +250,7 @@ export default function CustomReportModal({
               </div>
               {activeGrouping === "period" && (
                 <p className="text-[11px] muted mt-1.5">
-                  A by-period report lists every {grain} as a row, so it is not filtered to one.
+                  {t(`reports.builder.byPeriodNote.${grain}`, lang)}
                 </p>
               )}
             </div>
@@ -248,8 +259,7 @@ export default function CustomReportModal({
               <div className="flex gap-2 text-[11px] muted leading-relaxed">
                 <Info className="h-3.5 w-3.5 shrink-0 mt-px" />
                 <p>
-                  You have mixed bases selected. They will appear as separate columns and
-                  are never added together — accrual and cash answer different questions.
+                  {t("reports.builder.mixedBases", lang)}
                 </p>
               </div>
             )}
@@ -259,30 +269,27 @@ export default function CustomReportModal({
           <div className="p-4 bg-black/[0.015] dark:bg-white/[0.015]">
             <div className="flex items-center gap-2 mb-1">
               <Sparkles className="h-4 w-4 text-brand-600 dark:text-brand-300" />
-              <h3 className="text-sm font-medium">Ask in plain language</h3>
+              <h3 className="text-sm font-medium">{t("reports.builder.nl.heading", lang)}</h3>
             </div>
             <span className="inline-block text-[10px] px-1.5 py-0.5 rounded-full ring-1 ring-inset
                              bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20 mb-2">
-              Coming soon
+              {t("reports.builder.nl.comingSoon", lang)}
             </span>
             <textarea
               value={nl}
               onChange={(e) => setNl(e.target.value)}
               rows={5}
-              placeholder="e.g. Revenue and outstanding for each customer last quarter"
+              placeholder={t("reports.builder.nl.placeholder", lang)}
               className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 resize-y"
               style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
             />
-            <span title="Natural-language reports are not wired up yet">
+            <span title={t("reports.builder.nl.disabledTitle", lang)}>
               <Btn variant="outline" className="w-full mt-2" disabled>
-                <Sparkles className="h-4 w-4" />Interpret
+                <Sparkles className="h-4 w-4" />{t("reports.builder.nl.interpret", lang)}
               </Btn>
             </span>
             <p className="text-[11px] muted mt-2 leading-relaxed">
-              Not wired up — nothing typed here is sent anywhere. When it is switched on,
-              its only job will be to fill in the builder on the left. It will never write
-              its own query, so a generated report can only ever say what the builder can
-              already say correctly.
+              {t("reports.builder.nl.notWired", lang)}
             </p>
           </div>
         </div>
@@ -290,11 +297,12 @@ export default function CustomReportModal({
         <div className="flex items-center justify-between gap-2 p-4 border-t" style={{ borderColor: "rgb(var(--border))" }}>
           <span className="text-[11px] muted">
             {legalPicked.length === 0
-              ? "Pick at least one column."
-              : `${legalPicked.length} column${legalPicked.length === 1 ? "" : "s"} · ${GROUPING_LABELS[activeGrouping].toLowerCase()}`}
+              ? t("reports.builder.pickOne", lang)
+              : fill(t(`reports.builder.columnsCount.${plural(legalPicked.length)}`, lang),
+                  { n: legalPicked.length, g: groupingWord })}
           </span>
           <div className="flex items-center gap-2">
-            <Btn variant="outline" onClick={onClose}>Cancel</Btn>
+            <Btn variant="outline" onClick={onClose}>{t("common.cancel", lang)}</Btn>
             <Btn
               variant="primary"
               disabled={!canGenerate}
@@ -305,7 +313,7 @@ export default function CustomReportModal({
                 periodStart: activeStart,
               })}
             >
-              Generate
+              {t("reports.builder.generate", lang)}
             </Btn>
           </div>
         </div>

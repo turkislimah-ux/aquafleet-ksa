@@ -28,13 +28,20 @@ import { addDaysToKey } from "@/lib/utils";
 // --------------------------------------------------------------------------
 export type DailyPeriod = "day" | "week" | "month" | "quarter" | "year";
 
-export const DAILY_PERIODS: { key: DailyPeriod; en: string; ar: string }[] = [
-  { key: "day",     en: "Day",     ar: "يوم" },
-  { key: "week",    en: "Week",    ar: "أسبوع" },
-  { key: "month",   en: "Month",   ar: "شهر" },
-  { key: "quarter", en: "Quarter", ar: "ربع" },
-  { key: "year",    en: "Year",    ar: "سنة" },
-];
+/**
+ * The segmented control's five options, IN READING ORDER — narrowest first,
+ * because the day is this report's point and the rest are the fallback.
+ *
+ * KEYS ONLY. This carried an `en` and an `ar` column until Phase 3 Batch 6, so
+ * a module that renders nothing owned the words a button prints. The component
+ * reads them from `reports.daily.period.*` now. It is the same failure mode
+ * CLAUDE.md §7 records for DailyOps.revenue, caught from the other side:
+ * display text is only checkable where it is displayed.
+ *
+ * Typed as `DailyPeriod[]`, so the dictionary path the component builds from an
+ * entry typechecks — a sixth period cannot land here without its leaf.
+ */
+export const DAILY_PERIODS: DailyPeriod[] = ["day", "week", "month", "quarter", "year"];
 
 /**
  * The window a period covers, as inclusive YYYY-MM-DD keys.

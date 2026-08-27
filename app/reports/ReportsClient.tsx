@@ -19,6 +19,8 @@ import { useTabParam } from "@/lib/useTabParam";
 import { useRouter } from "next/navigation";
 import { BookOpen } from "lucide-react";
 import { PageHeader, Btn } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, type TKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   monthsDesc, monthLabel,
@@ -48,9 +50,12 @@ const REPORT_TABS = ["overview", "statements"] as const;
 
 type Tab = "overview" | "statements";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "overview", label: "Overview" },
-  { key: "statements", label: "Reports" },
+// Both labels point at keys that already exist: the second tab is the same
+// word as the page title and as the sidebar entry, and "Overview" is already
+// keyed for the Dashboard. Neither needed a reports-only copy.
+const TABS: { key: Tab; labelKey: TKey }[] = [
+  { key: "overview", labelKey: "dashboard.overview" },
+  { key: "statements", labelKey: "nav.reports" },
 ];
 
 type ReportsClientProps = {
@@ -126,6 +131,7 @@ type ReportsClientProps = {
 
 export default function ReportsClient(props: ReportsClientProps) {
   const router = useRouter();
+  const { lang } = useApp();
   // Tab lives in the URL so global search can deep-link a sub-page.
   const [tab, setTab] = useTabParam<Tab>(REPORT_TABS, "overview");
   const [expensesOpen, setExpensesOpen] = useState(false);
@@ -141,8 +147,8 @@ export default function ReportsClient(props: ReportsClientProps) {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Reports"
-        subtitle="Revenue, cost and profit — every figure from one shared definition"
+        title={t("nav.reports", lang)}
+        subtitle={t("reports.shell.subtitle", lang)}
         // OVERVIEW ONLY — both controls. The dictionary defines the figures on
         // THIS tab; tab 2 carries its own grain/period control and its own use
         // of the same dictionary (as the builder's fence), so a second launcher
@@ -157,7 +163,7 @@ export default function ReportsClient(props: ReportsClientProps) {
             <div className="flex flex-wrap items-center gap-2">
               {months.length > 0 && (
                 <label className="flex items-center gap-2 text-sm">
-                  <span className="muted">Period</span>
+                  <span className="muted">{t("reports.shell.period", lang)}</span>
                   <select
                     value={active ?? ""}
                     onChange={(e) => setMonth(e.target.value)}
@@ -172,7 +178,7 @@ export default function ReportsClient(props: ReportsClientProps) {
               )}
               <Btn variant="outline" onClick={() => setGlossaryOpen(true)}>
                 <BookOpen className="h-4 w-4" />
-                Metrics dictionary
+                {t("reports.shell.metricsDictionary", lang)}
               </Btn>
             </div>
           ) : undefined
@@ -180,18 +186,20 @@ export default function ReportsClient(props: ReportsClientProps) {
       />
 
       <div className="flex items-center gap-1 border-b flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
-        {TABS.map((t) => (
+        {/* `tb`, not `t` — the map parameter was `t` and would shadow the
+            translator this file now calls inside the loop. */}
+        {TABS.map((tb) => (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+            key={tb.key}
+            onClick={() => setTab(tb.key)}
             className={cn(
               "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
-              tab === t.key
+              tab === tb.key
                 ? "border-brand-600 text-brand-600 dark:text-brand-300"
                 : "border-transparent muted hover:text-[rgb(var(--fg))]",
             )}
           >
-            {t.label}
+            {t(tb.labelKey, lang)}
           </button>
         ))}
       </div>
