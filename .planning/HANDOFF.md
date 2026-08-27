@@ -1,3 +1,471 @@
+# SESSION HANDOFF — closes at PHASE 3 OF THE ARABIC EFFORT: NINE AREAS TRANSLATED, THREE LEFT (`f4cd71f` Batch 1 → `c736ff1` Batch 6, the Reports route)
+
+**Everything below was re-measured while writing this line — git, the migration
+number, the adoption counts, the dictionary size. Nothing is copied forward from
+the previous refresh, and nothing is quoted from a batch commit message.** Per
+`CLAUDE.md` §5. Figures that moved carry their previous value in parentheses.
+
+**Read `CLAUDE.md` first, then `CLAUDE.md` §7 (the durable record), then this
+file.** This file is a POINTER to §7, never the record itself. The previous
+handoff document is retained verbatim below the divider — its sections still
+describe the Phase 1 and Phase 2 work, which nothing here supersedes.
+
+---
+
+## 1. RECENT COMMITS — the Arabic effort, Phase 3
+
+Phase 3 is nine commits. All nine are on `origin/main`.
+
+| Hash | What it did |
+|---|---|
+| `f4cd71f` | Phase 3 Batch 1 — Arabic for customers, projects and login |
+| `a727a8b` | Phase 3 Batch 2a — Arabic for the shared chrome and the shared field components |
+| `8b21143` | Phase 3 Batch 2b — Arabic for the five Settings panels |
+| `6e3cad2` | Phase 3 Batch 3 — Arabic for the Dashboard |
+| `f1f66c9` | i18n: translate the Fleet route to Arabic |
+| `0dffbc0` | i18n: correct the Fleet Arabic wording after review (Turki's wording pass on `f1f66c9`) |
+| `a4bf764` | Phase 3 Batch 5 — Arabic for the Consumption route (the تصريح→إذن sweep is folded IN, not a separate commit) |
+| `7c435eb` | HANDOFF — re-point state at `a4bf764`, close Phase 3 Batch 5 |
+| `c736ff1` | Phase 3 Batch 6 — Arabic for the Reports route (the Sales-Returns wording fixes and the Daily-Trips RTL fix are folded IN, not separate commits) |
+
+**Two follow-ups do NOT exist as their own commits and should not be looked for.**
+The consumption إذن sweep landed inside `a4bf764`; the reports Sales-Returns
+wording and the Daily-Trips RTL plate-column fix landed inside `c736ff1`. Both
+were folded on Turki's instruction — "fold into the uncommitted batch, commit as
+one" — after he re-verified in the browser. Fleet is the one area that took a
+second commit (`0dffbc0`), because its review came after `f1f66c9` had shipped.
+
+Phase 2 (`9e60b8f`, `6fc9917`, `8b7ab8d`, `79a12db`) and Phase 1 (`1e5ab78`) are
+described in the retained document below.
+
+### What `c736ff1` contained, since it is the most recent and the least documented
+
+12 files, 3116 insertions, 780 deletions. `app/reports/{CustomReportModal,
+DailyTripsTab, ExpensesModal, MetricsGlossaryModal, OverviewTab, ReportsClient,
+StatementViews, StatementsTab}.tsx` and `lib/{daily-trips,i18n,report-builder,
+reports}.ts`. Census before translating: **468 user-facing strings, 360 distinct**,
+split **217 plain UI chrome / 251 financial-accounting** (the split errs toward
+accounting on purpose — an unread accounting term is the failure that matters).
+Four traps were fixed inside the batch: a `metricId` that discriminated on a
+LABEL instead of on data (it would have broken on a language switch, because
+`BuilderSelection.metricIds` is React state that survives one), three display
+strings composed inside a `useMemo` keyed on data (they would not re-run on a
+language change), four `label` → `labelKey` conversions, and `DAILY_PERIODS`
+moved to keys. 28 plural families. No view, formula or computed value touched.
+
+---
+
+## 2. CURRENT STATE — measured at `c736ff1`
+
+```
+$ git status
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+	modified:   preview/.planning/HANDOFF.json
+
+no changes added to commit
+
+$ git diff --stat
+ preview/.planning/HANDOFF.json | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+```
+
+**COMMITTED:** everything in the Arabic effort through Batch 6. Nothing from any
+batch is sitting uncommitted.
+
+**UNCOMMITTED:** exactly one file — `preview/.planning/HANDOFF.json`, which is
+gsd's, is rewritten by its own tooling on every session, and **must never be
+staged.** It is not this project's state. `.planning/HANDOFF.json` is gitignored
+(`.gitignore:21`); `preview/.planning/HANDOFF.json` is tracked but is to be left
+alone regardless. The only file this session commits is `.planning/HANDOFF.md`.
+
+**SYNC — 0 ahead / 0 behind `origin/main`, verified two ways:**
+
+```
+$ git status -sb | head -1
+## main...origin/main          ← no ahead/behind marker
+
+$ git rev-list --left-right --count origin/main...HEAD
+0	0
+```
+
+Read it back that way, from the BRANCH line and from `rev-list`, never from the
+tree line and **never from this sentence — this sentence has now been wrong seven
+times across the life of this document.**
+
+---
+
+## 3. THE ARABIC LOCALIZATION EFFORT — standing context
+
+### SCOPE — Option 1, decided by Turki at the Phase 1 boundary and not reopened
+
+Translate all user-facing **SCREEN** text. Explicitly OUT for this MVP:
+
+- **Server-action messages — 334 sites measured** (`error: "…"` across the
+  `actions.ts` files and `lib/actions/`). Every route translated so far has left
+  these English, and that is the established boundary, not an oversight:
+  `app/maintenance/actions.ts` 31, `app/inventory/actions.ts` 46,
+  `app/consumption/actions.ts` 19, `app/fleet/actions.ts` 11,
+  `app/customers/actions.ts` 4 — all with zero i18n imports. **Do not translate
+  `app/drivers/actions.ts` (52 sites) in Batch 7.** Breaking the boundary in one
+  route is worse than the boundary itself.
+- **DB `raise` messages.** The previous scoping put this at ~236. Re-measured
+  now with `grep -hoi "raise exception\|raise notice" supabase/migrations/*.sql`
+  the count is **679** — but that is a different measurement, counting every
+  raise across all 165 migration files including internal verification raises
+  that never reach a user. **The ~236 figure was never re-derived at this
+  refresh and should be treated as unverified.** What is settled and unchanged
+  is the RULING: DB messages are out of scope for the MVP either way.
+- **The language cookie is DEFERRED.** Language is app state, not a persisted
+  preference, and nothing in Phase 3 depends on changing that.
+
+### RULES — all of these are load-bearing, all have already caught a bug
+
+1. **English output must stay BYTE-IDENTICAL, every batch, MACHINE-PROVEN.**
+   Not eyeballed and not asserted. The harness renders each string before and
+   after and diffs bytes. **A negative control that cannot fire is worse than
+   none, because it reports a green it is incapable of reporting red** — so the
+   NC must be spot-checked each run to confirm it still FIRES. In Batch 6 the
+   prover was found broken twice (an mtime false-green and a missing `NC_ONLY`
+   false-red) and was repaired before its green was believed.
+2. **Numbers, dates and money that the APP formats stay LATIN, in both
+   languages.** Turki reversed toward Arabic-Indic mid-session once and then
+   reverted; **the final answer is Latin. Do not re-open it as a question.**
+   Arabic-Indic digits are fine in static copy and in user-typed content — the
+   rule binds app-formatted output only. Date format is month-first for now,
+   parked, not settled.
+3. **Entity names go through `arText(base, ar, lang)`** — one rule, replacing
+   four drifted patterns (`8b7ab8d`).
+4. **Every new dictionary key must satisfy `TKey`.** `t()` is type-safe as of
+   `79a12db`; a mistyped key is a COMPILE error, not a silent gap. A TS
+   template-literal key typechecks as `TKey` when every arm exists.
+5. **Per-route order of work:** thread `useApp`/`lang` first if the route is
+   unwired → copy the EN value VERBATIM into the dictionary → write the AR to
+   match the dictionary's existing voice → convert the call site to `t()`.
+   Doing it in any other order is how English drifts by a byte.
+6. **Count-bucket sentences use WHOLE ARABIC SENTENCES per bucket** —
+   singular / dual / 3–10 / 11+ — **never fragment-spliced.** Four sibling
+   leaves `one`/`two`/`few`/`many`; zero folds into `few`; the bucket is chosen
+   on `% 100`. English invariant: `EN[two] === EN[few] === EN[many]`, `EN[one]`
+   free.
+7. **Never compose a display string inside a `useMemo` keyed on data** — the
+   memo will not re-run on a language change. Caught three times in Batch 6.
+8. **Never discriminate on a LABEL where the value is React state** — use the
+   data. Caught once in Batch 6 (`metricId`).
+
+### PROCESS GATE — mandatory, no exceptions
+
+**code-complete → machine checks → STOP → report → wait for Turki's IN-BROWSER
+go-ahead → THEN commit + push.**
+
+**Never commit before his OK.** This has held for every Phase 3 batch and it is
+what caught the Fleet wording, the consumption إذن reversal and the Sales-Returns
+wording. The report he reads must group the FINANCIAL / ACCOUNTING terms
+separately from the plain UI chrome — that grouping is his reading pass, and it
+is the reason the census split exists.
+
+### DONE — 9 areas
+
+shared chrome · settings · customers · projects · login · dashboard · fleet ·
+consumption · reports.
+
+Measured adoption right now (tsx files importing `@/lib/i18n` / total tsx):
+
+```
+  app/reports      8/9        app/maintenance  9/11
+  app/consumption  4/5        app/inventory    3/4
+  app/fleet        3/5        app/projects     2/3
+  app/customers    1/2        app/login        1/1
+```
+
+The denominators are not all reached because server components and pure-layout
+files carry no strings.
+
+### REMAINING — 3 routes, all with ZERO language wiring
+
+```
+  app/drivers      0/10   ← Batch 7, next
+  app/archive      0/9
+  app/trips        0/17
+```
+
+Dictionary now **1726 leaves** (was 1194 at the previous refresh), `lib/i18n.ts`
+**4844 lines** (was 3078).
+
+---
+
+## 4. DB STATE
+
+**Highest migration: `0167_cost_views_ex_vat_and_archive_date_aware.sql`.**
+165 `.sql` files in `supabase/migrations/`.
+
+**The entire Arabic effort — all fourteen commits across Phases 1, 2 and 3 —
+has touched NO SQL.** No migration, no RPC, no view, no grant, no policy. The DB
+has been at 0167 since before Phase 1 opened and is at 0167 now.
+
+One migration IS queued, but deliberately after Batch 7 — see NEXT item 5.
+
+---
+
+## 5. DECISIONS AND RULINGS
+
+### Fleet — driver and truck state wording (`0dffbc0`, Turki's review of `f1f66c9`)
+
+`DRIVER_STATE_LABELS` (`lib/driver-state.ts:43`) and `TRUCK_OPS_STATE_LABELS`
+(`lib/truck-status.ts:47`) are plain-English maps read by the drivers and trips
+routes as well. **They were LEFT EXACTLY AS THEY ARE.** Fleet keys off the same
+enums into `fleet.driverState` / `fleet.truckState` instead. No other route was
+affected. This is the pattern Batch 7 must copy.
+
+| Key | EN | AR | Note |
+|---|---|---|---|
+| `fleet.driverState.active` | Active | نشط | |
+| `fleet.driverState.idle` | Idle | **متاح** | has a truck, no active project — free to take work |
+| `fleet.driverState.off_duty` | Off duty | **غير مكلف** | has no truck at all — not tasked |
+| `fleet.driverState.on_leave` | On leave | في إجازة | |
+| `fleet.truckState.idle` | Idle | **في الموقف** | must stay equal to `fleet.kpi.idle` — same enum, three surfaces |
+| `fleet.truckState.active` | Active | نشطة | |
+| `fleet.truckState.maintenance` | Maintenance | صيانة | |
+
+The reasoning is recorded in the dictionary at `lib/i18n.ts:1422-1440` and is
+worth reading before touching it: **خارج الدوام was wrong on its own terms** — it
+reads "outside working hours", but `off_duty` has nothing to do with the clock.
+Turki's wording describes the driver's WORKLOAD, which is what the page is about.
+**متاح here is deliberately the SAME WORD as `availability.available`**, which
+renders in the adjacent column of the driver picker; Turki's call, they are near
+enough the same thing to a dispatcher. Separate keys off separate enums, so
+nothing is coupled — only the word agrees.
+
+**Termination keeps the شطب family, and this is explicit, not inherited:**
+`terminateTruck` = شطب الشاحنة, `terminating` = جارٍ الشطب…,
+`availability.terminated` = مشطوب.
+
+**Total loss carries TWO forms on purpose, for grammatical agreement:**
+`totalLoss` = **تالف** (the button, standing alone, no noun to agree with),
+`reasonTotalLoss` = **تالفة** (lands inside `…على أنها ___`, and أنها is
+feminine), `confirmTotalLoss` = **تأكيد التلف**. Do not "unify" these.
+
+### Consumption — تصريح → إذن, everywhere (folded into `a4bf764`)
+
+**Turki REVERSED the earlier ruling.** The exit-permit noun is **«إذن»**, plural
+**«أذونات»**. NOT «تصريح» / «تصاريح». The sweep covered the whole consumption
+namespace plus six strays outside it.
+
+**«إذن خروج» is the GATE PASS. «إذن صرف» is the ISSUE NOTE — a different
+document in a Saudi warehouse. Nothing on that route may say «إذن صرف», and a
+bare «إذن» on that route is ALWAYS the gate pass.** Verified now: «إذن صرف»
+appears in exactly three places in the tree, all three inside the ruling comment
+at `lib/i18n.ts:2163-2173` that records the reversal. Nowhere else.
+
+**⚠ THE SWEEP HAS SINCE DRIFTED AND THE DRIFT IS LIVE.** `c736ff1` — the Reports
+batch, written after the ruling — reintroduced تصاريح in three places:
+
+```
+lib/i18n.ts:3106   reports.th.permits      { en: "Permits",      ar: "التصاريح" }
+lib/i18n.ts:3808   reports.ops.exitPermits { en: "Exit permits", ar: "تصاريح الخروج" }
+lib/i18n.ts:3814   reports.ops (narrative) "…والأعمال الخارجية والتصاريح أعداد أحداث…"
+```
+
+Confirmed as `c736ff1`'s by `git log -S`. **This is the parked wording pass's
+first item.** It is a dictionary-value fix, English untouched — but it is a
+wording decision, so it goes to Turki, not straight in. The Dashboard was checked
+at the same time and is CLEAN — no تصريح leftovers there, so that item can be
+struck from the parked list.
+
+### Reports — Sales-Returns wording (folded into `c736ff1`)
+
+Turki asked for three changes and **the scope check blocked one, which is the
+process working:**
+
+| Old | New | Where | Outcome |
+|---|---|---|---|
+| المعكوس | **المرتجع** | `reports.th.reversed` | APPLIED. Scope-checked first: `StatementViews.tsx:220` is its ONE call site repo-wide, the reversed-invoicing table. It lives in the shared `th` block but is Sales-Returns-only. |
+| فوترة معكوسة | **فواتير المرتجعة** | `reports.revenue.returnsHead` → `مردودات المبيعات (فواتير المرتجعة)`, `reports.revenue.totalReversed` → `إجمالي المرتجع` | APPLIED. |
+| مرتجع مبيعات | عوائد مرتجعة | — | **NOT APPLIED — Turki skipped it.** The string occurs exactly once repo-wide, at `lib/i18n.ts:1045` = `dashboard.feed.invoice_voided`, the Dashboard activity-feed verb (paired with `lib/dashboard.ts:110 invoice_voided: "bad"`). It is NOT in the Sales Returns section. Flagged rather than changed; Turki confirmed **leave the Dashboard feed untouched.** |
+
+**Tail still inconsistent, parked:** `reports.revenue.note` (`:3589`) and
+`reports.narrative.salesReturns` (`:4442`) still say مردودات / عُكس while the
+table now says المرتجع.
+
+### The RTL lesson — written down because it cost a bug (folded into `c736ff1`)
+
+**`text-align: start` resolves against the ELEMENT'S OWN direction.** Putting
+`dir="ltr"` on a node that also owns an alignment box inverts what `start` and
+`end` mean. In Arabic the Daily-Trips plate cells drifted out from under their
+own Trucks header, because the `<td>` carried `dir="ltr"` while the `<Th>`
+inherited RTL.
+
+**The fix is to split the jobs:** the outer element inherits the page direction
+and owns alignment; an inner inline `<span dir="ltr">` fixes ONLY glyph order.
+
+```jsx
+<td className="px-3 py-2 text-start font-mono text-[12px]">
+  <span dir="ltr">{r.plate ?? <span className="muted">—</span>}</span>
+</td>
+```
+
+The repo had already documented this at `components/GlobalSearch.tsx:524-535` for
+its shortcut hint. **Related trap from Phase 3 Batch 5, still true: `dir` DOES
+NOT REACH A `viewBox`** — HTML flex rows and logical properties reverse for free
+in Arabic, SVG geometry does not.
+
+**Flagged, out of scope, still open:** `app/trips/InvoiceDetailModal.tsx:1300` —
+`<div className="font-medium" dir="rtl">{nameAr}</div>` is the same bug mirrored
+(an Arabic customer name right-aligns while its label left-aligns in the English
+UI). Belongs to the Trips batch. `app/DashboardClient.tsx:838` was examined and
+is CORRECT as-is — flex order, no text-align involved.
+
+### Numbers — Latin, final
+
+Reversed toward Arabic-Indic, then reverted. **Latin is the answer.** Both digit
+commits (`9e60b8f`, `6fc9917`) are pinned to it. Do not re-open.
+
+### Staff roles — the ruling for Batch 7
+
+`staff.role` is an FK → `staff_roles.key`; the label comes from the row
+(`StaffTab.tsx:99`, `roleName()`). Migration `0011` seeds five English defaults.
+Repo precedent is that DB/user data is NOT translated (`lib/i18n.ts:719` a
+warehouse's own name, `:2953` a part's unit string).
+
+**The ruling splits the two cases rather than following the precedent blindly:**
+**translate the 5 BUILT-IN roles by keying the label off `staff_roles.key`;
+CUSTOM roles fall back to English exactly as the manager typed them.** A
+manager-typed role is user data and stays user data; a seeded default is
+effectively app copy that happens to live in a table.
+
+**⚠ TURKI STILL OWES THE ARABIC FOR THE FIVE.** Batch 7 cannot finish the Staff
+tab without it:
+
+| `staff_roles.key` | Seeded EN label | AR |
+|---|---|---|
+| `fleet_manager` | Fleet Manager | **needed** |
+| `ops_supervisor` | Ops Supervisor | **needed** |
+| `mechanic` | Mechanic | **needed** |
+| `inventory_clerk` | Inventory Clerk | **needed** |
+| `dispatcher` | Dispatcher | **needed** |
+
+---
+
+## 6. NEXT — Batch 7 is the DRIVERS route
+
+### The shape of the route, already mapped this session — do not re-map it
+
+**There is NO separate Staff page. Staff is a TAB inside `/drivers`.** No
+`app/staff/` directory exists anywhere in the tree. `lib/nav.ts:159` says so in
+as many words: *"Staff (the page is /drivers; the nav label is 'Staff')"*. The
+sidebar entry `nav.drivers` already reads `{ en: "Staff", ar: "الموظفون" }`
+(`lib/i18n.ts:9`) — the nav is translated, the page behind it is not. The page's
+own `<h1>` is literally `"Staff"` (`DriversClient.tsx:577`).
+
+Route file `app/drivers/page.tsx` (server, `force-dynamic`) → client shell
+`app/drivers/DriversClient.tsx`. Tab state is in the URL via `useTabParam`;
+`DRIVER_TABS = ["drivers","commissions","history","staff"]`, default `drivers`
+omits the param.
+
+**Four tabs, three buttons** (Commissions owns History as a sub-tab):
+
+| Tab | URL | Renderer | Strings |
+|---|---|---|---|
+| Drivers | `/drivers` | `DriversClient.tsx` inline — KPI bar, On-Duty bar, roster table, driver form modal, driver detail modal | 92 |
+| Commissions | `?tab=commissions` | `CommissionsTab.tsx` | 98 |
+| ↳ Historical | `?tab=history` | `HistoryTab.tsx` | 44 |
+| Management & Staff | `?tab=staff` | `StaffTab.tsx` | 48 |
+
+**Shared sub-components — each mounts in BOTH the driver detail and the staff
+detail, so translating one moves two tabs:** `LeaveSection.tsx` (16),
+`SalaryHistoryModal.tsx` (26), `PersonIdLink.tsx` (1), `LookupSelect.tsx` (3).
+`MechanicCommissionsSection.tsx` (17) is StaffTab-only, gated on
+`role === "mechanic"`.
+
+**Census: 345 user-facing strings, 242 distinct, across 9 tsx files.**
+`page.tsx` is 0 — pure server fetch. Do the chrome/accounting split before
+reporting, same as Batch 6; Commissions and Historical are almost entirely
+accounting.
+
+### The four things already checked, so Batch 7 does not have to re-check them
+
+1. **The type-to-confirm delete gate compares the driver NAME — which is DATA,
+   not a label — so the PROMPT IS SAFE TO TRANSLATE.** Verified:
+   `DriversClient.tsx:1161` reads
+   `confirmText.trim() === d.name.trim()`, and the visible copy is
+   `Type "{d.name}" to confirm` at `:1367` with `placeholder={d.name}` at
+   `:1373`. Translating the surrounding sentence cannot break the gate, because
+   what the user types is matched against the name they can see, in either
+   language. **Confirm this with Turki before translating it anyway** — it is a
+   destructive-action gate and it is cheap to ask. (`StaffTab` has no equivalent
+   type-to-confirm gate.)
+2. **Reuse `fleet.driverState.*` for the driver-state pills. DO NOT COIN NEW
+   WORDS.** `DRIVER_STATE_LABELS` renders at `DriversClient.tsx:122` (StatusPill),
+   `:192`, and `:197` (a `title` attribute — easy to miss). Key off the enum,
+   leave the map alone, exactly as Fleet did. **The map is ALSO read by
+   `app/trips/DriverDutyTable.tsx:123`, `app/trips/DriverRosterTable.tsx:142` and
+   `app/trips/ProjectsBoard.tsx:1193` — all in the untranslated Trips route.
+   Editing the map would silently change three Trips surfaces.**
+   Note the resulting inconsistency, which is KNOWN and PARKED, not a bug to fix
+   in this batch: `dashboard.driverState` still says خامل / خارج الدوام where
+   `fleet.driverState` says متاح / غير مكلف.
+   `StaffTab` does not use the map — it has its own `StatusBadge` at
+   `StaffTab.tsx:618-625` with hardcoded `Terminated / On leave / Active /
+   Inactive`.
+3. **Staff roles — the ruling is in §5 above.** Key the 5 built-ins off
+   `staff_roles.key`; custom roles fall back to English as typed. Render sites:
+   `StaffTab.tsx:390` (card), `:421` (detail header), `:427` (Role cell),
+   `:533-538` (the form dropdown, which carries an inline "+ Add custom role…").
+   **Blocked on Turki's five Arabic labels.**
+4. **`HistoryTab.tsx` IS SHARED WITH ARCHIVE AND IS IN SCOPE.**
+   `app/archive/ArchiveClient.tsx:95` imports `../drivers/HistoryTab` and renders
+   it at `:703`. Archive is 0/9 translated, so **translating HistoryTab makes
+   part of the Archive page Arabic early.** That is accepted, not an accident —
+   flag it in the report so Turki sees a half-Arabic Archive and is not
+   surprised by it.
+
+### Also in scope, easy to miss
+
+- Two display strings live in a lib, not a component:
+  `lib/commission-rows.ts:472` `"Ad-hoc · no project"`, and `monthLabel()` at
+  `:151` with hardcoded English month names (`"Aug 2026"`), which renders in the
+  Commissions, Specials and Adjustments headers.
+- `<h1>Staff</h1>` with the subtitle `{total} drivers · {staff.length} support
+  staff` — **needs Arabic plural families for BOTH counts.**
+- **`app/drivers/actions.ts` (52 `error: "…"` sites) is OUT** — see §3 SCOPE.
+
+### After Batch 7 — a SEPARATE small migration batch
+
+Add **`staff_roles.label_ar`** plus the form field, so CUSTOM roles can carry
+Arabic too. **This is its own unit of work and its own commit — it does NOT get
+folded into Batch 7, because Batch 7 touches no SQL and the whole Arabic effort
+has touched no SQL.** It would be migration **0168**. **The architect reviews and
+runs that migration** — do not apply it from a translation session.
+
+### Then, in order
+
+**archive → trips.**
+
+### PARKED — a wording-consistency pass at the very end
+
+1. **`تصاريح` → `أذونات` in the three Reports sites** listed in §5. The ruling
+   is settled; the drift is `c736ff1`'s. Highest-confidence item on this list.
+2. The Reports Sales-Returns tail — `reports.revenue.note` (`:3589`) and
+   `reports.narrative.salesReturns` (`:4442`) still say مردودات / عُكس while the
+   table says المرتجع.
+3. The Dashboard "Idle" words — `dashboard.driverState` خامل / خارج الدوام vs
+   `fleet.driverState` متاح / غير مكلف. Same enum, two vocabularies.
+4. ~~Dashboard تصريح leftovers~~ — **CHECKED, none. Struck.**
+
+---
+---
+
+# PREVIOUS HANDOFF DOCUMENT — retained verbatim
+
+Everything below this line is the previous refresh, unedited. Its Phase 1 and
+Phase 2 sections are still the record for that work and nothing above supersedes
+them. Its Phase 3 header is superseded by §1 above — it closes at `a4bf764` and
+predates Batch 6.
+
+---
+
 # SESSION HANDOFF — closes at PHASE 3 OF THE ARABIC EFFORT IN PROGRESS: BATCHES 1 THROUGH 5 SHIPPED, SIX COMMITS, NO SCHEMA (`f4cd71f` customers/projects/login → `a727a8b` Batch 2a, the shared chrome and the shared field components → `8b21143` Batch 2b, the five Settings panels → `6e3cad2` Batch 3, the Dashboard → `f1f66c9` Fleet, corrected in `0dffbc0` after Turki's wording review → `a4bf764` Batch 5, the Consumption route). **ALL SIX ARE ON origin/main — verified 0 ahead / 0 behind at `a4bf764`,** read from the BRANCH line of `git status -sb` and cross-checked with `git rev-list --left-right --count origin/main...HEAD` = 0 0, never from this sentence, which has now been wrong six times. **THIS FILE WAS SEVEN COMMITS STALE WHEN THIS REFRESH OPENED** — it still asserted "PHASE 3 … HAS NOT STARTED" while all five batches were already on main. That is the longest it has ever been allowed to drift, and the cause is worth naming: a handoff is written at a session CLOSE, and five batches ran as five sessions that each closed on a commit instead. **THE MEASURED PICTURE MOVED A LONG WAY: the dictionary went 227 leaves → 1194 (386 lines → 3078), and the inline lang-ternaries went 853 → 542.** Neither figure is copied forward from the batch messages — both were re-derived at this refresh, with the glob, per §5. **THE TERMINOLOGY RULING SET IN BATCH 5 IS DURABLE AND APPLIES APP-WIDE: the exit-permit noun is «إذن», plural «أذونات» — NOT «تصريح»/«تصاريح».** Turki reversed the earlier ruling; the sweep covered the whole consumption namespace plus six strays outside it, and `grep` now returns تصريح in exactly three places in `lib/i18n.ts`, all of them inside the ruling comment that records the reversal. **AND ONE RTL TRAP IS NOW WRITTEN DOWN BECAUSE IT COST A BUG: `dir` DOES NOT REACH A `viewBox`.** HTML flex rows and logical properties reverse for free in Arabic; SVG geometry does not, so the trend polyline drew oldest-at-x=0 and ran backwards against its own bars. DB untouched by all six commits — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and **ten came back IDENTICAL, with `v_active_alerts` 9 → 8 — a THIRD distinct value for the figure this file already documents as oscillating.** DB still 0167. **The `middleware 83 kB` guard was re-checked and HOLDS** — `a4bf764` edits `lib/nav.ts` again (the sixth stray Arabic string lives there), and it stayed 83 kB because that file's i18n reference is still `import type`. Tree clean apart from gsd's `preview/.planning/HANDOFF.json`. NEXT: Batch 6 is Inventory, which is now 395 of the 542 remaining ternaries in three files, then Reports, then the three routes with no language wiring at all (Trips, Drivers, Archive). Previous header, retained because the sections below still describe it: closes at PHASE 2 OF THE ARABIC EFFORT COMPLETE: THE FOUNDATION, FOUR COMMITS, NO SCHEMA (`9e60b8f` digit safety at the app-toggle sites → `6fc9917` digit safety part 2, the ~69 device-locale calls, Latin-pinned → `8b7ab8d` `arText()`, one rule for Arabic name display, replacing four drifted patterns → `79a12db` type-safe `t()`, a `TKey` union derived from the dictionary, so a mistyped key is now a COMPILE error). **ALL FOUR ARE ON origin/main — verified 0 ahead / 0 behind at `79a12db`,** read from the BRANCH line of `git status -sb`, never the tree line and never from this sentence, which has now been wrong six times. **THE STANDING RULE, CONFIRMED BY TURKI THIS SESSION: NUMBERS STAY LATIN IN BOTH LANGUAGES.** He reversed toward Arabic-Indic mid-session and then reverted; the FINAL answer is Latin, and both digit commits are pinned to it — do not re-open it as a question. Date format is MONTH-FIRST for now, parked for a later revisit, not settled. Phase 2 delivered exactly the three things the previous header's OPEN FOLLOW-UPS item 1 listed — typed `t()`, one `_ar` display helper, digit safety — so that item is now CLOSED and rewritten below. **PHASE 3 IS THE UNTRANSLATED SCREENS AND IT HAS NOT STARTED**: 853 inline lang-ternaries, 712 of them in files that call `t()` zero times, plus eight areas with NO language wiring at all. DB untouched by all four commits — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close, every one IDENTICAL, DB still 0167. **The `middleware 83 kB` guard was re-checked and HOLDS** — `79a12db` edited `lib/nav.ts`, which is the exact change that guard exists to catch; it stayed 83 kB because the new i18n reference is an `import type` and erases. Tree clean apart from gsd's `preview/.planning/HANDOFF.json`. NEXT: Phase 3, per-route, gated on Turki. Previous header, retained because the sections below still describe it: closes at PHASE 1 OF THE ARABIC EFFORT: CAIRO SELF-HOSTED FOR ARABIC ONLY (`1e5ab78`), ONE COMMIT, NO SCHEMA. Font only — no translation, no dir/lang change, no digits. Cairo is scoped by `unicode-range` rather than by a `[lang="ar"]` selector, which is what makes "English is byte-identical" a property of the CSS rather than a thing to re-test per screen. Verified by measuring each string rendered with the shipped stack against that same stack with Cairo removed: Arabic moves, Latin does not, to three decimal places. **THE SCOPE OF THE WHOLE ARABIC EFFORT WAS DECIDED THIS SESSION — OPTION 1, SCREEN TEXT ONLY.** Server-action messages and DB `raise` messages are explicitly OUT for the MVP, and the language cookie is DEFERRED; see THE ARABIC EFFORT section for what that closes and what it leaves open. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close, every one IDENTICAL, DB still 0167. Tree clean apart from gsd's `preview/.planning/HANDOFF.json`, and **PUSHED through `1e5ab78`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has now been wrong five times. NEXT: the foundation phase — see the open follow-ups in THE ARABIC EFFORT. Previous header, retained because the sections below still describe it: closes at A CLAUDE.md COMPRESSION PASS (`30ea4b8`; §5's 20KB trigger, fired by the 805 bytes the divide rule had just added — the pass RE-VERIFIED EVERY CLAIM IN THE FILE AND FOUND ZERO STALE FACTS, the first pass of three to come back clean, see THE CLAUDE.md COMPRESSION PASS section), after THE `divide-y` DARK-MODE FIX (`42cb69a`), after WAREHOUSE MANAGEMENT IN SETTINGS, three commits, NO SCHEMA (`a2a4c7e` → `ed2c1f0` → `41ea251`: create RELOCATED out of Inventory, then edit, then guarded hard delete. DB untouched — no migration, no RPC, no view, no grant; all eleven database counts re-queried at close and every one came back IDENTICAL, DB still 0167. Tree clean and **PUSHED through `30ea4b8`** — read that back from the BRANCH line of `git status -sb`, never the tree line, and never from this sentence, which has now been wrong three times. NEXT: nothing queued — ask Turki. ONE PIECE OF TEST DATA IS STILL LIVE ON PURPOSE AND STAYS: the warehouse `Furian warehouse` was a Delete fixture. Turki decided it KEEPS — he removes it himself, from the UI this unit shipped, if and when he wants to. Closed, not open; do not re-raise it and do not delete it. Previous header, retained because the sections below still describe it: closes at the UI POLISH PASS, five commits, NO SCHEMA)
 
 # PREVIOUS HEADER — the UI polish pass, five commits, NO SCHEMA (FEATURE 2 SETTINGS COMPLETE + A SECURITY HARDENING PASS + THE DAILY TRIPS REPORT + THE MAINTENANCE WAREHOUSE FILTER + THE P&L INDICATIVE ZAKAT LINE AND PER-SOURCE VAT SECTION + 0167 WORKSHOP COST EX-VAT AND ARCHIVED REPORTING MADE DATE-AWARE + THE SIDEBAR/MODAL/SEARCH UI PASS. DB still at 0167 — the UI pass touched no SQL at all, and every database figure below came back IDENTICAL. Tree clean and **PUSHED — read back from the BRANCH line of `git status -sb`, never the tree line.** NEXT: nothing queued — ask Turki. The P&L VAT defect this file carried as OPEN is CLOSED by 0167, and so are both descriptions of it that outlived the fix: the on-screen footnote in the VAT panel (`cefcff8`) and CLAUDE.md §7's "known open defect" line, now the cost-vs-cash VAT rule (`9e0fd77`). Nothing is left open from that unit.)
