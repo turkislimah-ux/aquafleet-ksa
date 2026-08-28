@@ -8077,7 +8077,11 @@ export const dict = {
       // one line apart saying two different words for the same thing (تصاعد vs
       // تراكمية) until Turki's Batch 9 follow-up. English unchanged.
       hScalable: { en: "Grows per trip by a bump %.", ar: "تزيد مع كل رحلة بنسبة تراكمية." },
-      fBump: { en: "Bump % per trip (max 50)", ar: "نسبة التصاعد لكل رحلة (بحد أقصى 50)" },
+      // The bump field sits directly under hScalable and names the same number
+      // the hint describes, so it carries the same word: تراكمية, not التصاعد.
+      // English keeps "Bump %" — that is the column's name in the schema's terms
+      // and the word Turki uses in English.
+      fBump: { en: "Bump % per trip (max 50)", ar: "النسبة التراكمية لكل رحلة (بحد أقصى 50)" },
       takesEffect: { en: "Takes effect", ar: "يبدأ سريانه" },
       resetToToday: { en: "Reset to today", ar: "إعادة الضبط لليوم" },
       hEffectiveToday: {
