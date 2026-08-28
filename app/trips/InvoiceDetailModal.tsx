@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import { X, Printer, Mail, Plus, Trash2, AlertTriangle, Download, Image as ImageIcon, Paperclip } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural, type Lang } from "@/lib/i18n";
+import { t, fill, plural, arText, type Lang, type TKey } from "@/lib/i18n";
 import { invoiceStatusLabel, paymentMethodLabel, waterTypeLabel } from "@/lib/enum-labels";
 import { formatDate, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
@@ -1992,9 +1992,27 @@ function GuardBox({
   );
 }
 
-// Builds the mailto: URI for one of the 4 template types. mailto only
-// controls "to"/subject/body — it cannot set the From address, so
-// companyEmail is referenced in the signature only, never used as a sender.
+// The rule between the Arabic and English blocks. ASCII hyphens deliberately:
+// they are bidi-neutral, they need no font, and every plain-text client has
+// them. A box-drawing or em-dash rule would depend on the recipient's glyph
+// coverage, which is the one thing a mailto body cannot influence.
+const MAIL_RULE = "------------------------------";
+
+// Builds the mailto: URI for one of the 5 template types (the original four
+// plus sales_return). mailto only controls "to"/subject/body — it cannot set
+// the From address, so companyEmail is referenced in the signature only, never
+// used as a sender, and it cannot carry an attachment or any styling at all.
+//
+// EVERY MAIL IS BILINGUAL, AND THIS FUNCTION IS NOT PASSED `lang`. Arabic
+// block, rule, English block, always both, whichever language the operator was
+// reading. It reads BOTH sides of each dictionary leaf rather than one.
+//
+// The two blocks are shaped differently on purpose — the English keeps its
+// figures inline because that is the mail customers have always received, the
+// Arabic puts every figure on its own line because a plain-text RTL line that
+// trails off in a Latin number is where mail-client bidi visibly breaks and
+// there is no `dir` attribute to pin it. Reasoning in full at the `emailBody`
+// group header in lib/i18n.ts.
 function buildMailtoFor(
   type: EmailType,
   raw: Invoice,
@@ -2004,85 +2022,228 @@ function buildMailtoFor(
 ): string {
   const ref = raw.invoice_number ? `#${raw.invoice_number}` : `(draft, ${raw.period_start} to ${raw.period_end})`;
   const buyerName = view.buyerSnapshot?.name ?? "Customer";
+  // THE ARABIC BLOCK ADDRESSES THE CUSTOMER IN ARABIC WHEN THE ROW HAS AN
+  // ARABIC NAME. `arText()` is the app's one rule for a `*_ar` column — Arabic
+  // only when the value is really there, non-null and non-empty AFTER a trim —
+  // so a row saved with "  " addresses the customer by their base name instead
+  // of opening the mail with a blank. The `"Customer"` stand-in for a snapshot
+  // with no name at all is English on BOTH sides: it is not a name, and
+  // inventing an Arabic one would say something the row does not.
+  //
+  // The lang argument is the literal "ar" because this block IS the Arabic one,
+  // not because the app is in Arabic — `buildMailtoFor` never reads `lang`.
+  const buyerNameAr = arText(buyerName, view.buyerSnapshot?.name_ar, "ar");
   const period = `${raw.period_start} to ${raw.period_end}`;
   const grand = formatSar(view.grand.total);
   const due = formatSar(view.amountDue.total);
-  const signature = ["Kind regards,", "Bin Slimah Group", companyEmail || FALLBACK_COMPANY_EMAIL];
+  const returnedOn = raw.voided_at
+    ? formatDate(raw.voided_at, { year: "numeric", month: "long", day: "numeric" })
+    : null;
+
+  // Same splice values on both sides except the two that HAVE a language:
+  // `{buyer}`, resolved above, and `{date}`, whose missing-timestamp fallback is
+  // a word rather than a date. Everything else — the reference, the period, both
+  // figures — is one Latin string used by both blocks, so the two halves can
+  // never quote different numbers. `fill()` leaves a token it cannot find alone,
+  // so the Arabic sentences, which carry no tokens, pass through untouched.
+  const valsEn = {
+    buyer: buyerName,
+    ref,
+    period,
+    grand,
+    due,
+    date: returnedOn ?? t("trips.invoice.emailBody.vRecently", "en"),
+  };
+  const valsAr = {
+    ...valsEn,
+    buyer: buyerNameAr,
+    date: returnedOn ?? t("trips.invoice.emailBody.vRecently", "ar"),
+  };
+  const ar = (k: TKey) => fill(t(k, "ar"), valsAr);
+  const en = (k: TKey) => fill(t(k, "en"), valsEn);
+
+  // A subject is one line, so the label/value stacking the bodies use is not
+  // available. The Arabic half therefore carries no data at all and the Latin
+  // half carries it once: one pure Arabic run, one pure Latin run, nothing
+  // straddling the join.
+  const subjectOf = (k: TKey) => `${t(k, "ar")} | ${en(k)}`;
+
+  // Arabic figure labels are the invoice sheet's own, so the mail names an
+  // amount exactly as the document does.
+  const lRef = t("trips.invoiceSheet.fInvoiceNo", "ar");
+  const lPeriod = t("trips.invoiceSheet.fPeriod", "ar");
+  // Only the `ar` side of these four is read. `grandTotal`'s English is the
+  // sheet's "TOTAL"; the English block below spells "Grand Total:" inline as it
+  // always has, so the two never meet.
+  const lGrand = t("trips.invoiceSheet.grandTotal", "ar");
+  const lDue = t("trips.invoiceSheet.amountDue", "ar");
+
+  const greetAr = ar("trips.invoice.emailBody.greeting");
+  const greetEn = en("trips.invoice.emailBody.greeting");
+  const closeAr = ar("trips.invoice.emailBody.closing");
+  // The English sign-off keeps the company line and address it has always had;
+  // the Arabic block closes on its phrase alone, because the sender is named
+  // once, underneath both blocks.
+  const signature = [
+    en("trips.invoice.emailBody.closing"),
+    "Bin Slimah Group",
+    companyEmail || FALLBACK_COMPANY_EMAIL,
+  ];
 
   let subject: string;
-  let bodyLines: (string | null)[];
+  let arLines: (string | null)[];
+  let enLines: (string | null)[];
 
   switch (type) {
     case "statement":
-      subject = `Statement — ${buyerName} — ${period}`;
-      bodyLines = [
-        `Dear ${buyerName},`,
+      subject = subjectOf("trips.invoice.emailBody.statement.subject");
+      arLines = [
+        greetAr,
         "",
-        `Please find below a summary of your account activity for the period ${period}.`,
+        ar("trips.invoice.emailBody.statement.intro"),
+        "",
+        lPeriod,
+        period,
+        lRef,
+        ref,
+        lGrand,
+        grand,
+        lDue,
+        due,
+        "",
+        ar("trips.invoice.emailBody.statement.outro"),
+        "",
+        closeAr,
+      ];
+      enLines = [
+        greetEn,
+        "",
+        en("trips.invoice.emailBody.statement.intro"),
         "",
         `Invoice ${ref}`,
         `Grand Total: ${grand}`,
         `Amount Due: ${due}`,
         "",
-        "If you have any questions about this statement, please don't hesitate to reach out.",
+        en("trips.invoice.emailBody.statement.outro"),
         "",
         ...signature,
       ];
       break;
     case "payment_due":
-      subject = `Payment due — Invoice ${ref} — ${buyerName}`;
-      bodyLines = [
-        `Dear ${buyerName},`,
+      subject = subjectOf("trips.invoice.emailBody.payment_due.subject");
+      arLines = [
+        greetAr,
         "",
-        `This is to confirm that invoice ${ref} for the period ${period} is now due for payment.`,
+        ar("trips.invoice.emailBody.payment_due.intro"),
+        "",
+        lRef,
+        ref,
+        lPeriod,
+        period,
+        lDue,
+        due,
+        "",
+        ar("trips.invoice.emailBody.payment_due.outro"),
+        "",
+        closeAr,
+      ];
+      enLines = [
+        greetEn,
+        "",
+        en("trips.invoice.emailBody.payment_due.intro"),
         "",
         `Amount Due: ${due}`,
         "",
-        "Kindly arrange payment at your earliest convenience. Please let us know if you need any further information to process this.",
+        en("trips.invoice.emailBody.payment_due.outro"),
         "",
         ...signature,
       ];
       break;
     case "reminder":
-      subject = `Reminder — Payment outstanding for Invoice ${ref}`;
-      bodyLines = [
-        `Dear ${buyerName},`,
+      subject = subjectOf("trips.invoice.emailBody.reminder.subject");
+      arLines = [
+        greetAr,
         "",
-        `This is a friendly reminder that invoice ${ref} for the period ${period} remains outstanding.`,
+        ar("trips.invoice.emailBody.reminder.intro"),
+        "",
+        lRef,
+        ref,
+        lPeriod,
+        period,
+        lDue,
+        due,
+        "",
+        ar("trips.invoice.emailBody.reminder.outro"),
+        "",
+        closeAr,
+      ];
+      enLines = [
+        greetEn,
+        "",
+        en("trips.invoice.emailBody.reminder.intro"),
         "",
         `Amount Due: ${due}`,
         "",
-        "We would appreciate it if you could arrange payment at your earliest convenience. If payment has already been made, please disregard this message.",
+        en("trips.invoice.emailBody.reminder.outro"),
         "",
         ...signature,
       ];
       break;
-    case "sales_return": {
-      const returnDate = raw.voided_at
-        ? formatDate(raw.voided_at, { year: "numeric", month: "long", day: "numeric" })
-        : "recently";
-      subject = `Sales Return — Invoice ${ref} — ${buyerName}`;
-      bodyLines = [
-        `Dear ${buyerName},`,
+    case "sales_return":
+      subject = subjectOf("trips.invoice.emailBody.sales_return.subject");
+      arLines = [
+        greetAr,
         "",
-        `This is to notify you that invoice ${ref} was cancelled (Sales Return) on ${returnDate}.`,
+        ar("trips.invoice.emailBody.sales_return.intro"),
         "",
-        "This invoice is no longer valid and no payment is owed against it. Please disregard it for any accounting or payment purposes.",
+        lRef,
+        ref,
+        t("trips.invoice.emailBody.fReturnDate", "ar"),
+        valsAr.date,
+        // `void_reason` is operator-entered free text of unknown script, which
+        // is exactly why it gets a line to itself here rather than trailing an
+        // Arabic sentence.
+        raw.void_reason ? t("trips.invoice.emailBody.fReturnReason", "ar") : null,
+        raw.void_reason || null,
+        "",
+        ar("trips.invoice.emailBody.sales_return.notice"),
+        "",
+        ar("trips.invoice.emailBody.sales_return.outro"),
+        "",
+        closeAr,
+      ];
+      enLines = [
+        greetEn,
+        "",
+        en("trips.invoice.emailBody.sales_return.intro"),
+        "",
+        en("trips.invoice.emailBody.sales_return.notice"),
         raw.void_reason ? `Reason: ${raw.void_reason}` : null,
         "",
-        "If you have any questions, please don't hesitate to reach out.",
+        en("trips.invoice.emailBody.sales_return.outro"),
         "",
         ...signature,
       ];
       break;
-    }
     case "generic":
     default:
-      subject = `Invoice ${ref}`;
-      bodyLines = [`Dear ${buyerName},`, "", `Please find attached invoice ${ref} for the period ${period}.`, "", ...signature];
+      subject = subjectOf("trips.invoice.emailBody.generic.subject");
+      arLines = [
+        greetAr,
+        "",
+        ar("trips.invoice.emailBody.generic.intro"),
+        "",
+        lRef,
+        ref,
+        lPeriod,
+        period,
+        "",
+        closeAr,
+      ];
+      enLines = [greetEn, "", en("trips.invoice.emailBody.generic.intro"), "", ...signature];
       break;
   }
 
-  const body = bodyLines.filter((l) => l !== null).join("\n");
+  const body = [...arLines, "", MAIL_RULE, "", ...enLines].filter((l) => l !== null).join("\n");
   return `mailto:${encodeURIComponent(customerEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }

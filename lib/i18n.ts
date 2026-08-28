@@ -7021,12 +7021,17 @@ export const dict = {
      * action's own `error:` string still passes through in English; only the
      * client-side fallbacks are looked up.
      *
-     * NOT TRANSLATED, DELIBERATELY: `buildMailtoFor()`. Its subject and body
-     * are outbound correspondence that REACHES THE CUSTOMER, the same class of
-     * text as the `translate="no"` company name in the sheet's footer — not app
-     * chrome. What the customer receives must not depend on which language the
-     * operator happened to be reading. The same reasoning is why this batch
-     * left `lib/invoicePdfTemplate.ts` and the Download path alone.
+     * `buildMailtoFor()` IS BILINGUAL, NOT TRANSLATED — the distinction is the
+     * whole of item 7. Its subject and body are outbound correspondence that
+     * REACHES THE CUSTOMER, so the rule this group used to state — what the
+     * customer receives must not depend on which language the operator happened
+     * to be reading — still holds, and holds more strongly than it did while
+     * the mail was English-only. Every mail now carries BOTH languages, Arabic
+     * block first, then a rule, then the English block, and `buildMailtoFor()`
+     * never reads `lang`. The wording lives in `emailBody` below.
+     *
+     * `lib/invoicePdfTemplate.ts` and the Download path are still untouched —
+     * the document keeps its own bilingual layout and its own later step.
      *
      * From `common`: `print`. From `trips.invoices`: `badPeriod`, which this
      * file's period editor validates with the IDENTICAL sentence InvoicesModal
@@ -7085,8 +7090,9 @@ export const dict = {
        * component, so the order is stated once instead of being a side effect
        * of object key insertion.
        *
-       * These are the labels on the CHOOSER. The mail that the choice actually
-       * sends stays English — see this group's header.
+       * These are the labels on the CHOOSER, and they follow the app language.
+       * The mail the choice actually sends is BILINGUAL regardless — its
+       * wording is `emailBody` below, one group per key here.
        */
       emailType: {
         statement: {
@@ -7117,6 +7123,161 @@ export const dict = {
           // English, and is not touched.
           label: { en: "Sales Return notice", ar: "إشعار مرتجع مبيعات" },
           hint: { en: "Explains this invoice was cancelled.", ar: "يوضّح أن هذه الفاتورة أُلغيت." },
+        },
+      },
+
+      /**
+       * THE MAIL ITSELF — the subject and body prose of the five templates
+       * above, as `buildMailtoFor()` assembles them.
+       *
+       * ALWAYS BOTH LANGUAGES, IN ONE MAIL. The builder reads `t(k, "ar")` AND
+       * `t(k, "en")` for every leaf in here and stacks them: Arabic block,
+       * rule, English block. It is not passed `lang` and cannot branch on it.
+       * That keeps the guarantee the English-only mail gave — the customer's
+       * copy does not depend on which language the operator was reading — while
+       * removing the assumption that the customer reads English.
+       *
+       * THE ENGLISH IS THE OLD MAIL, BYTE FOR BYTE. Every `en` value below is
+       * lifted verbatim from the literals that were inline in
+       * `buildMailtoFor()`. Not one sentence was reworded, so a customer who
+       * has been receiving these for a year reads the same English under the
+       * rule as above it.
+       *
+       * THE TWO SIDES OF A LEAF ARE NOT THE SAME SHAPE, AND THAT IS THE POINT.
+       * The English sentences carry `{ref}` / `{period}` / `{date}` INLINE,
+       * because that is how they have always read. The Arabic ones do NOT. A
+       * plain-text line that ENDS in a Latin number is the mixed-script case
+       * where a mail client's bidi resolution visibly fails: the figure, its
+       * currency and the trailing full stop are neutrals and weak types that
+       * get reordered to the wrong end of an RTL line, and no `dir` attribute
+       * exists in plain text to pin them. So the Arabic block says "shown
+       * below", names each figure on a LABEL line, and puts the value ALONE on
+       * the next line — an unmixed Latin run, where there is no bidi decision
+       * left to get wrong. `fill()` finds no `{ref}` in the Arabic string and
+       * leaves the sentence untouched, so both sides take the same vals.
+       *
+       * THE ONE ARABIC LINE THAT DOES EMBED DATA IS `greeting`, and it ends in
+       * `المحترمين،` — a strong RTL word. A Latin customer name INSIDE an
+       * Arabic run resolves correctly in every client; it is a run that TRAILS
+       * off in Latin that does not. That safety is what lets the greeting take
+       * whichever name the row has: the Arabic side reads `name_ar` when it is
+       * there, and a customer without one keeps a Latin name mid-line, which is
+       * the case this paragraph describes and the reason the closing word is
+       * fixed Arabic rather than the last thing spliced in.
+       *
+       * THE FIGURE LABELS ARE THE SHEET'S OWN, read straight from
+       * `trips.invoiceSheet.fInvoiceNo` / `.fPeriod` / `.grandTotal` /
+       * `.amountDue`, so the mail names an amount exactly as the invoice does.
+       * Only their `ar` side is read. Two labels had no counterpart and are new
+       * in this group — `fReturnDate`
+       * and `fReturnReason`. THEIR `en` SIDE IS NOT RENDERED: the English block
+       * spells both inline, verbatim as it always did. The English is filled in
+       * so each stays an ordinary bilingual pair rather than a half-leaf.
+       *
+       * NO FONT, NO HTML, NO ATTACHMENT — NOT A CHOICE, A LIMIT. `mailto:`
+       * carries `to`, `subject` and `body` and nothing else: no MIME type, no
+       * CSS, no attachment parameter. Cairo cannot reach this text and the
+       * recipient's client picks the face. Ordering the two blocks is the whole
+       * of what this group controls.
+       *
+       * EVERY NUMBER AND DATE STAYS LATIN — `formatSar` / `formatDate`, both
+       * pinned to "en-US" in `lib/utils.ts`. No money key is in here; each
+       * caption sits beside a figure the invoice engine already computed.
+       */
+      emailBody: {
+        // `{buyer}` is customer data, and it is THE ONE VALUE THE TWO SIDES
+        // RESOLVE DIFFERENTLY: the English keeps `buyer_snapshot.name`, the
+        // Arabic takes `buyer_snapshot.name_ar` through `arText()` and falls
+        // back to the same base name when that column is null or blank after a
+        // trim. So a customer with an Arabic name is greeted in Arabic above the
+        // rule and in English below it, and a customer without one is greeted by
+        // the same string twice — never by a blank. The `"Customer"` stand-in
+        // for a snapshot carrying no name at all stays English on BOTH sides:
+        // it is not a name, and an Arabic one would assert something the row
+        // does not say. Resolution is in `buildMailtoFor()`, not here.
+        greeting: { en: "Dear {buyer},", ar: "السادة/ {buyer} المحترمين،" },
+        // The English block's sign-off keeps its company line and address
+        // below it, in `buildMailtoFor()`; the Arabic block closes on this
+        // phrase alone, because the sender is named once, underneath both.
+        closing: { en: "Kind regards,", ar: "وتفضلوا بقبول فائق الاحترام،" },
+        // Arabic-block labels with no counterpart on the sheet. `en` is
+        // reference only — see this group's header.
+        fReturnDate: { en: "Return date", ar: "تاريخ المرتجع" },
+        fReturnReason: { en: "Reason", ar: "سبب المرتجع" },
+        // The stand-in when an invoice was voided with no timestamp. `en` IS
+        // rendered — it replaces the bare "recently" literal the builder used.
+        vRecently: { en: "recently", ar: "مؤخرًا" },
+
+        /**
+         * SUBJECTS. One line, so the label/value trick the bodies use is not
+         * available — a subject cannot be given its own lines. The Arabic side
+         * therefore carries NO placeholder at all: the invoice reference, the
+         * buyer and the period ride ONCE, in the English half, and the builder
+         * joins the two with a pipe. The Arabic run stays pure Arabic, the
+         * Latin run stays pure Latin, and nothing straddles the boundary.
+         */
+        statement: {
+          subject: { en: "Statement — {buyer} — {period}", ar: "كشف حساب" },
+          intro: {
+            en: "Please find below a summary of your account activity for the period {period}.",
+            ar: "فيما يلي ملخّص حركة حسابكم خلال الفترة الموضّحة أدناه.",
+          },
+          outro: {
+            en: "If you have any questions about this statement, please don't hesitate to reach out.",
+            ar: "إن كان لديكم أي استفسار حول هذا الكشف، فلا تترددوا في التواصل معنا.",
+          },
+        },
+        payment_due: {
+          subject: { en: "Payment due — Invoice {ref} — {buyer}", ar: "استحقاق سداد فاتورة" },
+          intro: {
+            en: "This is to confirm that invoice {ref} for the period {period} is now due for payment.",
+            ar: "نفيدكم بأن الفاتورة المبيّنة أدناه عن الفترة الموضّحة قد أصبحت مستحقة السداد.",
+          },
+          outro: {
+            en: "Kindly arrange payment at your earliest convenience. Please let us know if you need any further information to process this.",
+            ar: "نأمل التكرّم بترتيب السداد في أقرب وقت ممكن، ويسعدنا تزويدكم بأي معلومات إضافية تلزم لإتمام ذلك.",
+          },
+        },
+        reminder: {
+          subject: { en: "Reminder — Payment outstanding for Invoice {ref}", ar: "تذكير بسداد فاتورة مستحقة" },
+          intro: {
+            en: "This is a friendly reminder that invoice {ref} for the period {period} remains outstanding.",
+            ar: "نودّ تذكيركم بأن الفاتورة المبيّنة أدناه عن الفترة الموضّحة لا تزال غير مسدّدة.",
+          },
+          outro: {
+            en: "We would appreciate it if you could arrange payment at your earliest convenience. If payment has already been made, please disregard this message.",
+            ar: "نقدّر لكم ترتيب السداد في أقرب وقت ممكن. وإذا كان السداد قد تم بالفعل، فيُرجى تجاهل هذه الرسالة.",
+          },
+        },
+        sales_return: {
+          // "Sales Return" is the UI and customer-facing wording for a voided
+          // invoice; the stored status stays 'void'. Arabic is the sheet's and
+          // the PDF's own مرتجع مبيعات.
+          subject: { en: "Sales Return — Invoice {ref} — {buyer}", ar: "إشعار مرتجع مبيعات" },
+          intro: {
+            en: "This is to notify you that invoice {ref} was cancelled (Sales Return) on {date}.",
+            ar: "نفيدكم بأن الفاتورة المبيّنة أدناه قد أُلغيت (مرتجع مبيعات) بالتاريخ الموضّح أدناه.",
+          },
+          notice: {
+            en: "This invoice is no longer valid and no payment is owed against it. Please disregard it for any accounting or payment purposes.",
+            ar: "هذه الفاتورة لم تعد سارية ولا يوجد أي مبلغ مستحق بموجبها، ويُرجى تجاهلها لأي أغراض محاسبية أو سدادية.",
+          },
+          outro: {
+            en: "If you have any questions, please don't hesitate to reach out.",
+            ar: "إن كان لديكم أي استفسار، فلا تترددوا في التواصل معنا.",
+          },
+        },
+        generic: {
+          subject: { en: "Invoice {ref}", ar: "فاتورة" },
+          // "attached" is the OLD English, kept byte for byte. Nothing is
+          // attached and nothing can be — `mailto:` has no attachment
+          // parameter — so the Arabic does not repeat the claim. Correcting
+          // the English is a content change, not a translation, and is not
+          // this batch's to make.
+          intro: {
+            en: "Please find attached invoice {ref} for the period {period}.",
+            ar: "فيما يلي بيانات الفاتورة المبيّنة أدناه عن الفترة الموضّحة.",
+          },
         },
       },
     },
