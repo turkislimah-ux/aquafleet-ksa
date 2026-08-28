@@ -15,10 +15,12 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Plus, Trash2, FileText, Upload, User, Truck as TruckIcon, ChevronDown, Lock, Link as LinkIcon } from "lucide-react";
 import { Btn } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, arText } from "@/lib/i18n";
 import { cn, formatDate } from "@/lib/utils";
 import {
   ARCHIVE_GROUP_COLORS, ARCHIVE_STATUS_PILL, archiveStatusLabel, docStatus, groupDot,
-  linkedFieldFor, groupExpectsLink, isStandingType, PERSON_ID_LABEL,
+  linkedFieldFor, groupExpectsLink, isStandingType, personIdLabel, personIdLabelLower,
   type PersonIdField, type LinkSubjectKind,
 } from "@/lib/archive";
 import type {
@@ -49,10 +51,11 @@ import ScrollLock from "@/components/ScrollLock";
 // a different kind of fact, so it gets a colour that can never be misread as
 // an expiry state.
 export function LinkPill() {
+  const { lang } = useApp();
   return (
     <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset bg-violet-500/10 text-violet-700 dark:text-violet-300 ring-violet-500/25">
       <LinkIcon className="h-3 w-3" />
-      Link
+      {t("archive.linkPill", lang)}
     </span>
   );
 }
@@ -62,6 +65,7 @@ export function LinkPill() {
 // exists, so a fresh-looking input there would invite typing a second copy of
 // it, which 0092 now refuses at the database anyway.
 function LockedValue({ value }: { value: string }) {
+  const { lang } = useApp();
   return (
     <div
       className="px-3 py-2 rounded-lg border text-sm opacity-60 cursor-not-allowed flex items-center gap-2 bg-black/[0.03] dark:bg-white/[0.03]"
@@ -69,7 +73,7 @@ function LockedValue({ value }: { value: string }) {
       aria-disabled
     >
       <Lock className="h-3.5 w-3.5 shrink-0" />
-      <span className="truncate">{value || "Not set"}</span>
+      <span className="truncate">{value || t("archive.notSet", lang)}</span>
     </div>
   );
 }
@@ -93,15 +97,19 @@ function TypePicker({
   // real guarantee, this just avoids showing an action that would fail.
   usageByKey: Map<string, number>;
   onChange: (key: string) => void;
-  onAdded: (t: ArchiveDocumentType) => void;
+  // Named `ty`, not `t`: `t` is the translator throughout this file, and a
+  // parameter that shadows it turns every lookup inside the closure into a
+  // type error at best and the wrong call at worst.
+  onAdded: (ty: ArchiveDocumentType) => void;
   onDeleted: (key: string) => void;
 }) {
+  const { lang } = useApp();
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const selected = types.find((t) => t.key === value) ?? null;
+  const selected = types.find((ty) => ty.key === value) ?? null;
 
   async function submitNew() {
     const label = newLabel.trim();
@@ -111,7 +119,7 @@ function TypePicker({
     const res = await addArchiveDocumentType(label);
     setBusy(false);
     if (res.error || !res.type) {
-      setErr(res.error ?? "Could not add type.");
+      setErr(res.error ?? t("archive.errAddType", lang));
       return;
     }
     onAdded(res.type);
@@ -122,7 +130,7 @@ function TypePicker({
   }
 
   async function remove(key: string, label: string) {
-    if (!confirm(`Delete the "${label}" type? This cannot be undone.`)) return;
+    if (!confirm(fill(t("archive.confirmDeleteType", lang), { label }))) return;
     setBusy(true);
     setErr(null);
     const res = await deleteArchiveDocumentType(key);
@@ -145,7 +153,9 @@ function TypePicker({
       >
         <span className="flex items-center gap-2 min-w-0">
           <span className={cn("truncate", !selected && "muted")}>
-            {selected ? selected.label_en : "Choose a type…"}
+            {selected
+              ? arText(selected.label_en, selected.label_ar, lang)
+              : t("archive.typePicker.choose", lang)}
           </span>
           {selected && linkedFieldFor(selected, subjectKind) && <LinkPill />}
         </span>
@@ -160,37 +170,40 @@ function TypePicker({
             className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto scrollbar-thin rounded-lg border shadow-lg py-1"
             style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
           >
-            {types.map((t) => {
+            {types.map((ty) => {
               // Delete is offered ONLY for a user-added type with nothing
               // referencing it. Built-ins are excluded outright: 'iqama',
               // 'license' and 'registration' are the keys the linked mapping
               // is defined against, so deleting one would break linking, and
               // the rest are the base vocabulary.
-              const deletable = !isStandingType(t.key) && (usageByKey.get(t.key) ?? 0) === 0;
+              const deletable = !isStandingType(ty.key) && (usageByKey.get(ty.key) ?? 0) === 0;
+              // Pattern B: the type vocabulary is bilingual in the DB, so the
+              // label comes from the ROW, never from the dictionary.
+              const label = arText(ty.label_en, ty.label_ar, lang);
               return (
-                <li key={t.key} className="flex items-stretch">
+                <li key={ty.key} className="flex items-stretch">
                   <button
                     type="button"
-                    onClick={() => { onChange(t.key); setOpen(false); }}
+                    onClick={() => { onChange(ty.key); setOpen(false); }}
                     className={cn(
                       "flex-1 min-w-0 flex items-center justify-between gap-2 px-3 py-2 text-sm text-start hover:bg-black/5 dark:hover:bg-white/5",
-                      t.key === value && "bg-brand-500/10",
+                      ty.key === value && "bg-brand-500/10",
                     )}
                   >
-                    <span className="truncate">{t.label_en}</span>
+                    <span className="truncate">{label}</span>
                     {/* RIGHT of the type text, per Turki. Shown when the type
                         links for THIS group's population — an iqama type shows
                         it for both, a license type only for drivers. */}
-                    {linkedFieldFor(t, subjectKind) && <LinkPill />}
+                    {linkedFieldFor(ty, subjectKind) && <LinkPill />}
                   </button>
                   {deletable && (
                     <button
                       type="button"
-                      onClick={() => remove(t.key, t.label_en)}
+                      onClick={() => remove(ty.key, label)}
                       disabled={busy}
                       className="px-2 grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-40"
-                      title={`Delete "${t.label_en}"`}
-                      aria-label={`Delete ${t.label_en}`}
+                      title={fill(t("archive.typePicker.deleteTip", lang), { label })}
+                      aria-label={fill(t("archive.typePicker.deleteAria", lang), { label })}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -212,13 +225,13 @@ function TypePicker({
                       if (e.key === "Enter") { e.preventDefault(); submitNew(); }
                       if (e.key === "Escape") { setAdding(false); setNewLabel(""); }
                     }}
-                    placeholder="New type name"
+                    placeholder={t("archive.phNewType", lang)}
                     className={cn(INPUT, "flex-1")}
                     style={INPUT_STYLE}
                     autoFocus
                   />
                   <Btn variant="primary" onClick={submitNew} disabled={busy || !newLabel.trim()}>
-                    {busy ? "…" : "Add"}
+                    {busy ? "…" : t("common.add", lang)}
                   </Btn>
                 </div>
               ) : (
@@ -228,7 +241,7 @@ function TypePicker({
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-start text-brand-600 dark:text-brand-300 hover:bg-black/5 dark:hover:bg-white/5"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Add new type
+                  {t("archive.typePicker.addNew", lang)}
                 </button>
               )}
             </li>
@@ -286,6 +299,7 @@ function StagedFilePicker({
   onRemove: (id: string) => void;
   hint: string;
 }) {
+  const { lang } = useApp();
   return (
     <div className="space-y-2">
       {staged.length > 0 && (
@@ -298,12 +312,14 @@ function StagedFilePicker({
             >
               <FileText className="h-3.5 w-3.5 shrink-0 muted" />
               <span className="truncate flex-1">{sf.file.name}</span>
-              <span className="muted shrink-0">{(sf.file.size / 1024).toFixed(0)} KB</span>
+              <span className="muted shrink-0">
+                {fill(t("archive.fileSizeKb", lang), { n: (sf.file.size / 1024).toFixed(0) })}
+              </span>
               <button
                 type="button"
                 onClick={() => onRemove(sf.id)}
                 className="p-1 rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                aria-label="Remove file"
+                aria-label={t("archive.removeFile", lang)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -316,7 +332,7 @@ function StagedFilePicker({
         style={INPUT_STYLE}
       >
         <Upload className="h-3.5 w-3.5" />
-        Attach files
+        {t("archive.attachFiles", lang)}
         <input
           type="file"
           multiple
@@ -432,6 +448,7 @@ export function GroupModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { lang } = useApp();
   const isEdit = !!editingGroup;
   const [title, setTitle] = useState(editingGroup?.title ?? "");
   const [description, setDescription] = useState(editingGroup?.description ?? "");
@@ -450,16 +467,16 @@ export function GroupModal({
   const [localTypes, setLocalTypes] = useState<ArchiveDocumentType[]>([]);
   const [deletedTypeKeys, setDeletedTypeKeys] = useState<string[]>([]);
   const allGroupTypes = (() => {
-    const seen = new Set(types.map((t) => t.key));
-    return [...types, ...localTypes.filter((t) => !seen.has(t.key))].filter(
-      (t) => !deletedTypeKeys.includes(t.key),
+    const seen = new Set(types.map((ty) => ty.key));
+    return [...types, ...localTypes.filter((ty) => !seen.has(ty.key))].filter(
+      (ty) => !deletedTypeKeys.includes(ty.key),
     );
   })();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedLinkField = linkedFieldFor(
-    allGroupTypes.find((t) => t.key === groupTypeKey),
+    allGroupTypes.find((ty) => ty.key === groupTypeKey),
     subjectKind === "driver" ? "driver"
     : subjectKind === "staff" ? "staff"
     : subjectKind === "truck" ? "truck"
@@ -468,7 +485,7 @@ export function GroupModal({
 
   async function submit() {
     if (!title.trim()) {
-      setError("Group title is required.");
+      setError(t("archive.groupModal.errTitle", lang));
       return;
     }
     setSaving(true);
@@ -495,13 +512,13 @@ export function GroupModal({
 
   return (
     <ModalShell
-      title={isEdit ? "Edit Group" : "Create Group"}
+      title={isEdit ? t("archive.groupModal.titleEdit", lang) : t("archive.createGroup", lang)}
       onClose={onClose}
       footer={
         <>
-          <Btn variant="outline" onClick={onClose}>Cancel</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("common.cancel", lang)}</Btn>
           <Btn variant="primary" onClick={submit} disabled={saving || !title.trim()}>
-            {saving ? "…" : "Save"}
+            {saving ? "…" : t("common.save", lang)}
           </Btn>
         </>
       }
@@ -511,7 +528,7 @@ export function GroupModal({
       )}
 
       <div>
-        <label className="text-xs muted block mb-1">Title *</label>
+        <label className="text-xs muted block mb-1">{t("archive.groupModal.fTitle", lang)}</label>
         <input value={title} onChange={(e) => setTitle(e.target.value)} className={INPUT} style={INPUT_STYLE} autoFocus />
       </div>
 
@@ -522,50 +539,55 @@ export function GroupModal({
           group in violation of 0087's guard at once. */}
       {tab === "staff" && (
         <div>
-          <label className="text-xs muted block mb-1">This group is for *</label>
+          <label className="text-xs muted block mb-1">{t("archive.groupModal.fFor", lang)}</label>
           {isEdit ? (
             <div className="px-3 py-2 rounded-lg border text-sm opacity-60" style={INPUT_STYLE}>
-              {subjectKind === "driver" ? "Drivers" : "Management staff"}
+              {/* Keyed off the subject_kind VALUE, never off the rendered
+                  label — the label moves with `lang`, the value is what the
+                  DB constrains and what setSubjectKind writes. */}
+              {subjectKind === "driver"
+                ? t("archive.subjectKind.driver", lang)
+                : t("archive.subjectKind.staff", lang)}
             </div>
           ) : (
             <div className="flex gap-2">
-              {([
-                { key: "driver" as const, label: "Drivers" },
-                { key: "staff" as const, label: "Management staff" },
-              ]).map((o) => (
+              {(["driver", "staff"] as const).map((o) => (
                 <button
-                  key={o.key}
+                  key={o}
                   type="button"
-                  onClick={() => setSubjectKind(o.key)}
+                  onClick={() => setSubjectKind(o)}
                   className={cn(
                     "flex-1 px-3 py-2 rounded-lg border text-sm transition",
-                    subjectKind === o.key
+                    subjectKind === o
                       ? "border-brand-600 bg-brand-500/10 text-brand-700 dark:text-brand-300 font-medium"
                       : "hover:bg-black/5 dark:hover:bg-white/5",
                   )}
-                  style={subjectKind === o.key ? undefined : INPUT_STYLE}
+                  style={subjectKind === o ? undefined : INPUT_STYLE}
                 >
-                  {o.label}
+                  {t(`archive.subjectKind.${o}`, lang)}
                 </button>
               ))}
             </div>
           )}
           <p className="text-[11px] muted mt-1">
             {isEdit
-              ? "Cannot be changed after the group is created."
-              : "Every person in this list gets a row, whether or not they have the document yet."}
+              ? t("archive.groupModal.locked", lang)
+              : t("archive.groupModal.hintFor", lang)}
           </p>
         </div>
       )}
 
       {(tab === "staff" || tab === "truck") && (
         <div>
-          <label className="text-xs muted block mb-1">Document type *</label>
+          <label className="text-xs muted block mb-1">{t("archive.groupModal.fType", lang)}</label>
           {isEdit ? (
             <div className="px-3 py-2 rounded-lg border text-sm opacity-60 flex items-center gap-2" style={INPUT_STYLE}>
-              {allGroupTypes.find((t) => t.key === groupTypeKey)?.label_en ?? "—"}
+              {(() => {
+                const ty = allGroupTypes.find((x) => x.key === groupTypeKey);
+                return ty ? arText(ty.label_en, ty.label_ar, lang) : "—";
+              })()}
               {linkedFieldFor(
-                allGroupTypes.find((t) => t.key === groupTypeKey),
+                allGroupTypes.find((ty) => ty.key === groupTypeKey),
                 subjectKind === "driver" ? "driver"
                 : subjectKind === "staff" ? "staff"
                 : subjectKind === "truck" ? "truck"
@@ -580,9 +602,9 @@ export function GroupModal({
                   the dropdown itself. Same reason Inventory's PartPicker
                   exists rather than a restyled select. */}
               <TypePicker
-                types={allGroupTypes.filter((t) => t.active || t.key === groupTypeKey)}
+                types={allGroupTypes.filter((ty) => ty.active || ty.key === groupTypeKey)}
                 usageByKey={typeUsage}
-                onAdded={(t) => setLocalTypes((prev) => [...prev, t])}
+                onAdded={(ty) => setLocalTypes((prev) => [...prev, ty])}
                 onDeleted={(key) => setDeletedTypeKeys((prev) => [...prev, key])}
                 value={groupTypeKey}
                 subjectKind={
@@ -598,33 +620,34 @@ export function GroupModal({
                   second pill here would repeat what is visible two lines up. */}
               {selectedLinkField && (
                 <p className="text-[11px] muted mt-1.5">
-                  The {PERSON_ID_LABEL[selectedLinkField].toLowerCase()} and its expiry live on the
-                  person. Documents here read those; they store no copy.
+                  {fill(t("archive.groupModal.linkNote", lang), {
+                    field: personIdLabelLower(selectedLinkField, lang),
+                  })}
                 </p>
               )}
             </>
           )}
           <p className="text-[11px] muted mt-1">
             {isEdit
-              ? "Cannot be changed after the group is created."
-              : "Every document in this group is this type."}
+              ? t("archive.groupModal.locked", lang)
+              : t("archive.groupModal.hintType", lang)}
           </p>
         </div>
       )}
 
       <div>
-        <label className="text-xs muted block mb-1">Description</label>
+        <label className="text-xs muted block mb-1">{t("archive.groupModal.fDescription", lang)}</label>
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Shown under the group title — optional"
+          placeholder={t("archive.groupModal.phDescription", lang)}
           className={INPUT}
           style={INPUT_STYLE}
         />
       </div>
 
       <div>
-        <label className="text-xs muted block mb-1">Color</label>
+        <label className="text-xs muted block mb-1">{t("archive.groupModal.fColor", lang)}</label>
         <div className="flex items-center gap-2 flex-wrap">
           {ARCHIVE_GROUP_COLORS.map((c) => (
             <button
@@ -635,7 +658,7 @@ export function GroupModal({
                 "h-8 w-8 rounded-full grid place-items-center border-2 transition",
                 color === c.key ? "border-brand-600" : "border-transparent hover:border-black/10 dark:hover:border-white/10",
               )}
-              title={c.key}
+              title={t(`archive.color.${c.key}`, lang)}
             >
               <span className={cn("h-4 w-4 rounded-full", c.dot)} />
             </button>
@@ -644,7 +667,7 @@ export function GroupModal({
       </div>
 
       <div>
-        <label className="text-xs muted block mb-1">Warn when expiring within (days) *</label>
+        <label className="text-xs muted block mb-1">{t("archive.groupModal.fWarnDays", lang)}</label>
         <input
           type="number"
           min={1}
@@ -654,7 +677,7 @@ export function GroupModal({
           style={INPUT_STYLE}
         />
         <p className="text-[11px] muted mt-1">
-          Documents in this group turn yellow inside this window, red once expired.
+          {t("archive.groupModal.hintWarnDays", lang)}
         </p>
       </div>
     </ModalShell>
@@ -716,6 +739,7 @@ export function DocumentModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { lang } = useApp();
   const isEdit = !!editingDocument;
   const [title, setTitle] = useState(editingDocument?.title ?? "");
   const [referenceNo, setReferenceNo] = useState(editingDocument?.reference_no ?? "");
@@ -747,9 +771,9 @@ export function DocumentModal({
   // must still show as that document's type, otherwise opening Edit and
   // pressing Save would silently blank a field nobody touched.
   const allTypes = useMemo(() => {
-    const seen = new Set(types.map((t) => t.key));
-    const merged = [...types, ...localTypes.filter((t) => !seen.has(t.key))];
-    return merged.filter((t) => t.active || t.key === editingDocument?.type_key);
+    const seen = new Set(types.map((ty) => ty.key));
+    const merged = [...types, ...localTypes.filter((ty) => !seen.has(ty.key))];
+    return merged.filter((ty) => ty.active || ty.key === editingDocument?.type_key);
   }, [types, localTypes, editingDocument]);
 
   // In a staff/truck group the type is INHERITED from the group and cannot
@@ -784,7 +808,7 @@ export function DocumentModal({
     const res = await addArchiveDocumentType(label);
     setSavingType(false);
     if (res.error || !res.type) {
-      setError(res.error ?? "Could not add type.");
+      setError(res.error ?? t("archive.errAddType", lang));
       return;
     }
     setLocalTypes((prev) => [...prev, res.type!]);
@@ -829,14 +853,12 @@ export function DocumentModal({
 
   async function submit() {
     if (!title.trim()) {
-      setError("Document title is required.");
+      setError(t("archive.docModal.errTitle", lang));
       return;
     }
     // FAIL LOUDLY rather than write the number to the wrong place.
     if (linkExpected && !idField) {
-      setError(
-        "This group's type is linked to a person field, but that field could not be resolved. Not saving — the number would be stored on the document instead of the person.",
-      );
+      setError(t("archive.docModal.errLinkUnresolved", lang));
       return;
     }
 
@@ -906,7 +928,7 @@ export function DocumentModal({
     const res = await createArchiveDocument(input);
     if (res.error || !res.document) {
       setSaving(false);
-      setError(res.error ?? "Could not create document.");
+      setError(res.error ?? t("archive.docModal.errCreate", lang));
       return;
     }
 
@@ -925,7 +947,10 @@ export function DocumentModal({
     // silently losing the attachments they thought they'd added.
     if (failed.length > 0) {
       setError(
-        `Document saved, but ${failed.length} file(s) failed to upload: ${failed.join(", ")}. Reopen the document to attach them.`,
+        fill(t(`archive.docModal.errUploadPartial.${plural(failed.length)}`, lang), {
+          n: failed.length,
+          names: failed.join(", "),
+        }),
       );
       return;
     }
@@ -935,13 +960,17 @@ export function DocumentModal({
   return (
     <ModalShell
       wide
-      title={isEdit ? "Edit Document" : `Add Document — ${groupTitle}`}
+      title={
+        isEdit
+          ? t("archive.docModal.titleEdit", lang)
+          : fill(t("archive.docModal.titleAdd", lang), { group: groupTitle })
+      }
       onClose={onClose}
       footer={
         <>
-          <Btn variant="outline" onClick={onClose}>Cancel</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("common.cancel", lang)}</Btn>
           <Btn variant="primary" onClick={submit} disabled={saving || uploading || !title.trim()}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("common.saving", lang) : t("common.save", lang)}
           </Btn>
         </>
       }
@@ -951,26 +980,28 @@ export function DocumentModal({
       )}
 
       {/* IDENTITY — what this document is, who issued it, whose it is. */}
-      <div className="text-[11px] font-semibold uppercase tracking-wide muted">Identity</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted">{t("archive.section.identity", lang)}</div>
       {subject && (
         <div className="rounded-lg border px-3 py-2 text-sm flex items-center gap-2" style={INPUT_STYLE}>
           {subject.kind === "truck"
             ? <TruckIcon className="h-4 w-4 muted shrink-0" />
             : <User className="h-4 w-4 muted shrink-0" />}
           <span className="muted">
-            {subject.kind === "driver" ? "Driver" : subject.kind === "staff" ? "Staff member" : "Truck"}:
+            {/* Keyed off subject.kind — the VALUE the caller resolved from the
+                group's subject_kind — not off the phrase it prints. */}
+            {t(`archive.subjectLabel.${subject.kind}`, lang)}:
           </span>
           <span className="font-medium">{subject.name}</span>
         </div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="md:col-span-1">
-          <label className="text-xs muted block mb-1">Document title *</label>
+          <label className="text-xs muted block mb-1">{t("archive.docModal.fTitle", lang)}</label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} className={INPUT} style={INPUT_STYLE} autoFocus />
         </div>
 
         <div>
-          <label className="text-xs muted block mb-1">Type of document</label>
+          <label className="text-xs muted block mb-1">{t("archive.fTypeOfDocument", lang)}</label>
           {inheritedType ? (
             <>
               <div
@@ -978,10 +1009,10 @@ export function DocumentModal({
                 style={INPUT_STYLE}
                 aria-disabled
               >
-                {inheritedType.label_en}
+                {arText(inheritedType.label_en, inheritedType.label_ar, lang)}
                 {idField && <LinkPill />}
               </div>
-              <p className="text-[11px] muted mt-1">Set by the group — every document here is this type.</p>
+              <p className="text-[11px] muted mt-1">{t("archive.docModal.typeInherited", lang)}</p>
             </>
           ) : addingType ? (
             <div className="flex gap-2">
@@ -989,15 +1020,15 @@ export function DocumentModal({
                 value={newTypeLabel}
                 onChange={(e) => setNewTypeLabel(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitNewType(); } }}
-                placeholder="New type name"
+                placeholder={t("archive.phNewType", lang)}
                 className={cn(INPUT, "flex-1")}
                 style={INPUT_STYLE}
                 autoFocus
               />
               <Btn variant="primary" onClick={submitNewType} disabled={savingType || !newTypeLabel.trim()}>
-                {savingType ? "…" : "Add"}
+                {savingType ? "…" : t("common.add", lang)}
               </Btn>
-              <Btn variant="outline" onClick={() => { setAddingType(false); setNewTypeLabel(""); }}>Cancel</Btn>
+              <Btn variant="outline" onClick={() => { setAddingType(false); setNewTypeLabel(""); }}>{t("common.cancel", lang)}</Btn>
             </div>
           ) : (
             <select
@@ -1010,50 +1041,55 @@ export function DocumentModal({
               style={INPUT_STYLE}
             >
               <option value="">—</option>
-              {allTypes.map((t) => (
-                <option key={t.key} value={t.key}>{t.label_en}</option>
+              {allTypes.map((ty) => (
+                <option key={ty.key} value={ty.key}>{arText(ty.label_en, ty.label_ar, lang)}</option>
               ))}
-              <option value="__add__">+ Add new type…</option>
+              <option value="__add__">{t("archive.docModal.addNewTypeOption", lang)}</option>
             </select>
           )}
         </div>
 
         <div>
-          <label className="text-xs muted block mb-1">Issuing entity</label>
+          <label className="text-xs muted block mb-1">{t("archive.fIssuingEntity", lang)}</label>
           <input
             value={issuingEntity}
             onChange={(e) => setIssuingEntity(e.target.value)}
-            placeholder="e.g. Ministry of Transport"
+            placeholder={t("archive.docModal.phIssuingEntity", lang)}
             className={INPUT}
             style={INPUT_STYLE}
           />
         </div>
 
         <div>
-          <label className="text-xs muted block mb-1">Holder name</label>
+          <label className="text-xs muted block mb-1">{t("archive.fHolderName", lang)}</label>
           <input
             value={holderName}
             onChange={(e) => setHolderName(e.target.value)}
-            placeholder="Whose name it is in"
+            placeholder={t("archive.docModal.phHolderName", lang)}
             className={INPUT}
             style={INPUT_STYLE}
           />
         </div>
 
         <div className="md:col-span-2">
-          <label className="text-xs muted block mb-1">Note</label>
+          <label className="text-xs muted block mb-1">{t("common.note", lang)}</label>
           <input value={note} onChange={(e) => setNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
         </div>
       </div>
 
       {/* REFERENCE + VALIDITY — the numbers and dates that drive expiry. */}
-      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Reference &amp; validity</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("archive.section.refValidity", lang)}</div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
           {idField ? (
             <>
               <label className="text-xs muted flex items-center gap-2 mb-1">
-                {PERSON_ID_LABEL[idField]} — {subject?.name}
+                {fill(t("archive.docModal.fLinked", lang), {
+                  field: personIdLabel(idField, lang),
+                  // `?? ""` because JSX printed nothing for an absent name;
+                  // fill() would print the string "undefined".
+                  name: subject?.name ?? "",
+                })}
                 <LinkPill />
               </label>
               {isEdit ? (
@@ -1065,34 +1101,34 @@ export function DocumentModal({
                     style={INPUT_STYLE}
                   />
                   <p className="text-[11px] muted mt-1">
-                    Saved on the subject&apos;s record. This is where it is edited.
+                    {t("archive.docModal.linkedNumEditHint", lang)}
                   </p>
                 </>
               ) : (
                 <>
                   <LockedValue value={personNumber} />
                   <p className="text-[11px] muted mt-1">
-                    Already on the record — this document attaches to it.
+                    {t("archive.docModal.linkedNumLockedHint", lang)}
                   </p>
                 </>
               )}
             </>
           ) : (
             <>
-              <label className="text-xs muted block mb-1">Reference / ID number</label>
+              <label className="text-xs muted block mb-1">{t("archive.docModal.fReference", lang)}</label>
               <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} className={INPUT} style={INPUT_STYLE} />
             </>
           )}
         </div>
         <div>
-          <label className="text-xs muted block mb-1">Issue date</label>
+          <label className="text-xs muted block mb-1">{t("archive.fIssueDate", lang)}</label>
           <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} className={INPUT} style={INPUT_STYLE} />
         </div>
         <div>
           {idField ? (
             <>
               <label className="text-xs muted flex items-center gap-2 mb-1">
-                Expiry date<LinkPill />
+                {t("archive.fExpiryDate", lang)}<LinkPill />
               </label>
               {isEdit ? (
                 <>
@@ -1104,21 +1140,21 @@ export function DocumentModal({
                     style={INPUT_STYLE}
                   />
                   <p className="text-[11px] muted mt-1">
-                    The subject&apos;s expiry — this document&apos;s status reads it.
+                    {t("archive.docModal.linkedExpEditHint", lang)}
                   </p>
                 </>
               ) : (
                 <>
                   <LockedValue value={personExpiry ? formatDate(personExpiry + "T00:00:00") : ""} />
                   <p className="text-[11px] muted mt-1">
-                    Renew to move it forward.
+                    {t("archive.docModal.linkedExpLockedHint", lang)}
                   </p>
                 </>
               )}
             </>
           ) : (
             <>
-          <label className="text-xs muted block mb-1">Expiry date</label>
+          <label className="text-xs muted block mb-1">{t("archive.fExpiryDate", lang)}</label>
           <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} className={INPUT} style={INPUT_STYLE} />
             </>
           )}
@@ -1126,7 +1162,7 @@ export function DocumentModal({
       </div>
 
       {/* ATTACHMENTS */}
-      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Attachments</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("archive.section.attachments", lang)}</div>
       {isEdit ? (
         <div className="space-y-2">
           {currentFiles.length > 0 && (
@@ -1140,7 +1176,7 @@ export function DocumentModal({
                     onClick={() => onRemoveFile(f.id)}
                     disabled={busyFileId === f.id}
                     className="p-1 rounded text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"
-                    aria-label="Remove file"
+                    aria-label={t("archive.removeFile", lang)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -1153,7 +1189,7 @@ export function DocumentModal({
             style={INPUT_STYLE}
           >
             <Upload className="h-3.5 w-3.5" />
-            {uploading ? "Uploading…" : "Add files"}
+            {uploading ? t("archive.uploading", lang) : t("archive.addFiles", lang)}
             <input
               type="file"
               multiple
@@ -1163,14 +1199,14 @@ export function DocumentModal({
               disabled={uploading}
             />
           </label>
-          <p className="text-[11px] muted">Images, PDF, Word, Excel and more. Max 10 MB each.</p>
+          <p className="text-[11px] muted">{t("archive.fileHint", lang)}</p>
         </div>
       ) : (
         <StagedFilePicker
           staged={staged}
           onAdd={(picked) => setStaged((prev) => [...prev, ...picked.map((f) => ({ id: newStagedId(), file: f }))])}
           onRemove={(id) => setStaged((prev) => prev.filter((sf) => sf.id !== id))}
-          hint="Attached when you save. Images, PDF, Word, Excel and more. Max 10 MB each."
+          hint={t("archive.fileHintStaged", lang)}
         />
       )}
     </ModalShell>
@@ -1193,17 +1229,22 @@ export function RenewModal({
   // (0089/0091). RENEW IS THE WRITE PATH for a linked number and expiry —
   // Add only attaches to what already exists, so this is where a new Iqama,
   // licence or registration period actually lands on the subject's record.
+  // `field` alone — no pre-rendered `label`. The caller used to pass both, and
+  // the label was then case-folded here for mid-sentence use; that made the
+  // caller responsible for a string whose language this component decides, and
+  // .toLowerCase() on a translated label is a no-op in Arabic. The label is now
+  // derived from the field at render time, in the two shapes it is needed in.
   linked?: {
     field: PersonIdField;
     subjectId: string;
     subjectName: string;
-    label: string;
     currentNumber: string | null;
     currentExpiry: string | null;
   };
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { lang } = useApp();
   // Prefill from the current version — a renewal usually keeps the same
   // reference number and shifts the dates forward. For a LINKED document the
   // current values live on the SUBJECT, not on the document, so they are
@@ -1263,7 +1304,10 @@ export function RenewModal({
     // rather than closing on a half-done state.
     if (failed.length > 0) {
       setError(
-        `Renewed, but ${failed.length} file(s) failed to upload: ${failed.join(", ")}. Open the document to attach them.`,
+        fill(t(`archive.renewModal.errUploadPartial.${plural(failed.length)}`, lang), {
+          n: failed.length,
+          names: failed.join(", "),
+        }),
       );
       return;
     }
@@ -1272,13 +1316,13 @@ export function RenewModal({
 
   return (
     <ModalShell
-      title={`Renew — ${doc.title}`}
+      title={fill(t("archive.renewModal.title", lang), { title: doc.title })}
       onClose={onClose}
       footer={
         <>
-          <Btn variant="outline" onClick={onClose}>Cancel</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("common.cancel", lang)}</Btn>
           <Btn variant="primary" onClick={submit} disabled={saving}>
-            {saving ? "…" : "Renew"}
+            {saving ? "…" : t("archive.renew", lang)}
           </Btn>
         </>
       }
@@ -1288,53 +1332,64 @@ export function RenewModal({
       )}
 
       <div className="rounded-lg px-3 py-2 text-xs bg-brand-500/10 text-brand-700 dark:text-brand-300">
-        The current version is kept as history — its details and files stay retrievable.
-        {linked && ` The outgoing ${linked.label.toLowerCase()} and expiry are recorded there too.`}
+        {t("archive.renewModal.historyNote", lang)}
+        {/* The separating space stays in the CODE, not in the dictionary
+            value — a leading space inside a translated string is invisible to
+            a translator and gets trimmed by the first person who tidies it. */}
+        {linked &&
+          ` ${fill(t("archive.renewModal.historyNoteLinked", lang), {
+            field: personIdLabelLower(linked.field, lang),
+          })}`}
       </div>
 
       <div>
         <label className="text-xs muted flex items-center gap-2 mb-1">
-          {linked ? `New ${linked.label.toLowerCase()} — ${linked.subjectName}` : "New reference / ID number"}
+          {linked
+            ? fill(t("archive.renewModal.fNewLinked", lang), {
+                field: personIdLabelLower(linked.field, lang),
+                name: linked.subjectName,
+              })
+            : t("archive.renewModal.fNewReference", lang)}
           {linked && <LinkPill />}
         </label>
         <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} className={INPUT} style={INPUT_STYLE} />
         {linked && (
           <p className="text-[11px] muted mt-1">
-            Saved on the subject&apos;s record. The current value is kept in this document&apos;s history.
+            {t("archive.renewModal.linkedNumHint", lang)}
           </p>
         )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs muted block mb-1">New issue date</label>
+          <label className="text-xs muted block mb-1">{t("archive.renewModal.fNewIssue", lang)}</label>
           <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} className={INPUT} style={INPUT_STYLE} autoFocus />
         </div>
         <div>
           <label className="text-xs muted flex items-center gap-2 mb-1">
-            New expiry date{linked && <LinkPill />}
+            {t("archive.renewModal.fNewExpiry", lang)}{linked && <LinkPill />}
           </label>
           <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} className={INPUT} style={INPUT_STYLE} />
           {linked && (
             <p className="text-[11px] muted mt-1">
-              Moves the subject&apos;s expiry forward — every status reading it follows.
+              {t("archive.renewModal.linkedExpHint", lang)}
             </p>
           )}
         </div>
       </div>
 
       <div>
-        <label className="text-xs muted block mb-1">Note</label>
+        <label className="text-xs muted block mb-1">{t("common.note", lang)}</label>
         <input value={note} onChange={(e) => setNote(e.target.value)} className={INPUT} style={INPUT_STYLE} />
       </div>
 
       <div>
-        <label className="text-xs muted block mb-1">New version files</label>
+        <label className="text-xs muted block mb-1">{t("archive.renewModal.fNewFiles", lang)}</label>
         <StagedFilePicker
           staged={staged}
           onAdd={(picked) => setStaged((prev) => [...prev, ...picked.map((f) => ({ id: newStagedId(), file: f }))])}
           onRemove={(id) => setStaged((prev) => prev.filter((sf) => sf.id !== id))}
-          hint="Attached to the renewed document when you save. The current files move to history."
+          hint={t("archive.renewModal.fileHint", lang)}
         />
       </div>
     </ModalShell>
@@ -1398,7 +1453,8 @@ export function DocumentDetailModal({
   // For a linked document (0088) the reference IS the person's own number,
   // so the row below reads it from them rather than showing an empty
   // reference_no that is empty BY DESIGN and would look like missing data.
-  linkedId?: { label: string; value: string | null; expiry: string | null; personName: string } | null;
+  // `field`, not a rendered label — same reason as RenewModal's `linked`.
+  linkedId?: { field: PersonIdField; value: string | null; expiry: string | null; personName: string } | null;
   files: ArchiveDocumentFile[];
   renewals: ArchiveDocumentRenewal[];
   today: string;
@@ -1407,6 +1463,7 @@ export function DocumentDetailModal({
   onEdit: () => void;
   onRenew: () => void;
 }) {
+  const { lang } = useApp();
   // A linked document has no expiry of its own — the person's is the single
   // source, so the pill here reads exactly what the matrix row reads.
   const status = docStatus(linkedId ? linkedId.expiry : doc.expiry_date, group.warning_days, today);
@@ -1429,9 +1486,9 @@ export function DocumentDetailModal({
       onClose={onClose}
       footer={
         <>
-          <Btn variant="outline" onClick={onClose}>Close</Btn>
-          <Btn variant="outline" onClick={onEdit}>Edit</Btn>
-          <Btn variant="primary" onClick={onRenew}>Renew</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("archive.close", lang)}</Btn>
+          <Btn variant="outline" onClick={onEdit}>{t("common.edit", lang)}</Btn>
+          <Btn variant="primary" onClick={onRenew}>{t("archive.renew", lang)}</Btn>
         </>
       }
     >
@@ -1446,42 +1503,48 @@ export function DocumentDetailModal({
             ARCHIVE_STATUS_PILL[status],
           )}
         >
-          {archiveStatusLabel(status, linkedId ? linkedId.expiry : doc.expiry_date, today)}
+          {archiveStatusLabel(status, linkedId ? linkedId.expiry : doc.expiry_date, today, lang)}
         </span>
       </div>
 
-      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Identity</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("archive.section.identity", lang)}</div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <DetailRow label="Type of document" value={type ? type.label_en : "—"} />
-        <DetailRow label="Issuing entity" value={dash(doc.issuing_entity)} />
-        <DetailRow label="Holder name" value={dash(doc.holder_name)} />
+        <DetailRow
+          label={t("archive.fTypeOfDocument", lang)}
+          value={type ? arText(type.label_en, type.label_ar, lang) : "—"}
+        />
+        <DetailRow label={t("archive.fIssuingEntity", lang)} value={dash(doc.issuing_entity)} />
+        <DetailRow label={t("archive.fHolderName", lang)} value={dash(doc.holder_name)} />
       </div>
 
       <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
-        Reference &amp; validity
+        {t("archive.section.refValidity", lang)}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {linkedId ? (
           <DetailRow
-            label={`${linkedId.label} (${linkedId.personName})`}
+            label={fill(t("archive.detail.linkedLabel", lang), {
+              field: personIdLabel(linkedId.field, lang),
+              name: linkedId.personName,
+            })}
             value={
               <>
                 {dash(linkedId.value)}
-                <span className="block text-[11px] muted">Held on the person</span>
+                <span className="block text-[11px] muted">{t("archive.detail.heldOnPerson", lang)}</span>
               </>
             }
           />
         ) : (
-          <DetailRow label="Reference no." value={dash(doc.reference_no)} />
+          <DetailRow label={t("archive.detail.fReferenceNo", lang)} value={dash(doc.reference_no)} />
         )}
-        <DetailRow label="Issue date" value={date(doc.issue_date)} />
+        <DetailRow label={t("archive.fIssueDate", lang)} value={date(doc.issue_date)} />
         <DetailRow
-          label="Expiry date"
+          label={t("archive.fExpiryDate", lang)}
           value={
             linkedId ? (
               <>
                 {date(linkedId.expiry)}
-                <span className="block text-[11px] muted">Held on the person</span>
+                <span className="block text-[11px] muted">{t("archive.detail.heldOnPerson", lang)}</span>
               </>
             ) : (
               date(doc.expiry_date)
@@ -1492,16 +1555,18 @@ export function DocumentDetailModal({
 
       {doc.note && doc.note.trim() && (
         <>
-          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Note</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("common.note", lang)}</div>
           <p className="text-sm whitespace-pre-wrap">{doc.note}</p>
         </>
       )}
 
       <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
-        Attachments ({currentFiles.length})
+        {fill(t(`archive.detail.attachmentsCount.${plural(currentFiles.length)}`, lang), {
+          n: currentFiles.length,
+        })}
       </div>
       {currentFiles.length === 0 ? (
-        <p className="text-sm muted">No files attached to the current version.</p>
+        <p className="text-sm muted">{t("archive.detail.noFiles", lang)}</p>
       ) : (
         <div className="flex flex-wrap gap-2">
           {currentFiles.map((f) => (
@@ -1513,7 +1578,9 @@ export function DocumentDetailModal({
       {renewals.length > 0 && (
         <>
           <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
-            Previous versions ({renewals.length})
+            {fill(t(`archive.detail.previousVersionsCount.${plural(renewals.length)}`, lang), {
+              n: renewals.length,
+            })}
           </div>
           <div className="space-y-2">
             {renewals.map((r) => {
@@ -1521,11 +1588,11 @@ export function DocumentDetailModal({
               return (
                 <div key={r.id} className="rounded-lg border p-2.5 space-y-2" style={INPUT_STYLE}>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    <DetailRow label="Reference no." value={dash(r.reference_no)} />
-                    <DetailRow label="Issue date" value={date(r.issue_date)} />
-                    <DetailRow label="Expiry date" value={date(r.expiry_date)} />
+                    <DetailRow label={t("archive.detail.fReferenceNo", lang)} value={dash(r.reference_no)} />
+                    <DetailRow label={t("archive.fIssueDate", lang)} value={date(r.issue_date)} />
+                    <DetailRow label={t("archive.fExpiryDate", lang)} value={date(r.expiry_date)} />
                     <DetailRow
-                      label="Replaced on"
+                      label={t("archive.detail.fReplacedOn", lang)}
                       value={formatDate(r.superseded_at)}
                     />
                   </div>

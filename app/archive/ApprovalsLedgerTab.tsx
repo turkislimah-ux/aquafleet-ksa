@@ -23,8 +23,7 @@ import { Check, X, ChevronDown, ChevronRight, Lock, Scale, Clock } from "lucide-
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatDate, formatDateTime, formatSar } from "@/lib/utils";
 import {
-  buildLedger, LEDGER_KIND_LABELS, LEDGER_KIND_SHORT, LEDGER_KIND_PILL,
-  LEDGER_LOCK_DAYS,
+  buildLedger, LEDGER_KIND_PILL, LEDGER_LOCK_DAYS,
   type LedgerRow, type LedgerKind, type LedgerSystem, type LedgerOutcome,
   type LedgerWorkOrder, type LedgerOutsourcedJob,
   type LedgerPurchaseOrder, type LedgerStockReceipt,
@@ -33,6 +32,8 @@ import type {
   ConsumptionApproval, ExitPermit, ExitPermitLine,
   WorkOrderPart, WorkshopPayment,
 } from "@/lib/db-types";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, type Lang } from "@/lib/i18n";
 import { decideConsumptionApproval } from "../consumption/actions";
 
 export type PoApprovalLite = {
@@ -44,17 +45,27 @@ export type ReceiptApprovalLite = {
   outcome: string | null; comment: string | null; approved_at: string;
 };
 
-const SYSTEM_FILTERS: { key: LedgerSystem | "all"; label: string }[] = [
-  { key: "all", label: "All systems" },
-  { key: "consumption", label: "Consumption" },
-  { key: "inventory", label: "Inventory" },
-];
+// FUNCTIONS, not module-level consts. A const is built once at import time, in
+// whatever language the module happened to be evaluated under, and never changes
+// again — the freeze that bit the truck and customer sub-tab strips. The KEYS
+// stay the filter STATE; the label is display only.
+function systemFilters(lang: Lang): { key: LedgerSystem | "all"; label: string }[] {
+  return [
+    { key: "all", label: t("archive.ledger.filterAllSystems", lang) },
+    { key: "consumption", label: t("archive.ledger.system.consumption", lang) },
+    { key: "inventory", label: t("archive.ledger.system.inventory", lang) },
+  ];
+}
 
-const OUTCOME_FILTERS: { key: LedgerOutcome | "all"; label: string }[] = [
-  { key: "all", label: "All outcomes" },
-  { key: "approved", label: "Approved" },
-  { key: "rejected", label: "Rejected" },
-];
+function outcomeFilters(lang: Lang): { key: LedgerOutcome | "all"; label: string }[] {
+  return [
+    { key: "all", label: t("archive.ledger.filterAllOutcomes", lang) },
+    // The SET words, not the row's own word — see the dictionary note on why
+    // `filterApproved` and `outcome.approved` are two leaves in Arabic.
+    { key: "approved", label: t("archive.ledger.filterApproved", lang) },
+    { key: "rejected", label: t("archive.ledger.filterRejected", lang) },
+  ];
+}
 
 export default function ApprovalsLedgerTab({
   approvals, permits, permitLines, workOrders, workOrderParts,
@@ -79,6 +90,7 @@ export default function ApprovalsLedgerTab({
   nowMs: number;
 }) {
   const router = useRouter();
+  const { lang } = useApp();
   const [systemFilter, setSystemFilter] = useState<LedgerSystem | "all">("all");
   const [outcomeFilter, setOutcomeFilter] = useState<LedgerOutcome | "all">("all");
   const [kindFilter, setKindFilter] = useState<LedgerKind | "all">("all");
@@ -142,7 +154,7 @@ export default function ApprovalsLedgerTab({
     if (!row.revotable) return;
     const reason =
       decision === "rejected"
-        ? window.prompt("Reason for rejecting this? (required)")?.trim() ?? ""
+        ? window.prompt(t("archive.ledger.promptRejectReason", lang))?.trim() ?? ""
         : null;
     if (decision === "rejected" && !reason) return;
 
@@ -161,21 +173,20 @@ export default function ApprovalsLedgerTab({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Kpi label="Completed" value={String(kpis.total)} />
-        <Kpi label="Approved" value={String(kpis.approved)} />
-        <Kpi label="Rejected" value={String(kpis.rejected)} />
+        <Kpi label={t("archive.ledger.kpiCompleted", lang)} value={String(kpis.total)} />
+        <Kpi label={t("archive.ledger.filterApproved", lang)} value={String(kpis.approved)} />
+        <Kpi label={t("archive.ledger.filterRejected", lang)} value={String(kpis.rejected)} />
         <Kpi
-          label="Still re-votable"
+          label={t("archive.ledger.kpiRevotable", lang)}
           value={String(kpis.revotable)}
-          hint={`${kpis.locked} locked as history`}
+          hint={fill(t(`archive.ledger.lockedAsHistory.${plural(kpis.locked)}`, lang), {
+            n: kpis.locked,
+          })}
         />
       </div>
 
       <div className="rounded-lg px-3 py-2 text-[11px] muted bg-black/[0.03] dark:bg-white/[0.04]">
-        Every row here is derived live from its own system — nothing is copied into this tab.
-        Consumption decisions stay changeable for {LEDGER_LOCK_DAYS} days after completion, after
-        which the database itself refuses any further vote. Inventory decisions are locked the
-        moment they complete, because approving or rejecting one already moved stock or set a status.
+        {fill(t("archive.ledger.banner", lang), { d: LEDGER_LOCK_DAYS })}
       </div>
 
       {error && (
@@ -185,14 +196,17 @@ export default function ApprovalsLedgerTab({
       )}
 
       <div className="flex items-center gap-3 flex-wrap">
-        <Pills options={SYSTEM_FILTERS} active={systemFilter} onPick={(k) => setSystemFilter(k as LedgerSystem | "all")} />
+        <Pills options={systemFilters(lang)} active={systemFilter} onPick={(k) => setSystemFilter(k as LedgerSystem | "all")} />
         <span className="h-5 w-px" style={{ background: "rgb(var(--border))" }} />
-        <Pills options={OUTCOME_FILTERS} active={outcomeFilter} onPick={(k) => setOutcomeFilter(k as LedgerOutcome | "all")} />
+        <Pills options={outcomeFilters(lang)} active={outcomeFilter} onPick={(k) => setOutcomeFilter(k as LedgerOutcome | "all")} />
         <span className="h-5 w-px" style={{ background: "rgb(var(--border))" }} />
         <Pills
           options={[
-            { key: "all", label: "All kinds" },
-            ...kindsPresent.map((k) => ({ key: k, label: LEDGER_KIND_SHORT[k] })),
+            { key: "all", label: t("archive.ledger.filterAllKinds", lang) },
+            ...kindsPresent.map((k) => ({
+              key: k,
+              label: t(`archive.ledger.kindShort.${k}`, lang),
+            })),
           ]}
           active={kindFilter}
           onPick={(k) => setKindFilter(k as LedgerKind | "all")}
@@ -204,14 +218,16 @@ export default function ApprovalsLedgerTab({
           <div className="p-10 text-center">
             <Scale className="h-6 w-6 mx-auto mb-2 opacity-40" />
             <p className="text-sm muted">
-              {ledger.length === 0
-                ? "No completed approvals yet."
-                : "No completed approvals match these filters."}
+              {t(
+                ledger.length === 0
+                  ? "archive.ledger.emptyAll"
+                  : "archive.ledger.emptyFiltered",
+                lang,
+              )}
             </p>
             {ledger.length === 0 && (
               <p className="text-xs muted mt-1">
-                An approval lands here once it has two matching votes — from either the Consumption
-                or the Inventory side.
+                {t("archive.ledger.emptyHint", lang)}
               </p>
             )}
           </div>
@@ -222,14 +238,14 @@ export default function ApprovalsLedgerTab({
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
                 <TH>{null}</TH>
-                <TH>Reference</TH>
-                <TH>System</TH>
-                <TH>Kind</TH>
-                <TH>What</TH>
-                <TH>Completed</TH>
-                <TH>Value</TH>
-                <TH>Outcome</TH>
-                <TH>Window</TH>
+                <TH>{t("archive.thReference", lang)}</TH>
+                <TH>{t("archive.ledger.thSystem", lang)}</TH>
+                <TH>{t("archive.ledger.thKind", lang)}</TH>
+                <TH>{t("archive.ledger.thWhat", lang)}</TH>
+                <TH>{t("archive.ledger.thCompleted", lang)}</TH>
+                <TH>{t("archive.ledger.thValue", lang)}</TH>
+                <TH>{t("archive.ledger.thOutcome", lang)}</TH>
+                <TH>{t("archive.ledger.thWindow", lang)}</TH>
                 <TH>{null}</TH>
               </tr>
             </thead>
@@ -244,21 +260,21 @@ export default function ApprovalsLedgerTab({
                         <button
                           onClick={() => toggle(r.key)}
                           className="h-7 w-7 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                          aria-label={open ? "Collapse" : "Expand"}
+                          aria-label={t(open ? "archive.ledger.collapse" : "archive.ledger.expand", lang)}
                         >
                           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                         </button>
                       </TD>
                       <TD><span className="font-mono text-xs font-medium">{r.reference}</span></TD>
                       <TD className="text-xs muted">
-                        {r.system === "consumption" ? "Consumption" : "Inventory"}
+                        {t(`archive.ledger.system.${r.system}`, lang)}
                       </TD>
                       <TD>
                         <span className={cn(
                           "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
                           LEDGER_KIND_PILL[r.kind],
                         )}>
-                          {LEDGER_KIND_SHORT[r.kind]}
+                          {t(`archive.ledger.kindShort.${r.kind}`, lang)}
                         </span>
                       </TD>
                       <TD className="whitespace-normal max-w-[260px]">
@@ -277,18 +293,22 @@ export default function ApprovalsLedgerTab({
                             ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/25"
                             : "bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20",
                         )}>
-                          {r.outcome === "approved" ? "Approved" : "Rejected"}
+                          {t(`archive.ledger.outcome.${r.outcome}`, lang)}
                         </span>
                       </TD>
                       <TD className="text-xs">
                         {r.locked ? (
                           <span className="inline-flex items-center gap-1 muted">
-                            <Lock className="h-3 w-3" />Locked
+                            <Lock className="h-3 w-3" />{t("archive.ledger.lockedPill", lang)}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
                             <Clock className="h-3 w-3" />
-                            {r.daysLeft}d left
+                            {/* Reuses the expiry pills' countdown — "{n}d left" is the
+                                same sentence, so it is one leaf, not two. */}
+                            {fill(t(`archive.status.daysLeft.${plural(r.daysLeft)}`, lang), {
+                              n: r.daysLeft,
+                            })}
                           </span>
                         )}
                       </TD>
@@ -298,18 +318,18 @@ export default function ApprovalsLedgerTab({
                             <>
                               {r.outcome !== "approved" && (
                                 <Btn variant="primary" disabled={busy} onClick={() => void revote(r, "approved")}>
-                                  <Check className="h-3.5 w-3.5" />Approve
+                                  <Check className="h-3.5 w-3.5" />{t("archive.ledger.approve", lang)}
                                 </Btn>
                               )}
                               {r.outcome !== "rejected" && (
                                 <Btn variant="outline" disabled={busy} onClick={() => void revote(r, "rejected")}>
-                                  <X className="h-3.5 w-3.5" />Reject
+                                  <X className="h-3.5 w-3.5" />{t("archive.ledger.reject", lang)}
                                 </Btn>
                               )}
                             </>
                           ) : (
                             <span className="text-[11px] muted inline-flex items-center gap-1">
-                              <Lock className="h-3 w-3" />Read-only
+                              <Lock className="h-3 w-3" />{t("archive.ledger.readOnly", lang)}
                             </span>
                           )}
                         </div>
@@ -321,7 +341,9 @@ export default function ApprovalsLedgerTab({
                         <td colSpan={10} className="p-0 border-t" style={{ borderColor: "rgb(var(--border))" }}>
                           <div className="p-4 bg-black/[0.015] dark:bg-white/[0.02] space-y-3">
                             <div className="text-[11px] font-semibold uppercase tracking-wide muted">
-                              {LEDGER_KIND_LABELS[r.kind]} — sign-off sheet
+                              {fill(t("archive.ledger.signOffSheet", lang), {
+                                kind: t(`archive.ledger.kind.${r.kind}`, lang),
+                              })}
                             </div>
 
                             <div className={cn(
@@ -331,22 +353,31 @@ export default function ApprovalsLedgerTab({
                                 : "bg-rose-500/10 text-rose-800 dark:text-rose-200",
                             )}>
                               <div className="font-medium">
-                                {r.outcome === "approved" ? "Approved" : "Rejected"} on{" "}
-                                {formatDateTime(r.completedAt)}
+                                {fill(t(`archive.ledger.decidedOn.${r.outcome}`, lang), {
+                                  date: formatDateTime(r.completedAt),
+                                })}
                               </div>
                               {r.votes.map((v, i) => (
                                 <div key={`${v.by}-${i}`} className="flex flex-wrap items-baseline gap-x-1.5">
                                   <span className="font-medium">
-                                    {v.decision === "approved" ? "Approved" : "Rejected"}
+                                    {t(`archive.ledger.outcome.${v.decision}`, lang)}
                                   </span>
-                                  <span>by {v.by}</span>
-                                  <span className="opacity-70">on {formatDateTime(v.at)}</span>
-                                  {v.by === viewer && <span className="opacity-70">(you)</span>}
+                                  {/* `v.by` is the voter's email and `v.comment` their own
+                                      words — USER DATA, interpolated, never translated. */}
+                                  <span>{fill(t("archive.ledger.voteBy", lang), { name: v.by })}</span>
+                                  <span className="opacity-70">
+                                    {fill(t("archive.ledger.voteOn", lang), { date: formatDateTime(v.at) })}
+                                  </span>
+                                  {v.by === viewer && (
+                                    <span className="opacity-70">{t("archive.ledger.you", lang)}</span>
+                                  )}
                                   {v.comment && <span className="w-full">{v.comment}</span>}
                                 </div>
                               ))}
                               {r.reason && (
-                                <div className="w-full pt-0.5">Reason: {r.reason}</div>
+                                <div className="w-full pt-0.5">
+                                  {fill(t("archive.ledger.reasonLine", lang), { reason: r.reason })}
+                                </div>
                               )}
                             </div>
 
@@ -354,14 +385,30 @@ export default function ApprovalsLedgerTab({
                               {r.locked ? (
                                 <span className="inline-flex items-start gap-1">
                                   <Lock className="h-3 w-3 mt-0.5 shrink-0" />
-                                  {r.lockReason}
+                                  {/* `lockReason` is a LedgerLockReason union member, not a
+                                      sentence — lib/approvals-ledger.ts stopped composing
+                                      English so a pure derivation module could stay one.
+                                      Only `window_elapsed` spends {d}; fill on a
+                                      token-free template is a no-op.
+
+                                      THE NULL ARM IS UNREACHABLE IN PRACTICE and is still
+                                      written out: buildLedger sets a reason on every locked
+                                      row, but `locked` and `lockReason` are independent
+                                      fields on LedgerRow, so the type cannot say so and
+                                      nothing would catch it if that ever stopped being
+                                      true. Rendering nothing is what the old
+                                      `{r.lockReason}` did with a null. */}
+                                  {r.lockReason
+                                    ? fill(t(`archive.ledger.lockReason.${r.lockReason}`, lang), {
+                                        d: LEDGER_LOCK_DAYS,
+                                      })
+                                    : null}
                                 </span>
                               ) : (
-                                <>
-                                  Re-votable until {formatDate(r.locksAt)} ({r.daysLeft} days
-                                  left). A re-vote that drops this below two matching votes returns it to the
-                                  Consumption Approvals tab as pending, and it leaves this ledger.
-                                </>
+                                fill(t(`archive.ledger.revotableUntil.${plural(r.daysLeft)}`, lang), {
+                                  date: formatDate(r.locksAt),
+                                  n: r.daysLeft,
+                                })
                               )}
                             </div>
                           </div>

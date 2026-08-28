@@ -26,6 +26,8 @@ import { Btn } from "@/components/ui";
 import { formatSar, todayKey } from "@/lib/utils";
 import { returnCustomerBalance } from "@/lib/actions/finance";
 import type { ArchiveCustomerRow, CustomerAmountPayableRow } from "@/lib/db-types";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 import ScrollLock from "@/components/ScrollLock";
 
 const INPUT =
@@ -46,6 +48,7 @@ export default function ReturnBalanceModal({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const { lang } = useApp();
   const [method, setMethod] = useState<"" | "cash" | "bank_transfer">("");
   const [returnedOn, setReturnedOn] = useState(todayKey());
   const [reference, setReference] = useState("");
@@ -86,7 +89,7 @@ export default function ReturnBalanceModal({
     e.preventDefault();
     if (!customer) return;
     if (!canSubmit) {
-      setError("Pick a method and a return date. A bank transfer also needs an ETF ref. number and a photo.");
+      setError(t("archive.ret.validation", lang));
       return;
     }
     setSaving(true);
@@ -115,7 +118,7 @@ export default function ReturnBalanceModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-lg font-semibold">Return balance</h2>
+          <h2 className="text-lg font-semibold">{t("archive.ret.title", lang)}</h2>
           <button type="button" onClick={close} className="muted hover:text-[rgb(var(--fg))]">
             <X className="h-5 w-5" />
           </button>
@@ -132,12 +135,14 @@ export default function ReturnBalanceModal({
           className="rounded-xl border p-3 mb-4"
           style={{ borderColor: "rgb(var(--border))" }}
         >
-          <div className="text-[11px] muted uppercase tracking-wide">Amount to return</div>
+          <div className="text-[11px] muted uppercase tracking-wide">
+            {t("archive.ret.amountToReturn", lang)}
+          </div>
           <div className="text-2xl font-semibold tabular-nums mt-0.5">
             {payable ? formatSar(payable.amount_payable_sar) : "—"}
           </div>
           <div className="text-[11px] muted mt-1">
-            Taken from the customer&apos;s balance when this is saved. It is not editable here.
+            {t("archive.ret.amountNote", lang)}
           </div>
         </div>
 
@@ -151,7 +156,7 @@ export default function ReturnBalanceModal({
                 checked={method === "cash"}
                 onChange={() => setMethod("cash")}
               />
-              Cash
+              {t("archive.ret.method.cash", lang)}
             </label>
             <label className="flex items-center gap-1.5">
               <input
@@ -161,12 +166,14 @@ export default function ReturnBalanceModal({
                 checked={method === "bank_transfer"}
                 onChange={() => setMethod("bank_transfer")}
               />
-              Bank transfer
+              {t("archive.ret.method.bank_transfer", lang)}
             </label>
           </div>
 
           <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium">Returned on *</span>
+            {/* The required asterisk stays a bare literal beside the label, the
+                way every other converted form in the app marks one. */}
+            <span className="font-medium">{t("archive.ret.fReturnedOn", lang)} *</span>
             <input
               value={returnedOn}
               onChange={(e) => setReturnedOn(e.target.value)}
@@ -178,8 +185,15 @@ export default function ReturnBalanceModal({
           </label>
 
           <label className="flex flex-col gap-1.5 text-sm">
+            {/* Keyed off the FORM STATE, not off the rendered label — the same
+                rule the radios above follow. */}
             <span className="font-medium">
-              ETF Ref. number{method === "bank_transfer" ? " (required) *" : " (optional)"}
+              {t(
+                method === "bank_transfer"
+                  ? "archive.ret.fRefNumber.required"
+                  : "archive.ret.fRefNumber.optional",
+                lang,
+              )}
             </span>
             <input
               value={reference}
@@ -187,13 +201,18 @@ export default function ReturnBalanceModal({
               required={method === "bank_transfer"}
               className={INPUT}
               style={INPUT_STYLE}
-              placeholder="e.g. bank transfer ref"
+              placeholder={t("archive.ret.refPlaceholder", lang)}
             />
           </label>
 
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="font-medium">
-              Photo{method === "bank_transfer" ? " of transfer (required) *" : " (optional)"}
+              {t(
+                method === "bank_transfer"
+                  ? "archive.ret.fPhoto.required"
+                  : "archive.ret.fPhoto.optional",
+                lang,
+              )}
             </span>
             <input
               type="file"
@@ -206,7 +225,7 @@ export default function ReturnBalanceModal({
           </label>
 
           <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium">Note</span>
+            <span className="font-medium">{t("common.note", lang)}</span>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} name="note" rows={2}
               className={INPUT} style={INPUT_STYLE} />
           </label>
@@ -215,14 +234,14 @@ export default function ReturnBalanceModal({
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-app">
             <Btn type="button" variant="ghost" onClick={close}>
-              Cancel
+              {t("common.cancel", lang)}
             </Btn>
             <Btn
               type="submit"
               variant="primary"
               className={!canSubmit || saving ? "opacity-50 pointer-events-none" : ""}
             >
-              {saving ? "Recording…" : "Record return"}
+              {t(saving ? "common.recording" : "archive.ret.submit", lang)}
             </Btn>
           </div>
         </form>

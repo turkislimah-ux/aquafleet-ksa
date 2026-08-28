@@ -54,21 +54,27 @@ export type LedgerKind =
 
 export type LedgerOutcome = "approved" | "rejected";
 
-export const LEDGER_KIND_LABELS: Record<LedgerKind, string> = {
-  exit_permit: "Exit permit",
-  work_order: "In-house work order",
-  outsourced_job: "Outsourced job",
-  purchase_order: "Purchase order",
-  stock_receipt: "Stock receipt",
-};
-
-export const LEDGER_KIND_SHORT: Record<LedgerKind, string> = {
-  exit_permit: "Permit",
-  work_order: "In-house",
-  outsourced_job: "Outsourced",
-  purchase_order: "PO",
-  stock_receipt: "Receipt",
-};
+// WHY A COMPLETED ROW CANNOT BE RE-VOTED. A VALUE, not a sentence.
+//
+// This used to be four English strings built right here, which put display
+// language inside a module whose own header promises pure derivation over
+// rows — and made the reason untranslatable without threading a language into
+// a data builder. The wording now lives in the dictionary under
+// `archive.ledger.lockReason.*` and is looked up by the one component that
+// renders a ledger row. Closed union, so a fifth lock cause fails the build at
+// that lookup instead of reaching a screen as a raw key.
+//
+// The long/short KIND LABELS that used to sit here went the same way, for the
+// same reason: nothing outside that component ever read them.
+export type LedgerLockReason =
+  /** Consumption row past the 30-day window. */
+  | "window_elapsed"
+  /** A completed PO — approving it set the status and its RPCs refuse again. */
+  | "po_status_set"
+  /** A rejected receipt — the completing vote already applied its stock effect. */
+  | "receipt_rejection_applied"
+  /** An approved receipt — its RPCs refuse a vote once it leaves pending. */
+  | "receipt_left_pending";
 
 // Same palette as the Consumption tab for the three kinds it shares, so a
 // permit is the same blue in both places. The two inventory kinds get their
@@ -106,7 +112,7 @@ export type LedgerRow = {
   /** Consumption only, and only while unlocked. */
   revotable: boolean;
   /** Why this row cannot be re-voted, when it cannot. */
-  lockReason: string | null;
+  lockReason: LedgerLockReason | null;
   valueSar: number | null;
   votes: LedgerVote[];
   reason: string | null;
@@ -151,7 +157,7 @@ export function buildLedger(input: {
   const finish = (
     base: Omit<LedgerRow, "locksAt" | "locked" | "daysLeft" | "revotable" | "lockReason">,
     system: LedgerSystem,
-    inventoryLockReason: string | null,
+    inventoryLockReason: LedgerLockReason | null,
   ): LedgerRow => {
     const locksAt = new Date(
       new Date(base.completedAt).getTime() + LEDGER_LOCK_DAYS * 86_400_000,
@@ -165,11 +171,7 @@ export function buildLedger(input: {
       daysLeft: locked ? 0 : Math.max(0, LEDGER_LOCK_DAYS - elapsed),
       revotable: system === "consumption" && !locked,
       lockReason:
-        system === "inventory"
-          ? inventoryLockReason
-          : locked
-            ? `Locked — more than ${LEDGER_LOCK_DAYS} days since completion.`
-            : null,
+        system === "inventory" ? inventoryLockReason : locked ? "window_elapsed" : null,
     };
   };
 
@@ -308,8 +310,7 @@ export function buildLedger(input: {
         by: v.approver_email, at: v.approved_at, decision: "approved" as const, comment: v.comment,
       })),
       reason: null,
-    }, "inventory",
-      "Locked at completion — approving a purchase order sets its status, and its own RPCs refuse any further vote."));
+    }, "inventory", "po_status_set"));
   }
 
   const receiptById = new Map(input.stockReceipts.map((r) => [r.id, r]));
@@ -348,10 +349,7 @@ export function buildLedger(input: {
         comment: v.comment,
       })),
       reason: receipt.rejection_reason ?? ordered.find((v) => v.comment)?.comment ?? null,
-    }, "inventory",
-      rejected
-        ? "Locked at completion — the completing rejection already applied its stock effect, which cannot be undone by a later vote."
-        : "Locked at completion — the receipt's own RPCs refuse any further vote once it leaves pending approval."));
+    }, "inventory", rejected ? "receipt_rejection_applied" : "receipt_left_pending"));
   }
 
   // Newest completion first — a ledger is read from the top.

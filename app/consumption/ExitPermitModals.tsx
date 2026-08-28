@@ -967,7 +967,7 @@ export function ReturnModal({
               onClose();
             }}
           >
-            {t(busy ? "consumption.shared.recording" : "consumption.modals.recordReturn", lang)}
+            {t(busy ? "common.recording" : "consumption.modals.recordReturn", lang)}
           </Btn>
         </>
       }

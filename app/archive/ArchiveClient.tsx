@@ -32,6 +32,8 @@ import {
   FileText, History,
 } from "lucide-react";
 import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural } from "@/lib/i18n";
 import { cn, formatDate, formatSarExact } from "@/lib/utils";
 import {
   docStatus, expirySummary,
@@ -63,20 +65,20 @@ import type {
   LedgerWorkOrder, LedgerOutsourcedJob, LedgerPurchaseOrder, LedgerStockReceipt,
 } from "@/lib/approvals-ledger";
 import type { CommPayout, DriverLite } from "@/lib/commission-rows";
-import { linkedFieldFor, linkedFieldForDoc, readPersonLink, PERSON_ID_LABEL } from "@/lib/archive";
+import { linkedFieldFor, linkedFieldForDoc, readPersonLink } from "@/lib/archive";
 import {
   deleteArchiveGroup, deleteArchiveDocument, getArchiveFileSignedUrls,
   restoreCustomer, restoreDriver, restoreStaff, restoreTruck,
 } from "./actions";
 import { GroupModal, DocumentModal, RenewModal, DocumentDetailModal } from "./ArchiveModals";
-import ArchiveStaffTab, { STAFF_SUB_TABS, type StaffSubTab } from "./ArchiveStaffTab";
+import ArchiveStaffTab, { staffSubTabs, type StaffSubTab } from "./ArchiveStaffTab";
 import ArchiveTruckTab, {
-  TRUCK_SUB_TABS,
+  truckSubTabs,
   type TruckSubTab,
   type ArchiveTruckTabWorkOrder,
   type ArchiveTruckTabOutsourcedJob,
 } from "./ArchiveTruckTab";
-import ArchiveCustomerTab, { CUSTOMER_SUB_TABS, type CustomerSubTab } from "./ArchiveCustomerTab";
+import ArchiveCustomerTab, { customerSubTabs, type CustomerSubTab } from "./ArchiveCustomerTab";
 import ReturnBalanceModal from "./ReturnBalanceModal";
 import SubTabPicker from "./SubTabPicker";
 import ApprovalsLedgerTab, {
@@ -122,13 +124,12 @@ export type LedgerData = {
   nowMs: number;
 };
 
-const TABS: { key: PageTab; label: string }[] = [
-  { key: "company", label: "Company" },
-  { key: "staff", label: "Staff" },
-  { key: "truck", label: "Truck" },
-  { key: "customer", label: "Customer" },
-  { key: "ledger", label: "Approvals Ledger" },
-];
+// The tab strip renders ARCHIVE_PAGE_TABS directly. Before Phase 3 there was a
+// second module-level array pairing each key with an English label; the labels
+// now come from `archive.tabs.<key>`, and a list whose only remaining content
+// was those labels would have been a second copy of the same five keys to keep
+// in step with the first. The KEY is what the URL carries and what the DB
+// constrains — the label is only ever derived from it.
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -184,6 +185,7 @@ export default function ArchiveClient({
   error: string | null;
 }) {
   const router = useRouter();
+  const { lang } = useApp();
   // Tab lives in the URL so global search can deep-link a sub-page.
   const [tab, setTab] = useTabParam<PageTab>(ARCHIVE_PAGE_TABS, "company");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -229,8 +231,11 @@ export default function ArchiveClient({
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
-    const t = p.get("tab");
-    if (t === "staff" || t === "company" || t === "truck" || t === "customer") setTab(t);
+    const tabParam = p.get("tab");
+    if (
+      tabParam === "staff" || tabParam === "company"
+      || tabParam === "truck" || tabParam === "customer"
+    ) setTab(tabParam);
     const sub = p.get("sub");
     if (sub === "drivers" || sub === "management" || sub === "commissions" || sub === "deleted") {
       setStaffSubTab(sub);
@@ -385,7 +390,6 @@ export default function ArchiveClient({
       field,
       subjectId: subject.id,
       subjectName: "name" in subject ? subject.name : subject.plate,
-      label: PERSON_ID_LABEL[field],
       currentNumber: cur.number,
       currentExpiry: cur.expiry,
     };
@@ -409,7 +413,9 @@ export default function ArchiveClient({
       : detailDoc.truck_id ? trucksById.get(detailDoc.truck_id) : undefined;
     const linked = readPersonLink(field, subject);
     return {
-      label: PERSON_ID_LABEL[field],
+      // The FIELD, not a rendered label. The modal translates it at render
+      // time, so this memo carries no language-dependent string.
+      field,
       value: linked.number,
       expiry: linked.expiry,
       personName: subject ? ("name" in subject ? subject.name : subject.plate) : "",
@@ -427,9 +433,10 @@ export default function ArchiveClient({
 
   async function onDeleteGroup(g: ArchiveDocumentGroup) {
     const count = docsByGroup.get(g.id)?.length ?? 0;
+    // g.title is USER DATA — interpolated, never translated.
     const msg = count > 0
-      ? `Delete "${g.title}" and its ${count} document${count === 1 ? "" : "s"}? This cannot be undone.`
-      : `Delete "${g.title}"? This cannot be undone.`;
+      ? fill(t(`archive.confirmDeleteGroup.${plural(count)}`, lang), { title: g.title, n: count })
+      : fill(t("archive.confirmDeleteGroupEmpty", lang), { title: g.title });
     if (!confirm(msg)) return;
     const res = await deleteArchiveGroup(g.id);
     if (res.error) {
@@ -440,7 +447,7 @@ export default function ArchiveClient({
   }
 
   async function onDeleteDocument(d: ArchiveDocument) {
-    if (!confirm(`Permanently delete "${d.title}", its files and its renewal history? This cannot be undone.`)) return;
+    if (!confirm(fill(t("archive.confirmDeleteDoc", lang), { title: d.title }))) return;
     const res = await deleteArchiveDocument(d.id);
     if (res.error) {
       setActionError(res.error);
@@ -450,7 +457,7 @@ export default function ArchiveClient({
   }
 
   async function onRestoreDriver(d: ArchiveDriverRow) {
-    if (!confirm(`Restore ${d.name} to the active roster?`)) return;
+    if (!confirm(fill(t("archive.confirmRestorePerson", lang), { name: d.name }))) return;
     const res = await restoreDriver(d.id);
     if (res.error) {
       setActionError(res.error);
@@ -460,7 +467,7 @@ export default function ArchiveClient({
   }
 
   async function onRestoreStaff(s: ArchiveStaffRow) {
-    if (!confirm(`Restore ${s.name} to the active roster?`)) return;
+    if (!confirm(fill(t("archive.confirmRestorePerson", lang), { name: s.name }))) return;
     const res = await restoreStaff(s.id);
     if (res.error) {
       setActionError(res.error);
@@ -469,11 +476,13 @@ export default function ArchiveClient({
     router.refresh();
   }
 
-  async function onRestoreTruck(t: ArchiveTruckRow) {
-    if (!confirm(
-      `Restore ${t.plate} to the active fleet? Its termination reason, price and released date will be cleared.`,
-    )) return;
-    const res = await restoreTruck(t.id);
+  // Param is `truck`, not `t`: `t` is the translator in this file now, and a
+  // parameter of that name would shadow it inside exactly the function that
+  // needs it. The two sibling restore handlers keep their short names because
+  // neither collides.
+  async function onRestoreTruck(truck: ArchiveTruckRow) {
+    if (!confirm(fill(t("archive.confirmRestoreTruck", lang), { plate: truck.plate }))) return;
+    const res = await restoreTruck(truck.id);
     if (res.error) {
       setActionError(res.error);
       return;
@@ -501,9 +510,9 @@ export default function ArchiveClient({
     const payable = amountPayable.find((r) => r.customer_id === c.id) ?? null;
 
     const lines = [
-      `Restore ${c.name}?`,
+      fill(t("archive.restoreCustomerAsk", lang), { name: c.name }),
       "",
-      "The customer and its project both come back to active.",
+      t("archive.restoreCustomerBoth", lang),
     ];
     if (payable?.is_written_off) {
       // is_written_off is ACTIVE-only as of 0141 — a write-off already
@@ -518,15 +527,12 @@ export default function ArchiveClient({
       lines.push(
         "",
         amount != null
-          ? `THIS UN-FORGIVES THEIR DEBT. The ${moneySar(amount)} write-off is reversed and they owe it again. The write-off record is kept and marked reversed, not deleted.`
-          : "THIS UN-FORGIVES THEIR DEBT. The write-off is reversed and the amount becomes owed again. The write-off record is kept and marked reversed, not deleted.",
+          ? fill(t("archive.restoreCustomerWriteOff", lang), { amount: moneySar(amount) })
+          : t("archive.restoreCustomerWriteOffNoAmount", lang),
       );
     }
     if (payable?.balance_returned) {
-      lines.push(
-        "",
-        "Their prepaid balance was already refunded, so they return with no spendable credit. No money moves either way.",
-      );
+      lines.push("", t("archive.restoreCustomerRefunded", lang));
     }
 
     if (!confirm(lines.join("\n"))) return false;
@@ -547,7 +553,7 @@ export default function ArchiveClient({
   async function openFile(path: string) {
     const res = await getArchiveFileSignedUrls([path]);
     if (res.error || !res.urls?.[path]) {
-      setActionError(res.error ?? "Could not open file.");
+      setActionError(res.error ?? t("archive.errOpenFile", lang));
       return;
     }
     window.open(res.urls[path], "_blank", "noopener,noreferrer");
@@ -596,8 +602,8 @@ export default function ArchiveClient({
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Archive"
-        subtitle="Company, staff, truck and customer documents — with expiry tracking and renewal history"
+        title={t("archive.title", lang)}
+        subtitle={t("archive.subtitle", lang)}
         actions={
           // Group creation only exists where groups exist: the Company tab,
           // and the Staff tab's two PEOPLE sub-tabs. Commission History and
@@ -608,14 +614,14 @@ export default function ArchiveClient({
               variant="primary"
               onClick={() => { setEditingGroup(null); setNewGroupKind("none"); setGroupModalOpen(true); }}
             >
-              <Plus className="h-4 w-4" />Create Group
+              <Plus className="h-4 w-4" />{t("archive.createGroup", lang)}
             </Btn>
           ) : tab === "truck" && truckSubTab === "documents" ? (
             <Btn
               variant="primary"
               onClick={() => { setEditingGroup(null); setNewGroupKind("truck"); setGroupModalOpen(true); }}
             >
-              <Plus className="h-4 w-4" />Create Truck Group
+              <Plus className="h-4 w-4" />{t("archive.createTruckGroup", lang)}
             </Btn>
           ) : tab === "staff" && (staffSubTab === "drivers" || staffSubTab === "management") ? (
             <Btn
@@ -627,7 +633,11 @@ export default function ArchiveClient({
               }}
             >
               <Plus className="h-4 w-4" />
-              {staffSubTab === "drivers" ? "Create Driver Group" : "Create Staff Group"}
+              {/* Branches on the SUB-TAB VALUE, not on any rendered label. */}
+              {t(
+                staffSubTab === "drivers" ? "archive.createDriverGroup" : "archive.createStaffGroup",
+                lang,
+              )}
             </Btn>
           ) : undefined
         }
@@ -635,18 +645,18 @@ export default function ArchiveClient({
 
       {/* Tabs — underline style, matching TripsTabs.tsx / Maintenance. */}
       <div className="flex items-center gap-1 border-b flex-wrap" style={{ borderColor: "rgb(var(--border))" }}>
-        {TABS.map((t) => (
+        {ARCHIVE_PAGE_TABS.map((key) => (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+            key={key}
+            onClick={() => setTab(key)}
             className={cn(
               "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition",
-              tab === t.key
+              tab === key
                 ? "border-brand-600 text-brand-600 dark:text-brand-300"
                 : "border-transparent muted hover:text-[rgb(var(--fg))]",
             )}
           >
-            {t.label}
+            {t(`archive.tabs.${key}`, lang)}
           </button>
         ))}
       </div>
@@ -661,19 +671,19 @@ export default function ArchiveClient({
           a page-level roll-up (Company-only in Phase 1, all tabs later). */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <div className="card p-4">
-          <div className="text-xs muted uppercase tracking-wide">Expired</div>
+          <div className="text-xs muted uppercase tracking-wide">{t("archive.sumExpired", lang)}</div>
           <div className={cn("text-2xl font-semibold mt-1 tabular-nums", summary.expired > 0 ? "text-rose-600 dark:text-rose-400" : "")}>
             {summary.expired}
           </div>
         </div>
         <div className="card p-4">
-          <div className="text-xs muted uppercase tracking-wide">Expiring soon</div>
+          <div className="text-xs muted uppercase tracking-wide">{t("archive.sumExpiringSoon", lang)}</div>
           <div className={cn("text-2xl font-semibold mt-1 tabular-nums", summary.expiringSoon > 0 ? "text-amber-600 dark:text-amber-400" : "")}>
             {summary.expiringSoon}
           </div>
         </div>
         <div className="card p-4">
-          <div className="text-xs muted uppercase tracking-wide">Documents</div>
+          <div className="text-xs muted uppercase tracking-wide">{t("archive.sumDocuments", lang)}</div>
           <div className="text-2xl font-semibold mt-1 tabular-nums">{documents.length}</div>
         </div>
       </div>
@@ -684,8 +694,8 @@ export default function ArchiveClient({
               row above it, so two tab strips stacked on one page read as a
               hierarchy instead of competing for the same job. */}
           <SubTabPicker
-            ariaLabel="Staff sub-sections"
-            items={STAFF_SUB_TABS}
+            ariaLabel={t("archive.subNavStaff", lang)}
+            items={staffSubTabs(lang)}
             value={staffSubTab}
             onChange={setStaffSubTab}
           />
@@ -731,8 +741,8 @@ export default function ArchiveClient({
       ) : tab === "truck" ? (
         <div className="space-y-4">
           <SubTabPicker
-            ariaLabel="Truck sub-sections"
-            items={TRUCK_SUB_TABS}
+            ariaLabel={t("archive.subNavTruck", lang)}
+            items={truckSubTabs(lang)}
             value={truckSubTab}
             onChange={setTruckSubTab}
           />
@@ -771,8 +781,8 @@ export default function ArchiveClient({
       ) : tab === "customer" ? (
         <div className="space-y-4">
           <SubTabPicker
-            ariaLabel="Customer sub-sections"
-            items={CUSTOMER_SUB_TABS}
+            ariaLabel={t("archive.subNavCustomer", lang)}
+            items={customerSubTabs(lang)}
             value={customerSubTab}
             onChange={setCustomerSubTab}
           />
@@ -808,10 +818,8 @@ export default function ArchiveClient({
       ) : companyGroups.length === 0 ? (
         <Card>
           <div className="p-8 text-center">
-            <p className="text-sm muted">No document groups yet.</p>
-            <p className="text-xs muted mt-1">
-              Create a group (e.g. Commercial Registration, Insurance) then add documents to it.
-            </p>
+            <p className="text-sm muted">{t("archive.emptyGroups", lang)}</p>
+            <p className="text-xs muted mt-1">{t("archive.emptyGroupsHint", lang)}</p>
           </div>
         </Card>
       ) : (
@@ -835,8 +843,14 @@ export default function ArchiveClient({
                       <span className="font-semibold block truncate">{g.title}</span>
                       {/* Description sits BELOW the title — Turki's explicit ask. */}
                       {g.description && <span className="text-xs muted block">{g.description}</span>}
+                      {/* ONE sentence from ONE key — the old form spliced the
+                          plural "s" onto a fragment, which Arabic cannot do:
+                          its counted noun changes shape four ways, not two. */}
                       <span className="text-[11px] muted block mt-0.5">
-                        {docs.length} document{docs.length === 1 ? "" : "s"} · warns at {g.warning_days}d
+                        {fill(t(`archive.groupMeta.${plural(docs.length)}`, lang), {
+                          n: docs.length,
+                          d: g.warning_days,
+                        })}
                       </span>
                     </span>
                   </button>
@@ -845,19 +859,19 @@ export default function ArchiveClient({
                     {/* "Add Document" sits next to THIS group's title — the
                         second step of the two-step model. */}
                     <Btn variant="outline" onClick={() => { setEditingDoc(null); setDocSubject(undefined); setDocModalGroupId(g.id); }}>
-                      <Plus className="h-3.5 w-3.5" />Add Document
+                      <Plus className="h-3.5 w-3.5" />{t("archive.addDocument", lang)}
                     </Btn>
                     <button
                       onClick={() => { setEditingGroup(g); setGroupModalOpen(true); }}
                       className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                      title="Edit group"
+                      title={t("archive.editGroupTip", lang)}
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => onDeleteGroup(g)}
                       className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                      title="Delete group"
+                      title={t("archive.deleteGroupTip", lang)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -866,17 +880,17 @@ export default function ArchiveClient({
 
                 {!isCollapsed && (
                   docs.length === 0 ? (
-                    <p className="text-sm muted p-6 text-center">No documents in this group yet.</p>
+                    <p className="text-sm muted p-6 text-center">{t("archive.emptyDocs", lang)}</p>
                   ) : (
                     <Table>
                       <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                         <tr>
-                          <TH>Document</TH>
-                          <TH>Reference</TH>
-                          <TH>Issued</TH>
-                          <TH>Expires</TH>
-                          <TH>Status</TH>
-                          <TH>Files</TH>
+                          <TH>{t("archive.thDocument", lang)}</TH>
+                          <TH>{t("archive.thReference", lang)}</TH>
+                          <TH>{t("archive.thIssued", lang)}</TH>
+                          <TH>{t("archive.thExpires", lang)}</TH>
+                          <TH>{t("common.status", lang)}</TH>
+                          <TH>{t("archive.thFiles", lang)}</TH>
                           <TH></TH>
                         </tr>
                       </thead>
@@ -901,7 +915,7 @@ export default function ArchiveClient({
                                 <TD className="text-xs">{fmtDate(d.expiry_date)}</TD>
                                 <TD>
                                   <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", ARCHIVE_STATUS_PILL[status])}>
-                                    {archiveStatusLabel(status, d.expiry_date, today)}
+                                    {archiveStatusLabel(status, d.expiry_date, today, lang)}
                                   </span>
                                 </TD>
                                 <TD>
@@ -937,26 +951,26 @@ export default function ArchiveClient({
                                           showingHistory && "bg-black/5 dark:bg-white/5",
                                         )}
                                         style={{ borderColor: "rgb(var(--border))" }}
-                                        title="Renewal history"
+                                        title={t("archive.renewalHistoryTip", lang)}
                                       >
                                         <History className="h-3.5 w-3.5" />
                                         {docRenewals.length}
                                       </button>
                                     )}
                                     <Btn variant="outline" onClick={() => setRenewingDoc(d)}>
-                                      <RefreshCw className="h-3.5 w-3.5" />Renew
+                                      <RefreshCw className="h-3.5 w-3.5" />{t("archive.renew", lang)}
                                     </Btn>
                                     <button
                                       onClick={() => { setEditingDoc(d); setDocSubject(undefined); setDocModalGroupId(g.id); }}
                                       className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                                      title="Edit document"
+                                      title={t("archive.editDocTip", lang)}
                                     >
                                       <Pencil className="h-4 w-4" />
                                     </button>
                                     <button
                                       onClick={() => onDeleteDocument(d)}
                                       className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                                      title="Delete document"
+                                      title={t("archive.deleteDocTip", lang)}
                                     >
                                       <Trash2 className="h-4 w-4" />
                                     </button>
@@ -971,16 +985,20 @@ export default function ArchiveClient({
                                 return (
                                   <tr key={r.id} className="bg-black/[0.02] dark:bg-white/[0.02]">
                                     <TD className="text-xs muted ps-8">
-                                      Previous version
+                                      {t("archive.previousVersion", lang)}
+                                      {/* superseded_by is a USER NAME — appended
+                                          as data, never translated. */}
                                       <div className="text-[11px]">
-                                        superseded {formatDate(r.superseded_at)}
+                                        {fill(t("archive.supersededOn", lang), {
+                                          date: formatDate(r.superseded_at),
+                                        })}
                                         {r.superseded_by ? ` · ${r.superseded_by}` : ""}
                                       </div>
                                     </TD>
                                     <TD className="font-mono text-xs muted">{r.reference_no || "—"}</TD>
                                     <TD className="text-xs muted">{fmtDate(r.issue_date)}</TD>
                                     <TD className="text-xs muted">{fmtDate(r.expiry_date)}</TD>
-                                    <TD><span className="text-xs muted">Superseded</span></TD>
+                                    <TD><span className="text-xs muted">{t("archive.superseded", lang)}</span></TD>
                                     <TD>
                                       {rFiles.length === 0 ? (
                                         <span className="text-xs muted">—</span>

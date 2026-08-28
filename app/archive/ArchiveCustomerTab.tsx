@@ -26,42 +26,84 @@ import { ChevronDown, ChevronRight, FileText, Eye, X, Archive, Undo2, RotateCcw 
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { cn, formatDate, formatDayKey, formatSarExact, todayKey } from "@/lib/utils";
 import type { SubTabItem } from "./SubTabPicker";
-import {
-  PROJECT_STATUS_LABELS, PAYMENT_MODE_LABELS, COMMISSION_MODE_LABELS,
-} from "@/lib/db-types";
 import type {
   ArchiveCustomerRow, ArchiveInvoiceRow, ArchiveProjectRow, CustomerAmountPayableRow,
-  CommissionMode,
+  CommissionMode, PaymentMode, ProjectStatus,
 } from "@/lib/db-types";
 import { getProjectCommissionAt } from "../trips/actions";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
 import ScrollLock from "@/components/ScrollLock";
 
 export type CustomerSubTab = "invoices" | "deleted";
 
-export const CUSTOMER_SUB_TABS: SubTabItem<CustomerSubTab>[] = [
-  { key: "invoices", label: "Invoices", icon: FileText },
-  { key: "deleted", label: "Soft-deleted", icon: Archive },
-];
+// A FUNCTION, not a module-level const. A const would be built once, at import
+// time, in whatever language the module happened to be evaluated under, and
+// would then never change again. The KEYS are still the only thing the picker
+// calls back with — the label is display, the key is state.
+export function customerSubTabs(lang: Lang): SubTabItem<CustomerSubTab>[] {
+  return [
+    { key: "invoices", label: t("archive.customer.subTabs.invoices", lang), icon: FileText },
+    { key: "deleted", label: t("archive.subTabDeleted", lang), icon: Archive },
+  ];
+}
+
+// ENUM VALUE -> DICTIONARY KEY, the pattern app/projects/ProjectForm.tsx
+// established. The three label maps in lib/db-types.ts are no longer read
+// HERE — this file only ever indexed them, never iterated them for option
+// order — but they stay there as the English source for the forms that do.
+// Total Records, so a fourth project status fails the build at this line
+// rather than reaching a screen as a raw enum.
+const PROJECT_STATUS_TKEY: Record<ProjectStatus, TKey> = {
+  active: "labels.projActive",
+  paused: "labels.projPaused",
+  ended: "labels.projEnded",
+};
+const PAYMENT_MODE_TKEY: Record<PaymentMode, TKey> = {
+  postpaid: "labels.postpaid",
+  prepaid: "labels.prepaid",
+};
+const COMMISSION_MODE_TKEY: Record<CommissionMode, TKey> = {
+  fixed: "labels.commFixed",
+  scalable: "labels.commScalable",
+};
+
+// The `?? raw` arm the label-map reads used to carry. The unions above are a
+// TypeScript fact, not a database constraint this component can lean on, so a
+// value from outside one still renders as itself rather than as blank.
+function enumLabel<K extends string>(map: Record<K, TKey>, value: K, lang: Lang): string {
+  const key = map[value] as TKey | undefined;
+  return key ? t(key, lang) : value;
+}
 
 // Paid / unpaid, plus the two states that are neither yet.
 //
 // There is NO unpaid_at column — unpaid is the ABSENCE of paid_at, so it is
 // derived here rather than read. 'void' renders as "Sales Return", the UI
 // relabel this app settled on (the stored status stays 'void').
-function statusPill(inv: ArchiveInvoiceRow): { label: string; tone: string } {
+//
+// EVERY BRANCH TESTS `inv.status`, NEVER THE RENDERED WORD. The label is what
+// changes with `lang`; the status is what the database constrains.
+function statusPill(inv: ArchiveInvoiceRow, lang: Lang): { label: string; tone: string } {
   if (inv.status === "paid") {
-    return { label: "Paid", tone: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20" };
+    return { label: t("archive.customer.invStatus.paid", lang), tone: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20" };
   }
   if (inv.status === "void") {
-    return { label: "Sales Return", tone: "bg-slate-500/10 text-slate-600 dark:text-slate-400 ring-slate-500/25" };
+    return { label: t("archive.customer.invStatus.salesReturn", lang), tone: "bg-slate-500/10 text-slate-600 dark:text-slate-400 ring-slate-500/25" };
   }
   if (inv.status === "confirmed") {
-    return { label: "Unpaid", tone: "bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20" };
+    return { label: t("archive.customer.invStatus.unpaid", lang), tone: "bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20" };
   }
   // draft / review — issued to nobody yet, so neither paid nor unpaid would
   // be true. Naming the real state beats forcing it into the binary.
+  //
+  // Still a ternary and not a lookup: the second arm is the CATCH-ALL for any
+  // status that is not one of the four named above, and a Record would
+  // quietly change which of them says "In review".
   return {
-    label: inv.status === "draft" ? "Draft" : "In review",
+    label: inv.status === "draft"
+      ? t("archive.customer.invStatus.draft", lang)
+      : t("archive.customer.invStatus.inReview", lang),
     tone: "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/25",
   };
 }
@@ -111,6 +153,8 @@ const PILL = "text-[11px] px-2 py-0.5 rounded-full ring-1 ring-inset font-medium
 // row down, never behind a click — the number alone cannot say whether it is
 // owed or already handed back.
 function BalanceWithMark({ row }: { row: CustomerAmountPayableRow | null }) {
+  // Before the early return — a hook cannot sit behind a conditional.
+  const { lang } = useApp();
   if (!row) return <span className="muted">—</span>;
   // REFUNDED — checked before the zero test, because netting is exactly what
   // drives this row's payable to zero.
@@ -118,11 +162,15 @@ function BalanceWithMark({ row }: { row: CustomerAmountPayableRow | null }) {
     return (
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className="tabular-nums font-medium">{row.returned_sar != null ? money(row.returned_sar) : "—"}</span>
+        {/* The tooltip is TWO whole leaves, not a fragment spliced onto the
+            bare word: Arabic puts the date phrase where English puts " on". */}
         <span
           className={cn(PILL, "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20")}
-          title={`Returned${row.returned_on ? ` on ${fmtDate(row.returned_on)}` : ""}`}
+          title={row.returned_on
+            ? fill(t("archive.customer.returnedOnTip", lang), { date: fmtDate(row.returned_on) })
+            : t("archive.customer.returnedMark", lang)}
         >
-          Returned
+          {t("archive.customer.returnedMark", lang)}
         </span>
       </div>
     );
@@ -132,7 +180,7 @@ function BalanceWithMark({ row }: { row: CustomerAmountPayableRow | null }) {
     <div className="flex items-center gap-1.5 flex-wrap">
       <span className="tabular-nums font-medium">{money(row.amount_payable_sar)}</span>
       <span className={cn(PILL, "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/25")}>
-        To return
+        {t("archive.customer.toReturnMark", lang)}
       </span>
     </div>
   );
@@ -170,6 +218,7 @@ export default function ArchiveCustomerTab({
   // is the detail popup's cue to close.
   onRestoreCustomer: (customer: ArchiveCustomerRow) => Promise<boolean>;
 }) {
+  const { lang } = useApp();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [detailCustomer, setDetailCustomer] = useState<ArchiveCustomerRow | null>(null);
   const projectByCustomer = useMemo(
@@ -232,7 +281,7 @@ export default function ArchiveCustomerTab({
     if (withInvoices.length === 0) {
       return (
         <Card>
-          <p className="text-sm muted p-6 text-center">No customers yet.</p>
+          <p className="text-sm muted p-6 text-center">{t("archive.customer.emptyCustomers", lang)}</p>
         </Card>
       );
     }
@@ -262,31 +311,37 @@ export default function ArchiveCustomerTab({
                     <span className="font-semibold block truncate">
                       {c.name}
                       {(c.archived_at || !c.active) && (
-                        <span className="ms-2 text-[11px] font-normal muted">(archived)</span>
+                        <span className="ms-2 text-[11px] font-normal muted">{t("archive.customer.archivedMark", lang)}</span>
                       )}
                     </span>
                     {c.name_ar && <span className="text-xs muted block">{c.name_ar}</span>}
                     <span className="text-[11px] muted block mt-0.5">
-                      {list.length} invoice{list.length === 1 ? "" : "s"}
-                      {paidTotal > 0 ? ` · ${money(paidTotal)} paid` : ""}
+                      {fill(t(`archive.customer.invoiceCount.${plural(list.length)}`, lang), {
+                        n: list.length,
+                      })}
+                      {paidTotal > 0
+                        ? fill(t("archive.customer.paidSuffix", lang), { amount: money(paidTotal) })
+                        : ""}
                     </span>
                   </span>
                 </button>
 
                 {unpaidCount > 0 && (
                   <span className="text-xs px-2 py-1 rounded-full ring-1 ring-inset font-medium bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20 shrink-0">
-                    {unpaidCount} unpaid
+                    {fill(t(`archive.customer.unpaidCount.${plural(unpaidCount)}`, lang), {
+                      n: unpaidCount,
+                    })}
                   </span>
                 )}
               </div>
 
               {!isCollapsed && (
                 list.length === 0 ? (
-                  <p className="text-sm muted p-6 text-center">No invoices for this customer yet.</p>
+                  <p className="text-sm muted p-6 text-center">{t("archive.customer.emptyInvoices", lang)}</p>
                 ) : (
                   <div className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {list.map((inv) => {
-                      const pill = statusPill(inv);
+                      const pill = statusPill(inv, lang);
                       const d = invoiceDate(inv);
                       return (
                         <button
@@ -297,7 +352,7 @@ export default function ArchiveCustomerTab({
                         >
                           <div className="flex items-start justify-between gap-2">
                             <span className="font-mono text-xs font-medium truncate">
-                              {inv.invoice_number ?? "Not yet numbered"}
+                              {inv.invoice_number ?? t("archive.customer.notYetNumbered", lang)}
                             </span>
                             <span className={cn("shrink-0 text-[11px] px-2 py-0.5 rounded-full ring-1 ring-inset font-medium", pill.tone)}>
                               {pill.label}
@@ -308,7 +363,7 @@ export default function ArchiveCustomerTab({
                           </div>
                           <div className="text-[11px] muted mt-0.5">
                             {d.text}
-                            {!d.isIssued && " · created"}
+                            {!d.isIssued && t("archive.customer.createdSuffix", lang)}
                           </div>
                           <div className="text-[11px] muted">
                             {fmtDate(inv.period_start)} – {fmtDate(inv.period_end)}
@@ -346,22 +401,27 @@ export default function ArchiveCustomerTab({
     <div className="space-y-3">
       <Card className="!p-0 overflow-hidden">
         <div className="p-3 border-b" style={{ borderColor: "rgb(var(--border))" }}>
-          <span className="font-semibold block">Archived Customers</span>
+          <span className="font-semibold block">{t("archive.customer.archivedTitle", lang)}</span>
           <span className="text-[11px] muted">
-            {archivedCustomers.length} record{archivedCustomers.length === 1 ? "" : "s"} · kept, never deleted
+            {/* Shared with Terminated Trucks — same sentence, same leaf. */}
+            {fill(t(`archive.recordsKept.${plural(archivedCustomers.length)}`, lang), {
+              n: archivedCustomers.length,
+            })}
           </span>
         </div>
         {archivedCustomers.length === 0 ? (
-          <p className="text-sm muted p-6 text-center">No archived customers.</p>
+          <p className="text-sm muted p-6 text-center">{t("archive.customer.archivedEmpty", lang)}</p>
         ) : (
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH>Customer</TH>
-                <TH>Contact</TH>
-                <TH>Invoices</TH>
-                <TH>Balance to return</TH>
-                <TH>Archived on</TH>
+                <TH>{t("archive.customer.thCustomer", lang)}</TH>
+                <TH>{t("archive.customer.thContact", lang)}</TH>
+                {/* Same word as the sub-tab pill, in both languages — one leaf
+                    rather than two a reword would have to find separately. */}
+                <TH>{t("archive.customer.subTabs.invoices", lang)}</TH>
+                <TH>{t("archive.customer.thBalanceToReturn", lang)}</TH>
+                <TH>{t("archive.customer.thArchivedOn", lang)}</TH>
                 <TH>{null}</TH>
               </tr>
             </thead>
@@ -392,7 +452,8 @@ export default function ArchiveCustomerTab({
                           the popup all say "write-off" in one colour. */}
                       {payable?.is_written_off && (
                         <div className="text-[11px] mt-0.5 text-amber-700 dark:text-amber-300">
-                          Written off{payable.written_off_sar != null ? ` · ${money(payable.written_off_sar)}` : ""}
+                          {t("archive.customer.writtenOff", lang)}
+                          {payable.written_off_sar != null ? ` · ${money(payable.written_off_sar)}` : ""}
                         </div>
                       )}
                     </TD>
@@ -410,11 +471,11 @@ export default function ArchiveCustomerTab({
                       <div className="flex items-center justify-end gap-2">
                         {canReturn && (
                           <Btn variant="primary" onClick={() => onReturnBalance(c)}>
-                            <Undo2 className="h-3.5 w-3.5" />Return balance
+                            <Undo2 className="h-3.5 w-3.5" />{t("archive.customer.returnBalance", lang)}
                           </Btn>
                         )}
                         <Btn variant="outline" onClick={() => setDetailCustomer(c)}>
-                          <Eye className="h-3.5 w-3.5" />View
+                          <Eye className="h-3.5 w-3.5" />{t("common.view", lang)}
                         </Btn>
                         {/* BRAND-TINTED, not the neutral outline View wears.
                             Restore is the row's consequential action and has
@@ -438,7 +499,7 @@ export default function ArchiveCustomerTab({
                             className="border border-brand-600 bg-brand-500/10 text-brand-700 dark:text-brand-300 hover:bg-brand-500/20 dark:hover:bg-brand-500/20"
                             onClick={() => { void onRestoreCustomer(c); }}
                           >
-                            <RotateCcw className="h-3.5 w-3.5" />Restore
+                            <RotateCcw className="h-3.5 w-3.5" />{t("archive.restore", lang)}
                           </Btn>
                         )}
                       </div>
@@ -502,6 +563,7 @@ function ArchivedCustomerDetail({
   // The date: the project's own archived_at, falling back to the customer's
   // (0019/0141 flip both on ONE timestamp, so they agree) and finally to today
   // for a project that is not archived at all.
+  const { lang } = useApp();
   const asOf = (project?.archived_at ?? customer.archived_at ?? "").slice(0, 10) || todayKey();
   const projectId = project?.id ?? null;
   const [terms, setTerms] = useState<{
@@ -558,7 +620,7 @@ function ArchivedCustomerDetail({
         >
           <div>
             <h2 className="font-semibold">{customer.name}</h2>
-            <p className="text-[11px] muted">Archived customer · record kept, never deleted</p>
+            <p className="text-[11px] muted">{t("archive.customer.detailSubtitle", lang)}</p>
           </div>
           <button
             onClick={onClose}
@@ -573,20 +635,24 @@ function ArchivedCustomerDetail({
               one people open this for. */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <Stat
-              label="Total collected"
+              label={t("archive.customer.statCollected", lang)}
               value={money(collected)}
-              hint={`${paid.length} paid invoice${paid.length === 1 ? "" : "s"}`}
+              hint={fill(t(`archive.customer.paidInvoiceCount.${plural(paid.length)}`, lang), {
+                n: paid.length,
+              })}
               strong
             />
             <Stat
-              label="Total billed"
+              label={t("archive.customer.statBilled", lang)}
               value={money(billed)}
-              hint="Confirmed, paid and returned"
+              hint={t("archive.customer.statBilledHint", lang)}
             />
             <Stat
-              label="Outstanding"
+              label={t("archive.customer.statOutstanding", lang)}
               value={money(billed - collected)}
-              hint={billed - collected > 0 ? "Never collected" : "Fully settled"}
+              hint={billed - collected > 0
+                ? t("archive.customer.statNeverCollected", lang)
+                : t("archive.customer.statFullySettled", lang)}
             />
           </div>
 
@@ -606,19 +672,19 @@ function ArchivedCustomerDetail({
             <div className="rounded-xl border p-3" style={{ borderColor: "rgb(var(--border))" }}>
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
-                  <div className="text-[11px] muted uppercase tracking-wide">Balance to return</div>
+                  <div className="text-[11px] muted uppercase tracking-wide">{t("archive.customer.thBalanceToReturn", lang)}</div>
                   <div className="text-lg mt-0.5">
                     <BalanceWithMark row={payable} />
                   </div>
                   <div className="text-[11px] muted mt-0.5">
                     {payable.balance_returned
-                      ? "Paid back to the customer. The figure above is the amount that was returned — their spendable balance is now nil."
-                      : "Prepaid credit left over at archive — owed to the customer."}
+                      ? t("archive.customer.balanceReturnedNote", lang)
+                      : t("archive.customer.balanceOwedNote", lang)}
                   </div>
                 </div>
                 {!payable.balance_returned && (
                   <Btn variant="primary" onClick={() => onReturnBalance(customer)}>
-                    <Undo2 className="h-3.5 w-3.5" />Return balance
+                    <Undo2 className="h-3.5 w-3.5" />{t("archive.customer.returnBalance", lang)}
                   </Btn>
                 )}
               </div>
@@ -626,19 +692,23 @@ function ArchivedCustomerDetail({
               {payable.balance_returned && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3 pt-3 border-t"
                      style={{ borderColor: "rgb(var(--border))" }}>
+                  {/* NOT the pill's `returnedMark` leaf, though the English is
+                      the same word: this labels an AMOUNT, and Arabic has to
+                      name the amount here and must not on the pill. */}
                   <Field
-                    label="Returned"
+                    label={t("archive.customer.fReturned", lang)}
                     value={payable.returned_sar != null ? money(payable.returned_sar) : "—"}
                   />
+                  {/* Keyed off the stored returned_method, never the word. */}
                   <Field
-                    label="Method"
+                    label={t("archive.ret.fMethod", lang)}
                     value={payable.returned_method === "bank_transfer"
-                      ? "Bank transfer"
+                      ? t("archive.ret.method.bank_transfer", lang)
                       : payable.returned_method === "cash"
-                        ? "Cash"
+                        ? t("archive.ret.method.cash", lang)
                         : "—"}
                   />
-                  <Field label="Returned on" value={fmtDate(payable.returned_on)} />
+                  <Field label={t("archive.ret.fReturnedOn", lang)} value={fmtDate(payable.returned_on)} />
                 </div>
               )}
             </div>
@@ -659,67 +729,75 @@ function ArchivedCustomerDetail({
               catches them after they have decided. */}
           {payable?.is_written_off && (
             <div className="rounded-xl border p-3 bg-amber-500/5" style={{ borderColor: "rgb(var(--border))" }}>
-              <div className="text-[11px] muted uppercase tracking-wide">Written off on archive</div>
+              <div className="text-[11px] muted uppercase tracking-wide">{t("archive.customer.writtenOffOnArchive", lang)}</div>
               <div className="text-lg font-semibold tabular-nums mt-0.5">
                 {payable.written_off_sar != null ? money(payable.written_off_sar) : "—"}
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
-                <Field label="Reason" value={payable.write_off_reason || "—"} />
-                <Field label="By" value={payable.written_off_by || "—"} />
-                <Field label="On" value={fmtDate(payable.written_off_at)} />
+                {/* write_off_reason is USER DATA — a free-text reason typed by
+                    whoever forced the archive. Only its label is translated. */}
+                <Field label={t("archive.thReason", lang)} value={payable.write_off_reason || "—"} />
+                <Field label={t("archive.customer.fBy", lang)} value={payable.written_off_by || "—"} />
+                <Field label={t("archive.customer.fOn", lang)} value={fmtDate(payable.written_off_at)} />
               </div>
               {customer.archived_at != null && (
                 <div className="text-[11px] mt-2 pt-2 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-                  Restoring this customer reverses the write-off — the amount above becomes owed again. The record is kept and marked reversed, not deleted.
+                  {t("archive.customer.writeOffRestoreWarn", lang)}
                 </div>
               )}
             </div>
           )}
 
-          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Customer</div>
+          {/* Section heading and the archived-customers table column are the
+              same word in both languages, so they share the one leaf. */}
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("archive.customer.thCustomer", lang)}</div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <Field label="Name (Arabic)" value={customer.name_ar || "—"} />
-            <Field label="Contact" value={customer.contact_name || "—"} />
-            <Field label="Phone" value={customer.phone || "—"} />
-            <Field label="Email" value={customer.email || "—"} />
-            <Field label="Archived on" value={fmtDate(customer.archived_at)} />
-            <Field label="Customer since" value={fmtDate(customer.created_at)} />
+            {/* Every VALUE below is user data — the customer's own name,
+                contact, phone and email — and is rendered as stored. */}
+            <Field label={t("archive.fNameAr", lang)} value={customer.name_ar || "—"} />
+            <Field label={t("archive.customer.thContact", lang)} value={customer.contact_name || "—"} />
+            <Field label={t("archive.fPhone", lang)} value={customer.phone || "—"} />
+            <Field label={t("archive.fEmail", lang)} value={customer.email || "—"} />
+            <Field label={t("archive.customer.thArchivedOn", lang)} value={fmtDate(customer.archived_at)} />
+            <Field label={t("archive.customer.fCustomerSince", lang)} value={fmtDate(customer.created_at)} />
           </div>
 
           {/* THE PROJECT — a customer is archived as a side effect of
               archiving its 1:1 project (0019), so without this the record was
               only ever half the story. These are the Add-Project fields. */}
-          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Project</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("archive.customer.secProject", lang)}</div>
           {!project ? (
             <p className="text-sm muted">
-              No project on record for this customer — unusual, since a customer is normally
-              archived alongside one.
+              {t("archive.customer.noProject", lang)}
             </p>
           ) : (
             <>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <Field label="Project name" value={project.name} />
-                <Field label="Trip-ref prefix" value={project.initials} />
+                {/* project.name, .initials and .location are USER DATA. */}
+                <Field label={t("archive.customer.fProjectName", lang)} value={project.name} />
+                <Field label={t("archive.customer.fInitials", lang)} value={project.initials} />
                 <Field
-                  label="Status"
-                  value={PROJECT_STATUS_LABELS[project.status] ?? project.status}
+                  label={t("common.status", lang)}
+                  value={enumLabel(PROJECT_STATUS_TKEY, project.status, lang)}
                 />
                 <Field
-                  label="Payment method"
-                  value={project.payment_mode ? PAYMENT_MODE_LABELS[project.payment_mode] : "—"}
+                  label={t("archive.customer.fPaymentMethod", lang)}
+                  value={project.payment_mode
+                    ? enumLabel(PAYMENT_MODE_TKEY, project.payment_mode, lang)
+                    : "—"}
                 />
-                <Field label="Rate per trip" value={money(Number(project.rate_per_trip_sar))} />
+                <Field label={t("archive.customer.fRatePerTrip", lang)} value={money(Number(project.rate_per_trip_sar))} />
                 <Field
-                  label="Water type"
-                  value={project.water_type === "potable" ? "Potable"
-                    : project.water_type === "non_potable" ? "Non-potable" : "—"}
+                  label={t("archive.customer.fWaterType", lang)}
+                  value={project.water_type === "potable" ? t("archive.customer.waterType.potable", lang)
+                    : project.water_type === "non_potable" ? t("archive.customer.waterType.non_potable", lang) : "—"}
                 />
-                <Field label="Start date" value={fmtDate(project.start_date)} />
-                <Field label="End date" value={fmtDate(project.end_date)} />
-                <Field label="Location" value={project.location || "—"} />
+                <Field label={t("archive.customer.fStartDate", lang)} value={fmtDate(project.start_date)} />
+                <Field label={t("archive.customer.fEndDate", lang)} value={fmtDate(project.end_date)} />
+                <Field label={t("archive.customer.fLocation", lang)} value={project.location || "—"} />
                 {project.description && (
                   <div className="col-span-2 md:col-span-3">
-                    <div className="text-[11px] muted mb-0.5">Description</div>
+                    <div className="text-[11px] muted mb-0.5">{t("archive.customer.fDescription", lang)}</div>
                     <div className="text-sm whitespace-pre-wrap">{project.description}</div>
                   </div>
                 )}
@@ -731,29 +809,33 @@ function ArchivedCustomerDetail({
               <div className="rounded-xl border p-3" style={{ borderColor: "rgb(var(--border))" }}>
                 <div className="flex items-baseline justify-between gap-3 mb-2">
                   <div className="text-[11px] font-semibold uppercase tracking-wide muted">
-                    Driver commission
+                    {t("archive.customer.secCommission", lang)}
                   </div>
                   <div className="text-[11px] muted">
-                    Terms in force {formatDayKey(asOf)}
+                    {/* formatDayKey's output is an app-formatted date and stays
+                        Latin in both languages — only the phrase moves. */}
+                    {fill(t("archive.customer.termsInForce", lang), { date: formatDayKey(asOf) })}
                   </div>
                 </div>
                 {terms.state === "loading" ? (
-                  <p className="text-sm muted">Loading terms…</p>
+                  <p className="text-sm muted">{t("archive.customer.termsLoading", lang)}</p>
                 ) : terms.state === "failed" ? (
                   <p className="text-sm muted">
-                    Could not resolve the terms for this date.
+                    {t("archive.customer.termsFailed", lang)}
                   </p>
                 ) : !terms.config ? (
-                  <p className="text-sm muted">No commission terms on record for this date.</p>
+                  <p className="text-sm muted">{t("archive.customer.termsNone", lang)}</p>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     <Field
-                      label="Commission mode"
-                      value={COMMISSION_MODE_LABELS[terms.config.mode] ?? terms.config.mode}
+                      label={t("archive.customer.fCommissionMode", lang)}
+                      value={enumLabel(COMMISSION_MODE_TKEY, terms.config.mode, lang)}
                     />
-                    <Field label="Commission per trip" value={money(terms.config.value)} />
+                    <Field label={t("archive.customer.fCommissionPerTrip", lang)} value={money(terms.config.value)} />
+                    {/* The percent SIGN is app formatting, not language — it
+                        stays on the Latin figure in both. */}
                     <Field
-                      label="Bump % per trip"
+                      label={t("archive.customer.fBumpPct", lang)}
                       value={terms.config.mode === "scalable" ? `${terms.config.bumpPct}%` : "—"}
                     />
                   </div>
@@ -763,24 +845,26 @@ function ArchivedCustomerDetail({
           )}
 
           <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
-            Invoices ({invoices.length})
+            {fill(t(`archive.customer.invoicesHeading.${plural(invoices.length)}`, lang), {
+              n: invoices.length,
+            })}
           </div>
           {invoices.length === 0 ? (
-            <p className="text-sm muted">No invoices on record.</p>
+            <p className="text-sm muted">{t("archive.customer.noInvoicesOnRecord", lang)}</p>
           ) : (
             <Table>
               <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                 <tr>
-                  <TH>Invoice</TH>
-                  <TH>Date</TH>
-                  <TH>Total</TH>
-                  <TH>Status</TH>
+                  <TH>{t("archive.customer.thInvoice", lang)}</TH>
+                  <TH>{t("archive.customer.thDate", lang)}</TH>
+                  <TH>{t("archive.thTotal", lang)}</TH>
+                  <TH>{t("common.status", lang)}</TH>
                   <TH>{null}</TH>
                 </tr>
               </thead>
               <tbody>
                 {invoices.map((inv) => {
-                  const pill = statusPill(inv);
+                  const pill = statusPill(inv, lang);
                   return (
                     <tr key={inv.id}>
                       <TD className="font-mono text-xs">{inv.invoice_number ?? "—"}</TD>
@@ -794,7 +878,7 @@ function ArchivedCustomerDetail({
                       <TD>
                         <div className="flex justify-end">
                           <Btn variant="outline" onClick={() => onOpenInvoice(inv.id, customer.email)}>
-                            <FileText className="h-3.5 w-3.5" />Open
+                            <FileText className="h-3.5 w-3.5" />{t("archive.customer.open", lang)}
                           </Btn>
                         </div>
                       </TD>
@@ -810,10 +894,10 @@ function ArchivedCustomerDetail({
           className="flex justify-end gap-2 p-4 border-t"
           style={{ borderColor: "rgb(var(--border))" }}
         >
-          <Btn variant="outline" onClick={onClose}>Close</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("archive.close", lang)}</Btn>
           {customer.archived_at != null && (
             <Btn variant="primary" onClick={onRestore}>
-              <RotateCcw className="h-4 w-4" />Restore
+              <RotateCcw className="h-4 w-4" />{t("archive.restore", lang)}
             </Btn>
           )}
         </div>

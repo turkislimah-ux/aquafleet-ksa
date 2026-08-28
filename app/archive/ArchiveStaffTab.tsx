@@ -43,7 +43,7 @@ import type { SubTabItem } from "./SubTabPicker";
 import { cn, formatAmount, formatDate } from "@/lib/utils";
 import {
   docStatus, ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
-  groupAccent, groupDot, linkedFieldFor, linkedFieldForDoc, readPersonLink, PERSON_ID_LABEL,
+  groupAccent, groupDot, linkedFieldFor, linkedFieldForDoc, readPersonLink, personIdLabel,
 } from "@/lib/archive";
 import type {
   ArchiveDocumentGroup,
@@ -54,16 +54,24 @@ import type {
   ArchiveDriverRow,
   ArchiveStaffRow,
 } from "@/lib/db-types";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 import ScrollLock from "@/components/ScrollLock";
 
 export type StaffSubTab = "drivers" | "management" | "commissions" | "deleted";
 
-export const STAFF_SUB_TABS: SubTabItem<StaffSubTab>[] = [
-  { key: "drivers", label: "Drivers", icon: IdCard },
-  { key: "management", label: "Management Staff", icon: Users },
-  { key: "commissions", label: "Commission History", icon: Wallet },
-  { key: "deleted", label: "Soft-deleted", icon: Archive },
-];
+// A FUNCTION, not a module-level const. A const would be built once, at import
+// time, in whatever language the module happened to be evaluated under, and
+// would then never change again. The KEYS are still the only thing the picker
+// calls back with — the label is display, the key is state.
+export function staffSubTabs(lang: Lang): SubTabItem<StaffSubTab>[] {
+  return [
+    { key: "drivers", label: t("archive.staff.subTabs.drivers", lang), icon: IdCard },
+    { key: "management", label: t("archive.staff.subTabs.management", lang), icon: Users },
+    { key: "commissions", label: t("archive.staff.subTabs.commissions", lang), icon: Wallet },
+    { key: "deleted", label: t("archive.subTabDeleted", lang), icon: Archive },
+  ];
+}
 
 // A person in a matrix, flattened to what the row needs. Drivers and staff
 // render through the SAME row component — the two populations differ only in
@@ -152,7 +160,11 @@ export default function ArchiveStaffTab({
   onRestoreDriver: (d: ArchiveDriverRow) => void;
   onRestoreStaff: (s: ArchiveStaffRow) => void;
 }) {
-  const typesByKey = useMemo(() => new Map(types.map((t) => [t.key, t])), [types]);
+  const { lang } = useApp();
+  // `row` and not `t` — the map callback's parameter used to shadow the
+  // translator import. Renaming the PARAMETER is the fix; aliasing `t` would
+  // have left every other call site in this file reading the wrong name.
+  const typesByKey = useMemo(() => new Map(types.map((row) => [row.key, row])), [types]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Which document's renewal history is expanded — same one-at-a-time model
   // the Company tab's table uses.
@@ -222,19 +234,20 @@ export default function ArchiveStaffTab({
   // -------------------------------------------------------------------------
   function renderMatrix(kind: "driver" | "staff", people: Person[]) {
     const kindGroups = groups.filter((g) => g.subject_kind === kind);
-    const subjectLabel = kind === "driver" ? "Driver" : "Staff member";
+    // `kind` is the closed union the caller passes, set from WHICH population
+    // this matrix is rendering — never read back off the rendered word.
+    const subjectLabel =
+      kind === "driver" ? t("common.driver", lang) : t("archive.staff.subjectStaff", lang);
 
     if (kindGroups.length === 0) {
       return (
         <Card>
           <div className="p-8 text-center">
-            <p className="text-sm muted">
-              No {kind === "driver" ? "driver" : "management staff"} document groups yet.
-            </p>
-            <p className="text-xs muted mt-1">
-              Create a group (e.g. {kind === "driver" ? "Driving Licence, Iqama, Work Permit" : "Iqama, Employment Contract"}) —
-              every {subjectLabel.toLowerCase()} then gets a row in it automatically.
-            </p>
+            {/* Whole sentences per kind. The English used to splice the noun
+                in and lowercase the subject label — see the dictionary note
+                on why a `.toLowerCase()` on a translated string is a bug. */}
+            <p className="text-sm muted">{t(`archive.staff.emptyGroups.${kind}`, lang)}</p>
+            <p className="text-xs muted mt-1">{t(`archive.staff.emptyGroupsHint.${kind}`, lang)}</p>
           </div>
         </Card>
       );
@@ -244,7 +257,7 @@ export default function ArchiveStaffTab({
       return (
         <Card>
           <p className="text-sm muted p-6 text-center">
-            No active {kind === "driver" ? "drivers" : "management staff"} to track documents for.
+            {t(`archive.staff.emptyPeople.${kind}`, lang)}
           </p>
         </Card>
       );
@@ -301,10 +314,19 @@ export default function ArchiveStaffTab({
                   <span className="min-w-0">
                     <span className="font-semibold block truncate">{g.title}</span>
                     {g.description && <span className="text-xs muted block">{g.description}</span>}
+                    {/* PATTERN B. archive_document_types carries label_en +
+                        label_ar in the row itself, so the type name renders
+                        through arText and nothing is added to the dictionary
+                        or to SEED_GROUPS. `g.title` / `g.description` above
+                        are USER DATA and stay verbatim. */}
                     <span className="text-[11px] muted block mt-0.5">
-                      {groupTypeRow ? `${groupTypeRow.label_en} · ` : ""}
-                      {people.length} {kind === "driver" ? "driver" : "staff"}
-                      {people.length === 1 ? "" : "s"} · warns at {g.warning_days}d
+                      {groupTypeRow
+                        ? `${arText(groupTypeRow.label_en, groupTypeRow.label_ar, lang)} · `
+                        : ""}
+                      {fill(t(`archive.staff.peopleMeta.${kind}.${plural(people.length)}`, lang), {
+                        n: people.length,
+                        d: g.warning_days,
+                      })}
                     </span>
                   </span>
                 </button>
@@ -315,25 +337,29 @@ export default function ArchiveStaffTab({
                   {linkField && <LinkPill />}
                   {missing > 0 && (
                     <span className={cn("text-xs px-2 py-1 rounded-full ring-1 ring-inset font-medium", MISSING_PILL)}>
-                      {missing} missing
+                      {/* Counts PEOPLE, so it is per-kind. The one beside it
+                          counts DOCUMENTS and lives at the route root. */}
+                      {fill(t(`archive.staff.missingCount.${kind}.${plural(missing)}`, lang), {
+                        n: missing,
+                      })}
                     </span>
                   )}
                   {expired > 0 && (
                     <span className="text-xs px-2 py-1 rounded-full ring-1 ring-inset font-medium bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20">
-                      {expired} expired
+                      {fill(t(`archive.expiredCount.${plural(expired)}`, lang), { n: expired })}
                     </span>
                   )}
                   <button
                     onClick={() => onEditGroup(g)}
                     className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                    title="Edit group"
+                    title={t("archive.editGroupTip", lang)}
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => onDeleteGroup(g)}
                     className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                    title="Delete group"
+                    title={t("archive.deleteGroupTip", lang)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -345,12 +371,12 @@ export default function ArchiveStaffTab({
                   <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                     <tr>
                       <TH>{subjectLabel}</TH>
-                      <TH>Reference / ID no.</TH>
-                      <TH>Issued</TH>
-                      <TH>Expires</TH>
-                      <TH>Note</TH>
-                      <TH>Files</TH>
-                      <TH>Status</TH>
+                      <TH>{t("archive.thReferenceId", lang)}</TH>
+                      <TH>{t("archive.thIssued", lang)}</TH>
+                      <TH>{t("archive.thExpires", lang)}</TH>
+                      <TH>{t("common.note", lang)}</TH>
+                      <TH>{t("archive.thFiles", lang)}</TH>
+                      <TH>{t("common.status", lang)}</TH>
                       <TH>{null}</TH>
                     </tr>
                   </thead>
@@ -383,13 +409,13 @@ export default function ArchiveStaffTab({
                             <TD className="text-xs muted">—</TD>
                             <TD>
                               <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", MISSING_PILL)}>
-                                Missing
+                                {t("archive.missingPill", lang)}
                               </span>
                             </TD>
                             <TD>
                               <div className="flex items-center justify-end">
                                 <Btn variant="outline" onClick={() => onAddDocument(g, person)}>
-                                  <Plus className="h-3.5 w-3.5" />Add
+                                  <Plus className="h-3.5 w-3.5" />{t("common.add", lang)}
                                 </Btn>
                               </div>
                             </TD>
@@ -438,7 +464,9 @@ export default function ArchiveStaffTab({
                                       )}
                                       {docs.length > 1 && (
                                         <div className="text-[11px] muted mt-0.5">
-                                          {docs.length} documents
+                                          {fill(t(`archive.docsCount.${plural(docs.length)}`, lang), {
+                                            n: docs.length,
+                                          })}
                                         </div>
                                       )}
                                     </>
@@ -453,8 +481,14 @@ export default function ArchiveStaffTab({
                                   {rowField ? (
                                     <>
                                       {link?.number || "—"}
+                                      {/* Keyed off PersonIdField — the closed
+                                          union linkedFieldForDoc resolves —
+                                          not off the linked_*_field COLUMN
+                                          values ('iqama_number', …), which
+                                          are internal mapping keys and never
+                                          reach a screen. */}
                                       <span className="block font-sans text-[10px] muted">
-                                        {PERSON_ID_LABEL[rowField]}
+                                        {personIdLabel(rowField, lang)}
                                       </span>
                                     </>
                                   ) : (
@@ -492,7 +526,7 @@ export default function ArchiveStaffTab({
                                 </TD>
                                 <TD>
                                   <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", ARCHIVE_STATUS_PILL[status])}>
-                                    {archiveStatusLabel(status, effectiveExpiry, today)}
+                                    {archiveStatusLabel(status, effectiveExpiry, today, lang)}
                                   </span>
                                 </TD>
                                 <TD>
@@ -508,19 +542,19 @@ export default function ArchiveStaffTab({
                                           showingHistory && "bg-black/5 dark:bg-white/5",
                                         )}
                                         style={{ borderColor: "rgb(var(--border))" }}
-                                        title="Renewal history"
+                                        title={t("archive.renewalHistoryTip", lang)}
                                       >
                                         <History className="h-3.5 w-3.5" />
                                         {docRenewals.length}
                                       </button>
                                     )}
                                     <Btn variant="outline" onClick={() => onRenewDocument(d)}>
-                                      <RefreshCw className="h-3.5 w-3.5" />Renew
+                                      <RefreshCw className="h-3.5 w-3.5" />{t("archive.renew", lang)}
                                     </Btn>
                                     <button
                                       onClick={() => onEditDocument(d, g, person)}
                                       className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                                      title="Edit document"
+                                      title={t("archive.editDocTip", lang)}
                                     >
                                       <Pencil className="h-4 w-4" />
                                     </button>
@@ -532,7 +566,9 @@ export default function ArchiveStaffTab({
                                       <button
                                         onClick={() => onAddDocument(g, person)}
                                         className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                                        title={`Add another document for ${person.name}`}
+                                        title={fill(t("archive.staff.addAnotherFor", lang), {
+                                          name: person.name,
+                                        })}
                                       >
                                         <Plus className="h-4 w-4" />
                                       </button>
@@ -540,7 +576,7 @@ export default function ArchiveStaffTab({
                                     <button
                                       onClick={() => onDeleteDocument(d)}
                                       className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                                      title="Delete document"
+                                      title={t("archive.deleteDocTip", lang)}
                                     >
                                       <Trash2 className="h-4 w-4" />
                                     </button>
@@ -559,9 +595,14 @@ export default function ArchiveStaffTab({
                                 return (
                                   <tr key={r.id} className="bg-black/[0.02] dark:bg-white/[0.02]">
                                     <TD className="text-xs muted ps-8">
-                                      Previous version
+                                      {t("archive.previousVersion", lang)}
+                                      {/* `superseded_by` is USER DATA (an
+                                          actor's name) — separator and value
+                                          stay in code. */}
                                       <div className="text-[11px]">
-                                        superseded {formatDate(r.superseded_at)}
+                                        {fill(t("archive.supersededOn", lang), {
+                                          date: formatDate(r.superseded_at),
+                                        })}
                                         {r.superseded_by ? ` · ${r.superseded_by}` : ""}
                                       </div>
                                     </TD>
@@ -589,7 +630,7 @@ export default function ArchiveStaffTab({
                                         </div>
                                       )}
                                     </TD>
-                                    <TD><span className="text-xs muted">Superseded</span></TD>
+                                    <TD><span className="text-xs muted">{t("archive.superseded", lang)}</span></TD>
                                     <TD>{null}</TD>
                                   </tr>
                                 );
@@ -648,21 +689,27 @@ export default function ArchiveStaffTab({
     <div className="space-y-3">
       <Card className="!p-0 overflow-hidden">
         <div className="p-3 border-b" style={{ borderColor: "rgb(var(--border))" }}>
-          <span className="font-semibold block">Terminated Drivers</span>
+          <span className="font-semibold block">{t("archive.staff.terminatedDriversTitle", lang)}</span>
+          {/* Shared with Terminated Trucks, Terminated Management Staff and
+              Archived Customers — same sentence, same leaf. */}
           <span className="text-[11px] muted">
-            {terminatedDrivers.length} record{terminatedDrivers.length === 1 ? "" : "s"} · kept, never deleted
+            {fill(t(`archive.recordsKept.${plural(terminatedDrivers.length)}`, lang), {
+              n: terminatedDrivers.length,
+            })}
           </span>
         </div>
         {terminatedDrivers.length === 0 ? (
-          <p className="text-sm muted p-6 text-center">No terminated drivers.</p>
+          <p className="text-sm muted p-6 text-center">
+            {t("archive.staff.terminatedDriversEmpty", lang)}
+          </p>
         ) : (
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH>Driver</TH>
-                <TH>Iqama ID</TH>
-                <TH>Last working day</TH>
-                <TH>Terminated on</TH>
+                <TH>{t("common.driver", lang)}</TH>
+                <TH>{t("archive.personId.driver_iqama", lang)}</TH>
+                <TH>{t("archive.staff.thLastWorkingDay", lang)}</TH>
+                <TH>{t("archive.staff.thTerminatedOn", lang)}</TH>
                 <TH>{null}</TH>
               </tr>
             </thead>
@@ -681,10 +728,10 @@ export default function ArchiveStaffTab({
                   <TD>
                     <div className="flex items-center gap-1 justify-end">
                       <Btn variant="outline" onClick={() => setDetailPerson({ kind: "driver", row: d })}>
-                        <Eye className="h-3.5 w-3.5" />View
+                        <Eye className="h-3.5 w-3.5" />{t("common.view", lang)}
                       </Btn>
                       <Btn variant="outline" onClick={() => onRestoreDriver(d)}>
-                        <RotateCcw className="h-3.5 w-3.5" />Restore
+                        <RotateCcw className="h-3.5 w-3.5" />{t("archive.restore", lang)}
                       </Btn>
                     </div>
                   </TD>
@@ -697,20 +744,24 @@ export default function ArchiveStaffTab({
 
       <Card className="!p-0 overflow-hidden">
         <div className="p-3 border-b" style={{ borderColor: "rgb(var(--border))" }}>
-          <span className="font-semibold block">Terminated Management Staff</span>
+          <span className="font-semibold block">{t("archive.staff.terminatedStaffTitle", lang)}</span>
           <span className="text-[11px] muted">
-            {terminatedStaff.length} record{terminatedStaff.length === 1 ? "" : "s"} · kept, never deleted
+            {fill(t(`archive.recordsKept.${plural(terminatedStaff.length)}`, lang), {
+              n: terminatedStaff.length,
+            })}
           </span>
         </div>
         {terminatedStaff.length === 0 ? (
-          <p className="text-sm muted p-6 text-center">No terminated staff.</p>
+          <p className="text-sm muted p-6 text-center">
+            {t("archive.staff.terminatedStaffEmpty", lang)}
+          </p>
         ) : (
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH>Staff member</TH>
-                <TH>Role</TH>
-                <TH>Terminated on</TH>
+                <TH>{t("archive.staff.subjectStaff", lang)}</TH>
+                <TH>{t("archive.staff.thRole", lang)}</TH>
+                <TH>{t("archive.staff.thTerminatedOn", lang)}</TH>
                 <TH>{null}</TH>
               </tr>
             </thead>
@@ -728,10 +779,10 @@ export default function ArchiveStaffTab({
                   <TD>
                     <div className="flex items-center gap-1 justify-end">
                       <Btn variant="outline" onClick={() => setDetailPerson({ kind: "staff", row: s })}>
-                        <Eye className="h-3.5 w-3.5" />View
+                        <Eye className="h-3.5 w-3.5" />{t("common.view", lang)}
                       </Btn>
                       <Btn variant="outline" onClick={() => onRestoreStaff(s)}>
-                        <RotateCcw className="h-3.5 w-3.5" />Restore
+                        <RotateCcw className="h-3.5 w-3.5" />{t("archive.restore", lang)}
                       </Btn>
                     </div>
                   </TD>
@@ -785,6 +836,9 @@ function TerminatedPersonDetail({
   onRestore: () => void;
   onClose: () => void;
 }) {
+  const { lang } = useApp();
+  // The discriminant, not the rendered word. Every per-kind lookup below keys
+  // off `person.kind`.
   const isDriver = person.kind === "driver";
   const row = person.row;
   const groupsById = new Map(groups.map((g) => [g.id, g]));
@@ -809,9 +863,12 @@ function TerminatedPersonDetail({
           style={{ borderColor: "rgb(var(--border))" }}
         >
           <div>
+            {/* row.name is USER DATA. */}
             <h2 className="font-semibold">{row.name}</h2>
+            {/* One whole leaf per kind, not a noun spliced into a shared
+                tail: Arabic inflects the whole phrase around the subject. */}
             <p className="text-[11px] muted">
-              {isDriver ? "Terminated driver" : "Terminated staff member"} · record kept, never deleted
+              {t(`archive.staff.detailSubtitle.${person.kind}`, lang)}
             </p>
           </div>
           <button
@@ -823,60 +880,83 @@ function TerminatedPersonDetail({
         </div>
 
         <div className="p-4 space-y-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide muted">Identity</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted">
+            {t("archive.staff.secIdentity", lang)}
+          </div>
+          {/* EVERY VALUE in this grid is USER DATA or an app-formatted date —
+              only the labels are looked up. `iqama_number`, `license_number`,
+              `role`, `phone`, `email` and `duty_hours` render verbatim, and
+              fmtDate/formatDate stay Latin in both languages. */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <PersonField label="Name (Arabic)" value={dash(row.name_ar)} />
-            <PersonField label="Iqama ID" value={dash(row.iqama_number)} mono />
-            <PersonField label="Iqama expiry" value={fmtDate(row.iqama_expiry)} />
+            <PersonField label={t("archive.fNameAr", lang)} value={dash(row.name_ar)} />
+            {/* Both arms say "Iqama ID" in English and the same words in
+                Arabic, but the key still follows the SUBJECT — the two are
+                separate PersonIdField members and may diverge. */}
+            <PersonField
+              label={t(isDriver ? "archive.personId.driver_iqama" : "archive.personId.staff_iqama", lang)}
+              value={dash(row.iqama_number)}
+              mono
+            />
+            <PersonField label={t("archive.staff.fIqamaExpiry", lang)} value={fmtDate(row.iqama_expiry)} />
             {isDriver && (
               <>
-                <PersonField label="License ID" value={dash((row as ArchiveDriverRow).license_number)} mono />
-                <PersonField label="License expiry" value={fmtDate((row as ArchiveDriverRow).license_expiry)} />
+                <PersonField label={t("archive.personId.driver_license", lang)} value={dash((row as ArchiveDriverRow).license_number)} mono />
+                <PersonField label={t("archive.staff.fLicenseExpiry", lang)} value={fmtDate((row as ArchiveDriverRow).license_expiry)} />
               </>
             )}
-            {!isDriver && <PersonField label="Role" value={dash((row as ArchiveStaffRow).role)} />}
+            {!isDriver && <PersonField label={t("archive.staff.thRole", lang)} value={dash((row as ArchiveStaffRow).role)} />}
           </div>
 
-          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Employment</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
+            {t("archive.staff.secEmployment", lang)}
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <PersonField label="Phone" value={dash(row.phone)} />
-            {!isDriver && <PersonField label="Email" value={dash((row as ArchiveStaffRow).email)} />}
-            <PersonField label="Hire date" value={fmtDate(row.hire_date)} />
-            <PersonField label="Duty hours" value={dash(row.duty_hours)} />
+            <PersonField label={t("archive.fPhone", lang)} value={dash(row.phone)} />
+            {!isDriver && <PersonField label={t("archive.fEmail", lang)} value={dash((row as ArchiveStaffRow).email)} />}
+            <PersonField label={t("archive.staff.fHireDate", lang)} value={fmtDate(row.hire_date)} />
+            <PersonField label={t("archive.staff.fDutyHours", lang)} value={dash(row.duty_hours)} />
             <PersonField
-              label="Monthly salary"
+              label={t("archive.staff.fMonthlySalary", lang)}
               value={
+                // formatAmount output stays Latin in both languages; only the
+                // currency mark moves, which is what archive.sarAmount holds.
                 isDriver
                   ? (row as ArchiveDriverRow).salary_sar != null
-                    ? `${fmtMoney(Number((row as ArchiveDriverRow).salary_sar))} SAR`
+                    ? fill(t("archive.sarAmount", lang), {
+                        n: fmtMoney(Number((row as ArchiveDriverRow).salary_sar)),
+                      })
                     : "—"
                   : (row as ArchiveStaffRow).monthly_salary_sar != null
-                    ? `${fmtMoney(Number((row as ArchiveStaffRow).monthly_salary_sar))} SAR`
+                    ? fill(t("archive.sarAmount", lang), {
+                        n: fmtMoney(Number((row as ArchiveStaffRow).monthly_salary_sar)),
+                      })
                     : "—"
               }
             />
             {isDriver && (
-              <PersonField label="Last working day" value={fmtDate((row as ArchiveDriverRow).termination_date)} />
+              <PersonField label={t("archive.staff.thLastWorkingDay", lang)} value={fmtDate((row as ArchiveDriverRow).termination_date)} />
             )}
             <PersonField
-              label="Terminated on"
+              label={t("archive.staff.thTerminatedOn", lang)}
               value={row.terminated_at ? formatDate(row.terminated_at) : "—"}
             />
           </div>
 
           <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
-            Archived documents ({theirDocs.length})
+            {fill(t(`archive.archivedDocsCount.${plural(theirDocs.length)}`, lang), {
+              n: theirDocs.length,
+            })}
           </div>
           {theirDocs.length === 0 ? (
-            <p className="text-sm muted">No archived documents for this person.</p>
+            <p className="text-sm muted">{t("archive.staff.noArchivedDocs", lang)}</p>
           ) : (
             <Table>
               <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                 <tr>
-                  <TH>Group</TH>
-                  <TH>Document</TH>
-                  <TH>Expires</TH>
-                  <TH>Status</TH>
+                  <TH>{t("archive.thGroup", lang)}</TH>
+                  <TH>{t("archive.thDocument", lang)}</TH>
+                  <TH>{t("archive.thExpires", lang)}</TH>
+                  <TH>{t("common.status", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -890,7 +970,7 @@ function TerminatedPersonDetail({
                       <TD className="text-xs">{fmtDate(d.expiry_date)}</TD>
                       <TD>
                         <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", ARCHIVE_STATUS_PILL[status])}>
-                          {archiveStatusLabel(status, d.expiry_date, today)}
+                          {archiveStatusLabel(status, d.expiry_date, today, lang)}
                         </span>
                       </TD>
                     </tr>
@@ -905,9 +985,9 @@ function TerminatedPersonDetail({
           className="flex justify-end gap-2 p-4 border-t"
           style={{ borderColor: "rgb(var(--border))" }}
         >
-          <Btn variant="outline" onClick={onClose}>Close</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("archive.close", lang)}</Btn>
           <Btn variant="primary" onClick={onRestore}>
-            <RotateCcw className="h-4 w-4" />Restore
+            <RotateCcw className="h-4 w-4" />{t("archive.restore", lang)}
           </Btn>
         </div>
       </div>

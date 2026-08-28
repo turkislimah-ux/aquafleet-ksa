@@ -30,11 +30,13 @@ import { Card, Btn, Table, TH, TD } from "@/components/ui";
 import { LinkPill } from "./ArchiveModals";
 import type { SubTabItem } from "./SubTabPicker";
 import { getMaintenanceJobDetail, type MaintenanceJobDetail } from "./actions";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 import { cn, formatAmount, formatDate } from "@/lib/utils";
 import {
   docStatus, ARCHIVE_STATUS_ROW_TONE, ARCHIVE_STATUS_PILL, archiveStatusLabel,
   groupAccent, groupDot, linkedFieldFor, linkedFieldForDoc, readPersonLink,
-  PERSON_ID_LABEL,
+  personIdLabel,
 } from "@/lib/archive";
 import type {
   ArchiveDocumentGroup,
@@ -73,11 +75,17 @@ export type ArchiveTruckTabOutsourcedJob = {
 
 export type TruckSubTab = "documents" | "maintenance" | "deleted";
 
-export const TRUCK_SUB_TABS: SubTabItem<TruckSubTab>[] = [
-  { key: "documents", label: "Documents", icon: FileText },
-  { key: "maintenance", label: "Maintenance History", icon: Wrench },
-  { key: "deleted", label: "Soft-deleted", icon: Archive },
-];
+// A FUNCTION, not a module-level const: the labels are language-dependent and
+// a const would be built once, at import time, in whatever language the module
+// happened to be evaluated under — and would then never change again. The KEYS
+// are still the only thing the picker calls back with.
+export function truckSubTabs(lang: Lang): SubTabItem<TruckSubTab>[] {
+  return [
+    { key: "documents", label: t("archive.truck.subTabs.documents", lang), icon: FileText },
+    { key: "maintenance", label: t("archive.truck.subTabs.maintenance", lang), icon: Wrench },
+    { key: "deleted", label: t("archive.subTabDeleted", lang), icon: Archive },
+  ];
+}
 
 // Same reasoning as the Staff tab's: "Missing" is a ROW state, never a member
 // of ArchiveDocStatus — that union feeds expirySummary(), and a gap is not an
@@ -95,8 +103,11 @@ function fmtDate(iso: string | null): string {
 // and rendered Arabic-Indic digits on an Arabic device.
 const fmtMoney = (n: number): string => formatAmount(n);
 
-function truckLabel(t: ArchiveTruckRow): string {
-  return t.plate;
+// Param is `truck`, not `t` — `t` is the translator everywhere in this file
+// now, and a shadow here would be the kind of bug that only shows up in the
+// one branch that happens to translate.
+function truckLabel(truck: ArchiveTruckRow): string {
+  return truck.plate;
 }
 
 export default function ArchiveTruckTab({
@@ -142,9 +153,10 @@ export default function ArchiveTruckTab({
   onOpenFile: (path: string) => void;
   onEditGroup: (group: ArchiveDocumentGroup) => void;
   onDeleteGroup: (group: ArchiveDocumentGroup) => void;
-  onRestoreTruck: (t: ArchiveTruckRow) => void;
+  onRestoreTruck: (truck: ArchiveTruckRow) => void;
 }) {
-  const typesByKey = useMemo(() => new Map(types.map((t) => [t.key, t])), [types]);
+  const { lang } = useApp();
+  const typesByKey = useMemo(() => new Map(types.map((ty) => [ty.key, ty])), [types]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [historyDocId, setHistoryDocId] = useState<string | null>(null);
   const [detailTruck, setDetailTruck] = useState<ArchiveTruckRow | null>(null);
@@ -174,17 +186,17 @@ export default function ArchiveTruckTab({
   const activeTrucks = useMemo(
     () =>
       trucks
-        .filter((t) => t.active && !t.terminated_at)
+        .filter((truck) => truck.active && !truck.terminated_at)
         .sort((a, b) => a.plate.localeCompare(b.plate)),
     [trucks],
   );
 
   const terminatedTrucks = useMemo(
-    () => trucks.filter((t) => t.terminated_at || !t.active),
+    () => trucks.filter((truck) => truck.terminated_at || !truck.active),
     [trucks],
   );
 
-  const trucksById = useMemo(() => new Map(trucks.map((t) => [t.id, t])), [trucks]);
+  const trucksById = useMemo(() => new Map(trucks.map((truck) => [truck.id, truck])), [trucks]);
 
   function toggleCollapsed(id: string) {
     setCollapsed((prev) => {
@@ -203,10 +215,9 @@ export default function ArchiveTruckTab({
       return (
         <Card>
           <div className="p-8 text-center">
-            <p className="text-sm muted">No truck document groups yet.</p>
+            <p className="text-sm muted">{t("archive.truck.emptyGroups", lang)}</p>
             <p className="text-xs muted mt-1">
-              Create a group (e.g. Registration, Insurance, Inspection) — every truck then gets a
-              row in it automatically.
+              {t("archive.truck.emptyGroupsHint", lang)}
             </p>
           </div>
         </Card>
@@ -216,7 +227,7 @@ export default function ArchiveTruckTab({
     if (activeTrucks.length === 0) {
       return (
         <Card>
-          <p className="text-sm muted p-6 text-center">No active trucks to track documents for.</p>
+          <p className="text-sm muted p-6 text-center">{t("archive.truck.emptyTrucks", lang)}</p>
         </Card>
       );
     }
@@ -267,9 +278,16 @@ export default function ArchiveTruckTab({
                     <span className="font-semibold block truncate">{g.title}</span>
                     {g.description && <span className="text-xs muted block">{g.description}</span>}
                     <span className="text-[11px] muted block mt-0.5">
-                      {groupTypeRow ? `${groupTypeRow.label_en} · ` : ""}
-                      {activeTrucks.length} truck{activeTrucks.length === 1 ? "" : "s"} · warns at{" "}
-                      {g.warning_days}d
+                      {/* Pattern B: the document type is bilingual in the DB,
+                          so its label is read straight off the row rather than
+                          looked up by key. */}
+                      {groupTypeRow
+                        ? `${arText(groupTypeRow.label_en, groupTypeRow.label_ar, lang)} · `
+                        : ""}
+                      {fill(t(`archive.truck.groupMeta.${plural(activeTrucks.length)}`, lang), {
+                        n: activeTrucks.length,
+                        d: g.warning_days,
+                      })}
                     </span>
                   </span>
                 </button>
@@ -278,25 +296,25 @@ export default function ArchiveTruckTab({
                   {linkField && <LinkPill />}
                   {missing > 0 && (
                     <span className={cn("text-xs px-2 py-1 rounded-full ring-1 ring-inset font-medium", MISSING_PILL)}>
-                      {missing} missing
+                      {fill(t(`archive.truck.missingCount.${plural(missing)}`, lang), { n: missing })}
                     </span>
                   )}
                   {expired > 0 && (
                     <span className="text-xs px-2 py-1 rounded-full ring-1 ring-inset font-medium bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-rose-500/20">
-                      {expired} expired
+                      {fill(t(`archive.expiredCount.${plural(expired)}`, lang), { n: expired })}
                     </span>
                   )}
                   <button
                     onClick={() => onEditGroup(g)}
                     className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                    title="Edit group"
+                    title={t("archive.editGroupTip", lang)}
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => onDeleteGroup(g)}
                     className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                    title="Delete group"
+                    title={t("archive.deleteGroupTip", lang)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -307,13 +325,13 @@ export default function ArchiveTruckTab({
                 <Table>
                   <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                     <tr>
-                      <TH>Truck</TH>
-                      <TH>Reference / ID no.</TH>
-                      <TH>Issued</TH>
-                      <TH>Expires</TH>
-                      <TH>Note</TH>
-                      <TH>Files</TH>
-                      <TH>Status</TH>
+                      <TH>{t("archive.truck.thTruck", lang)}</TH>
+                      <TH>{t("archive.thReferenceId", lang)}</TH>
+                      <TH>{t("archive.thIssued", lang)}</TH>
+                      <TH>{t("archive.thExpires", lang)}</TH>
+                      <TH>{t("common.note", lang)}</TH>
+                      <TH>{t("archive.thFiles", lang)}</TH>
+                      <TH>{t("common.status", lang)}</TH>
                       <TH>{null}</TH>
                     </tr>
                   </thead>
@@ -340,13 +358,13 @@ export default function ArchiveTruckTab({
                             <TD className="text-xs muted">—</TD>
                             <TD>
                               <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", MISSING_PILL)}>
-                                Missing
+                                {t("archive.missingPill", lang)}
                               </span>
                             </TD>
                             <TD>
                               <div className="flex items-center justify-end">
                                 <Btn variant="outline" onClick={() => onAddDocument(g, truck)}>
-                                  <Plus className="h-3.5 w-3.5" />Add
+                                  <Plus className="h-3.5 w-3.5" />{t("common.add", lang)}
                                 </Btn>
                               </div>
                             </TD>
@@ -385,7 +403,11 @@ export default function ArchiveTruckTab({
                                         <span className="font-medium">{truckLabel(truck)}</span>
                                         {truck.model && <div className="text-[11px] muted">{truck.model}</div>}
                                         {docs.length > 1 && (
-                                          <div className="text-[11px] muted mt-0.5">{docs.length} documents</div>
+                                          <div className="text-[11px] muted mt-0.5">
+                                            {fill(t(`archive.docsCount.${plural(docs.length)}`, lang), {
+                                              n: docs.length,
+                                            })}
+                                          </div>
                                         )}
                                       </>
                                     ) : (
@@ -400,7 +422,7 @@ export default function ArchiveTruckTab({
                                       <>
                                         {link?.number || "—"}
                                         <span className="block font-sans text-[10px] muted">
-                                          {PERSON_ID_LABEL[rowField]}
+                                          {personIdLabel(rowField, lang)}
                                         </span>
                                       </>
                                     ) : (
@@ -438,7 +460,7 @@ export default function ArchiveTruckTab({
                                   </TD>
                                   <TD>
                                     <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", ARCHIVE_STATUS_PILL[status])}>
-                                      {archiveStatusLabel(status, effectiveExpiry, today)}
+                                      {archiveStatusLabel(status, effectiveExpiry, today, lang)}
                                     </span>
                                   </TD>
                                   <TD>
@@ -451,19 +473,19 @@ export default function ArchiveTruckTab({
                                             showingHistory && "bg-black/5 dark:bg-white/5",
                                           )}
                                           style={{ borderColor: "rgb(var(--border))" }}
-                                          title="Renewal history"
+                                          title={t("archive.renewalHistoryTip", lang)}
                                         >
                                           <History className="h-3.5 w-3.5" />
                                           {docRenewals.length}
                                         </button>
                                       )}
                                       <Btn variant="outline" onClick={() => onRenewDocument(d)}>
-                                        <RefreshCw className="h-3.5 w-3.5" />Renew
+                                        <RefreshCw className="h-3.5 w-3.5" />{t("archive.renew", lang)}
                                       </Btn>
                                       <button
                                         onClick={() => onEditDocument(d, g, truck)}
                                         className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                                        title="Edit document"
+                                        title={t("archive.editDocTip", lang)}
                                       >
                                         <Pencil className="h-4 w-4" />
                                       </button>
@@ -478,7 +500,9 @@ export default function ArchiveTruckTab({
                                         <button
                                           onClick={() => onAddDocument(g, truck)}
                                           className="h-8 w-8 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
-                                          title={`Add another document for ${truck.plate}`}
+                                          title={fill(t("archive.truck.addAnotherFor", lang), {
+                                            plate: truck.plate,
+                                          })}
                                         >
                                           <Plus className="h-4 w-4" />
                                         </button>
@@ -486,7 +510,7 @@ export default function ArchiveTruckTab({
                                       <button
                                         onClick={() => onDeleteDocument(d)}
                                         className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
-                                        title="Delete document"
+                                        title={t("archive.deleteDocTip", lang)}
                                       >
                                         <Trash2 className="h-4 w-4" />
                                       </button>
@@ -499,9 +523,11 @@ export default function ArchiveTruckTab({
                                   return (
                                     <tr key={r.id} className="bg-black/[0.02] dark:bg-white/[0.02]">
                                       <TD className="text-xs muted ps-8">
-                                        Previous version
+                                        {t("archive.previousVersion", lang)}
                                         <div className="text-[11px]">
-                                          superseded {formatDate(r.superseded_at)}
+                                          {fill(t("archive.supersededOn", lang), {
+                                            date: formatDate(r.superseded_at),
+                                          })}
                                           {r.superseded_by ? ` · ${r.superseded_by}` : ""}
                                         </div>
                                       </TD>
@@ -529,7 +555,7 @@ export default function ArchiveTruckTab({
                                           </div>
                                         )}
                                       </TD>
-                                      <TD><span className="text-xs muted">Superseded</span></TD>
+                                      <TD><span className="text-xs muted">{t("archive.superseded", lang)}</span></TD>
                                       <TD>{null}</TD>
                                     </tr>
                                   );
@@ -613,24 +639,27 @@ export default function ArchiveTruckTab({
           style={{ borderColor: "rgb(var(--border))" }}
         >
           <div>
-            <span className="font-semibold block">Maintenance History</span>
+            {/* The card heading and the sub-tab segment are the same words in
+                both languages — one leaf, read twice, rather than two that a
+                reword would have to find separately. */}
+            <span className="font-semibold block">{t("archive.truck.subTabs.maintenance", lang)}</span>
             <span className="text-[11px] muted">
-              Read-only — in-house work orders and outsourced jobs, newest first.
+              {t("archive.truck.maintSubtitle", lang)}
             </span>
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <span className="muted text-xs">Truck</span>
+            <span className="muted text-xs">{t("archive.truck.thTruck", lang)}</span>
             <select
               value={maintTruckId}
               onChange={(e) => setMaintTruckId(e.target.value)}
               className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
               style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
             >
-              <option value="all">All trucks</option>
+              <option value="all">{t("archive.truck.allTrucks", lang)}</option>
               {/* Every truck, terminated included — a terminated truck's
                   history is exactly the kind of thing an archive is for. */}
-              {trucks.map((t) => (
-                <option key={t.id} value={t.id}>{t.plate}</option>
+              {trucks.map((truck) => (
+                <option key={truck.id} value={truck.id}>{truck.plate}</option>
               ))}
             </select>
           </div>
@@ -645,20 +674,20 @@ export default function ArchiveTruckTab({
         {rows.length === 0 ? (
           <p className="text-sm muted p-6 text-center">
             <Wrench className="h-5 w-5 mx-auto mb-2 opacity-50" />
-            No maintenance history for this selection.
+            {t("archive.truck.maintEmpty", lang)}
           </p>
         ) : (
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH>Ref</TH>
-                <TH>Truck</TH>
-                <TH>Job</TH>
-                <TH>Track</TH>
-                <TH>Status</TH>
-                <TH>Opened</TH>
-                <TH>Closed</TH>
-                <TH>Parts cost</TH>
+                <TH>{t("archive.truck.thRef", lang)}</TH>
+                <TH>{t("archive.truck.thTruck", lang)}</TH>
+                <TH>{t("archive.truck.thJob", lang)}</TH>
+                <TH>{t("archive.truck.thTrack", lang)}</TH>
+                <TH>{t("common.status", lang)}</TH>
+                <TH>{t("common.opened", lang)}</TH>
+                <TH>{t("archive.truck.thClosed", lang)}</TH>
+                <TH>{t("archive.truck.thPartsCost", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -683,16 +712,26 @@ export default function ArchiveTruckTab({
                           : "bg-violet-500/10 text-violet-700 dark:text-violet-300 ring-violet-500/25",
                       )}
                     >
-                      {r.kind === "in_house" ? "In-house" : "Outsourced"}
+                      {t(`archive.truck.kind.${r.kind}`, lang)}
                     </span>
                   </TD>
+                  {/* FLAGGED, deliberately untranslated: `status` is a raw
+                      work_orders / outsourced_jobs enum typed `string` here.
+                      Its value set is owned by the Maintenance route, which
+                      this batch does not convert, so there is no closed union
+                      to key a dictionary group off — a partial map would
+                      silently fall through to English for any value it missed.
+                      It stays as the underscore-stripped raw value until the
+                      Maintenance batch gives it a home. */}
                   <TD className="text-xs capitalize">{r.status.replace(/_/g, " ")}</TD>
                   <TD className="text-xs">{r.opened ? fmtDate(r.opened.slice(0, 10)) : "—"}</TD>
                   <TD className="text-xs">
                     {r.closed ? formatDate(r.closed) : "—"}
                   </TD>
                   <TD className="text-xs tabular-nums">
-                    {r.cost != null ? `${fmtMoney(Number(r.cost))} SAR` : <span className="muted">—</span>}
+                    {r.cost != null
+                      ? fill(t("archive.sarAmount", lang), { n: fmtMoney(Number(r.cost)) })
+                      : <span className="muted">—</span>}
                   </TD>
                 </tr>
               ))}
@@ -714,51 +753,57 @@ export default function ArchiveTruckTab({
     <div className="space-y-3">
       <Card className="!p-0 overflow-hidden">
         <div className="p-3 border-b" style={{ borderColor: "rgb(var(--border))" }}>
-          <span className="font-semibold block">Terminated Trucks</span>
+          <span className="font-semibold block">{t("archive.truck.terminatedTitle", lang)}</span>
           <span className="text-[11px] muted">
-            {terminatedTrucks.length} record{terminatedTrucks.length === 1 ? "" : "s"} · kept, never deleted
+            {fill(t(`archive.recordsKept.${plural(terminatedTrucks.length)}`, lang), {
+              n: terminatedTrucks.length,
+            })}
           </span>
         </div>
         {terminatedTrucks.length === 0 ? (
-          <p className="text-sm muted p-6 text-center">No terminated trucks.</p>
+          <p className="text-sm muted p-6 text-center">{t("archive.truck.terminatedEmpty", lang)}</p>
         ) : (
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH>Truck</TH>
-                <TH>Reason</TH>
-                <TH>Price</TH>
-                <TH>Released</TH>
-                <TH>Terminated on</TH>
+                <TH>{t("archive.truck.thTruck", lang)}</TH>
+                <TH>{t("archive.thReason", lang)}</TH>
+                <TH>{t("archive.truck.thPrice", lang)}</TH>
+                <TH>{t("archive.truck.thReleased", lang)}</TH>
+                <TH>{t("archive.truck.thTerminatedOn", lang)}</TH>
                 <TH>{null}</TH>
               </tr>
             </thead>
             <tbody>
-              {terminatedTrucks.map((t) => (
-                <tr key={t.id}>
+              {terminatedTrucks.map((truck) => (
+                <tr key={truck.id}>
                   <TD>
-                    <span className="font-medium">{t.plate}</span>
-                    {t.model && <div className="text-[11px] muted">{t.model}</div>}
+                    <span className="font-medium">{truck.plate}</span>
+                    {truck.model && <div className="text-[11px] muted">{truck.model}</div>}
                   </TD>
                   <TD className="text-xs">
-                    {t.termination_reason === "sold" ? "Sold"
-                      : t.termination_reason === "total_loss" ? "Total loss"
+                    {/* Keyed off termination_reason's VALUE — the two-value
+                        enum the restore RPC clears — not off its wording. */}
+                    {truck.termination_reason === "sold" ? t("archive.truck.reason.sold", lang)
+                      : truck.termination_reason === "total_loss" ? t("archive.truck.reason.total_loss", lang)
                       : <span className="muted">—</span>}
                   </TD>
                   <TD className="text-xs tabular-nums">
-                    {t.termination_price != null ? `${fmtMoney(Number(t.termination_price))} SAR` : <span className="muted">—</span>}
+                    {truck.termination_price != null
+                      ? fill(t("archive.sarAmount", lang), { n: fmtMoney(Number(truck.termination_price)) })
+                      : <span className="muted">—</span>}
                   </TD>
-                  <TD className="text-xs">{fmtDate(t.released_date)}</TD>
+                  <TD className="text-xs">{fmtDate(truck.released_date)}</TD>
                   <TD className="text-xs">
-                    {t.terminated_at ? formatDate(t.terminated_at) : "—"}
+                    {truck.terminated_at ? formatDate(truck.terminated_at) : "—"}
                   </TD>
                   <TD>
                     <div className="flex items-center gap-1 justify-end">
-                      <Btn variant="outline" onClick={() => setDetailTruck(t)}>
-                        <Eye className="h-3.5 w-3.5" />View
+                      <Btn variant="outline" onClick={() => setDetailTruck(truck)}>
+                        <Eye className="h-3.5 w-3.5" />{t("common.view", lang)}
                       </Btn>
-                      <Btn variant="outline" onClick={() => onRestoreTruck(t)}>
-                        <RotateCcw className="h-3.5 w-3.5" />Restore
+                      <Btn variant="outline" onClick={() => onRestoreTruck(truck)}>
+                        <RotateCcw className="h-3.5 w-3.5" />{t("archive.restore", lang)}
                       </Btn>
                     </div>
                   </TD>
@@ -810,6 +855,7 @@ function TerminatedTruckDetail({
   onRestore: () => void;
   onClose: () => void;
 }) {
+  const { lang } = useApp();
   const groupsById = new Map(groups.map((g) => [g.id, g]));
   const theirDocs = documents.filter((d) => d.truck_id === truck.id);
   const jobCount =
@@ -834,7 +880,7 @@ function TerminatedTruckDetail({
         >
           <div>
             <h2 className="font-semibold">{truck.plate}</h2>
-            <p className="text-[11px] muted">Terminated truck · record kept, never deleted</p>
+            <p className="text-[11px] muted">{t("archive.truck.detailSubtitle", lang)}</p>
           </div>
           <button
             onClick={onClose}
@@ -845,52 +891,62 @@ function TerminatedTruckDetail({
         </div>
 
         <div className="p-4 space-y-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide muted">Vehicle</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted">{t("archive.truck.sectionVehicle", lang)}</div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <TruckField label="Model" value={dash(truck.model)} />
-            <TruckField label="Year" value={dash(truck.year)} />
-            <TruckField label="Capacity (m³)" value={dash(truck.capacity_m3)} />
-            <TruckField label="VIN" value={dash(truck.vin)} mono />
-            <TruckField label="Vehicle Registration" value={dash(truck.vehicle_registration)} mono />
-            <TruckField label="Registration expiry" value={fmtDate(truck.registration_expiry)} />
-            <TruckField label="Odometer (km)" value={dash(truck.odometer_km)} />
+            <TruckField label={t("archive.truck.fModel", lang)} value={dash(truck.model)} />
+            <TruckField label={t("archive.truck.fYear", lang)} value={dash(truck.year)} />
+            <TruckField label={t("archive.truck.fCapacity", lang)} value={dash(truck.capacity_m3)} />
+            <TruckField label={t("archive.truck.fVin", lang)} value={dash(truck.vin)} mono />
+            {/* Same words as the LINKED-field label for a truck, in both
+                languages — the column this field shows IS what a linked
+                registration document reads from, so it reuses that leaf
+                rather than minting a second copy that could drift. */}
+            <TruckField label={t("archive.personId.truck_registration", lang)} value={dash(truck.vehicle_registration)} mono />
+            <TruckField label={t("archive.truck.fRegistrationExpiry", lang)} value={fmtDate(truck.registration_expiry)} />
+            <TruckField label={t("archive.truck.fOdometer", lang)} value={dash(truck.odometer_km)} />
           </div>
 
-          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Termination</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("archive.truck.sectionTermination", lang)}</div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <TruckField
-              label="Reason"
+              label={t("archive.thReason", lang)}
               value={
-                truck.termination_reason === "sold" ? "Sold"
-                : truck.termination_reason === "total_loss" ? "Total loss"
+                truck.termination_reason === "sold" ? t("archive.truck.reason.sold", lang)
+                : truck.termination_reason === "total_loss" ? t("archive.truck.reason.total_loss", lang)
                 : "—"
               }
             />
             <TruckField
-              label="Price"
-              value={truck.termination_price != null ? `${fmtMoney(Number(truck.termination_price))} SAR` : "—"}
+              label={t("archive.truck.thPrice", lang)}
+              value={
+                truck.termination_price != null
+                  ? fill(t("archive.sarAmount", lang), { n: fmtMoney(Number(truck.termination_price)) })
+                  : "—"
+              }
             />
-            <TruckField label="Released" value={fmtDate(truck.released_date)} />
+            <TruckField label={t("archive.truck.thReleased", lang)} value={fmtDate(truck.released_date)} />
             <TruckField
-              label="Terminated on"
+              label={t("archive.truck.thTerminatedOn", lang)}
               value={truck.terminated_at ? formatDate(truck.terminated_at) : "—"}
             />
-            <TruckField label="Maintenance jobs on record" value={String(jobCount)} />
+            <TruckField label={t("archive.truck.fJobCount", lang)} value={String(jobCount)} />
           </div>
 
           <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">
-            Archived documents ({theirDocs.length})
+            {fill(t(`archive.archivedDocsCount.${plural(theirDocs.length)}`, lang), {
+              n: theirDocs.length,
+            })}
           </div>
           {theirDocs.length === 0 ? (
-            <p className="text-sm muted">No archived documents for this truck.</p>
+            <p className="text-sm muted">{t("archive.truck.noArchivedDocs", lang)}</p>
           ) : (
             <Table>
               <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                 <tr>
-                  <TH>Group</TH>
-                  <TH>Document</TH>
-                  <TH>Expires</TH>
-                  <TH>Status</TH>
+                  <TH>{t("archive.thGroup", lang)}</TH>
+                  <TH>{t("archive.thDocument", lang)}</TH>
+                  <TH>{t("archive.thExpires", lang)}</TH>
+                  <TH>{t("common.status", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -907,7 +963,7 @@ function TerminatedTruckDetail({
                       <TD className="text-xs">{fmtDate(expiry)}</TD>
                       <TD>
                         <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", ARCHIVE_STATUS_PILL[status])}>
-                          {archiveStatusLabel(status, expiry, today)}
+                          {archiveStatusLabel(status, expiry, today, lang)}
                         </span>
                       </TD>
                     </tr>
@@ -922,9 +978,9 @@ function TerminatedTruckDetail({
           className="flex justify-end gap-2 p-4 border-t"
           style={{ borderColor: "rgb(var(--border))" }}
         >
-          <Btn variant="outline" onClick={onClose}>Close</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("archive.close", lang)}</Btn>
           <Btn variant="primary" onClick={onRestore}>
-            <RotateCcw className="h-4 w-4" />Restore
+            <RotateCcw className="h-4 w-4" />{t("archive.restore", lang)}
           </Btn>
         </div>
       </div>
@@ -943,6 +999,7 @@ function MaintenanceJobModal({
   detail: MaintenanceJobDetail;
   onClose: () => void;
 }) {
+  const { lang } = useApp();
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40 overflow-y-auto"
@@ -962,8 +1019,10 @@ function MaintenanceJobModal({
             <p className="text-[11px] muted">
               <span className="font-mono">{detail.ref}</span>
               {" · "}
-              {detail.kind === "in_house" ? "In-house work order" : "Outsourced job"}
+              {t(`archive.truck.jobKind.${detail.kind}`, lang)}
               {" · "}
+              {/* FLAGGED, same reason as the track table's status cell: a raw
+                  Maintenance-route enum with no closed union to key off. */}
               <span className="capitalize">{detail.status.replace(/_/g, " ")}</span>
             </p>
           </div>
@@ -976,8 +1035,14 @@ function MaintenanceJobModal({
         </div>
 
         <div className="p-4 space-y-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide muted">Details</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide muted">{t("archive.truck.sectionDetails", lang)}</div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {/* FLAGGED: `f.label` — and `linesTitle` / `linesEmpty` /
+                `l.label` / `l.sub` / `total` below — are DISPLAY strings built
+                SERVER-SIDE by getMaintenanceJobDetail in ./actions.ts. The
+                brief scopes that file's `error:` strings out of this batch; it
+                does not obviously cover display text. Left English pending a
+                ruling — see the report. */}
             {detail.fields.map((f) => (
               <TruckField key={f.label} label={f.label} value={f.value} />
             ))}
@@ -992,13 +1057,13 @@ function MaintenanceJobModal({
             <Table>
               <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                 <tr>
-                  <TH>{detail.kind === "in_house" ? "Part" : "Repairer"}</TH>
-                  <TH>{detail.kind === "in_house" ? "Qty drawn" : "Subtotal + VAT"}</TH>
+                  <TH>{detail.kind === "in_house" ? t("common.part", lang) : t("archive.truck.thRepairer", lang)}</TH>
+                  <TH>{detail.kind === "in_house" ? t("archive.truck.thQtyDrawn", lang) : t("archive.truck.thSubtotalVat", lang)}</TH>
                   {/* On-hand pair — in-house only; an outsourced job consumes
                       no inventory, so the column would be empty for every row
                       rather than merely blank for some. */}
-                  {detail.kind === "in_house" && <TH>On hand</TH>}
-                  <TH>{detail.kind === "in_house" ? "Value" : "Total"}</TH>
+                  {detail.kind === "in_house" && <TH>{t("archive.truck.thOnHand", lang)}</TH>}
+                  <TH>{detail.kind === "in_house" ? t("archive.truck.thValue", lang) : t("archive.thTotal", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -1018,7 +1083,7 @@ function MaintenanceJobModal({
                             <span className="font-medium">{l.onHandAfter}</span>
                           </span>
                         ) : (
-                          <span className="muted" title="No matching stock movement found for this work order">—</span>
+                          <span className="muted" title={t("archive.truck.noStockMovement", lang)}>—</span>
                         )}
                       </TD>
                     )}
@@ -1035,7 +1100,7 @@ function MaintenanceJobModal({
 
           {detail.note && (
             <>
-              <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">Note</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide muted pt-1">{t("common.note", lang)}</div>
               <p className="text-sm whitespace-pre-wrap">{detail.note}</p>
             </>
           )}
@@ -1045,7 +1110,7 @@ function MaintenanceJobModal({
           className="flex justify-end gap-2 p-4 border-t"
           style={{ borderColor: "rgb(var(--border))" }}
         >
-          <Btn variant="outline" onClick={onClose}>Close</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("archive.close", lang)}</Btn>
         </div>
       </div>
     </div>

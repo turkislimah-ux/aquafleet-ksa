@@ -12,6 +12,7 @@
 // stay deterministic — identical convention to lib/leave.ts.
 
 import type { ArchiveDocument, ArchiveDocumentGroup, ArchiveDocumentType } from "./db-types";
+import { t, fill, plural, type Lang } from "./i18n";
 
 // Matches preview/'s own archive vocabulary (archive.js: "expired" /
 // "expiring_soon" / "valid"), plus "none" for a document with no expiry
@@ -119,17 +120,35 @@ export const ARCHIVE_STATUS_PILL: Record<ArchiveDocStatus, string> = {
 // dropping either one makes the pill answer only half the question.
 // Expiring-soon stays bare ("12d left") because its amber tone is already
 // saying "not simply valid" and a second word would just crowd the pill.
+//
+// BILINGUAL (Phase 3). `lang` is a required parameter rather than a hook read,
+// for the same reason `today` is: this is a pure function every caller reaches
+// from a different render context, and a module that reached for the language
+// itself would be a second source of truth for it. Every caller already has
+// `lang` in hand from useApp(); a caller that memoises this output must carry
+// `lang` in its dependency list, or the pill keeps the previous language's
+// words after a switch.
+//
+// The day COUNTS stay Latin digits in both languages — app-formatted numbers
+// are Latin throughout this app, so `12d left` and `متبقٍ 12 يومًا` quote the
+// same glyphs.
 export function archiveStatusLabel(
   s: ArchiveDocStatus,
   expiryIso: string | null,
   today: string,
+  lang: Lang,
 ): string {
-  if (s === "none") return "No expiry";
+  if (s === "none") return t("archive.status.noExpiry", lang);
   const days = expiryIso ? daysUntil(expiryIso, today) : 0;
-  if (s === "expired") return `Expired · ${Math.abs(days)}d ago`;
-  if (days === 0) return "Expires today";
-  if (s === "valid") return `Valid · ${days}d left`;
-  return `${days}d left`;
+  if (s === "expired") {
+    const ago = Math.abs(days);
+    return fill(t(`archive.status.expiredAgo.${plural(ago)}`, lang), { n: ago });
+  }
+  if (days === 0) return t("archive.status.expiresToday", lang);
+  if (s === "valid") {
+    return fill(t(`archive.status.validLeft.${plural(days)}`, lang), { n: days });
+  }
+  return fill(t(`archive.status.daysLeft.${plural(days)}`, lang), { n: days });
 }
 
 // Colors a group can be tagged with (the "coloring option" at group create).
@@ -304,12 +323,27 @@ export function groupExpectsLink(
   );
 }
 
-export const PERSON_ID_LABEL: Record<PersonIdField, string> = {
-  driver_iqama: "Iqama ID",
-  staff_iqama: "Iqama ID",
-  driver_license: "License ID",
-  truck_registration: "Vehicle Registration",
-};
+// THE label a user reads for a linked field. Keyed off PersonIdField, the
+// closed union resolved by linkedFieldFor() — never off the linked_*_field
+// COLUMN VALUES that union is resolved from ('iqama_number' and friends). Those
+// are internal mapping keys; they name a database column and never reach a
+// screen, so they are not translated and must not become a display source.
+//
+// Was a plain Record<PersonIdField, string> before Phase 3. It is a function
+// now because the answer depends on `lang`, and a frozen object could only have
+// held one language's copy.
+export function personIdLabel(field: PersonIdField, lang: Lang): string {
+  return t(`archive.personId.${field}`, lang);
+}
+
+// Same four labels, mid-sentence. A SEPARATE lookup rather than
+// personIdLabel(...).toLowerCase(): Arabic has no letter case, so lowercasing
+// the Arabic is a silent no-op, and case-folding a localized string is the
+// "operate on the label instead of the value" mistake wearing a different hat.
+// The English entries are pre-lowercased, so the rendered English is unchanged.
+export function personIdLabelLower(field: PersonIdField, lang: Lang): string {
+  return t(`archive.personIdLower.${field}`, lang);
+}
 
 // The person's own number + expiry for a linked field. ONE reader, so the
 // matrix cell, the document popup and the status pill can never disagree

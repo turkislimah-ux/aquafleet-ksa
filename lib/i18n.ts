@@ -142,6 +142,13 @@ export const dict = {
     tryAgain: { en: "Try again", ar: "إعادة المحاولة" },
     saved: { en: "Saved", ar: "تم الحفظ" },
     note: { en: "Note", ar: "ملاحظة" },
+    // The in-flight label on a button that is WRITING AN EVENT — not saving an
+    // edit, which is `common.saving`. Lived at `consumption.shared.recording`
+    // and was already documented there as covering the Archive balance-return
+    // popup; Batch 8 made that reader real, and a THIRD file in a SECOND route
+    // is what `common` is for. Moving it beat the alternatives: a duplicate
+    // leaf, or `app/archive/` importing a `consumption.*` key.
+    recording: { en: "Recording…", ar: "جارٍ التسجيل…" },
     // Added in Phase 3 Batch 6, on the same test the groups above were added
     // under. `Delete` is the accessible name of an icon button in BOTH of the
     // files in this batch that have one — the expenses modal's row action and
@@ -370,6 +377,15 @@ export const dict = {
     // PaymentMode
     postpaid: { en: "Postpaid", ar: "دفع آجل" },
     prepaid: { en: "Prepaid", ar: "دفع مقدم" },
+    // CommissionMode. Added in Phase 3 Batch 8 for the archived-customer
+    // popup, which renders COMMISSION_MODE_LABELS the same way this block's
+    // other three maps are rendered. It belongs HERE and not under `archive`
+    // for the reason in this block's header: the English lives in a
+    // db-types.ts label map, and a map read from one route today is read from
+    // three tomorrow. `comm` prefix because `fixed`/`scalable` on their own
+    // would collide with the next enum that has a "fixed" member.
+    commFixed: { en: "Fixed", ar: "ثابتة" },
+    commScalable: { en: "Scalable", ar: "تصاعدية" },
     // ProjectStatus
     projActive: { en: "Active", ar: "نشط" },
     projPaused: { en: "Paused", ar: "متوقف" },
@@ -1790,9 +1806,11 @@ export const dict = {
       // The printed permit's own header renders the same two words, so the
       // document a driver carries and the approval queue name it identically.
       exitPermit: { en: "Exit permit", ar: "إذن خروج" },
-      // The in-flight label on a button that is writing an event: the approvals
-      // queue recording a decision, the return popup recording a return.
-      recording: { en: "Recording…", ar: "جارٍ التسجيل…" },
+      // `Recording…` moved to `common.recording` in Batch 8. It was always
+      // shared with the Archive balance-return popup — the note that used to
+      // sit here said so — and once that popup actually read it, the leaf was
+      // being pulled across a route boundary from a namespace named for the
+      // other route.
     },
 
     enums: {
@@ -2480,8 +2498,8 @@ export const dict = {
       },
       reasonLabel: { en: "Reason *", ar: "السبب *" },
       reasonPlaceholder: { en: "What is wrong with this one?", ar: "ما الخطأ في هذا؟" },
-      // `Recording…` is `consumption.shared.recording` — the return popup's
-      // submit button carries the same in-flight label.
+      // `Recording…` is `common.recording` — the return popup's submit button
+      // carries the same in-flight label.
       recordRejection: { en: "Record rejection", ar: "تسجيل الرفض" },
     },
 
@@ -2871,9 +2889,15 @@ export const dict = {
         en: "Permit {n} — enter what came back. Partial returns are fine.",
         ar: "إذن {n} — أدخل ما عاد. الإرجاع الجزئي مقبول.",
       },
-      // `Recording…` is NOT here — it is `consumption.shared.recording`, which
-      // this modal's submit button reads. A second copy sat here until the
-      // duplicate checker found it byte-identical and unreferenced.
+      // `Recording…` is NOT here — it is `common.recording`, which this modal's
+      // submit button reads. A second copy sat here until the duplicate checker
+      // found it byte-identical and unreferenced.
+      //
+      // NOR IS THIS LEAF THE ARCHIVE ONE. `archive.ret.submit` is also
+      // "Record return" in English and is a DIFFERENT SENTENCE: this returns
+      // PARTS to a warehouse ("تسجيل الإرجاع"), that returns a customer's MONEY
+      // ("تسجيل إعادة الرصيد"). The English collision is the whole reason to
+      // say so here.
       recordReturn: { en: "Record return", ar: "تسجيل الإرجاع" },
       labelReturnedOn: { en: "Returned on", ar: "تاريخ الإرجاع" },
       colItem: { en: "Item", ar: "الصنف" },
@@ -5447,6 +5471,1266 @@ export const dict = {
       fActive: { en: "Active", ar: "نشط" },
       addRole: { en: "+ Add custom role…", ar: "+ إضافة وظيفة مخصّصة…" },
       phNewRole: { en: "New role name", ar: "اسم الوظيفة الجديدة" },
+    },
+  },
+  // -------------------------------------------------------------------------
+  // ARCHIVE (Phase 3, Batch 8) — app/archive/** plus lib/archive.ts, which is
+  // imported by nothing outside that route and carries three user-facing label
+  // surfaces of its own (the status pill, the linked-field label, and the
+  // lowercase variant one sentence reads).
+  //
+  // NOT here, deliberately:
+  //  - archive_document_types.label_en / .label_ar are BILINGUAL IN THE DB
+  //    (Pattern B, like units / repairer_types). They render through
+  //    arText(label_en, label_ar, lang). No key, and nothing added to
+  //    SEED_GROUPS — the seed guard only understands the key/label/is_default
+  //    shape, which that table does not have.
+  //  - archive_document_groups.title / .description are USER DATA. Rendered
+  //    verbatim in both languages.
+  //  - document title, reference_no, note, issuing_entity, holder_name,
+  //    renewal note, uploaded file_name: all USER DATA, rendered verbatim.
+  // -------------------------------------------------------------------------
+  archive: {
+    title: { en: "Archive", ar: "الأرشيف" },
+    subtitle: {
+      en: "Company, staff, truck and customer documents — with expiry tracking and renewal history",
+      ar: "مستندات الشركة والموظفين والشاحنات والعملاء — مع تتبّع الانتهاء وسجل التجديد",
+    },
+
+    // The PAGE tab strip. Keyed off the PageTab value (the
+    // archive_document_groups.tab enum plus the UI-only "ledger"), never off
+    // the rendered label — the label is what changes with `lang`, the value is
+    // what the DB constrains and what setTab writes to the URL.
+    tabs: {
+      company: { en: "Company", ar: "الشركة" },
+      staff: { en: "Staff", ar: "الموظفون" },
+      truck: { en: "Truck", ar: "الشاحنات" },
+      customer: { en: "Customer", ar: "العملاء" },
+      ledger: { en: "Approvals Ledger", ar: "سجل الموافقات" },
+    },
+
+    // Page-header actions. Four separate leaves rather than one with a token,
+    // because Arabic changes more than the noun between them.
+    createGroup: { en: "Create Group", ar: "إنشاء مجموعة" },
+    createTruckGroup: { en: "Create Truck Group", ar: "إنشاء مجموعة شاحنات" },
+    createDriverGroup: { en: "Create Driver Group", ar: "إنشاء مجموعة سائقين" },
+    createStaffGroup: { en: "Create Staff Group", ar: "إنشاء مجموعة موظفين" },
+
+    // Top-of-page compliance roll-up.
+    sumExpired: { en: "Expired", ar: "منتهية" },
+    sumExpiringSoon: { en: "Expiring soon", ar: "تنتهي قريبًا" },
+    sumDocuments: { en: "Documents", ar: "المستندات" },
+
+    // Accessible names for the three pill sub-tab rows.
+    subNavStaff: { en: "Staff sub-sections", ar: "الأقسام الفرعية للموظفين" },
+    subNavTruck: { en: "Truck sub-sections", ar: "الأقسام الفرعية للشاحنات" },
+    subNavCustomer: { en: "Customer sub-sections", ar: "الأقسام الفرعية للعملاء" },
+
+    emptyGroups: { en: "No document groups yet.", ar: "لا توجد مجموعات مستندات بعد." },
+    emptyGroupsHint: {
+      en: "Create a group (e.g. Commercial Registration, Insurance) then add documents to it.",
+      ar: "أنشئ مجموعة (مثل السجل التجاري أو التأمين) ثم أضف المستندات إليها.",
+    },
+    emptyDocs: { en: "No documents in this group yet.", ar: "لا توجد مستندات في هذه المجموعة بعد." },
+
+    // "{n} document(s) · warns at {d}d". TWO tokens, one fill() pass. English
+    // differs only between `one` and the rest, which is the invariant the
+    // four-bucket helper is built on; Arabic drops the numeral for one/two.
+    // {d} is an app-formatted number and stays Latin in both languages.
+    groupMeta: {
+      one: { en: "{n} document · warns at {d}d", ar: "مستند واحد · تنبيه قبل {d} يوم" },
+      two: { en: "{n} documents · warns at {d}d", ar: "مستندان · تنبيه قبل {d} يوم" },
+      few: { en: "{n} documents · warns at {d}d", ar: "{n} مستندات · تنبيه قبل {d} يوم" },
+      many: { en: "{n} documents · warns at {d}d", ar: "{n} مستندًا · تنبيه قبل {d} يوم" },
+    },
+
+    // Company-tab document table.
+    thDocument: { en: "Document", ar: "المستند" },
+    thReference: { en: "Reference", ar: "المرجع" },
+    thIssued: { en: "Issued", ar: "الإصدار" },
+    thExpires: { en: "Expires", ar: "الانتهاء" },
+    thFiles: { en: "Files", ar: "الملفات" },
+
+    addDocument: { en: "Add Document", ar: "إضافة مستند" },
+    renew: { en: "Renew", ar: "تجديد" },
+    // Read by the truck tab's soft-deleted list and its detail popup, and by
+    // the staff and customer tabs' equivalents. `drivers.restore` is that
+    // route's own copy and stays there — this batch does not touch it.
+    restore: { en: "Restore", ar: "استعادة" },
+    // A money figure with its unit. The FIGURE is app-formatted (formatAmount)
+    // and stays Latin in both languages; only the currency mark moves. One
+    // leaf rather than a `common` promotion: the suffixed form appears in this
+    // route's tables only, and every other namespace spells it inside a field
+    // label like "Amount (SAR)".
+    sarAmount: { en: "{n} SAR", ar: "{n} ر.س" },
+
+    // ── PROMOTED OUT OF A SUB-NAMESPACE ─────────────────────────────────────
+    // Every leaf below started life inside `archive.truck` or
+    // `archive.customer` and moved up when a second file in this batch
+    // rendered the identical English. Same test the `common` promotions use,
+    // applied one level down: a leaf earns the route root by being read from
+    // more than one of the route's files.
+    //
+    // `subTabDeleted` is the third pill in ALL THREE sub-tab strips (truck,
+    // staff, customer); `recordsKept` is the caption under the Terminated
+    // Trucks, Terminated Drivers, Terminated Management Staff and Archived
+    // Customers headings alike, word for word. Keeping four copies would mean
+    // a reword had to find every one of them.
+    subTabDeleted: { en: "Soft-deleted", ar: "محذوفة/أرشيف" },
+    recordsKept: {
+      one: { en: "{n} record · kept, never deleted", ar: "سجل واحد · محفوظ ولا يُحذف أبدًا" },
+      two: { en: "{n} records · kept, never deleted", ar: "سجلان · محفوظان ولا يُحذفان أبدًا" },
+      few: { en: "{n} records · kept, never deleted", ar: "{n} سجلات · محفوظة ولا تُحذف أبدًا" },
+      many: { en: "{n} records · kept, never deleted", ar: "{n} سجلًا · محفوظة ولا تُحذف أبدًا" },
+    },
+    thReason: { en: "Reason", ar: "السبب" },
+    thTotal: { en: "Total", ar: "الإجمالي" },
+
+    // The compliance MATRIX vocabulary, shared verbatim by the truck matrix
+    // and both people matrices. `expiredCount` counts DOCUMENTS on every one
+    // of them — which is why it promotes while `missingCount` does not: that
+    // one counts trucks in one tab and people in the other, and Arabic will
+    // not carry both.
+    expiredCount: {
+      one: { en: "{n} expired", ar: "مستند منتهٍ" },
+      two: { en: "{n} expired", ar: "مستندان منتهيان" },
+      few: { en: "{n} expired", ar: "{n} مستندات منتهية" },
+      many: { en: "{n} expired", ar: "{n} مستندًا منتهيًا" },
+    },
+    thReferenceId: { en: "Reference / ID no.", ar: "المرجع / رقم الهوية" },
+    // A subject row with no document at all. A ROW STATE, not an
+    // ArchiveDocStatus — same separation lib/archive.ts keeps.
+    missingPill: { en: "Missing", ar: "ناقص" },
+    // Sub-line under a subject that holds more than one document in a group.
+    docsCount: {
+      one: { en: "{n} documents", ar: "مستند واحد" },
+      two: { en: "{n} documents", ar: "مستندان" },
+      few: { en: "{n} documents", ar: "{n} مستندات" },
+      many: { en: "{n} documents", ar: "{n} مستندًا" },
+    },
+    // The archived-documents section in both terminated-subject popups.
+    // `noArchivedDocs` stays per-tab: "for this truck" and "for this person"
+    // are different English, so there is nothing to share.
+    archivedDocsCount: {
+      one: { en: "Archived documents ({n})", ar: "المستندات المؤرشفة (مستند واحد)" },
+      two: { en: "Archived documents ({n})", ar: "المستندات المؤرشفة (مستندان)" },
+      few: { en: "Archived documents ({n})", ar: "المستندات المؤرشفة ({n} مستندات)" },
+      many: { en: "Archived documents ({n})", ar: "المستندات المؤرشفة ({n} مستندًا)" },
+    },
+    thGroup: { en: "Group", ar: "المجموعة" },
+
+    // Person fields shared by the archived-customer and terminated-person
+    // popups. Both read the same three columns off different tables.
+    fNameAr: { en: "Name (Arabic)", ar: "الاسم (بالعربية)" },
+    fPhone: { en: "Phone", ar: "الهاتف" },
+    fEmail: { en: "Email", ar: "البريد الإلكتروني" },
+
+    editGroupTip: { en: "Edit group", ar: "تعديل المجموعة" },
+    deleteGroupTip: { en: "Delete group", ar: "حذف المجموعة" },
+    editDocTip: { en: "Edit document", ar: "تعديل المستند" },
+    deleteDocTip: { en: "Delete document", ar: "حذف المستند" },
+    renewalHistoryTip: { en: "Renewal history", ar: "سجل التجديد" },
+
+    previousVersion: { en: "Previous version", ar: "نسخة سابقة" },
+    supersededOn: { en: "superseded {date}", ar: "استُبدلت في {date}" },
+    superseded: { en: "Superseded", ar: "مستبدَلة" },
+
+    // The DERIVED expiry status pill (lib/archive.ts). The status VALUE comes
+    // from docStatus(); only the wording is looked up here, so the row tint,
+    // the summary count and the pill can still never disagree.
+    // Day counts are app-formatted numbers and stay Latin in both languages.
+    status: {
+      noExpiry: { en: "No expiry", ar: "بدون تاريخ انتهاء" },
+      expiresToday: { en: "Expires today", ar: "تنتهي اليوم" },
+      expiredAgo: {
+        one: { en: "Expired · {n}d ago", ar: "منتهية · منذ يوم" },
+        two: { en: "Expired · {n}d ago", ar: "منتهية · منذ يومين" },
+        few: { en: "Expired · {n}d ago", ar: "منتهية · منذ {n} أيام" },
+        many: { en: "Expired · {n}d ago", ar: "منتهية · منذ {n} يومًا" },
+      },
+      validLeft: {
+        one: { en: "Valid · {n}d left", ar: "سارية · يوم واحد متبقٍ" },
+        two: { en: "Valid · {n}d left", ar: "سارية · يومان متبقيان" },
+        few: { en: "Valid · {n}d left", ar: "سارية · {n} أيام متبقية" },
+        many: { en: "Valid · {n}d left", ar: "سارية · {n} يومًا متبقيًا" },
+      },
+      daysLeft: {
+        one: { en: "{n}d left", ar: "يوم واحد متبقٍ" },
+        two: { en: "{n}d left", ar: "يومان متبقيان" },
+        few: { en: "{n}d left", ar: "{n} أيام متبقية" },
+        many: { en: "{n}d left", ar: "{n} يومًا متبقيًا" },
+      },
+    },
+
+    // THE LINKED FIELD LABEL. Keyed off PersonIdField — a CLOSED TS union
+    // resolved in code (lib/archive.ts linkedFieldFor) — and NOT off the
+    // archive_document_types.linked_*_field column values it is resolved from.
+    // Those raw values ('iqama_number', 'license_number',
+    // 'vehicle_registration') are internal mapping keys and never reach a
+    // screen; this curated label is what a user actually reads.
+    personId: {
+      driver_iqama: { en: "Iqama ID", ar: "رقم الإقامة" },
+      staff_iqama: { en: "Iqama ID", ar: "رقم الإقامة" },
+      driver_license: { en: "License ID", ar: "رقم الرخصة" },
+      truck_registration: { en: "Vehicle Registration", ar: "استمارة المركبة" },
+    },
+    // The same four labels mid-sentence. A separate group, not `.toLowerCase()`
+    // on the one above: Arabic has no letter case, so lowercasing a translated
+    // label is a no-op that silently leaves the English-only intent behind —
+    // and calling toLowerCase() on a LOCALIZED string is exactly the
+    // "discriminate on the label" mistake in another costume. English here is
+    // pre-lowercased so the rendered English is byte-identical to what
+    // PERSON_ID_LABEL[f].toLowerCase() produced.
+    personIdLower: {
+      driver_iqama: { en: "iqama id", ar: "رقم الإقامة" },
+      staff_iqama: { en: "iqama id", ar: "رقم الإقامة" },
+      driver_license: { en: "license id", ar: "رقم الرخصة" },
+      truck_registration: { en: "vehicle registration", ar: "استمارة المركبة" },
+    },
+
+    // confirm() / alert() bodies. Plain text — no formatting component can
+    // reach inside a native dialog, so every figure is pre-formatted by the
+    // caller and interpolated as a token.
+    confirmDeleteGroup: {
+      one: {
+        en: "Delete \"{title}\" and its {n} document? This cannot be undone.",
+        ar: "حذف «{title}» والمستند الذي بداخلها؟ لا يمكن التراجع عن هذا.",
+      },
+      two: {
+        en: "Delete \"{title}\" and its {n} documents? This cannot be undone.",
+        ar: "حذف «{title}» والمستندين اللذين بداخلها؟ لا يمكن التراجع عن هذا.",
+      },
+      few: {
+        en: "Delete \"{title}\" and its {n} documents? This cannot be undone.",
+        ar: "حذف «{title}» و{n} مستندات بداخلها؟ لا يمكن التراجع عن هذا.",
+      },
+      many: {
+        en: "Delete \"{title}\" and its {n} documents? This cannot be undone.",
+        ar: "حذف «{title}» و{n} مستندًا بداخلها؟ لا يمكن التراجع عن هذا.",
+      },
+    },
+    confirmDeleteGroupEmpty: {
+      en: "Delete \"{title}\"? This cannot be undone.",
+      ar: "حذف «{title}»؟ لا يمكن التراجع عن هذا.",
+    },
+    confirmDeleteDoc: {
+      en: "Permanently delete \"{title}\", its files and its renewal history? This cannot be undone.",
+      ar: "حذف «{title}» وملفاته وسجل تجديده نهائيًا؟ لا يمكن التراجع عن هذا.",
+    },
+    // Drivers and management staff share ONE English sentence, so they share
+    // one leaf rather than two byte-identical ones.
+    confirmRestorePerson: {
+      en: "Restore {name} to the active roster?",
+      ar: "استعادة {name} إلى القائمة النشطة؟",
+    },
+    confirmRestoreTruck: {
+      en: "Restore {plate} to the active fleet? Its termination reason, price and released date will be cleared.",
+      ar: "استعادة {plate} إلى الأسطول النشط؟ سيُمسح سبب الإيقاف والسعر وتاريخ الإفراج.",
+    },
+    // Restoring a customer is ASSEMBLED from a base line plus at most two
+    // consequence lines — is_written_off and balance_returned are independent
+    // and one customer can carry both. Each line is a whole sentence, not a
+    // fragment spliced onto another.
+    restoreCustomerAsk: { en: "Restore {name}?", ar: "استعادة {name}؟" },
+    restoreCustomerBoth: {
+      en: "The customer and its project both come back to active.",
+      ar: "سيعود العميل ومشروعه معًا إلى الحالة النشطة.",
+    },
+    restoreCustomerWriteOff: {
+      en: "THIS UN-FORGIVES THEIR DEBT. The {amount} write-off is reversed and they owe it again. The write-off record is kept and marked reversed, not deleted.",
+      ar: "هذا يُلغي إعفاء الدين. سيُعكس الإعفاء البالغ {amount} ويصبح مستحقًا عليه مرة أخرى. يُحفظ سجل الإعفاء ويُوسم بأنه معكوس، ولا يُحذف.",
+    },
+    restoreCustomerWriteOffNoAmount: {
+      en: "THIS UN-FORGIVES THEIR DEBT. The write-off is reversed and the amount becomes owed again. The write-off record is kept and marked reversed, not deleted.",
+      ar: "هذا يُلغي إعفاء الدين. سيُعكس الإعفاء ويصبح المبلغ مستحقًا مرة أخرى. يُحفظ سجل الإعفاء ويُوسم بأنه معكوس، ولا يُحذف.",
+    },
+    restoreCustomerRefunded: {
+      en: "Their prepaid balance was already refunded, so they return with no spendable credit. No money moves either way.",
+      ar: "سبق أن رُدّ رصيده المدفوع مسبقًا، لذلك يعود بلا رصيد قابل للصرف. لا تتحرك أي أموال في أي اتجاه.",
+    },
+
+    errOpenFile: { en: "Could not open file.", ar: "تعذّر فتح الملف." },
+
+    // -----------------------------------------------------------------------
+    // TRUCK TAB — the compliance matrix, maintenance history, terminated
+    // trucks. Its own sub-namespace because almost none of it is shared: a
+    // truck tab counts TRUCKS where the company tab counts documents, and the
+    // two count sentences inflect differently in Arabic.
+    // -----------------------------------------------------------------------
+    truck: {
+      // The segmented sub-tab control. Keyed off the TruckSubTab value, never
+      // off the label — the value is what the picker calls onChange with.
+      // The third pill reads `archive.subTabDeleted`: all three strips have it.
+      subTabs: {
+        documents: { en: "Documents", ar: "المستندات" },
+        maintenance: { en: "Maintenance History", ar: "سجل الصيانة" },
+      },
+
+      emptyGroups: {
+        en: "No truck document groups yet.",
+        ar: "لا توجد مجموعات مستندات شاحنات بعد.",
+      },
+      emptyGroupsHint: {
+        en: "Create a group (e.g. Registration, Insurance, Inspection) — every truck then gets a row in it automatically.",
+        ar: "أنشئ مجموعة (مثل الاستمارة أو التأمين أو الفحص) — عندها تحصل كل شاحنة على صف فيها تلقائيًا.",
+      },
+      emptyTrucks: {
+        en: "No active trucks to track documents for.",
+        ar: "لا توجد شاحنات نشطة لتتبّع مستنداتها.",
+      },
+
+      // "{n} truck(s) · warns at {d}d". The document-type prefix that can sit
+      // in front of it is NOT part of this string — it comes from
+      // archive_document_types (Pattern B) and is rendered through arText by
+      // the caller, so no type vocabulary is keyed here.
+      groupMeta: {
+        one: { en: "{n} truck · warns at {d}d", ar: "شاحنة واحدة · تنبيه قبل {d} يوم" },
+        two: { en: "{n} trucks · warns at {d}d", ar: "شاحنتان · تنبيه قبل {d} يوم" },
+        few: { en: "{n} trucks · warns at {d}d", ar: "{n} شاحنات · تنبيه قبل {d} يوم" },
+        many: { en: "{n} trucks · warns at {d}d", ar: "{n} شاحنة · تنبيه قبل {d} يوم" },
+      },
+
+      // The two header count pills. English is invariant across the buckets —
+      // it never names the noun — but Arabic cannot count without naming it,
+      // and the two pills count DIFFERENT things: `missing` counts trucks with
+      // no document in this group (feminine), `expired` counts documents
+      // (masculine). One shared leaf would have got one of them wrong.
+      missingCount: {
+        one: { en: "{n} missing", ar: "شاحنة واحدة ناقصة" },
+        two: { en: "{n} missing", ar: "شاحنتان ناقصتان" },
+        few: { en: "{n} missing", ar: "{n} شاحنات ناقصة" },
+        many: { en: "{n} missing", ar: "{n} شاحنة ناقصة" },
+      },
+      // The expired counter reads `archive.expiredCount`: it counts DOCUMENTS
+      // here and in both staff matrices, so it promoted to the route root.
+
+      // Matrix table. Only the subject column is the truck tab's own — the
+      // reference header is `archive.thReferenceId`, `Issued`, `Expires` and
+      // `Files` come from the shared archive headers, and `Note` / `Status`
+      // from `common`.
+      thTruck: { en: "Truck", ar: "الشاحنة" },
+
+      // The Missing pill and the multi-document sub-line are
+      // `archive.missingPill` and `archive.docsCount` — the staff matrices
+      // render both, word for word.
+      addAnotherFor: {
+        en: "Add another document for {plate}",
+        ar: "إضافة مستند آخر للوحة {plate}",
+      },
+
+      // ---- Maintenance sub-tab (READ-ONLY over work_orders + outsourced_jobs)
+      maintSubtitle: {
+        en: "Read-only — in-house work orders and outsourced jobs, newest first.",
+        ar: "للعرض فقط — أوامر العمل الداخلية والأعمال الخارجية، الأحدث أولًا.",
+      },
+      allTrucks: { en: "All trucks", ar: "كل الشاحنات" },
+      maintEmpty: {
+        en: "No maintenance history for this selection.",
+        ar: "لا يوجد سجل صيانة لهذا التحديد.",
+      },
+      thRef: { en: "Ref", ar: "المرجع" },
+      thJob: { en: "Job", ar: "العمل" },
+      thTrack: { en: "Track", ar: "المسار" },
+      thClosed: { en: "Closed", ar: "تاريخ الإغلاق" },
+      thPartsCost: { en: "Parts cost", ar: "تكلفة القطع" },
+      // The in-house / outsourced track. Keyed off the row's `kind`, which is
+      // set in code from WHICH FEED the row came out of — never off the pill's
+      // wording.
+      kind: {
+        in_house: { en: "In-house", ar: "داخلي" },
+        outsourced: { en: "Outsourced", ar: "خارجي" },
+      },
+
+      // ---- Soft-deleted sub-tab
+      terminatedTitle: { en: "Terminated Trucks", ar: "الشاحنات الموقوفة" },
+      // The caption under that heading is `archive.recordsKept` — the archived
+      // customers list says the same sentence about its own rows.
+      terminatedEmpty: { en: "No terminated trucks.", ar: "لا توجد شاحنات موقوفة." },
+      thPrice: { en: "Price", ar: "السعر" },
+      thReleased: { en: "Released", ar: "تاريخ الإفراج" },
+      thTerminatedOn: { en: "Terminated on", ar: "تاريخ الإيقاف" },
+      // trucks.termination_reason — a fixed two-value enum. Keyed off the
+      // VALUE the row carries, which is also what the restore RPC clears.
+      reason: {
+        sold: { en: "Sold", ar: "مُباعة" },
+        total_loss: { en: "Total loss", ar: "خسارة كلية" },
+      },
+
+      // ---- Terminated-truck detail popup
+      detailSubtitle: {
+        en: "Terminated truck · record kept, never deleted",
+        ar: "شاحنة موقوفة · السجل محفوظ ولا يُحذف أبدًا",
+      },
+      sectionVehicle: { en: "Vehicle", ar: "المركبة" },
+      fModel: { en: "Model", ar: "الطراز" },
+      fYear: { en: "Year", ar: "سنة الصنع" },
+      fCapacity: { en: "Capacity (m³)", ar: "السعة (م³)" },
+      fVin: { en: "VIN", ar: "رقم الهيكل" },
+      fRegistrationExpiry: { en: "Registration expiry", ar: "انتهاء الاستمارة" },
+      fOdometer: { en: "Odometer (km)", ar: "العداد (كم)" },
+      sectionTermination: { en: "Termination", ar: "الإيقاف" },
+      fJobCount: { en: "Maintenance jobs on record", ar: "أعمال الصيانة المسجّلة" },
+      // The section heading is `archive.archivedDocsCount` and the Group
+      // column header `archive.thGroup` — both shared with the
+      // terminated-person popup. Only the empty line stays here: "for this
+      // truck" and "for this person" are different sentences.
+      noArchivedDocs: {
+        en: "No archived documents for this truck.",
+        ar: "لا توجد مستندات مؤرشفة لهذه الشاحنة.",
+      },
+
+      // ---- Maintenance-job detail popup
+      // Same two `kind` values as the track pill above, spelled out as a
+      // heading rather than a badge.
+      jobKind: {
+        in_house: { en: "In-house work order", ar: "أمر عمل داخلي" },
+        outsourced: { en: "Outsourced job", ar: "عمل خارجي" },
+      },
+      sectionDetails: { en: "Details", ar: "التفاصيل" },
+      thRepairer: { en: "Repairer", ar: "الورشة" },
+      thQtyDrawn: { en: "Qty drawn", ar: "الكمية المسحوبة" },
+      thSubtotalVat: { en: "Subtotal + VAT", ar: "الإجمالي الفرعي + الضريبة" },
+      thOnHand: { en: "On hand", ar: "المتوفر" },
+      thValue: { en: "Value", ar: "القيمة" },
+      noStockMovement: {
+        en: "No matching stock movement found for this work order",
+        ar: "لم يُعثر على حركة مخزون مطابقة لأمر العمل هذا",
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // STAFF TAB — TWO compliance matrices (drivers, management staff) over one
+    // renderer, plus the terminated-person record.
+    //
+    // ALMOST EVERY COUNT AND SENTENCE HERE IS SPLIT PER KIND, and that is not
+    // duplication for its own sake. English gets away with one sentence and a
+    // `{kind === "driver" ? … : …}` splice because only the noun changes;
+    // Arabic changes the noun, its number, its gender and the adjective that
+    // agrees with it. `سائقان ناقصان` and `موظفان ناقصان` are not one string
+    // with a hole in it. The `.driver` / `.staff` sub-key is read off the
+    // renderer's `kind` parameter — a closed TS union, set from WHICH TABLE
+    // the population came out of, never from the rendered word.
+    //
+    // The driver side of `subjectLabel` is `common.driver`, so only the staff
+    // half needs a leaf here.
+    // -----------------------------------------------------------------------
+    staff: {
+      // Keyed off the StaffSubTab value. The fourth pill is
+      // `archive.subTabDeleted`, shared by all three strips.
+      subTabs: {
+        drivers: { en: "Drivers", ar: "السائقون" },
+        management: { en: "Management Staff", ar: "الموظفون الإداريون" },
+        commissions: { en: "Commission History", ar: "سجل العمولات" },
+      },
+      subjectStaff: { en: "Staff member", ar: "الموظف" },
+
+      // WHOLE SENTENCES PER KIND, not a shared frame with the subject spliced
+      // in. The English hint interpolated `subjectLabel.toLowerCase()`, which
+      // is the personIdLower trap in another costume: Arabic has no letter
+      // case, so lowercasing a translated label silently does nothing and
+      // leaves an English-only intent behind. The English text below is
+      // byte-identical to what the splice produced.
+      emptyGroups: {
+        driver: { en: "No driver document groups yet.", ar: "لا توجد مجموعات مستندات للسائقين بعد." },
+        staff: {
+          en: "No management staff document groups yet.",
+          ar: "لا توجد مجموعات مستندات للموظفين الإداريين بعد.",
+        },
+      },
+      emptyGroupsHint: {
+        driver: {
+          en: "Create a group (e.g. Driving Licence, Iqama, Work Permit) — every driver then gets a row in it automatically.",
+          ar: "أنشئ مجموعة (مثل رخصة القيادة أو الإقامة أو رخصة العمل) — وسيحصل كل سائق على صف فيها تلقائيًا.",
+        },
+        staff: {
+          en: "Create a group (e.g. Iqama, Employment Contract) — every staff member then gets a row in it automatically.",
+          ar: "أنشئ مجموعة (مثل الإقامة أو عقد العمل) — وسيحصل كل موظف على صف فيها تلقائيًا.",
+        },
+      },
+      emptyPeople: {
+        driver: { en: "No active drivers to track documents for.", ar: "لا يوجد سائقون نشطون لتتبّع مستنداتهم." },
+        staff: {
+          en: "No active management staff to track documents for.",
+          ar: "لا يوجد موظفون إداريون نشطون لتتبّع مستنداتهم.",
+        },
+      },
+
+      // "{n} driver(s) · warns at {d}d". Two tokens, one fill() pass; {d} is
+      // an app-formatted number and stays Latin in both languages.
+      //
+      // THE STAFF PLURAL READS "staffs" AND THAT IS DELIBERATE. The English it
+      // replaces was `{kind === "driver" ? "driver" : "staff"}` followed by a
+      // bare `{n === 1 ? "" : "s"}`, so the live page has always rendered
+      // "5 staffs". English output is byte-identical in this batch, which
+      // means the wart is preserved, not corrected — fixing it is an English
+      // copy change and belongs in its own commit. The Arabic is simply
+      // correct, because nothing forces it to copy the mistake.
+      peopleMeta: {
+        driver: {
+          one: { en: "{n} driver · warns at {d}d", ar: "سائق واحد · تنبيه قبل {d} يوم" },
+          two: { en: "{n} drivers · warns at {d}d", ar: "سائقان · تنبيه قبل {d} يوم" },
+          few: { en: "{n} drivers · warns at {d}d", ar: "{n} سائقين · تنبيه قبل {d} يوم" },
+          many: { en: "{n} drivers · warns at {d}d", ar: "{n} سائقًا · تنبيه قبل {d} يوم" },
+        },
+        staff: {
+          one: { en: "{n} staff · warns at {d}d", ar: "موظف واحد · تنبيه قبل {d} يوم" },
+          two: { en: "{n} staffs · warns at {d}d", ar: "موظفان · تنبيه قبل {d} يوم" },
+          few: { en: "{n} staffs · warns at {d}d", ar: "{n} موظفين · تنبيه قبل {d} يوم" },
+          many: { en: "{n} staffs · warns at {d}d", ar: "{n} موظفًا · تنبيه قبل {d} يوم" },
+        },
+      },
+
+      // The gap counter. Counts PEOPLE missing the document, which is why it
+      // could not join `archive.expiredCount` at the route root: that one
+      // counts documents, and the truck tab's own `missingCount` counts
+      // trucks. Three populations, three sets of Arabic agreement.
+      missingCount: {
+        driver: {
+          one: { en: "{n} missing", ar: "سائق واحد ناقص" },
+          two: { en: "{n} missing", ar: "سائقان ناقصان" },
+          few: { en: "{n} missing", ar: "{n} سائقين ناقصين" },
+          many: { en: "{n} missing", ar: "{n} سائقًا ناقصًا" },
+        },
+        staff: {
+          one: { en: "{n} missing", ar: "موظف واحد ناقص" },
+          two: { en: "{n} missing", ar: "موظفان ناقصان" },
+          few: { en: "{n} missing", ar: "{n} موظفين ناقصين" },
+          many: { en: "{n} missing", ar: "{n} موظفًا ناقصًا" },
+        },
+      },
+
+      // NOT `archive.truck.addAnotherFor`, even though both are "Add another
+      // document for {x}". That one names a PLATE and this one names a PERSON,
+      // and Arabic marks the difference (`للوحة` vs `لـ`).
+      addAnotherFor: {
+        en: "Add another document for {name}",
+        ar: "إضافة مستند آخر لـ{name}",
+      },
+
+      // ---- Soft-deleted sub-tab. Both captions are `archive.recordsKept`.
+      terminatedDriversTitle: { en: "Terminated Drivers", ar: "السائقون المنهية خدماتهم" },
+      terminatedDriversEmpty: { en: "No terminated drivers.", ar: "لا يوجد سائقون منهية خدماتهم." },
+      terminatedStaffTitle: { en: "Terminated Management Staff", ar: "الموظفون الإداريون المنهية خدماتهم" },
+      terminatedStaffEmpty: { en: "No terminated staff.", ar: "لا يوجد موظفون منهية خدماتهم." },
+      thRole: { en: "Role", ar: "الوظيفة" },
+      thLastWorkingDay: { en: "Last working day", ar: "آخر يوم عمل" },
+      thTerminatedOn: { en: "Terminated on", ar: "تاريخ إنهاء الخدمة" },
+
+      // ---- Terminated-person popup
+      detailSubtitle: {
+        driver: {
+          en: "Terminated driver · record kept, never deleted",
+          ar: "سائق منهية خدمته · السجل محفوظ ولا يُحذف أبدًا",
+        },
+        staff: {
+          en: "Terminated staff member · record kept, never deleted",
+          ar: "موظف منهية خدمته · السجل محفوظ ولا يُحذف أبدًا",
+        },
+      },
+      secIdentity: { en: "Identity", ar: "التعريف" },
+      secEmployment: { en: "Employment", ar: "التوظيف" },
+      // The two ID NUMBER labels are `archive.personId.*`, keyed off the same
+      // PersonIdField union the matrix uses. Only the EXPIRY labels are new.
+      fIqamaExpiry: { en: "Iqama expiry", ar: "انتهاء الإقامة" },
+      fLicenseExpiry: { en: "License expiry", ar: "انتهاء الرخصة" },
+      fHireDate: { en: "Hire date", ar: "تاريخ التعيين" },
+      fDutyHours: { en: "Duty hours", ar: "ساعات الدوام" },
+      fMonthlySalary: { en: "Monthly salary", ar: "الراتب الشهري" },
+      noArchivedDocs: {
+        en: "No archived documents for this person.",
+        ar: "لا توجد مستندات مؤرشفة لهذا الشخص.",
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // CUSTOMER TAB — the one tab that archives no DOCUMENTS at all. What it
+    // keeps is the FINANCIAL record: invoices, the balance owed back to the
+    // customer, the write-off that forced the archive, and the commission
+    // terms the dead project ran under.
+    //
+    // That makes this the accounting vocabulary of the whole route, and it is
+    // the reason the group is not folded into the company tab's: "Expires" and
+    // "Balance to return" have nothing to say to each other, and Arabic
+    // finance wording is a register of its own.
+    //
+    // EVERY FIGURE HERE IS APP-FORMATTED (formatSarExact / formatDate /
+    // formatDayKey) AND STAYS LATIN IN BOTH LANGUAGES. Only the words move.
+    // -----------------------------------------------------------------------
+    customer: {
+      // Two pills. The third strip in the route, and the third reader of
+      // `archive.subTabDeleted`.
+      subTabs: {
+        invoices: { en: "Invoices", ar: "الفواتير" },
+      },
+
+      // THE INVOICE STATUS PILL. Keyed off `invoices.status`, never off the
+      // rendered word.
+      //
+      // `salesReturn` is the deliberate mismatch: the STORED status is 'void'
+      // and the UI has always relabelled it. The key is named after the label
+      // because that is what the pill says; the call site still branches on
+      // the value, so the relabel stays a display decision in one place.
+      //
+      // The last pair is a ternary, not a lookup, because the fall-through arm
+      // catches every status that is not one of the four named — swapping it
+      // for a Record would change WHICH statuses render "In review".
+      invStatus: {
+        paid: { en: "Paid", ar: "مدفوعة" },
+        salesReturn: { en: "Sales Return", ar: "مرتجع مبيعات" },
+        unpaid: { en: "Unpaid", ar: "غير مدفوعة" },
+        draft: { en: "Draft", ar: "مسودة" },
+        inReview: { en: "In review", ar: "قيد المراجعة" },
+      },
+
+      // THE RETURN MARK — the pill that travels beside the figure.
+      // `returnedMark` is the pill's own word AND the tooltip when no date was
+      // recorded; `returnedOnTip` is the same tooltip with one. Two leaves
+      // rather than a fragment glued onto the first, because Arabic puts the
+      // date phrase where English puts " on".
+      returnedMark: { en: "Returned", ar: "أُعيد" },
+      returnedOnTip: { en: "Returned on {date}", ar: "أُعيد في {date}" },
+      toReturnMark: { en: "To return", ar: "للإعادة" },
+
+      emptyCustomers: { en: "No customers yet.", ar: "لا يوجد عملاء بعد." },
+
+      // The parentheses are part of the string in both languages — they mark
+      // an aside, and Arabic uses the same pair.
+      archivedMark: { en: "(archived)", ar: "(مؤرشف)" },
+      invoiceCount: {
+        one: { en: "{n} invoice", ar: "فاتورة واحدة" },
+        two: { en: "{n} invoices", ar: "فاتورتان" },
+        few: { en: "{n} invoices", ar: "{n} فواتير" },
+        many: { en: "{n} invoices", ar: "{n} فاتورة" },
+      },
+      // A SUFFIX, and the leading space is load-bearing: it is spliced onto
+      // the count above inside a template literal, where JSX whitespace rules
+      // do not apply and nothing would re-insert it.
+      paidSuffix: { en: " · {amount} paid", ar: " · {amount} مدفوعة" },
+      unpaidCount: {
+        one: { en: "{n} unpaid", ar: "فاتورة واحدة غير مدفوعة" },
+        two: { en: "{n} unpaid", ar: "فاتورتان غير مدفوعتين" },
+        few: { en: "{n} unpaid", ar: "{n} فواتير غير مدفوعة" },
+        many: { en: "{n} unpaid", ar: "{n} فاتورة غير مدفوعة" },
+      },
+
+      emptyInvoices: {
+        en: "No invoices for this customer yet.",
+        ar: "لا توجد فواتير لهذا العميل بعد.",
+      },
+      notYetNumbered: { en: "Not yet numbered", ar: "لم تُرقّم بعد" },
+      // Marks the date above it as the CREATED date rather than the issue
+      // date. Same leading-space rule as paidSuffix.
+      createdSuffix: { en: " · created", ar: " · أُنشئت" },
+
+      archivedTitle: { en: "Archived Customers", ar: "العملاء المؤرشفون" },
+      // Its caption is `archive.recordsKept`, shared with the truck tab.
+      archivedEmpty: { en: "No archived customers.", ar: "لا يوجد عملاء مؤرشفون." },
+
+      // Table columns. `thCustomer` is read a second time as the popup's
+      // Customer section heading — one word doing two jobs, kept as one leaf
+      // so a reword cannot land on the column and miss the heading.
+      thCustomer: { en: "Customer", ar: "العميل" },
+      thContact: { en: "Contact", ar: "جهة الاتصال" },
+      thBalanceToReturn: { en: "Balance to return", ar: "الرصيد المستحق للإعادة" },
+      thArchivedOn: { en: "Archived on", ar: "تاريخ الأرشفة" },
+
+      // The write-off caption and block. " · {amount}" is assembled in code:
+      // the separator is punctuation and the figure is app-formatted, so
+      // there is no language in it to key.
+      writtenOff: { en: "Written off", ar: "مُعفى" },
+      writtenOffOnArchive: { en: "Written off on archive", ar: "أُعفي عند الأرشفة" },
+      writeOffRestoreWarn: {
+        en: "Restoring this customer reverses the write-off — the amount above becomes owed again. The record is kept and marked reversed, not deleted.",
+        ar: "استعادة هذا العميل تعكس الإعفاء — ويصبح المبلغ أعلاه مستحقًا مرة أخرى. يُحفظ السجل ويُوسم بأنه معكوس، ولا يُحذف.",
+      },
+      fBy: { en: "By", ar: "بواسطة" },
+      fOn: { en: "On", ar: "بتاريخ" },
+
+      returnBalance: { en: "Return balance", ar: "إعادة الرصيد" },
+
+      detailSubtitle: {
+        en: "Archived customer · record kept, never deleted",
+        ar: "عميل مؤرشف · السجل محفوظ ولا يُحذف أبدًا",
+      },
+
+      // The three money stats. `collected` counts PAID invoices only and
+      // `billed` counts everything issued — the hints say which, and that is
+      // the whole reason they are hints and not tooltips.
+      statCollected: { en: "Total collected", ar: "إجمالي المحصّل" },
+      paidInvoiceCount: {
+        one: { en: "{n} paid invoice", ar: "فاتورة مدفوعة واحدة" },
+        two: { en: "{n} paid invoices", ar: "فاتورتان مدفوعتان" },
+        few: { en: "{n} paid invoices", ar: "{n} فواتير مدفوعة" },
+        many: { en: "{n} paid invoices", ar: "{n} فاتورة مدفوعة" },
+      },
+      statBilled: { en: "Total billed", ar: "إجمالي المفوتر" },
+      statBilledHint: { en: "Confirmed, paid and returned", ar: "المؤكدة والمدفوعة والمرتجعة" },
+      statOutstanding: { en: "Outstanding", ar: "المتبقي" },
+      statNeverCollected: { en: "Never collected", ar: "لم يُحصّل أبدًا" },
+      statFullySettled: { en: "Fully settled", ar: "مسدَّد بالكامل" },
+
+      balanceReturnedNote: {
+        en: "Paid back to the customer. The figure above is the amount that was returned — their spendable balance is now nil.",
+        ar: "أُعيد إلى العميل. المبلغ أعلاه هو ما جرى إرجاعه — ورصيده القابل للصرف الآن صفر.",
+      },
+      balanceOwedNote: {
+        en: "Prepaid credit left over at archive — owed to the customer.",
+        ar: "رصيد مدفوع مسبقًا متبقٍ عند الأرشفة — مستحق للعميل.",
+      },
+      // NOT the same leaf as `returnedMark` above, even though the English is
+      // the same word. That one is a PILL saying the money went back; this is
+      // a field LABEL over the amount. Arabic has to name the amount here and
+      // must not there, so one leaf would have been wrong on one side.
+      fReturned: { en: "Returned", ar: "المبلغ المُعاد" },
+      // `Method`, `Returned on` and the cash/bank_transfer pair moved to
+      // `archive.ret.*`: ReturnBalanceModal WRITES the same three columns this
+      // popup READS, so they are the balance-return surface's vocabulary, not
+      // the customer tab's.
+
+      // Name (Arabic) / Phone / Email are `archive.fNameAr` / `archive.fPhone`
+      // / `archive.fEmail` — the terminated-person popup renders the same
+      // three labels over the same three columns.
+      fCustomerSince: { en: "Customer since", ar: "عميل منذ" },
+
+      secProject: { en: "Project", ar: "المشروع" },
+      noProject: {
+        en: "No project on record for this customer — unusual, since a customer is normally archived alongside one.",
+        ar: "لا يوجد مشروع مسجّل لهذا العميل — وهذا غير معتاد، لأن العميل يُؤرشف عادةً مع مشروعه.",
+      },
+      fProjectName: { en: "Project name", ar: "اسم المشروع" },
+      fInitials: { en: "Trip-ref prefix", ar: "بادئة مرجع الرحلة" },
+      fPaymentMethod: { en: "Payment method", ar: "طريقة الدفع" },
+      fRatePerTrip: { en: "Rate per trip", ar: "السعر لكل رحلة" },
+      fWaterType: { en: "Water type", ar: "نوع المياه" },
+      // projects.water_type — a fixed pair rendered by a ternary in code, not
+      // a db-types label map, so it is keyed here rather than under `labels`.
+      waterType: {
+        potable: { en: "Potable", ar: "صالحة للشرب" },
+        non_potable: { en: "Non-potable", ar: "غير صالحة للشرب" },
+      },
+      fStartDate: { en: "Start date", ar: "تاريخ البداية" },
+      fEndDate: { en: "End date", ar: "تاريخ النهاية" },
+      fLocation: { en: "Location", ar: "الموقع" },
+      fDescription: { en: "Description", ar: "الوصف" },
+
+      // THE COMMISSION BLOCK. Resolved AT THE ARCHIVE DATE, not today — see
+      // the call site's comment — so the caption naming the date is the point
+      // of the box and not decoration.
+      secCommission: { en: "Driver commission", ar: "عمولة السائق" },
+      termsInForce: { en: "Terms in force {date}", ar: "الشروط السارية {date}" },
+      termsLoading: { en: "Loading terms…", ar: "جارٍ تحميل الشروط…" },
+      termsFailed: {
+        en: "Could not resolve the terms for this date.",
+        ar: "تعذّر تحديد الشروط لهذا التاريخ.",
+      },
+      termsNone: {
+        en: "No commission terms on record for this date.",
+        ar: "لا توجد شروط عمولة مسجّلة لهذا التاريخ.",
+      },
+      fCommissionMode: { en: "Commission mode", ar: "نوع العمولة" },
+      fCommissionPerTrip: { en: "Commission per trip", ar: "العمولة لكل رحلة" },
+      fBumpPct: { en: "Bump % per trip", ar: "نسبة الزيادة لكل رحلة" },
+
+      invoicesHeading: {
+        one: { en: "Invoices ({n})", ar: "الفواتير (فاتورة واحدة)" },
+        two: { en: "Invoices ({n})", ar: "الفواتير (فاتورتان)" },
+        few: { en: "Invoices ({n})", ar: "الفواتير ({n} فواتير)" },
+        many: { en: "Invoices ({n})", ar: "الفواتير ({n} فاتورة)" },
+      },
+      noInvoicesOnRecord: { en: "No invoices on record.", ar: "لا توجد فواتير مسجّلة." },
+      thInvoice: { en: "Invoice", ar: "الفاتورة" },
+      thDate: { en: "Date", ar: "التاريخ" },
+      open: { en: "Open", ar: "فتح" },
+    },
+
+    // -----------------------------------------------------------------------
+    // APPROVALS LEDGER TAB — completed approvals from BOTH systems, derived
+    // live. Its own sub-namespace: the vocabulary is votes, windows and locks,
+    // which nothing else in this route talks about.
+    //
+    // The tab's tab-strip label is `archive.tabs.ledger`.
+    //
+    // "APPROVED" AND "REJECTED" ARE TWO PAIRS HERE, NOT ONE. `outcome.*` is
+    // the ROW's own word — it labels a single decision (a قرار, masculine) in
+    // the pill, the vote line and the sign-off head. `filterApproved` /
+    // `filterRejected` label a SET of them: a KPI count and a filter pill, and
+    // Arabic wants the definite plural there. English collapses the two, which
+    // is exactly why splitting them has to be deliberate.
+    // -----------------------------------------------------------------------
+    ledger: {
+      // Filter pills. Keyed off LedgerSystem / LedgerOutcome / LedgerKind plus
+      // the UI-only "all" — never off the rendered label.
+      filterAllSystems: { en: "All systems", ar: "كل الأنظمة" },
+      filterAllOutcomes: { en: "All outcomes", ar: "كل النتائج" },
+      filterAllKinds: { en: "All kinds", ar: "كل الأنواع" },
+      filterApproved: { en: "Approved", ar: "المعتمدة" },
+      filterRejected: { en: "Rejected", ar: "المرفوضة" },
+
+      // The two source systems. Read as a filter label AND as the System
+      // column's cell, which is one word doing one job in both places.
+      system: {
+        consumption: { en: "Consumption", ar: "الاستهلاك" },
+        inventory: { en: "Inventory", ar: "المخزون" },
+      },
+
+      // LedgerKind, long and short. Both maps used to live in
+      // lib/approvals-ledger.ts; nothing outside this tab read either, and a
+      // pure derivation module is the wrong place for display text.
+      kind: {
+        exit_permit: { en: "Exit permit", ar: "تصريح خروج" },
+        work_order: { en: "In-house work order", ar: "أمر عمل داخلي" },
+        outsourced_job: { en: "Outsourced job", ar: "عمل خارجي" },
+        purchase_order: { en: "Purchase order", ar: "أمر شراء" },
+        stock_receipt: { en: "Stock receipt", ar: "إشعار استلام" },
+      },
+      kindShort: {
+        exit_permit: { en: "Permit", ar: "تصريح" },
+        work_order: { en: "In-house", ar: "داخلي" },
+        outsourced_job: { en: "Outsourced", ar: "خارجي" },
+        purchase_order: { en: "PO", ar: "أمر شراء" },
+        stock_receipt: { en: "Receipt", ar: "استلام" },
+      },
+
+      // KPI strip.
+      kpiCompleted: { en: "Completed", ar: "المكتملة" },
+      kpiRevotable: { en: "Still re-votable", ar: "قابلة لإعادة التصويت" },
+      lockedAsHistory: {
+        one: { en: "{n} locked as history", ar: "سجل واحد مقفل كتاريخ" },
+        two: { en: "{n} locked as history", ar: "سجلان مقفلان كتاريخ" },
+        few: { en: "{n} locked as history", ar: "{n} سجلات مقفلة كتاريخ" },
+        many: { en: "{n} locked as history", ar: "{n} سجلًا مقفلًا كتاريخ" },
+      },
+
+      // The standing explanation above the filters. {d} is LEDGER_LOCK_DAYS,
+      // an app-formatted number, and stays Latin in both languages.
+      banner: {
+        en: "Every row here is derived live from its own system — nothing is copied into this tab. Consumption decisions stay changeable for {d} days after completion, after which the database itself refuses any further vote. Inventory decisions are locked the moment they complete, because approving or rejecting one already moved stock or set a status.",
+        ar: "كل سطر هنا مُشتق مباشرة من نظامه — ولا يُنسخ شيء إلى هذا التبويب. تبقى قرارات الاستهلاك قابلة للتغيير لمدة {d} يومًا بعد اكتمالها، وبعدها ترفض قاعدة البيانات نفسها أي تصويت إضافي. أما قرارات المخزون فتُقفل لحظة اكتمالها، لأن اعتماد أحدها أو رفضه يكون قد حرّك المخزون أو غيّر الحالة فعلًا.",
+      },
+
+      emptyAll: { en: "No completed approvals yet.", ar: "لا توجد موافقات مكتملة بعد." },
+      emptyFiltered: {
+        en: "No completed approvals match these filters.",
+        ar: "لا توجد موافقات مكتملة تطابق هذه المرشّحات.",
+      },
+      emptyHint: {
+        en: "An approval lands here once it has two matching votes — from either the Consumption or the Inventory side.",
+        ar: "تصل الموافقة إلى هنا بمجرد حصولها على تصويتين متطابقين — من جانب الاستهلاك أو من جانب المخزون.",
+      },
+
+      // Table. `Reference` is `archive.thReference`.
+      thSystem: { en: "System", ar: "النظام" },
+      thKind: { en: "Kind", ar: "النوع" },
+      thWhat: { en: "What", ar: "الموضوع" },
+      thCompleted: { en: "Completed", ar: "تاريخ الاكتمال" },
+      thValue: { en: "Value", ar: "القيمة" },
+      thOutcome: { en: "Outcome", ar: "النتيجة" },
+      thWindow: { en: "Window", ar: "المهلة" },
+
+      expand: { en: "Expand", ar: "توسيع" },
+      collapse: { en: "Collapse", ar: "طي" },
+
+      outcome: {
+        approved: { en: "Approved", ar: "معتمد" },
+        rejected: { en: "Rejected", ar: "مرفوض" },
+      },
+      // The Window cell. The countdown reuses `archive.status.daysLeft` —
+      // "{n}d left" is the same sentence the expiry pills render.
+      lockedPill: { en: "Locked", ar: "مقفل" },
+      readOnly: { en: "Read-only", ar: "للعرض فقط" },
+      approve: { en: "Approve", ar: "اعتماد" },
+      reject: { en: "Reject", ar: "رفض" },
+      promptRejectReason: {
+        en: "Reason for rejecting this? (required)",
+        ar: "ما سبب الرفض؟ (مطلوب)",
+      },
+
+      // ---- Expanded sign-off sheet
+      signOffSheet: { en: "{kind} — sign-off sheet", ar: "{kind} — ورقة الاعتماد" },
+      // Head line. Two whole leaves keyed off LedgerOutcome, because Arabic
+      // puts the verb where English puts the participle.
+      decidedOn: {
+        approved: { en: "Approved on {date}", ar: "اعتُمد في {date}" },
+        rejected: { en: "Rejected on {date}", ar: "رُفض في {date}" },
+      },
+      // One vote. `by` carries the actor's email and `comment` their words —
+      // both USER DATA, interpolated, never translated.
+      voteBy: { en: "by {name}", ar: "بواسطة {name}" },
+      voteOn: { en: "on {date}", ar: "في {date}" },
+      you: { en: "(you)", ar: "(أنت)" },
+      reasonLine: { en: "Reason: {reason}", ar: "السبب: {reason}" },
+
+      // Keyed off LedgerLockReason, the union lib/approvals-ledger.ts now
+      // emits in place of four English sentences.
+      lockReason: {
+        window_elapsed: {
+          en: "Locked — more than {d} days since completion.",
+          ar: "مقفل — مضى أكثر من {d} يومًا على الاكتمال.",
+        },
+        po_status_set: {
+          en: "Locked at completion — approving a purchase order sets its status, and its own RPCs refuse any further vote.",
+          ar: "مقفل عند الاكتمال — اعتماد أمر الشراء يضبط حالته، وإجراءاته الخاصة ترفض أي تصويت إضافي.",
+        },
+        receipt_rejection_applied: {
+          en: "Locked at completion — the completing rejection already applied its stock effect, which cannot be undone by a later vote.",
+          ar: "مقفل عند الاكتمال — الرفض المُكمِّل طبّق أثره على المخزون فعلًا، ولا يمكن التراجع عنه بتصويت لاحق.",
+        },
+        receipt_left_pending: {
+          en: "Locked at completion — the receipt's own RPCs refuse any further vote once it leaves pending approval.",
+          ar: "مقفل عند الاكتمال — إجراءات الإشعار الخاصة ترفض أي تصويت إضافي بعد خروجه من انتظار الاعتماد.",
+        },
+      },
+
+      // The unlocked footnote. English reads "1 days left" at n = 1 — it has
+      // no singular arm and this batch does not add one, so all four English
+      // buckets are identical and only the Arabic inflects.
+      revotableUntil: {
+        one: {
+          en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
+          ar: "قابل لإعادة التصويت حتى {date} (يوم واحد متبقٍ). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب موافقات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+        },
+        two: {
+          en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
+          ar: "قابل لإعادة التصويت حتى {date} (يومان متبقيان). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب موافقات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+        },
+        few: {
+          en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
+          ar: "قابل لإعادة التصويت حتى {date} ({n} أيام متبقية). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب موافقات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+        },
+        many: {
+          en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
+          ar: "قابل لإعادة التصويت حتى {date} ({n} يومًا متبقيًا). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب موافقات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+        },
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // BALANCE RETURN — app/archive/ReturnBalanceModal.tsx, and the three
+    // columns of it that app/archive/ArchiveCustomerTab.tsx reads back.
+    //
+    // ITS OWN SUB-NAMESPACE BECAUSE THE SURFACE IS SHARED, NOT THE FILE. The
+    // modal WRITES customer_balance_returns and the customer popup DISPLAYS the
+    // row it wrote, so `fMethod`, `fReturnedOn` and `method.*` are read from
+    // both files — the same test that promoted `fNameAr` / `fPhone` / `fEmail`
+    // to this root. They were in `archive.customer` while it had one reader.
+    //
+    // THERE IS NO AMOUNT LEAF THAT TAKES INPUT, and there must never be one.
+    // The figure is read server-side by return_customer_balance() and frozen
+    // into the row (0139); the modal only SHOWS it. See that file's header.
+    // -----------------------------------------------------------------------
+    ret: {
+      title: { en: "Return balance", ar: "إعادة الرصيد" },
+      fMethod: { en: "Method", ar: "الطريقة" },
+      fReturnedOn: { en: "Returned on", ar: "تاريخ الإعادة" },
+      // customer_balance_returns.returned_method — a fixed pair, keyed off the
+      // stored value in the popup and off the radio's own value in the modal.
+      // Never off the rendered label.
+      method: {
+        bank_transfer: { en: "Bank transfer", ar: "تحويل بنكي" },
+        cash: { en: "Cash", ar: "نقدًا" },
+      },
+
+      // The read-only figure and its caption. `amountToReturn` is NOT
+      // `archive.customer.fReturned`: that one labels money that ALREADY went
+      // back, this one money about to. English distinguishes them by tense and
+      // Arabic by participle, so they are two leaves.
+      amountToReturn: { en: "Amount to return", ar: "المبلغ المطلوب إعادته" },
+      // The JSX writes `&apos;`, which RENDERS as a bare apostrophe — the
+      // English here is the rendered form, not the source form.
+      amountNote: {
+        en: "Taken from the customer's balance when this is saved. It is not editable here.",
+        ar: "يُؤخذ من رصيد العميل عند الحفظ. وهو غير قابل للتعديل هنا.",
+      },
+
+      // WHOLE SENTENCES PER STATE, not a stem plus a "(required)" suffix. The
+      // required arm of the photo field says "of transfer" and the optional arm
+      // does not, so there is no stem to share — and Arabic would not have
+      // agreed to one anyway. Keyed off `method === "bank_transfer"`, which is
+      // the form's STATE, never off the label.
+      fRefNumber: {
+        required: { en: "ETF Ref. number (required) *", ar: "رقم مرجع التحويل (مطلوب) *" },
+        optional: { en: "ETF Ref. number (optional)", ar: "رقم مرجع التحويل (اختياري)" },
+      },
+      refPlaceholder: { en: "e.g. bank transfer ref", ar: "مثال: مرجع التحويل البنكي" },
+      fPhoto: {
+        required: { en: "Photo of transfer (required) *", ar: "صورة التحويل (مطلوبة) *" },
+        optional: { en: "Photo (optional)", ar: "صورة (اختيارية)" },
+      },
+
+      // CLIENT-SIDE validation, so it translates. The `res.error` string beside
+      // it comes from the server action and stays English this batch.
+      validation: {
+        en: "Pick a method and a return date. A bank transfer also needs an ETF ref. number and a photo.",
+        ar: "اختر الطريقة وتاريخ الإعادة. ويحتاج التحويل البنكي أيضًا إلى رقم مرجع وصورة.",
+      },
+      // "Record return" in English here and at `consumption.modals.recordReturn`
+      // — and they are NOT one leaf. That one returns PARTS to a warehouse;
+      // this one returns a customer's MONEY. Arabic separates what English
+      // collapsed.
+      submit: { en: "Record return", ar: "تسجيل إعادة الرصيد" },
+    },
+
+    // -----------------------------------------------------------------------
+    // MODALS — group create/edit, add/edit document, renew, full details.
+    // -----------------------------------------------------------------------
+
+    // The purple pill that marks a document type whose number and expiry live
+    // on the person/truck rather than on the document.
+    linkPill: { en: "Link", ar: "مرتبط" },
+
+    // Section headings shared by the document form and the details popup.
+    section: {
+      identity: { en: "Identity", ar: "التعريف" },
+      // The JSX writes `&amp;`, which RENDERS as a bare ampersand — so the
+      // English here is the rendered form, not the source form.
+      refValidity: { en: "Reference & validity", ar: "المرجع والصلاحية" },
+      attachments: { en: "Attachments", ar: "المرفقات" },
+    },
+
+    // WHO a staff group is for. Keyed off archive_document_groups.subject_kind
+    // — a fixed enum the DB constrains — never off the label. The raw value
+    // itself is a behavioural discriminator everywhere else in this route and
+    // is never rendered; this is the one place it becomes words.
+    subjectKind: {
+      driver: { en: "Drivers", ar: "السائقون" },
+      staff: { en: "Management staff", ar: "الموظفون الإداريون" },
+    },
+    // The subject NAMED on a document form, keyed off the same kind value.
+    // Singular here, plural above: one names a population, the other names a
+    // person, and Arabic will not let one string do both.
+    subjectLabel: {
+      driver: { en: "Driver", ar: "سائق" },
+      staff: { en: "Staff member", ar: "موظف" },
+      truck: { en: "Truck", ar: "شاحنة" },
+    },
+
+    // Group colour swatch tooltips. The English is the RAW KEY, unchanged —
+    // that is what the tooltip said before this batch and byte-identity is the
+    // rule. Arabic gets the actual colour word, which is what the tooltip was
+    // always trying to be.
+    color: {
+      slate: { en: "slate", ar: "رمادي" },
+      brand: { en: "brand", ar: "لون العلامة" },
+      emerald: { en: "emerald", ar: "زمردي" },
+      amber: { en: "amber", ar: "كهرماني" },
+      violet: { en: "violet", ar: "بنفسجي" },
+      rose: { en: "rose", ar: "وردي" },
+    },
+
+    // Shared file chrome (the staged picker, the edit-mode uploader).
+    notSet: { en: "Not set", ar: "غير محدّد" },
+    removeFile: { en: "Remove file", ar: "إزالة الملف" },
+    attachFiles: { en: "Attach files", ar: "إرفاق ملفات" },
+    addFiles: { en: "Add files", ar: "إضافة ملفات" },
+    uploading: { en: "Uploading…", ar: "جارٍ الرفع…" },
+    // Size is an app-formatted number and stays Latin; only the unit moves.
+    fileSizeKb: { en: "{n} KB", ar: "{n} كيلوبايت" },
+    fileHint: {
+      en: "Images, PDF, Word, Excel and more. Max 10 MB each.",
+      ar: "صور و PDF و Word و Excel وغيرها. بحد أقصى 10 ميغابايت لكل ملف.",
+    },
+    fileHintStaged: {
+      en: "Attached when you save. Images, PDF, Word, Excel and more. Max 10 MB each.",
+      ar: "تُرفق عند الحفظ. صور و PDF و Word و Excel وغيرها. بحد أقصى 10 ميغابايت لكل ملف.",
+    },
+
+    // Field labels read by BOTH the document form and the details popup.
+    fTypeOfDocument: { en: "Type of document", ar: "نوع المستند" },
+    fIssuingEntity: { en: "Issuing entity", ar: "الجهة المُصدِرة" },
+    fHolderName: { en: "Holder name", ar: "اسم صاحب المستند" },
+    fIssueDate: { en: "Issue date", ar: "تاريخ الإصدار" },
+    fExpiryDate: { en: "Expiry date", ar: "تاريخ الانتهاء" },
+    close: { en: "Close", ar: "إغلاق" },
+
+    // The document-TYPE picker. Its rows render label_en / label_ar through
+    // arText — nothing about the type vocabulary itself is keyed here.
+    phNewType: { en: "New type name", ar: "اسم النوع الجديد" },
+    errAddType: { en: "Could not add type.", ar: "تعذّرت إضافة النوع." },
+    confirmDeleteType: {
+      en: "Delete the \"{label}\" type? This cannot be undone.",
+      ar: "حذف نوع «{label}»؟ لا يمكن التراجع عن هذا.",
+    },
+    typePicker: {
+      choose: { en: "Choose a type…", ar: "اختر نوعًا…" },
+      addNew: { en: "Add new type", ar: "إضافة نوع جديد" },
+      deleteTip: { en: "Delete \"{label}\"", ar: "حذف «{label}»" },
+      deleteAria: { en: "Delete {label}", ar: "حذف {label}" },
+    },
+
+    groupModal: {
+      titleEdit: { en: "Edit Group", ar: "تعديل المجموعة" },
+      errTitle: { en: "Group title is required.", ar: "عنوان المجموعة مطلوب." },
+      fTitle: { en: "Title *", ar: "العنوان *" },
+      fFor: { en: "This group is for *", ar: "هذه المجموعة لـ *" },
+      fType: { en: "Document type *", ar: "نوع المستند *" },
+      fDescription: { en: "Description", ar: "الوصف" },
+      phDescription: {
+        en: "Shown under the group title — optional",
+        ar: "يظهر تحت عنوان المجموعة — اختياري",
+      },
+      fColor: { en: "Color", ar: "اللون" },
+      fWarnDays: {
+        en: "Warn when expiring within (days) *",
+        ar: "التنبيه عند الانتهاء خلال (أيام) *",
+      },
+      // One key, two callers — the subject-kind block and the type block show
+      // the identical sentence once the group exists.
+      locked: {
+        en: "Cannot be changed after the group is created.",
+        ar: "لا يمكن تغييره بعد إنشاء المجموعة.",
+      },
+      hintFor: {
+        en: "Every person in this list gets a row, whether or not they have the document yet.",
+        ar: "كل شخص في هذه القائمة يحصل على صف، سواء كان لديه المستند أم لا.",
+      },
+      hintType: {
+        en: "Every document in this group is this type.",
+        ar: "كل مستند في هذه المجموعة من هذا النوع.",
+      },
+      hintWarnDays: {
+        en: "Documents in this group turn yellow inside this window, red once expired.",
+        ar: "تتحوّل مستندات هذه المجموعة إلى الأصفر داخل هذه المدة، وإلى الأحمر بعد الانتهاء.",
+      },
+      // {field} is the LOWERCASE linked-field label. English is pre-lowercased
+      // in `personIdLower` rather than case-folded here — see that group.
+      linkNote: {
+        en: "The {field} and its expiry live on the person. Documents here read those; they store no copy.",
+        ar: "يُحفظ {field} وتاريخ انتهائه على سجل الشخص. المستندات هنا تقرأ منه ولا تحتفظ بنسخة.",
+      },
+    },
+
+    docModal: {
+      titleEdit: { en: "Edit Document", ar: "تعديل المستند" },
+      // {group} is the group's own title — USER DATA, interpolated as-is.
+      titleAdd: { en: "Add Document — {group}", ar: "إضافة مستند — {group}" },
+      errTitle: { en: "Document title is required.", ar: "عنوان المستند مطلوب." },
+      errLinkUnresolved: {
+        en: "This group's type is linked to a person field, but that field could not be resolved. Not saving — the number would be stored on the document instead of the person.",
+        ar: "نوع هذه المجموعة مرتبط بحقل على سجل الشخص، لكن تعذّر تحديد ذلك الحقل. لم يتم الحفظ — كان الرقم سيُخزَّن على المستند بدلًا من الشخص.",
+      },
+      errCreate: { en: "Could not create document.", ar: "تعذّر إنشاء المستند." },
+      // {names} is a comma-joined list of uploaded FILE NAMES — user data.
+      errUploadPartial: {
+        one: {
+          en: "Document saved, but {n} file(s) failed to upload: {names}. Reopen the document to attach them.",
+          ar: "تم حفظ المستند، لكن تعذّر رفع ملف واحد: {names}. أعد فتح المستند لإرفاقه.",
+        },
+        two: {
+          en: "Document saved, but {n} file(s) failed to upload: {names}. Reopen the document to attach them.",
+          ar: "تم حفظ المستند، لكن تعذّر رفع ملفين: {names}. أعد فتح المستند لإرفاقهما.",
+        },
+        few: {
+          en: "Document saved, but {n} file(s) failed to upload: {names}. Reopen the document to attach them.",
+          ar: "تم حفظ المستند، لكن تعذّر رفع {n} ملفات: {names}. أعد فتح المستند لإرفاقها.",
+        },
+        many: {
+          en: "Document saved, but {n} file(s) failed to upload: {names}. Reopen the document to attach them.",
+          ar: "تم حفظ المستند، لكن تعذّر رفع {n} ملفًا: {names}. أعد فتح المستند لإرفاقها.",
+        },
+      },
+      fTitle: { en: "Document title *", ar: "عنوان المستند *" },
+      phIssuingEntity: { en: "e.g. Ministry of Transport", ar: "مثال: وزارة النقل" },
+      phHolderName: { en: "Whose name it is in", ar: "باسم من هو" },
+      addNewTypeOption: { en: "+ Add new type…", ar: "+ إضافة نوع جديد…" },
+      typeInherited: {
+        en: "Set by the group — every document here is this type.",
+        ar: "محدّد من المجموعة — كل مستند هنا من هذا النوع.",
+      },
+      // The LINKED number's label: the field name, an em dash, the subject's
+      // own name. {name} is USER DATA. Same shape as renewModal.fNewLinked,
+      // one word apart, so the two stay separate leaves rather than one with a
+      // spliced-in prefix.
+      fLinked: { en: "{field} — {name}", ar: "{field} — {name}" },
+      fReference: { en: "Reference / ID number", ar: "المرجع / رقم الهوية" },
+      linkedNumEditHint: {
+        en: "Saved on the subject's record. This is where it is edited.",
+        ar: "يُحفظ على سجل صاحب المستند. من هنا يتم تعديله.",
+      },
+      linkedNumLockedHint: {
+        en: "Already on the record — this document attaches to it.",
+        ar: "موجود على السجل بالفعل — هذا المستند يُرفق به.",
+      },
+      linkedExpEditHint: {
+        en: "The subject's expiry — this document's status reads it.",
+        ar: "تاريخ انتهاء صاحب المستند — حالة هذا المستند تقرأ منه.",
+      },
+      linkedExpLockedHint: { en: "Renew to move it forward.", ar: "جدِّد لتقديم التاريخ." },
+    },
+
+    renewModal: {
+      // {title} is the document's own title — USER DATA.
+      title: { en: "Renew — {title}", ar: "تجديد — {title}" },
+      historyNote: {
+        en: "The current version is kept as history — its details and files stay retrievable.",
+        ar: "تُحفظ النسخة الحالية كسجل — تفاصيلها وملفاتها تبقى قابلة للاسترجاع.",
+      },
+      historyNoteLinked: {
+        en: "The outgoing {field} and expiry are recorded there too.",
+        ar: "يُسجَّل هناك أيضًا {field} السابق وتاريخ انتهائه.",
+      },
+      fNewLinked: { en: "New {field} — {name}", ar: "{field} الجديد — {name}" },
+      fNewReference: { en: "New reference / ID number", ar: "المرجع / رقم الهوية الجديد" },
+      fNewIssue: { en: "New issue date", ar: "تاريخ الإصدار الجديد" },
+      fNewExpiry: { en: "New expiry date", ar: "تاريخ الانتهاء الجديد" },
+      fNewFiles: { en: "New version files", ar: "ملفات النسخة الجديدة" },
+      linkedNumHint: {
+        en: "Saved on the subject's record. The current value is kept in this document's history.",
+        ar: "يُحفظ على سجل صاحب المستند. تبقى القيمة الحالية ضمن سجل هذا المستند.",
+      },
+      linkedExpHint: {
+        en: "Moves the subject's expiry forward — every status reading it follows.",
+        ar: "يقدّم تاريخ انتهاء صاحب المستند — وكل حالة تقرأ منه تتبعه.",
+      },
+      fileHint: {
+        en: "Attached to the renewed document when you save. The current files move to history.",
+        ar: "تُرفق بالمستند المجدَّد عند الحفظ. تنتقل الملفات الحالية إلى السجل.",
+      },
+      errUploadPartial: {
+        one: {
+          en: "Renewed, but {n} file(s) failed to upload: {names}. Open the document to attach them.",
+          ar: "تم التجديد، لكن تعذّر رفع ملف واحد: {names}. افتح المستند لإرفاقه.",
+        },
+        two: {
+          en: "Renewed, but {n} file(s) failed to upload: {names}. Open the document to attach them.",
+          ar: "تم التجديد، لكن تعذّر رفع ملفين: {names}. افتح المستند لإرفاقهما.",
+        },
+        few: {
+          en: "Renewed, but {n} file(s) failed to upload: {names}. Open the document to attach them.",
+          ar: "تم التجديد، لكن تعذّر رفع {n} ملفات: {names}. افتح المستند لإرفاقها.",
+        },
+        many: {
+          en: "Renewed, but {n} file(s) failed to upload: {names}. Open the document to attach them.",
+          ar: "تم التجديد، لكن تعذّر رفع {n} ملفًا: {names}. افتح المستند لإرفاقها.",
+        },
+      },
+    },
+
+    detail: {
+      fReferenceNo: { en: "Reference no.", ar: "رقم المرجع" },
+      fReplacedOn: { en: "Replaced on", ar: "تاريخ الاستبدال" },
+      heldOnPerson: { en: "Held on the person", ar: "محفوظ على سجل الشخص" },
+      // {field} is the linked-field label, {name} the person's or truck's own
+      // name — the second is USER DATA.
+      linkedLabel: { en: "{field} ({name})", ar: "{field} ({name})" },
+      noFiles: {
+        en: "No files attached to the current version.",
+        ar: "لا توجد ملفات مرفقة بالنسخة الحالية.",
+      },
+      // Counts sit in parentheses next to a heading. English is invariant
+      // across all four buckets — the noun is already plural-shaped in both
+      // headings — so only Arabic actually branches.
+      attachmentsCount: {
+        one: { en: "Attachments ({n})", ar: "المرفقات (مرفق واحد)" },
+        two: { en: "Attachments ({n})", ar: "المرفقات (مرفقان)" },
+        few: { en: "Attachments ({n})", ar: "المرفقات ({n} مرفقات)" },
+        many: { en: "Attachments ({n})", ar: "المرفقات ({n} مرفقًا)" },
+      },
+      previousVersionsCount: {
+        one: { en: "Previous versions ({n})", ar: "النسخ السابقة (نسخة واحدة)" },
+        two: { en: "Previous versions ({n})", ar: "النسخ السابقة (نسختان)" },
+        few: { en: "Previous versions ({n})", ar: "النسخ السابقة ({n} نسخ)" },
+        many: { en: "Previous versions ({n})", ar: "النسخ السابقة ({n} نسخة)" },
+      },
     },
   },
 } as const;

@@ -812,7 +812,7 @@ function RejectModal({
           >
             {t(
               busy
-                ? "consumption.shared.recording"
+                ? "common.recording"
                 : "consumption.approvalsTab.recordRejection",
               lang,
             )}
