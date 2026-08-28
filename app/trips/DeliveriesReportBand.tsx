@@ -36,6 +36,8 @@
 
 import { History } from "lucide-react";
 import { addDaysToKey, formatSar } from "@/lib/utils";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 // The subset of a trip row this band reads. Both callers pass full trip rows,
 // so this stays a structural subset rather than a shared row type.
@@ -45,18 +47,28 @@ export type DeliveriesReportTrip = {
   rate_sar: number | null;
 };
 
-export type DeliveriesReportWindow = { label: string; count: number; sar: number };
+// A WINDOW IS IDENTIFIED BY A KEY, NOT BY ITS LABEL. The row used to carry
+// `label: string`, which meant the display text was baked into the data by
+// buildDeliveriesReport — a pure function with no `lang` — and then used as the
+// React key on top of that. Both callers memoise their report, so the labels
+// froze in whatever language happened to be active when the memo first ran, and
+// a language switch that DID invalidate the memo would have swapped every key
+// and remounted the whole band. Keying the row and resolving the text at render
+// removes both problems and keeps the builder pure.
+export type DeliveriesReportWindowKey = "today" | "d7" | "d30" | "d90";
+
+export type DeliveriesReportWindow = { key: DeliveriesReportWindowKey; count: number; sar: number };
 
 // days = the window's total length INCLUDING today, so "Today" is 1.
-const WINDOWS: readonly { label: string; days: number }[] = [
-  { label: "Today", days: 1 },
-  { label: "Last 7 days", days: 7 },
-  { label: "Last 30 days", days: 30 },
-  { label: "Last 90 days", days: 90 },
+const WINDOWS: readonly { key: DeliveriesReportWindowKey; days: number }[] = [
+  { key: "today", days: 1 },
+  { key: "d7", days: 7 },
+  { key: "d30", days: 30 },
+  { key: "d90", days: 90 },
 ] as const;
 
 export const EMPTY_DELIVERIES_REPORT: DeliveriesReportWindow[] = WINDOWS.map((w) => ({
-  label: w.label,
+  key: w.key,
   count: 0,
   sar: 0,
 }));
@@ -77,7 +89,7 @@ export function buildDeliveriesReport(
   fallbackRateSar: number,
 ): DeliveriesReportWindow[] {
   const bounds = WINDOWS.map((w) => addDaysToKey(todayKey, -(w.days - 1)));
-  const out = WINDOWS.map((w) => ({ label: w.label, count: 0, sar: 0 }));
+  const out = WINDOWS.map((w) => ({ key: w.key, count: 0, sar: 0 }));
   for (const t of trips) {
     // delivered_at is the PREDICATE; trip_date is the bucket. A trip missing
     // either is not placeable and is skipped rather than guessed at.
@@ -109,6 +121,7 @@ export default function DeliveriesReportBand({
    */
   hint?: string;
 }) {
+  const { lang } = useApp();
   return (
     <div
       className={`rounded-lg border grid grid-cols-2 md:grid-cols-[auto_repeat(4,minmax(0,1fr))] items-center gap-y-2 px-3 py-2 ${className}`}
@@ -117,17 +130,19 @@ export default function DeliveriesReportBand({
       <div className="col-span-2 md:col-span-1 pe-3">
         <div className="inline-flex items-center gap-1.5 text-xs font-semibold muted">
           <History className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
-          Deliveries report
+          {t("trips.deliveries.heading", lang)}
         </div>
         {hint && <div className="text-[10px] muted mt-0.5 ms-[22px]">{hint}</div>}
       </div>
       {windows.map((w) => (
         <div
-          key={w.label}
+          key={w.key}
           className="flex flex-col items-start gap-0.5 px-3 border-s"
           style={{ borderColor: "rgb(var(--border))" }}
         >
-          <span className="text-[10px] uppercase tracking-wide font-semibold muted">{w.label}</span>
+          <span className="text-[10px] uppercase tracking-wide font-semibold muted">
+            {t(`trips.deliveries.${w.key}`, lang)}
+          </span>
           <span className="text-lg font-bold tabular-nums leading-none">{w.count}</span>
           <span className="text-[11px] text-emerald-600 dark:text-emerald-400 tabular-nums">
             {formatSar(w.sar)}

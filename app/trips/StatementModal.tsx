@@ -79,14 +79,17 @@ import {
   type TopupStatementInput,
 } from "@/lib/prepaid";
 import {
-  WATER_TYPE_LABELS,
-  PAYMENT_METHOD_LABELS,
   type WaterType,
   type InvoicePaymentMethod,
 } from "@/lib/db-types";
 import { formatTripRef, sampleTripRef } from "@/lib/trip-ref";
 import TripRefLink from "@/components/TripRefLink";
 import ScrollLock from "@/components/ScrollLock";
+import { useApp } from "@/components/AppShell";
+import { t, fill } from "@/lib/i18n";
+// The Type / Reference / mode cells read the ENUM VALUE through these helpers.
+// db-types' own `_LABELS` maps are no longer imported here and were not edited.
+import { paymentMethodLabel, paymentModeLabel, waterTypeLabel } from "@/lib/enum-labels";
 
 const INPUT = "px-2.5 py-1.5 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-brand-500/30";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -198,6 +201,7 @@ export default function StatementModal({
   // NOT a credit and NOT a debit, see the settlement note in lib/prepaid.ts).
   payments: StatementPayment[];
 }) {
+  const { lang } = useApp();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -279,8 +283,10 @@ export default function StatementModal({
     ...paymentRows.map((p) => ({ kind: "payment" as const, date: paymentDateOf(p), row: p })),
   ].sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1));
 
-  const title = mode === "prepaid" ? "PREPAID STATEMENT" : "POSTPAID STATEMENT";
-  const modeLabel = mode === "prepaid" ? "Prepaid" : "Postpaid";
+  const title = t(mode === "prepaid" ? "trips.statement.titlePrepaid" : "trips.statement.titlePostpaid", lang);
+  // Was an inline ternary on the same two literals PAYMENT_MODE_LABELS already
+  // holds. Routed through the enum helper so the mode names read from one place.
+  const modeLabel = paymentModeLabel(mode, lang);
 
   return createPortal(
     <div className="statement-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
@@ -306,28 +312,26 @@ export default function StatementModal({
           </div>
           <div className="no-print flex items-center gap-3 shrink-0">
             <Btn variant="outline" onClick={handlePrint}>
-              <Printer className="h-4 w-4" /> Print
+              <Printer className="h-4 w-4" /> {t("common.print", lang)}
             </Btn>
             <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]">
               <X className="h-5 w-5" />
             </button>
           </div>
         </div>
-        {sampleRef && <p className="text-sm muted mb-1">Ref. {sampleRef}</p>}
+        {sampleRef && <p className="text-sm muted mb-1">{fill(t("trips.statement.sampleRef", lang), { ref: sampleRef })}</p>}
         <p className="text-sm muted mb-4">
-          {mode === "prepaid"
-            ? "Add Balance credits and delivered-trip/charge debits (VAT-inclusive), oldest first."
-            : "Delivered trips and recorded payments, oldest first."}
+          {t(mode === "prepaid" ? "trips.statement.subPrepaid" : "trips.statement.subPostpaid", lang)}
         </p>
 
         {/* Period picker — table rows only, footer figures stay global. */}
         <div className="no-print flex items-end gap-2 flex-wrap mb-4">
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium muted">From</span>
+            <span className="text-xs font-medium muted">{t("trips.statement.from", lang)}</span>
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={INPUT} style={INPUT_STYLE} />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium muted">To</span>
+            <span className="text-xs font-medium muted">{t("trips.statement.to", lang)}</span>
             <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={INPUT} style={INPUT_STYLE} />
           </label>
           {hasPeriodFilter && (
@@ -338,7 +342,7 @@ export default function StatementModal({
                 setDateTo("");
               }}
             >
-              All-time
+              {t("trips.statement.allTime", lang)}
             </Btn>
           )}
         </div>
@@ -346,21 +350,21 @@ export default function StatementModal({
         {mode === "prepaid" ? (
           entries.length === 0 ? (
             <div className="card p-10 text-center muted text-sm">
-              {hasPeriodFilter ? "No activity in this period." : "No balance added or delivered trips yet."}
+              {t(hasPeriodFilter ? "trips.statement.emptyPeriod" : "trips.statement.emptyPrepaid", lang)}
             </div>
           ) : (
             <div className="card p-0 overflow-hidden">
               <Table>
                 <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                   <tr>
-                    <TH>Date</TH>
-                    <TH>Type</TH>
-                    <TH>Truck</TH>
-                    <TH>Capacity</TH>
-                    <TH>Ref</TH>
-                    <TH>Note</TH>
-                    <TH>Amount</TH>
-                    <TH>Running Balance</TH>
+                    <TH>{t("common.date", lang)}</TH>
+                    <TH>{t("common.type", lang)}</TH>
+                    <TH>{t("common.truck", lang)}</TH>
+                    <TH>{t("common.capacity", lang)}</TH>
+                    <TH>{t("trips.statement.colRef", lang)}</TH>
+                    <TH>{t("common.note", lang)}</TH>
+                    <TH>{t("common.amount", lang)}</TH>
+                    <TH>{t("trips.statement.colRunningBalance", lang)}</TH>
                   </tr>
                 </thead>
                 <tbody>
@@ -385,20 +389,20 @@ export default function StatementModal({
                         <TD className="tabular-nums">{e.date}</TD>
                         <TD>
                           {e.kind === "topup" ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">Add Balance</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">{t("trips.finance.addBalance", lang)}</span>
                           ) : e.kind === "settlement" ? (
-                            <span className={SETTLEMENT_INK_CLS}>Invoice payable</span>
+                            <span className={SETTLEMENT_INK_CLS}>{t("trips.statement.typeSettlement", lang)}</span>
                           ) : e.kind === "return" ? (
                             // Says WHY the balance dropped. Without this label
                             // the row would fall through to the water-type
                             // branch below and a refund would be presented as
                             // a delivery.
-                            <span className={RETURN_INK_CLS}>Balance returned</span>
+                            <span className={RETURN_INK_CLS}>{t("trips.statement.typeReturn", lang)}</span>
                           ) : e.kind === "charge" ? (
-                            <span className="muted">Special charge</span>
+                            <span className="muted">{t("trips.statement.typeCharge", lang)}</span>
                           ) : (
                             <span className="muted">
-                              {(e.water_type ?? projectWaterType) ? WATER_TYPE_LABELS[(e.water_type ?? projectWaterType) as WaterType] : "—"}
+                              {(e.water_type ?? projectWaterType) ? waterTypeLabel((e.water_type ?? projectWaterType) as WaterType, lang) : "—"}
                             </span>
                           )}
                         </TD>
@@ -417,7 +421,7 @@ export default function StatementModal({
                           {e.kind === "topup" ? (
                             <span className="muted">—</span>
                           ) : e.kind === "settlement" ? (
-                            <span className={SETTLEMENT_INK_CLS}>Balance</span>
+                            <span className={SETTLEMENT_INK_CLS}>{t("trips.statement.noteBalance", lang)}</span>
                           ) : (
                             e.note || <span className="muted">—</span>
                           )}
@@ -440,8 +444,15 @@ export default function StatementModal({
                           ) : (
                             <span className="flex flex-col items-end">
                               <span className="tabular-nums font-medium">−{formatSar(Math.abs(e.amount))}</span>
+                              {/* BOTH figures are the SAME two expressions they
+                                  always were — formatNum() output, passed
+                                  through `fill` as tokens. No re-round, no
+                                  re-sign, no new subtraction. */}
                               <span className="tabular-nums text-xs text-black/35 dark:text-white/35">
-                                {formatNum(consumed?.amount ?? 0)} + VAT {formatNum(round2((consumed?.consumedAmount ?? 0) - (consumed?.amount ?? 0)))}
+                                {fill(t("trips.statement.vatSplit", lang), {
+                                  net: formatNum(consumed?.amount ?? 0),
+                                  vat: formatNum(round2((consumed?.consumedAmount ?? 0) - (consumed?.amount ?? 0))),
+                                })}
                               </span>
                             </span>
                           )}
@@ -460,21 +471,21 @@ export default function StatementModal({
           )
         ) : postpaidRows.length === 0 ? (
           <div className="card p-10 text-center muted text-sm">
-            {hasPeriodFilter ? "No activity in this period." : "No delivered trips or payments yet."}
+            {t(hasPeriodFilter ? "trips.statement.emptyPeriod" : "trips.statement.emptyPostpaid", lang)}
           </div>
         ) : (
           <div className="card p-0 overflow-hidden">
             <Table>
               <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                 <tr>
-                  <TH>Date</TH>
-                  <TH>Ref</TH>
-                  <TH>Type</TH>
-                  <TH>Truck</TH>
-                  <TH>Capacity</TH>
-                  <TH>Amount</TH>
-                  <TH>VAT</TH>
-                  <TH>Total</TH>
+                  <TH>{t("common.date", lang)}</TH>
+                  <TH>{t("trips.statement.colRef", lang)}</TH>
+                  <TH>{t("common.type", lang)}</TH>
+                  <TH>{t("common.truck", lang)}</TH>
+                  <TH>{t("common.capacity", lang)}</TH>
+                  <TH>{t("common.amount", lang)}</TH>
+                  <TH>{t("trips.statement.colVat", lang)}</TH>
+                  <TH>{t("common.total", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -486,7 +497,7 @@ export default function StatementModal({
                         <TripRefLink tripId={r.row.id} label={formatTripRef(r.row.ref)} />
                       </TD>
                       <TD className="muted">
-                        {(r.row.water_type ?? projectWaterType) ? WATER_TYPE_LABELS[(r.row.water_type ?? projectWaterType) as WaterType] : "—"}
+                        {(r.row.water_type ?? projectWaterType) ? waterTypeLabel((r.row.water_type ?? projectWaterType) as WaterType, lang) : "—"}
                       </TD>
                       <TD className="muted">{tripMetaById.get(r.row.id)?.truckPlate ?? "—"}</TD>
                       <TD className="muted">
@@ -511,13 +522,13 @@ export default function StatementModal({
                         {r.row.payment_method === "bank_transfer" ? (
                           r.row.payment_reference || <span className="muted">—</span>
                         ) : r.row.payment_method ? (
-                          PAYMENT_METHOD_LABELS[r.row.payment_method]
+                          paymentMethodLabel(r.row.payment_method, lang)
                         ) : (
                           <span className="muted">—</span>
                         )}
                       </TD>
                       <TD>
-                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">Payment</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">{t("trips.statement.typePayment", lang)}</span>
                       </TD>
                       <TD className="muted">—</TD>
                       <TD className="muted">—</TD>
@@ -537,21 +548,21 @@ export default function StatementModal({
         <div className="flex items-center justify-between pt-4 mt-4 border-t border-app">
           {mode === "prepaid" ? (
             <div className="text-sm">
-              <span className="muted">Running balance: </span>
+              <span className="muted">{t("trips.statement.footRunningBalance", lang)} </span>
               <span className={"font-semibold tabular-nums " + (balance < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
                 {formatSar(balance)}
               </span>
             </div>
           ) : (
             <div className="text-sm">
-              <span className="muted">Total payable: </span>
+              <span className="muted">{t("trips.statement.footTotalPayable", lang)} </span>
               <span className={"font-semibold tabular-nums " + (totalPayable > 0 ? "text-rose-600 dark:text-rose-400" : "")}>
                 {formatSar(totalPayable)}
               </span>
             </div>
           )}
           <Btn variant="outline" onClick={onClose} className="no-print">
-            Close
+            {t("common.close", lang)}
           </Btn>
         </div>
       </div>

@@ -12,7 +12,9 @@
 import { useMemo } from "react";
 import { Check } from "lucide-react";
 import { Table, TH, TD, StatusPill } from "@/components/ui";
-import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
+import { type DriverState } from "@/lib/driver-state";
+import { useApp } from "@/components/AppShell";
+import { t, type Lang } from "@/lib/i18n";
 
 type Driver = { id: string; name: string; status?: string };
 type TruckLite = {
@@ -22,17 +24,21 @@ type TruckLite = {
   last_service_date: string | null;
 };
 
-const MONTH_SHORT = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
+// The twelve abbreviations were a module-level `const MONTH_SHORT`, frozen at
+// import — one of three identical copies in this route. They now come from
+// `common.monthShort`, which is why this takes `lang`.
+//
 // "YYYY-MM-DD" (Postgres date) → "DD Mon YYYY". Null/blank → null.
-function fmtServiceDate(key: string | null): string | null {
+// ONLY the month NAME is translated. The day and the year stay Latin digits in
+// both languages, because they are app-formatted numbers, not labels.
+const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
+function fmtServiceDate(key: string | null, lang: Lang): string | null {
   if (!key) return null;
   const [y, m, d] = key.split("-").map(Number);
   if (!y || !m || !d) return null;
-  return `${d} ${MONTH_SHORT[m - 1]} ${y}`;
+  const mk = MONTH_KEYS[m - 1];
+  if (!mk) return null;
+  return `${d} ${t(`common.monthShort.${mk}`, lang)} ${y}`;
 }
 
 export default function DriverRosterTable({
@@ -57,17 +63,19 @@ export default function DriverRosterTable({
   // Already-selected drivers are preserved (locked, not dropped).
   leaveUnavailable?: boolean;
 }) {
+  const { lang } = useApp();
+  // `tr`, not `t` — see DriverDutyTable: the translator must not be shadowed.
   // driver_id → its truck (0/1 per driver via the unique partial index).
   const truckByDriver = useMemo(() => {
     const m = new Map<string, TruckLite>();
-    for (const t of trucks) if (t.assigned_driver_id) m.set(t.assigned_driver_id, t);
+    for (const tr of trucks) if (tr.assigned_driver_id) m.set(tr.assigned_driver_id, tr);
     return m;
   }, [trucks]);
 
   if (drivers.length === 0) {
     return (
       <div className="rounded-lg border border-app px-3 py-4 text-center text-sm muted">
-        No drivers available.
+        {t("trips.driverTable.emptyRoster", lang)}
       </div>
     );
   }
@@ -79,18 +87,18 @@ export default function DriverRosterTable({
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
             <tr>
               <TH></TH>
-              <TH>Driver</TH>
-              {stateByDriver && <TH>Status</TH>}
-              <TH>Assigned truck</TH>
-              <TH>Last serviced</TH>
-              <TH>Project(s)</TH>
+              <TH>{t("common.driver", lang)}</TH>
+              {stateByDriver && <TH>{t("common.status", lang)}</TH>}
+              <TH>{t("trips.driverTable.assignedTruck", lang)}</TH>
+              <TH>{t("trips.driverTable.lastServiced", lang)}</TH>
+              <TH>{t("trips.driverTable.projectsCol", lang)}</TH>
             </tr>
           </thead>
           <tbody>
             {drivers.map((d) => {
               const on = selected.includes(d.id);
               const truck = truckByDriver.get(d.id) ?? null;
-              const serviced = truck ? fmtServiceDate(truck.last_service_date) : null;
+              const serviced = truck ? fmtServiceDate(truck.last_service_date, lang) : null;
               const projNames = driverProjectNames[d.id] ?? [];
               // Roster gating: on_leave (today) is BLOCKED. off_duty (no truck)
               // stays selectable. On leave-load failure, block everything.
@@ -102,9 +110,9 @@ export default function DriverRosterTable({
               const locked = !!leaveUnavailable || blockedByState;
               const reason =
                 state === "on_leave"
-                  ? "On leave"
+                  ? t("trips.driverTable.onLeave", lang)
                   : leaveUnavailable
-                    ? "Leave unavailable"
+                    ? t("trips.driverTable.leaveUnavailable", lang)
                     : null;
               return (
                 <tr
@@ -132,14 +140,17 @@ export default function DriverRosterTable({
                     {locked && reason && (
                       <div className="text-[11px] font-normal text-amber-600 dark:text-amber-400">
                         {reason}
-                        {on ? " · kept" : ""}
+                        {on ? t("trips.driverTable.kept", lang) : ""}
                       </div>
                     )}
                   </TD>
                   {stateByDriver && (
                     <TD>
                       {stateByDriver[d.id] ? (
-                        <StatusPill status={stateByDriver[d.id]} label={DRIVER_STATE_LABELS[stateByDriver[d.id]]} />
+                        <StatusPill
+                          status={stateByDriver[d.id]}
+                          label={t(`fleet.driverState.${stateByDriver[d.id]}`, lang)}
+                        />
                       ) : (
                         <span className="muted">—</span>
                       )}

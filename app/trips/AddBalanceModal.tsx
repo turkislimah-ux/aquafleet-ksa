@@ -28,6 +28,11 @@ import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar, todayKey } from "@/lib/utils";
 import { recordTopup, getTopupProofSignedUrl } from "@/lib/actions/finance";
 import ScrollLock from "@/components/ScrollLock";
+import { useApp } from "@/components/AppShell";
+import { t, fill } from "@/lib/i18n";
+// The history row's method cell reads the ENUM VALUE through this helper.
+// `db-types`'s own label map is not imported and not edited.
+import { paymentMethodLabel } from "@/lib/enum-labels";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -64,6 +69,7 @@ export default function AddBalanceModal({
   history: AddBalanceHistoryRow[];
 }) {
   const router = useRouter();
+  const { lang } = useApp();
   const [view, setView] = useState<"list" | "form">("form");
 
   const [customerId, setCustomerId] = useState("");
@@ -111,7 +117,9 @@ export default function AddBalanceModal({
   async function onViewPhoto(topupId: string) {
     const r = await getTopupProofSignedUrl(topupId);
     if (r.error || !r.data) {
-      setError(r.error ?? "Could not open photo.");
+      // `r.error` is the server action's own string and stays ENGLISH — only
+      // OUR fallback translates.
+      setError(r.error ?? t("trips.addBalance.errPhoto", lang));
       return;
     }
     window.open(r.data.url, "_blank", "noopener,noreferrer");
@@ -132,7 +140,7 @@ export default function AddBalanceModal({
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!canSubmit) {
-      setError("Pick a customer, method, and enter a positive amount and date.");
+      setError(t("trips.addBalance.errIncomplete", lang));
       return;
     }
     setSaving(true);
@@ -163,7 +171,10 @@ export default function AddBalanceModal({
 
   if (!open) return null;
 
-  const title = fixedCustomer ? `Add Balance — ${fixedCustomer.name}` : "Add Balance";
+  // The customer's name is USER DATA and prints as stored, in either language.
+  const title = fixedCustomer
+    ? fill(t("trips.addBalance.titleFor", lang), { name: fixedCustomer.name })
+    : t("trips.finance.addBalance", lang);
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={close}>
@@ -191,42 +202,46 @@ export default function AddBalanceModal({
 
         {view === "list" ? (
           <>
-            <p className="text-sm muted mb-4">Balance additions for this customer, most recent first.</p>
+            <p className="text-sm muted mb-4">{t("trips.addBalance.listSubtitle", lang)}</p>
             <Btn variant="primary" onClick={openForm} className="mb-4">
-              <Plus className="h-4 w-4" /> Add Balance
+              <Plus className="h-4 w-4" /> {t("trips.finance.addBalance", lang)}
             </Btn>
             {error && <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">{error}</p>}
             {history.length === 0 ? (
-              <div className="card p-8 text-center muted text-sm">No balance added yet for this customer.</div>
+              <div className="card p-8 text-center muted text-sm">{t("trips.addBalance.listEmpty", lang)}</div>
             ) : (
               <div className="card p-0 overflow-hidden">
                 <Table>
                   <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                     <tr>
-                      <TH>Date</TH>
-                      <TH>Method</TH>
-                      <TH>ETF Ref.</TH>
-                      <TH>Amount</TH>
-                      <TH>Photo</TH>
+                      <TH>{t("common.date", lang)}</TH>
+                      <TH>{t("trips.finance.colMethod", lang)}</TH>
+                      <TH>{t("trips.addBalance.colEtfRef", lang)}</TH>
+                      <TH>{t("common.amount", lang)}</TH>
+                      <TH>{t("trips.addBalance.colPhoto", lang)}</TH>
                     </tr>
                   </thead>
                   <tbody>
-                    {history.map((t) => (
-                      <tr key={t.id}>
-                        <TD className="tabular-nums">{t.topup_date}</TD>
+                    {/* The row variable was `t`, which SHADOWED the translator
+                        inside this map and made every key above unreachable
+                        here. Renamed to `tp` (topup) — same rename already
+                        applied in DriverDutyTable and DriverRosterTable. */}
+                    {history.map((tp) => (
+                      <tr key={tp.id}>
+                        <TD className="tabular-nums">{tp.topup_date}</TD>
                         <TD>
-                          {t.method === "cash" ? "Cash" : t.method === "bank_transfer" ? "Bank transfer" : <span className="muted">—</span>}
+                          {tp.method ? paymentMethodLabel(tp.method, lang) : <span className="muted">—</span>}
                         </TD>
-                        <TD>{t.reference ? t.reference : <span className="muted">—</span>}</TD>
-                        <TD className="tabular-nums">{formatSar(t.amount_sar)}</TD>
+                        <TD>{tp.reference ? tp.reference : <span className="muted">—</span>}</TD>
+                        <TD className="tabular-nums">{formatSar(tp.amount_sar)}</TD>
                         <TD>
-                          {t.photo_path ? (
+                          {tp.photo_path ? (
                             <button
                               type="button"
-                              onClick={() => onViewPhoto(t.id)}
+                              onClick={() => onViewPhoto(tp.id)}
                               className="inline-flex items-center gap-1 text-brand-600 hover:underline"
                             >
-                              <ImageIcon className="h-3.5 w-3.5" /> View
+                              <ImageIcon className="h-3.5 w-3.5" /> {t("common.view", lang)}
                             </button>
                           ) : (
                             <span className="muted">—</span>
@@ -242,12 +257,12 @@ export default function AddBalanceModal({
         ) : (
           <>
             <p className="text-sm muted mb-4">
-              Pre-VAT amount. Adds to the customer&apos;s prepaid balance immediately.
+              {t("trips.addBalance.formSubtitle", lang)}
             </p>
 
             <form onSubmit={onSubmit} className="space-y-4">
               <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">Customer *</span>
+                <span className="font-medium">{t("common.customer", lang)} *</span>
                 {fixedCustomer ? (
                   <div className={INPUT + " bg-black/[0.03] dark:bg-white/[0.04]"} style={INPUT_STYLE}>
                     {fixedCustomer.name}
@@ -260,7 +275,7 @@ export default function AddBalanceModal({
                     className={INPUT}
                     style={INPUT_STYLE}
                   >
-                    <option value="">Select customer…</option>
+                    <option value="">{t("trips.addBalance.selectCustomer", lang)}</option>
                     {customers.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
@@ -282,7 +297,7 @@ export default function AddBalanceModal({
                     checked={method === "cash"}
                     onChange={() => setMethod("cash")}
                   />
-                  Cash
+                  {t("labels.payCash", lang)}
                 </label>
                 <label className="flex items-center gap-1.5">
                   <input
@@ -292,12 +307,12 @@ export default function AddBalanceModal({
                     checked={method === "bank_transfer"}
                     onChange={() => setMethod("bank_transfer")}
                   />
-                  Bank transfer
+                  {t("labels.payBankTransfer", lang)}
                 </label>
               </div>
 
               <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">Amount (SAR, pre-VAT) *</span>
+                <span className="font-medium">{t("trips.addBalance.fAmount", lang)} *</span>
                 <input
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
@@ -307,12 +322,12 @@ export default function AddBalanceModal({
                   required
                   className={INPUT}
                   style={INPUT_STYLE}
-                  placeholder="e.g. 5000"
+                  placeholder={t("trips.addBalance.amountPlaceholder", lang)}
                 />
               </label>
 
               <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">Date *</span>
+                <span className="font-medium">{t("common.date", lang)} *</span>
                 <input
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
@@ -330,7 +345,10 @@ export default function AddBalanceModal({
                   the fields for cash). */}
               <label className="flex flex-col gap-1.5 text-sm">
                 <span className="font-medium">
-                  ETF Ref. number{method === "bank_transfer" ? " (required) *" : " (optional)"}
+                  {t("trips.addBalance.fEtfRef", lang)}
+                  {method === "bank_transfer"
+                    ? t("trips.addBalance.suffixRequired", lang)
+                    : t("trips.addBalance.suffixOptional", lang)}
                 </span>
                 <input
                   value={reference}
@@ -338,12 +356,15 @@ export default function AddBalanceModal({
                   required={method === "bank_transfer"}
                   className={INPUT}
                   style={INPUT_STYLE}
-                  placeholder="e.g. bank transfer ref"
+                  placeholder={t("trips.addBalance.refPlaceholder", lang)}
                 />
               </label>
               <label className="flex flex-col gap-1.5 text-sm">
                 <span className="font-medium">
-                  Photo{method === "bank_transfer" ? " of transfer (required) *" : " (optional)"}
+                  {t("trips.addBalance.fPhoto", lang)}
+                  {method === "bank_transfer"
+                    ? t("trips.addBalance.suffixPhotoRequired", lang)
+                    : t("trips.addBalance.suffixOptional", lang)}
                 </span>
                 <input
                   type="file"
@@ -356,7 +377,7 @@ export default function AddBalanceModal({
               </label>
 
               <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">Note</span>
+                <span className="font-medium">{t("common.note", lang)}</span>
                 <textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
@@ -371,14 +392,14 @@ export default function AddBalanceModal({
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-app">
                 <Btn type="button" variant="ghost" onClick={() => (fixedCustomer ? setView("list") : close())}>
-                  Cancel
+                  {t("common.cancel", lang)}
                 </Btn>
                 <Btn
                   type="submit"
                   variant="primary"
                   className={!canSubmit || saving ? "opacity-50 pointer-events-none" : ""}
                 >
-                  {saving ? "Adding…" : "Add Balance"}
+                  {t(saving ? "trips.addBalance.adding" : "trips.finance.addBalance", lang)}
                 </Btn>
               </div>
             </form>

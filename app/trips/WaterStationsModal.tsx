@@ -27,8 +27,13 @@ import { useRouter } from "next/navigation";
 import { X, Plus, Pencil, Droplet, AlertTriangle } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
-import { WATER_TYPE_LABELS, type WaterType } from "@/lib/db-types";
+import { type WaterType } from "@/lib/db-types";
 import { stationPriceFor, type WaterStationRow } from "@/lib/station-pricing";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, type Lang } from "@/lib/i18n";
+// Water-type names come off the ENUM VALUE, the same `potable` / `non_potable`
+// this file already maps over. db-types' WATER_TYPE_LABELS is untouched.
+import { waterTypeLabel } from "@/lib/enum-labels";
 import {
   createWaterStation,
   updateWaterStation,
@@ -60,6 +65,7 @@ export default function WaterStationsModal({
   onClose: () => void;
   stations: StationRow[];
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const [view, setView] = useState<View>("list");
   const [editing, setEditing] = useState<StationRow | null>(null);
@@ -134,7 +140,10 @@ export default function WaterStationsModal({
     if (!pendingDeactivate || !needsReassignment) return;
     const missing = needsReassignment.filter((p) => !reassignMap[p.id]);
     if (missing.length > 0) {
-      setDeactivateErr(`Pick a replacement default for: ${missing.map((p) => p.name).join(", ")}.`);
+      // The joined list is PROJECT NAMES — user data, printed as stored.
+      setDeactivateErr(
+        fill(t("trips.stations.errPickReplacement", lang), { names: missing.map((p) => p.name).join(", ") }),
+      );
       return;
     }
     const reassignments: StationReassignment[] = needsReassignment.map((p) => ({
@@ -169,25 +178,24 @@ export default function WaterStationsModal({
             <div className="flex items-start justify-between gap-4 mb-1">
               <div className="flex items-center gap-2">
                 <Droplet className="h-5 w-5 text-brand-600 dark:text-brand-300" />
-                <h2 className="text-lg font-semibold">Water stations</h2>
+                <h2 className="text-lg font-semibold">{t("trips.stations.title", lang)}</h2>
               </div>
               <button onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <p className="text-sm muted mb-4">
-              Where trucks fill. Renaming keeps every existing trip and project resolving correctly —
-              only the display name changes.
+              {t("trips.stations.subtitle", lang)}
             </p>
 
             <Table>
               <thead>
                 <tr>
-                  <TH>Name</TH>
-                  <TH>City</TH>
-                  <TH>Coordinates</TH>
-                  <TH>Water types &amp; fill cost (internal)</TH>
-                  <TH className="text-right">Actions</TH>
+                  <TH>{t("trips.stations.colName", lang)}</TH>
+                  <TH>{t("trips.stations.colCity", lang)}</TH>
+                  <TH>{t("trips.stations.colCoordinates", lang)}</TH>
+                  <TH>{t("trips.stations.colTypesCost", lang)}</TH>
+                  <TH className="text-right">{t("common.actions", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -198,7 +206,7 @@ export default function WaterStationsModal({
                       className="py-6 px-3 border-t text-center muted text-sm"
                       style={{ borderColor: "rgb(var(--border))" }}
                     >
-                      No active stations.
+                      {t("trips.stations.emptyActive", lang)}
                     </td>
                   </tr>
                 )}
@@ -206,6 +214,7 @@ export default function WaterStationsModal({
                   <StationRowView
                     key={s.id}
                     s={s}
+                    lang={lang}
                     onEdit={() => openEdit(s)}
                     onDeactivate={() => startDeactivate(s)}
                   />
@@ -219,23 +228,23 @@ export default function WaterStationsModal({
               <div className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/5 p-4">
                 {!needsReassignment ? (
                   <>
-                    <p className="text-sm font-medium mb-1">Deactivate "{pendingDeactivate.name}"?</p>
+                    {/* The station name is USER DATA and prints as stored. */}
+                    <p className="text-sm font-medium mb-1">{fill(t("trips.stations.confirmTitle", lang), { name: pendingDeactivate.name })}</p>
                     <p className="text-xs muted mb-3">
-                      It disappears from every station picker. Past trips still show its name.
-                      This can be undone later by re-adding a station with the same name.
+                      {t("trips.stations.confirmBody", lang)}
                     </p>
                     {deactivateErr && (
                       <p className="text-xs text-rose-600 dark:text-rose-400 mb-2">{deactivateErr}</p>
                     )}
                     <div className="flex gap-2 justify-end">
-                      <Btn variant="outline" onClick={resetDeactivate}>Cancel</Btn>
+                      <Btn variant="outline" onClick={resetDeactivate}>{t("common.cancel", lang)}</Btn>
                       <button
                         type="button"
                         disabled={deactivating}
                         onClick={confirmDeactivate}
                         className="h-9 px-3 rounded-lg text-sm font-medium bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50"
                       >
-                        {deactivating ? "Deactivating…" : "Deactivate"}
+                        {t(deactivating ? "trips.stations.deactivating" : "trips.stations.deactivate", lang)}
                       </button>
                     </div>
                   </>
@@ -243,10 +252,15 @@ export default function WaterStationsModal({
                   <>
                     <div className="flex items-start gap-2 mb-2">
                       <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                      {/* Was `project{n === 1 ? "" : "s"}` spliced mid-sentence.
+                          Arabic pluralises on {n}%100 across four buckets and its
+                          one/two forms drop the numeral, so the whole sentence
+                          has to be the leaf — not the suffix. */}
                       <p className="text-sm font-medium">
-                        "{pendingDeactivate.name}" is the default station for {needsReassignment.length}{" "}
-                        project{needsReassignment.length === 1 ? "" : "s"}. Pick a replacement default for
-                        each before deactivating — nothing is reassigned automatically.
+                        {fill(t(`trips.stations.reassignWarn.${plural(needsReassignment.length)}`, lang), {
+                          name: pendingDeactivate.name,
+                          n: needsReassignment.length,
+                        })}
                       </p>
                     </div>
                     <div className="flex flex-col gap-2 mb-3">
@@ -259,7 +273,7 @@ export default function WaterStationsModal({
                             className={INPUT + " max-w-[220px]"}
                             style={INPUT_STYLE}
                           >
-                            <option value="" disabled>Pick replacement…</option>
+                            <option value="" disabled>{t("trips.stations.pickReplacement", lang)}</option>
                             {replacementOptions.map((r) => (
                               <option key={r.key} value={r.key}>{r.name}</option>
                             ))}
@@ -271,14 +285,14 @@ export default function WaterStationsModal({
                       <p className="text-xs text-rose-600 dark:text-rose-400 mb-2">{deactivateErr}</p>
                     )}
                     <div className="flex gap-2 justify-end">
-                      <Btn variant="outline" onClick={resetDeactivate}>Cancel</Btn>
+                      <Btn variant="outline" onClick={resetDeactivate}>{t("common.cancel", lang)}</Btn>
                       <button
                         type="button"
                         disabled={deactivating}
                         onClick={confirmReassignAndDeactivate}
                         className="h-9 px-3 rounded-lg text-sm font-medium bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50"
                       >
-                        {deactivating ? "Saving…" : "Confirm replacements & deactivate"}
+                        {t(deactivating ? "common.saving" : "trips.stations.confirmReplacements", lang)}
                       </button>
                     </div>
                   </>
@@ -293,14 +307,17 @@ export default function WaterStationsModal({
                   onClick={() => setShowInactive((v) => !v)}
                   className="text-xs muted underline underline-offset-2"
                 >
-                  {showInactive ? "Hide" : "Show"} deactivated stations ({inactiveStations.length})
+                  {fill(
+                    t(showInactive ? "trips.stations.hideDeactivated" : "trips.stations.showDeactivated", lang),
+                    { n: inactiveStations.length },
+                  )}
                 </button>
                 {showInactive && (
                   <ul className="mt-2 flex flex-col gap-1">
                     {inactiveStations.map((s) => (
                       <li key={s.id} className="text-xs muted flex items-center gap-2">
                         <span className="line-through">{s.name}</span>
-                        <span className="text-[10px] uppercase tracking-wide">deactivated</span>
+                        <span className="text-[10px] uppercase tracking-wide">{t("trips.stations.deactivatedTag", lang)}</span>
                       </li>
                     ))}
                   </ul>
@@ -309,8 +326,8 @@ export default function WaterStationsModal({
             )}
 
             <div className="mt-5 flex justify-between">
-              <Btn variant="primary" onClick={openAdd}><Plus className="h-4 w-4" /> Add station</Btn>
-              <Btn variant="outline" onClick={close}>Close</Btn>
+              <Btn variant="primary" onClick={openAdd}><Plus className="h-4 w-4" /> {t("trips.stations.addStation", lang)}</Btn>
+              <Btn variant="outline" onClick={close}>{t("common.close", lang)}</Btn>
             </div>
           </>
         ) : (
@@ -332,12 +349,17 @@ export default function WaterStationsModal({
   );
 }
 
+// `lang` arrives as a PROP, not from useApp() — this is a pure row renderer with
+// no state of its own, the same treatment the already-converted badge/row
+// components in this route got.
 function StationRowView({
   s,
+  lang,
   onEdit,
   onDeactivate,
 }: {
   s: StationRow;
+  lang: Lang;
   onEdit: () => void;
   onDeactivate: () => void;
 }) {
@@ -348,7 +370,7 @@ function StationRowView({
       <TD>
         <span className="font-medium">{s.name}</span>
         {s.is_default && (
-          <span className="ml-2 text-[10px] uppercase tracking-wide muted">default</span>
+          <span className="ml-2 text-[10px] uppercase tracking-wide muted">{t("trips.stations.defaultTag", lang)}</span>
         )}
       </TD>
       <TD>{s.city ?? "—"}</TD>
@@ -361,9 +383,9 @@ function StationRowView({
             const price = stationPriceFor(s, wt);
             return (
               <span key={wt} className="flex items-center gap-1.5 whitespace-nowrap">
-                <span className="muted">{WATER_TYPE_LABELS[wt]}</span>
+                <span className="muted">{waterTypeLabel(wt, lang)}</span>
                 {price === null ? (
-                  <span className="muted italic">not offered</span>
+                  <span className="muted italic">{t("trips.stations.notOffered", lang)}</span>
                 ) : (
                   <span className="tabular-nums font-medium">{formatSar(price)}</span>
                 )}
@@ -377,7 +399,7 @@ function StationRowView({
           <button
             type="button"
             onClick={onEdit}
-            title="Edit"
+            title={t("common.edit", lang)}
             className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/5"
           >
             <Pencil className="h-4 w-4" />
@@ -385,7 +407,7 @@ function StationRowView({
           <button
             type="button"
             onClick={onDeactivate}
-            title="Deactivate"
+            title={t("trips.stations.deactivate", lang)}
             className="p-1.5 rounded hover:bg-rose-500/10 text-rose-600 dark:text-rose-400"
           >
             <X className="h-4 w-4" />
@@ -407,6 +429,7 @@ function StationForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const { lang } = useApp();
   const [name, setName] = useState(editing?.name ?? "");
   const [city, setCity] = useState(editing?.city ?? "");
   const [latitude, setLatitude] = useState(editing?.latitude != null ? String(editing.latitude) : "");
@@ -431,27 +454,27 @@ function StationForm({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (name.trim() === "") {
-      setError("Station name is required.");
+      setError(t("trips.stations.errName", lang));
       return;
     }
     if (!potableOn && !nonPotableOn) {
-      setError("Pick at least one water type and give it a price.");
+      setError(t("trips.stations.errNoType", lang));
       return;
     }
     // A ticked type with a blank or non-numeric box is incomplete. Coercing it
     // to 0 would record "this station fills free", which is a real and very
     // different claim.
     for (const [on, raw, label] of [
-      [potableOn, potablePrice, WATER_TYPE_LABELS.potable],
-      [nonPotableOn, nonPotablePrice, WATER_TYPE_LABELS.non_potable],
+      [potableOn, potablePrice, waterTypeLabel("potable", lang)],
+      [nonPotableOn, nonPotablePrice, waterTypeLabel("non_potable", lang)],
     ] as [boolean, string, string][]) {
       if (!on) continue;
       if (raw.trim() === "" || !Number.isFinite(Number(raw))) {
-        setError(`Enter a price for ${label} — use 0 if this station fills free.`);
+        setError(fill(t("trips.stations.errPrice", lang), { type: label }));
         return;
       }
       if (Number(raw) < 0) {
-        setError(`${label} price cannot be negative.`);
+        setError(fill(t("trips.stations.errNegative", lang), { type: label }));
         return;
       }
     }
@@ -483,7 +506,7 @@ function StationForm({
   return (
     <form onSubmit={submit}>
       <div className="flex items-start justify-between gap-4 mb-4">
-        <h2 className="text-lg font-semibold">{editing ? "Edit station" : "Add station"}</h2>
+        <h2 className="text-lg font-semibold">{t(editing ? "trips.stations.editStation" : "trips.stations.addStation", lang)}</h2>
         <button type="button" onClick={onCancel} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
           <X className="h-4 w-4" />
         </button>
@@ -491,34 +514,36 @@ function StationForm({
 
       <div className="flex flex-col gap-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="muted">Name *</span>
+          {/* The form reuses the table's `colName` / `colCity` — one word, one
+              leaf, whichever surface spells it. */}
+          <span className="muted">{t("trips.stations.colName", lang)} *</span>
           <input value={name} onChange={(e) => setName(e.target.value)} className={INPUT} style={INPUT_STYLE} required />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="muted">City</span>
+          <span className="muted">{t("trips.stations.colCity", lang)}</span>
           <input value={city} onChange={(e) => setCity(e.target.value)} className={INPUT} style={INPUT_STYLE} />
         </label>
         <div className="grid grid-cols-2 gap-3">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Latitude</span>
+            <span className="muted">{t("trips.stations.fLatitude", lang)}</span>
             <input
               value={latitude}
               onChange={(e) => setLatitude(e.target.value)}
               className={INPUT}
               style={INPUT_STYLE}
               inputMode="decimal"
-              placeholder="e.g. 24.7136"
+              placeholder={t("trips.stations.latPlaceholder", lang)}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">Longitude</span>
+            <span className="muted">{t("trips.stations.fLongitude", lang)}</span>
             <input
               value={longitude}
               onChange={(e) => setLongitude(e.target.value)}
               className={INPUT}
               style={INPUT_STYLE}
               inputMode="decimal"
-              placeholder="e.g. 46.6753"
+              placeholder={t("trips.stations.lngPlaceholder", lang)}
             />
           </label>
         </div>
@@ -528,8 +553,7 @@ function StationForm({
             block it for this station. */}
         <div className="flex flex-col gap-2 text-sm">
           <span className="muted">
-            Water types and fill cost — internal, SAR per fill (cost only; never affects rates,
-            commission, or invoices). Tick each type this station sells. Enter 0 if it fills free.
+            {t("trips.stations.pricingHelp", lang)}
           </span>
           {([
             ["potable", potableOn, setPotableOn, potablePrice, setPotablePrice],
@@ -544,7 +568,7 @@ function StationForm({
                     onChange={(e) => setOn(e.target.checked)}
                     className="h-4 w-4 rounded border-slate-300 accent-brand-600"
                   />
-                  <span>{WATER_TYPE_LABELS[wt]}</span>
+                  <span>{waterTypeLabel(wt, lang)}</span>
                 </label>
                 <input
                   value={price}
@@ -553,22 +577,21 @@ function StationForm({
                   className={INPUT}
                   style={INPUT_STYLE}
                   inputMode="decimal"
-                  placeholder={on ? "e.g. 45 — or 0 if free" : "not offered"}
-                  aria-label={`${WATER_TYPE_LABELS[wt]} fill price`}
+                  placeholder={t(on ? "trips.stations.pricePlaceholder" : "trips.stations.notOffered", lang)}
+                  aria-label={fill(t("trips.stations.priceAria", lang), { type: waterTypeLabel(wt, lang) })}
                 />
               </div>
             )
           )}
           {!potableOn && !nonPotableOn && (
             <p className="text-xs text-amber-700 dark:text-amber-300">
-              A station must offer at least one water type.
+              {t("trips.stations.warnNoType", lang)}
             </p>
           )}
         </div>
         {editing && (
           <p className="text-xs muted">
-            Renaming only changes the display name — every trip/project already pointing at this
-            station keeps resolving correctly.
+            {t("trips.stations.renameNote", lang)}
           </p>
         )}
       </div>
@@ -576,13 +599,13 @@ function StationForm({
       {error && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{error}</p>}
 
       <div className="mt-5 flex justify-end gap-2">
-        <Btn variant="outline" onClick={onCancel}>Cancel</Btn>
+        <Btn variant="outline" onClick={onCancel}>{t("common.cancel", lang)}</Btn>
         <button
           type="submit"
           disabled={!canSubmit || saving}
           className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
         >
-          {saving ? "Saving…" : editing ? "Save changes" : "Add station"}
+          {t(saving ? "common.saving" : editing ? "trips.stations.saveChanges" : "trips.stations.addStation", lang)}
         </button>
       </div>
     </form>

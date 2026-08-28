@@ -12,7 +12,9 @@
 
 import { useMemo } from "react";
 import { Table, TH, TD, StatusPill } from "@/components/ui";
-import { DRIVER_STATE_LABELS, type DriverState } from "@/lib/driver-state";
+import { type DriverState } from "@/lib/driver-state";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 type Driver = { id: string; name: string; status?: string };
 type TruckLite = { id: string; plate: string; assigned_driver_id: string | null };
@@ -42,16 +44,19 @@ export default function DriverDutyTable({
   // "nobody on leave"). Shows a distinct reason.
   leaveUnavailable?: boolean;
 }) {
+  const { lang } = useApp();
+  // `tr` because `t` is this file's loop variable for a truck row — shadowing
+  // the translator inside the map would be a silent capture, not a tsc error.
   const truckByDriver = useMemo(() => {
     const m = new Map<string, TruckLite>();
-    for (const t of trucks) if (t.assigned_driver_id) m.set(t.assigned_driver_id, t);
+    for (const tr of trucks) if (tr.assigned_driver_id) m.set(tr.assigned_driver_id, tr);
     return m;
   }, [trucks]);
 
   if (drivers.length === 0) {
     return (
       <div className="rounded-lg border border-app px-3 py-4 text-center text-sm muted">
-        No drivers available — assign drivers to this project first.
+        {t("trips.driverTable.emptyDuty", lang)}
       </div>
     );
   }
@@ -63,11 +68,11 @@ export default function DriverDutyTable({
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
             <tr>
               <TH></TH>
-              <TH>Driver</TH>
-              {stateByDriver && <TH>Status</TH>}
-              <TH>Assigned truck</TH>
-              <TH>On duty</TH>
-              <TH>Last delivered</TH>
+              <TH>{t("common.driver", lang)}</TH>
+              {stateByDriver && <TH>{t("common.status", lang)}</TH>}
+              <TH>{t("trips.driverTable.assignedTruck", lang)}</TH>
+              <TH>{t("trips.driverTable.onDuty", lang)}</TH>
+              <TH>{t("trips.driverTable.lastDelivered", lang)}</TH>
             </tr>
           </thead>
           <tbody>
@@ -82,10 +87,10 @@ export default function DriverDutyTable({
               const disabled = onLeaveSel || noTruck;
               const reason = onLeaveSel
                 ? leaveUnavailable
-                  ? "Leave unavailable"
-                  : "On leave"
+                  ? t("trips.driverTable.leaveUnavailable", lang)
+                  : t("trips.driverTable.onLeave", lang)
                 : noTruck
-                  ? "No truck"
+                  ? t("trips.driverTable.noTruck", lang)
                   : null;
               const duty = dutyByDriver[d.id] ?? { onDuty: 0, lastDelivered: null };
               return (
@@ -120,7 +125,10 @@ export default function DriverDutyTable({
                   {stateByDriver && (
                     <TD>
                       {stateByDriver[d.id] ? (
-                        <StatusPill status={stateByDriver[d.id]} label={DRIVER_STATE_LABELS[stateByDriver[d.id]]} />
+                        <StatusPill
+                          status={stateByDriver[d.id]}
+                          label={t(`fleet.driverState.${stateByDriver[d.id]}`, lang)}
+                        />
                       ) : (
                         <span className="muted">—</span>
                       )}
@@ -130,7 +138,7 @@ export default function DriverDutyTable({
                     {truck ? (
                       <span className="tabular-nums">{truck.plate}</span>
                     ) : (
-                      <span className="muted">— no truck</span>
+                      <span className="muted">{t("trips.driverTable.noTruckCell", lang)}</span>
                     )}
                   </TD>
                   <TD className="tabular-nums">

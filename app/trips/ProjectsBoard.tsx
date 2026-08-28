@@ -24,6 +24,9 @@ import {
   X, Lock, AlertTriangle, Trash2,
 } from "lucide-react";
 import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, type Lang } from "@/lib/i18n";
+import { tripStageLabel, waterTypeLabel } from "@/lib/enum-labels";
 import { cn, formatSar } from "@/lib/utils";
 import { stationBlockedForType, type StationOption, type WaterStationRow } from "@/lib/station-pricing";
 import {
@@ -35,10 +38,8 @@ import {
   type ProjectCommissionNowRow,
   STAGE_ORDER,
   STAGE_STYLES,
-  TRIP_STAGE_LABELS,
-  WATER_TYPE_LABELS,
 } from "@/lib/db-types";
-import { type DriverState, DRIVER_STATE_LABELS } from "@/lib/driver-state";
+import { type DriverState } from "@/lib/driver-state";
 import { type LeavePeriod } from "@/lib/leave";
 import { pillColor } from "@/lib/project-colors";
 import { formatTripRef } from "@/lib/trip-ref";
@@ -53,13 +54,19 @@ import CreateTripForm from "./CreateTripForm";
 import ManageDriversModal from "../projects/ManageDriversModal";
 import ScrollLock from "@/components/ScrollLock";
 
-// Mid-sentence wording for a water type, off the ONE label map — the same map
-// CreateTripForm's own gate message reads, so the two halves of the gate say
-// the same words rather than one saying "Non-potable" and the other "non
-// potable". A trip with no type is not gated at all, so this fallback only
+// Mid-sentence wording for a water type, off the ONE resolver — the same
+// resolver CreateTripForm's own gate message reads, so the two halves of the
+// gate say the same words rather than one saying "Non-potable" and the other
+// "non potable". A trip with no type is not gated at all, so this fallback only
 // ever appears defensively.
-function waterTypeWord(t: WaterType | null | undefined): string {
-  return t ? WATER_TYPE_LABELS[t].toLowerCase() : "this water type";
+//
+// The parameter is `v`, not `t`: `t` is now the dictionary lookup, and a
+// parameter of that name would shadow it inside this very body.
+// `waterTypeLabel()` keys off the ENUM VALUE and returns exactly what
+// WATER_TYPE_LABELS held for English, so `.toLowerCase()` is byte-identical
+// there; on Arabic it is a no-op, since Arabic has no letter case.
+function waterTypeWord(v: WaterType | null | undefined, lang: Lang): string {
+  return v ? waterTypeLabel(v, lang).toLowerCase() : t("trips.board.thisWaterType", lang);
 }
 
 type TripRow = Trip & {
@@ -168,8 +175,16 @@ function fmtPhaseStamp(iso: string | null): string {
 // --- Day-calendar helpers. All keys are local "YYYY-MM-DD" (matches the trips
 // trip_date date column, which is TZ-free). Using local components (not
 // toISOString, which is UTC) keeps "today" aligned with the user's clock. -------
-const WEEKDAY_LBL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+//
+// Both label arrays became KEY tuples. A module-level array of English words
+// cannot follow the language, so what stays at module scope is the INDEX → key
+// mapping (which is fixed data, the same in both languages) and the words are
+// looked up at render with the caller's `lang`. WEEKDAY_KEYS is indexed by
+// Date.getDay() and MONTH_KEYS by Date.getMonth(), exactly as before — the
+// order and the arity are unchanged, so every existing index still lands on the
+// same word.
+const WEEKDAY_KEYS = ["0", "1", "2", "3", "4", "5", "6"] as const;
+const MONTH_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"] as const;
 
 function dayKey(d: Date): string {
   const y = d.getFullYear();
@@ -204,9 +219,11 @@ function initials(name: string): string {
   return (first + last).toUpperCase();
 }
 // "30 Jun 2026" from a local YYYY-MM-DD key (parseKey keeps it local, no TZ shift).
-function fmtDayKey(key: string): string {
+// The day number and the year are DIGITS and stay Latin in both languages — only
+// the month word follows `lang`, through `common.monthShort`.
+function fmtDayKey(key: string, lang: Lang): string {
   const d = parseKey(key);
-  return `${d.getDate()} ${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+  return `${d.getDate()} ${t(`common.monthShort.${MONTH_KEYS[d.getMonth()]}`, lang)} ${d.getFullYear()}`;
 }
 
 const ACTION_BTN =
@@ -271,8 +288,9 @@ function TripCard({
   highlighted?: boolean;
   onHighlightHover?: () => void;
 }) {
+  const { lang } = useApp();
   const s = STAGE_STYLES[trip.stage];
-  // Demo: t.tankSizeM3 || truck.capacityM3. Trip's own tank size wins; truck capacity is the fallback.
+  // Demo: trip.tankSizeM3 || truck.capacityM3. Trip's own tank size wins; truck capacity is the fallback.
   const tankSize = trip.tank_size_m3 ?? trip.truckCapacityM3 ?? null;
 
   // Phase-timestamp rows — status-specific, mirrors the demo's phaseRows. Loading
@@ -281,7 +299,7 @@ function TripCard({
   if (trip.stage === "scheduled") {
     phaseRows = (
       <div className="text-xs mt-1">
-        <span className="muted">Scheduled:</span>{" "}
+        <span className="muted">{t("trips.board.stampScheduled", lang)}</span>{" "}
         <span className="tabular-nums">{fmtPhaseStamp(trip.scheduled_at ?? trip.trip_date)}</span>
       </div>
     );
@@ -293,7 +311,7 @@ function TripCard({
     phaseRows = (
       <>
         <div className="text-xs mt-1">
-          <span className="muted">Loading since:</span>{" "}
+          <span className="muted">{t("trips.board.stampLoadingSince", lang)}</span>{" "}
           <span className="tabular-nums">
             {fmtPhaseStamp(trip.loading_at ?? trip.scheduled_at ?? trip.trip_date)}
           </span>
@@ -312,16 +330,16 @@ function TripCard({
           )}
         >
           <Droplet className="h-3 w-3 shrink-0" />
-          <span className="opacity-80 shrink-0">Fill at:</span>
+          <span className="opacity-80 shrink-0">{t("trips.board.fillAt", lang)}</span>
           <span className="relative inline-flex items-center min-w-0 flex-1">
             <select
-              aria-label="Fill station"
+              aria-label={t("trips.board.fillStation", lang)}
               value={trip.water_station}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => onStationChange(e.target.value)}
               className="appearance-none bg-transparent font-semibold truncate max-w-[8rem] pe-4 cursor-pointer focus:outline-none"
             >
-              <option value="">Set station</option>
+              <option value="">{t("trips.board.setStation", lang)}</option>
               {!hasCurrentOption && <option value={trip.water_station}>{stationName}</option>}
               {/* A station that does not fill this trip's water type is
                   DISABLED, not hidden — the list stays the full list, and the
@@ -333,7 +351,11 @@ function TripCard({
                 return (
                   <option key={st.key} value={st.key} disabled={blocked}>
                     {st.name}
-                    {blocked ? ` — no ${waterTypeWord(trip.water_type)}` : ""}
+                    {blocked
+                      ? fill(t("trips.board.blockedSuffix", lang), {
+                          type: waterTypeWord(trip.water_type, lang),
+                        })
+                      : ""}
                   </option>
                 );
               })}
@@ -346,7 +368,7 @@ function TripCard({
   } else if (trip.stage === "in_transit") {
     phaseRows = (
       <div className="text-xs mt-1">
-        <span className="muted">In transit since:</span>{" "}
+        <span className="muted">{t("trips.board.stampInTransitSince", lang)}</span>{" "}
         <span className="tabular-nums">
           {fmtPhaseStamp(trip.in_transit_at ?? trip.loading_at ?? trip.trip_date)}
         </span>
@@ -358,13 +380,13 @@ function TripCard({
     phaseRows = (
       <>
         <div className="text-xs mt-1">
-          <span className="muted">Delivered:</span>{" "}
+          <span className="muted">{t("trips.board.stampDelivered", lang)}</span>{" "}
           <span className="tabular-nums">{fmtPhaseStamp(trip.delivered_at ?? trip.trip_date)}</span>
         </div>
         {stationName && (
           <div className="text-xs mt-1 flex items-center gap-1">
             <Droplet className="h-3 w-3 text-brand-500 shrink-0" />
-            <span className="muted">Filled at:</span> <b className="truncate">{stationName}</b>
+            <span className="muted">{t("trips.board.filledAt", lang)}</span> <b className="truncate">{stationName}</b>
           </div>
         )}
       </>
@@ -392,7 +414,7 @@ function TripCard({
             scheduled -> loading move is the dispatch decision, not the start
             of driving). The action, the icon and the own-current-stage colour
             lock documented above ACTION_PRIMARY are untouched. */}
-        <Play className="h-3.5 w-3.5" /> {busy ? "…" : "Dispatch"}
+        <Play className="h-3.5 w-3.5" /> {busy ? "…" : t("trips.board.dispatch", lang)}
       </button>
     );
   } else if (trip.stage === "loading") {
@@ -406,7 +428,7 @@ function TripCard({
         }}
         className={cn(ACTION_BTN, ACTION_SOLID_AMBER)}
       >
-        <Truck className="h-3.5 w-3.5" /> {busy ? "…" : "Mark in transit"}
+        <Truck className="h-3.5 w-3.5" /> {busy ? "…" : t("trips.board.markInTransit", lang)}
       </button>
     );
   } else if (trip.stage === "in_transit") {
@@ -420,7 +442,7 @@ function TripCard({
         }}
         className={cn(ACTION_BTN, ACTION_SOLID_ORANGE)}
       >
-        <Check className="h-3.5 w-3.5" /> {busy ? "…" : "Mark delivered"}
+        <Check className="h-3.5 w-3.5" /> {busy ? "…" : t("trips.board.markDelivered", lang)}
       </button>
     );
   } else if (trip.stage === "delivered") {
@@ -445,8 +467,8 @@ function TripCard({
             // statement of fact rather than a fabricated +0.00 SAR, which would
             // claim a figure nobody stamped — the same distinction ruling (a)
             // draws in the money path between "no config" and "zero".
-            "Delivered — no commission recorded"
-          : `Commission paid +${formatSar(trip.commission_sar)}`}
+            t("trips.board.noCommissionRecorded", lang)
+          : fill(t("trips.board.commissionPaid", lang), { v: formatSar(trip.commission_sar) })}
       </span>
     );
   }
@@ -488,7 +510,7 @@ function TripCard({
         {/* Ref — plain bold mono text, no pill (matches preview/app.css
             .kanban-ref: font-weight:600, no background/color). */}
         <span className="font-mono text-xs font-semibold">
-          {trip.ref ? formatTripRef(trip.ref) : <span className="muted font-sans opacity-80">No ref</span>}
+          {trip.ref ? formatTripRef(trip.ref) : <span className="muted font-sans opacity-80">{t("trips.board.noRef", lang)}</span>}
         </span>
         <span className="font-mono text-xs muted truncate">
           {showPlate ? trip.truckPlate ?? "—" : "—"}
@@ -515,7 +537,7 @@ function TripCard({
           className="mt-1 flex items-center gap-1 text-[0.6rem] text-slate-400 dark:text-slate-500 opacity-60 pointer-events-none"
         >
           <MapPin className="h-3 w-3 shrink-0" />
-          <span>Click for route</span>
+          <span>{t("trips.board.clickForRoute", lang)}</span>
         </div>
       )}
     </div>
@@ -563,6 +585,7 @@ function StageColumn({
   highlightedTripId?: string | null;
   onHighlightHover?: () => void;
 }) {
+  const { lang } = useApp();
   const s = STAGE_STYLES[stage];
   return (
     <div
@@ -576,7 +599,9 @@ function StageColumn({
         className={cn("flex items-center justify-between px-3 py-2.5 text-xs font-bold uppercase tracking-wide border-b", s.headerText)}
         style={{ borderColor: "rgb(var(--border))" }}
       >
-        <span>{TRIP_STAGE_LABELS[stage]}</span>
+        {/* Keyed off the STAGE VALUE, same as the map it replaces — this header
+            is `stage` rendered, never a label the column discriminates on. */}
+        <span>{tripStageLabel(stage, lang)}</span>
         <span className="rounded-full bg-black/5 dark:bg-white/10 px-2 py-0.5 text-xs tabular-nums muted normal-case font-semibold">
           {cards.length}
         </span>
@@ -677,6 +702,7 @@ function PhasePickerModal({
   onDelete: (tripId: string) => Promise<boolean>;
   onClose: () => void;
 }) {
+  const { lang } = useApp();
   const commissionLocked = trip.payout_id != null;
   const invoiceLocked = trip.invoiceLocked;
   const locked = commissionLocked || invoiceLocked;
@@ -716,7 +742,7 @@ function PhasePickerModal({
     }
     // The server's own sentence, or the generic line only when there genuinely
     // is no reason to show — never instead of one.
-    setErr(res.error ?? "Could not move this trip. Try again.");
+    setErr(res.error ?? t("trips.board.errMove", lang));
   }
 
   function handleApplyClick() {
@@ -734,7 +760,7 @@ function PhasePickerModal({
     const ok = await onDelete(trip.id);
     setDeleting(false);
     if (ok) onClose();
-    else setDeleteErr("Could not delete this trip. Try again.");
+    else setDeleteErr(t("trips.board.errDelete", lang));
   }
 
   return (
@@ -745,10 +771,10 @@ function PhasePickerModal({
           <>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <h2 className="text-lg font-semibold">Move trip</h2>
+                <h2 className="text-lg font-semibold">{t("trips.board.moveTrip", lang)}</h2>
                 <p className="text-xs muted font-mono mt-0.5">{formatTripRef(trip.ref)}</p>
               </div>
-              <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]" aria-label="Close">
+              <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]" aria-label={t("common.close", lang)}>
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -757,11 +783,14 @@ function PhasePickerModal({
               <div className="mt-3 flex items-start gap-2 rounded-lg bg-slate-500/10 ring-1 ring-inset ring-slate-500/20 px-3 py-2 text-xs">
                 <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5 text-slate-500 dark:text-slate-400" />
                 <span className="muted">
-                  {commissionLocked && invoiceLocked
-                    ? "Paid — commission is settled and the customer invoice is paid. Stage and station can't be changed."
-                    : commissionLocked
-                      ? "Paid — this trip's commission is locked into a History record. Stage and station can't be changed."
-                      : "Invoice paid — the customer has been billed for this trip. Stage and station can't be changed."}
+                  {t(
+                    commissionLocked && invoiceLocked
+                      ? "trips.board.lockBoth"
+                      : commissionLocked
+                        ? "trips.board.lockCommission"
+                        : "trips.board.lockInvoice",
+                    lang,
+                  )}
                 </span>
               </div>
             )}
@@ -790,10 +819,10 @@ function PhasePickerModal({
                     )}
                   >
                     <span className={cn("h-2 w-2 rounded-full shrink-0", st.dot)} />
-                    <span className="font-medium flex-1">{TRIP_STAGE_LABELS[stage]}</span>
+                    <span className="font-medium flex-1">{tripStageLabel(stage, lang)}</span>
                     {isCurrent && (
                       <span className="rounded-full bg-black/5 dark:bg-white/10 px-1.5 py-0.5 text-[10px] font-medium muted">
-                        Current
+                        {t("trips.board.current", lang)}
                       </span>
                     )}
                     {disabled && <Lock className="h-3 w-3 muted shrink-0" />}
@@ -805,16 +834,16 @@ function PhasePickerModal({
             {/* Fill station — same options as the loading chip, but usable at
                 any stage here (the card's inline chip stays loading-only). */}
             <label className="mt-4 flex flex-col gap-1 text-sm">
-              <span className="muted text-xs">Fill station</span>
+              <span className="muted text-xs">{t("trips.board.fillStation", lang)}</span>
               <select
-                aria-label="Fill station"
+                aria-label={t("trips.board.fillStation", lang)}
                 value={station}
                 disabled={locked}
                 onChange={(e) => setStation(e.target.value)}
                 className="px-2.5 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full disabled:opacity-50"
                 style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
               >
-                <option value="">Set station</option>
+                <option value="">{t("trips.board.setStation", lang)}</option>
                 {!hasCurrentOption && <option value={trip.water_station}>{currentStationName}</option>}
                 {/* Same gate as the loading chip — disabled, labelled, and
                     re-checked server-side by setTripStage. */}
@@ -823,14 +852,20 @@ function PhasePickerModal({
                   return (
                     <option key={st.key} value={st.key} disabled={blocked}>
                       {st.name}
-                      {blocked ? ` — no ${waterTypeWord(trip.water_type)}` : ""}
+                      {blocked
+                        ? fill(t("trips.board.blockedSuffix", lang), {
+                            type: waterTypeWord(trip.water_type, lang),
+                          })
+                        : ""}
                     </option>
                   );
                 })}
               </select>
               {trip.water_type && (
                 <span className="text-[11px] muted">
-                  This trip is {waterTypeWord(trip.water_type)}. Stations that don&apos;t fill it can&apos;t be picked.
+                  {fill(t("trips.board.typeHint", lang), {
+                    type: waterTypeWord(trip.water_type, lang),
+                  })}
                 </span>
               )}
             </label>
@@ -839,7 +874,7 @@ function PhasePickerModal({
 
             <div className="flex justify-end gap-2 mt-5">
               <Btn variant="outline" onClick={onClose}>
-                Cancel
+                {t("common.cancel", lang)}
               </Btn>
               <button
                 type="button"
@@ -847,7 +882,7 @@ function PhasePickerModal({
                 onClick={handleApplyClick}
                 className="h-9 px-4 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
               >
-                {busy ? "Moving…" : "Apply"}
+                {t(busy ? "trips.board.moving" : "trips.board.apply", lang)}
               </button>
             </div>
 
@@ -857,19 +892,19 @@ function PhasePickerModal({
             {deletable && (
               <section className="mt-5 pt-4 border-t border-rose-500/30 space-y-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
-                  Danger zone
+                  {t("common.dangerZone", lang)}
                 </h3>
                 <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 flex items-center justify-between gap-3">
                   <div className="text-sm">
-                    <div className="font-medium">Delete trip</div>
-                    <div className="muted text-[11px]">Permanent — cannot be undone. No Archive recovery.</div>
+                    <div className="font-medium">{t("trips.board.deleteTrip", lang)}</div>
+                    <div className="muted text-[11px]">{t("trips.board.deleteHint", lang)}</div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setView("delete-confirm")}
                     className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-rose-500/40 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
                   >
-                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                    <Trash2 className="h-3.5 w-3.5" /> {t("common.delete", lang)}
                   </button>
                 </div>
               </section>
@@ -879,13 +914,13 @@ function PhasePickerModal({
           <>
             <div className="flex items-start justify-between gap-2">
               <h2 className="text-lg font-semibold flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-amber-500" /> Confirm move
+                <AlertTriangle className="h-5 w-5 text-amber-500" /> {t("trips.board.confirmMove", lang)}
               </h2>
               <button
                 type="button"
                 onClick={() => setView("pick")}
                 className="muted hover:text-[rgb(var(--fg))]"
-                aria-label="Back"
+                aria-label={t("trips.board.back", lang)}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -895,11 +930,11 @@ function PhasePickerModal({
                 <li className="flex gap-2">
                   <span className="text-amber-500 shrink-0">•</span>
                   <span>
-                    Reverses the recorded delivery — clears the delivered timestamp and commission
+                    {t("trips.board.reverseWarn", lang)}
                     {trip.commission_sar != null && (
                       <>
                         {" "}
-                        (currently <b>{formatSar(trip.commission_sar)}</b>)
+                        ({t("trips.board.currently", lang)} <b>{formatSar(trip.commission_sar)}</b>)
                       </>
                     )}
                     .
@@ -910,7 +945,7 @@ function PhasePickerModal({
                 <li className="flex gap-2">
                   <span className="text-amber-500 shrink-0">•</span>
                   <span>
-                    Fill station changes from <b>{currentStationName || "—"}</b> to{" "}
+                    {t("trips.board.stationFrom", lang)} <b>{currentStationName || "—"}</b> {t("trips.board.stationTo", lang)}{" "}
                     <b>{nextStationName || "—"}</b>.
                   </span>
                 </li>
@@ -919,7 +954,7 @@ function PhasePickerModal({
             {err && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{err}</p>}
             <div className="flex justify-end gap-2 mt-5">
               <Btn variant="outline" onClick={() => setView("pick")}>
-                Cancel
+                {t("common.cancel", lang)}
               </Btn>
               <button
                 type="button"
@@ -927,7 +962,7 @@ function PhasePickerModal({
                 onClick={apply}
                 className="h-9 px-4 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
               >
-                {busy ? "Moving…" : "Confirm move"}
+                {t(busy ? "trips.board.moving" : "trips.board.confirmMove", lang)}
               </button>
             </div>
           </>
@@ -938,25 +973,29 @@ function PhasePickerModal({
                 hatch exists here, unlike every other destructive action. */}
             <div className="flex items-start justify-between gap-2">
               <h2 className="text-lg font-semibold flex items-center gap-2 text-rose-600 dark:text-rose-400">
-                <AlertTriangle className="h-5 w-5" /> Delete trip permanently
+                <AlertTriangle className="h-5 w-5" /> {t("trips.board.deletePermanentTitle", lang)}
               </h2>
               <button
                 type="button"
                 onClick={() => setView("pick")}
                 className="muted hover:text-[rgb(var(--fg))]"
-                aria-label="Back"
+                aria-label={t("trips.board.back", lang)}
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
             <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-700 dark:text-rose-300">
-              This permanently deletes trip <b className="font-mono">{trip.ref ? formatTripRef(trip.ref) : "this trip"}</b>. This cannot be
-              undone — there is no Archive to restore it from.
+              {/* Split at the bold mono ref. The whitespace run between `</b>`
+                  and the next expression contains a newline, so JSX strips it —
+                  which is why `deleteBodyAfter` has to OPEN with its own full
+                  stop, exactly as the original text did. */}
+              {t("trips.board.deleteBodyBefore", lang)} <b className="font-mono">{trip.ref ? formatTripRef(trip.ref) : t("trips.board.thisTrip", lang)}</b>
+              {t("trips.board.deleteBodyAfter", lang)}
             </div>
             {deleteErr && <p className="text-sm text-rose-600 dark:text-rose-400 mt-3">{deleteErr}</p>}
             <div className="flex justify-end gap-2 mt-5">
               <Btn variant="outline" onClick={() => setView("pick")}>
-                Cancel
+                {t("common.cancel", lang)}
               </Btn>
               <button
                 type="button"
@@ -964,7 +1003,7 @@ function PhasePickerModal({
                 onClick={confirmDelete}
                 className="h-9 px-4 rounded-lg text-sm font-medium bg-rose-600 hover:bg-rose-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
               >
-                <Trash2 className="h-3.5 w-3.5" /> {deleting ? "Deleting…" : "Delete permanently"}
+                <Trash2 className="h-3.5 w-3.5" /> {t(deleting ? "trips.board.deleting" : "trips.board.deletePermanently", lang)}
               </button>
             </div>
           </>
@@ -1026,6 +1065,7 @@ function ProjectCard({
   highlightedTripId?: string | null;
   onHighlightHover?: () => void;
 }) {
+  const { lang } = useApp();
   return (
     <div className="card p-4">
       {/* Header (block A) */}
@@ -1058,26 +1098,29 @@ function ProjectCard({
                 BASE plus its step, because the base alone would read as the
                 whole story when trip 6 of the day earns more than trip 1. */}
             <span className={cn(MONEY_PILL, "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/20")}>
-              Rate / trip <b>{formatSar(project.rate_per_trip_sar)}</b>
+              {t("trips.board.ratePerTrip", lang)} <b>{formatSar(project.rate_per_trip_sar)}</b>
             </span>
             {commissionNow?.commission_mode && (
               <span className={cn(MONEY_PILL, "bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20")}>
-                Commission / trip <b>{formatSar(commissionNow.commission_value ?? 0)}</b>
+                {t("trips.board.commissionPerTrip", lang)} <b>{formatSar(commissionNow.commission_value ?? 0)}</b>
                 {commissionNow.commission_mode === "scalable" && (
                   <span className="opacity-75">+{commissionNow.commission_bump_pct ?? 0}%</span>
                 )}
               </span>
             )}
             <span>·</span>
-            <span>{assignedCount} {assignedCount === 1 ? "driver" : "drivers"}</span>
+            {/* FOUR-BUCKET PLURAL. The count itself is untouched — `{n}` is
+                substituted with the same `assignedCount` the old ternary
+                printed, so English renders the identical bytes. */}
+            <span>{fill(t(`trips.board.driverCount.${plural(assignedCount)}`, lang), { n: assignedCount })}</span>
           </div>
         </div>
         <div className="inline-flex gap-2 shrink-0">
           <Btn variant="outline" onClick={() => onManage(project)}>
-            <Users className="h-3.5 w-3.5" /> Manage drivers
+            <Users className="h-3.5 w-3.5" /> {t("projects.manageDrivers", lang)}
           </Btn>
           <Btn variant="primary" onClick={() => onAdd(project.id)}>
-            <Plus className="h-3.5 w-3.5" /> Add trip
+            <Plus className="h-3.5 w-3.5" /> {t("trips.board.addTrip", lang)}
           </Btn>
         </div>
       </div>
@@ -1138,23 +1181,25 @@ function ProjectCard({
           style={{ borderColor: "rgb(var(--border))" }}
         >
           <Users className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-          <span className="font-semibold">Drivers operating this project</span>
+          <span className="font-semibold">{t("trips.board.driversOperating", lang)}</span>
           <span className="muted text-xs ms-auto">
-            {driverRows.length} {driverRows.length === 1 ? "driver" : "drivers"}
+            {fill(t(`trips.board.driverCount.${plural(driverRows.length)}`, lang), {
+              n: driverRows.length,
+            })}
           </span>
         </div>
         {driverRows.length === 0 ? (
-          <p className="muted text-sm p-3 text-center">No drivers assigned.</p>
+          <p className="muted text-sm p-3 text-center">{t("trips.board.noDriversAssigned", lang)}</p>
         ) : (
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Driver</TH>
-                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Truck</TH>
-                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Duty status</TH>
-                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Trips (day)</TH>
-                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Commission (day)</TH>
-                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">Last trip</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">{t("common.driver", lang)}</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">{t("common.truck", lang)}</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">{t("trips.board.thDutyStatus", lang)}</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">{t("trips.board.thTripsDay", lang)}</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">{t("trips.board.commissionDay", lang)}</TH>
+                <TH className="!text-[0.62rem] !py-[0.4rem] !px-3">{t("trips.board.thLastTrip", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -1190,14 +1235,17 @@ function ProjectCard({
                   <TD className="!py-2 !px-3">
                     {/* Pill's own classes (tone/color/dot) are untouched — it just
                         rides the row's opacity like every other cell. */}
-                    <StatusPill status={r.status} label={DRIVER_STATE_LABELS[r.status]} />
+                    {/* Keyed off `r.status`, the DERIVED STATE VALUE — the same
+                        thing `status` already passes to the pill for its tone.
+                        Nothing here reads the label back. */}
+                    <StatusPill status={r.status} label={t(`fleet.driverState.${r.status}`, lang)} />
                   </TD>
                   <TD className="!py-2 !px-3 tabular-nums font-medium">{r.tripsDay}</TD>
                   <TD className="!py-2 !px-3 tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
                     {formatSar(r.commissionDay)}
                   </TD>
                   <TD className="!py-2 !px-3 text-xs">
-                    {r.lastTripDate ? fmtDayKey(r.lastTripDate) : <span className="muted">—</span>}
+                    {r.lastTripDate ? fmtDayKey(r.lastTripDate, lang) : <span className="muted">—</span>}
                   </TD>
                 </tr>
                 );
@@ -1274,6 +1322,7 @@ export default function ProjectsBoard({
   leavePeriods,
   leaveLoadFailed,
 }: ProjectsBoardProps) {
+  const { lang } = useApp();
   const router = useRouter();
   const [advancingId, setAdvancingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1468,13 +1517,18 @@ export default function ProjectsBoard({
 
   // Right-header label: selected day relative to TODAY. Real date math via
   // addDays (parseKey → Date.setDate), so month/year boundaries roll correctly.
+  //
+  // `lang` IS IN THE DEPS. This memo composes a display STRING, so without it
+  // the label would freeze in whichever language was mounted first and never
+  // follow a language switch. The date arithmetic is untouched — only the words
+  // it produces are now looked up.
   const selectedDayLabel = useMemo(() => {
-    if (selectedDay === todayKey) return "Today";
-    if (selectedDay === addDays(todayKey, -1)) return "Yesterday";
-    if (selectedDay === addDays(todayKey, 1)) return "Tomorrow";
+    if (selectedDay === todayKey) return t("trips.deliveries.today", lang);
+    if (selectedDay === addDays(todayKey, -1)) return t("trips.board.yesterday", lang);
+    if (selectedDay === addDays(todayKey, 1)) return t("trips.board.tomorrow", lang);
     const d = parseKey(selectedDay);
-    return `${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
-  }, [selectedDay, todayKey]);
+    return `${t(`common.monthShort.${MONTH_KEYS[d.getMonth()]}`, lang)} ${d.getDate()}`;
+  }, [selectedDay, todayKey, lang]);
 
   // The 7 visible day cells (Sun→Sat) for the current week.
   const weekDays = useMemo(() => {
@@ -1486,16 +1540,21 @@ export default function ProjectsBoard({
   }, [weekStart]);
 
   // "22 – 28 Jun 2026" style range label for the week header.
+  // `lang` in the deps for the same reason as selectedDayLabel above. The day
+  // numbers and the year stay Latin digits in both languages; only the month
+  // word moves.
   const weekRangeLabel = useMemo(() => {
     const first = weekDays[0];
     const last = weekDays[6];
     const y = parseKey(last.key).getFullYear();
+    const firstMonth = t(`common.monthShort.${MONTH_KEYS[first.month]}`, lang);
+    const lastMonth = t(`common.monthShort.${MONTH_KEYS[last.month]}`, lang);
     const span =
       first.month === last.month
-        ? `${first.dayNum} – ${last.dayNum} ${MONTH_SHORT[last.month]}`
-        : `${first.dayNum} ${MONTH_SHORT[first.month]} – ${last.dayNum} ${MONTH_SHORT[last.month]}`;
+        ? `${first.dayNum} – ${last.dayNum} ${lastMonth}`
+        : `${first.dayNum} ${firstMonth} – ${last.dayNum} ${lastMonth}`;
     return `${span} ${y}`;
-  }, [weekDays]);
+  }, [weekDays, lang]);
 
   // Day-scoped: split THIS DAY's trips into per-project buckets + a direct bucket.
   const { byProject, directCustomer } = useMemo(() => {
@@ -1592,20 +1651,20 @@ export default function ProjectsBoard({
         <div className="flex items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2 min-w-0">
             <Calendar className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
-            <span className="text-sm font-semibold truncate">Project Calendar</span>
+            <span className="text-sm font-semibold truncate">{t("trips.board.calendar", lang)}</span>
           </div>
           <div className="flex-1 flex items-center justify-center gap-1.5">
-            <Btn variant="outline" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="Previous week">
+            <Btn variant="outline" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label={t("trips.board.prevWeek", lang)}>
               <ChevronLeft className="h-4 w-4" />
             </Btn>
             <span
               className="inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium tabular-nums"
               style={{ borderColor: "rgb(var(--border))" }}
             >
-              <span className="muted me-1">Week of</span>
+              <span className="muted me-1">{t("trips.board.weekOf", lang)}</span>
               {weekRangeLabel}
             </span>
-            <Btn variant="outline" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="Next week">
+            <Btn variant="outline" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label={t("trips.board.nextWeek", lang)}>
               <ChevronRight className="h-4 w-4" />
             </Btn>
           </div>
@@ -1633,13 +1692,13 @@ export default function ProjectsBoard({
                 <div className="flex items-baseline justify-between gap-1">
                   <span className="inline-flex items-baseline gap-1.5 min-w-0">
                     <span className="text-[10px] font-semibold uppercase tracking-wide muted">
-                      {WEEKDAY_LBL[d.dow]}
+                      {t(`trips.board.weekday.${WEEKDAY_KEYS[d.dow]}`, lang)}
                     </span>
                     <span className="text-lg font-semibold tabular-nums leading-none">{d.dayNum}</span>
                   </span>
                   {isToday && (
                     <span className="text-[10px] font-medium text-brand-600 dark:text-brand-400 shrink-0">
-                      Today
+                      {t("trips.deliveries.today", lang)}
                     </span>
                   )}
                 </div>
@@ -1658,7 +1717,9 @@ export default function ProjectsBoard({
                     </span>
                   ))}
                   {pills.length > 3 && (
-                    <span className="block w-full text-[9px] muted px-1.5 py-0.5">+{pills.length - 3} more</span>
+                    <span className="block w-full text-[9px] muted px-1.5 py-0.5">
+                      {fill(t("trips.board.morePills", lang), { n: pills.length - 3 })}
+                    </span>
                   )}
                 </div>
               </button>
@@ -1669,10 +1730,16 @@ export default function ProjectsBoard({
 
       {/* KPI row — scoped to the selected day. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <Stat label="Active projects (day)" value={activeProjects} tone="info" />
-        <Stat label="Pending pushes (day)" value={pendingPushes} tone={pendingPushes > 0 ? "warn" : "ok"} />
-        <Stat label="Running trips (day)" value={running} tone="ok" />
-        <Stat label="Commission (day)" value={formatSar(commissionDay)} tone="ok" />
+        <Stat label={t("trips.board.kActiveProjects", lang)} value={activeProjects} tone="info" />
+        <Stat
+          label={t("trips.board.kPendingPushes", lang)}
+          value={pendingPushes}
+          tone={pendingPushes > 0 ? "warn" : "ok"}
+        />
+        <Stat label={t("trips.board.kRunningTrips", lang)} value={running} tone="ok" />
+        {/* The VALUE is untouched — `formatSar(commissionDay)` still produces the
+            same money string. Only the tile's label moves. */}
+        <Stat label={t("trips.board.commissionDay", lang)} value={formatSar(commissionDay)} tone="ok" />
       </div>
 
       {/* New Project + Manage stations USED TO SIT HERE, below the KPIs. They
@@ -1708,7 +1775,7 @@ export default function ProjectsBoard({
 
       {/* Project-stacked board */}
       {activeList.length === 0 && directCustomer.length === 0 ? (
-        <div className="card p-6 text-center muted text-sm">No active projects yet.</div>
+        <div className="card p-6 text-center muted text-sm">{t("trips.board.noActiveProjects", lang)}</div>
       ) : (
         <div className="space-y-5">
           {activeList.map((p) => (
@@ -1740,9 +1807,9 @@ export default function ProjectsBoard({
             <div className="card p-4">
               <div className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-full bg-slate-400 shrink-0" />
-                <h3 className="text-base font-semibold">Direct customer trips</h3>
+                <h3 className="text-base font-semibold">{t("trips.board.directTrips", lang)}</h3>
               </div>
-              <p className="text-xs muted mt-1">Trips not tied to a project.</p>
+              <p className="text-xs muted mt-1">{t("trips.board.directHint", lang)}</p>
               <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {STAGE_ORDER.map((stage) => {
                   let cards = directCustomer.filter((t) => t.stage === stage);

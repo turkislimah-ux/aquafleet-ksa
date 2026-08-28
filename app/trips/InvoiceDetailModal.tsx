@@ -18,6 +18,9 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { X, Printer, Mail, Plus, Trash2, AlertTriangle, Download, Image as ImageIcon, Paperclip } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, fill } from "@/lib/i18n";
+import { invoiceStatusLabel } from "@/lib/enum-labels";
 import { formatDate, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
 import { round2 } from "@/lib/vat";
@@ -65,14 +68,23 @@ const FALLBACK_COMPANY_EMAIL = "info@binslimah.com";
 // Each maps to a distinct tone/purpose picked by the user before mailto opens.
 // Batch C adds "sales_return" — a Sales Return (cancellation) notice, only
 // meaningful once the invoice has actually been returned/voided.
-type EmailType = "statement" | "payment_due" | "reminder" | "generic" | "sales_return";
-const EMAIL_TYPE_META: Record<EmailType, { label: string; hint: string }> = {
-  statement: { label: "Monthly report / statement", hint: "Activity summary for the period." },
-  payment_due: { label: "Payment due", hint: "This invoice is now due — request payment." },
-  reminder: { label: "Payment reminder", hint: "Follow-up nudge for an outstanding balance." },
-  generic: { label: "Plain / generic", hint: "Minimal — just the invoice reference." },
-  sales_return: { label: "Sales Return notice", hint: "Explains this invoice was cancelled." },
-};
+//
+// THIS IS A KEY TUPLE, NOT A LABEL MAP. It replaces the old
+// `EMAIL_TYPE_META: Record<EmailType, {label, hint}>` const, whose English
+// words could not follow a language switch from module scope. It carries the
+// two things the map was actually load-bearing for — the MEMBERS and their
+// ORDER in the picker — while the words come from
+// `trips.invoice.emailType.<type>.{label,hint}` at the render site.
+//
+// The order is the same order the old `Object.keys(EMAIL_TYPE_META)` yielded
+// (string keys enumerate in insertion order), but it is now STATED rather than
+// inherited from how the object happened to be written.
+//
+// `EmailType` is derived from the tuple so the union and the list cannot drift
+// apart — adding a template here is a `tsc` error until its dictionary leaves
+// exist.
+const EMAIL_TYPES = ["statement", "payment_due", "reminder", "generic", "sales_return"] as const;
+type EmailType = (typeof EMAIL_TYPES)[number];
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -171,6 +183,9 @@ export default function InvoiceDetailModal({
   // and PDF. Only the WRITE affordances are withheld.
   readOnly?: boolean;
 }) {
+  // Read BEFORE the `!open || !invoiceId || !mounted` bail-out further down —
+  // a hook after an early return is a hook-order violation.
+  const { lang } = useApp();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -239,7 +254,7 @@ export default function InvoiceDetailModal({
     setError(null);
     const r = await getInvoice(invoiceId);
     if (r.error || !r.data) {
-      setError(r.error ?? "Could not load invoice.");
+      setError(r.error ?? t("trips.invoice.errLoad", lang));
       setLoading(false);
       return;
     }
@@ -257,7 +272,7 @@ export default function InvoiceDetailModal({
     if (r.data.status === "draft" || r.data.status === "review") {
       const p = await previewInvoice(invoiceId);
       if (p.error || !p.data) {
-        setError(p.error ?? "Could not assemble invoice preview.");
+        setError(p.error ?? t("trips.invoice.errPreview", lang));
         setLoading(false);
         return;
       }
@@ -375,7 +390,7 @@ export default function InvoiceDetailModal({
     const r = await getInvoicePdf(invoiceId);
     setDownloadingPdf(false);
     if (r.error || !r.data) {
-      setPdfError(r.error ?? "Could not generate the PDF.");
+      setPdfError(r.error ?? t("trips.invoice.errPdf", lang));
       return;
     }
     // Server Actions can't stream a Blob directly — bytes arrive as base64;
@@ -420,7 +435,7 @@ export default function InvoiceDetailModal({
     const res = await addSpecialCharge(invoiceId, chargeLabel.trim(), chargeDate || null, qty, price);
     if (res.error || !res.data) {
       setAddingCharge(false);
-      setActionError(res.error ?? "Could not add the charge.");
+      setActionError(res.error ?? t("trips.invoice.errAddCharge", lang));
       return;
     }
     if (chargeImageFile) {
@@ -430,7 +445,7 @@ export default function InvoiceDetailModal({
       if (imgRes.error) {
         // Charge itself was added fine — surface the image failure but don't
         // discard the successful add; the row can still get an image later.
-        setActionError(`Charge added, but the image failed to attach: ${imgRes.error}`);
+        setActionError(fill(t("trips.invoice.errChargeImage", lang), { err: imgRes.error }));
       }
     }
     setAddingCharge(false);
@@ -453,7 +468,7 @@ export default function InvoiceDetailModal({
   async function onViewChargeImage(chargeId: string) {
     const r = await getSpecialChargeImageSignedUrl(chargeId);
     if (r.error || !r.data) {
-      setActionError(r.error ?? "Could not open the attached image.");
+      setActionError(r.error ?? t("trips.invoice.errViewImage", lang));
       return;
     }
     window.open(r.data.url, "_blank", "noopener,noreferrer");
@@ -463,7 +478,9 @@ export default function InvoiceDetailModal({
     e.preventDefault();
     if (!invoiceId) return;
     if (periodStartInput > periodEndInput) {
-      setPeriodError("Pick a valid period (start must be on or before end).");
+      // Same rule, same sentence InvoicesModal validates the CREATE form with —
+      // reused from where its first reader put it rather than promoted.
+      setPeriodError(t("trips.invoices.badPeriod", lang));
       return;
     }
     setSavingPeriod(true);
@@ -482,7 +499,7 @@ export default function InvoiceDetailModal({
     if (!invoiceId) return;
     const r = await getProofSignedUrl(invoiceId);
     if (r.error || !r.data) {
-      setActionError(r.error ?? "Could not open proof of payment.");
+      setActionError(r.error ?? t("trips.invoice.errProof", lang));
       return;
     }
     window.open(r.data.url, "_blank", "noopener,noreferrer");
@@ -642,22 +659,27 @@ export default function InvoiceDetailModal({
         <div className="no-print sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-app bg-[rgb(var(--card))] px-5 py-3">
           <div className="flex items-center gap-3">
             <button type="button" onClick={onBack} className="text-sm muted hover:text-[rgb(var(--fg))]">
-              ← Back to invoices
+              {t("trips.invoice.backToInvoices", lang)}
             </button>
-            {status && <StatusPill status={status} label={INVOICE_STATUS_LABELS[status]} />}
+            {/* TOOLBAR pill — chrome, so it translates. Keyed off `status`, the
+                ENUM VALUE, exactly as the map it replaces was; nothing reads the
+                label back. The SHEET's own Status line (:788, inside
+                `#invoice-print`) still renders INVOICE_STATUS_LABELS and stays
+                English, which is why that import is still here. */}
+            {status && <StatusPill status={status} label={invoiceStatusLabel(status, lang)} />}
           </div>
           <div className="flex items-center gap-2">
-            <span title={!canEmail && raw && view ? "No customer email on file" : undefined}>
+            <span title={!canEmail && raw && view ? t("trips.invoice.noEmailOnFile", lang) : undefined}>
               <Btn
                 variant="outline"
                 onClick={() => canEmail && setEmailPickerOpen(true)}
                 className={!canEmail ? "opacity-50 pointer-events-none" : ""}
               >
-                <Mail className="h-4 w-4" /> Email
+                <Mail className="h-4 w-4" /> {t("trips.invoice.emailBtn", lang)}
               </Btn>
             </span>
             <Btn variant="outline" onClick={handlePrint}>
-              <Printer className="h-4 w-4" /> Print
+              <Printer className="h-4 w-4" /> {t("common.print", lang)}
             </Btn>
             <span title={pdfError ?? undefined}>
               <Btn
@@ -665,7 +687,8 @@ export default function InvoiceDetailModal({
                 onClick={handleDownloadPdf}
                 className={downloadingPdf ? "opacity-50 pointer-events-none" : ""}
               >
-                <Download className="h-4 w-4" /> {downloadingPdf ? "Generating…" : "Download PDF"}
+                <Download className="h-4 w-4" />{" "}
+                {t(downloadingPdf ? "trips.invoice.generating" : "trips.invoice.downloadPdf", lang)}
               </Btn>
             </span>
             <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]">
@@ -674,7 +697,7 @@ export default function InvoiceDetailModal({
           </div>
         </div>
 
-        {loading && <div className="p-10 text-center muted text-sm">Loading invoice…</div>}
+        {loading && <div className="p-10 text-center muted text-sm">{t("trips.invoice.loading", lang)}</div>}
         {error && <div className="p-10 text-center text-sm text-rose-600 dark:text-rose-400">{error}</div>}
 
         {!loading && !error && raw && view && (
@@ -1240,7 +1263,7 @@ export default function InvoiceDetailModal({
         <ScrollLock />
         <div className="card p-5 w-full max-w-sm space-y-3" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold">Email invoice — choose type</h3>
+            <h3 className="text-sm font-semibold">{t("trips.invoice.emailPickerTitle", lang)}</h3>
             <button type="button" onClick={() => setEmailPickerOpen(false)} className="muted hover:text-[rgb(var(--fg))]">
               <X className="h-4 w-4" />
             </button>
@@ -1250,17 +1273,20 @@ export default function InvoiceDetailModal({
                 the other four don't make sense to send on a cancelled
                 invoice (payment due/reminder chase money that's no longer
                 owed), so they're hidden rather than left to misfire. */}
-            {(Object.keys(EMAIL_TYPE_META) as EmailType[])
-              .filter((type) => (status === "void" ? type === "sales_return" : type !== "sales_return"))
-              .map((type) => (
+            {EMAIL_TYPES.filter((type) =>
+              status === "void" ? type === "sales_return" : type !== "sales_return",
+            ).map((type) => (
               <button
                 key={type}
                 type="button"
                 onClick={() => sendTemplate(type)}
                 className="w-full text-left rounded-lg border border-app px-3 py-2 text-sm hover:border-brand-500 hover:bg-brand-500/10"
               >
-                <div className="font-medium">{EMAIL_TYPE_META[type].label}</div>
-                <div className="muted text-[11px]">{EMAIL_TYPE_META[type].hint}</div>
+                {/* Keyed off the TEMPLATE VALUE `type`, the same value
+                    sendTemplate() dispatches on. The picker never reads a
+                    label back to decide which mail to build. */}
+                <div className="font-medium">{t(`trips.invoice.emailType.${type}.label`, lang)}</div>
+                <div className="muted text-[11px]">{t(`trips.invoice.emailType.${type}.hint`, lang)}</div>
               </button>
             ))}
           </div>
@@ -1295,9 +1321,21 @@ function IdentityBlock({
     <div>
       <div className="text-[11px] uppercase tracking-wide muted mb-0.5">{title}</div>
       {name !== undefined && <div className="font-medium">{name ?? <span className="muted">Not on file</span>}</div>}
+      {/* THE ONE INTENTIONAL CHANGE INSIDE `#invoice-print`, and it changes no
+          text. `dir="rtl"` used to sit on the block, which forced the whole
+          line to lay out right-to-left regardless of the page's own direction —
+          so on an English sheet this one line jumped to the right margin while
+          every other line stayed left. The attribute is only needed for GLYPH
+          ORDER within the Arabic name itself, so it moves to an inline <span>:
+          the block now inherits the page direction and aligns with its
+          neighbours, and the Arabic still shapes correctly.
+
+          The rendered TEXT is byte-identical — `{nameAr}` was the div's only
+          child (the surrounding whitespace runs contain newlines and are
+          stripped by JSX), and it is now the span's only child. */}
       {nameAr && (
-        <div className="font-medium" dir="rtl">
-          {nameAr}
+        <div className="font-medium">
+          <span dir="rtl">{nameAr}</span>
         </div>
       )}
       {lines

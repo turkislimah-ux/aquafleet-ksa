@@ -20,6 +20,9 @@ import { type DriverState, resolveOnLeave } from "@/lib/driver-state";
 import { type LeavePeriod } from "@/lib/leave";
 import DriverDutyTable from "./DriverDutyTable";
 import ScrollLock from "@/components/ScrollLock";
+import { useApp } from "@/components/AppShell";
+import { t, fill, type Lang } from "@/lib/i18n";
+import { waterTypeLabel } from "@/lib/enum-labels";
 
 type ProjectOption = {
   id: string;
@@ -41,15 +44,18 @@ type TripLite = {
 
 type Kind = "project" | "customer";
 
-const MONTH_SHORT = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
+// The twelve abbreviations were a module-level `const MONTH_SHORT`, frozen at
+// import — copy two of three in this route (DriverRosterTable and ProjectsBoard
+// held the others). They now come from `common.monthShort`, which is why this
+// takes `lang`.
+//
 // ISO timestamp → "DD Mon YYYY" in LOCAL time (matches the app's delivered-day basis).
-function fmtDeliveredLocal(iso: string): string {
+// ONLY the month NAME is translated; the day and the year are app-formatted
+// numbers and stay Latin digits in both languages.
+const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
+function fmtDeliveredLocal(iso: string, lang: Lang): string {
   const d = new Date(iso);
-  return `${d.getDate()} ${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+  return `${d.getDate()} ${t(`common.monthShort.${MONTH_KEYS[d.getMonth()]}`, lang)} ${d.getFullYear()}`;
 }
 
 const INPUT =
@@ -116,6 +122,7 @@ export default function CreateTripForm({
   defaultDate?: string;
 }) {
   const router = useRouter();
+  const { lang } = useApp();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -142,7 +149,9 @@ export default function CreateTripForm({
   // station after choosing a type. The select drops the option, so without
   // this the field would silently blank and look like a glitch.
   const blockedType = waterType !== "" && !allowedTypes.includes(waterType) ? waterType : null;
-  const stationName = pickedStation?.name ?? "This station";
+  // The station's own name is ROW DATA and prints as stored; only the fallback
+  // subject translates.
+  const stationName = pickedStation?.name ?? t("trips.newTrip.thisStation", lang);
   // Single-select operational driver. null = NOTHING PICKED YET, which is now a
   // REFUSING state, not a valid "unassigned" trip — see the required-fields block
   // above onSubmit. Truck is DERIVED from this driver (one truck per driver) —
@@ -209,11 +218,14 @@ export default function CreateTripForm({
     for (const [id, v] of Object.entries(m)) {
       out[id] = {
         onDuty: v.onDuty,
-        lastDelivered: v.lastDeliveredAt ? fmtDeliveredLocal(v.lastDeliveredAt) : null,
+        lastDelivered: v.lastDeliveredAt ? fmtDeliveredLocal(v.lastDeliveredAt, lang) : null,
       };
     }
     return out;
-  }, [trips, selectedDay]);
+    // `lang` IS a dependency: this memo composes a DISPLAY STRING, so without
+    // it the last-delivered column would keep the language it was first
+    // rendered in for as long as the trip rows and the selected day held.
+  }, [trips, selectedDay, lang]);
 
   // driver_ids on leave for the SELECTED trip day (trip_date the manager picked).
   // Resolved from the FULL leave periods via the canonical range check. A driver
@@ -290,10 +302,10 @@ export default function CreateTripForm({
   // themselves stay editable so the user can always reach the state that unblocks.
   const blockedReason = countInvalid
     ? count.trim() === ""
-      ? "Enter how many trips to create."
-      : `Batch must be a whole number from 1 to ${MAX_BATCH_TRIPS}.`
+      ? t("trips.newTrip.errBatchEmpty", lang)
+      : fill(t("trips.newTrip.errBatchRange", lang), { max: MAX_BATCH_TRIPS })
     : missingDriver
-      ? "Pick a driver — a trip cannot be created unassigned."
+      ? t("trips.newTrip.errNoDriver", lang)
       : null;
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -327,7 +339,7 @@ export default function CreateTripForm({
             className="card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-thin"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-lg font-semibold mb-4">New trip</h2>
+            <h2 className="text-lg font-semibold mb-4">{t("trips.newTrip.title", lang)}</h2>
             <form onSubmit={onSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Link kind toggle */}
               <div className="sm:col-span-2 flex gap-2">
@@ -342,7 +354,7 @@ export default function CreateTripForm({
                   )}
                   style={kind !== "project" ? { borderColor: "rgb(var(--border))" } : undefined}
                 >
-                  Project trip
+                  {t("trips.newTrip.kindProject", lang)}
                 </button>
                 <button
                   type="button"
@@ -355,13 +367,13 @@ export default function CreateTripForm({
                   )}
                   style={kind !== "customer" ? { borderColor: "rgb(var(--border))" } : undefined}
                 >
-                  Customer trip
+                  {t("trips.newTrip.kindCustomer", lang)}
                 </button>
               </div>
 
               {kind === "project" ? (
                 <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                  <span className="muted">Project *</span>
+                  <span className="muted">{t("common.project", lang)} *</span>
                   <select
                     name="project_id"
                     required
@@ -371,7 +383,7 @@ export default function CreateTripForm({
                     style={INPUT_STYLE}
                   >
                     <option value="" disabled>
-                      Select…
+                      {t("common.selectPlaceholder", lang)}
                     </option>
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -382,7 +394,7 @@ export default function CreateTripForm({
                 </label>
               ) : (
                 <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                  <span className="muted">Customer *</span>
+                  <span className="muted">{t("common.customer", lang)} *</span>
                   <select
                     name="customer_id"
                     required
@@ -392,7 +404,7 @@ export default function CreateTripForm({
                     style={INPUT_STYLE}
                   >
                     <option value="" disabled>
-                      Select…
+                      {t("common.selectPlaceholder", lang)}
                     </option>
                     {customers.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -404,7 +416,7 @@ export default function CreateTripForm({
               )}
 
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Water station *</span>
+                <span className="muted">{t("trips.newTrip.fWaterStation", lang)} *</span>
                 <select
                   name="water_station"
                   value={station}
@@ -414,7 +426,7 @@ export default function CreateTripForm({
                 >
                   {stations.length === 0 && (
                     <option value="" disabled>
-                      No stations
+                      {t("trips.newTrip.noStations", lang)}
                     </option>
                   )}
                   {stations.map((s) => (
@@ -426,7 +438,7 @@ export default function CreateTripForm({
               </label>
 
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Water type *</span>
+                <span className="muted">{t("trips.newTrip.fWaterType", lang)} *</span>
                 <select
                   name="water_type"
                   required
@@ -440,25 +452,32 @@ export default function CreateTripForm({
                       direct-customer trip (no project to inherit from), never
                       silently defaults. */}
                   <option value="" disabled>
-                    Select…
+                    {t("common.selectPlaceholder", lang)}
                   </option>
                   {/* Only what THIS station offers. A type it does not price
                       is not selectable here — pick another station to get it.
                       An unpriced legacy station offers both, so trip creation
                       never freezes while prices are still being entered
                       (selectableWaterTypes carries that rule). */}
+                  {/* STILL ITERATES WATER_TYPE_LABELS, deliberately. That map
+                      is the enum's members and its ORDER — the option list has
+                      to keep both — while the visible text now comes from
+                      waterTypeLabel(), which keys off the same value. The map
+                      itself is not edited. */}
                   {(Object.keys(WATER_TYPE_LABELS) as WaterType[])
                     .filter((v) => allowedTypes.includes(v))
                     .map((v) => (
                       <option key={v} value={v}>
-                        {WATER_TYPE_LABELS[v]}
+                        {waterTypeLabel(v, lang)}
                       </option>
                     ))}
                 </select>
                 {blockedType && (
                   <span className="text-xs text-amber-700 dark:text-amber-300">
-                    {stationName} does not offer {WATER_TYPE_LABELS[blockedType]}. Pick another
-                    station, or add that type to this station under Manage stations.
+                    {fill(t("trips.newTrip.blockedType", lang), {
+                      station: stationName,
+                      type: waterTypeLabel(blockedType, lang),
+                    })}
                   </span>
                 )}
               </label>
@@ -471,8 +490,8 @@ export default function CreateTripForm({
                     Batch field's, because the two requirements are enforced by
                     the same block and must not look like different rules. */}
                 <span className="muted">
-                  Driver <span className="text-rose-600 dark:text-rose-400 font-semibold">*</span>
-                  {driverId ? "" : " · none picked"}
+                  {t("common.driver", lang)} <span className="text-rose-600 dark:text-rose-400 font-semibold">*</span>
+                  {driverId ? "" : t("trips.newTrip.nonePicked", lang)}
                 </span>
                 <DriverDutyTable
                   drivers={visibleDrivers}
@@ -489,7 +508,7 @@ export default function CreateTripForm({
               </div>
 
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Trip date</span>
+                <span className="muted">{t("trips.newTrip.fTripDate", lang)}</span>
                 <input
                   name="trip_date"
                   type="date"
@@ -504,7 +523,7 @@ export default function CreateTripForm({
                   other field on this form. See BATCH_INPUT's header for why. */}
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-semibold">
-                  How many (batch){" "}
+                  {t("trips.newTrip.fBatch", lang)}{" "}
                   <span className="text-rose-600 dark:text-rose-400">*</span>
                 </span>
                 <input
@@ -522,7 +541,7 @@ export default function CreateTripForm({
                   style={BATCH_INPUT_STYLE}
                 />
                 <span className="text-[11px] muted">
-                  Required — how many identical trips to create.
+                  {t("trips.newTrip.batchHint", lang)}
                 </span>
               </label>
 
@@ -538,10 +557,10 @@ export default function CreateTripForm({
                   <span className="text-xs muted text-end">{blockedReason}</span>
                 )}
                 <Btn variant="outline" onClick={close}>
-                  Cancel
+                  {t("common.cancel", lang)}
                 </Btn>
                 <Btn type="submit" variant="primary" disabled={saving || blockedReason !== null}>
-                  {saving ? "Saving…" : "Create"}
+                  {t(saving ? "common.saving" : "trips.newTrip.create", lang)}
                 </Btn>
               </div>
             </form>

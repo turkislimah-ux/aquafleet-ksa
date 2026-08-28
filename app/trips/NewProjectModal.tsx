@@ -12,6 +12,8 @@ import { Btn } from "@/components/ui";
 import { type DriverState } from "@/lib/driver-state";
 import ProjectModal from "./ProjectModal";
 import { type SelectableStation } from "@/lib/station-pricing";
+import { useApp } from "@/components/AppShell";
+import { t } from "@/lib/i18n";
 
 type Driver = { id: string; name: string; status?: string };
 type TruckLite = {
@@ -41,11 +43,12 @@ export default function NewProjectModal({
   leaveUnavailable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const { lang } = useApp();
 
   return (
     <>
       <Btn variant="primary" onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> New Project
+        <Plus className="h-4 w-4" /> {t("trips.shell.newProject", lang)}
       </Btn>
       <ProjectModal
         mode="create"

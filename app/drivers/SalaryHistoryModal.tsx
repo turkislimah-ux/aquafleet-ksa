@@ -60,13 +60,17 @@ const INPUT =
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
 // Indexing a const tuple types the element as the union of its twelve members,
-// so `drivers.months.${key}` is twelve real TKeys rather than `string`. Same
+// so `common.monthShort.${key}` is twelve real TKeys rather than `string`. Same
 // device as app/fleet/FleetClient.tsx's own monthLabel.
+//
+// The leaves moved from `drivers.months` to `common.monthShort` in Phase 3
+// Batch 9 (unchanged values) once app/trips turned out to hold three more
+// hardcoded copies of the same array.
 const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
 
 function monthName(m: string, lang: Lang): string | null {
   const key = MONTH_KEYS[Number(m) - 1];
-  return key ? t(`drivers.months.${key}`, lang) : null;
+  return key ? t(`common.monthShort.${key}`, lang) : null;
 }
 
 /** "2026-03-14" → "Mar 2026". Pure string work — no Date, no timezone. */

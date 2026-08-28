@@ -23,23 +23,33 @@ import FinanceTab from "./FinanceTab";
 import NewProjectModal from "./NewProjectModal";
 import WaterStationsModal from "./WaterStationsModal";
 import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import { useApp } from "@/components/AppShell";
+import { t, fill, type Lang } from "@/lib/i18n";
 
 type Tab = "projects" | "customers" | "finance";
 
-const HEADER: Record<Tab, { title: string; subtitle: string }> = {
-  projects: {
-    title: "Project Operations",
-    subtitle: "Each project runs its own Kanban — push trips through the board manually.",
-  },
-  customers: {
-    title: "Manage Customers",
-    subtitle: "View and manage every customer, their project, rate, and assigned drivers.",
-  },
-  finance: {
-    title: "Finance",
-    subtitle: "Prepaid balances, top-ups, and customer statements — pre-VAT.",
-  },
-};
+// WAS a module-level `const HEADER: Record<Tab, …>`. A const object of display
+// strings is evaluated once at import, so the page title and subtitle kept the
+// language that was active when the module first loaded and never followed a
+// switch. A function taking `lang` is re-evaluated per render instead.
+function headerFor(tab: Tab, lang: Lang): { title: string; subtitle: string } {
+  if (tab === "customers") {
+    return {
+      title: t("trips.shell.headCustomersTitle", lang),
+      subtitle: t("trips.shell.headCustomersSubtitle", lang),
+    };
+  }
+  if (tab === "finance") {
+    return {
+      title: t("trips.shell.headFinanceTitle", lang),
+      subtitle: t("trips.shell.headFinanceSubtitle", lang),
+    };
+  }
+  return {
+    title: t("trips.shell.headProjectsTitle", lang),
+    subtitle: t("trips.shell.headProjectsSubtitle", lang),
+  };
+}
 
 export default function TripsTabs({
   error,
@@ -56,6 +66,7 @@ export default function TripsTabs({
   paidInvoices: PaidInvoiceRow[];
 }) {
   const router = useRouter();
+  const { lang } = useApp();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -69,7 +80,7 @@ export default function TripsTabs({
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
 
-  const head = HEADER[tab];
+  const head = headerFor(tab, lang);
 
   // Water station management popup (false = closed). Lives HERE, not in
   // ProjectsBoard, so the trigger survives a tab switch.
@@ -99,7 +110,7 @@ export default function TripsTabs({
         actions={
           <>
             <Btn variant="outline" onClick={() => setManagingStations(true)}>
-              <Droplet className="h-4 w-4" /> Manage stations
+              <Droplet className="h-4 w-4" /> {t("trips.shell.manageStations", lang)}
             </Btn>
             <NewProjectModal
               drivers={boardProps.drivers}
@@ -125,13 +136,27 @@ export default function TripsTabs({
         className="flex items-center gap-1 border-b mb-4 flex-wrap"
         style={{ borderColor: "rgb(var(--border))" }}
       >
-        <TabBtn active={tab === "projects"} onClick={() => setTab("projects")} label="Projects" />
-        <TabBtn active={tab === "customers"} onClick={() => setTab("customers")} label="Customers" />
-        <TabBtn active={tab === "finance"} onClick={() => setTab("finance")} label="Finance/Invoice" />
+        <TabBtn
+          active={tab === "projects"}
+          onClick={() => setTab("projects")}
+          label={t("trips.shell.tabProjects", lang)}
+        />
+        <TabBtn
+          active={tab === "customers"}
+          onClick={() => setTab("customers")}
+          label={t("trips.shell.tabCustomers", lang)}
+        />
+        <TabBtn
+          active={tab === "finance"}
+          onClick={() => setTab("finance")}
+          label={t("trips.shell.tabFinance", lang)}
+        />
       </div>
 
       {error && (
-        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">Failed to load trips: {error}</p>
+        <p className="text-sm text-rose-600 dark:text-rose-400 mb-4">
+          {fill(t("trips.shell.loadFailed", lang), { error })}
+        </p>
       )}
 
       {tab === "projects" && <ProjectsBoard {...boardProps} />}

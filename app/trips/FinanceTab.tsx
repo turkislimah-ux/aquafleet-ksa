@@ -24,7 +24,11 @@ import { useMemo, useState } from "react";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { currentMonthKey, formatSar } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
-import { PAYMENT_MODE_LABELS, type PaymentMode } from "@/lib/db-types";
+// PAYMENT_MODE_LABELS is no longer imported — the badge reads
+// paymentModeLabel() instead. The MAP ITSELF IS NOT EDITED; it stays the
+// enum's English source of truth in db-types.ts, and the helper keys off the
+// same enum values.
+import { type PaymentMode } from "@/lib/db-types";
 import {
   derivedBalanceItems,
   round2,
@@ -42,6 +46,9 @@ import StatementModal, { type TripMeta } from "./StatementModal";
 import InvoicesModal, { type InvoiceCustomer } from "./InvoicesModal";
 import { useRecordFocus } from "@/lib/useRecordFocus";
 import { resolveInvoiceCustomer } from "@/lib/actions/search";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural, type Lang } from "@/lib/i18n";
+import { paymentModeLabel } from "@/lib/enum-labels";
 
 type CustomerLite = { id: string; name: string; email: string | null };
 type ProjectLite = {
@@ -130,6 +137,7 @@ export default function FinanceTab({
   specialCharges,
   paidInvoices,
 }: FinanceTabProps) {
+  const { lang } = useApp();
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
   const [topupTarget, setTopupTarget] = useState<AddBalanceCustomerOption | null | "global">(null);
   const [statementFor, setStatementFor] = useState<{ customerId: string; customerName: string } | null>(null);
@@ -414,24 +422,27 @@ export default function FinanceTab({
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <Stat
-          label="Total running balance"
+          label={t("trips.finance.kRunningBalance", lang)}
           value={formatSar(totalPrepaidBalance)}
           tone={totalPrepaidBalance < 0 ? "bad" : "ok"}
-          sub={`${prepaidCount} prepaid customer${prepaidCount === 1 ? "" : "s"}`}
+          sub={fill(t(`trips.finance.kPrepaidCustomers.${plural(prepaidCount)}`, lang), { n: prepaidCount })}
         />
         <Stat
-          label="Over-balance"
+          label={t("trips.finance.kOverBalance", lang)}
           value={overBalanceRows.length}
           tone={overBalanceRows.length > 0 ? "bad" : "ok"}
-          sub={overBalanceRows.length > 0 ? "needs balance added" : "all covered"}
+          sub={t(overBalanceRows.length > 0 ? "trips.finance.kNeedsBalance" : "trips.finance.kAllCovered", lang)}
         />
         <Stat
-          label="Customers by mode"
+          label={t("trips.finance.kByMode", lang)}
           value={`${prepaidCount} / ${postpaidCount}`}
           tone="info"
-          sub={`prepaid / postpaid${unsetCount > 0 ? ` · ${unsetCount} unset` : ""}`}
+          sub={
+            t("trips.finance.kByModeSub", lang) +
+            (unsetCount > 0 ? fill(t("trips.finance.kByModeUnset", lang), { n: unsetCount }) : "")
+          }
         />
-        <Stat label="Add Balance · month" value={formatSar(topupsThisMonth)} tone="ok" />
+        <Stat label={t("trips.finance.kAddBalanceMonth", lang)} value={formatSar(topupsThisMonth)} tone="ok" />
       </div>
 
       {/* Over-balance quick access — only when relevant. */}
@@ -440,7 +451,9 @@ export default function FinanceTab({
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div className="text-sm">
               <span className="font-medium text-rose-700 dark:text-rose-300">
-                {overBalanceRows.length} prepaid customer{overBalanceRows.length === 1 ? "" : "s"} over balance:
+                {fill(t(`trips.finance.overBanner.${plural(overBalanceRows.length)}`, lang), {
+                  n: overBalanceRows.length,
+                })}
               </span>{" "}
               <span className="muted">
                 {overBalanceRows.map((r) => r.customer.name).join(", ")}
@@ -450,7 +463,7 @@ export default function FinanceTab({
               variant="outline"
               onClick={() => setTopupTarget({ id: overBalanceRows[0].customer.id, name: overBalanceRows[0].customer.name })}
             >
-              Add Balance
+              {t("trips.finance.addBalance", lang)}
             </Btn>
           </div>
         </div>
@@ -471,7 +484,15 @@ export default function FinanceTab({
                   : "muted hover:text-[rgb(var(--fg))]")
               }
             >
-              {f === "all" ? "All" : f === "prepaid" ? "Prepaid" : "Postpaid"}
+              {/* Discriminates on the FILTER VALUE, which happens to share its
+                  two non-"all" members with PaymentMode — so the two mode
+                  words come from the same `labels.*` leaves the ModeBadge
+                  reads through paymentModeLabel(). */}
+              {f === "all"
+                ? t("common.all", lang)
+                : f === "prepaid"
+                  ? t("labels.prepaid", lang)
+                  : t("labels.postpaid", lang)}
             </button>
           ))}
         </div>
@@ -481,30 +502,30 @@ export default function FinanceTab({
             onClick={() => setTopupTarget("global")}
             className={prepaidCustomerOptions.length === 0 ? "opacity-50 pointer-events-none" : ""}
           >
-            Add Balance
+            {t("trips.finance.addBalance", lang)}
           </Btn>
         </div>
       </div>
 
       {filteredRows.length === 0 ? (
-        <div className="card p-10 text-center muted text-sm">No customers in this view.</div>
+        <div className="card p-10 text-center muted text-sm">{t("trips.finance.empty", lang)}</div>
       ) : (
         <div className="card p-0 overflow-hidden">
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH>Customer</TH>
-                <TH>Project</TH>
-                <TH>Method</TH>
-                <TH>Rate</TH>
-                <TH>Unsettled Trips</TH>
-                <TH>Settled Balance</TH>
+                <TH>{t("common.customer", lang)}</TH>
+                <TH>{t("common.project", lang)}</TH>
+                <TH>{t("trips.finance.colMethod", lang)}</TH>
+                <TH>{t("common.rate", lang)}</TH>
+                <TH>{t("trips.finance.colUnsettledTrips", lang)}</TH>
+                <TH>{t("trips.finance.colSettledBalance", lang)}</TH>
                 <TH>
                   {/* The definition lives on the header, not in a legend
                       nobody scrolls to. TH takes no title prop and this is
                       not a reason to widen a shared UI primitive. */}
-                  <span title="What the customer still owes for work already provided, minus what they have paid. Prepaid: their current balance. Postpaid: delivered trips and special charges not yet on a PAID invoice.">
-                    Amount Payable
+                  <span title={t("trips.finance.colAmountPayableHint", lang)}>
+                    {t("trips.finance.colAmountPayable", lang)}
                   </span>
                 </TH>
                 <TH></TH>
@@ -516,7 +537,7 @@ export default function FinanceTab({
                   <TD className="font-medium">{r.customer.name}</TD>
                   <TD>{r.project?.name ?? <span className="muted">—</span>}</TD>
                   <TD>
-                    <ModeBadge mode={r.mode} />
+                    <ModeBadge mode={r.mode} lang={lang} />
                   </TD>
                   <TD className="tabular-nums">
                     {r.rateVatInclusive != null ? formatSar(r.rateVatInclusive) : <span className="muted">—</span>}
@@ -549,7 +570,7 @@ export default function FinanceTab({
                           variant="outline"
                           onClick={() => setTopupTarget({ id: r.customer.id, name: r.customer.name })}
                         >
-                          Add Balance
+                          {t("trips.finance.addBalance", lang)}
                         </Btn>
                       )}
                       {(r.mode === "prepaid" || r.mode === "postpaid") && (
@@ -557,7 +578,7 @@ export default function FinanceTab({
                           variant="outline"
                           onClick={() => setStatementFor({ customerId: r.customer.id, customerName: r.customer.name })}
                         >
-                          View statement
+                          {t("trips.finance.viewStatement", lang)}
                         </Btn>
                       )}
                       {r.mode === "prepaid" || r.mode === "postpaid" ? (
@@ -565,14 +586,14 @@ export default function FinanceTab({
                           variant="outline"
                           onClick={() => setInvoicesFor({ id: r.customer.id, name: r.customer.name, email: r.customer.email, settledBalance: r.settledBalance })}
                         >
-                          Invoices
+                          {t("trips.finance.invoices", lang)}
                         </Btn>
                       ) : r.project ? (
                         // payment_mode unset (legacy pre-0025 project) — stays
                         // blocked, assembleInvoice() throws on a null mode.
-                        <span className="muted text-xs">Set payment mode to invoice</span>
+                        <span className="muted text-xs">{t("trips.finance.setModeToInvoice", lang)}</span>
                       ) : (
-                        <span className="muted text-xs">No project</span>
+                        <span className="muted text-xs">{t("trips.finance.noProject", lang)}</span>
                       )}
                     </div>
                   </TD>
@@ -660,11 +681,15 @@ function AmountPayable({ value }: { value: number | null }) {
   );
 }
 
-function ModeBadge({ mode }: { mode: PaymentMode | null }) {
+// `lang` is PASSED, not read from useApp() here: this is a plain function
+// component in the same module, and taking it as a prop keeps it a pure
+// renderer of the mode it is handed — the same reason it takes `mode` rather
+// than looking the row up.
+function ModeBadge({ mode, lang }: { mode: PaymentMode | null; lang: Lang }) {
   if (mode === null) {
     return (
       <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20">
-        Unset
+        {t("trips.finance.modeUnset", lang)}
       </span>
     );
   }
@@ -674,7 +699,7 @@ function ModeBadge({ mode }: { mode: PaymentMode | null }) {
       : "bg-slate-500/10 text-slate-700 dark:text-slate-300 ring-slate-500/20";
   return (
     <span className={"inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset " + cls}>
-      {PAYMENT_MODE_LABELS[mode]}
+      {paymentModeLabel(mode, lang)}
     </span>
   );
 }

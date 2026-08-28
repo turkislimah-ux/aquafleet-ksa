@@ -15,6 +15,8 @@ import { type DriverState } from "@/lib/driver-state";
 import ProjectModal, { type ProjectInitial } from "./ProjectModal";
 import BreakdownReport from "./BreakdownReport";
 import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import { useApp } from "@/components/AppShell";
+import { t, fill } from "@/lib/i18n";
 
 // Minimal shapes — the page passes wider objects (assignable to these). These
 // carry every field the edit form pre-fills.
@@ -162,6 +164,7 @@ export default function CustomersTab({
   specialCharges,
   paidInvoices,
 }: CustomersTabProps) {
+  const { lang } = useApp();
   // Edit modal target (null = closed). This holds an ID, not a snapshot object.
   //
   // IT USED TO HOLD THE BUILT ProjectInitial, AND THAT BROKE THE REFRESH. The
@@ -319,31 +322,33 @@ export default function CustomersTab({
     <div>
       {/* KPI row — current calendar month snapshot. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <Stat label="Total customers" value={totalCustomers} tone="info" />
-        <Stat label="Drivers deployed" value={driversDeployed} tone="ok" />
-        <Stat label="Trips · month" value={tripsThisMonth} tone="ok" />
-        <Stat label="Revenue · month" value={formatSar(revenueThisMonth)} tone="ok" />
+        <Stat label={t("trips.customers.kTotalCustomers", lang)} value={totalCustomers} tone="info" />
+        <Stat label={t("trips.customers.kDriversDeployed", lang)} value={driversDeployed} tone="ok" />
+        <Stat label={t("trips.customers.kTripsMonth", lang)} value={tripsThisMonth} tone="ok" />
+        <Stat label={t("trips.customers.kRevenueMonth", lang)} value={formatSar(revenueThisMonth)} tone="ok" />
       </div>
 
       {customers.length === 0 ? (
         <div className="card p-10 text-center muted text-sm">
-          No customers yet — create a project to add one.
+          {t("trips.customers.empty", lang)}
         </div>
       ) : (
         <div className="card p-0 overflow-hidden">
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH>Customer</TH>
-                <TH>Project</TH>
-                <TH>Rate</TH>
-                <TH>Commission</TH>
-                <TH>Location</TH>
-                <TH>Drivers</TH>
+                <TH>{t("common.customer", lang)}</TH>
+                <TH>{t("common.project", lang)}</TH>
+                <TH>{t("common.rate", lang)}</TH>
+                <TH>{t("trips.customers.colCommission", lang)}</TH>
+                <TH>{t("trips.customers.colLocation", lang)}</TH>
+                <TH>{t("trips.customers.colDrivers", lang)}</TH>
                 <TH>
                   <span className="flex flex-col leading-tight">
-                    <span>Delivered</span>
-                    <span className="text-[11px] font-normal normal-case muted">(this month)</span>
+                    <span>{t("trips.customers.colDelivered", lang)}</span>
+                    <span className="text-[11px] font-normal normal-case muted">
+                      {t("trips.customers.colDeliveredNote", lang)}
+                    </span>
                   </span>
                 </TH>
                 <TH></TH>
@@ -371,14 +376,20 @@ export default function CustomersTab({
                             </span>{" "}
                             <span className="text-xs text-emerald-600 dark:text-emerald-400">
                               ·{" "}
+                              {/* Still discriminated on the ENUM VALUE, never
+                                  on the rendered label — the ternary is the
+                                  one that was already here, only its two
+                                  outputs now come from the dictionary. */}
                               {comm.commission_mode === "scalable"
-                                ? `Scalable +${comm.commission_bump_pct ?? 0}%`
-                                : "Fixed"}
+                                ? `${t("labels.commScalable", lang)} +${comm.commission_bump_pct ?? 0}%`
+                                : t("labels.commFixed", lang)}
                             </span>
                           </span>
                           {comm.next_effective_from && (
                             <span className="text-[11px] text-amber-600 dark:text-amber-400">
-                              Changes {formatDayKey(comm.next_effective_from)}
+                              {fill(t("trips.customers.changes", lang), {
+                                date: formatDayKey(comm.next_effective_from),
+                              })}
                             </span>
                           )}
                         </span>
@@ -397,7 +408,7 @@ export default function CustomersTab({
                           variant="outline"
                           onClick={() => project && setEditingId(project.id)}
                         >
-                          Manage project
+                          {t("trips.customers.manageProject", lang)}
                         </Btn>
                         <Btn
                           variant="outline"
@@ -411,7 +422,7 @@ export default function CustomersTab({
                             })
                           }
                         >
-                          View breakdown
+                          {t("trips.customers.viewBreakdown", lang)}
                         </Btn>
                       </div>
                     </TD>

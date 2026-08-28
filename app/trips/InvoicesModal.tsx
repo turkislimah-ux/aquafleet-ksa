@@ -13,10 +13,13 @@ import { useRouter } from "next/navigation";
 import { X, Plus } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
 import { formatSar, todayKey } from "@/lib/utils";
-import { INVOICE_STATUS_LABELS, type Invoice } from "@/lib/db-types";
+import { type Invoice } from "@/lib/db-types";
 import { createDraftInvoice, listInvoicesForCustomer } from "./invoiceActions";
 import InvoiceDetailModal from "./InvoiceDetailModal";
 import ScrollLock from "@/components/ScrollLock";
+import { useApp } from "@/components/AppShell";
+import { t, fill } from "@/lib/i18n";
+import { invoiceStatusLabel } from "@/lib/enum-labels";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
@@ -44,6 +47,7 @@ export default function InvoicesModal({
   initialInvoiceId?: string | null;
 }) {
   const router = useRouter();
+  const { lang } = useApp();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,7 +112,7 @@ export default function InvoicesModal({
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!customer || periodStart > periodEnd) {
-      setCreateError("Pick a valid period (start must be on or before end).");
+      setCreateError(t("trips.invoices.badPeriod", lang));
       return;
     }
     setSaving(true);
@@ -116,7 +120,9 @@ export default function InvoicesModal({
     const res = await createDraftInvoice(customer.id, periodStart, periodEnd);
     setSaving(false);
     if (res.error || !res.data) {
-      setCreateError(res.error ?? "Could not create draft invoice.");
+      // `res.error` is the SERVER's own message and stays English; the fallback
+      // is ours, so it translates.
+      setCreateError(res.error ?? t("trips.invoices.createFailed", lang));
       return;
     }
     setCreating(false);
@@ -136,60 +142,60 @@ export default function InvoicesModal({
             stay on one line each do not fit in 672px. */}
         <div className="card p-6 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between mb-1">
-            <h2 className="text-lg font-semibold">Invoices — {customer.name}</h2>
+            <h2 className="text-lg font-semibold">
+              {fill(t("trips.invoices.title", lang), { name: customer.name })}
+            </h2>
             <button type="button" onClick={close} className="muted hover:text-[rgb(var(--fg))]">
               <X className="h-5 w-5" />
             </button>
           </div>
-          <p className="text-sm muted mb-4">Draft, review, confirm, and pay invoices for this customer.</p>
+          <p className="text-sm muted mb-4">{t("trips.invoices.subtitle", lang)}</p>
 
           {!creating ? (
             <Btn variant="primary" onClick={() => setCreating(true)} className="mb-4">
-              <Plus className="h-4 w-4" /> New invoice
+              <Plus className="h-4 w-4" /> {t("trips.invoices.newInvoice", lang)}
             </Btn>
           ) : (
             <form onSubmit={onCreate} className="mb-4 space-y-3 rounded-lg border border-app p-3">
               <div className="grid grid-cols-2 gap-3">
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium">Period start *</span>
+                  <span className="font-medium">{t("trips.invoices.fPeriodStart", lang)} *</span>
                   <input value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} type="date" required className={INPUT} style={INPUT_STYLE} />
                 </label>
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium">Period end *</span>
+                  <span className="font-medium">{t("trips.invoices.fPeriodEnd", lang)} *</span>
                   <input value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} type="date" required className={INPUT} style={INPUT_STYLE} />
                 </label>
               </div>
-              <p className="text-xs muted">
-                Membership is by trip date. The draft auto-recomputes from current trips until it&apos;s confirmed.
-              </p>
+              <p className="text-xs muted">{t("trips.invoices.periodHint", lang)}</p>
               {createError && <p className="text-sm text-rose-600 dark:text-rose-400">{createError}</p>}
               <div className="flex items-center justify-end gap-2">
                 <Btn type="button" variant="ghost" onClick={() => setCreating(false)}>
-                  Cancel
+                  {t("common.cancel", lang)}
                 </Btn>
                 <Btn type="submit" variant="primary" className={saving ? "opacity-50 pointer-events-none" : ""}>
-                  {saving ? "Creating…" : "Create draft"}
+                  {t(saving ? "trips.invoices.creating" : "trips.invoices.createDraft", lang)}
                 </Btn>
               </div>
             </form>
           )}
 
-          {loading && <div className="p-6 text-center muted text-sm">Loading…</div>}
+          {loading && <div className="p-6 text-center muted text-sm">{t("common.loading", lang)}</div>}
           {error && <div className="p-6 text-center text-sm text-rose-600 dark:text-rose-400">{error}</div>}
 
           {!loading && !error && (
             invoices.length === 0 ? (
-              <div className="card p-8 text-center muted text-sm">No invoices yet for this customer.</div>
+              <div className="card p-8 text-center muted text-sm">{t("trips.invoices.empty", lang)}</div>
             ) : (
               <div className="card p-0 overflow-hidden">
                 <Table>
                   <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                     <tr>
-                      <TH>Period</TH>
-                      <TH>Status</TH>
-                      <TH>Invoice #</TH>
-                      <TH>Grand Total</TH>
-                      <TH>Amount Due</TH>
+                      <TH>{t("trips.invoices.colPeriod", lang)}</TH>
+                      <TH>{t("common.status", lang)}</TH>
+                      <TH>{t("trips.invoices.colNumber", lang)}</TH>
+                      <TH>{t("trips.invoices.colGrandTotal", lang)}</TH>
+                      <TH>{t("trips.invoices.colAmountDue", lang)}</TH>
                       <TH></TH>
                     </tr>
                   </thead>
@@ -200,14 +206,14 @@ export default function InvoicesModal({
                           {inv.period_start} → {inv.period_end}
                         </TD>
                         <TD>
-                          <StatusPill status={inv.status} label={INVOICE_STATUS_LABELS[inv.status]} />
+                          <StatusPill status={inv.status} label={invoiceStatusLabel(inv.status, lang)} />
                         </TD>
                         <TD>{inv.invoice_number ?? <span className="muted">—</span>}</TD>
                         <TD className="tabular-nums">{formatSar(inv.grand_total_sar)}</TD>
                         <TD className="tabular-nums">{formatSar(inv.amount_due_sar)}</TD>
                         <TD>
                           <Btn variant="outline" onClick={() => setSelectedInvoiceId(inv.id)}>
-                            Open
+                            {t("trips.invoices.open", lang)}
                           </Btn>
                         </TD>
                       </tr>

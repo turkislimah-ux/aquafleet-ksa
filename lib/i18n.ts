@@ -159,6 +159,91 @@ export const dict = {
     // this batch, so folding it in would move a key out of a file this commit
     // does not otherwise touch, for no reader's benefit.
     delete: { en: "Delete", ar: "حذف" },
+    // Added in Phase 3 Batch 9, on the same test as the groups above: FIVE of
+    // the files this batch converts spell one of these two words as a bare
+    // column header or field label — CustomersTab's two table columns,
+    // CreateTripForm's two link-kind pickers, FinanceTab, BreakdownReport and
+    // ProjectModal's section heads. Minting a `trips.*` leaf per surface would
+    // have produced six copies of "Project" inside ONE namespace, which is the
+    // duplication `common` exists to stop.
+    //
+    // The route-scoped copies that already exist elsewhere — `dashboard`'s
+    // thProject/thCustomer, `archive`'s secProject, `consumption`'s
+    // destProject/destCustomer — STAY WHERE THEY ARE. Their Arabic differs by
+    // grammatical context (`destProject` is "مشروع", indefinite, because it
+    // completes a sentence; these are "المشروع", the definite column name), and
+    // rewriting routes this commit does not otherwise open would be a change
+    // with no reader's benefit. Same call as `mt.edit` vs `common.edit`.
+    project: { en: "Project", ar: "المشروع" },
+    customer: { en: "Customer", ar: "العميل" },
+    // Same test, same batch: the per-trip price column is headed "Rate" on the
+    // Customers tab, on the Finance tab and in the Breakdown report. The three
+    // print DIFFERENT figures — the project's live rate, the VAT-inclusive
+    // rate, the frozen per-trip rate — but they are one word and one concept,
+    // and three leaves would be three places to reword it.
+    rate: { en: "Rate", ar: "السعر" },
+    // Same batch, same test — five more one-word strings that this batch's
+    // files each spell identically:
+    //   date   — AddBalanceModal's form field AND history column, both
+    //            statement tables, the Breakdown report's payments table.
+    //   amount — the same three files.
+    //   total  — the statement's postpaid column and the Breakdown payments
+    //            footer row.
+    //   close  — StatementModal, WaterStationsModal, InvoiceDetailModal's
+    //            toolbar (the chrome, not the frozen sheet).
+    //   print  — StatementModal, BreakdownReport, InvoiceDetailModal's toolbar.
+    //
+    // `fleet`, `reports`, `drivers` and `archive` keep their own `date` /
+    // `close`, for the reason written above `project` — those routes are not
+    // open in this commit and their leaves already read correctly.
+    date: { en: "Date", ar: "التاريخ" },
+    amount: { en: "Amount", ar: "المبلغ" },
+    total: { en: "Total", ar: "الإجمالي" },
+    close: { en: "Close", ar: "إغلاق" },
+    print: { en: "Print", ar: "طباعة" },
+    // Same batch, same test: TWO of this batch's files head a destructive
+    // section with it — ProjectsBoard's phase picker (hard-delete a trip) and
+    // ProjectModal (archive a project). `fleet.term.dangerZone` and
+    // `drivers.term.dangerZone` hold the identical pair and STAY where they
+    // are, for the reason written above `project`: those routes are not open
+    // in this commit and their leaves already read correctly.
+    dangerZone: { en: "Danger zone", ar: "منطقة الخطر" },
+    /**
+     * ABBREVIATED MONTH NAMES — promoted here from `drivers.months` in Phase 3
+     * Batch 9, on the same "a second route reads it" test as `recording` and
+     * `delete` above. The values are UNCHANGED, byte for byte; only the path
+     * moved, and `lib/commission-rows.ts` (the one prior caller) moved with it.
+     *
+     * The promotion is not tidying. THREE separate files in app/trips froze
+     * their own `const MONTH_SHORT = ["Jan", …]` at module scope —
+     * CreateTripForm, ProjectsBoard and DriverRosterTable — so the choice was
+     * one shared leaf set or FOUR copies of the same twelve strings. The
+     * argument against copies is already written down in commission-rows.ts's
+     * own header: two copies of the month naming is how two screens start
+     * captioning the same month differently. That reasoning does not get weaker
+     * when the copies are in a different route.
+     *
+     * Latin digits are NOT affected by this. Only the month NAME is a label;
+     * the day and year around it stay app-formatted Latin numerals in both
+     * languages, so an Arabic reader sees "1 يناير 2026".
+     *
+     * Keys are QUOTED. A bare numeric key becomes a number in the object type
+     * and LeafPaths drops it, so `common.monthShort.8` would not typecheck.
+     */
+    monthShort: {
+      "1": { en: "Jan", ar: "يناير" },
+      "2": { en: "Feb", ar: "فبراير" },
+      "3": { en: "Mar", ar: "مارس" },
+      "4": { en: "Apr", ar: "أبريل" },
+      "5": { en: "May", ar: "مايو" },
+      "6": { en: "Jun", ar: "يونيو" },
+      "7": { en: "Jul", ar: "يوليو" },
+      "8": { en: "Aug", ar: "أغسطس" },
+      "9": { en: "Sep", ar: "سبتمبر" },
+      "10": { en: "Oct", ar: "أكتوبر" },
+      "11": { en: "Nov", ar: "نوفمبر" },
+      "12": { en: "Dec", ar: "ديسمبر" },
+    },
   },
   mt: {
     calendar: { en: "Maintenance Calendar", ar: "تقويم الصيانة" },
@@ -385,11 +470,55 @@ export const dict = {
     // three tomorrow. `comm` prefix because `fixed`/`scalable` on their own
     // would collide with the next enum that has a "fixed" member.
     commFixed: { en: "Fixed", ar: "ثابتة" },
-    commScalable: { en: "Scalable", ar: "تصاعدية" },
+    // AR is تراكمية (cumulative), NOT تصاعدية (ascending/escalating) — Turki's
+    // wording, Batch 9 follow-up. The commission ACCUMULATES per trip; تصاعدية
+    // reads as a rising RATE, which is not what the bump does. FOUR readers:
+    // CustomersTab, BreakdownReport, ProjectModal's mode card, and
+    // ArchiveCustomerTab's archived-customer popup — all four move together.
+    // `trips.project.scalablePerTrip` carries the same mode word and changed in
+    // the same pass. English is unchanged.
+    commScalable: { en: "Scalable", ar: "تراكمية" },
     // ProjectStatus
     projActive: { en: "Active", ar: "نشط" },
     projPaused: { en: "Paused", ar: "متوقف" },
     projEnded: { en: "Ended", ar: "منتهي" },
+
+    // ── Phase 3 Batch 9 — the four enums the Trips route renders ────────────
+    //
+    // TripStage. The English here is TRIP_STAGE_LABELS, and it is NOT the
+    // `status` block's trip vocabulary even though three of the four words
+    // match: `status.in_transit` is "In Transit" and TRIP_STAGE_LABELS.in_transit
+    // is "In transit" — lowercase t. Routing the stage column through `status`
+    // would have changed one English string on screen. They are two columns
+    // that happen to overlap, exactly the case this block's header describes.
+    // The Arabic is deliberately the SAME as `status`'s, because the concept is
+    // the same; only the English casing ever diverged.
+    stageScheduled: { en: "Scheduled", ar: "مجدولة" },
+    stageLoading: { en: "Loading", ar: "تحميل" },
+    stageInTransit: { en: "In transit", ar: "في الطريق" },
+    stageDelivered: { en: "Delivered", ar: "تم التسليم" },
+
+    // InvoiceStatus. `invVoid` renders "Sales Return", not "Void" — the enum
+    // member is `void` but the business calls the document a sales return, and
+    // the Arabic follows the WORDS ON SCREEN rather than the enum name.
+    invDraft: { en: "Draft", ar: "مسودة" },
+    invReview: { en: "Review", ar: "مراجعة" },
+    invConfirmed: { en: "Confirmed", ar: "مؤكدة" },
+    invPaid: { en: "Paid", ar: "مدفوعة" },
+    invVoid: { en: "Sales Return", ar: "مرتجع مبيعات" },
+
+    // InvoicePaymentMethod — HOW an invoice was settled. `payBalance` is
+    // "Prepaid balance", not "Balance": it names the SOURCE the money came
+    // from (the customer's own prepaid credit), and shortening it to "Balance"
+    // would read as the amount still owed — the opposite fact. Distinct from
+    // `prepaid` above, which is the payment MODE the project runs under.
+    payCash: { en: "Cash", ar: "نقدًا" },
+    payBankTransfer: { en: "Bank transfer", ar: "تحويل بنكي" },
+    payBalance: { en: "Prepaid balance", ar: "رصيد مدفوع مقدمًا" },
+
+    // WaterType.
+    waterPotable: { en: "Potable", ar: "صالحة للشرب" },
+    waterNonPotable: { en: "Non-potable", ar: "غير صالحة للشرب" },
   },
 
   /**
@@ -4907,27 +5036,11 @@ export const dict = {
       terminating: { en: "Terminating…", ar: "جارٍ إنهاء الخدمة…" },
     },
 
-    // Month abbreviations for lib/commission-rows.ts monthLabel(). `fleet.months.*`
-    // cannot serve: it carries FULL English names ("January"), and this renders
-    // as "Aug 2026" inside a heading. The Arabic matches fleet's because Arabic
-    // has no abbreviated month forms to differ in.
-    // Keys are QUOTED, same as fleet.months — a bare numeric key becomes a number
-    // in the object type and LeafPaths drops it, so `drivers.months.8` would not
-    // typecheck as a TKey.
-    months: {
-      "1": { en: "Jan", ar: "يناير" },
-      "2": { en: "Feb", ar: "فبراير" },
-      "3": { en: "Mar", ar: "مارس" },
-      "4": { en: "Apr", ar: "أبريل" },
-      "5": { en: "May", ar: "مايو" },
-      "6": { en: "Jun", ar: "يونيو" },
-      "7": { en: "Jul", ar: "يوليو" },
-      "8": { en: "Aug", ar: "أغسطس" },
-      "9": { en: "Sep", ar: "سبتمبر" },
-      "10": { en: "Oct", ar: "أكتوبر" },
-      "11": { en: "Nov", ar: "نوفمبر" },
-      "12": { en: "Dec", ar: "ديسمبر" },
-    },
+    // Month abbreviations MOVED to `common.monthShort` in Phase 3 Batch 9 —
+    // app/trips froze three more copies of the same twelve strings, which is
+    // the second-route test `common` exists for. `fleet.months.*` still cannot
+    // serve either caller: it carries FULL English names ("January"), and both
+    // of these render as "Aug 2026". Values were not edited in the move.
 
     // The inline "+ Add custom …" lookup (LookupSelect), shared by the leave-type
     // and the mechanic-commission-type pickers.
@@ -6731,6 +6844,1331 @@ export const dict = {
         few: { en: "Previous versions ({n})", ar: "النسخ السابقة ({n} نسخ)" },
         many: { en: "Previous versions ({n})", ar: "النسخ السابقة ({n} نسخة)" },
       },
+    },
+  },
+
+  /**
+   * ── Phase 3 Batch 9 — THE TRIPS ROUTE ────────────────────────────────────
+   *
+   * The money route, and the last one. Grouped by the SURFACE that owns the
+   * string, same as every namespace above it.
+   *
+   * TWO THINGS ARE DELIBERATELY ABSENT FROM THIS NAMESPACE.
+   *
+   * 1. THE PRINTED INVOICE SHEET. `app/trips/InvoiceDetailModal.tsx` renders a
+   *    `#invoice-print` subtree that is a DOCUMENT, not a screen, and it stays
+   *    ENGLISH. The bilingual artifact customers actually receive is
+   *    `lib/invoicePdfTemplate.ts`, which stacks an EN line and an AR line for
+   *    every static label; translating the browser-print sheet instead would
+   *    give the same invoice two different layouts depending on which button
+   *    produced it. Everything under `trips.invoice.*` below is the CHROME
+   *    around that sheet — toolbar, dialogs, email picker, errors — every one
+   *    of which carries a `no-print` class. If a key here ever starts
+   *    rendering inside `#invoice-print`, that is the bug, not a translation
+   *    gap.
+   *
+   * 2. SERVER-ACTION FAILURE TEXT. Every `error:` string returned by
+   *    `actions.ts` and `invoiceActions.ts` stays English. They are surfaced
+   *    verbatim from the server and several quote a Postgres message; a
+   *    half-translated sentence is harder to act on than an English one.
+   *    Client-side VALIDATION — the checks that run before any call is made —
+   *    is translated, and lives here.
+   *
+   * MONEY IS READ-ONLY IN THIS BATCH. No figure, formula, view or ZATCA
+   * snapshot is touched by anything below; these are labels that sit BESIDE
+   * numbers the database already computed.
+   */
+  trips: {
+    // TripsTabs — the page shell. The three headers were a module-level
+    // `const HEADER: Record<Tab, …>` that froze at import, so the page title
+    // kept its import-time language after a switch.
+    shell: {
+      tabProjects: { en: "Projects", ar: "المشاريع" },
+      tabCustomers: { en: "Customers", ar: "العملاء" },
+      tabFinance: { en: "Finance/Invoice", ar: "المالية/الفواتير" },
+      manageStations: { en: "Manage stations", ar: "إدارة المحطات" },
+      // `{error}` is a server message and stays as it arrives — see this
+      // namespace's header, point 2.
+      loadFailed: { en: "Failed to load trips: {error}", ar: "تعذّر تحميل الرحلات: {error}" },
+      headProjectsTitle: { en: "Project Operations", ar: "تشغيل المشاريع" },
+      headProjectsSubtitle: {
+        en: "Each project runs its own Kanban — push trips through the board manually.",
+        ar: "لكل مشروع لوحة كانبان خاصة به — حرّك الرحلات عبر اللوحة يدويًا.",
+      },
+      headCustomersTitle: { en: "Manage Customers", ar: "إدارة العملاء" },
+      headCustomersSubtitle: {
+        en: "View and manage every customer, their project, rate, and assigned drivers.",
+        ar: "عرض وإدارة كل عميل ومشروعه والسعر والسائقين المسندين إليه.",
+      },
+      headFinanceTitle: { en: "Finance", ar: "المالية" },
+      headFinanceSubtitle: {
+        en: "Prepaid balances, top-ups, and customer statements — pre-VAT.",
+        ar: "الأرصدة المدفوعة مقدمًا والإيداعات وكشوف حسابات العملاء — قبل ضريبة القيمة المضافة.",
+      },
+      // NewProjectModal's trigger. It renders into the shell's header slot,
+      // which is why it sits in this group and not in a file-shaped one of
+      // its own — that file is a button and an open flag, nothing else.
+      newProject: { en: "New Project", ar: "مشروع جديد" },
+    },
+
+    // DeliveriesReportBand. The window LABELS used to be the band's identity:
+    // `WINDOWS` was a module-level const and its `label` was carried through
+    // buildDeliveriesReport into the row data AND used as the React key. The
+    // labels are now resolved at render and the rows carry a stable `key`
+    // instead, so the band cannot freeze and a language switch cannot remount
+    // it.
+    deliveries: {
+      heading: { en: "Deliveries report", ar: "تقرير التسليمات" },
+      today: { en: "Today", ar: "اليوم" },
+      d7: { en: "Last 7 days", ar: "آخر 7 أيام" },
+      d30: { en: "Last 30 days", ar: "آخر 30 يومًا" },
+      d90: { en: "Last 90 days", ar: "آخر 90 يومًا" },
+    },
+
+    // DriverRosterTable (multi-select, project form) and DriverDutyTable
+    // (single-select, Add Trip). One group: they are two views of the same
+    // roster and genuinely share five of these strings. `common.driver` and
+    // `common.status` cover the two columns both tables spell the same way as
+    // the rest of the app.
+    driverTable: {
+      emptyRoster: { en: "No drivers available.", ar: "لا يوجد سائقون متاحون." },
+      emptyDuty: {
+        en: "No drivers available — assign drivers to this project first.",
+        ar: "لا يوجد سائقون متاحون — أسند سائقين إلى هذا المشروع أولاً.",
+      },
+      assignedTruck: { en: "Assigned truck", ar: "الشاحنة المسندة" },
+      lastServiced: { en: "Last serviced", ar: "آخر صيانة" },
+      projectsCol: { en: "Project(s)", ar: "المشاريع" },
+      onDuty: { en: "On duty", ar: "رحلات جارية" },
+      lastDelivered: { en: "Last delivered", ar: "آخر تسليم" },
+      // Row-block reasons. `onLeave` and `leaveUnavailable` are rendered by
+      // both tables; `noTruck` only by the duty table, which cannot dispatch
+      // a driver without one.
+      onLeave: { en: "On leave", ar: "في إجازة" },
+      leaveUnavailable: { en: "Leave unavailable", ar: "بيانات الإجازات غير متاحة" },
+      noTruck: { en: "No truck", ar: "لا توجد شاحنة" },
+      // The duty table's empty truck CELL, which says more than the roster
+      // table's bare dash. The em dash is part of the string in both.
+      noTruckCell: { en: "— no truck", ar: "— لا توجد شاحنة" },
+      // Appended to a block reason when the driver was ALREADY rostered and is
+      // being kept rather than dropped. The LEADING SPACE and the separator
+      // are inside the value on purpose: this is concatenated onto the reason
+      // by the JSX, and moving the space outside would change the rendered
+      // English by a byte.
+      kept: { en: " · kept", ar: " · محتفظ به" },
+    },
+
+    // InvoicesModal — the per-customer invoice LIST and the new-draft form.
+    // Not the invoice itself; that is `trips.invoice.*`.
+    invoices: {
+      title: { en: "Invoices — {name}", ar: "الفواتير — {name}" },
+      subtitle: {
+        en: "Draft, review, confirm, and pay invoices for this customer.",
+        ar: "إنشاء فواتير هذا العميل ومراجعتها وتأكيدها وسدادها.",
+      },
+      newInvoice: { en: "New invoice", ar: "فاتورة جديدة" },
+      fPeriodStart: { en: "Period start", ar: "بداية الفترة" },
+      fPeriodEnd: { en: "Period end", ar: "نهاية الفترة" },
+      periodHint: {
+        en: "Membership is by trip date. The draft auto-recomputes from current trips until it's confirmed.",
+        ar: "تُحتسب العضوية بتاريخ الرحلة. تُعاد المسودة حسابيًا من الرحلات الحالية حتى تُؤكَّد.",
+      },
+      creating: { en: "Creating…", ar: "جارٍ الإنشاء…" },
+      createDraft: { en: "Create draft", ar: "إنشاء مسودة" },
+      // Client-side, before any call — translated, unlike the server's own
+      // `error:` strings.
+      badPeriod: {
+        en: "Pick a valid period (start must be on or before end).",
+        ar: "اختر فترة صحيحة (يجب أن تكون البداية في تاريخ النهاية أو قبله).",
+      },
+      createFailed: { en: "Could not create draft invoice.", ar: "تعذّر إنشاء مسودة الفاتورة." },
+      empty: { en: "No invoices yet for this customer.", ar: "لا توجد فواتير لهذا العميل بعد." },
+      colPeriod: { en: "Period", ar: "الفترة" },
+      colNumber: { en: "Invoice #", ar: "رقم الفاتورة" },
+      colGrandTotal: { en: "Grand Total", ar: "الإجمالي الكلي" },
+      colAmountDue: { en: "Amount Due", ar: "المبلغ المستحق" },
+      open: { en: "Open", ar: "فتح" },
+    },
+
+    /**
+     * InvoiceDetailModal — CHROME ONLY. This group is deliberately SMALL, and
+     * the reason it is small is the whole ruling for this file.
+     *
+     * THE INVOICE SHEET IS FROZEN. `#invoice-print` (InvoiceDetailModal.tsx
+     * :681–1230) is the ZATCA-facing document, and every word inside that
+     * subtree stays ENGLISH, byte for byte — the buyer/seller identity blocks,
+     * the trip and special-charge tables, Amount Due, Grand Total, the
+     * Sales-Return banner, the lifecycle guard boxes, the payment forms. The
+     * official downloadable artifact, `lib/invoicePdfTemplate.ts`, is ALREADY
+     * bilingual and is not touched by this batch either. A tax document does
+     * not change shape because the operator switched the UI language.
+     *
+     * WHAT IS IN HERE is the WORKSPACE around that sheet: the sticky toolbar,
+     * the load/error states, and the email-type picker — a separate portal that
+     * renders OUTSIDE `#invoice-print` entirely.
+     *
+     * THREE ERROR PARAGRAPHS ARE THE EDGE CASE, and they are listed here on
+     * purpose. `actionError`, `pdfError` and `periodError` render at :1014,
+     * :1015 and :711 — inside the `#invoice-print` element but on `no-print`
+     * nodes, so they are never on the printed page or in the PDF. They are
+     * operator feedback, not document content. Their literals are SET in the
+     * handlers above the sheet (:242–:485), so no source line inside the frozen
+     * range moves for them. A server action's own `error:` string still passes
+     * through in English — only the client-side fallbacks are looked up.
+     *
+     * NOT TRANSLATED, DELIBERATELY: `buildMailtoFor()` (:1881). Its subject and
+     * body are outbound correspondence that REACHES THE CUSTOMER, the same
+     * class of text as the invoice sheet and the `translate="no"` company name
+     * at :1228 — not app chrome. What the customer receives must not depend on
+     * which language the operator happened to be reading.
+     *
+     * From `common`: `print`. From `trips.invoices`: `badPeriod`, which this
+     * file's period editor validates with the IDENTICAL sentence InvoicesModal
+     * uses when creating the draft — one rule, one wording, and it stays where
+     * its first reader put it rather than being promoted.
+     *
+     * NO MONEY KEY IS IN THIS GROUP. Every figure on this screen is read from
+     * a frozen snapshot column or from previewInvoice(); nothing here re-rounds,
+     * re-bases or re-signs an amount, and no VAT/subtotal/total/ledger caption
+     * appears below — those all live inside the frozen sheet.
+     */
+    invoice: {
+      // The arrow flips with the reading direction — same treatment as
+      // `drivers.payslip.allPayslips`. It is part of the value because the JSX
+      // renders one text run, not an icon plus a label.
+      backToInvoices: { en: "← Back to invoices", ar: "→ رجوع إلى الفواتير" },
+      // The toolbar's Email button is a VERB — "send this invoice by mail" —
+      // which is why it does not reuse `login.email` / `customers.fEmail`,
+      // both of which are the noun on a form field.
+      emailBtn: { en: "Email", ar: "إرسال بالبريد" },
+      // `title=` on the disabled Email button's wrapper.
+      noEmailOnFile: { en: "No customer email on file", ar: "لا يوجد بريد إلكتروني مسجَّل للعميل" },
+      downloadPdf: { en: "Download PDF", ar: "تنزيل PDF" },
+      // Distinct from `trips.invoices.creating` ("Creating…"): that one is a
+      // draft row being written, this one is a file being rendered.
+      generating: { en: "Generating…", ar: "جارٍ التجهيز…" },
+      loading: { en: "Loading invoice…", ar: "جارٍ تحميل الفاتورة…" },
+
+      // Error/validation text. All of it is client-side fallback wording; a
+      // server action's own message is surfaced verbatim in English.
+      errLoad: { en: "Could not load invoice.", ar: "تعذّر تحميل الفاتورة." },
+      errPreview: {
+        en: "Could not assemble invoice preview.",
+        ar: "تعذّر تجميع معاينة الفاتورة.",
+      },
+      errPdf: { en: "Could not generate the PDF.", ar: "تعذّر إنشاء ملف PDF." },
+      errAddCharge: { en: "Could not add the charge.", ar: "تعذّرت إضافة الرسوم." },
+      // `{err}` is the upload action's own English message, spliced in
+      // unchanged. The charge itself succeeded — the sentence has to keep
+      // saying so, or the operator re-adds a charge that already exists.
+      errChargeImage: {
+        en: "Charge added, but the image failed to attach: {err}",
+        ar: "أُضيفت الرسوم، لكن تعذّر إرفاق الصورة: {err}",
+      },
+      errViewImage: { en: "Could not open the attached image.", ar: "تعذّر فتح الصورة المرفقة." },
+      errProof: { en: "Could not open proof of payment.", ar: "تعذّر فتح إثبات الدفع." },
+
+      // Email-type picker — its own portal, rendered outside `#invoice-print`.
+      emailPickerTitle: {
+        en: "Email invoice — choose type",
+        ar: "إرسال الفاتورة بالبريد — اختر النوع",
+      },
+      /**
+       * The five mailto templates, KEYED BY THE TEMPLATE VALUE. This replaces a
+       * module-level `EMAIL_TYPE_META` const of English label/hint pairs; the
+       * picker's ORDER now comes from an `EMAIL_TYPES` key tuple in the
+       * component, so the order is stated once instead of being a side effect
+       * of object key insertion.
+       *
+       * These are the labels on the CHOOSER. The mail that the choice actually
+       * sends stays English — see this group's header.
+       */
+      emailType: {
+        statement: {
+          label: { en: "Monthly report / statement", ar: "تقرير شهري / كشف حساب" },
+          hint: { en: "Activity summary for the period.", ar: "ملخّص النشاط خلال الفترة." },
+        },
+        payment_due: {
+          label: { en: "Payment due", ar: "استحقاق السداد" },
+          hint: {
+            en: "This invoice is now due — request payment.",
+            ar: "هذه الفاتورة مستحقة الآن — طلب السداد.",
+          },
+        },
+        reminder: {
+          label: { en: "Payment reminder", ar: "تذكير بالسداد" },
+          hint: {
+            en: "Follow-up nudge for an outstanding balance.",
+            ar: "تذكير متابعة برصيد مستحق.",
+          },
+        },
+        generic: {
+          label: { en: "Plain / generic", ar: "عادي / مبسّط" },
+          hint: { en: "Minimal — just the invoice reference.", ar: "الحد الأدنى — مرجع الفاتورة فقط." },
+        },
+        sales_return: {
+          // "Sales Return" is the UI wording for a voided invoice (stored
+          // status stays 'void'). The sheet's own banner says it too, in
+          // English, and is not touched.
+          label: { en: "Sales Return notice", ar: "إشعار مرتجع مبيعات" },
+          hint: { en: "Explains this invoice was cancelled.", ar: "يوضّح أن هذه الفاتورة أُلغيت." },
+        },
+      },
+    },
+
+    // CustomersTab — one row per customer, KPIs over the current calendar
+    // month. `common.customer` / `common.project` cover the first two columns.
+    //
+    // NO MONEY KEY HERE. The Rate and Commission cells render `formatSar()`
+    // over figures this tab only reads; the two commission WORDS come from
+    // `labels.commFixed` / `labels.commScalable` at the call site, through the
+    // same inline ternary that was already there, so the mode is still
+    // discriminated on the ENUM VALUE and never on the rendered label.
+    customers: {
+      kTotalCustomers: { en: "Total customers", ar: "إجمالي العملاء" },
+      kDriversDeployed: { en: "Drivers deployed", ar: "السائقون العاملون" },
+      // The "·" is a separator the app uses in both languages and is part of
+      // the value, not punctuation the translator chose.
+      kTripsMonth: { en: "Trips · month", ar: "الرحلات · الشهر" },
+      kRevenueMonth: { en: "Revenue · month", ar: "الإيرادات · الشهر" },
+      empty: {
+        en: "No customers yet — create a project to add one.",
+        ar: "لا يوجد عملاء بعد — أنشئ مشروعًا لإضافة عميل.",
+      },
+      colCommission: { en: "Commission", ar: "العمولة" },
+      colLocation: { en: "Location", ar: "الموقع" },
+      colDrivers: { en: "Drivers", ar: "السائقون" },
+      colDelivered: { en: "Delivered", ar: "المسلَّمة" },
+      // The second line of the Delivered header. Parentheses included — they
+      // are in the English literal.
+      colDeliveredNote: { en: "(this month)", ar: "(هذا الشهر)" },
+      // A FUTURE-DATED commission change is queued. `{date}` is
+      // formatDayKey()'s output — an app-formatted date, so it stays Latin
+      // digits in both languages.
+      changes: { en: "Changes {date}", ar: "يتغيّر {date}" },
+      manageProject: { en: "Manage project", ar: "إدارة المشروع" },
+      viewBreakdown: { en: "View breakdown", ar: "عرض التفصيل" },
+    },
+
+    // CreateTripForm — the "New trip" modal. Its own group rather than a share
+    // with `driverTable`: the duty table it embeds is a separate component with
+    // its own keys, and these are this form's field labels and refusal reasons.
+    newTrip: {
+      title: { en: "New trip", ar: "رحلة جديدة" },
+      kindProject: { en: "Project trip", ar: "رحلة مشروع" },
+      kindCustomer: { en: "Customer trip", ar: "رحلة عميل" },
+      fWaterStation: { en: "Water station", ar: "محطة المياه" },
+      noStations: { en: "No stations", ar: "لا توجد محطات" },
+      fWaterType: { en: "Water type", ar: "نوع المياه" },
+      // Shown when the chosen STATION stops offering the already-chosen TYPE.
+      // `{type}` is filled from `waterTypeLabel()`, so it is translated too —
+      // the only token in this namespace that is not raw data. Stored in its
+      // COLLAPSED single-line form: the JSX wraps this sentence across two
+      // lines and JSX joins a wrapped run with exactly one space.
+      blockedType: {
+        en: "{station} does not offer {type}. Pick another station, or add that type to this station under Manage stations.",
+        ar: "{station} لا توفّر {type}. اختر محطة أخرى، أو أضف هذا النوع إلى هذه المحطة من إدارة المحطات.",
+      },
+      // The fallback subject of that sentence when no station is picked yet.
+      thisStation: { en: "This station", ar: "هذه المحطة" },
+      // Appended after the Driver label's asterisk. LEADING SPACE inside the
+      // value, same device as `driverTable.kept` — the JSX concatenates it.
+      nonePicked: { en: " · none picked", ar: " · لم يُختر" },
+      fTripDate: { en: "Trip date", ar: "تاريخ الرحلة" },
+      fBatch: { en: "How many (batch)", ar: "الكمية (دفعة)" },
+      batchHint: {
+        en: "Required — how many identical trips to create.",
+        ar: "مطلوب — كم رحلة متطابقة تريد إنشاءها.",
+      },
+      // The three CLIENT-side refusal reasons. These are ours and translate;
+      // the `res.error` this same form renders is the server action's own text
+      // and stays English — see this namespace's header.
+      errBatchEmpty: {
+        en: "Enter how many trips to create.",
+        ar: "أدخل عدد الرحلات المطلوب إنشاؤها.",
+      },
+      // `{max}` is MAX_BATCH_TRIPS, an app constant — Latin digits both ways.
+      errBatchRange: {
+        en: "Batch must be a whole number from 1 to {max}.",
+        ar: "يجب أن تكون الدفعة عددًا صحيحًا من 1 إلى {max}.",
+      },
+      errNoDriver: {
+        en: "Pick a driver — a trip cannot be created unassigned.",
+        ar: "اختر سائقًا — لا يمكن إنشاء رحلة بدون إسناد.",
+      },
+      create: { en: "Create", ar: "إنشاء" },
+    },
+
+    // ── FinanceTab — the prepaid-ledger surface ──────────────────────────────
+    //
+    // THE FINANCIAL VOCABULARY STARTS HERE. Everything below names a money
+    // CONCEPT — running balance, settled balance, amount payable, unsettled
+    // trips — and NOT ONE OF THEM CHANGES A FIGURE. Every number this tab
+    // prints still comes from `derivedBalanceItems`, `computeAmountPayable`
+    // and `formatSar`, untouched; these are the words wrapped around them.
+    //
+    // The same four concepts are re-read by StatementModal, BreakdownReport
+    // and InvoiceDetailModal's chrome, which is why they are named for the
+    // CONCEPT and not for this tab's column position.
+    finance: {
+      kRunningBalance: { en: "Total running balance", ar: "إجمالي الرصيد الجاري" },
+      // "prepaid customer(s)" under the running-balance KPI. English had a
+      // singular already (`${n === 1 ? "" : "s"}`), so `one` is genuinely
+      // singular here rather than kept-verbatim.
+      kPrepaidCustomers: {
+        one: { en: "{n} prepaid customer", ar: "عميل واحد بالدفع المقدم" },
+        two: { en: "{n} prepaid customers", ar: "عميلان بالدفع المقدم" },
+        few: { en: "{n} prepaid customers", ar: "{n} عملاء بالدفع المقدم" },
+        many: { en: "{n} prepaid customers", ar: "{n} عميلاً بالدفع المقدم" },
+      },
+      kOverBalance: { en: "Over-balance", ar: "تجاوز الرصيد" },
+      kNeedsBalance: { en: "needs balance added", ar: "بحاجة إلى إضافة رصيد" },
+      kAllCovered: { en: "all covered", ar: "الجميع مغطى" },
+      kByMode: { en: "Customers by mode", ar: "العملاء حسب طريقة الدفع" },
+      // The KPI's sub-line. `{n} / {n}` above it is two app-formatted counts
+      // and stays Latin; this is the caption under them.
+      kByModeSub: { en: "prepaid / postpaid", ar: "دفع مقدم / دفع آجل" },
+      // Appended to that caption only when some project has NO payment mode.
+      // The leading " · " is inside the value, same device as
+      // `driverTable.kept`.
+      kByModeUnset: { en: " · {n} unset", ar: " · {n} غير محدد" },
+      kAddBalanceMonth: { en: "Add Balance · month", ar: "إضافة رصيد · الشهر" },
+      // The over-balance banner. The trailing colon is part of the English
+      // sentence — the customer names follow it.
+      overBanner: {
+        one: { en: "{n} prepaid customer over balance:", ar: "عميل واحد بالدفع المقدم تجاوز رصيده:" },
+        two: { en: "{n} prepaid customers over balance:", ar: "عميلان بالدفع المقدم تجاوزا رصيدهما:" },
+        few: { en: "{n} prepaid customers over balance:", ar: "{n} عملاء بالدفع المقدم تجاوزوا أرصدتهم:" },
+        many: { en: "{n} prepaid customers over balance:", ar: "{n} عميلاً بالدفع المقدم تجاوزوا أرصدتهم:" },
+      },
+      // Title Case, and it is the name of the ACTION — the same three words on
+      // the banner button, the toolbar button and the per-row button, plus the
+      // modal they all open. One leaf, four call sites.
+      addBalance: { en: "Add Balance", ar: "إضافة رصيد" },
+      empty: { en: "No customers in this view.", ar: "لا يوجد عملاء في هذا العرض." },
+      colMethod: { en: "Method", ar: "الطريقة" },
+      colUnsettledTrips: { en: "Unsettled Trips", ar: "رحلات غير مسددة" },
+      colSettledBalance: { en: "Settled Balance", ar: "الرصيد المسدد" },
+      colAmountPayable: { en: "Amount Payable", ar: "المبلغ الواجب السداد" },
+      // The Amount Payable header's `title` tooltip — a DEFINITION, and the one
+      // place either payment mode's rule is written on screen. It is a native
+      // title attribute, so it is a plain string and takes no markup.
+      colAmountPayableHint: {
+        en: "What the customer still owes for work already provided, minus what they have paid. Prepaid: their current balance. Postpaid: delivered trips and special charges not yet on a PAID invoice.",
+        ar: "ما يزال العميل مدينًا به مقابل عمل تم تنفيذه بالفعل، مطروحًا منه ما سدده. الدفع المقدم: رصيده الحالي. الدفع الآجل: الرحلات المسلَّمة والرسوم الخاصة التي لم تُدرج بعد في فاتورة مدفوعة.",
+      },
+      viewStatement: { en: "View statement", ar: "عرض كشف الحساب" },
+      invoices: { en: "Invoices", ar: "الفواتير" },
+      // Two REFUSALS, not statuses: this customer cannot be invoiced yet.
+      setModeToInvoice: { en: "Set payment mode to invoice", ar: "حدد طريقة الدفع لإصدار فاتورة" },
+      noProject: { en: "No project", ar: "لا يوجد مشروع" },
+      // The mode badge's third state. `prepaid` / `postpaid` come from
+      // `labels.*` through paymentModeLabel(); NULL is not an enum member and
+      // has no entry there, so it is named here.
+      modeUnset: { en: "Unset", ar: "غير محدد" },
+    },
+
+    // AddBalanceModal — the history list AND the add form, one popup. The
+    // three-word ACTION name itself is `trips.finance.addBalance`: this modal
+    // is that button's destination, and two leaves reading "Add Balance" is
+    // exactly the split that lets a reword land on the button and miss the
+    // dialog it opens.
+    //
+    // MONEY UNTOUCHED here too — `recordTopup` is called with the same
+    // FormData it always was, and the amount is the user's own input.
+    addBalance: {
+      // `{name}` is the customer's own name and prints as stored.
+      titleFor: { en: "Add Balance — {name}", ar: "إضافة رصيد — {name}" },
+      listSubtitle: {
+        en: "Balance additions for this customer, most recent first.",
+        ar: "الأرصدة المضافة لهذا العميل، الأحدث أولاً.",
+      },
+      listEmpty: {
+        en: "No balance added yet for this customer.",
+        ar: "لم يُضف أي رصيد لهذا العميل بعد.",
+      },
+      // NO colDate / colAmount / fDate HERE — `common.date` and
+      // `common.amount` cover all three, promoted once this batch's other
+      // financial surfaces turned out to spell them the same way.
+      //
+      // "ETF Ref." is the business's own shorthand for the bank transfer
+      // reference and is kept as an abbreviation in both languages — the
+      // Arabic spells the word "reference" and leaves the acronym standing,
+      // because that is the string on the bank's own slip.
+      colEtfRef: { en: "ETF Ref.", ar: "مرجع ETF" },
+      colPhoto: { en: "Photo", ar: "الصورة" },
+      formSubtitle: {
+        en: "Pre-VAT amount. Adds to the customer's prepaid balance immediately.",
+        ar: "المبلغ قبل ضريبة القيمة المضافة. يُضاف إلى رصيد العميل المدفوع مقدمًا فورًا.",
+      },
+      selectCustomer: { en: "Select customer…", ar: "اختر عميلاً…" },
+      // The unit and the tax basis are inside the label, so the whole thing is
+      // one leaf. "SAR" stays Latin — it is the ISO currency code every money
+      // figure in this app is printed with.
+      fAmount: { en: "Amount (SAR, pre-VAT)", ar: "المبلغ (SAR، قبل الضريبة)" },
+      amountPlaceholder: { en: "e.g. 5000", ar: "مثال: 5000" },
+      fEtfRef: { en: "ETF Ref. number", ar: "رقم مرجع ETF" },
+      refPlaceholder: { en: "e.g. bank transfer ref", ar: "مثال: مرجع التحويل البنكي" },
+      fPhoto: { en: "Photo", ar: "صورة" },
+      // THREE SUFFIXES, concatenated onto the two labels above by the JSX. The
+      // LEADING SPACE is inside each value on purpose — same device as
+      // `driverTable.kept` — and `optional` is deliberately ONE leaf read by
+      // both fields, because "optional" means the same thing on each.
+      suffixRequired: { en: " (required) *", ar: " (مطلوب) *" },
+      suffixPhotoRequired: { en: " of transfer (required) *", ar: " التحويل (مطلوب) *" },
+      suffixOptional: { en: " (optional)", ar: " (اختياري)" },
+      adding: { en: "Adding…", ar: "جارٍ الإضافة…" },
+      // Client-side, ours, so it translates. The `res.error` from recordTopup
+      // does not — see this namespace's header.
+      errIncomplete: {
+        en: "Pick a customer, method, and enter a positive amount and date.",
+        ar: "اختر عميلاً وطريقة دفع، وأدخل مبلغًا موجبًا وتاريخًا.",
+      },
+      errPhoto: { en: "Could not open photo.", ar: "تعذّر فتح الصورة." },
+    },
+
+    // StatementModal — the per-customer ledger drill-in, both arms.
+    //
+    // THIS PRINTS, AND IT STILL TRANSLATES. It is not the frozen surface: the
+    // ZATCA artifact is the invoice sheet (`#invoice-print`, and the official
+    // PDF in lib/invoicePdfTemplate.ts). A statement is an internal working
+    // document with no regulated layout, so a manager reading Arabic gets an
+    // Arabic statement on paper too.
+    //
+    // EVERY FIGURE ON IT IS READ-ONLY. buildStatementItems() and
+    // consumingItems() are called with exactly the arguments they always were;
+    // nothing here re-signs, re-rounds or re-bases a single amount.
+    statement: {
+      titlePrepaid: { en: "PREPAID STATEMENT", ar: "كشف حساب الدفع المقدم" },
+      titlePostpaid: { en: "POSTPAID STATEMENT", ar: "كشف حساب الدفع الآجل" },
+      // `{ref}` is sampleTripRef()'s output — a project's own reference format,
+      // Latin in both languages.
+      sampleRef: { en: "Ref. {ref}", ar: "المرجع {ref}" },
+      subPrepaid: {
+        en: "Add Balance credits and delivered-trip/charge debits (VAT-inclusive), oldest first.",
+        ar: "أرصدة مضافة وخصوم الرحلات المسلَّمة والرسوم (شاملة ضريبة القيمة المضافة)، الأقدم أولاً.",
+      },
+      subPostpaid: {
+        en: "Delivered trips and recorded payments, oldest first.",
+        ar: "الرحلات المسلَّمة والمدفوعات المسجّلة، الأقدم أولاً.",
+      },
+      from: { en: "From", ar: "من" },
+      to: { en: "To", ar: "إلى" },
+      allTime: { en: "All-time", ar: "كل الفترات" },
+      emptyPeriod: { en: "No activity in this period.", ar: "لا يوجد نشاط في هذه الفترة." },
+      emptyPrepaid: {
+        en: "No balance added or delivered trips yet.",
+        ar: "لم يُضف رصيد ولم تُسلَّم رحلات بعد.",
+      },
+      emptyPostpaid: {
+        en: "No delivered trips or payments yet.",
+        ar: "لا توجد رحلات مسلَّمة أو مدفوعات بعد.",
+      },
+      // `common.date` / `common.type` / `common.truck` / `common.capacity` /
+      // `common.note` / `common.amount` / `common.total` cover seven of the
+      // sixteen column heads across the two tables. These three are this
+      // table's own.
+      colRef: { en: "Ref", ar: "المرجع" },
+      colRunningBalance: { en: "Running Balance", ar: "الرصيد الجاري" },
+      // "VAT" STAYS LATIN IN ARABIC — Turki's call, Batch 9 follow-up. The
+      // statement's VAT column head is read as the Latin acronym by the people
+      // who use it, and the spelled-out ضريبة القيمة المضافة made a narrow
+      // numeric column wrap. Scope is the standalone LABEL only: the long VAT
+      // SENTENCES elsewhere in the dictionary keep their Arabic, and
+      // `consumption.approvalsTab.colVat` — the same head on a DIFFERENT
+      // route — was left alone because this batch is the Trips route.
+      // `trips.project.fVat` is a different concept again (tax registration
+      // number) and is likewise untouched.
+      colVat: { en: "VAT", ar: "VAT" },
+      // The Type column's four NAMED row kinds. The fifth renders the trip's
+      // water type through waterTypeLabel(), off the enum value.
+      //
+      // "Invoice payable" is the RECORD-ONLY settlement row — it is not a
+      // movement and the running balance holds flat across it (lib/prepaid.ts).
+      // The Arabic says the same: a document being noted, not money moving.
+      typeSettlement: { en: "Invoice payable", ar: "فاتورة مستحقة" },
+      typeReturn: { en: "Balance returned", ar: "رصيد مُعاد" },
+      typeCharge: { en: "Special charge", ar: "رسوم خاصة" },
+      typePayment: { en: "Payment", ar: "دفعة" },
+      // The settlement row's Note cell — says WHAT the invoice was settled
+      // against, not the balance figure itself.
+      noteBalance: { en: "Balance", ar: "الرصيد" },
+      // The faded pre-VAT/VAT sub-line under a debit. BOTH tokens are
+      // formatNum() output and stay Latin; only the connector is a word.
+      // The connector is the same Latin "VAT" as `colVat` above — this sub-line
+      // sits directly under that column and the two must not disagree.
+      vatSplit: { en: "{net} + VAT {vat}", ar: "{net} + VAT {vat}" },
+      // Footer captions. The trailing space that separates each from its
+      // figure is a JSX literal at the call site, not part of the value.
+      footRunningBalance: { en: "Running balance:", ar: "الرصيد الجاري:" },
+      footTotalPayable: { en: "Total payable:", ar: "الإجمالي المستحق:" },
+    },
+
+    // WaterStationsModal — the only CRUD surface over water_stations.
+    //
+    // The station `key` is immutable (0014) and never rendered, so nothing in
+    // this group can reach it. The two fill-cost prices ARE money, but they
+    // are cost-side and read by no rate, commission or invoice path — and this
+    // batch changes neither the numbers nor the columns they live in.
+    stations: {
+      title: { en: "Water stations", ar: "محطات المياه" },
+      subtitle: {
+        en: "Where trucks fill. Renaming keeps every existing trip and project resolving correctly — only the display name changes.",
+        ar: "حيث تتزوّد الشاحنات. تغيير الاسم لا يؤثر على أي رحلة أو مشروع قائم — يتغيّر الاسم المعروض فقط.",
+      },
+      colName: { en: "Name", ar: "الاسم" },
+      colCity: { en: "City", ar: "المدينة" },
+      colCoordinates: { en: "Coordinates", ar: "الإحداثيات" },
+      // The "&" is a literal ampersand in the JSX (written `&amp;`), so the
+      // value carries a real "&" and not the entity.
+      colTypesCost: {
+        en: "Water types & fill cost (internal)",
+        ar: "أنواع المياه وتكلفة التعبئة (داخلي)",
+      },
+      emptyActive: { en: "No active stations.", ar: "لا توجد محطات نشطة." },
+      // The station name is user data and prints as stored. The straight
+      // quotes are in the English literal.
+      confirmTitle: { en: "Deactivate \"{name}\"?", ar: "تعطيل \"{name}\"؟" },
+      confirmBody: {
+        en: "It disappears from every station picker. Past trips still show its name. This can be undone later by re-adding a station with the same name.",
+        ar: "ستختفي من كل قوائم اختيار المحطات. الرحلات السابقة تبقى تعرض اسمها. يمكن التراجع لاحقًا بإضافة محطة بالاسم نفسه.",
+      },
+      deactivate: { en: "Deactivate", ar: "تعطيل" },
+      deactivating: { en: "Deactivating…", ar: "جارٍ التعطيل…" },
+      // FOUR-BUCKET PLURAL. The English spliced `{n === 1 ? "" : "s"}` into the
+      // middle of a sentence, which is the construction this dictionary's
+      // plural rule exists to replace — Arabic pluralises on {n}%100 and the
+      // one/two forms drop the numeral entirely.
+      reassignWarn: {
+        one: {
+          en: "\"{name}\" is the default station for {n} project. Pick a replacement default for each before deactivating — nothing is reassigned automatically.",
+          ar: "\"{name}\" هي المحطة الافتراضية لمشروع واحد. اختر بديلاً افتراضيًا لكل مشروع قبل التعطيل — لا يُعاد الإسناد تلقائيًا.",
+        },
+        two: {
+          en: "\"{name}\" is the default station for {n} projects. Pick a replacement default for each before deactivating — nothing is reassigned automatically.",
+          ar: "\"{name}\" هي المحطة الافتراضية لمشروعين. اختر بديلاً افتراضيًا لكل مشروع قبل التعطيل — لا يُعاد الإسناد تلقائيًا.",
+        },
+        few: {
+          en: "\"{name}\" is the default station for {n} projects. Pick a replacement default for each before deactivating — nothing is reassigned automatically.",
+          ar: "\"{name}\" هي المحطة الافتراضية لـ {n} مشاريع. اختر بديلاً افتراضيًا لكل مشروع قبل التعطيل — لا يُعاد الإسناد تلقائيًا.",
+        },
+        many: {
+          en: "\"{name}\" is the default station for {n} projects. Pick a replacement default for each before deactivating — nothing is reassigned automatically.",
+          ar: "\"{name}\" هي المحطة الافتراضية لـ {n} مشروعًا. اختر بديلاً افتراضيًا لكل مشروع قبل التعطيل — لا يُعاد الإسناد تلقائيًا.",
+        },
+      },
+      pickReplacement: { en: "Pick replacement…", ar: "اختر بديلاً…" },
+      confirmReplacements: {
+        en: "Confirm replacements & deactivate",
+        ar: "تأكيد البدائل والتعطيل",
+      },
+      // `{names}` is a comma-joined list of project names — user data, joined
+      // by the caller and printed as stored.
+      errPickReplacement: {
+        en: "Pick a replacement default for: {names}.",
+        ar: "اختر بديلاً افتراضيًا لـ: {names}.",
+      },
+      hideDeactivated: {
+        en: "Hide deactivated stations ({n})",
+        ar: "إخفاء المحطات المعطّلة ({n})",
+      },
+      showDeactivated: {
+        en: "Show deactivated stations ({n})",
+        ar: "عرض المحطات المعطّلة ({n})",
+      },
+      // Two lower-case inline TAGS, not sentences — the CSS upper-cases the
+      // first one, so the value stays as the English literal spells it.
+      deactivatedTag: { en: "deactivated", ar: "معطّلة" },
+      defaultTag: { en: "default", ar: "افتراضية" },
+      // A type with no price is NOT OFFERED, which the row says in words
+      // rather than printing a zero — see the cell's own comment.
+      notOffered: { en: "not offered", ar: "غير متوفر" },
+      addStation: { en: "Add station", ar: "إضافة محطة" },
+      editStation: { en: "Edit station", ar: "تعديل محطة" },
+      fLatitude: { en: "Latitude", ar: "خط العرض" },
+      fLongitude: { en: "Longitude", ar: "خط الطول" },
+      latPlaceholder: { en: "e.g. 24.7136", ar: "مثال: 24.7136" },
+      lngPlaceholder: { en: "e.g. 46.6753", ar: "مثال: 46.6753" },
+      pricingHelp: {
+        en: "Water types and fill cost — internal, SAR per fill (cost only; never affects rates, commission, or invoices). Tick each type this station sells. Enter 0 if it fills free.",
+        ar: "أنواع المياه وتكلفة التعبئة — داخلية، بالريال لكل تعبئة (تكلفة فقط؛ لا تؤثر على الأسعار أو العمولات أو الفواتير). حدّد كل نوع تبيعه هذه المحطة. أدخل 0 إذا كانت التعبئة مجانية.",
+      },
+      pricePlaceholder: { en: "e.g. 45 — or 0 if free", ar: "مثال: 45 — أو 0 إذا كانت مجانية" },
+      // `{type}` is a water type through waterTypeLabel(), off the enum.
+      priceAria: { en: "{type} fill price", ar: "سعر تعبئة {type}" },
+      warnNoType: {
+        en: "A station must offer at least one water type.",
+        ar: "يجب أن توفّر المحطة نوع مياه واحدًا على الأقل.",
+      },
+      renameNote: {
+        en: "Renaming only changes the display name — every trip/project already pointing at this station keeps resolving correctly.",
+        ar: "تغيير الاسم يغيّر الاسم المعروض فقط — كل رحلة أو مشروع يشير إلى هذه المحطة يبقى صحيحًا.",
+      },
+      saveChanges: { en: "Save changes", ar: "حفظ التغييرات" },
+      errName: { en: "Station name is required.", ar: "اسم المحطة مطلوب." },
+      errNoType: {
+        en: "Pick at least one water type and give it a price.",
+        ar: "اختر نوع مياه واحدًا على الأقل وحدّد سعره.",
+      },
+      errPrice: {
+        en: "Enter a price for {type} — use 0 if this station fills free.",
+        ar: "أدخل سعرًا لـ {type} — استخدم 0 إذا كانت التعبئة مجانية.",
+      },
+      errNegative: { en: "{type} price cannot be negative.", ar: "لا يمكن أن يكون سعر {type} سالبًا." },
+    },
+
+    // BreakdownReport — the per-project monthly report, opened from the
+    // Customers tab. Prints, and translates, for the same reason the statement
+    // does: it is an internal management document, not the ZATCA artifact.
+    //
+    // NOT ONE FIGURE MOVES. Revenue still sums each delivered trip's own
+    // frozen `rate_sar`, commission still sums `commission_sar`, and Amount
+    // payable still comes from ./amountPayable with the arguments it already
+    // had. `common.rate`, `common.revenue`, `common.driver`,
+    // `trips.customers.colCommission` / `.colDelivered` / `.changes` and
+    // `trips.finance.colMethod` cover the words this report shares with the
+    // tab that opens it — one vocabulary, not two.
+    breakdown: {
+      month: { en: "Month", ar: "الشهر" },
+      printPdf: { en: "Print / Save as PDF", ar: "طباعة / حفظ كملف PDF" },
+      monthInProgress: { en: "Month in progress", ar: "الشهر جارٍ" },
+      // `{rate}` is formatSar() output. The apostrophe is a real ’ — the JSX
+      // spelled it `&rsquo;` and the rendered character is what must match.
+      rateNote: {
+        en: "Revenue prices each delivered trip at the rate frozen on it at delivery, so past months keep what they were worth on the day. The project’s current rate ({rate}/trip) applies to new work only.",
+        ar: "تُسعَّر الإيرادات لكل رحلة مسلَّمة بالسعر المجمَّد عليها عند التسليم، فتحتفظ الأشهر السابقة بقيمتها في حينها. سعر المشروع الحالي ({rate}/رحلة) ينطبق على العمل الجديد فقط.",
+      },
+      secFinancial: { en: "Financial · {month}", ar: "المالية · {month}" },
+      kTripsDelivered: { en: "Trips delivered", ar: "الرحلات المسلَّمة" },
+      kCommissionPaid: { en: "Commission paid", ar: "العمولة المدفوعة" },
+      kNetMargin: { en: "Net margin", ar: "صافي الهامش" },
+      kAvgRevenue: { en: "Avg revenue / trip", ar: "متوسط الإيراد / رحلة" },
+      payments: { en: "Invoice payments · {month}", ar: "مدفوعات الفواتير · {month}" },
+      colInvoice: { en: "Invoice", ar: "الفاتورة" },
+      colReference: { en: "Reference", ar: "المرجع" },
+      noPayments: { en: "No invoice paid this month.", ar: "لم تُسدَّد أي فاتورة هذا الشهر." },
+      // Lower-case "payable" — this is the box heading, deliberately spelled
+      // differently from the Finance tab's "Amount Payable" COLUMN, and the
+      // two English literals differ by a byte. Two leaves, on purpose.
+      payable: { en: "Amount payable", ar: "المبلغ الواجب السداد" },
+      payableScope: {
+        en: "All periods, as of {today} — not limited to {month}.",
+        ar: "كل الفترات، حتى {today} — غير مقصور على {month}.",
+      },
+      // The three readings of the payable's SIGN, plus the no-mode refusal.
+      // The sign is the meaning (./amountPayable) and is computed there; these
+      // only name what it already said.
+      payableNoMode: {
+        en: "No payment mode set — nothing can be claimed.",
+        ar: "لم تُحدَّد طريقة الدفع — لا يمكن المطالبة بشيء.",
+      },
+      payableOwed: { en: "Owed to us", ar: "مستحق لنا" },
+      payableCredit: { en: "Credit the customer holds", ar: "رصيد لدى العميل" },
+      payableSettled: { en: "Settled", ar: "مسدَّد" },
+      secTrend: { en: "6-month trend (ending {month})", ar: "اتجاه 6 أشهر (ينتهي في {month})" },
+      // RECHARTS SERIES NAMES. These are read twice — as the `name` prop and
+      // by the tooltip formatter that decides which series to format as money
+      // — so the call site reads ONE const for both and never compares against
+      // a hard-coded English word.
+      serRevenue: { en: "Revenue", ar: "الإيرادات" },
+      serTrips: { en: "Trips", ar: "الرحلات" },
+      trendNote: {
+        en: "Revenue = sum of each delivered trip’s frozen rate. Trips = all scheduled trips. Both by trip date. Months with no activity show as zero.",
+        ar: "الإيرادات = مجموع السعر المجمَّد لكل رحلة مسلَّمة. الرحلات = كل الرحلات المجدولة. كلاهما بتاريخ الرحلة. الأشهر بلا نشاط تظهر صفرًا.",
+      },
+      secOperational: { en: "Operational · {month}", ar: "التشغيل · {month}" },
+      kTotalTrips: { en: "Total trips", ar: "إجمالي الرحلات" },
+      kNotDelivered: { en: "Not delivered", ar: "غير مسلَّمة" },
+      kCompletion: { en: "Completion rate", ar: "نسبة الإنجاز" },
+      bandHint: {
+        en: "Rolling windows anchored to today — not the selected month.",
+        ar: "نوافذ متحركة مرتبطة باليوم — وليس بالشهر المختار.",
+      },
+      stationsUsed: { en: "Water stations used", ar: "محطات المياه المستخدمة" },
+      typesSeen: { en: "Water types seen", ar: "أنواع المياه المسجّلة" },
+      // The "&" is a literal ampersand in the JSX here too.
+      secDaily: {
+        en: "{month} · daily activity & delivery split",
+        ar: "{month} · النشاط اليومي وتوزيع التسليم",
+      },
+      dayTooltip: { en: "Day {d}", ar: "يوم {d}" },
+      noTripsMonth: { en: "No trips this month.", ar: "لا توجد رحلات هذا الشهر." },
+      secByDriver: { en: "By driver · {month}", ar: "حسب السائق · {month}" },
+      tblCommission: { en: "Commission earned", ar: "العمولة المكتسبة" },
+      tblRevenue: { en: "Revenue generated", ar: "الإيرادات المحققة" },
+      noDelivered: {
+        en: "No delivered trips this month.",
+        ar: "لا توجد رحلات مسلَّمة هذا الشهر.",
+      },
+      // Two driver-row fallbacks. "Unassigned" is a real bucket (the trip had
+      // no driver); "Unknown driver" means the id resolved to nothing.
+      unassigned: { en: "Unassigned", ar: "غير مسند" },
+      unknownDriver: { en: "Unknown driver", ar: "سائق غير معروف" },
+      // `{date}` is formatDate() output — an app-formatted date, Latin in both
+      // languages. The company name beside it is fenced with translate="no"
+      // in the JSX and is not a leaf.
+      generated: { en: "Generated {date}", ar: "أُنشئ في {date}" },
+    },
+
+    /**
+     * ProjectsBoard — the Projects tab itself: the week calendar strip, the
+     * day-scoped KPI row, every trip card, the any-stage phase picker, and the
+     * per-project header + driver summary.
+     *
+     * THE MONEY ON THIS BOARD IS READ, NEVER WRITTEN. Four surfaces print a
+     * figure — the delivered card's "Commission paid" badge, the header's
+     * rate/commission pills, the KPI, and the driver table's commission column
+     * — and every one of them is `formatSar(<a column already on the row>)`.
+     * Nothing below re-derives, re-rates or re-formats a number: `{v}` and
+     * `{n}` are substituted with the value the component already had, so the
+     * digits are byte-identical in both languages and only the words move.
+     *
+     * Reused rather than restated here: `common.close`, `common.cancel`,
+     * `common.delete`, `common.dangerZone`, `common.driver`, `common.truck`,
+     * `common.monthShort` (the calendar's date spans), `projects.manageDrivers`,
+     * `trips.deliveries.today`, and `fleet.driverState.*` for the duty pill —
+     * that last one keyed off `r.status`, the derived enum VALUE, never off the
+     * label that used to come out of DRIVER_STATE_LABELS.
+     */
+    board: {
+      // ── Week calendar strip ──────────────────────────────────────────────
+      calendar: { en: "Project Calendar", ar: "تقويم المشاريع" },
+      // Both are aria-labels on icon-only buttons. `mt.prevWeek`/`mt.nextWeek`
+      // hold the identical English and stay where they are: Maintenance is not
+      // open in this commit, and a leaf earns `common` by being needed in more
+      // than one file of the batch being converted.
+      prevWeek: { en: "Previous week", ar: "الأسبوع السابق" },
+      nextWeek: { en: "Next week", ar: "الأسبوع التالي" },
+      weekOf: { en: "Week of", ar: "أسبوع" },
+      // WEEKDAY_LBL was a module-level array indexed by Date.getDay(), so the
+      // keys are the getDay() numbers — QUOTED, because a numeric-looking key
+      // must stay a string for the TKey union to resolve. The Arabic is the
+      // SHORT form: this renders into a 10px uppercase slot above the day
+      // number, and the full يوم الأحد would wrap the cell.
+      weekday: {
+        "0": { en: "Sun", ar: "أحد" },
+        "1": { en: "Mon", ar: "اثنين" },
+        "2": { en: "Tue", ar: "ثلاثاء" },
+        "3": { en: "Wed", ar: "أربعاء" },
+        "4": { en: "Thu", ar: "خميس" },
+        "5": { en: "Fri", ar: "جمعة" },
+        "6": { en: "Sat", ar: "سبت" },
+      },
+      // The right-hand header label is "Today" / "Yesterday" / "Tomorrow", or
+      // a "3 Jun"-style date built from `common.monthShort`. "Today" is
+      // `trips.deliveries.today` — same route, same word, already a leaf.
+      yesterday: { en: "Yesterday", ar: "أمس" },
+      tomorrow: { en: "Tomorrow", ar: "غدًا" },
+      // `{n}` is a count of project pills that did not fit in the day cell.
+      morePills: { en: "+{n} more", ar: "+{n} أخرى" },
+
+      // ── KPI row (all four scoped to the selected day) ────────────────────
+      kActiveProjects: { en: "Active projects (day)", ar: "المشاريع النشطة (اليوم)" },
+      kPendingPushes: { en: "Pending pushes (day)", ar: "بانتظار الإرسال (اليوم)" },
+      kRunningTrips: { en: "Running trips (day)", ar: "الرحلات الجارية (اليوم)" },
+      // ONE leaf for two surfaces that spell it identically: the KPI tile and
+      // the driver-summary column head.
+      commissionDay: { en: "Commission (day)", ar: "العمولة (اليوم)" },
+
+      // ── Trip card ────────────────────────────────────────────────────────
+      // The four phase stamps. Each is followed by an app-formatted timestamp
+      // that stays LATIN in both languages (fmtPhaseStamp), so the colon
+      // belongs to the label and not to the value.
+      stampScheduled: { en: "Scheduled:", ar: "مجدولة:" },
+      stampLoadingSince: { en: "Loading since:", ar: "قيد التحميل منذ:" },
+      stampInTransitSince: { en: "In transit since:", ar: "في الطريق منذ:" },
+      stampDelivered: { en: "Delivered:", ar: "تم التسليم:" },
+      // "Fill at:" is the LIVE editor on a loading card; "Filled at:" is the
+      // read-only historical fact on a delivered one. Two leaves on purpose —
+      // the tense is the whole distinction, and Arabic marks it too.
+      fillAt: { en: "Fill at:", ar: "التعبئة في:" },
+      filledAt: { en: "Filled at:", ar: "عُبِّئت في:" },
+      // One leaf, two uses: the <select>'s aria-label on the card AND the
+      // visible field label in the phase picker. Same English, same control.
+      fillStation: { en: "Fill station", ar: "محطة التعبئة" },
+      setStation: { en: "Set station", ar: "حدّد المحطة" },
+      // The disabled-option suffix. LEADING SPACE IS PART OF THE STRING — it
+      // was a template literal that began with one, appended to the station
+      // name inside the same <option>. `{type}` is waterTypeWord(), which is
+      // `waterTypeLabel()` lower-cased: in English that is byte-identical to
+      // the WATER_TYPE_LABELS text it always read, and lower-casing Arabic is
+      // a no-op.
+      blockedSuffix: { en: " — no {type}", ar: " — لا توفّر {type}" },
+      // waterTypeWord()'s null branch. Defensive only — a trip with no water
+      // type is never gated — but it must not be able to print "null".
+      thisWaterType: { en: "this water type", ar: "هذا النوع من المياه" },
+      // The three stage buttons. Turki's wording: the scheduled → loading move
+      // is the DISPATCH decision, not the start of driving.
+      dispatch: { en: "Dispatch", ar: "إرسال" },
+      // AR reads "update to X", not "mark as X" — Turki's wording, Batch 9
+      // follow-up. English unchanged: EN "Mark …" is the button text the Kanban
+      // has always shown.
+      markInTransit: { en: "Mark in transit", ar: "تحديث الى في الطريق" },
+      markDelivered: { en: "Mark delivered", ar: "تحديث الى تم التسليم" },
+      // The delivered card's static badge. `{v}` is formatSar(trip.commission_sar)
+      // — the DRIVER's commission frozen at delivery, read straight off the row.
+      // The null branch states the fact rather than printing a fabricated +0.00.
+      noCommissionRecorded: {
+        en: "Delivered — no commission recorded",
+        ar: "تم التسليم — لم تُسجَّل عمولة",
+      },
+      commissionPaid: { en: "Commission paid +{v}", ar: "العمولة مدفوعة +{v}" },
+      noRef: { en: "No ref", ar: "بلا مرجع" },
+      // aria-hidden decorative hint — route optimization is not built yet.
+      clickForRoute: { en: "Click for route", ar: "اضغط لعرض المسار" },
+
+      // ── Phase picker ─────────────────────────────────────────────────────
+      moveTrip: { en: "Move trip", ar: "نقل الرحلة" },
+      // Both are the CLIENT's generic fallback, shown only when the server
+      // returned no reason of its own. A real `res.error` sentence passes
+      // through in English exactly as the server wrote it — see this
+      // namespace's header.
+      errMove: {
+        en: "Could not move this trip. Try again.",
+        ar: "تعذّر نقل هذه الرحلة. حاول مرة أخرى.",
+      },
+      errDelete: {
+        en: "Could not delete this trip. Try again.",
+        ar: "تعذّر حذف هذه الرحلة. حاول مرة أخرى.",
+      },
+      // THE TWO LOCKS ARE INDEPENDENT and the three sentences say which one
+      // fired: payout_id set (commission snapshotted into a History payout),
+      // a PAID customer invoice, or both. The apostrophes are literal — these
+      // are JS strings in a ternary, not JSX text with &apos;.
+      lockBoth: {
+        en: "Paid — commission is settled and the customer invoice is paid. Stage and station can't be changed.",
+        ar: "مدفوعة — سُوِّيت العمولة وفاتورة العميل مدفوعة. لا يمكن تغيير المرحلة أو المحطة.",
+      },
+      lockCommission: {
+        en: "Paid — this trip's commission is locked into a History record. Stage and station can't be changed.",
+        ar: "مدفوعة — عمولة هذه الرحلة مثبّتة في سجل الدفعات. لا يمكن تغيير المرحلة أو المحطة.",
+      },
+      lockInvoice: {
+        en: "Invoice paid — the customer has been billed for this trip. Stage and station can't be changed.",
+        ar: "الفاتورة مدفوعة — تمت مطالبة العميل بهذه الرحلة. لا يمكن تغيير المرحلة أو المحطة.",
+      },
+      // Tag on the trip's own row in the stage list.
+      current: { en: "Current", ar: "الحالية" },
+      // `{type}` is waterTypeWord() again. ONE leaf rather than a split,
+      // because the type sits mid-sentence and Arabic puts it in a different
+      // place than English does.
+      typeHint: {
+        en: "This trip is {type}. Stations that don't fill it can't be picked.",
+        ar: "هذه الرحلة {type}. لا يمكن اختيار محطات لا تعبّئ هذا النوع.",
+      },
+      moving: { en: "Moving…", ar: "جارٍ النقل…" },
+      apply: { en: "Apply", ar: "تطبيق" },
+      back: { en: "Back", ar: "رجوع" },
+      // Confirm-move step. `reverseWarn` and `currently` are SPLIT at the <b>
+      // rather than filled into one sentence: the bold run holds a formatSar
+      // figure and the parentheses are JSX text either side of it.
+      confirmMove: { en: "Confirm move", ar: "تأكيد النقل" },
+      reverseWarn: {
+        en: "Reverses the recorded delivery — clears the delivered timestamp and commission",
+        ar: "يعكس التسليم المسجّل — يمسح وقت التسليم والعمولة",
+      },
+      currently: { en: "currently", ar: "حاليًا" },
+      // Split at the two bold station names for the same reason.
+      stationFrom: { en: "Fill station changes from", ar: "تتغيّر محطة التعبئة من" },
+      stationTo: { en: "to", ar: "إلى" },
+      // Delete — the app's ONE hard delete. Deliberately blunt: there is no
+      // archive and no restore path, unlike every other destructive action.
+      deleteTrip: { en: "Delete trip", ar: "حذف الرحلة" },
+      deleteHint: {
+        en: "Permanent — cannot be undone. No Archive recovery.",
+        ar: "نهائي — لا يمكن التراجع. لا استرجاع من الأرشيف.",
+      },
+      deletePermanentTitle: { en: "Delete trip permanently", ar: "حذف الرحلة نهائيًا" },
+      // Three leaves, split at the bold mono trip ref. `deleteBodyAfter`
+      // OPENS WITH THE FULL STOP that closes the first clause — the ref is
+      // the last thing before it.
+      deleteBodyBefore: { en: "This permanently deletes trip", ar: "سيحذف هذا نهائيًا الرحلة" },
+      thisTrip: { en: "this trip", ar: "هذه الرحلة" },
+      deleteBodyAfter: {
+        en: ". This cannot be undone — there is no Archive to restore it from.",
+        ar: ". لا يمكن التراجع عن ذلك — لا يوجد أرشيف لاستعادتها منه.",
+      },
+      deleting: { en: "Deleting…", ar: "جارٍ الحذف…" },
+      deletePermanently: { en: "Delete permanently", ar: "حذف نهائي" },
+
+      // ── Project card header + driver summary ─────────────────────────────
+      // THE TWO SIDES OF ONE TRIP. Rate is what the customer pays us,
+      // commission is what we pay the driver; both pills are split at the <b>
+      // so the figure stays an untouched formatSar() call.
+      ratePerTrip: { en: "Rate / trip", ar: "السعر / الرحلة" },
+      commissionPerTrip: { en: "Commission / trip", ar: "العمولة / الرحلة" },
+      // FOUR-BUCKET PLURAL, serving BOTH counts on this card — the header's
+      // assigned-driver count and the summary strip's row count, which spelled
+      // the identical `{n} driver/drivers`. English folds two/few/many onto one
+      // form; Arabic drops the numeral for one/two and keeps it for few/many.
+      driverCount: {
+        one: { en: "{n} driver", ar: "سائق واحد" },
+        two: { en: "{n} drivers", ar: "سائقان" },
+        few: { en: "{n} drivers", ar: "{n} سائقين" },
+        many: { en: "{n} drivers", ar: "{n} سائقًا" },
+      },
+      addTrip: { en: "Add trip", ar: "إضافة رحلة" },
+      driversOperating: {
+        en: "Drivers operating this project",
+        ar: "السائقون العاملون على هذا المشروع",
+      },
+      noDriversAssigned: { en: "No drivers assigned.", ar: "لا يوجد سائقون مسندون." },
+      // Column heads with no exact match in `common`. "Duty status" is NOT
+      // `common.status` ("Status") and not `driverTable.onDuty` ("On duty").
+      thDutyStatus: { en: "Duty status", ar: "حالة الدوام" },
+      thTripsDay: { en: "Trips (day)", ar: "الرحلات (اليوم)" },
+      thLastTrip: { en: "Last trip", ar: "آخر رحلة" },
+
+      // ── Board body ───────────────────────────────────────────────────────
+      noActiveProjects: { en: "No active projects yet.", ar: "لا توجد مشاريع نشطة بعد." },
+      directTrips: { en: "Direct customer trips", ar: "رحلات عملاء مباشرة" },
+      directHint: { en: "Trips not tied to a project.", ar: "رحلات غير مرتبطة بمشروع." },
+    },
+
+    /**
+     * ── ProjectModal — the ONE form behind both "New Project" and "Manage
+     * project" ──────────────────────────────────────────────────────────────
+     *
+     * NOT ONE FIGURE MOVES. Every amount on this surface is still produced by
+     * the code that produced it before: `formatSar()` over `commRes.applied`,
+     * over `commissionNow.commission_value`, over the live preview's own
+     * arithmetic. The commission WRITER (setProjectCommission) and its
+     * cancel path are untouched — this group only renames the sentences that
+     * REPORT what those writers already returned. `{v}` / `{pct}` / `{date}`
+     * / `{n}` are call-site tokens filled with the SAME expressions that were
+     * interpolated into the old template literals.
+     *
+     * SERVER TEXT STAYS ENGLISH AND STAYS VERBATIM. `res.error` from
+     * ./actions — including the debt guard's blocked message, which names the
+     * amount owed, and the cancel RPC's two refusals, which name the project
+     * and the date — is rendered as it arrives. Only the CLIENT-side fallback
+     * after a `??` is translated, because only that one is ours to write.
+     *
+     * USER DATA IS NOT TRANSLATED EITHER: the project name in the archive
+     * confirmation and the type-to-confirm placeholder are the row's own
+     * `projName`, and the confirm test compares against that same base value —
+     * never against a label — so an Arabic-mode user types the same characters
+     * an English-mode user does.
+     *
+     * REUSED RATHER THAN DUPLICATED. Within `trips`, on the precedent set by
+     * BreakdownReport reading `trips.customers.*`: `trips.customers.manageProject`
+     * (title, edit mode), `trips.shell.newProject` (title, create mode),
+     * `trips.customers.colCommission` ("Commission", the section head),
+     * `trips.customers.colDrivers` ("Drivers"), `trips.stations.saveChanges`.
+     * From `common`: `customer`, `dangerZone`, `cancel`, `saving`,
+     * `selectPlaceholder`. From `labels`: `postpaid` / `prepaid` and
+     * `commFixed` / `commScalable` — the payment-mode and commission-mode
+     * pickers render an ENUM, so they key off the value like every other enum
+     * in this batch.
+     */
+    project: {
+      // ── Header ───────────────────────────────────────────────────────────
+      editSubtitle: {
+        en: "Edit this customer and its project. Changes apply to future trips — already-delivered trips keep their stamped commission.",
+        ar: "عدّل هذا العميل ومشروعه. تسري التغييرات على الرحلات القادمة — أما الرحلات المُسلَّمة فتحتفظ بالعمولة المثبَّتة عليها.",
+      },
+      createSubtitle: {
+        en: "Spin up a new water-transport project. Creates the customer and its project together — each project gets its own Kanban board.",
+        ar: "أنشئ مشروع نقل مياه جديدًا. يُنشئ العميل ومشروعه معًا — ولكل مشروع لوحة كانبان خاصة به.",
+      },
+
+      // ── Client-side validation + fallbacks ───────────────────────────────
+      // These five are the ONLY error text this file owns. Everything else the
+      // user can see in the red line is `res.error` straight from the server
+      // action, in English, unchanged.
+      errRequired: {
+        en: "Fill the required fields: customer name, customer type, project name, water station, water type, and payment mode.",
+        ar: "أكمل الحقول المطلوبة: اسم العميل، ونوع العميل، واسم المشروع، ومحطة المياه، ونوع المياه، وطريقة الدفع.",
+      },
+      errNoProjectId: { en: "Missing project id.", ar: "معرّف المشروع مفقود." },
+      errCommissionNoReport: {
+        en: "The commission change did not report back.",
+        ar: "لم يصل ردّ بشأن تغيير العمولة.",
+      },
+      // Appended after the line above OR after a real server error, with one
+      // space between them — the same two-sentence shape the old template
+      // literal produced. Kept a separate leaf because the first half is
+      // sometimes the server's words and sometimes ours.
+      errRestSaved: {
+        en: "The rest of the project was saved.",
+        ar: "تم حفظ بقية بيانات المشروع.",
+      },
+      errCancelNoReport: {
+        en: "The cancellation did not report back.",
+        ar: "لم يصل ردّ بشأن الإلغاء.",
+      },
+
+      // ── The commission-change receipt ────────────────────────────────────
+      // Assembled from `commRes.applied`, which is what the RPC reported it
+      // wrote. `{v}` is formatSar(a.value) and `{mode}` is one of the two
+      // fragments below, PRE-FILLED before it is spliced in — safe because
+      // fill() is single-pass, so a `{pct}` already substituted is not
+      // re-substituted. Both fragments open with a SPACE: they butt directly
+      // against the amount, exactly as `${…}` did.
+      modeScalable: { en: " +{pct}%/trip", ar: " +{pct}٪/رحلة" },
+      modeFixed: { en: " fixed", ar: " ثابتة" },
+      noteInForce: {
+        en: "In force from today at {v}{mode}.",
+        ar: "سارية من اليوم بقيمة {v}{mode}.",
+      },
+      noteScheduled: {
+        en: "Scheduled for {date} at {v}{mode}.",
+        ar: "مجدولة بتاريخ {date} بقيمة {v}{mode}.",
+      },
+      // FOUR-BUCKET PLURAL. Was `trip${n === 1 ? "" : "s"}` spliced into the
+      // sentence; English folds two/few/many onto the identical form, so
+      // whichever bucket fires prints what it printed before.
+      repriceTrips: {
+        one: {
+          en: "{n} unpaid trip dated today will price at the new terms on the next stage change.",
+          ar: "رحلة واحدة غير مدفوعة بتاريخ اليوم سيُعاد تسعيرها بالشروط الجديدة عند تغيير المرحلة التالي.",
+        },
+        two: {
+          en: "{n} unpaid trips dated today will price at the new terms on the next stage change.",
+          ar: "رحلتان غير مدفوعتين بتاريخ اليوم سيُعاد تسعيرهما بالشروط الجديدة عند تغيير المرحلة التالي.",
+        },
+        few: {
+          en: "{n} unpaid trips dated today will price at the new terms on the next stage change.",
+          ar: "{n} رحلات غير مدفوعة بتاريخ اليوم سيُعاد تسعيرها بالشروط الجديدة عند تغيير المرحلة التالي.",
+        },
+        many: {
+          en: "{n} unpaid trips dated today will price at the new terms on the next stage change.",
+          ar: "{n} رحلة غير مدفوعة بتاريخ اليوم سيُعاد تسعيرها بالشروط الجديدة عند تغيير المرحلة التالي.",
+        },
+      },
+      noReprice: {
+        en: "No trips today to reprice.",
+        ar: "لا توجد رحلات اليوم لإعادة تسعيرها.",
+      },
+      termsUnmoved: {
+        en: "Today's terms have not moved.",
+        ar: "لم تتغيّر شروط اليوم.",
+      },
+
+      // The withdraw-a-queued-change receipt, same shape, second four-bucket
+      // plural (`change${n === 1 ? "" : "s"}`).
+      noteWithdrew: {
+        en: "Withdrew the change scheduled for {date}.",
+        ar: "تم سحب التغيير المجدول بتاريخ {date}.",
+      },
+      nothingQueued: { en: "Nothing else is queued.", ar: "لا شيء آخر في الانتظار." },
+      otherQueued: {
+        one: {
+          en: "{n} other scheduled change still queued.",
+          ar: "تغيير مجدول آخر ما زال في الانتظار.",
+        },
+        two: {
+          en: "{n} other scheduled changes still queued.",
+          ar: "تغييران مجدولان آخران ما زالا في الانتظار.",
+        },
+        few: {
+          en: "{n} other scheduled changes still queued.",
+          ar: "{n} تغييرات مجدولة أخرى ما زالت في الانتظار.",
+        },
+        many: {
+          en: "{n} other scheduled changes still queued.",
+          ar: "{n} تغييرًا مجدولًا آخر ما زال في الانتظار.",
+        },
+      },
+
+      // ── Customer section ─────────────────────────────────────────────────
+      // Route-scoped on purpose. `customers.fType` / `.fLat` / `.fLng` /
+      // `.fAddress` / `.fVatNumber` / `.fLegalNameAr` and `drivers.fPhone` hold
+      // near-identical pairs, but they belong to routes this commit does not
+      // open, and moving a key out of a file nobody in this batch edits buys
+      // no reader anything. Same call as `mt.edit` vs `common.edit`.
+      fCustName: { en: "Customer name *", ar: "اسم العميل *" },
+      phCustName: { en: "e.g. Bin Slimah Construction", ar: "مثال: بن سليمة للمقاولات" },
+      // The English placeholder for the Arabic-name box was ALREADY Arabic —
+      // it is a sample of what goes in the field, not chrome — so both sides
+      // carry the same string.
+      fNameAr: { en: "Company name (Arabic)", ar: "اسم الشركة (بالعربية)" },
+      phNameAr: { en: "اسم الشركة", ar: "اسم الشركة" },
+      fVat: { en: "VAT Registration Number", ar: "الرقم الضريبي" },
+      fCr: { en: "CR number", ar: "رقم السجل التجاري" },
+      fCustType: { en: "Customer type *", ar: "نوع العميل *" },
+      fContactName: { en: "Contact name", ar: "اسم جهة الاتصال" },
+      fPhone: { en: "Phone", ar: "الهاتف" },
+      fEmail: { en: "Email", ar: "البريد الإلكتروني" },
+      phEmail: { en: "e.g. billing@customer.com", ar: "مثال: billing@customer.com" },
+      // THE ONE INTENTIONAL ENGLISH CHANGE IN THIS BATCH. Turki renamed the
+      // LABEL from "Invoice address" to "National Address" — the KSA National
+      // Address is the specific thing this field holds, and the old wording
+      // read as a free-form billing line. LABEL ONLY: the column, the stored
+      // value, and every address code path are untouched, and the placeholder
+      // below still describes the same content. The English byte-identity
+      // harness flags this leaf BY DESIGN; it is declared there, not reverted.
+      fInvoiceAddress: { en: "National Address", ar: "العنوان الوطني" },
+      phInvoiceAddress: {
+        en: "for the invoice header — may differ from delivery site",
+        ar: "لترويسة الفاتورة — قد يختلف عن موقع التسليم",
+      },
+      fDeliveryAddress: { en: "Delivery site address", ar: "عنوان موقع التسليم" },
+      phDeliveryAddress: {
+        en: "e.g. Riyadh — King Salman Park",
+        ar: "مثال: الرياض — منتزه الملك سلمان",
+      },
+      // The two coordinate placeholders ("24.7136" / "46.6753") are SAMPLE
+      // NUMBERS, not words. They stay in the JSX untranslated, like every
+      // other app-formatted numeral in this batch.
+      fLat: { en: "Delivery latitude", ar: "خط عرض التسليم" },
+      fLng: { en: "Delivery longitude", ar: "خط طول التسليم" },
+
+      // ── Payment & Rate ───────────────────────────────────────────────────
+      // The head is written with an `&amp;` entity in the JSX; the leaf holds
+      // the character it renders as.
+      secPayment: { en: "Payment & Rate", ar: "الدفع والسعر" },
+      fPaymentMode: { en: "Payment mode *", ar: "طريقة الدفع *" },
+      hPostpaid: {
+        en: "Invoiced after delivery — pays per period.",
+        ar: "تُصدر الفاتورة بعد التسليم — يدفع لكل فترة.",
+      },
+      hPrepaid: {
+        en: "Runs on a top-up balance — trips draw it down.",
+        ar: "يعمل برصيد مدفوع مقدمًا — تخصم منه الرحلات.",
+      },
+      hPaymentRequired: {
+        en: "Required — pick how this customer pays.",
+        ar: "مطلوب — اختر طريقة دفع هذا العميل.",
+      },
+      checkingSettlement: { en: "Checking settlement…", ar: "جارٍ فحص التسوية…" },
+      // REVENUE, not driver pay — the two are deliberately worded apart on
+      // screen and the hint is what keeps them apart.
+      fRate: { en: "Customer rate / trip (SAR)", ar: "سعر العميل / الرحلة (ريال)" },
+      hRatePrepaid: {
+        en: "Revenue — what each delivered trip draws from the prepaid balance.",
+        ar: "إيراد — ما تخصمه كل رحلة مُسلَّمة من الرصيد المدفوع مقدمًا.",
+      },
+      hRatePostpaid: {
+        en: "Revenue — what the customer pays per trip.",
+        ar: "إيراد — ما يدفعه العميل عن كل رحلة.",
+      },
+
+      // ── Commission section ───────────────────────────────────────────────
+      dirtyToday: {
+        en: "Saving will change today's terms",
+        ar: "سيؤدي الحفظ إلى تغيير شروط اليوم",
+      },
+      dirtyScheduled: {
+        en: "Saving will schedule a change for {date}",
+        ar: "سيؤدي الحفظ إلى جدولة تغيير بتاريخ {date}",
+      },
+      notDirty: {
+        en: "Terms in force today — unchanged",
+        ar: "الشروط السارية اليوم — دون تغيير",
+      },
+      // The apostrophe is a real ’ — the JSX writes it as `&rsquo;`.
+      commissionUnavailable: {
+        en: "This project’s current commission terms could not be read, so they are not shown and cannot be changed from here. Reload the page; if it persists the project has no commission history row and needs one before it can be edited.",
+        ar: "تعذّرت قراءة شروط العمولة الحالية لهذا المشروع، لذا لا تظهر ولا يمكن تغييرها من هنا. أعد تحميل الصفحة؛ وإن استمر ذلك فالمشروع بلا سجل عمولة ويحتاج إلى واحد قبل أن يصبح قابلًا للتعديل.",
+      },
+      fCommissionBase: {
+        en: "Driver commission base (SAR)",
+        ar: "أساس عمولة السائق (ريال)",
+      },
+      hCommissionBase: {
+        en: "Driver pay — separate from the customer rate.",
+        ar: "أجر السائق — منفصل عن سعر العميل.",
+      },
+      fCommissionMode: { en: "Driver commission mode", ar: "نمط عمولة السائق" },
+      hFixed: { en: "Same commission every trip.", ar: "العمولة نفسها في كل رحلة." },
+      // The hint under the scalable mode card. AR says تراكمية to match
+      // `labels.commScalable` — the mode's NAME and its one-line explanation sat
+      // one line apart saying two different words for the same thing (تصاعد vs
+      // تراكمية) until Turki's Batch 9 follow-up. English unchanged.
+      hScalable: { en: "Grows per trip by a bump %.", ar: "تزيد مع كل رحلة بنسبة تراكمية." },
+      fBump: { en: "Bump % per trip (max 50)", ar: "نسبة التصاعد لكل رحلة (بحد أقصى 50)" },
+      takesEffect: { en: "Takes effect", ar: "يبدأ سريانه" },
+      resetToToday: { en: "Reset to today", ar: "إعادة الضبط لليوم" },
+      hEffectiveToday: {
+        en: "Today — the change goes live immediately.",
+        ar: "اليوم — يسري التغيير فورًا.",
+      },
+      hEffectiveQueued: {
+        en: "Queued for {date} — today's terms stay as they are until then.",
+        ar: "في الانتظار حتى {date} — تبقى شروط اليوم كما هي حتى ذلك الحين.",
+      },
+      // Split at the <b> so the figure stays an untouched formatSar() call.
+      earnsBefore: { en: "Driver earns", ar: "يكسب السائق" },
+      earnsAfter: { en: "every trip.", ar: "في كل رحلة." },
+      previewHead: {
+        en: "Driver commission (first 10 trips):",
+        ar: "عمولة السائق (أول 10 رحلات):",
+      },
+      tripN: { en: "Trip {n}", ar: "رحلة {n}" },
+
+      // The "what is actually true right now" card — read from
+      // v_project_commission_now, never from the form state.
+      termsOnRecord: { en: "Terms on record", ar: "الشروط المسجّلة" },
+      inForceToday: { en: "In force today", ar: "السارية اليوم" },
+      // Same mode word as `labels.commScalable` — see the note there. تراكمية.
+      scalablePerTrip: { en: "Scalable +{pct}% per trip", ar: "تراكمية +{pct}٪ لكل رحلة" },
+      fixedEveryTrip: { en: "Fixed every trip", ar: "ثابتة في كل رحلة" },
+      nextScheduled: { en: "Next scheduled change", ar: "التغيير المجدول التالي" },
+      // A separator, spaces included — it joins the mode line to the date.
+      fromSep: { en: " · from ", ar: " · من " },
+      cancelling: { en: "Cancelling…", ar: "جارٍ الإلغاء…" },
+      cancelThisChange: { en: "Cancel this change", ar: "إلغاء هذا التغيير" },
+      noneQueued: { en: "None queued", ar: "لا شيء في الانتظار" },
+      staleMirror: {
+        en: "The project record still shows the previous figure. Every screen prices from the terms above, so this is a bookkeeping lag, not a live difference.",
+        ar: "لا يزال سجل المشروع يعرض الرقم السابق. كل الشاشات تسعّر من الشروط أعلاه، فهذا تأخّر في القيد وليس فرقًا فعليًا.",
+      },
+
+      // ── Operation section ────────────────────────────────────────────────
+      secOperation: { en: "Operation", ar: "التشغيل" },
+      fProjName: { en: "Project name *", ar: "اسم المشروع *" },
+      phProjName: { en: "e.g. King Salman Park", ar: "مثال: منتزه الملك سلمان" },
+      fStation: { en: "Default water station *", ar: "محطة المياه الافتراضية *" },
+      noStations: { en: "No stations", ar: "لا توجد محطات" },
+      fWaterType: { en: "Default water type *", ar: "نوع المياه الافتراضي *" },
+      // Route-scoped, like the customer fields above: `mt.description` and
+      // `reports.*.description` hold the identical pair but belong to routes
+      // this commit does not open.
+      fDescription: { en: "Description", ar: "الوصف" },
+      driversHint: { en: "· {n} selected · optional", ar: "· {n} محدد · اختياري" },
+
+      // ── Danger zone ──────────────────────────────────────────────────────
+      // ARCHIVE, NOT DELETE. The wording says "Archives"/"restore" because the
+      // action is a soft archive with a restore path; nothing here hard-deletes.
+      removeProject: { en: "Remove / Cancel project", ar: "إزالة / إلغاء المشروع" },
+      removeHint: {
+        en: "Archives the project and its customer. Restorable later from the Archive page.",
+        ar: "يؤرشف المشروع وعميله. يمكن استعادته لاحقًا من صفحة الأرشيف.",
+      },
+      // Split at the <b>{projName}</b> — the project name is USER DATA and is
+      // printed as stored, in both languages.
+      archiveBefore: { en: "This will archive", ar: "سيؤدي هذا إلى أرشفة" },
+      archiveAfter: {
+        en: "and its customer and all its trips. You can restore it later from the Archive page. Type the project name to confirm.",
+        ar: "وعميله وكل رحلاته. يمكنك استعادته لاحقًا من صفحة الأرشيف. اكتب اسم المشروع للتأكيد.",
+      },
+      archivingBlocked: { en: "Archiving is blocked", ar: "الأرشفة محظورة" },
+      // The blocked reason itself is the RPC's raised message — it names the
+      // amount owed, so it is rendered verbatim and is NOT a leaf.
+      overrideBefore: {
+        en: "A manager can override this. Overriding",
+        ar: "يمكن للمدير تجاوز ذلك. والتجاوز",
+      },
+      overrideStrong: { en: "writes the amount off", ar: "يشطب المبلغ" },
+      overrideAfter: {
+        en: "— the customer stops owing it, and your name, the reason and the time are recorded against the write-off. It cannot be undone from here.",
+        ar: "— يتوقف العميل عن استحقاقه، ويُسجَّل اسمك والسبب والوقت على عملية الشطب. ولا يمكن التراجع عنها من هنا.",
+      },
+      phOverrideReason: {
+        en: "Reason for writing off the outstanding amount",
+        ar: "سبب شطب المبلغ المستحق",
+      },
+      writingOff: { en: "Writing off…", ar: "جارٍ الشطب…" },
+      writeOffAndRemove: {
+        en: "Write off and remove project",
+        ar: "شطب المبلغ وإزالة المشروع",
+      },
+      removing: { en: "Removing…", ar: "جارٍ الإزالة…" },
+      removeProjectBtn: { en: "Remove project", ar: "إزالة المشروع" },
+
+      // ── Footer ───────────────────────────────────────────────────────────
+      createProject: { en: "Create project", ar: "إنشاء المشروع" },
     },
   },
 } as const;

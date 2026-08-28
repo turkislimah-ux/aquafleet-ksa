@@ -40,9 +40,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { Btn } from "@/components/ui";
+import { useApp } from "@/components/AppShell";
+import { t, fill, plural } from "@/lib/i18n";
+import { customerTypeLabel, waterTypeLabel } from "@/lib/enum-labels";
 import {
   CUSTOMER_TYPE_LABELS,
   WATER_TYPE_LABELS,
+  type CustomerType,
   type WaterType,
   type PaymentMode,
   type ProjectCommissionNowRow,
@@ -162,6 +166,7 @@ export default function ProjectModal({
   // Fail-safe: leave data failed to load — block NEW roster selections.
   leaveUnavailable?: boolean;
 }) {
+  const { lang } = useApp();
   const router = useRouter();
   const defaultStation = useMemo(
     () => stations.find((s) => s.is_default)?.key ?? stations[0]?.key ?? "",
@@ -413,16 +418,14 @@ export default function ProjectModal({
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!canSubmit) {
-      setError(
-        "Fill the required fields: customer name, customer type, project name, water station, water type, and payment mode.",
-      );
+      setError(t("trips.project.errRequired", lang));
       return;
     }
     // paymentMode is narrowed to PaymentMode (excludes "") here — canSubmit
     // above already required it, and TS's aliased-condition narrowing carries
     // that through (same reason payload.payment_mode below type-checks).
     if (isEdit && !initial?.project_id) {
-      setError("Missing project id.");
+      setError(t("trips.project.errNoProjectId", lang));
       return;
     }
     setSaving(true);
@@ -511,7 +514,7 @@ export default function ProjectModal({
       // real while the user believed it had rolled back. Nothing is rolled
       // back: the two writes are separate statements by design.
       setError(
-        `${commRes.error ?? "The commission change did not report back."} The rest of the project was saved.`,
+        `${commRes.error ?? t("trips.project.errCommissionNoReport", lang)} ${t("trips.project.errRestSaved", lang)}`,
       );
       router.refresh();
       return;
@@ -522,12 +525,33 @@ export default function ProjectModal({
     const a = commRes.applied;
     setCommissionBaseline(normalizeCommission(a.mode, a.value, a.bumpPct));
     setEffectiveFrom(today);
+    // THE FIGURES ARE THE RPC'S OWN. `a.value`, `a.bumpPct`, `a.effectiveFrom`
+    // and `a.repriceableTrips` are what set_project_commission reported it
+    // wrote; nothing here recomputes, re-rounds or re-formats them —
+    // formatSar() and formatDayKey() are the same calls that were inside the
+    // old template literals. Only the sentence around them moved.
+    //
+    // The mode fragment is PRE-FILLED before it is spliced in. fill() makes a
+    // single left-to-right pass over the ORIGINAL string, so a `{pct}` already
+    // substituted inside `modeTxt` is never seen again as a token.
+    const modeTxt =
+      a.mode === "scalable"
+        ? fill(t("trips.project.modeScalable", lang), { pct: a.bumpPct })
+        : t("trips.project.modeFixed", lang);
+    const inForce = fill(t("trips.project.noteInForce", lang), {
+      v: formatSar(a.value),
+      mode: modeTxt,
+    });
     setCommissionNote(
       a.appliesNow
         ? a.repriceableTrips > 0
-          ? `In force from today at ${formatSar(a.value)}${a.mode === "scalable" ? ` +${a.bumpPct}%/trip` : " fixed"}. ${a.repriceableTrips} unpaid trip${a.repriceableTrips === 1 ? "" : "s"} dated today will price at the new terms on the next stage change.`
-          : `In force from today at ${formatSar(a.value)}${a.mode === "scalable" ? ` +${a.bumpPct}%/trip` : " fixed"}. No trips today to reprice.`
-        : `Scheduled for ${formatDayKey(a.effectiveFrom)} at ${formatSar(a.value)}${a.mode === "scalable" ? ` +${a.bumpPct}%/trip` : " fixed"}. Today's terms have not moved.`,
+          ? `${inForce} ${fill(t(`trips.project.repriceTrips.${plural(a.repriceableTrips)}`, lang), { n: a.repriceableTrips })}`
+          : `${inForce} ${t("trips.project.noReprice", lang)}`
+        : `${fill(t("trips.project.noteScheduled", lang), {
+            date: formatDayKey(a.effectiveFrom),
+            v: formatSar(a.value),
+            mode: modeTxt,
+          })} ${t("trips.project.termsUnmoved", lang)}`,
     );
     router.refresh();
   }
@@ -544,15 +568,17 @@ export default function ProjectModal({
     const res = await cancelProjectCommission(initial.project_id, when);
     setCancelling(false);
     if (res.error || !res.cancelled) {
-      setError(res.error ?? "The cancellation did not report back.");
+      setError(res.error ?? t("trips.project.errCancelNoReport", lang));
       return;
     }
     const c = res.cancelled;
     setCommissionNote(
-      `Withdrew the change scheduled for ${formatDayKey(c.effectiveFrom)}. ${
+      `${fill(t("trips.project.noteWithdrew", lang), { date: formatDayKey(c.effectiveFrom) })} ${
         c.remainingScheduled === 0
-          ? "Nothing else is queued."
-          : `${c.remainingScheduled} other scheduled change${c.remainingScheduled === 1 ? "" : "s"} still queued.`
+          ? t("trips.project.nothingQueued", lang)
+          : fill(t(`trips.project.otherQueued.${plural(c.remainingScheduled)}`, lang), {
+              n: c.remainingScheduled,
+            })
       }`,
     );
     router.refresh();
@@ -598,76 +624,81 @@ export default function ProjectModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-lg font-semibold">{isEdit ? "Manage project" : "New Project"}</h2>
+          <h2 className="text-lg font-semibold">
+            {t(isEdit ? "trips.customers.manageProject" : "trips.shell.newProject", lang)}
+          </h2>
           <button type="button" onClick={close} className="muted hover:text-[rgb(var(--fg))]">
             <X className="h-5 w-5" />
           </button>
         </div>
         <p className="text-sm muted mb-4">
-          {isEdit
-            ? "Edit this customer and its project. Changes apply to future trips — already-delivered trips keep their stamped commission."
-            : "Spin up a new water-transport project. Creates the customer and its project together — each project gets its own Kanban board."}
+          {t(isEdit ? "trips.project.editSubtitle" : "trips.project.createSubtitle", lang)}
         </p>
 
         <form onSubmit={onSubmit} className="space-y-5">
           {/* Customer section. */}
           <section className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wide muted">Customer</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide muted">{t("common.customer", lang)}</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Batch D follow-up #2 — company name EN/AR share a row, VAT
                   Registration Number + CR number sit right below it (layout
                   ordering only, same fields/state, no data change). */}
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Customer name *</span>
-                <input value={custName} onChange={(e) => setCustName(e.target.value)} required className={INPUT} style={INPUT_STYLE} placeholder="e.g. Bin Slimah Construction" />
+                <span className="muted">{t("trips.project.fCustName", lang)}</span>
+                <input value={custName} onChange={(e) => setCustName(e.target.value)} required className={INPUT} style={INPUT_STYLE} placeholder={t("trips.project.phCustName", lang)} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Company name (Arabic)</span>
-                <input value={custNameAr} onChange={(e) => setCustNameAr(e.target.value)} dir="rtl" className={INPUT} style={INPUT_STYLE} placeholder="اسم الشركة" />
+                <span className="muted">{t("trips.project.fNameAr", lang)}</span>
+                <input value={custNameAr} onChange={(e) => setCustNameAr(e.target.value)} dir="rtl" className={INPUT} style={INPUT_STYLE} placeholder={t("trips.project.phNameAr", lang)} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">VAT Registration Number</span>
+                <span className="muted">{t("trips.project.fVat", lang)}</span>
                 <input value={custVatNumber} onChange={(e) => setCustVatNumber(e.target.value)} className={INPUT} style={INPUT_STYLE} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">CR number</span>
+                <span className="muted">{t("trips.project.fCr", lang)}</span>
                 <input value={custCrNumber} onChange={(e) => setCustCrNumber(e.target.value)} className={INPUT} style={INPUT_STYLE} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Customer type *</span>
+                <span className="muted">{t("trips.project.fCustType", lang)}</span>
                 <select value={custType} onChange={(e) => setCustType(e.target.value)} required className={INPUT} style={INPUT_STYLE}>
-                  <option value="" disabled>Select…</option>
-                  {Object.entries(CUSTOMER_TYPE_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
+                  <option value="" disabled>{t("common.selectPlaceholder", lang)}</option>
+                  {/* STILL ITERATES CUSTOMER_TYPE_LABELS, deliberately: that map
+                      is the enum's members AND their order, both of which this
+                      list has to keep. Only the visible text moved, to
+                      customerTypeLabel(), which keys off the same value. The
+                      map itself is not edited. */}
+                  {(Object.keys(CUSTOMER_TYPE_LABELS) as CustomerType[]).map((v) => (
+                    <option key={v} value={v}>{customerTypeLabel(v, lang)}</option>
                   ))}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Contact name</span>
+                <span className="muted">{t("trips.project.fContactName", lang)}</span>
                 <input value={contactName} onChange={(e) => setContactName(e.target.value)} className={INPUT} style={INPUT_STYLE} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Phone</span>
+                <span className="muted">{t("trips.project.fPhone", lang)}</span>
                 <input value={phone} onChange={(e) => setPhone(e.target.value)} className={INPUT} style={INPUT_STYLE} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Email</span>
-                <input value={custEmail} onChange={(e) => setCustEmail(e.target.value)} type="email" className={INPUT} style={INPUT_STYLE} placeholder="e.g. billing@customer.com" />
+                <span className="muted">{t("trips.project.fEmail", lang)}</span>
+                <input value={custEmail} onChange={(e) => setCustEmail(e.target.value)} type="email" className={INPUT} style={INPUT_STYLE} placeholder={t("trips.project.phEmail", lang)} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Invoice address</span>
-                <input value={custBillingAddress} onChange={(e) => setCustBillingAddress(e.target.value)} className={INPUT} style={INPUT_STYLE} placeholder="for the invoice header — may differ from delivery site" />
+                <span className="muted">{t("trips.project.fInvoiceAddress", lang)}</span>
+                <input value={custBillingAddress} onChange={(e) => setCustBillingAddress(e.target.value)} className={INPUT} style={INPUT_STYLE} placeholder={t("trips.project.phInvoiceAddress", lang)} />
               </label>
               <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                <span className="muted">Delivery site address</span>
-                <input value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} className={INPUT} style={INPUT_STYLE} placeholder="e.g. Riyadh — King Salman Park" />
+                <span className="muted">{t("trips.project.fDeliveryAddress", lang)}</span>
+                <input value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} className={INPUT} style={INPUT_STYLE} placeholder={t("trips.project.phDeliveryAddress", lang)} />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Delivery latitude</span>
+                <span className="muted">{t("trips.project.fLat", lang)}</span>
                 <input value={deliveryLat} onChange={(e) => setDeliveryLat(e.target.value)} type="number" step="any" className={INPUT} style={INPUT_STYLE} placeholder="24.7136" />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Delivery longitude</span>
+                <span className="muted">{t("trips.project.fLng", lang)}</span>
                 <input value={deliveryLng} onChange={(e) => setDeliveryLng(e.target.value)} type="number" step="any" className={INPUT} style={INPUT_STYLE} placeholder="46.6753" />
               </label>
             </div>
@@ -678,33 +709,33 @@ export default function ProjectModal({
               and blocks submit until picked. Customer rate/trip lives here
               too (it's revenue, same bucket as how the customer pays). */}
           <section className="space-y-3 border-t border-app pt-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide muted">Payment &amp; Rate</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide muted">{t("trips.project.secPayment", lang)}</h3>
 
             <div className="space-y-1.5">
-              <span className="text-sm font-medium">Payment mode *</span>
+              <span className="text-sm font-medium">{t("trips.project.fPaymentMode", lang)}</span>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => selectPaymentMode("postpaid")}
                   className={`rounded-lg border px-3 py-2 text-left text-sm ${paymentMode === "postpaid" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
                 >
-                  <div className="font-medium">Postpaid</div>
-                  <div className="muted text-[11px]">Invoiced after delivery — pays per period.</div>
+                  <div className="font-medium">{t("labels.postpaid", lang)}</div>
+                  <div className="muted text-[11px]">{t("trips.project.hPostpaid", lang)}</div>
                 </button>
                 <button
                   type="button"
                   onClick={() => selectPaymentMode("prepaid")}
                   className={`rounded-lg border px-3 py-2 text-left text-sm ${paymentMode === "prepaid" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
                 >
-                  <div className="font-medium">Prepaid</div>
-                  <div className="muted text-[11px]">Runs on a top-up balance — trips draw it down.</div>
+                  <div className="font-medium">{t("labels.prepaid", lang)}</div>
+                  <div className="muted text-[11px]">{t("trips.project.hPrepaid", lang)}</div>
                 </button>
               </div>
               {paymentMode === "" && (
-                <p className="muted text-[11px]">Required — pick how this customer pays.</p>
+                <p className="muted text-[11px]">{t("trips.project.hPaymentRequired", lang)}</p>
               )}
               {modeCheck.checking && (
-                <p className="muted text-[11px]">Checking settlement…</p>
+                <p className="muted text-[11px]">{t("trips.project.checkingSettlement", lang)}</p>
               )}
               {modeCheck.blocked && modeCheck.reason && (
                 <p className="text-rose-600 dark:text-rose-400 text-[11px]">{modeCheck.reason}</p>
@@ -712,11 +743,14 @@ export default function ProjectModal({
             </div>
 
             <label className="flex flex-col gap-1 text-sm rounded-lg border border-app p-3">
-              <span className="font-medium">Customer rate / trip (SAR)</span>
+              <span className="font-medium">{t("trips.project.fRate", lang)}</span>
               <span className="muted text-[11px]">
-                {paymentMode === "prepaid"
-                  ? "Revenue — what each delivered trip draws from the prepaid balance."
-                  : "Revenue — what the customer pays per trip."}
+                {t(
+                  paymentMode === "prepaid"
+                    ? "trips.project.hRatePrepaid"
+                    : "trips.project.hRatePostpaid",
+                  lang,
+                )}
               </span>
               <input value={rate} onChange={(e) => setRate(e.target.value)} type="number" min="0" className={INPUT} style={INPUT_STYLE} />
             </label>
@@ -726,35 +760,35 @@ export default function ProjectModal({
               figure moves on an existing project. */}
           <section className="space-y-3 border-t border-app pt-4">
             <div className="flex items-baseline justify-between gap-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wide muted">Commission</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wide muted">{t("trips.customers.colCommission", lang)}</h3>
               {isEdit && commissionBaseline !== null && (
                 <span className="text-[11px] muted">
                   {commissionDirty
                     ? effectiveFrom === today
-                      ? "Saving will change today's terms"
-                      : `Saving will schedule a change for ${formatDayKey(effectiveFrom)}`
-                    : "Terms in force today — unchanged"}
+                      ? t("trips.project.dirtyToday", lang)
+                      : fill(t("trips.project.dirtyScheduled", lang), {
+                          date: formatDayKey(effectiveFrom),
+                        })
+                    : t("trips.project.notDirty", lang)}
                 </span>
               )}
             </div>
 
             {commissionUnavailable && (
               <p className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
-                This project&rsquo;s current commission terms could not be read, so they are not
-                shown and cannot be changed from here. Reload the page; if it persists the
-                project has no commission history row and needs one before it can be edited.
+                {t("trips.project.commissionUnavailable", lang)}
               </p>
             )}
 
             <label className="flex flex-col gap-1 text-sm rounded-lg border border-app p-3">
-              <span className="font-medium">Driver commission base (SAR)</span>
-              <span className="muted text-[11px]">Driver pay — separate from the customer rate.</span>
+              <span className="font-medium">{t("trips.project.fCommissionBase", lang)}</span>
+              <span className="muted text-[11px]">{t("trips.project.hCommissionBase", lang)}</span>
               <input value={commissionValue} onChange={(e) => setCommissionValue(e.target.value)} type="number" min="0" disabled={commissionUnavailable} className={INPUT} style={INPUT_STYLE} />
             </label>
 
             {/* Commission mode + bump. */}
             <div className="rounded-lg border border-app p-3 space-y-3">
-              <span className="text-sm font-medium">Driver commission mode</span>
+              <span className="text-sm font-medium">{t("trips.project.fCommissionMode", lang)}</span>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -762,8 +796,8 @@ export default function ProjectModal({
                   onClick={() => setCommMode("fixed")}
                   className={`rounded-lg border px-3 py-2 text-left text-sm disabled:opacity-50 ${commMode === "fixed" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
                 >
-                  <div className="font-medium">Fixed</div>
-                  <div className="muted text-[11px]">Same commission every trip.</div>
+                  <div className="font-medium">{t("labels.commFixed", lang)}</div>
+                  <div className="muted text-[11px]">{t("trips.project.hFixed", lang)}</div>
                 </button>
                 <button
                   type="button"
@@ -771,8 +805,8 @@ export default function ProjectModal({
                   onClick={() => setCommMode("scalable")}
                   className={`rounded-lg border px-3 py-2 text-left text-sm disabled:opacity-50 ${commMode === "scalable" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
                 >
-                  <div className="font-medium">Scalable</div>
-                  <div className="muted text-[11px]">Grows per trip by a bump %.</div>
+                  <div className="font-medium">{t("labels.commScalable", lang)}</div>
+                  <div className="muted text-[11px]">{t("trips.project.hScalable", lang)}</div>
                 </button>
               </div>
 
@@ -783,7 +817,7 @@ export default function ProjectModal({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {commMode === "scalable" && (
                   <label className="flex flex-col gap-1 text-sm">
-                    <span className="muted">Bump % per trip (max 50)</span>
+                    <span className="muted">{t("trips.project.fBump", lang)}</span>
                     <input
                       value={bump}
                       onChange={(e) => setBump(e.target.value)}
@@ -799,14 +833,14 @@ export default function ProjectModal({
                 {isEdit && (
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="muted flex items-center justify-between gap-2">
-                      <span>Takes effect</span>
+                      <span>{t("trips.project.takesEffect", lang)}</span>
                       {effectiveFrom !== today && (
                         <button
                           type="button"
                           onClick={() => setEffectiveFrom(today)}
                           className="text-[11px] text-brand-600 dark:text-brand-300 hover:underline"
                         >
-                          Reset to today
+                          {t("trips.project.resetToToday", lang)}
                         </button>
                       )}
                     </span>
@@ -825,8 +859,10 @@ export default function ProjectModal({
                     />
                     <span className="muted text-[11px]">
                       {effectiveFrom === today
-                        ? "Today — the change goes live immediately."
-                        : `Queued for ${formatDayKey(effectiveFrom)} — today's terms stay as they are until then.`}
+                        ? t("trips.project.hEffectiveToday", lang)
+                        : fill(t("trips.project.hEffectiveQueued", lang), {
+                            date: formatDayKey(effectiveFrom),
+                          })}
                     </span>
                   </label>
                 )}
@@ -836,15 +872,15 @@ export default function ProjectModal({
               <div>
                 {commMode === "fixed" ? (
                   <div className="muted text-xs">
-                    Driver earns <b className="text-emerald-600 dark:text-emerald-400">{formatSar(base)}</b> every trip.
+                    {t("trips.project.earnsBefore", lang)} <b className="text-emerald-600 dark:text-emerald-400">{formatSar(base)}</b> {t("trips.project.earnsAfter", lang)}
                   </div>
                 ) : (
                   <>
-                    <div className="muted text-xs mb-1">Driver commission (first 10 trips):</div>
+                    <div className="muted text-xs mb-1">{t("trips.project.previewHead", lang)}</div>
                     <div className="grid grid-cols-5 gap-1.5">
                       {preview.map((p) => (
                         <div key={p.n} className="rounded-lg border border-app px-2 py-1.5 text-center">
-                          <div className="text-[10px] muted">Trip {p.n}</div>
+                          <div className="text-[10px] muted">{fill(t("trips.project.tripN", lang), { n: p.n })}</div>
                           <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
                             {formatSar(p.pay)}
                           </div>
@@ -863,11 +899,11 @@ export default function ProjectModal({
                 conflating them is how a stale figure looks confirmed. */}
             {isEdit && (
               <div className="rounded-lg border border-app p-3 space-y-3">
-                <span className="text-sm font-medium">Terms on record</span>
+                <span className="text-sm font-medium">{t("trips.project.termsOnRecord", lang)}</span>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="rounded-lg border border-app px-3 py-2">
-                    <div className="text-[11px] muted">In force today</div>
+                    <div className="text-[11px] muted">{t("trips.project.inForceToday", lang)}</div>
                     {commissionNow?.commission_mode ? (
                       <>
                         <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
@@ -875,8 +911,10 @@ export default function ProjectModal({
                         </div>
                         <div className="text-[11px] muted">
                           {commissionNow.commission_mode === "scalable"
-                            ? `Scalable +${commissionNow.commission_bump_pct ?? 0}% per trip`
-                            : "Fixed every trip"}
+                            ? fill(t("trips.project.scalablePerTrip", lang), {
+                                pct: commissionNow.commission_bump_pct ?? 0,
+                              })
+                            : t("trips.project.fixedEveryTrip", lang)}
                         </div>
                       </>
                     ) : (
@@ -885,7 +923,7 @@ export default function ProjectModal({
                   </div>
 
                   <div className="rounded-lg border border-app px-3 py-2">
-                    <div className="text-[11px] muted">Next scheduled change</div>
+                    <div className="text-[11px] muted">{t("trips.project.nextScheduled", lang)}</div>
                     {commissionNow?.next_effective_from ? (
                       <>
                         <div className="text-sm font-semibold text-amber-600 dark:text-amber-400 tabular-nums">
@@ -893,9 +931,11 @@ export default function ProjectModal({
                         </div>
                         <div className="text-[11px] muted">
                           {commissionNow.next_commission_mode === "scalable"
-                            ? `Scalable +${commissionNow.next_commission_bump_pct ?? 0}% per trip`
-                            : "Fixed every trip"}
-                          {" · from "}
+                            ? fill(t("trips.project.scalablePerTrip", lang), {
+                                pct: commissionNow.next_commission_bump_pct ?? 0,
+                              })
+                            : t("trips.project.fixedEveryTrip", lang)}
+                          {t("trips.project.fromSep", lang)}
                           {formatDayKey(commissionNow.next_effective_from)}
                         </div>
                         <button
@@ -904,11 +944,11 @@ export default function ProjectModal({
                           onClick={() => onCancelScheduled(commissionNow.next_effective_from as string)}
                           className="mt-1.5 text-[11px] text-rose-600 dark:text-rose-400 hover:underline disabled:opacity-50"
                         >
-                          {cancelling ? "Cancelling…" : "Cancel this change"}
+                          {t(cancelling ? "trips.project.cancelling" : "trips.project.cancelThisChange", lang)}
                         </button>
                       </>
                     ) : (
-                      <div className="text-sm muted">None queued</div>
+                      <div className="text-sm muted">{t("trips.project.noneQueued", lang)}</div>
                     )}
                   </div>
                 </div>
@@ -920,8 +960,7 @@ export default function ProjectModal({
                     informational, not a fault to act on. */}
                 {commissionNow?.projects_column_is_stale && (
                   <p className="text-[11px] muted">
-                    The project record still shows the previous figure. Every screen prices from
-                    the terms above, so this is a bookkeeping lag, not a live difference.
+                    {t("trips.project.staleMirror", lang)}
                   </p>
                 )}
 
@@ -937,41 +976,44 @@ export default function ProjectModal({
           {/* Operation section — trip-management: project identity, water
               station/type, description, and the driver roster. */}
           <section className="space-y-3 border-t border-app pt-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide muted">Operation</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide muted">{t("trips.project.secOperation", lang)}</h3>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">Project name *</span>
-              <input value={projName} onChange={(e) => setProjName(e.target.value)} required className={INPUT} style={INPUT_STYLE} placeholder="e.g. King Salman Park" />
+              <span className="muted">{t("trips.project.fProjName", lang)}</span>
+              <input value={projName} onChange={(e) => setProjName(e.target.value)} required className={INPUT} style={INPUT_STYLE} placeholder={t("trips.project.phProjName", lang)} />
             </label>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Default water station *</span>
+                <span className="muted">{t("trips.project.fStation", lang)}</span>
                 <select value={station} onChange={(e) => setStation(e.target.value)} required className={INPUT} style={INPUT_STYLE}>
-                  {stations.length === 0 && <option value="" disabled>No stations</option>}
+                  {stations.length === 0 && <option value="" disabled>{t("trips.project.noStations", lang)}</option>}
                   {stations.map((s) => (
                     <option key={s.key} value={s.key}>{s.name}</option>
                   ))}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="muted">Default water type *</span>
+                <span className="muted">{t("trips.project.fWaterType", lang)}</span>
                 <select value={waterType} onChange={(e) => setWaterType(e.target.value as WaterType)} required className={INPUT} style={INPUT_STYLE}>
-                  <option value="" disabled>Select…</option>
-                  {Object.entries(WATER_TYPE_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
+                  <option value="" disabled>{t("common.selectPlaceholder", lang)}</option>
+                  {/* Same rule as the customer-type list above: the map keeps
+                      supplying the members and their order, waterTypeLabel()
+                      supplies the words. */}
+                  {(Object.keys(WATER_TYPE_LABELS) as WaterType[]).map((v) => (
+                    <option key={v} value={v}>{waterTypeLabel(v, lang)}</option>
                   ))}
                 </select>
               </label>
             </div>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">Description</span>
+              <span className="muted">{t("trips.project.fDescription", lang)}</span>
               <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={INPUT} style={INPUT_STYLE} />
             </label>
 
             <div className="flex items-center justify-between pt-1">
-              <span className="text-sm font-medium">Drivers</span>
-              <span className="muted text-[11px]">· {selected.length} selected · optional</span>
+              <span className="text-sm font-medium">{t("trips.customers.colDrivers", lang)}</span>
+              <span className="muted text-[11px]">{fill(t("trips.project.driversHint", lang), { n: selected.length })}</span>
             </div>
             <DriverRosterTable
               drivers={drivers}
@@ -988,14 +1030,14 @@ export default function ProjectModal({
           {isEdit && (
             <section className="space-y-3 border-t border-rose-500/30 pt-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
-                Danger zone
+                {t("common.dangerZone", lang)}
               </h3>
               {!confirmingArchive ? (
                 <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 flex items-center justify-between gap-3">
                   <div className="text-sm">
-                    <div className="font-medium">Remove / Cancel project</div>
+                    <div className="font-medium">{t("trips.project.removeProject", lang)}</div>
                     <div className="muted text-[11px]">
-                      Archives the project and its customer. Restorable later from the Archive page.
+                      {t("trips.project.removeHint", lang)}
                     </div>
                   </div>
                   <button
@@ -1003,14 +1045,13 @@ export default function ProjectModal({
                     onClick={() => setConfirmingArchive(true)}
                     className="shrink-0 rounded-lg border border-rose-500/40 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
                   >
-                    Remove / Cancel project
+                    {t("trips.project.removeProject", lang)}
                   </button>
                 </div>
               ) : (
                 <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 space-y-3">
                   <p className="text-sm text-rose-700 dark:text-rose-300">
-                    This will archive <b>{projName}</b> and its customer and all its trips. You can
-                    restore it later from the Archive page. Type the project name to confirm.
+                    {t("trips.project.archiveBefore", lang)} <b>{projName}</b> {t("trips.project.archiveAfter", lang)}
                   </p>
                   <input
                     value={confirmText}
@@ -1028,13 +1069,11 @@ export default function ProjectModal({
                   {blockMessage && (
                     <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
                       <div className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                        Archiving is blocked
+                        {t("trips.project.archivingBlocked", lang)}
                       </div>
                       <p className="text-sm text-amber-800 dark:text-amber-200">{blockMessage}</p>
                       <p className="text-[11px] text-amber-700 dark:text-amber-300/80">
-                        A manager can override this. Overriding <b>writes the amount off</b> — the
-                        customer stops owing it, and your name, the reason and the time are recorded
-                        against the write-off. It cannot be undone from here.
+                        {t("trips.project.overrideBefore", lang)} <b>{t("trips.project.overrideStrong", lang)}</b> {t("trips.project.overrideAfter", lang)}
                       </p>
                       <textarea
                         value={overrideReason}
@@ -1042,7 +1081,7 @@ export default function ProjectModal({
                         rows={2}
                         className={INPUT}
                         style={INPUT_STYLE}
-                        placeholder="Reason for writing off the outstanding amount"
+                        placeholder={t("trips.project.phOverrideReason", lang)}
                       />
                     </div>
                   )}
@@ -1057,7 +1096,7 @@ export default function ProjectModal({
                         setOverrideReason("");
                       }}
                     >
-                      Cancel
+                      {t("common.cancel", lang)}
                     </Btn>
                     {blockMessage ? (
                       <button
@@ -1071,7 +1110,7 @@ export default function ProjectModal({
                             : "")
                         }
                       >
-                        {archiving ? "Writing off…" : "Write off and remove project"}
+                        {t(archiving ? "trips.project.writingOff" : "trips.project.writeOffAndRemove", lang)}
                       </button>
                     ) : (
                       <button
@@ -1083,7 +1122,7 @@ export default function ProjectModal({
                           (!archiveMatch || archiving ? "opacity-50 pointer-events-none" : "")
                         }
                       >
-                        {archiving ? "Removing…" : "Remove project"}
+                        {t(archiving ? "trips.project.removing" : "trips.project.removeProjectBtn", lang)}
                       </button>
                     )}
                   </div>
@@ -1095,9 +1134,16 @@ export default function ProjectModal({
           {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
 
           <div className="flex justify-end gap-2 border-t border-app pt-4">
-            <Btn variant="outline" onClick={close}>Cancel</Btn>
+            <Btn variant="outline" onClick={close}>{t("common.cancel", lang)}</Btn>
             <Btn type="submit" variant="primary" className={!canSubmit ? "opacity-50 pointer-events-none" : ""}>
-              {saving ? "Saving…" : isEdit ? "Save changes" : "Create project"}
+              {t(
+                saving
+                  ? "common.saving"
+                  : isEdit
+                    ? "trips.stations.saveChanges"
+                    : "trips.project.createProject",
+                lang,
+              )}
             </Btn>
           </div>
         </form>

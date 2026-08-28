@@ -53,13 +53,15 @@ import { Btn, Stat, Table, TH, TD } from "@/components/ui";
 import { currentMonthKey, formatDate, formatDayKey, formatSar, todayKey } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import {
-  WATER_TYPE_LABELS,
-  PAYMENT_MODE_LABELS,
-  PAYMENT_METHOD_LABELS,
   type PaymentMode,
   type WaterType,
   type ProjectCommissionNowRow,
 } from "@/lib/db-types";
+import { useApp } from "@/components/AppShell";
+import { t, fill, type Lang } from "@/lib/i18n";
+// Water type, payment method and payment mode all render off the ENUM VALUE.
+// db-types' three `_LABELS` maps stay as they are and are no longer read here.
+import { paymentMethodLabel, paymentModeLabel, waterTypeLabel } from "@/lib/enum-labels";
 import DeliveriesReportBand, { buildDeliveriesReport } from "./DeliveriesReportBand";
 // round2 from the money engine, not a local copy — a revenue figure should round
 // the same way the balance it is compared against does.
@@ -131,18 +133,25 @@ type ProjectLite = {
   payment_mode: PaymentMode | null;
 };
 
-const MONTH_LBL = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// THE FOURTH COPY OF THE MONTH ARRAY IS GONE. It was a module-level const, so
+// it froze at import and could never have followed a language switch anyway.
+// The names now come from `common.monthShort`, the one place four files read.
+// Indexing a const tuple types the element as the union of its twelve members,
+// so `common.monthShort.${key}` is twelve real TKeys rather than `string`.
+const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
 
-// "2026-06" → "Jun 2026".
-function monthLabel(key: string): string {
+// "2026-06" → "Jun 2026". The YEAR is a plain number and stays Latin.
+function monthLabel(key: string, lang: Lang): string {
   const [y, m] = key.split("-");
-  return `${MONTH_LBL[Number(m) - 1] ?? m} ${y}`;
+  const mk = MONTH_KEYS[Number(m) - 1];
+  return `${mk ? t(`common.monthShort.${mk}`, lang) : m} ${y}`;
 }
 
 // "2026-06" → "Jun 26" (compact axis tick for the 6-month trend).
-function shortMonthLabel(key: string): string {
+function shortMonthLabel(key: string, lang: Lang): string {
   const [y, m] = key.split("-");
-  return `${MONTH_LBL[Number(m) - 1] ?? m} ${y.slice(2)}`;
+  const mk = MONTH_KEYS[Number(m) - 1];
+  return `${mk ? t(`common.monthShort.${mk}`, lang) : m} ${y.slice(2)}`;
 }
 
 const UNASSIGNED = "__unassigned__";
@@ -191,6 +200,7 @@ export default function BreakdownReport({
   // 02:59 Riyadh the report opened on LAST month and the list stopped one month
   // short. (The per-trip keys reach the local clock two ways depending on column
   // type — see the note above deliveredInMonth.)
+  const { lang } = useApp();
   const currentMonth = currentMonthKey();
   const [selMonth, setSelMonth] = useState(currentMonth);
 
@@ -407,11 +417,13 @@ export default function BreakdownReport({
     for (const t of totalInMonth) if (t.water_station) set.add(t.water_station);
     return Array.from(set).map((k) => stationName.get(k) ?? k);
   }, [totalInMonth, stationName]);
+  // `lang` IS A DEPENDENCY: this memo composes DISPLAY strings, so without it
+  // the list would keep the language it was first computed in.
   const waterTypesUsed = useMemo(() => {
     const set = new Set<string>();
-    for (const t of totalInMonth) if (t.water_type) set.add(t.water_type);
-    return Array.from(set).map((k) => WATER_TYPE_LABELS[k as keyof typeof WATER_TYPE_LABELS] ?? k);
-  }, [totalInMonth]);
+    for (const tr of totalInMonth) if (tr.water_type) set.add(tr.water_type);
+    return Array.from(set).map((k) => waterTypeLabel(k as WaterType, lang) || k);
+  }, [totalInMonth, lang]);
 
   // --- Section 3: Two driver tables (delivered_at basis) -----------------
   const driverRows = useMemo(() => {
@@ -430,14 +442,20 @@ export default function BreakdownReport({
       const tripsDelivered = counts.get(key) ?? 0;
       return {
         key,
-        name: key === UNASSIGNED ? "Unassigned" : driverName.get(key) ?? "Unknown driver",
+        name:
+          key === UNASSIGNED
+            ? t("trips.breakdown.unassigned", lang)
+            : driverName.get(key) ?? t("trips.breakdown.unknownDriver", lang),
         tripsDelivered,
         commission: comm.get(key) ?? 0,
         revenue: round2(rev.get(key) ?? 0),
       };
     });
     return rows;
-  }, [deliveredInMonth, driverName, tripRevenue]);
+    // `lang` IS A DEPENDENCY: the two fallback NAMES are display strings. The
+    // money in this memo is untouched — commission still sums `commission_sar`
+    // and revenue still sums each trip's own frozen rate.
+  }, [deliveredInMonth, driverName, tripRevenue, lang]);
 
   const commissionTable = useMemo(
     () => [...driverRows].sort((a, b) => b.commission - a.commission),
@@ -489,11 +507,13 @@ export default function BreakdownReport({
       }
     }
     return keys.map((k) => ({
-      label: shortMonthLabel(k),
+      label: shortMonthLabel(k, lang),
       revenue: round2(deliv.get(k) ?? 0),
       trips: tot.get(k) ?? 0,
     }));
-  }, [projectTrips, selMonth, tripRevenue]);
+    // `lang` IS A DEPENDENCY: `label` is the axis tick, a display string. The
+    // two SERIES are untouched — revenue is still the per-trip frozen-rate sum.
+  }, [projectTrips, selMonth, tripRevenue, lang]);
 
   // --- Chart 2 data: trips per day in the selected month (by trip_date). ---
   // Current/incomplete month: only days up to today get bars.
@@ -514,12 +534,14 @@ export default function BreakdownReport({
   }, [totalInMonth, selMonth, currentMonth]);
 
   // --- Chart 3 data: delivered vs not-delivered (reuses section values). ----
+  // The two slices are coloured by ORDER (<Cell> position), never by matching
+  // `name` — so localising the label cannot mis-colour the chart.
   const statusData = useMemo(
     () => [
-      { name: "Delivered", value: deliveredCount },
-      { name: "Not delivered", value: notDelivered },
+      { name: t("trips.customers.colDelivered", lang), value: deliveredCount },
+      { name: t("trips.breakdown.kNotDelivered", lang), value: notDelivered },
     ],
-    [deliveredCount, notDelivered],
+    [deliveredCount, notDelivered, lang],
   );
   const hasStatusData = deliveredCount + notDelivered > 0;
 
@@ -530,8 +552,19 @@ export default function BreakdownReport({
   // before the read landed) — render an em dash, never a zero: "0 SAR fixed" is
   // a claim about the contract, "—" is an admission we do not have it.
   const commMode = commissionNow?.commission_mode ?? null;
+  // Reads the ENUM VALUE, exactly as before — `commission_mode`, never a label.
+  // The `+N%` is the live bump percentage and is NOT touched: it is spliced in
+  // as it always was, after a word that is now a dictionary leaf.
   const commType =
-    commMode === "scalable" ? `Scalable +${commissionNow?.commission_bump_pct ?? 0}%` : "Fixed";
+    commMode === "scalable"
+      ? `${t("labels.commScalable", lang)} +${commissionNow?.commission_bump_pct ?? 0}%`
+      : t("labels.commFixed", lang);
+  // RECHARTS SERIES NAMES, resolved ONCE. Each is read twice — as the `name`
+  // prop and by a tooltip formatter — and the formatter compares against THIS
+  // const, never a hard-coded English word, so the money formatting follows the
+  // series rather than the language.
+  const serRevenue = t("trips.breakdown.serRevenue", lang);
+  const serTrips = t("trips.breakdown.serTrips", lang);
   const generatedOn = formatDate(new Date(), {
     year: "numeric",
     month: "short",
@@ -556,7 +589,7 @@ export default function BreakdownReport({
         {/* Toolbar — not printed. */}
         <div className="no-print sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-app bg-[rgb(var(--card))] px-5 py-3">
           <div className="flex items-center gap-2">
-            <label className="text-sm muted">Month</label>
+            <label className="text-sm muted">{t("trips.breakdown.month", lang)}</label>
             <select
               value={selMonth}
               onChange={(e) => setSelMonth(e.target.value)}
@@ -565,14 +598,14 @@ export default function BreakdownReport({
             >
               {months.map((m) => (
                 <option key={m} value={m}>
-                  {monthLabel(m)}
+                  {monthLabel(m, lang)}
                 </option>
               ))}
             </select>
           </div>
           <div className="flex items-center gap-2">
             <Btn variant="outline" onClick={handlePrint}>
-              <Printer className="h-4 w-4" /> Print / Save as PDF
+              <Printer className="h-4 w-4" /> {t("trips.breakdown.printPdf", lang)}
             </Btn>
             <button type="button" onClick={onClose} className="muted hover:text-[rgb(var(--fg))]">
               <X className="h-5 w-5" />
@@ -596,10 +629,10 @@ export default function BreakdownReport({
                 </span>
               </h2>
               <p className="text-sm muted">
-                {customerName} · {monthLabel(selMonth)}
+                {customerName} · {monthLabel(selMonth, lang)}
                 {monthInProgress && (
                   <span className="ms-2 inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-                    Month in progress
+                    {t("trips.breakdown.monthInProgress", lang)}
                   </span>
                 )}
               </p>
@@ -610,10 +643,12 @@ export default function BreakdownReport({
                   {phone}
                 </p>
               )}
+              {/* `{rate}` is the SAME formatSar(rate) expression, passed as a
+                  token instead of spliced mid-sentence. No re-format, no
+                  re-round — Arabic puts the rate in a different place, so the
+                  whole sentence has to be the leaf. */}
               <p className="mt-1 text-[11px] muted">
-                Revenue prices each delivered trip at the rate frozen on it at delivery, so past
-                months keep what they were worth on the day. The project&rsquo;s current rate
-                ({formatSar(rate)}/trip) applies to new work only.
+                {fill(t("trips.breakdown.rateNote", lang), { rate: formatSar(rate) })}
               </p>
             </div>
 
@@ -622,13 +657,13 @@ export default function BreakdownReport({
                 green from flattening to black in the printed PDF. */}
             <div className="shrink-0 text-right text-sm">
               <div>
-                <span>Rate </span>
+                <span>{t("common.rate", lang)} </span>
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">
                   {formatSar(rate)}
                 </span>
               </div>
               <div className="mt-1">
-                <span>Commission </span>
+                <span>{t("trips.customers.colCommission", lang)} </span>
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">
                   {commMode ? formatSar(commissionNow?.commission_value ?? 0) : "—"}
                 </span>
@@ -636,7 +671,9 @@ export default function BreakdownReport({
               {commMode && <div className="text-[11px] muted">{commType}</div>}
               {commissionNow?.next_effective_from && (
                 <div className="text-[11px] text-amber-600 dark:text-amber-400">
-                  Changes {formatDayKey(commissionNow.next_effective_from)}
+                  {fill(t("trips.customers.changes", lang), {
+                    date: formatDayKey(commissionNow.next_effective_from),
+                  })}
                 </div>
               )}
             </div>
@@ -645,15 +682,17 @@ export default function BreakdownReport({
           {/* Section 1 — Financial. */}
           <section className="space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">
-              Financial · {monthLabel(selMonth)}
+              {fill(t("trips.breakdown.secFinancial", lang), { month: monthLabel(selMonth, lang) })}
             </h3>
+            {/* Every `value=` below is the SAME expression it was — only the
+                `label=` moved into the dictionary. */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 break-inside-avoid">
-              <Stat label="Trips delivered" value={deliveredCount} tone="info" />
-              <Stat label="Revenue" value={formatSar(revenue)} tone="ok" />
-              <Stat label="Commission paid" value={formatSar(commission)} tone="warn" />
-              <Stat label="Net margin" value={formatSar(netMargin)} tone={netMargin >= 0 ? "ok" : "bad"} />
+              <Stat label={t("trips.breakdown.kTripsDelivered", lang)} value={deliveredCount} tone="info" />
+              <Stat label={t("common.revenue", lang)} value={formatSar(revenue)} tone="ok" />
+              <Stat label={t("trips.breakdown.kCommissionPaid", lang)} value={formatSar(commission)} tone="warn" />
+              <Stat label={t("trips.breakdown.kNetMargin", lang)} value={formatSar(netMargin)} tone={netMargin >= 0 ? "ok" : "bad"} />
               <Stat
-                label="Avg revenue / trip"
+                label={t("trips.breakdown.kAvgRevenue", lang)}
                 value={avgRevenue == null ? "—" : formatSar(avgRevenue)}
                 tone="info"
               />
@@ -668,22 +707,22 @@ export default function BreakdownReport({
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="card p-0 overflow-hidden lg:col-span-2 break-inside-avoid">
                 <div className="px-3 py-2 text-sm font-medium border-b border-app">
-                  Invoice payments · {monthLabel(selMonth)}
+                  {fill(t("trips.breakdown.payments", lang), { month: monthLabel(selMonth, lang) })}
                 </div>
                 <Table>
                   <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                     <tr>
-                      <TH>Date</TH>
-                      <TH>Invoice</TH>
-                      <TH>Method</TH>
-                      <TH>Reference</TH>
-                      <TH>Amount</TH>
+                      <TH>{t("common.date", lang)}</TH>
+                      <TH>{t("trips.breakdown.colInvoice", lang)}</TH>
+                      <TH>{t("trips.finance.colMethod", lang)}</TH>
+                      <TH>{t("trips.breakdown.colReference", lang)}</TH>
+                      <TH>{t("common.amount", lang)}</TH>
                     </tr>
                   </thead>
                   <tbody>
                     {monthPayments.length === 0 ? (
                       <tr>
-                        <TD className="muted">No invoice paid this month.</TD>
+                        <TD className="muted">{t("trips.breakdown.noPayments", lang)}</TD>
                         <TD>{""}</TD>
                         <TD>{""}</TD>
                         <TD>{""}</TD>
@@ -698,7 +737,7 @@ export default function BreakdownReport({
                             {/* payment_method is NULLABLE on the row — a legacy
                                 paid invoice predates 0039's method capture. */}
                             <TD className={p.inv.payment_method ? "" : "muted"}>
-                              {p.inv.payment_method ? PAYMENT_METHOD_LABELS[p.inv.payment_method] : "—"}
+                              {p.inv.payment_method ? paymentMethodLabel(p.inv.payment_method, lang) : "—"}
                             </TD>
                             <TD className={p.inv.payment_reference ? "" : "muted"}>
                               {p.inv.payment_reference || "—"}
@@ -707,7 +746,7 @@ export default function BreakdownReport({
                           </tr>
                         ))}
                         <tr className="border-t border-app">
-                          <TD className="font-medium">Total</TD>
+                          <TD className="font-medium">{t("common.total", lang)}</TD>
                           <TD>{""}</TD>
                           <TD>{""}</TD>
                           <TD>{""}</TD>
@@ -720,9 +759,12 @@ export default function BreakdownReport({
               </div>
 
               <div className="card p-3 break-inside-avoid">
-                <div className="text-sm font-medium">Amount payable</div>
+                <div className="text-sm font-medium">{t("trips.breakdown.payable", lang)}</div>
                 <div className="text-[11px] muted mt-0.5">
-                  All periods, as of {todayKey()} — not limited to {monthLabel(selMonth)}.
+                  {fill(t("trips.breakdown.payableScope", lang), {
+                    today: todayKey(),
+                    month: monthLabel(selMonth, lang),
+                  })}
                 </div>
                 {/* Sign IS the meaning (./amountPayable): negative = owed to us,
                     zero = settled, positive = credit the customer holds. Same
@@ -745,17 +787,18 @@ export default function BreakdownReport({
                   {amountPayable == null ? "—" : formatSar(amountPayable)}
                 </div>
                 <div className="text-xs muted mt-1">
+                  {/* Discriminates on the SIGN of the number, never on a label. */}
                   {amountPayable == null
-                    ? "No payment mode set — nothing can be claimed."
+                    ? t("trips.breakdown.payableNoMode", lang)
                     : amountPayable < 0
-                    ? "Owed to us"
+                    ? t("trips.breakdown.payableOwed", lang)
                     : amountPayable > 0
-                    ? "Credit the customer holds"
-                    : "Settled"}
+                    ? t("trips.breakdown.payableCredit", lang)
+                    : t("trips.breakdown.payableSettled", lang)}
                 </div>
                 {project?.payment_mode && (
                   <div className="text-[11px] muted mt-2">
-                    {PAYMENT_MODE_LABELS[project.payment_mode]}
+                    {paymentModeLabel(project.payment_mode, lang)}
                   </div>
                 )}
               </div>
@@ -767,7 +810,7 @@ export default function BreakdownReport({
               in print (no viewport => %-height collapses to zero). */}
           <section className="space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">
-              6-month trend (ending {monthLabel(selMonth)})
+              {fill(t("trips.breakdown.secTrend", lang), { month: monthLabel(selMonth, lang) })}
             </h3>
             <div
               className="rounded-lg border border-app p-3 break-inside-avoid"
@@ -792,7 +835,7 @@ export default function BreakdownReport({
                   />
                   <Tooltip
                     formatter={(value, name) =>
-                      name === "Revenue" ? [formatSar(Number(value)), name] : [value, name]
+                      name === serRevenue ? [formatSar(Number(value)), name] : [value, name]
                     }
                   />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -800,7 +843,7 @@ export default function BreakdownReport({
                     yAxisId="rev"
                     type="monotone"
                     dataKey="revenue"
-                    name="Revenue"
+                    name={serRevenue}
                     stroke={C_REVENUE}
                     strokeWidth={2}
                     dot={{ r: 3 }}
@@ -809,7 +852,7 @@ export default function BreakdownReport({
                     yAxisId="trips"
                     type="monotone"
                     dataKey="trips"
-                    name="Trips"
+                    name={serTrips}
                     stroke={C_TRIPS}
                     strokeWidth={2}
                     dot={{ r: 3 }}
@@ -818,22 +861,21 @@ export default function BreakdownReport({
               </ResponsiveContainer>
             </div>
             <p className="text-[11px] muted">
-              Revenue = sum of each delivered trip&rsquo;s frozen rate. Trips = all scheduled trips.
-              Both by trip date. Months with no activity show as zero.
+              {t("trips.breakdown.trendNote", lang)}
             </p>
           </section>
 
           {/* Section 2 — Operational. */}
           <section className="space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">
-              Operational · {monthLabel(selMonth)}
+              {fill(t("trips.breakdown.secOperational", lang), { month: monthLabel(selMonth, lang) })}
             </h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 break-inside-avoid">
-              <Stat label="Total trips" value={totalCount} tone="info" />
-              <Stat label="Delivered" value={deliveredCount} tone="ok" />
-              <Stat label="Not delivered" value={notDelivered} tone="warn" />
+              <Stat label={t("trips.breakdown.kTotalTrips", lang)} value={totalCount} tone="info" />
+              <Stat label={t("trips.customers.colDelivered", lang)} value={deliveredCount} tone="ok" />
+              <Stat label={t("trips.breakdown.kNotDelivered", lang)} value={notDelivered} tone="warn" />
               <Stat
-                label="Completion rate"
+                label={t("trips.breakdown.kCompletion", lang)}
                 value={completion == null ? "—" : `${Math.round(completion * 100)}%`}
                 tone="info"
               />
@@ -841,15 +883,15 @@ export default function BreakdownReport({
             <DeliveriesReportBand
               windows={deliveriesWindows}
               className="break-inside-avoid"
-              hint="Rolling windows anchored to today — not the selected month."
+              hint={t("trips.breakdown.bandHint", lang)}
             />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
               <div className="rounded-lg border border-app p-3">
-                <div className="muted text-[11px] uppercase tracking-wide mb-1">Water stations used</div>
+                <div className="muted text-[11px] uppercase tracking-wide mb-1">{t("trips.breakdown.stationsUsed", lang)}</div>
                 <div>{stationsUsed.length ? stationsUsed.join(", ") : <span className="muted">—</span>}</div>
               </div>
               <div className="rounded-lg border border-app p-3">
-                <div className="muted text-[11px] uppercase tracking-wide mb-1">Water types seen</div>
+                <div className="muted text-[11px] uppercase tracking-wide mb-1">{t("trips.breakdown.typesSeen", lang)}</div>
                 <div>{waterTypesUsed.length ? waterTypesUsed.join(", ") : <span className="muted">—</span>}</div>
               </div>
             </div>
@@ -860,7 +902,7 @@ export default function BreakdownReport({
               matches the Operational numbers exactly. */}
           <section className="space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">
-              {monthLabel(selMonth)} · daily activity & delivery split
+              {fill(t("trips.breakdown.secDaily", lang), { month: monthLabel(selMonth, lang) })}
             </h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Chart 2 — trips per day. */}
@@ -871,10 +913,10 @@ export default function BreakdownReport({
                     <XAxis dataKey="day" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
                     <YAxis tick={{ fontSize: 11 }} width={28} allowDecimals={false} />
                     <Tooltip
-                      labelFormatter={(d) => `Day ${d}`}
-                      formatter={(value) => [value, "Trips"]}
+                      labelFormatter={(d) => fill(t("trips.breakdown.dayTooltip", lang), { d })}
+                      formatter={(value) => [value, serTrips]}
                     />
-                    <Bar dataKey="trips" name="Trips" fill={C_TRIPS} radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="trips" name={serTrips} fill={C_TRIPS} radius={[2, 2, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -903,7 +945,7 @@ export default function BreakdownReport({
                   </ResponsiveContainer>
                 ) : (
                   <div className="grid h-full place-items-center text-sm muted">
-                    No trips this month.
+                    {t("trips.breakdown.noTripsMonth", lang)}
                   </div>
                 )}
               </div>
@@ -913,25 +955,25 @@ export default function BreakdownReport({
           {/* Section 3 — Driver tables. */}
           <section className="space-y-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide muted">
-              By driver · {monthLabel(selMonth)}
+              {fill(t("trips.breakdown.secByDriver", lang), { month: monthLabel(selMonth, lang) })}
             </h3>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Commission table. */}
               <div className="card p-0 overflow-hidden">
-                <div className="px-3 py-2 text-sm font-medium border-b border-app">Commission earned</div>
+                <div className="px-3 py-2 text-sm font-medium border-b border-app">{t("trips.breakdown.tblCommission", lang)}</div>
                 <Table>
                   <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                     <tr>
-                      <TH>Driver</TH>
-                      <TH>Delivered</TH>
-                      <TH>Commission</TH>
+                      <TH>{t("common.driver", lang)}</TH>
+                      <TH>{t("trips.customers.colDelivered", lang)}</TH>
+                      <TH>{t("trips.customers.colCommission", lang)}</TH>
                     </tr>
                   </thead>
                   <tbody>
                     {commissionTable.length === 0 ? (
                       <tr>
-                        <TD className="muted">No delivered trips this month.</TD>
+                        <TD className="muted">{t("trips.breakdown.noDelivered", lang)}</TD>
                         <TD>{""}</TD>
                         <TD>{""}</TD>
                       </tr>
@@ -950,19 +992,19 @@ export default function BreakdownReport({
 
               {/* Revenue table. */}
               <div className="card p-0 overflow-hidden">
-                <div className="px-3 py-2 text-sm font-medium border-b border-app">Revenue generated</div>
+                <div className="px-3 py-2 text-sm font-medium border-b border-app">{t("trips.breakdown.tblRevenue", lang)}</div>
                 <Table>
                   <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                     <tr>
-                      <TH>Driver</TH>
-                      <TH>Delivered</TH>
-                      <TH>Revenue</TH>
+                      <TH>{t("common.driver", lang)}</TH>
+                      <TH>{t("trips.customers.colDelivered", lang)}</TH>
+                      <TH>{t("common.revenue", lang)}</TH>
                     </tr>
                   </thead>
                   <tbody>
                     {revenueTable.length === 0 ? (
                       <tr>
-                        <TD className="muted">No delivered trips this month.</TD>
+                        <TD className="muted">{t("trips.breakdown.noDelivered", lang)}</TD>
                         <TD>{""}</TD>
                         <TD>{""}</TD>
                       </tr>
@@ -983,7 +1025,7 @@ export default function BreakdownReport({
 
           {/* Print footer — generated date + branding. */}
           <div className="border-t border-app pt-3 text-[11px] muted flex items-center justify-between">
-            <span>Generated {generatedOn}</span>
+            <span>{fill(t("trips.breakdown.generated", lang), { date: generatedOn })}</span>
             {/* translate="no" on the SPAN, not the row — "Generated <date>" is
                 ordinary prose that SHOULD translate. Only the company's own
                 name is fenced off. Same footer as the invoice's. */}

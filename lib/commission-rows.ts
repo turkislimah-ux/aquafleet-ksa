@@ -165,11 +165,16 @@ export { currentMonthKey };
 // `lang` is REQUIRED, not defaulted: a default would let a call site keep
 // rendering English forever without tsc ever mentioning it.
 // Indexing a const tuple types the element as the union of its twelve members,
-// so `drivers.months.${key}` is twelve real TKeys rather than `string`.
+// so `common.monthShort.${key}` is twelve real TKeys rather than `string`.
+//
+// The leaves lived at `drivers.months` until Phase 3 Batch 9 and moved to
+// `common.monthShort` unchanged, when app/trips turned out to hold three more
+// hardcoded copies of the same array. The paragraph above is the reason the
+// move went that way rather than adding a fourth copy.
 const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
 export function monthLabel(monthKey: string, lang: Lang): string {
   const key = MONTH_KEYS[Number(monthKey.slice(5, 7)) - 1];
-  return key ? `${t(`drivers.months.${key}`, lang)} ${monthKey.slice(0, 4)}` : monthKey;
+  return key ? `${t(`common.monthShort.${key}`, lang)} ${monthKey.slice(0, 4)}` : monthKey;
 }
 
 // `buildBaseLines` USED TO LIVE HERE and was deleted: zero call sites, in app
