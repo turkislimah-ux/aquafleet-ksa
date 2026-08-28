@@ -8,8 +8,8 @@
 //
 // Grouping key: water type is fixed per project (Finance polish batch B) —
 // every trip line in a group shares one water_type, so no "Mixed" case can
-// occur; typeLabel falls back to "—" only for pre-water_type-field invoice
-// snapshots (frozen before the field existed, never retro-filled). Multiple
+// occur; `waterType` is null only for pre-water_type-field invoice snapshots
+// (frozen before the field existed, never retro-filled). Multiple
 // DISTINCT rates would need separate rows (not built yet — deferred to a
 // later batch since today every trip line in a table shares one rate; see
 // finance-invoice-spec.md-referenced note in ProjectsBoard/invoiceActions).
@@ -17,7 +17,7 @@
 // Trip-only (Finance polish batch B) — special charges now render in their
 // own SpecialChargesSection (InvoiceDetailModal.tsx), never through here.
 
-import { WATER_TYPE_LABELS, type WaterType } from "./db-types";
+import { type WaterType } from "./db-types";
 import { tripRefRangeLabel } from "./trip-ref";
 
 export type DisplayLine = {
@@ -36,7 +36,14 @@ export type GroupedRow = {
   periodLabel: string; // e.g. "12 Jun – 30 Jun 2026" or a single date
   refRangeLabel: string;
   firstTripId: string; // for the clickable range -> jumps to the first trip
-  typeLabel: string; // water type label, or "—" for a pre-water_type frozen snapshot
+  // THE ENUM VALUE, NOT A LABEL (item 6). This used to be a `typeLabel` string
+  // resolved here through `WATER_TYPE_LABELS` — the last hardcoded English left
+  // inside `#invoice-print`, and unreachable from the sheet's own translation
+  // because a grouping helper has no business knowing the UI language. The row
+  // now carries what Postgres stores and the caller renders it through
+  // `waterTypeLabel()` in lib/enum-labels.ts, same as every other enum in the
+  // app. null = a pre-water_type frozen snapshot; the caller prints "—".
+  waterType: WaterType | null;
   quantity: number;
   price: number; // per-trip rate
   amount: number; // price * quantity (== sum of the group's amount_sar, exact)
@@ -84,7 +91,6 @@ export function groupInvoiceLines(lines: DisplayLine[], fallbackWaterType?: Wate
     // polish batch C) — the frozen snapshot itself is never touched/rewritten,
     // this is a label substitution at render time.
     const resolvedType = ordered[0]?.water_type ?? fallbackWaterType ?? null;
-    const typeLabel = resolvedType ? WATER_TYPE_LABELS[resolvedType] : "—";
 
     groups.push({
       type: "trip-group",
@@ -92,7 +98,7 @@ export function groupInvoiceLines(lines: DisplayLine[], fallbackWaterType?: Wate
       periodLabel,
       refRangeLabel: tripRefRangeLabel(ordered.map((l) => l.ref)),
       firstTripId: ordered[0]?.id ?? "",
-      typeLabel,
+      waterType: resolvedType,
       quantity: ordered.length,
       price: rate,
       amount: rate * ordered.length,

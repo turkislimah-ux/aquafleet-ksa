@@ -19,16 +19,14 @@ import { useRouter } from "next/navigation";
 import { X, Printer, Mail, Plus, Trash2, AlertTriangle, Download, Image as ImageIcon, Paperclip } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
-import { t, fill } from "@/lib/i18n";
-import { invoiceStatusLabel } from "@/lib/enum-labels";
+import { t, fill, plural, type Lang } from "@/lib/i18n";
+import { invoiceStatusLabel, paymentMethodLabel, waterTypeLabel } from "@/lib/enum-labels";
 import { formatDate, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
 import { round2 } from "@/lib/vat";
 import { groupInvoiceLines } from "@/lib/invoiceDisplay";
 import TripRefLink from "@/components/TripRefLink";
 import {
-  INVOICE_STATUS_LABELS,
-  PAYMENT_METHOD_LABELS,
   type Invoice,
   type InvoiceLineSnapshot,
   type WaterType,
@@ -706,20 +704,22 @@ export default function InvoiceDetailModal({
             <div className="flex items-start justify-between gap-6 flex-wrap">
               <div>
                 <h2 className="text-xl font-semibold">
-                  {raw.invoice_number ? `Invoice #${raw.invoice_number}` : "Invoice (draft — not yet numbered)"}
+                  {raw.invoice_number
+                    ? fill(t("trips.invoiceSheet.headline", lang), { n: raw.invoice_number })
+                    : t("trips.invoiceSheet.headlineDraft", lang)}
                 </h2>
                 {status === "draft" && !readOnly && editingPeriod ? (
                   <form onSubmit={onSavePeriod} className="no-print flex items-end gap-2 flex-wrap mt-1">
                     <label className="flex flex-col gap-1 text-xs">
-                      <span className="font-medium">Period start</span>
+                      <span className="font-medium">{t("trips.invoiceSheet.fPeriodStart", lang)}</span>
                       <input value={periodStartInput} onChange={(e) => setPeriodStartInput(e.target.value)} type="date" required className={INPUT} style={INPUT_STYLE} />
                     </label>
                     <label className="flex flex-col gap-1 text-xs">
-                      <span className="font-medium">Period end</span>
+                      <span className="font-medium">{t("trips.invoiceSheet.fPeriodEnd", lang)}</span>
                       <input value={periodEndInput} onChange={(e) => setPeriodEndInput(e.target.value)} type="date" required className={INPUT} style={INPUT_STYLE} />
                     </label>
                     <Btn type="submit" variant="outline" className={savingPeriod ? "opacity-50 pointer-events-none" : ""}>
-                      {savingPeriod ? "Saving…" : "Save"}
+                      {t(savingPeriod ? "common.saving" : "common.save", lang)}
                     </Btn>
                     <Btn
                       type="button"
@@ -729,7 +729,7 @@ export default function InvoiceDetailModal({
                         setPeriodError(null);
                       }}
                     >
-                      Cancel
+                      {t("common.cancel", lang)}
                     </Btn>
                     {periodError && <p className="w-full text-sm text-rose-600 dark:text-rose-400">{periodError}</p>}
                   </form>
@@ -743,7 +743,7 @@ export default function InvoiceDetailModal({
                       setPeriodError(null);
                       setEditingPeriod(true);
                     }}
-                    title="Click to change this draft's period"
+                    title={t("trips.invoiceSheet.editPeriodHint", lang)}
                   >
                     {raw.period_start} → {raw.period_end}
                   </button>
@@ -762,36 +762,42 @@ export default function InvoiceDetailModal({
                 straight off `raw` — never itself snapshotted. */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm break-inside-avoid">
               <IdentityBlock
-                title="Buyer"
+                lang={lang}
+                title={t("trips.invoiceSheet.buyer", lang)}
                 name={view.buyerSnapshot?.name ?? null}
                 nameAr={view.buyerSnapshot?.name_ar ?? null}
                 lines={[
                   { label: "", value: view.buyerSnapshot?.billing_address ?? null },
-                  { label: "VAT Registration No.", value: view.buyerSnapshot?.vat_number ?? null },
-                  { label: "CR No.", value: view.buyerSnapshot?.cr_number ?? null },
+                  { label: t("trips.invoiceSheet.fVatRegNo", lang), value: view.buyerSnapshot?.vat_number ?? null },
+                  { label: t("trips.invoiceSheet.fCrNo", lang), value: view.buyerSnapshot?.cr_number ?? null },
                   { label: "", value: customerEmail },
                 ]}
               />
               <IdentityBlock
-                title="Seller"
+                lang={lang}
+                title={t("trips.invoiceSheet.seller", lang)}
                 name={view.sellerSnapshot?.legal_name ?? null}
                 nameAr={view.sellerSnapshot?.legal_name_ar ?? null}
                 lines={[
                   { label: "", value: view.sellerSnapshot?.description ?? null },
-                  { label: "CR No.", value: view.sellerSnapshot?.cr_number ?? null },
+                  { label: t("trips.invoiceSheet.fCrNo", lang), value: view.sellerSnapshot?.cr_number ?? null },
                   { label: "", value: view.sellerSnapshot?.address ?? null },
-                  { label: "Tel", value: view.sellerSnapshot?.telephone ?? null },
-                  { label: "Mobile", value: view.sellerSnapshot?.phone ?? null },
-                  { label: "VAT Registration No.", value: view.sellerSnapshot?.vat_number ?? null },
+                  { label: t("trips.invoiceSheet.fTel", lang), value: view.sellerSnapshot?.telephone ?? null },
+                  { label: t("trips.invoiceSheet.fMobile", lang), value: view.sellerSnapshot?.phone ?? null },
+                  { label: t("trips.invoiceSheet.fVatRegNo", lang), value: view.sellerSnapshot?.vat_number ?? null },
                 ]}
               />
               <IdentityBlock
-                title="Invoice info"
+                lang={lang}
+                title={t("trips.invoiceSheet.invoiceInfo", lang)}
                 lines={[
-                  { label: "Invoice No.", value: raw.invoice_number ?? "Draft — not yet numbered" },
-                  { label: "Issue date", value: raw.confirmed_at ? raw.confirmed_at.slice(0, 10) : "—" },
-                  { label: "Period", value: `${raw.period_start} → ${raw.period_end}` },
-                  { label: "Status", value: status ? INVOICE_STATUS_LABELS[status] : null },
+                  {
+                    label: t("trips.invoiceSheet.fInvoiceNo", lang),
+                    value: raw.invoice_number ?? t("trips.invoiceSheet.vDraftNotNumbered", lang),
+                  },
+                  { label: t("trips.invoiceSheet.fIssueDate", lang), value: raw.confirmed_at ? raw.confirmed_at.slice(0, 10) : "—" },
+                  { label: t("trips.invoiceSheet.fPeriod", lang), value: `${raw.period_start} → ${raw.period_end}` },
+                  { label: t("common.status", lang), value: status ? invoiceStatusLabel(status, lang) : null },
                 ]}
               />
             </div>
@@ -805,12 +811,14 @@ export default function InvoiceDetailModal({
             {raw.status === "void" && (
               <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-700 dark:text-rose-300 break-inside-avoid space-y-1">
                 <div>
-                  <span className="font-medium">Sales Return</span>
-                  {raw.voided_at ? ` on ${raw.voided_at.slice(0, 10)}` : ""}
-                  {raw.void_reason ? ` — ${raw.void_reason}` : ""}
+                  <span className="font-medium">{t("trips.invoiceSheet.salesReturn", lang)}</span>
+                  {raw.voided_at ? fill(t("trips.invoiceSheet.voidedOn", lang), { date: raw.voided_at.slice(0, 10) }) : ""}
+                  {raw.void_reason ? fill(t("trips.invoiceSheet.voidSuffix", lang), { reason: raw.void_reason }) : ""}
                 </div>
                 <div className="text-xs">
-                  This invoice{raw.invoice_number ? ` (${raw.invoice_number})` : ""} is unpaid — marked Sales Return.
+                  {fill(t("trips.invoiceSheet.salesReturnNote", lang), {
+                    ref: raw.invoice_number ? ` (${raw.invoice_number})` : "",
+                  })}
                 </div>
               </div>
             )}
@@ -823,13 +831,15 @@ export default function InvoiceDetailModal({
                     no per-row VAT column (VAT only ever appears in the
                     Grand Total stack below). */}
                 <PrepaidTripTable
-                  title="Covered Trips"
+                  lang={lang}
+                  title={t("trips.invoiceSheet.tCoveredTrips", lang)}
                   lines={view.coveredLines}
                   ledger={view.ledger?.covered ?? { subtotal: view.covered.total, balance: null, remaining: null }}
                   fallbackWaterType={view.projectWaterType}
                 />
                 <PrepaidTripTable
-                  title="Unpaid Trips"
+                  lang={lang}
+                  title={t("trips.invoiceSheet.tUnpaidTrips", lang)}
                   lines={view.unpaidLines}
                   ledger={view.ledger?.unpaid ?? { subtotal: view.amountDue.total, balance: null, remaining: null }}
                   fallbackWaterType={view.projectWaterType}
@@ -844,6 +854,7 @@ export default function InvoiceDetailModal({
                   hiddenFromPrint={raw.hide_amount_due}
                   headerRight={
                     <HideAmountDueToggle
+                      lang={lang}
                       hidden={raw.hide_amount_due}
                       busy={busy}
                       onToggle={() => runAction(() => setHideAmountDue(invoiceId, !raw.hide_amount_due))}
@@ -857,6 +868,7 @@ export default function InvoiceDetailModal({
                     surface as before. */}
                 {(prepaidChargeLines.length > 0 || editable) && (
                   <SpecialChargesSection
+                    lang={lang}
                     chargeLines={prepaidChargeLines}
                     subtotal={round2(prepaidChargeLines.reduce((s, l) => s + l.amount_sar, 0))}
                     vat={round2(prepaidChargeLines.reduce((s, l) => s + (l.vat_sar ?? 0), 0))}
@@ -900,15 +912,21 @@ export default function InvoiceDetailModal({
                   <div
                     className={"sm:w-64 sm:flex-shrink-0" + (raw.hide_amount_due ? " no-print" : "")}
                   >
-                    <TotalCard label="Amount Due" totals={view.amountDue} tone={view.amountDue.total > 0 ? "bad" : "ok"} />
+                    <TotalCard
+                      lang={lang}
+                      label={t("trips.invoiceSheet.amountDue", lang)}
+                      totals={view.amountDue}
+                      tone={view.amountDue.total > 0 ? "bad" : "ok"}
+                    />
                   </div>
                   {/* Grand Total — v3 §9, one stacked block: covered trips +
                       covered charges only (unpaid trips excluded). No title
                       (item 4). */}
                   <GrandTotalStack
-                    subtotalLabel="Subtotal (Covered trips)"
+                    lang={lang}
+                    subtotalLabel={t("trips.invoiceSheet.subtotalCovered", lang)}
                     subtotal={view.covered.subtotal}
-                    chargesLabel="Special Charges (covered)"
+                    chargesLabel={t("trips.invoiceSheet.chargesCovered", lang)}
                     chargesSubtotal={prepaidCoveredChargesSubtotal}
                     vat={view.grand.vat}
                     total={view.grand.total}
@@ -921,7 +939,8 @@ export default function InvoiceDetailModal({
                     customer with nothing yet covered this period). */}
                 {view.coveredLines.length > 0 && (
                   <LineTable
-                    title="Covered (paid from prepaid balance)"
+                    lang={lang}
+                    title={t("trips.invoiceSheet.tCoveredPostpaid", lang)}
                     lines={view.coveredLines}
                     totals={view.covered}
                     fallbackWaterType={view.projectWaterType}
@@ -934,12 +953,14 @@ export default function InvoiceDetailModal({
                     total, includes charges) is still what feeds Amount
                     Due/Grand Total further down, untouched. */}
                 <LineTable
-                  title="Unpaid — Amount Due (trips)"
+                  lang={lang}
+                  title={t("trips.invoiceSheet.tUnpaidPostpaid", lang)}
                   lines={postpaidUnpaidTripLines}
                   totals={{ subtotal: postpaidUnpaidTripSubtotal, vat: postpaidUnpaidTripVat, total: postpaidUnpaidTripTotal }}
                   fallbackWaterType={view.projectWaterType}
                   headerRight={
                     <HideAmountDueToggle
+                      lang={lang}
                       hidden={raw.hide_amount_due}
                       busy={busy}
                       onToggle={() => runAction(() => setHideAmountDue(invoiceId, !raw.hide_amount_due))}
@@ -954,6 +975,7 @@ export default function InvoiceDetailModal({
                     Grand Total/Amount Due below. */}
                 {(postpaidChargeLines.length > 0 || editable) && (
                   <SpecialChargesSection
+                    lang={lang}
                     chargeLines={postpaidChargeLines}
                     subtotal={postpaidChargesSubtotal}
                     vat={postpaidChargesVat}
@@ -990,9 +1012,10 @@ export default function InvoiceDetailModal({
                     Subtotal → Special Charges → VAT → Total, no Balance/
                     Remaining (postpaid has no balance). No title (item 4). */}
                 <GrandTotalStack
-                  subtotalLabel="Subtotal (Unpaid trips)"
+                  lang={lang}
+                  subtotalLabel={t("trips.invoiceSheet.subtotalUnpaid", lang)}
                   subtotal={postpaidUnpaidTripSubtotal}
-                  chargesLabel="Special Charges"
+                  chargesLabel={t("trips.invoiceSheet.specialCharges", lang)}
                   chargesSubtotal={postpaidChargesSubtotal}
                   vat={view.grand.vat}
                   total={view.grand.total}
@@ -1008,14 +1031,12 @@ export default function InvoiceDetailModal({
               <div className="no-print rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2 break-inside-avoid">
                 <p className="text-sm text-amber-800 dark:text-amber-300 flex gap-2">
                   <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                  {blockers.length} trip{blockers.length > 1 ? "s" : ""} in this invoice&apos;s period{" "}
-                  {blockers.length > 1 ? "are" : "is"} not yet delivered — Confirm is blocked until every trip is
-                  delivered.
+                  {fill(t(`trips.invoiceSheet.blockers.${plural(blockers.length)}`, lang), { n: blockers.length })}
                 </p>
                 <ul className="text-sm space-y-1 ps-6 list-disc">
                   {blockers.map((b) => (
                     <li key={b.id}>
-                      {b.trip_date} — <TripRefLink tripId={b.id} label={b.ref ?? "View trip"} />
+                      {b.trip_date} — <TripRefLink tripId={b.id} label={b.ref ?? t("trips.invoiceSheet.viewTrip", lang)} />
                     </li>
                   ))}
                 </ul>
@@ -1024,11 +1045,13 @@ export default function InvoiceDetailModal({
 
             {raw.status === "paid" && (
               <div className="rounded-lg border border-app p-3 text-sm break-inside-avoid">
-                <span className="font-medium">Paid</span> {raw.paid_at ? `on ${raw.paid_at.slice(0, 10)}` : ""} via{" "}
-                {raw.payment_method ? PAYMENT_METHOD_LABELS[raw.payment_method] : "—"}.
+                <span className="font-medium">{t("trips.invoiceSheet.paid", lang)}</span>{" "}
+                {raw.paid_at ? fill(t("trips.invoiceSheet.paidOn", lang), { date: raw.paid_at.slice(0, 10) }) : ""}{" "}
+                {t("trips.invoiceSheet.via", lang)}{" "}
+                {raw.payment_method ? paymentMethodLabel(raw.payment_method, lang) : "—"}.
                 {raw.proof_of_payment_path && (
                   <Btn variant="ghost" className="ms-2 no-print" onClick={onViewProof}>
-                    View proof
+                    {t("trips.invoiceSheet.viewProof", lang)}
                   </Btn>
                 )}
               </div>
@@ -1044,18 +1067,19 @@ export default function InvoiceDetailModal({
               {status === "draft" && !deletingDraft && (
                 <div className="flex items-center gap-2">
                   <Btn variant="primary" onClick={() => runAction(() => setInvoiceReview(invoiceId))} className={busy ? "opacity-50 pointer-events-none" : ""}>
-                    Move to Review
+                    {t("trips.invoiceSheet.moveToReview", lang)}
                   </Btn>
                   <Btn variant="outline" onClick={() => setDeletingDraft(true)} className={busy ? "opacity-50 pointer-events-none" : ""}>
-                    <Trash2 className="h-4 w-4" /> Delete draft
+                    <Trash2 className="h-4 w-4" /> {t("trips.invoiceSheet.deleteDraft", lang)}
                   </Btn>
                 </div>
               )}
               {status === "draft" && deletingDraft && (
                 <GuardBox
-                  warning="Deletes this draft and releases every trip it had reserved, freeing them for another invoice. This cannot be undone."
+                  lang={lang}
+                  warning={t("trips.invoiceSheet.guardDeleteDraft", lang)}
                   busy={busy}
-                  confirmLabel="Yes, delete draft"
+                  confirmLabel={t("trips.invoiceSheet.confirmDeleteDraft", lang)}
                   onCancel={() => setDeletingDraft(false)}
                   onConfirm={onDeleteDraft}
                 />
@@ -1064,12 +1088,12 @@ export default function InvoiceDetailModal({
               {status === "review" && !confirmingConfirm && (
                 <div className="flex items-center gap-2">
                   <Btn variant="outline" onClick={() => runAction(() => revertInvoiceToDraft(invoiceId))} className={busy ? "opacity-50 pointer-events-none" : ""}>
-                    Back to Draft
+                    {t("trips.invoiceSheet.backToDraft", lang)}
                   </Btn>
                   <span
                     title={
                       blockers.length > 0
-                        ? "Cannot confirm — undelivered trips in this invoice's period (see list above)."
+                        ? t("trips.invoiceSheet.cannotConfirmTitle", lang)
                         : undefined
                     }
                   >
@@ -1078,16 +1102,17 @@ export default function InvoiceDetailModal({
                       onClick={() => blockers.length === 0 && setConfirmingConfirm(true)}
                       className={blockers.length > 0 ? "opacity-50 pointer-events-none" : ""}
                     >
-                      Confirm Invoice
+                      {t("trips.invoiceSheet.confirmInvoiceBtn", lang)}
                     </Btn>
                   </span>
                 </div>
               )}
               {status === "review" && confirmingConfirm && (
                 <GuardBox
-                  warning="Confirming assigns a permanent invoice number and VAT ref, and locks the invoice forever — there is no revert to draft after this. Special charges can no longer be edited."
+                  lang={lang}
+                  warning={t("trips.invoiceSheet.guardConfirm", lang)}
                   busy={busy}
-                  confirmLabel="Yes, confirm invoice"
+                  confirmLabel={t("trips.invoiceSheet.confirmConfirm", lang)}
                   onCancel={() => setConfirmingConfirm(false)}
                   onConfirm={() => runAction(() => confirmInvoice(invoiceId).then((r) => ({ error: r.error })))}
                 />
@@ -1096,10 +1121,10 @@ export default function InvoiceDetailModal({
               {status === "confirmed" && !voiding && !payingOpen && (
                 <div className="flex items-center gap-2">
                   <Btn variant="primary" onClick={() => setPayingOpen(true)}>
-                    {isPrepaid ? "Pay with Balance" : "Mark Paid"}
+                    {t(isPrepaid ? "trips.invoiceSheet.payWithBalance" : "trips.invoiceSheet.markPaid", lang)}
                   </Btn>
                   <Btn variant="outline" onClick={() => setVoiding(true)}>
-                    Sales Return
+                    {t("trips.invoiceSheet.salesReturn", lang)}
                   </Btn>
                 </div>
               )}
@@ -1111,29 +1136,29 @@ export default function InvoiceDetailModal({
                 <div className="space-y-3 max-w-sm">
                   <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
                     <div className="flex justify-between">
-                      <span className="muted">Settled balance</span>
+                      <span className="muted">{t("trips.invoiceSheet.settledBalance", lang)}</span>
                       <span className="tabular-nums">{formatSar(settledBalance ?? 0)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="muted">This invoice (Grand Total)</span>
+                      <span className="muted">{t("trips.invoiceSheet.thisInvoiceGrand", lang)}</span>
                       <span className="tabular-nums">− {formatSar(view.grand.total)}</span>
                     </div>
                     <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-                      <span>Remaining settled balance</span>
+                      <span>{t("trips.invoiceSheet.remainingSettled", lang)}</span>
                       <span className={"tabular-nums " + (((settledBalance ?? 0) - view.grand.total) < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
                         {formatSar((settledBalance ?? 0) - view.grand.total)}
                       </span>
                     </div>
                   </div>
                   <p className="text-xs muted">
-                    The balance already covered these trips/charges at delivery — this just records the settlement and locks them. No new money changes hands.
+                    {t("trips.invoiceSheet.balanceNote", lang)}
                   </p>
                   <div className="flex items-center gap-2">
                     <Btn type="button" variant="ghost" onClick={() => setPayingOpen(false)}>
-                      Cancel
+                      {t("common.cancel", lang)}
                     </Btn>
                     <Btn type="button" variant="primary" onClick={onMarkPaidBalance} className={busy ? "opacity-50 pointer-events-none" : ""}>
-                      {busy ? "Recording…" : "Confirm payment"}
+                      {t(busy ? "common.recording" : "trips.invoiceSheet.confirmPayment", lang)}
                     </Btn>
                   </div>
                 </div>
@@ -1144,11 +1169,11 @@ export default function InvoiceDetailModal({
                   <div className="flex items-center gap-4 text-sm">
                     <label className="flex items-center gap-1.5">
                       <input type="radio" name="paymentMethod" value="cash" checked={payMethod === "cash"} onChange={() => setPayMethod("cash")} />
-                      Cash
+                      {paymentMethodLabel("cash", lang)}
                     </label>
                     <label className="flex items-center gap-1.5">
                       <input type="radio" name="paymentMethod" value="bank_transfer" checked={payMethod === "bank_transfer"} onChange={() => setPayMethod("bank_transfer")} />
-                      Bank transfer
+                      {paymentMethodLabel("bank_transfer", lang)}
                     </label>
                   </div>
                   {/* Batch 2 (migration 0039) — reference + date required for
@@ -1158,7 +1183,8 @@ export default function InvoiceDetailModal({
                       FormData in onMarkPaid, same as proofFile. */}
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="font-medium">
-                      Payment reference{payMethod === "bank_transfer" ? " (required) *" : " (optional)"}
+                      {t("trips.invoiceSheet.fPaymentReference", lang)}
+                      {t(payMethod === "bank_transfer" ? "trips.invoiceSheet.sufRequired" : "trips.invoiceSheet.sufOptional", lang)}
                     </span>
                     <input
                       type="text"
@@ -1170,7 +1196,8 @@ export default function InvoiceDetailModal({
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="font-medium">
-                      Payment date{payMethod === "bank_transfer" ? " (required) *" : " (optional)"}
+                      {t("trips.invoiceSheet.fPaymentDate", lang)}
+                      {t(payMethod === "bank_transfer" ? "trips.invoiceSheet.sufRequired" : "trips.invoiceSheet.sufOptional", lang)}
                     </span>
                     <input
                       type="date"
@@ -1181,21 +1208,21 @@ export default function InvoiceDetailModal({
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
-                    <span className="font-medium">Note (optional)</span>
+                    <span className="font-medium">{t("trips.invoiceSheet.fPayNote", lang)}</span>
                     <textarea name="paymentNote" rows={2} className={INPUT} style={INPUT_STYLE} />
                   </label>
                   {payMethod === "bank_transfer" && (
                     <label className="flex flex-col gap-1 text-sm">
-                      <span className="font-medium">Proof of payment (required) *</span>
+                      <span className="font-medium">{t("trips.invoiceSheet.fProof", lang)}</span>
                       <input type="file" name="proofFile" required className={INPUT} style={INPUT_STYLE} />
                     </label>
                   )}
                   <div className="flex items-center gap-2">
                     <Btn type="button" variant="ghost" onClick={() => setPayingOpen(false)}>
-                      Cancel
+                      {t("common.cancel", lang)}
                     </Btn>
                     <Btn type="submit" variant="primary" className={busy ? "opacity-50 pointer-events-none" : ""}>
-                      {busy ? "Recording…" : "Confirm payment"}
+                      {t(busy ? "common.recording" : "trips.invoiceSheet.confirmPayment", lang)}
                     </Btn>
                   </div>
                 </form>
@@ -1203,13 +1230,14 @@ export default function InvoiceDetailModal({
               {status === "confirmed" && voiding && (
                 <div className="space-y-2 max-w-sm">
                   <label className="flex flex-col gap-1 text-sm">
-                    <span className="font-medium">Sales Return reason *</span>
+                    <span className="font-medium">{t("trips.invoiceSheet.fVoidReason", lang)}</span>
                     <textarea value={voidReason} onChange={(e) => setVoidReason(e.target.value)} rows={2} className={INPUT} style={INPUT_STYLE} />
                   </label>
                   <GuardBox
-                    warning="Marking this a Sales Return is the only undo for a confirmed invoice, and it's terminal — there is no path back to Confirmed/Paid. The invoice number and VAT ref are retained forever, but this invoice will no longer be collectible."
+                    lang={lang}
+                    warning={t("trips.invoiceSheet.guardVoid", lang)}
                     busy={busy}
-                    confirmLabel="Yes, mark as Sales Return"
+                    confirmLabel={t("trips.invoiceSheet.confirmVoid", lang)}
                     confirmDisabled={!voidReason.trim()}
                     onCancel={() => setVoiding(false)}
                     onConfirm={() => runAction(() => voidInvoice(invoiceId, voidReason.trim()))}
@@ -1219,19 +1247,20 @@ export default function InvoiceDetailModal({
 
               {status === "paid" && !unpaying && (
                 <Btn variant="outline" onClick={() => setUnpaying(true)}>
-                  <AlertTriangle className="h-4 w-4" /> Admin: Un-pay
+                  <AlertTriangle className="h-4 w-4" /> {t("trips.invoiceSheet.adminUnpay", lang)}
                 </Btn>
               )}
               {status === "paid" && unpaying && (
                 <div className="space-y-2 max-w-sm">
                   <label className="flex flex-col gap-1 text-sm">
-                    <span className="font-medium">Un-pay reason *</span>
+                    <span className="font-medium">{t("trips.invoiceSheet.fUnpayReason", lang)}</span>
                     <textarea value={unpayReason} onChange={(e) => setUnpayReason(e.target.value)} rows={2} className={INPUT} style={INPUT_STYLE} />
                   </label>
                   <GuardBox
-                    warning="This reverses the payment and unlocks every trip this invoice locked. Only do this to correct a mistake — the customer's balance/collectible status changes immediately."
+                    lang={lang}
+                    warning={t("trips.invoiceSheet.guardUnpay", lang)}
                     busy={busy}
-                    confirmLabel="Yes, un-pay"
+                    confirmLabel={t("trips.invoiceSheet.confirmUnpay", lang)}
                     confirmDisabled={!unpayReason.trim()}
                     onCancel={() => setUnpaying(false)}
                     onConfirm={() => runAction(() => unpayInvoice(invoiceId, unpayReason.trim()))}
@@ -1242,7 +1271,11 @@ export default function InvoiceDetailModal({
             )}
 
             <div className="border-t border-app pt-3 text-[11px] muted flex items-center justify-between">
-              <span>Generated {formatDate(new Date(), { year: "numeric", month: "short", day: "numeric" })}</span>
+              <span>
+                {fill(t("trips.invoiceSheet.generated", lang), {
+                  date: formatDate(new Date(), { year: "numeric", month: "short", day: "numeric" }),
+                })}
+              </span>
               {/* translate="no" on the SPAN, not the row — "Generated <date>"
                   is ordinary prose that SHOULD translate. Only the company's
                   own name is fenced off. This footer prints onto an invoice
@@ -1307,11 +1340,16 @@ export default function InvoiceDetailModal({
 // value alone (used for address/description/email — text that reads fine
 // unlabeled).
 function IdentityBlock({
+  lang,
   title,
   name,
   nameAr,
   lines,
 }: {
+  // Every caller passes an ALREADY-TRANSLATED `title` and already-translated
+  // labels — `lang` is here for the one string this component owns itself, the
+  // "Not on file" placeholder below.
+  lang: Lang;
   title: string;
   name?: string | null;
   nameAr?: string | null;
@@ -1320,7 +1358,9 @@ function IdentityBlock({
   return (
     <div>
       <div className="text-[11px] uppercase tracking-wide muted mb-0.5">{title}</div>
-      {name !== undefined && <div className="font-medium">{name ?? <span className="muted">Not on file</span>}</div>}
+      {name !== undefined && (
+        <div className="font-medium">{name ?? <span className="muted">{t("trips.invoiceSheet.notOnFile", lang)}</span>}</div>
+      )}
       {/* THE ONE INTENTIONAL CHANGE INSIDE `#invoice-print`, and it changes no
           text. `dir="rtl"` used to sit on the block, which forced the whole
           line to lay out right-to-left regardless of the page's own direction —
@@ -1350,12 +1390,14 @@ function IdentityBlock({
 }
 
 function LineTable({
+  lang,
   title,
   lines,
   totals,
   fallbackWaterType,
   headerRight,
 }: {
+  lang: Lang;
   title: string;
   lines: InvoiceLineSnapshot[];
   totals: Totals;
@@ -1384,18 +1426,18 @@ function LineTable({
         <Table>
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
             <tr>
-              <TH>Date</TH>
-              <TH>Description</TH>
-              <TH>Type</TH>
-              <TH>Quantity</TH>
-              <TH>Price</TH>
-              <TH>Amount</TH>
+              <TH>{t("common.date", lang)}</TH>
+              <TH>{t("trips.invoiceSheet.colDescription", lang)}</TH>
+              <TH>{t("common.type", lang)}</TH>
+              <TH>{t("trips.invoiceSheet.colQuantity", lang)}</TH>
+              <TH>{t("trips.invoiceSheet.colPrice", lang)}</TH>
+              <TH>{t("common.amount", lang)}</TH>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <TD className="muted">Nothing here.</TD>
+                <TD className="muted">{t("trips.invoiceSheet.emptyLines", lang)}</TD>
                 <TD>{""}</TD>
                 <TD>{""}</TD>
                 <TD>{""}</TD>
@@ -1413,7 +1455,7 @@ function LineTable({
                       <span className="muted">{r.refRangeLabel}</span>
                     )}
                   </TD>
-                  <TD>{r.typeLabel}</TD>
+                  <TD>{r.waterType ? waterTypeLabel(r.waterType, lang) : "—"}</TD>
                   <TD className="tabular-nums">{r.quantity}</TD>
                   <TD className="tabular-nums">{formatSar(r.price)}</TD>
                   <TD className="tabular-nums">{formatSar(r.amount)}</TD>
@@ -1431,13 +1473,16 @@ function LineTable({
             A flex row below the table sizes on its own content instead. */}
         <div className="border-t border-app px-4 py-3 text-sm">
           <div className="flex items-center justify-between">
-            <span className="muted">Subtotal</span>
+            <span className="muted">{t("trips.invoiceSheet.subtotal", lang)}</span>
             <span className="flex items-baseline gap-2">
               {/* v3.1 (item 3) — faded pre-VAT + VAT breakdown alongside the
                   figure. totals.subtotal is already pre-VAT here (Totals =
                   InvoiceTableTotals, lib/invoice.ts) — no re-derivation. */}
               <span className="tabular-nums text-xs text-black/35 dark:text-white/35">
-                {formatNum(totals.subtotal)} + VAT {formatNum(totals.vat)}
+                {fill(t("trips.invoiceSheet.vatSplit", lang), {
+                  net: formatNum(totals.subtotal),
+                  vat: formatNum(totals.vat),
+                })}
               </span>
               <span className="tabular-nums font-medium">{formatSar(totals.total)}</span>
             </span>
@@ -1456,6 +1501,7 @@ function LineTable({
 // lib/invoicePdfTemplate.ts's prepaidTripTable exactly (same three figures,
 // same source: view.ledger, never re-derived here).
 function PrepaidTripTable({
+  lang,
   title,
   lines,
   ledger,
@@ -1463,6 +1509,7 @@ function PrepaidTripTable({
   headerRight,
   hiddenFromPrint = false,
 }: {
+  lang: Lang;
   title: string;
   lines: InvoiceLineSnapshot[];
   ledger: DisplayLedgerTotals;
@@ -1501,17 +1548,17 @@ function PrepaidTripTable({
             it. This also brings the screen CLOSER to the PDF, whose own empty
             state is a single colspan cell (invoicePdfTemplate.ts). */}
         {rows.length === 0 ? (
-          <div className="px-4 py-3 text-sm muted">No trips.</div>
+          <div className="px-4 py-3 text-sm muted">{t("trips.invoiceSheet.emptyTrips", lang)}</div>
         ) : (
         <Table>
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
             <tr>
-              <TH>Date</TH>
-              <TH>Description</TH>
-              <TH>Type</TH>
-              <TH>Quantity</TH>
-              <TH>Price</TH>
-              <TH>Amount</TH>
+              <TH>{t("common.date", lang)}</TH>
+              <TH>{t("trips.invoiceSheet.colDescription", lang)}</TH>
+              <TH>{t("common.type", lang)}</TH>
+              <TH>{t("trips.invoiceSheet.colQuantity", lang)}</TH>
+              <TH>{t("trips.invoiceSheet.colPrice", lang)}</TH>
+              <TH>{t("common.amount", lang)}</TH>
             </tr>
           </thead>
           <tbody>
@@ -1526,7 +1573,7 @@ function PrepaidTripTable({
                       <span className="muted">{r.refRangeLabel}</span>
                     )}
                   </TD>
-                  <TD>{r.typeLabel}</TD>
+                  <TD>{r.waterType ? waterTypeLabel(r.waterType, lang) : "—"}</TD>
                   <TD className="tabular-nums">{r.quantity}</TD>
                   <TD className="tabular-nums">{formatSar(r.price)}</TD>
                   <TD className="tabular-nums">{formatSar(r.amount)}</TD>
@@ -1538,22 +1585,22 @@ function PrepaidTripTable({
         )}
         <div className="border-t border-app px-4 py-3 space-y-1 text-sm">
           <div className="flex items-center justify-between">
-            <span className="muted">Subtotal</span>
+            <span className="muted">{t("trips.invoiceSheet.subtotal", lang)}</span>
             <span className="flex items-baseline gap-2">
               <span className="tabular-nums text-xs text-black/35 dark:text-white/35">
-                {formatNum(preVat)} + VAT {formatNum(vatAmt)}
+                {fill(t("trips.invoiceSheet.vatSplit", lang), { net: formatNum(preVat), vat: formatNum(vatAmt) })}
               </span>
               <span className="tabular-nums font-medium">{formatSar(ledger.subtotal)}</span>
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="muted">Running Balance</span>
+            <span className="muted">{t("trips.invoiceSheet.runningBalance", lang)}</span>
             {/* null = pre-migration-0036 legacy invoice, no frozen balance on
                 disk (see DisplayLedgerTotals) — "—", never a fabricated 0. */}
             <span className="tabular-nums">{ledger.balance == null ? <span className="muted">—</span> : formatSar(ledger.balance)}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="font-medium">Remaining</span>
+            <span className="font-medium">{t("trips.invoiceSheet.remaining", lang)}</span>
             <span className={"tabular-nums font-semibold " + (ledger.remaining != null && ledger.remaining < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
               {ledger.remaining == null ? <span className="muted font-normal">—</span> : formatSar(ledger.remaining)}
             </span>
@@ -1572,6 +1619,7 @@ function PrepaidTripTable({
 // per the "too condensed" complaint — this is a distinct, secondary
 // bookkeeping surface, not a dense ledger.
 function SpecialChargesSection({
+  lang,
   chargeLines,
   subtotal,
   vat,
@@ -1594,6 +1642,7 @@ function SpecialChargesSection({
   setChargeImageFile,
   chargeImageInputKey,
 }: {
+  lang: Lang;
   chargeLines: InvoiceLineSnapshot[];
   subtotal: number;
   vat: number;
@@ -1628,19 +1677,19 @@ function SpecialChargesSection({
           caller already applies), matching Covered/Unpaid's "always shown"
           convention. */}
       <section className="space-y-2 break-inside-avoid">
-        <h3 className="text-xs font-semibold uppercase tracking-wide muted">Special Charges</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide muted">{t("trips.invoiceSheet.specialCharges", lang)}</h3>
         <div className="card p-0 overflow-hidden">
           {chargeLines.length > 0 ? (
             <>
               <Table>
                 <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                   <tr>
-                    <TH>Date</TH>
-                    <TH>Description</TH>
-                    <TH>Quantity</TH>
-                    <TH>Price</TH>
-                    <TH>Amount</TH>
-                    <TH>Status</TH>
+                    <TH>{t("common.date", lang)}</TH>
+                    <TH>{t("trips.invoiceSheet.colDescription", lang)}</TH>
+                    <TH>{t("trips.invoiceSheet.colQuantity", lang)}</TH>
+                    <TH>{t("trips.invoiceSheet.colPrice", lang)}</TH>
+                    <TH>{t("common.amount", lang)}</TH>
+                    <TH>{t("common.status", lang)}</TH>
                     <TH></TH>
                   </tr>
                 </thead>
@@ -1666,11 +1715,11 @@ function SpecialChargesSection({
                             shows "Rolls forward". */}
                         {l.covered === false ? (
                           <span className="inline-block rounded-full px-2 py-0.5 text-[11px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400">
-                            Rolls forward
+                            {t("trips.invoiceSheet.badgeRollsForward", lang)}
                           </span>
                         ) : (
                           <span className="inline-block rounded-full px-2 py-0.5 text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                            Covered
+                            {t("trips.invoiceSheet.badgeCovered", lang)}
                           </span>
                         )}
                       </TD>
@@ -1681,13 +1730,13 @@ function SpecialChargesSection({
                               type="button"
                               onClick={() => onViewChargeImage(l.id)}
                               className="muted hover:text-[rgb(var(--fg))]"
-                              title="View attached image (internal only)"
+                              title={t("trips.invoiceSheet.viewImageTitle", lang)}
                             >
                               <ImageIcon className="h-4 w-4" />
                             </button>
                           ) : (
                             editable && (
-                              <label className="muted hover:text-[rgb(var(--fg))] cursor-pointer" title="Attach an image (internal only)">
+                              <label className="muted hover:text-[rgb(var(--fg))] cursor-pointer" title={t("trips.invoiceSheet.attachImageTitle", lang)}>
                                 <Paperclip className="h-4 w-4" />
                                 <input
                                   type="file"
@@ -1714,12 +1763,14 @@ function SpecialChargesSection({
                 </tbody>
               </Table>
               <div className="flex items-center justify-end gap-2 border-t border-app px-4 py-3 text-sm">
-                <span className="muted">Subtotal {formatNum(subtotal)} + VAT {formatNum(vat)} =</span>
+                <span className="muted">
+                  {fill(t("trips.invoiceSheet.chargesSubtotal", lang), { net: formatNum(subtotal), vat: formatNum(vat) })}
+                </span>
                 <span className="font-semibold tabular-nums">{formatSar(total)}</span>
               </div>
             </>
           ) : (
-            <p className="p-4 text-sm muted">No special charges on this invoice yet.</p>
+            <p className="p-4 text-sm muted">{t("trips.invoiceSheet.noCharges", lang)}</p>
           )}
         </div>
       </section>
@@ -1729,32 +1780,38 @@ function SpecialChargesSection({
       {editable && (
         <section className="break-inside-avoid">
           <form onSubmit={onAddCharge} className="no-print space-y-4 rounded-2xl bg-black/[0.025] dark:bg-white/[0.035] p-6">
-            <p className="text-xs font-semibold uppercase tracking-wide muted">Add a charge</p>
+            <p className="text-xs font-semibold uppercase tracking-wide muted">{t("trips.invoiceSheet.addChargeTitle", lang)}</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <label className="flex flex-col gap-1.5 text-sm col-span-2">
-                <span className="font-medium">Description</span>
-                <input value={chargeLabel} onChange={(e) => setChargeLabel(e.target.value)} className={INPUT} style={INPUT_STYLE} placeholder="e.g. Callout fee" />
+                <span className="font-medium">{t("trips.invoiceSheet.colDescription", lang)}</span>
+                <input
+                  value={chargeLabel}
+                  onChange={(e) => setChargeLabel(e.target.value)}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                  placeholder={t("trips.invoiceSheet.phCallout", lang)}
+                />
               </label>
               <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">Date</span>
+                <span className="font-medium">{t("common.date", lang)}</span>
                 <input value={chargeDate} onChange={(e) => setChargeDate(e.target.value)} type="date" className={INPUT} style={INPUT_STYLE} />
               </label>
               <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">Quantity</span>
+                <span className="font-medium">{t("trips.invoiceSheet.colQuantity", lang)}</span>
                 <input value={chargeQty} onChange={(e) => setChargeQty(e.target.value)} type="number" min="0" step="any" className={INPUT} style={INPUT_STYLE} />
               </label>
               <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">Price (pre-VAT)</span>
+                <span className="font-medium">{t("trips.invoiceSheet.fPricePreVat", lang)}</span>
                 <input value={chargePrice} onChange={(e) => setChargePrice(e.target.value)} type="number" min="0" step="any" className={INPUT} style={INPUT_STYLE} placeholder="0" />
               </label>
               <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">Amount</span>
+                <span className="font-medium">{t("common.amount", lang)}</span>
                 <div className={INPUT + " muted tabular-nums"} style={INPUT_STYLE}>
                   {formatSar(chargeAmountPreview)}
                 </div>
               </label>
               <label className="flex flex-col gap-1.5 text-sm col-span-2">
-                <span className="font-medium">Attach image (optional, internal only)</span>
+                <span className="font-medium">{t("trips.invoiceSheet.fAttachImage", lang)}</span>
                 <input
                   key={chargeImageInputKey}
                   type="file"
@@ -1767,7 +1824,8 @@ function SpecialChargesSection({
             </div>
             <div className="flex items-center justify-end">
               <Btn type="submit" variant="outline" className={!canSubmit || addingCharge ? "opacity-50 pointer-events-none" : ""}>
-                <Plus className="h-4 w-4" /> {addingCharge ? "Adding…" : "Add charge"}
+                <Plus className="h-4 w-4" />{" "}
+                {t(addingCharge ? "trips.invoiceSheet.adding" : "trips.invoiceSheet.addChargeBtn", lang)}
               </Btn>
             </div>
           </form>
@@ -1777,7 +1835,17 @@ function SpecialChargesSection({
   );
 }
 
-function TotalCard({ label, totals, tone }: { label: string; totals: Totals; tone: "ok" | "bad" | "info" }) {
+function TotalCard({
+  lang,
+  label,
+  totals,
+  tone,
+}: {
+  lang: Lang;
+  label: string;
+  totals: Totals;
+  tone: "ok" | "bad" | "info";
+}) {
   const toneCls =
     tone === "ok" ? "text-emerald-600 dark:text-emerald-400" : tone === "bad" ? "text-rose-600 dark:text-rose-400" : "text-brand-600 dark:text-brand-300";
   return (
@@ -1785,7 +1853,10 @@ function TotalCard({ label, totals, tone }: { label: string; totals: Totals; ton
       <div className="text-xs muted uppercase tracking-wide">{label}</div>
       <div className={"text-2xl font-semibold mt-1 tabular-nums " + toneCls}>{formatSar(totals.total)}</div>
       <div className="text-xs muted mt-1">
-        {formatSar(totals.subtotal)} + {formatSar(totals.vat)} VAT
+        {fill(t("trips.invoiceSheet.totalCardSplit", lang), {
+          subtotal: formatSar(totals.subtotal),
+          vat: formatSar(totals.vat),
+        })}
       </div>
     </div>
   );
@@ -1799,6 +1870,7 @@ function TotalCard({ label, totals, tone }: { label: string; totals: Totals; ton
 // behavior); postpaid feeds it the full unpaid-trips + charges period value
 // (its existing view.grand, untouched — see lib/invoice.ts's POSTPAID note).
 function GrandTotalStack({
+  lang,
   subtotalLabel,
   subtotal,
   chargesLabel,
@@ -1806,6 +1878,7 @@ function GrandTotalStack({
   vat,
   total,
 }: {
+  lang: Lang;
   subtotalLabel: string;
   subtotal: number;
   chargesLabel: string;
@@ -1825,11 +1898,11 @@ function GrandTotalStack({
           <span className="tabular-nums">{formatSar(chargesSubtotal)}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="muted">Total VAT</span>
+          <span className="muted">{t("trips.invoiceSheet.totalVat", lang)}</span>
           <span className="tabular-nums">{formatSar(vat)}</span>
         </div>
         <div className="flex items-center justify-between pt-2 mt-1 border-t border-app">
-          <span className="font-semibold">TOTAL</span>
+          <span className="font-semibold">{t("trips.invoiceSheet.grandTotal", lang)}</span>
           <span className="text-xl font-semibold tabular-nums text-brand-600 dark:text-brand-300">{formatSar(total)}</span>
         </div>
       </div>
@@ -1842,10 +1915,12 @@ function GrandTotalStack({
 // same `invoices.hide_amount_due` column, same setHideAmountDue() action —
 // just relocated). Shared by both modes (item 5: Amount Due applies to both).
 function HideAmountDueToggle({
+  lang,
   hidden,
   busy,
   onToggle,
 }: {
+  lang: Lang;
   hidden: boolean;
   busy: boolean;
   onToggle: () => void;
@@ -1856,7 +1931,7 @@ function HideAmountDueToggle({
       onClick={onToggle}
       disabled={busy}
       className={"no-print inline-flex items-center gap-2 text-xs " + (busy ? "opacity-50 pointer-events-none" : "")}
-      title="Controls whether Amount Due appears in print / PDF / email — always visible here on-screen."
+      title={t("trips.invoiceSheet.hideDueTitle", lang)}
     >
       <span
         className={
@@ -1871,12 +1946,15 @@ function HideAmountDueToggle({
           }
         />
       </span>
-      <span className="muted">{hidden ? "Hidden from customer" : "Visible to customer"}</span>
+      <span className="muted">
+        {t(hidden ? "trips.invoiceSheet.hiddenFromCustomer" : "trips.invoiceSheet.visibleToCustomer", lang)}
+      </span>
     </button>
   );
 }
 
 function GuardBox({
+  lang,
   warning,
   busy,
   confirmLabel,
@@ -1884,6 +1962,7 @@ function GuardBox({
   onCancel,
   onConfirm,
 }: {
+  lang: Lang;
   warning: string;
   busy: boolean;
   confirmLabel: string;
@@ -1899,14 +1978,14 @@ function GuardBox({
       </p>
       <div className="flex items-center gap-2">
         <Btn variant="ghost" onClick={onCancel}>
-          Cancel
+          {t("common.cancel", lang)}
         </Btn>
         <Btn
           variant="primary"
           onClick={onConfirm}
           className={busy || confirmDisabled ? "opacity-50 pointer-events-none" : "bg-rose-600 hover:bg-rose-700"}
         >
-          {busy ? "Working…" : confirmLabel}
+          {busy ? t("trips.invoiceSheet.working", lang) : confirmLabel}
         </Btn>
       </div>
     </div>

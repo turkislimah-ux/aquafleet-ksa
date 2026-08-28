@@ -512,9 +512,18 @@ export const dict = {
     // from (the customer's own prepaid credit), and shortening it to "Balance"
     // would read as the amount still owed — the opposite fact. Distinct from
     // `prepaid` above, which is the payment MODE the project runs under.
+    //
+    // The three Arabic values are the PDF invoice's own (PAYMENT_METHOD_AR,
+    // lib/invoicePdfTemplate.ts:149-153), so a settled invoice names its
+    // payment method identically on screen and on the document it prints to.
+    // `payBalance` was aligned last (رصيد مدفوع مقدمًا → الرصيد المدفوع مقدمًا,
+    // item 6): definite, matching the PDF. Arabic only — the English side of
+    // all three is untouched. THIS KEY IS SHARED, so the change also lands on
+    // BreakdownReport, AddBalanceModal and StatementModal, which is the point:
+    // one payment method, one name, wherever it is read.
     payCash: { en: "Cash", ar: "نقدًا" },
     payBankTransfer: { en: "Bank transfer", ar: "تحويل بنكي" },
-    payBalance: { en: "Prepaid balance", ar: "رصيد مدفوع مقدمًا" },
+    payBalance: { en: "Prepaid balance", ar: "الرصيد المدفوع مقدمًا" },
 
     // WaterType.
     waterPotable: { en: "Potable", ar: "صالحة للشرب" },
@@ -6853,19 +6862,20 @@ export const dict = {
    * The money route, and the last one. Grouped by the SURFACE that owns the
    * string, same as every namespace above it.
    *
-   * TWO THINGS ARE DELIBERATELY ABSENT FROM THIS NAMESPACE.
+   * ONE THING IS DELIBERATELY ABSENT FROM THIS NAMESPACE, AND ONE THING THAT
+   * USED TO BE ABSENT NO LONGER IS.
    *
-   * 1. THE PRINTED INVOICE SHEET. `app/trips/InvoiceDetailModal.tsx` renders a
-   *    `#invoice-print` subtree that is a DOCUMENT, not a screen, and it stays
-   *    ENGLISH. The bilingual artifact customers actually receive is
-   *    `lib/invoicePdfTemplate.ts`, which stacks an EN line and an AR line for
-   *    every static label; translating the browser-print sheet instead would
-   *    give the same invoice two different layouts depending on which button
-   *    produced it. Everything under `trips.invoice.*` below is the CHROME
-   *    around that sheet — toolbar, dialogs, email picker, errors — every one
-   *    of which carries a `no-print` class. If a key here ever starts
-   *    rendering inside `#invoice-print`, that is the bug, not a translation
-   *    gap.
+   * 1. THE INVOICE SHEET IS NOW TRANSLATED, and this paragraph used to say the
+   *    opposite. Batch 9 froze `#invoice-print` in English on the reasoning
+   *    that a document is not a screen and that `lib/invoicePdfTemplate.ts` —
+   *    bilingual since Batch D — was the artifact customers receive. Item 6
+   *    overturned the first half of that and kept the second: the POPUP is a
+   *    screen the operator reads, it follows the app language, and its Arabic
+   *    is COPIED FROM THE PDF rather than invented, so the two never drift.
+   *    `trips.invoice.*` is still the chrome around the sheet (toolbar,
+   *    dialogs, email picker, errors); `trips.invoiceSheet.*` is the sheet.
+   *    The PDF and the Download path are untouched by that work — the download
+   *    language picker is its own later step.
    *
    * 2. SERVER-ACTION FAILURE TEXT. Every `error:` string returned by
    *    `actions.ts` and `invoiceActions.ts` stays English. They are surfaced
@@ -6991,36 +7001,32 @@ export const dict = {
     },
 
     /**
-     * InvoiceDetailModal — CHROME ONLY. This group is deliberately SMALL, and
-     * the reason it is small is the whole ruling for this file.
+     * InvoiceDetailModal — CHROME. The workspace AROUND the sheet: the sticky
+     * toolbar, the load/error states, and the email-type picker, which is a
+     * separate portal rendering outside `#invoice-print` entirely.
      *
-     * THE INVOICE SHEET IS FROZEN. `#invoice-print` (InvoiceDetailModal.tsx
-     * :681–1230) is the ZATCA-facing document, and every word inside that
-     * subtree stays ENGLISH, byte for byte — the buyer/seller identity blocks,
-     * the trip and special-charge tables, Amount Due, Grand Total, the
-     * Sales-Return banner, the lifecycle guard boxes, the payment forms. The
-     * official downloadable artifact, `lib/invoicePdfTemplate.ts`, is ALREADY
-     * bilingual and is not touched by this batch either. A tax document does
-     * not change shape because the operator switched the UI language.
+     * THE SHEET ITSELF IS `trips.invoiceSheet`, one group below. This header
+     * used to say the sheet was frozen in English and that this group was
+     * "deliberately small" for that reason; item 6 translated the sheet, so the
+     * split is no longer frozen-vs-translated. It is now just CHROME vs
+     * DOCUMENT — two groups because they answer to different sources (chrome is
+     * written for this app; the sheet's Arabic is copied from the PDF), not
+     * because one of them is off limits.
      *
-     * WHAT IS IN HERE is the WORKSPACE around that sheet: the sticky toolbar,
-     * the load/error states, and the email-type picker — a separate portal that
-     * renders OUTSIDE `#invoice-print` entirely.
+     * THREE ERROR PARAGRAPHS STILL LIVE HERE rather than in the sheet group.
+     * `actionError`, `pdfError` and `periodError` render inside the
+     * `#invoice-print` element but on `no-print` nodes, and their literals are
+     * SET in the handlers well above the sheet — they are operator feedback
+     * that happens to be positioned there, not document content. A server
+     * action's own `error:` string still passes through in English; only the
+     * client-side fallbacks are looked up.
      *
-     * THREE ERROR PARAGRAPHS ARE THE EDGE CASE, and they are listed here on
-     * purpose. `actionError`, `pdfError` and `periodError` render at :1014,
-     * :1015 and :711 — inside the `#invoice-print` element but on `no-print`
-     * nodes, so they are never on the printed page or in the PDF. They are
-     * operator feedback, not document content. Their literals are SET in the
-     * handlers above the sheet (:242–:485), so no source line inside the frozen
-     * range moves for them. A server action's own `error:` string still passes
-     * through in English — only the client-side fallbacks are looked up.
-     *
-     * NOT TRANSLATED, DELIBERATELY: `buildMailtoFor()` (:1881). Its subject and
-     * body are outbound correspondence that REACHES THE CUSTOMER, the same
-     * class of text as the invoice sheet and the `translate="no"` company name
-     * at :1228 — not app chrome. What the customer receives must not depend on
-     * which language the operator happened to be reading.
+     * NOT TRANSLATED, DELIBERATELY: `buildMailtoFor()`. Its subject and body
+     * are outbound correspondence that REACHES THE CUSTOMER, the same class of
+     * text as the `translate="no"` company name in the sheet's footer — not app
+     * chrome. What the customer receives must not depend on which language the
+     * operator happened to be reading. The same reasoning is why this batch
+     * left `lib/invoicePdfTemplate.ts` and the Download path alone.
      *
      * From `common`: `print`. From `trips.invoices`: `badPeriod`, which this
      * file's period editor validates with the IDENTICAL sentence InvoicesModal
@@ -7029,8 +7035,7 @@ export const dict = {
      *
      * NO MONEY KEY IS IN THIS GROUP. Every figure on this screen is read from
      * a frozen snapshot column or from previewInvoice(); nothing here re-rounds,
-     * re-bases or re-signs an amount, and no VAT/subtotal/total/ledger caption
-     * appears below — those all live inside the frozen sheet.
+     * re-bases or re-signs an amount.
      */
     invoice: {
       // The arrow flips with the reading direction — same treatment as
@@ -7114,6 +7119,318 @@ export const dict = {
           hint: { en: "Explains this invoice was cancelled.", ar: "يوضّح أن هذه الفاتورة أُلغيت." },
         },
       },
+    },
+
+    /**
+     * InvoiceDetailModal — THE SHEET ITSELF. `#invoice-print`, the subtree the
+     * Print button puts on paper.
+     *
+     * THE ARABIC IN HERE IS NOT NEW PROSE. Wherever a label already exists in
+     * `lib/invoicePdfTemplate.ts` — which has been bilingual since Batch D —
+     * that file's Arabic string is copied here BYTE FOR BYTE. The PDF is the
+     * artifact the customer receives and the older of the two, so it is the
+     * source and this is the copy, never the other way round. A label with no
+     * counterpart there was written fresh and is marked `FRESH` on its own line
+     * so the next reader can tell the two apart without diffing two files.
+     *
+     * "VAT" IS LATIN IN BOTH LANGUAGES, AND THIS DIVERGES FROM THE PDF ON
+     * PURPOSE. The PDF renders the LABEL as `ضريبة القيمة المضافة`; on screen
+     * the app's standing rule is that VAT is written "VAT" in Arabic too — the
+     * same call `trips.statement.colVat` and `trips.statement.vatSplit` already
+     * make. Two keys below (`totalVat`, and the `vatSplit`/`chargesSubtotal`
+     * money strips) are therefore the only places where the sheet and the PDF
+     * deliberately read differently. Everything else matches.
+     *
+     * EVERY NUMBER STAYS LATIN. Nothing in this group formats a figure: amounts
+     * come from `formatSar`/`formatNum` and dates from `formatDate`, all pinned
+     * to "en-US" in `lib/utils.ts` for exactly this reason. `{net}`/`{vat}`/
+     * `{n}`/`{date}` are splice points for text those helpers already produced.
+     *
+     * NO MONEY KEY MEANS NO MONEY MATH. Every caption below sits BESIDE a figure
+     * the invoice engine already computed and frozen; not one of them re-rounds,
+     * re-bases, re-signs or re-totals anything, and no stored column, view or
+     * snapshot moved to make this group exist.
+     *
+     * STATUS AND PAYMENT METHOD ARE NOT IN HERE. They key off the ENUM VALUE
+     * through `invoiceStatusLabel()` / `paymentMethodLabel()` in
+     * `lib/enum-labels.ts`, which resolve to the `labels.inv*` / `labels.pay*`
+     * leaves the rest of the app already shares. The sheet's Status line used to
+     * render `INVOICE_STATUS_LABELS` directly, which is why it stayed English
+     * while the toolbar pill beside it translated.
+     *
+     * From `common`: `date`, `description` has no common entry so it is below,
+     * `amount`, `status`, `type`, `total` (the stack's row is "TOTAL", its own
+     * key), `save`, `cancel`, `saving`, `recording`.
+     */
+    invoiceSheet: {
+      // The sheet's own headline. The PDF's <h1> is `Tax Invoice` / `فاتورة
+      // ضريبية`; on screen the English headline has always been the reference
+      // (`Invoice #1042`) and stays that, byte for byte. The ARABIC takes the
+      // tax term, because فاتورة on its own is a shop receipt and this document
+      // is a ZATCA tax invoice.
+      headline: { en: "Invoice #{n}", ar: "فاتورة ضريبية #{n}" },
+      // FRESH — the PDF never renders an unnumbered headline (a draft's ref
+      // falls back to its period inside the Invoice Info block instead).
+      headlineDraft: {
+        en: "Invoice (draft — not yet numbered)",
+        ar: "فاتورة ضريبية (مسودة — لم تُرقَّم بعد)",
+      },
+      // Draft-only period editor. `no-print`, but inside the sheet.
+      // FRESH — the PDF has one `Period` label, not a start/end pair.
+      fPeriodStart: { en: "Period start", ar: "بداية الفترة" },
+      fPeriodEnd: { en: "Period end", ar: "نهاية الفترة" },
+      // FRESH — `title=` on the period button.
+      editPeriodHint: {
+        en: "Click to change this draft's period",
+        ar: "اضغط لتغيير فترة هذه المسودة",
+      },
+
+      // ── The three header cards ───────────────────────────────────────────
+      buyer: { en: "Buyer", ar: "المشتري" },
+      seller: { en: "Seller", ar: "البائع" },
+      // PDF title is `Invoice Info` (capital I); the sheet's is `Invoice info`.
+      // The English is left exactly as it renders today — only the Arabic is
+      // lifted.
+      invoiceInfo: { en: "Invoice info", ar: "بيانات الفاتورة" },
+      // FRESH — the PDF prints an em dash for a missing name.
+      notOnFile: { en: "Not on file", ar: "غير مسجَّل" },
+      // PDF says `VAT Reg. No.`, the sheet says `VAT Registration No.` — two
+      // different English strings for one Arabic one. The Arabic is the PDF's.
+      fVatRegNo: { en: "VAT Registration No.", ar: "الرقم الضريبي" },
+      fCrNo: { en: "CR No.", ar: "رقم السجل التجاري" },
+      fTel: { en: "Tel", ar: "هاتف" },
+      fMobile: { en: "Mobile", ar: "جوال" },
+      fInvoiceNo: { en: "Invoice No.", ar: "رقم الفاتورة" },
+      // PDF: `Issue Date`. Same Arabic.
+      fIssueDate: { en: "Issue date", ar: "تاريخ الإصدار" },
+      fPeriod: { en: "Period", ar: "الفترة" },
+      // The VALUE in the Invoice No. row before a number is assigned. Its
+      // first word is the PDF's own draft status label.
+      vDraftNotNumbered: { en: "Draft — not yet numbered", ar: "مسودة — لم تُرقَّم بعد" },
+
+      // ── Sales Return banner (status === 'void') ──────────────────────────
+      salesReturn: { en: "Sales Return", ar: "مرتجع مبيعات" },
+      // LEADING SPACE IS PART OF THE VALUE. These two are appended to the
+      // bold label above by separate JSX expressions, and the newline between
+      // them in the source collapses to nothing — the space has always lived
+      // inside the template literal, so it lives inside the string here.
+      // FRESH: the PDF leaves this date connector in English on both lines.
+      voidedOn: { en: " on {date}", ar: " بتاريخ {date}" },
+      // `{reason}` is operator-entered text. Identical in both languages: the
+      // separator is punctuation, not words.
+      voidSuffix: { en: " — {reason}", ar: " — {reason}" },
+      // `{ref}` is ` (INV-1042)` or empty — assembled at the call site exactly
+      // as the PDF assembles its own.
+      salesReturnNote: {
+        en: "This invoice{ref} is unpaid — marked Sales Return.",
+        ar: "هذه الفاتورة{ref} غير مدفوعة — تم تحويلها إلى مرتجع مبيعات.",
+      },
+
+      // ── Table titles ─────────────────────────────────────────────────────
+      tCoveredTrips: { en: "Covered Trips", ar: "الرحلات المغطاة" },
+      tUnpaidTrips: { en: "Unpaid Trips", ar: "الرحلات غير المدفوعة" },
+      tCoveredPostpaid: {
+        en: "Covered (paid from prepaid balance)",
+        ar: "مغطى (من الرصيد المسبق)",
+      },
+      // FRESH — the PDF's postpaid due table is titled `Amount Due
+      // (collectible)` / `المبلغ المستحق (قابل للتحصيل)`, which is a different
+      // sentence from the sheet's. Built from the PDF's own vocabulary rather
+      // than lifted whole.
+      tUnpaidPostpaid: {
+        en: "Unpaid — Amount Due (trips)",
+        ar: "غير مدفوعة — المبلغ المستحق (رحلات)",
+      },
+
+      // ── Table columns ────────────────────────────────────────────────────
+      // `Date`, `Type`, `Amount` and `Status` come from `common` — same English,
+      // and `common.date`/`common.amount`/`common.status` already carry the
+      // PDF's exact Arabic.
+      colDescription: { en: "Description", ar: "البيان" },
+      // FRESH — the screen tables carry Quantity/Price columns the PDF does
+      // not have (it prints one Amount per row). `common.qty` is "Qty", a
+      // different English word, so it is not reused here.
+      colQuantity: { en: "Quantity", ar: "الكمية" },
+      colPrice: { en: "Price", ar: "السعر" },
+      // FRESH — LineTable's empty state. The PDF omits an empty table entirely.
+      emptyLines: { en: "Nothing here.", ar: "لا يوجد شيء هنا." },
+      // PDF: `No trips` / `لا توجد رحلات`. The sheet's English carries a full
+      // stop, so the Arabic carries one too.
+      emptyTrips: { en: "No trips.", ar: "لا توجد رحلات." },
+
+      // ── Money strips under the tables ────────────────────────────────────
+      subtotal: { en: "Subtotal", ar: "المجموع الفرعي" },
+      // IDENTICAL IN BOTH LANGUAGES, and that is the point — see this group's
+      // header on VAT. Same shape as `trips.statement.vatSplit`. Both operands
+      // arrive already formatted by `formatNum`, so both stay Latin.
+      vatSplit: { en: "{net} + VAT {vat}", ar: "{net} + VAT {vat}" },
+      // PDF: `Balance` / `الرصيد`. The sheet's English says "Running Balance";
+      // the Arabic is the PDF's, so the two documents name the figure the same.
+      runningBalance: { en: "Running Balance", ar: "الرصيد" },
+      remaining: { en: "Remaining", ar: "المتبقي" },
+
+      // ── Special charges ──────────────────────────────────────────────────
+      specialCharges: { en: "Special Charges", ar: "رسوم إضافية" },
+      badgeCovered: { en: "Covered", ar: "مغطى" },
+      badgeRollsForward: { en: "Rolls forward", ar: "يُرحّل" },
+      // FRESH — `title=` on two `no-print` icon buttons. The attachment is
+      // internal-only and never reaches the PDF, so it has no counterpart.
+      viewImageTitle: {
+        en: "View attached image (internal only)",
+        ar: "عرض الصورة المرفقة (داخلي فقط)",
+      },
+      attachImageTitle: {
+        en: "Attach an image (internal only)",
+        ar: "إرفاق صورة (داخلي فقط)",
+      },
+      // One run, not three: the English is a single text node ending in "=".
+      chargesSubtotal: {
+        en: "Subtotal {net} + VAT {vat} =",
+        ar: "المجموع الفرعي {net} + VAT {vat} =",
+      },
+      // FRESH — the PDF omits the charges table when there is nothing in it.
+      noCharges: {
+        en: "No special charges on this invoice yet.",
+        ar: "لا توجد رسوم إضافية على هذه الفاتورة بعد.",
+      },
+      // Add-charge form — `no-print`, editable stages only. All FRESH: this is
+      // an operator surface with no printed counterpart at all.
+      addChargeTitle: { en: "Add a charge", ar: "إضافة رسوم" },
+      phCallout: { en: "e.g. Callout fee", ar: "مثال: رسوم استدعاء" },
+      fPricePreVat: { en: "Price (pre-VAT)", ar: "السعر (قبل VAT)" },
+      fAttachImage: {
+        en: "Attach image (optional, internal only)",
+        ar: "إرفاق صورة (اختياري، داخلي فقط)",
+      },
+      adding: { en: "Adding…", ar: "جارٍ الإضافة…" },
+      addChargeBtn: { en: "Add charge", ar: "إضافة الرسوم" },
+
+      // ── Totals ───────────────────────────────────────────────────────────
+      amountDue: { en: "Amount Due", ar: "المبلغ المستحق" },
+      // The TotalCard's second line. Latin on both sides, same reasoning as
+      // `vatSplit` — and note the operand order differs from it (the word VAT
+      // trails here), which is why it is a separate key and not a reuse.
+      totalCardSplit: { en: "{subtotal} + {vat} VAT", ar: "{subtotal} + {vat} VAT" },
+      subtotalCovered: {
+        en: "Subtotal (Covered trips)",
+        ar: "المجموع الفرعي (الرحلات المغطاة)",
+      },
+      chargesCovered: { en: "Special Charges (covered)", ar: "رسوم إضافية (مغطاة)" },
+      // FRESH — the PDF's grand-total stack is prepaid-only, so it has no
+      // "unpaid trips" subtotal row. Composed from the PDF's own two phrases.
+      subtotalUnpaid: {
+        en: "Subtotal (Unpaid trips)",
+        ar: "المجموع الفرعي (الرحلات غير المدفوعة)",
+      },
+      // DIVERGES FROM THE PDF DELIBERATELY — the PDF says `إجمالي ضريبة القيمة
+      // المضافة`. See this group's header: on screen VAT is Latin.
+      totalVat: { en: "Total VAT", ar: "إجمالي VAT" },
+      // The stack's final row. Uppercase in English, so not `common.total`.
+      grandTotal: { en: "TOTAL", ar: "الإجمالي" },
+
+      // ── Hide-amount-due toggle (`no-print`) ──────────────────────────────
+      // FRESH — a control, not document content.
+      hideDueTitle: {
+        en: "Controls whether Amount Due appears in print / PDF / email — always visible here on-screen.",
+        ar: "يتحكّم في ظهور المبلغ المستحق في الطباعة / PDF / البريد — ويبقى ظاهرًا دائمًا هنا على الشاشة.",
+      },
+      hiddenFromCustomer: { en: "Hidden from customer", ar: "مخفي عن العميل" },
+      visibleToCustomer: { en: "Visible to customer", ar: "ظاهر للعميل" },
+
+      // ── Review-stage blockers (`no-print`) ───────────────────────────────
+      // FRESH. English branches on `> 1`, which is exactly what `plural()`
+      // gives: only `one` takes the singular, and the count is always ≥ 1 here
+      // because the panel is gated on `blockers.length > 0`.
+      blockers: {
+        one: {
+          en: "{n} trip in this invoice's period is not yet delivered — Confirm is blocked until every trip is delivered.",
+          ar: "رحلة واحدة في فترة هذه الفاتورة لم تُسلَّم بعد — التأكيد متوقف حتى تُسلَّم كل الرحلات.",
+        },
+        two: {
+          en: "{n} trips in this invoice's period are not yet delivered — Confirm is blocked until every trip is delivered.",
+          ar: "رحلتان في فترة هذه الفاتورة لم تُسلَّما بعد — التأكيد متوقف حتى تُسلَّم كل الرحلات.",
+        },
+        few: {
+          en: "{n} trips in this invoice's period are not yet delivered — Confirm is blocked until every trip is delivered.",
+          ar: "{n} رحلات في فترة هذه الفاتورة لم تُسلَّم بعد — التأكيد متوقف حتى تُسلَّم كل الرحلات.",
+        },
+        many: {
+          en: "{n} trips in this invoice's period are not yet delivered — Confirm is blocked until every trip is delivered.",
+          ar: "{n} رحلة في فترة هذه الفاتورة لم تُسلَّم بعد — التأكيد متوقف حتى تُسلَّم كل الرحلات.",
+        },
+      },
+      // FRESH — the link label when a blocking trip has no ref yet.
+      viewTrip: { en: "View trip", ar: "عرض الرحلة" },
+
+      // ── Paid box ─────────────────────────────────────────────────────────
+      paid: { en: "Paid", ar: "مدفوعة" },
+      // NO leading space here, unlike `voidedOn` above — this one sits between
+      // two JSX text runs that already supply their own spaces.
+      // FRESH: the PDF leaves its date connector English.
+      paidOn: { en: "on {date}", ar: "بتاريخ {date}" },
+      via: { en: "via", ar: "عبر" },
+      // FRESH — `no-print` button; the proof file is internal.
+      viewProof: { en: "View proof", ar: "عرض الإثبات" },
+
+      // ── Lifecycle action bar (`no-print`, absent when read-only) ─────────
+      // ALL FRESH. None of this reaches paper: these are the operator's stage
+      // transitions and their guard boxes.
+      moveToReview: { en: "Move to Review", ar: "نقل إلى المراجعة" },
+      deleteDraft: { en: "Delete draft", ar: "حذف المسودة" },
+      guardDeleteDraft: {
+        en: "Deletes this draft and releases every trip it had reserved, freeing them for another invoice. This cannot be undone.",
+        ar: "يحذف هذه المسودة ويُحرّر كل رحلة كانت محجوزة لها، لتصبح متاحة لفاتورة أخرى. لا يمكن التراجع عن هذا.",
+      },
+      confirmDeleteDraft: { en: "Yes, delete draft", ar: "نعم، احذف المسودة" },
+      backToDraft: { en: "Back to Draft", ar: "رجوع إلى المسودة" },
+      cannotConfirmTitle: {
+        en: "Cannot confirm — undelivered trips in this invoice's period (see list above).",
+        ar: "لا يمكن التأكيد — توجد رحلات غير مسلَّمة في فترة هذه الفاتورة (انظر القائمة أعلاه).",
+      },
+      confirmInvoiceBtn: { en: "Confirm Invoice", ar: "تأكيد الفاتورة" },
+      // "VAT ref" keeps VAT Latin, same rule as the labels above.
+      guardConfirm: {
+        en: "Confirming assigns a permanent invoice number and VAT ref, and locks the invoice forever — there is no revert to draft after this. Special charges can no longer be edited.",
+        ar: "التأكيد يمنح رقم فاتورة ومرجع VAT دائمين، ويقفل الفاتورة إلى الأبد — لا يوجد رجوع إلى المسودة بعد ذلك. ولن يعود بالإمكان تعديل الرسوم الإضافية.",
+      },
+      confirmConfirm: { en: "Yes, confirm invoice", ar: "نعم، أكّد الفاتورة" },
+      payWithBalance: { en: "Pay with Balance", ar: "السداد من الرصيد" },
+      markPaid: { en: "Mark Paid", ar: "تحديد كمدفوعة" },
+      settledBalance: { en: "Settled balance", ar: "الرصيد المسوّى" },
+      thisInvoiceGrand: { en: "This invoice (Grand Total)", ar: "هذه الفاتورة (الإجمالي الكلي)" },
+      remainingSettled: { en: "Remaining settled balance", ar: "الرصيد المسوّى المتبقي" },
+      balanceNote: {
+        en: "The balance already covered these trips/charges at delivery — this just records the settlement and locks them. No new money changes hands.",
+        ar: "الرصيد غطّى هذه الرحلات/الرسوم عند التسليم — هذا يسجّل التسوية ويقفلها فقط. لا تنتقل أي أموال جديدة.",
+      },
+      confirmPayment: { en: "Confirm payment", ar: "تأكيد السداد" },
+      fPaymentReference: { en: "Payment reference", ar: "مرجع السداد" },
+      fPaymentDate: { en: "Payment date", ar: "تاريخ السداد" },
+      // Appended to the two labels above. LEADING SPACE, as in the literals.
+      sufRequired: { en: " (required) *", ar: " (مطلوب) *" },
+      sufOptional: { en: " (optional)", ar: " (اختياري)" },
+      fPayNote: { en: "Note (optional)", ar: "ملاحظة (اختياري)" },
+      fProof: { en: "Proof of payment (required) *", ar: "إثبات الدفع (مطلوب) *" },
+      fVoidReason: { en: "Sales Return reason *", ar: "سبب مرتجع المبيعات *" },
+      guardVoid: {
+        en: "Marking this a Sales Return is the only undo for a confirmed invoice, and it's terminal — there is no path back to Confirmed/Paid. The invoice number and VAT ref are retained forever, but this invoice will no longer be collectible.",
+        ar: "تحويلها إلى مرتجع مبيعات هو التراجع الوحيد عن فاتورة مؤكدة، وهو نهائي — لا يوجد طريق للعودة إلى مؤكدة/مدفوعة. يُحتفظ برقم الفاتورة ومرجع VAT إلى الأبد، لكن هذه الفاتورة لن تعود قابلة للتحصيل.",
+      },
+      confirmVoid: { en: "Yes, mark as Sales Return", ar: "نعم، حوّلها إلى مرتجع مبيعات" },
+      adminUnpay: { en: "Admin: Un-pay", ar: "إداري: إلغاء السداد" },
+      fUnpayReason: { en: "Un-pay reason *", ar: "سبب إلغاء السداد *" },
+      guardUnpay: {
+        en: "This reverses the payment and unlocks every trip this invoice locked. Only do this to correct a mistake — the customer's balance/collectible status changes immediately.",
+        ar: "هذا يعكس السداد ويفكّ قفل كل رحلة قفلتها هذه الفاتورة. لا تفعل ذلك إلا لتصحيح خطأ — يتغيّر رصيد العميل/حالة التحصيل فورًا.",
+      },
+      confirmUnpay: { en: "Yes, un-pay", ar: "نعم، ألغِ السداد" },
+      working: { en: "Working…", ar: "جارٍ التنفيذ…" },
+
+      // ── Footer ───────────────────────────────────────────────────────────
+      // FRESH. `{date}` is `formatDate()`'s "Aug 28, 2026" — Latin digits, but
+      // an ENGLISH month abbreviation in both languages, because the formatter
+      // is pinned to "en-US" app-wide and this batch does not touch formatters.
+      generated: { en: "Generated {date}", ar: "أُنشئ في {date}" },
     },
 
     // CustomersTab — one row per customer, KPIs over the current calendar
