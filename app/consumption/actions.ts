@@ -24,6 +24,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { ExitPermit, ExitPermitFile } from "@/lib/db-types";
 import { APPROVAL_SUBJECT_COLUMN, type ApprovalKind } from "@/lib/consumption-approvals";
+import { t, type Lang } from "@/lib/i18n";
 
 const BUCKET = "exit-permits";
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -36,8 +37,14 @@ async function actorEmail(supabase: ReturnType<typeof createClient>): Promise<st
 // PostgREST surfaces a RAISE as a message string. These RPCs raise sentences
 // meant to be read (0093 wrote them that way deliberately), so they are
 // passed through rather than replaced with a generic apology.
-function rpcError(e: { message?: string } | null): string {
-  return e?.message ?? "Something went wrong.";
+//
+// PASSED THROUGH MEANS PASSED THROUGH IN ENGLISH — those sentences live in the
+// migrations, and an Arabic reader gets them as written. Translating them needs
+// an error-code contract between plpgsql and this file, which is a schema
+// change, not a copy fix (see the note on `consumption.errors`). Only the
+// no-message fallback is ours, so only it is translated.
+function rpcError(e: { message?: string } | null, lang: Lang): string {
+  return e?.message ?? t("consumption.errors.rpcFallback", lang);
 }
 
 // ---------------------------------------------------------------------------
@@ -62,27 +69,31 @@ export type ExitPermitHeaderInput = {
 
 // Client-side mirrors of 0093's CHECK constraints, so a mistake reads as a
 // sentence instead of a raw constraint violation. The DB stays the real gate.
-function validateHeader(input: ExitPermitHeaderInput): string | null {
-  if (!input.warehouse_id) return "Choose the warehouse the parts leave from.";
+//
+// This is the FORM-LEVEL guard: it fires on submit and prints as one banner at
+// the top of the permit modal, which is why it needs `lang` even though the
+// per-field labels above it were translated long ago.
+function validateHeader(input: ExitPermitHeaderInput, lang: Lang): string | null {
+  if (!input.warehouse_id) return t("consumption.errors.warehouseRequired", lang);
   if (input.kind === "returnable" && !input.expected_return_on) {
-    return "A returnable permit needs an expected return date.";
+    return t("consumption.errors.returnableNeedsDate", lang);
   }
   if (input.kind === "permanent" && input.expected_return_on) {
-    return "A permanent permit cannot carry a return date.";
+    return t("consumption.errors.permanentNoDate", lang);
   }
   const ids = [
     input.destination_water_station_id, input.destination_project_id,
     input.destination_truck_id, input.destination_customer_id,
   ];
   if (input.destination_kind === "other") {
-    if (!input.destination_other_text?.trim()) return "Describe the destination.";
-    if (ids.some(Boolean)) return "An 'other' destination cannot also point at a record.";
+    if (!input.destination_other_text?.trim()) return t("consumption.errors.describeDestination", lang);
+    if (ids.some(Boolean)) return t("consumption.errors.otherDestNoRecord", lang);
   } else if (ids.filter(Boolean).length !== 1) {
-    return "Choose exactly one destination.";
+    return t("consumption.errors.oneDestination", lang);
   }
   const hasStaff = !!input.receiver_staff_id;
   const hasName = !!input.receiver_name?.trim();
-  if (hasStaff === hasName) return "Give a receiver: either a staff member or a name.";
+  if (hasStaff === hasName) return t("consumption.errors.receiverRequired", lang);
   return null;
 }
 
@@ -106,8 +117,9 @@ function headerRow(input: ExitPermitHeaderInput) {
 
 export async function createExitPermitDraft(
   input: ExitPermitHeaderInput,
+  lang: Lang,
 ): Promise<{ error: string | null; permit?: ExitPermit }> {
-  const bad = validateHeader(input);
+  const bad = validateHeader(input, lang);
   if (bad) return { error: bad };
 
   const supabase = createClient();
@@ -126,9 +138,10 @@ export async function createExitPermitDraft(
 export async function updateExitPermitDraft(
   permitId: string,
   input: ExitPermitHeaderInput,
+  lang: Lang,
 ): Promise<{ error: string | null }> {
-  if (!permitId) return { error: "Permit is required." };
-  const bad = validateHeader(input);
+  if (!permitId) return { error: t("consumption.errors.permitRequired", lang) };
+  const bad = validateHeader(input, lang);
   if (bad) return { error: bad };
 
   const supabase = createClient();
@@ -142,15 +155,18 @@ export async function updateExitPermitDraft(
     .select("id");
   if (error) return { error: error.message };
   if (!data || data.length === 0) {
-    return { error: "This permit is no longer a draft — it cannot be edited." };
+    return { error: t("consumption.errors.noLongerDraft", lang) };
   }
 
   revalidatePath("/consumption");
   return { error: null };
 }
 
-export async function deleteExitPermitDraft(permitId: string): Promise<{ error: string | null }> {
-  if (!permitId) return { error: "Permit is required." };
+export async function deleteExitPermitDraft(
+  permitId: string,
+  lang: Lang,
+): Promise<{ error: string | null }> {
+  if (!permitId) return { error: t("consumption.errors.permitRequired", lang) };
 
   const supabase = createClient();
 
@@ -170,7 +186,7 @@ export async function deleteExitPermitDraft(permitId: string): Promise<{ error: 
     .select("id");
   if (error) return { error: error.message };
   if (!data || data.length === 0) {
-    return { error: "Only a draft can be deleted. An exited permit is a record — void it instead." };
+    return { error: t("consumption.errors.onlyDraftDeletable", lang) };
   }
 
   if (paths.length > 0) await supabase.storage.from(BUCKET).remove(paths);
@@ -186,14 +202,15 @@ export async function deleteExitPermitDraft(permitId: string): Promise<{ error: 
 async function assertDraft(
   supabase: ReturnType<typeof createClient>,
   permitId: string,
+  lang: Lang,
 ): Promise<string | null> {
   const { data } = await supabase
     .from("exit_permits")
     .select("status")
     .eq("id", permitId)
     .single();
-  if (!data) return "Permit not found.";
-  if (data.status !== "draft") return "Items can only be changed while the permit is a draft.";
+  if (!data) return t("consumption.errors.permitNotFound", lang);
+  if (data.status !== "draft") return t("consumption.errors.itemsDraftOnly", lang);
   return null;
 }
 
@@ -202,12 +219,13 @@ export async function addExitPermitLine(
   partId: string,
   qty: number,
   note: string | null,
+  lang: Lang,
 ): Promise<{ error: string | null }> {
-  if (!permitId || !partId) return { error: "Permit and part are required." };
-  if (!Number.isFinite(qty) || qty <= 0) return { error: "Quantity must be more than zero." };
+  if (!permitId || !partId) return { error: t("consumption.errors.permitAndPartRequired", lang) };
+  if (!Number.isFinite(qty) || qty <= 0) return { error: t("consumption.errors.qtyPositive", lang) };
 
   const supabase = createClient();
-  const bad = await assertDraft(supabase, permitId);
+  const bad = await assertDraft(supabase, permitId, lang);
   if (bad) return { error: bad };
 
   const { error } = await supabase.from("exit_permit_lines").insert({
@@ -226,11 +244,12 @@ export async function updateExitPermitLineQty(
   permitId: string,
   lineId: string,
   qty: number,
+  lang: Lang,
 ): Promise<{ error: string | null }> {
-  if (!Number.isFinite(qty) || qty <= 0) return { error: "Quantity must be more than zero." };
+  if (!Number.isFinite(qty) || qty <= 0) return { error: t("consumption.errors.qtyPositive", lang) };
 
   const supabase = createClient();
-  const bad = await assertDraft(supabase, permitId);
+  const bad = await assertDraft(supabase, permitId, lang);
   if (bad) return { error: bad };
 
   // qty ONLY. unit_price_sar and qty_returned are written by the RPCs alone —
@@ -249,9 +268,10 @@ export async function updateExitPermitLineQty(
 export async function removeExitPermitLine(
   permitId: string,
   lineId: string,
+  lang: Lang,
 ): Promise<{ error: string | null }> {
   const supabase = createClient();
-  const bad = await assertDraft(supabase, permitId);
+  const bad = await assertDraft(supabase, permitId, lang);
   if (bad) return { error: bad };
 
   const { error } = await supabase
@@ -269,14 +289,17 @@ export async function removeExitPermitLine(
 // THE MONEY MOMENTS — the three orchestrator RPCs, nothing else.
 // ---------------------------------------------------------------------------
 
-export async function confirmExitPermit(permitId: string): Promise<{ error: string | null }> {
-  if (!permitId) return { error: "Permit is required." };
+export async function confirmExitPermit(
+  permitId: string,
+  lang: Lang,
+): Promise<{ error: string | null }> {
+  if (!permitId) return { error: t("consumption.errors.permitRequired", lang) };
   const supabase = createClient();
   const { error } = await supabase.rpc("confirm_exit_permit", {
     p_permit_id: permitId,
     p_actor: await actorEmail(supabase),
   });
-  if (error) return { error: rpcError(error) };
+  if (error) return { error: rpcError(error, lang) };
 
   revalidatePath("/consumption");
   revalidatePath("/inventory");
@@ -288,10 +311,11 @@ export async function recordExitPermitReturn(
   lines: { line_id: string; qty: number }[],
   returnedOn: string,
   note: string | null,
+  lang: Lang,
 ): Promise<{ error: string | null }> {
-  if (!permitId) return { error: "Permit is required." };
+  if (!permitId) return { error: t("consumption.errors.permitRequired", lang) };
   const usable = lines.filter((l) => Number.isFinite(l.qty) && l.qty > 0);
-  if (usable.length === 0) return { error: "Enter a quantity for at least one item." };
+  if (usable.length === 0) return { error: t("consumption.errors.returnNeedsQty", lang) };
 
   const supabase = createClient();
   const { error } = await supabase.rpc("record_exit_permit_return", {
@@ -301,7 +325,7 @@ export async function recordExitPermitReturn(
     p_note: note?.trim() || null,
     p_actor: await actorEmail(supabase),
   });
-  if (error) return { error: rpcError(error) };
+  if (error) return { error: rpcError(error, lang) };
 
   revalidatePath("/consumption");
   revalidatePath("/inventory");
@@ -311,15 +335,16 @@ export async function recordExitPermitReturn(
 export async function voidExitPermit(
   permitId: string,
   reason: string | null,
+  lang: Lang,
 ): Promise<{ error: string | null }> {
-  if (!permitId) return { error: "Permit is required." };
+  if (!permitId) return { error: t("consumption.errors.permitRequired", lang) };
   const supabase = createClient();
   const { error } = await supabase.rpc("void_exit_permit", {
     p_permit_id: permitId,
     p_reason: reason?.trim() || null,
     p_actor: await actorEmail(supabase),
   });
-  if (error) return { error: rpcError(error) };
+  if (error) return { error: rpcError(error, lang) };
 
   revalidatePath("/consumption");
   revalidatePath("/inventory");
@@ -332,12 +357,13 @@ export async function voidExitPermit(
 
 export async function uploadExitPermitFile(
   formData: FormData,
+  lang: Lang,
 ): Promise<{ error: string | null; file?: ExitPermitFile }> {
   const permitId = String(formData.get("permitId") ?? "").trim();
   const file = formData.get("file");
-  if (!permitId) return { error: "Permit is required." };
-  if (!(file instanceof File) || file.size === 0) return { error: "Choose a file." };
-  if (file.size > MAX_FILE_BYTES) return { error: "File is larger than 10 MB." };
+  if (!permitId) return { error: t("consumption.errors.permitRequired", lang) };
+  if (!(file instanceof File) || file.size === 0) return { error: t("consumption.errors.chooseFile", lang) };
+  if (file.size > MAX_FILE_BYTES) return { error: t("consumption.errors.fileTooLarge", lang) };
 
   const supabase = createClient();
   const ext = file.name.includes(".") ? file.name.split(".").pop() : null;
@@ -429,34 +455,35 @@ async function subjectIsEligible(
   supabase: ReturnType<typeof createClient>,
   kind: ApprovalKindArg,
   subjectId: string,
+  lang: Lang,
 ): Promise<string | null> {
   if (kind === "exit_permit") {
     const { data } = await supabase
       .from("exit_permits").select("status").eq("id", subjectId).maybeSingle();
-    if (!data) return "That permit no longer exists.";
-    if (data.status !== "exited") return "Only a permit whose parts have left can be approved.";
+    if (!data) return t("consumption.errors.permitGone", lang);
+    if (data.status !== "exited") return t("consumption.errors.permitMustHaveExited", lang);
     return null;
   }
   if (kind === "work_order") {
     const { data } = await supabase
       .from("work_orders").select("status").eq("id", subjectId).maybeSingle();
-    if (!data) return "That work order no longer exists.";
-    if (data.status !== "completed") return "Only a completed work order can be approved.";
+    if (!data) return t("consumption.errors.workOrderGone", lang);
+    if (data.status !== "completed") return t("consumption.errors.workOrderMustBeCompleted", lang);
     const { count } = await supabase
       .from("work_order_parts")
       .select("id", { count: "exact", head: true })
       .eq("work_order_id", subjectId);
-    if (!count) return "That work order consumed no parts, so there is nothing to approve.";
+    if (!count) return t("consumption.errors.workOrderNoParts", lang);
     return null;
   }
   const { data } = await supabase
     .from("outsourced_jobs").select("id").eq("id", subjectId).maybeSingle();
-  if (!data) return "That outsourced job no longer exists.";
+  if (!data) return t("consumption.errors.outsourcedJobGone", lang);
   const { count } = await supabase
     .from("workshop_payments")
     .select("id", { count: "exact", head: true })
     .eq("outsourced_job_id", subjectId);
-  if (!count) return "That job has no vendor payment recorded, so there is nothing to approve.";
+  if (!count) return t("consumption.errors.outsourcedJobNoPayment", lang);
   return null;
 }
 
@@ -465,18 +492,19 @@ export async function decideConsumptionApproval(
   subjectId: string,
   decision: "approved" | "rejected",
   reason: string | null,
+  lang: Lang,
 ): Promise<{ error: string | null }> {
-  if (!subjectId) return { error: "Nothing selected." };
-  if (!(kind in SUBJECT_COLUMN)) return { error: "Unknown approval kind." };
+  if (!subjectId) return { error: t("consumption.errors.nothingSelected", lang) };
+  if (!(kind in SUBJECT_COLUMN)) return { error: t("consumption.errors.unknownApprovalKind", lang) };
   if (decision !== "approved" && decision !== "rejected") {
-    return { error: "A decision must be approve or reject." };
+    return { error: t("consumption.errors.decisionInvalid", lang) };
   }
   const trimmed = reason?.trim() || null;
   // Enforced here, not only in the form: a rejection nobody explained is a
   // dead end for whoever reads it later. Approval stays free of the demand —
   // "yes, as expected" needs no essay.
   if (decision === "rejected" && !trimmed) {
-    return { error: "Give a reason for the rejection." };
+    return { error: t("consumption.errors.rejectionNeedsReason", lang) };
   }
 
   const supabase = createClient();
@@ -485,9 +513,9 @@ export async function decideConsumptionApproval(
   // decided_by is NOT NULL as of 0095 — the approver is part of the key now,
   // so an unattributable decision is refused here rather than at the database
   // with a 23502 nobody can read.
-  if (!actor) return { error: "Sign in again — a decision has to be attributable." };
+  if (!actor) return { error: t("consumption.errors.signInAgain", lang) };
 
-  const bad = await subjectIsEligible(supabase, kind, subjectId);
+  const bad = await subjectIsEligible(supabase, kind, subjectId, lang);
   if (bad) return { error: bad };
 
   // ONE ROW PER (EVENT, PERSON) — 0095's key. A person CHANGES their own

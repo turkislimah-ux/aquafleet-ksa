@@ -519,7 +519,9 @@ export default function AppShell({
                 <NotificationsMenu lang={lang} />
 
                 <button onClick={() => setLang(lang === "en" ? "ar" : "en")}
-                  aria-label={lang === "en" ? "Switch to Arabic" : "Switch to English"}
+                  aria-label={lang === "en"
+                    ? t("shared.chrome.switchToArabic", lang)
+                    : t("shared.chrome.switchToEnglish", lang)}
                   className="focus-ring transition-colors [touch-action:manipulation] rounded-xl border backdrop-blur-md hover:border-brand-500/40 h-9 px-3 text-sm flex items-center gap-1.5"
                   style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card) / 0.6)" }}>
                   <Globe className="h-4 w-4" aria-hidden />
@@ -527,7 +529,9 @@ export default function AppShell({
                 </button>
 
                 <button onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-                  aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+                  aria-label={theme === "light"
+                    ? t("shared.chrome.switchToDark", lang)
+                    : t("shared.chrome.switchToLight", lang)}
                   className="focus-ring transition-colors [touch-action:manipulation] rounded-xl border backdrop-blur-md hover:border-brand-500/40 h-9 w-9 grid place-items-center"
                   style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card) / 0.6)" }}>
                   {theme === "light" ? <Moon className="h-4 w-4" aria-hidden /> : <Sun className="h-4 w-4" aria-hidden />}

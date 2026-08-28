@@ -318,6 +318,19 @@ export const dict = {
     },
     outOfPartBanner: { en: "work order(s) can't start — stock is short", ar: "أمر/أوامر عمل لا يمكنها البدء — المخزون غير كافٍ" },
     allTasksRequired: { en: "All tasks must be checked before completing", ar: "يجب تحديد كل المهام قبل الإنهاء" },
+    // Tooltips on a task checkbox that is disabled because the job it belongs
+    // to has not started yet. They are the ONLY explanation a user gets for a
+    // control that silently does nothing, which is why they cannot stay
+    // English. "تحديد" for "checking off" matches `allTasksRequired` directly
+    // above — same action, same verb.
+    taskLockedStart: {
+      en: "Start this work order before checking off tasks",
+      ar: "ابدأ أمر العمل قبل تحديد المهام",
+    },
+    taskLockedDispatch: {
+      en: "Dispatch this job before checking off tasks",
+      ar: "أرسل العمل الخارجي قبل تحديد المهام",
+    },
     createdBy: { en: "Created by", ar: "أنشأه" },
     startedBy: { en: "Started by", ar: "بدأه" },
     completedBy: { en: "Completed by", ar: "أنهاه" },
@@ -567,6 +580,18 @@ export const dict = {
       // Trails a global-search hit that routes to a PAGE rather than a record.
       opensPage: { en: "opens page", ar: "فتح الصفحة" },
       noMatches: { en: "No matches for “{q}”", ar: "لا توجد نتائج لـ \"{q}\"" },
+
+      // Header-control screen-reader names. Each pair names the TARGET of the
+      // toggle, not its current state — "Switch to Arabic" shows while the UI
+      // is English. So the label a user hears is always in the language they
+      // are LEAVING, which is the one they can currently read: the Arabic
+      // strings below are heard by a user already in Arabic mode, about to
+      // switch away. The visible glyph/word beside them is separate and stays
+      // as it is (the language button already prints "العربية"/"English").
+      switchToArabic: { en: "Switch to Arabic", ar: "التبديل إلى العربية" },
+      switchToEnglish: { en: "Switch to English", ar: "التبديل إلى الإنجليزية" },
+      switchToDark: { en: "Switch to dark mode", ar: "التبديل إلى الوضع الداكن" },
+      switchToLight: { en: "Switch to light mode", ar: "التبديل إلى الوضع الفاتح" },
     },
 
     // OperationStationField (the picker section) and OperationStationsModal
@@ -662,6 +687,18 @@ export const dict = {
       // The VISIBLE label reuses `common.plate`, which is already "Plate".
       plateLetterAria: { en: "Plate letter {n}", ar: "حرف اللوحة {n}" },
       plateDigitAria: { en: "Plate digit {n}", ar: "رقم اللوحة {n}" },
+    },
+
+    // SaudiMap's corner caption. The map is a hand-traced outline projected
+    // with a linear transform (see that file's header), so the caption is a
+    // DISCLAIMER, not decoration — it has to survive translation or an Arabic
+    // reader is the only one not told the geometry is approximate.
+    //
+    // The city labels inside the SVG stay English for now: they are `CITIES`
+    // data, not copy, and giving them Arabic names is a wording decision
+    // rather than a defect fix.
+    map: {
+      approximate: { en: "Saudi Arabia · approximate", ar: "المملكة العربية السعودية · تقريبي" },
     },
   },
 
@@ -1360,6 +1397,11 @@ export const dict = {
       worked: { en: "Worked", ar: "أيام عمل" },
       available: { en: "Available", ar: "أيام متاحة" },
       trucks: { en: "Trucks", ar: "شاحنات" },
+      // Centre caption under the utilization band, between the "0%" and "100%"
+      // ticks. The figures stay Latin on both sides — every number in this app
+      // is Latin by rule — so only the WORD moves, and it leads in Arabic so
+      // the line does not trail off in a Latin token.
+      targetBand: { en: "60-80% target", ar: "المستهدف 60-80%" },
       note: {
         en: "Days a truck ran at least one delivered trip, over the days it was available. Maintenance and out-of-service days leave the denominator; idle-but-in-service days stay in it — those are the ones this measures.",
         ar: "أيام شغّلت فيها الشاحنة رحلة مسلَّمة واحدة على الأقل، مقسومة على أيام توفّرها. الأيام في الصيانة أو خارج الخدمة مستبعدة من المقام، وأيام التوقف بلا عمل محتسبة.",
@@ -1967,6 +2009,145 @@ export const dict = {
       destInlineTruck: { en: "truck", ar: "شاحنة" },
       destInlineCustomer: { en: "customer", ar: "عميل" },
       destInlineOther: { en: "other", ar: "جهة أخرى" },
+    },
+
+    // app/consumption/actions.ts — EVERY sentence the server actions can hand
+    // back for the UI to print.
+    //
+    // WHY THESE SLIPPED THE FIRST SWEEP, and why the fix is a namespace rather
+    // than a patch: a route's copy audit reads its JSX. These strings are not
+    // in any JSX — they are `return { error: "…" }` inside a "use server"
+    // module, so they reach the screen through a `setError` the grep sees as a
+    // variable. Field-level validation in the modals was already translated;
+    // the FORM-LEVEL guards were not, because they never lived in the form.
+    //
+    // The actions take `lang` and resolve these themselves. The alternative —
+    // returning a key for the client to resolve — fails SILENTLY when a call
+    // site forgets to look at the new field (the user gets a blank banner);
+    // a missing `lang` argument is a tsc error. Loud beats quiet for a message
+    // whose whole job is to explain a refusal.
+    //
+    // NOT here, and cannot be: the sentences PostgREST relays from a raised
+    // RPC exception. Those are written in the migrations (0093 wrote them as
+    // readable sentences on purpose) and arrive already-formed in English —
+    // translating them means an error-code map on the database side, which is
+    // a schema change, not a copy fix. `rpcFallback` below is ours: it is what
+    // prints when such an error carries no message at all.
+    errors: {
+      rpcFallback: { en: "Something went wrong.", ar: "حدث خطأ ما." },
+
+      // --- validateHeader(): the draft form's submit-time guards ---
+      // These fire as one red banner at the top of the permit form. They mirror
+      // 0093's CHECK constraints, so each one names the FIELD to go fix rather
+      // than reporting that a constraint failed.
+      warehouseRequired: {
+        en: "Choose the warehouse the parts leave from.",
+        ar: "اختر المستودع الذي تخرج منه القطع.",
+      },
+      returnableNeedsDate: {
+        en: "A returnable permit needs an expected return date.",
+        ar: "الإذن القابل للإرجاع يحتاج تاريخ إرجاع متوقع.",
+      },
+      permanentNoDate: {
+        en: "A permanent permit cannot carry a return date.",
+        ar: "الإذن الدائم لا يحمل تاريخ إرجاع.",
+      },
+      describeDestination: { en: "Describe the destination.", ar: "صف الوجهة." },
+      // The English quotes the option's own label, so the Arabic quotes the
+      // Arabic label — «أخرى» is `enums.destOther` verbatim, not a synonym.
+      otherDestNoRecord: {
+        en: "An 'other' destination cannot also point at a record.",
+        ar: "الوجهة «أخرى» لا يمكن أن تشير أيضاً إلى سجل.",
+      },
+      oneDestination: { en: "Choose exactly one destination.", ar: "اختر وجهة واحدة فقط." },
+      receiverRequired: {
+        en: "Give a receiver: either a staff member or a name.",
+        ar: "حدّد المستلم: إما موظف أو اسم.",
+      },
+
+      // --- draft lifecycle ---
+      // `permitRequired` is read by six actions. One leaf, six readers: the
+      // sentence is the same refusal every time, and six copies is how the
+      // wording drifts.
+      permitRequired: { en: "Permit is required.", ar: "الإذن مطلوب." },
+      permitAndPartRequired: {
+        en: "Permit and part are required.",
+        ar: "الإذن والقطعة مطلوبان.",
+      },
+      permitNotFound: { en: "Permit not found.", ar: "الإذن غير موجود." },
+      // The status gate lives in the WHERE clause, so this prints when a write
+      // matched zero rows — someone else confirmed the permit mid-edit.
+      noLongerDraft: {
+        en: "This permit is no longer a draft — it cannot be edited.",
+        ar: "لم يعد هذا الإذن مسودة — لا يمكن تعديله.",
+      },
+      itemsDraftOnly: {
+        en: "Items can only be changed while the permit is a draft.",
+        ar: "لا يمكن تغيير الأصناف إلا والإذن مسودة.",
+      },
+      // Points at the action that IS allowed — «ألغه» is `shared.voidPermit`'s
+      // verb, so the sentence names the button the reader should press next.
+      onlyDraftDeletable: {
+        en: "Only a draft can be deleted. An exited permit is a record — void it instead.",
+        ar: "لا يمكن حذف سوى المسودة. الإذن الذي خرج سجل — ألغه بدلاً من ذلك.",
+      },
+      qtyPositive: {
+        en: "Quantity must be more than zero.",
+        ar: "الكمية يجب أن تكون أكبر من صفر.",
+      },
+      returnNeedsQty: {
+        en: "Enter a quantity for at least one item.",
+        ar: "أدخل كمية لصنف واحد على الأقل.",
+      },
+
+      // --- attachments ---
+      chooseFile: { en: "Choose a file.", ar: "اختر ملفاً." },
+      // "10" stays Latin — every figure in this app does — and ميغابايت is the
+      // unit `common.photoTooLarge` already uses for the same limit class.
+      fileTooLarge: { en: "File is larger than 10 MB.", ar: "حجم الملف أكبر من 10 ميغابايت." },
+
+      // --- approvals: subjectIsEligible() and the decision guards ---
+      // The queue's own inclusion rules, restated server-side. Each says WHY
+      // the subject is not approvable, because the row was offered by a list
+      // the reader was looking at a moment ago.
+      permitGone: { en: "That permit no longer exists.", ar: "هذا الإذن لم يعد موجوداً." },
+      permitMustHaveExited: {
+        en: "Only a permit whose parts have left can be approved.",
+        ar: "لا يُعتمد إلا الإذن الذي خرجت قطعه.",
+      },
+      workOrderGone: {
+        en: "That work order no longer exists.",
+        ar: "أمر العمل هذا لم يعد موجوداً.",
+      },
+      workOrderMustBeCompleted: {
+        en: "Only a completed work order can be approved.",
+        ar: "لا يُعتمد إلا أمر العمل المكتمل.",
+      },
+      workOrderNoParts: {
+        en: "That work order consumed no parts, so there is nothing to approve.",
+        ar: "أمر العمل هذا لم يستهلك أي قطع، فلا شيء لاعتماده.",
+      },
+      outsourcedJobGone: {
+        en: "That outsourced job no longer exists.",
+        ar: "العمل الخارجي هذا لم يعد موجوداً.",
+      },
+      outsourcedJobNoPayment: {
+        en: "That job has no vendor payment recorded, so there is nothing to approve.",
+        ar: "هذا العمل لا يحمل أي دفعة مسجّلة للمورد، فلا شيء لاعتماده.",
+      },
+      nothingSelected: { en: "Nothing selected.", ar: "لم يُحدَّد شيء." },
+      unknownApprovalKind: { en: "Unknown approval kind.", ar: "نوع اعتماد غير معروف." },
+      decisionInvalid: {
+        en: "A decision must be approve or reject.",
+        ar: "القرار يجب أن يكون اعتماداً أو رفضاً.",
+      },
+      rejectionNeedsReason: { en: "Give a reason for the rejection.", ar: "اذكر سبب الرفض." },
+      // 0095 made decided_by NOT NULL, so an unattributable decision is refused
+      // here rather than at the database with a 23502 nobody can read.
+      signInAgain: {
+        en: "Sign in again — a decision has to be attributable.",
+        ar: "سجّل الدخول من جديد — القرار يجب أن يُنسب إلى شخص.",
+      },
     },
 
     // lib/consumption-approvals.ts — the three label maps plus the fallback
@@ -8652,6 +8833,35 @@ export const dict = {
       // ── Footer ───────────────────────────────────────────────────────────
       createProject: { en: "Create project", ar: "إنشاء المشروع" },
     },
+  },
+
+  // ── Routes whose copy is still inline ────────────────────────────────────
+  // `iot` and `inventory` hold ONE key each, which is the whole point: these
+  // two routes never got a namespace, so their several hundred bilingual
+  // strings live as `lang === …` ternaries in the JSX. Those ternaries are not
+  // broken — they render correct Arabic — and moving them is a separate,
+  // mechanical job. What is broken is the handful of strings that were written
+  // as ENGLISH ONLY and so reach an Arabic reader untranslated. Only those
+  // move here. The namespaces exist now so the consolidation pass has a place
+  // to land rather than having to invent one mid-flight.
+  iot: {
+    // Live-feed indicator beside the sensor grid heading, next to a pulsing
+    // dot. A status word, not a label — it says the numbers below are moving.
+    streaming: { en: "Streaming", ar: "بث مباشر" },
+    // Speed unit, printed after a Latin figure (`{speed} km/h`). The other
+    // units on this card — °C, kPa, V — are SI SYMBOLS and are deliberately
+    // NOT here: those are written the same way in Arabic technical text, and
+    // transliterating them would be a style decision, not a fix. "km/h" is the
+    // odd one out because it is an English-word abbreviation, not a symbol.
+    kmh: { en: "km/h", ar: "كم/س" },
+  },
+
+  inventory: {
+    // The "AI-generated" badge on a purchase-order row. The star is kept
+    // inside the value rather than in the JSX so the English is one literal
+    // and cannot drift from the badge it replaces. "ذكاء" matches the Arabic
+    // already used by this badge's own tooltip ("أنشأه الذكاء").
+    aiPill: { en: "★ AI", ar: "★ ذكاء" },
   },
 } as const;
 

@@ -82,7 +82,7 @@ export default function RoutesPage() {
               </button>
             </div>
           </div>
-          <SaudiMap points={points} routes={routes} height={520} />
+          <SaudiMap points={points} routes={routes} height={520} lang={lang} />
           <div className="flex items-center gap-4 mt-3 text-xs muted flex-wrap">
             <Legend color="#10b981" label={lang === "en" ? "Active truck" : "شاحنة نشطة"} />
             <Legend color="#3b82f6" label={lang === "en" ? "Idle truck" : "شاحنة متوقفة"} />

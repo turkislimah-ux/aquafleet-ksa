@@ -164,6 +164,7 @@ export default function ApprovalsLedgerTab({
       row.subjectId,
       decision,
       reason,
+      lang,
     );
     setBusyKey(null);
     if (res.error) { setError(res.error); return; }

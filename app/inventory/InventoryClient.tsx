@@ -1213,7 +1213,16 @@ function PartsTable({
             const tier = stockTier(p);
             const stockValue = p.unit_cost_sar != null ? p.unit_cost_sar * p.qty_on_hand : null;
             const warehouseName = warehousesById.get(p.warehouse_id)?.name ?? "—";
-            const secondaryName = lang === "ar" ? p.name : p.name_ar;
+            // The row prints the name twice: the reader's language on top, the
+            // OTHER language under it. `arText` already falls back to `p.name`
+            // when `name_ar` is null, so in Arabic mode a part with no Arabic
+            // name resolved to `p.name` on BOTH lines — the same English string
+            // stacked on itself. Deriving the secondary from the resolved
+            // primary instead of from `lang` alone makes the second line what
+            // it claims to be: a name the first line is not already showing.
+            const primaryName = arText(p.name, p.name_ar, lang);
+            const otherName = lang === "ar" ? p.name : p.name_ar;
+            const secondaryName = otherName && otherName !== primaryName ? otherName : null;
             // Unit-cost trend arrow — mirrors preview's Inventory table row
             // exactly (pages-2.js: currentPriceSar vs previousPriceSar,
             // ↑ delta-up / ↓ delta-down, inline % next to the price).
@@ -1239,7 +1248,7 @@ function PartsTable({
                   <div className="flex items-center gap-2">
                     <Package className="h-4 w-4 muted" />
                     <div>
-                      <div className="font-medium">{arText(p.name, p.name_ar, lang)}</div>
+                      <div className="font-medium">{primaryName}</div>
                       {secondaryName && <div className="text-[11px] muted">{secondaryName}</div>}
                     </div>
                   </div>

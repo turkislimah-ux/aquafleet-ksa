@@ -34,7 +34,7 @@ export default function IoTPage() {
       </div>
 
       <Section title={lang === "en" ? "Live Sensor Grid" : "شبكة المستشعرات"}
-        action={<span className="text-xs muted flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse-dot"></span> Streaming</span>}>
+        action={<span className="text-xs muted flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse-dot"></span> {t("iot.streaming", lang)}</span>}>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {trucks.slice(0, 16).map(tr => {
             const tempBad = tr.iot.engineTempC > 95;
@@ -51,7 +51,7 @@ export default function IoTPage() {
                     </div>
                     <div className="flex items-center gap-1 text-xs">
                       <Wifi className={`h-3.5 w-3.5 ${tr.status === "out_of_service" ? "text-rose-500" : "text-emerald-500"}`} />
-                      <span className="muted">{tr.iot.speedKph} km/h</span>
+                      <span className="muted">{tr.iot.speedKph} {t("iot.kmh", lang)}</span>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 text-xs">

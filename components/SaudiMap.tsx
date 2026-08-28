@@ -1,5 +1,7 @@
 "use client";
 
+import { t, type Lang } from "@/lib/i18n";
+
 /**
  * Lightweight, dependency-free SVG map of Saudi Arabia.
  * Coordinates are projected with a simple linear transform inside the rough KSA bounding box:
@@ -48,18 +50,24 @@ const CITIES = [
   { name: "NEOM", lat: 27.9300, lng: 35.0900 },
 ];
 
+// `lang` is REQUIRED while every other prop has a default: this component
+// renders a caption, so the language is not information it can sensibly guess.
+// A default of "en" would make an untranslated map the silent failure mode for
+// any future caller that forgets it — which is the exact bug being fixed here.
 export default function SaudiMap({
   points = [],
   routes = [],
   height = 480,
   showCities = true,
   className,
+  lang,
 }: {
   points?: MapPoint[];
   routes?: MapRoute[];
   height?: number;
   showCities?: boolean;
   className?: string;
+  lang: Lang;
 }) {
   return (
     <div className={`relative w-full rounded-xl overflow-hidden border ${className ?? ""}`}
@@ -114,7 +122,7 @@ export default function SaudiMap({
         })}
       </svg>
       <div className="absolute bottom-2 end-2 text-[10px] muted bg-white/70 dark:bg-black/40 backdrop-blur px-2 py-0.5 rounded">
-        Saudi Arabia · approximate
+        {t("shared.map.approximate", lang)}
       </div>
     </div>
   );

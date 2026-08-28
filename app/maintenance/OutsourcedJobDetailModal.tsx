@@ -437,7 +437,7 @@ export default function OutsourcedJobDetailModal({
                       type="button"
                       onClick={() => onToggleTask(tk)}
                       disabled={!tasksEditable || busyTaskId === tk.id}
-                      title={!tasksEditable && editable ? "Dispatch this job before checking off tasks" : undefined}
+                      title={!tasksEditable && editable ? t("mt.taskLockedDispatch", lang) : undefined}
                       className="flex items-center gap-2 text-sm w-full text-start disabled:cursor-default"
                     >
                       {tk.done ? <CheckSquare className="h-4 w-4 text-emerald-600 shrink-0" /> : <Square className="h-4 w-4 muted shrink-0" />}

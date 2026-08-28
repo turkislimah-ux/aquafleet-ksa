@@ -253,7 +253,7 @@ export default function ConsumptionClient({
 
   async function onDeleteDraft(p: ExitPermit) {
     if (!confirm(t("consumption.client.deleteDraftConfirm", lang))) return;
-    const res = await deleteExitPermitDraft(p.id);
+    const res = await deleteExitPermitDraft(p.id, lang);
     if (res.error) { setActionError(res.error); return; }
     router.refresh();
   }

@@ -204,12 +204,13 @@ export default function ApprovalsTab({
     reason: string | null,
   ): Promise<string | null> {
     setBusyKey(keyOf(e));
-    const res = await decideConsumptionApproval(e.kind, e.subjectId, decision, reason);
+    const res = await decideConsumptionApproval(e.kind, e.subjectId, decision, reason, lang);
     setBusyKey(null);
     if (res.error) {
       // A conflict gets the message that names the other voter; anything else
       // (eligibility, a vanished subject) surfaces the server's own words —
-      // and those stay English, because actions.ts is out of this batch.
+      // which the action resolves in `lang`, hence the argument above. The one
+      // exception is an RPC's own RAISE text, which lives in the migrations.
       return conflictMessage(e, viewer, decision, lang) ?? res.error;
     }
     router.refresh();

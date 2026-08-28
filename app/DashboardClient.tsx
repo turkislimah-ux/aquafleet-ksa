@@ -765,14 +765,14 @@ export default function DashboardClient({
 
       {/* ---- popups ---------------------------------------------------- */}
       {allActions && (
-        <Modal title={t("dashboard.actions.modalTitle", lang)} onClose={() => setAllActions(false)}>
+        <Modal title={t("dashboard.actions.modalTitle", lang)} onClose={() => setAllActions(false)} lang={lang}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {openItems.map((row) => <ActionCard key={row.kind} row={row} lang={lang} />)}
           </div>
         </Modal>
       )}
       {allFeed && (
-        <Modal title={t("dashboard.activity.modalTitle", lang)} onClose={() => setAllFeed(false)}>
+        <Modal title={t("dashboard.activity.modalTitle", lang)} onClose={() => setAllFeed(false)} lang={lang}>
           <div className="card p-0"><FeedList rows={feed} lang={lang} /></div>
         </Modal>
       )}
@@ -1146,7 +1146,7 @@ function FleetUtilizationCard({
             />
           </div>
           <div className="flex justify-between text-[10px] muted tabular-nums" aria-hidden>
-            <span>0%</span><span>60-80% target</span><span>100%</span>
+            <span>0%</span><span>{t("dashboard.utilization.targetBand", lang)}</span><span>100%</span>
           </div>
 
           <dl className="grid grid-cols-3 gap-2 pt-1 text-center">
@@ -1622,8 +1622,8 @@ function FeedList({ rows, lang }: { rows: FeedRow[]; lang: "en" | "ar" }) {
  * and stacked popups are DOM siblings rather than nested — the exact trap
  * already documented for the Inventory modals (CLAUDE.md §7).
  */
-function Modal({ title, onClose, children }: {
-  title: string; onClose: () => void; children: React.ReactNode;
+function Modal({ title, onClose, lang, children }: {
+  title: string; onClose: () => void; lang: Lang; children: React.ReactNode;
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -1642,7 +1642,7 @@ function Modal({ title, onClose, children }: {
         <div className="flex items-center justify-between gap-3 border-b px-4 py-3"
           style={{ borderColor: "rgb(var(--border))" }}>
           <h3 className="text-sm font-semibold">{title}</h3>
-          <button type="button" onClick={onClose} aria-label="Close"
+          <button type="button" onClick={onClose} aria-label={t("common.close", lang)}
             className="focus-ring grid h-8 w-8 place-items-center rounded-lg muted transition-colors hover:bg-black/5 dark:hover:bg-white/5">
             <X className="h-4 w-4" aria-hidden />
           </button>
@@ -1794,7 +1794,7 @@ function Summaries({ options, lang, pickerOpen, setPickerOpen }: {
       )}
 
       {pickerOpen && (
-        <Modal title={t("dashboard.addSummary", lang)} onClose={() => setPickerOpen(false)}>
+        <Modal title={t("dashboard.addSummary", lang)} onClose={() => setPickerOpen(false)} lang={lang}>
           <p className="mb-3 text-xs muted">
             {t("dashboard.summaries.pickerNote", lang)}
           </p>

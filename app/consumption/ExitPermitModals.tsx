@@ -292,7 +292,7 @@ export function PermitFormModal({
     for (const it of pending) {
       if (it.flushed) { next.push(it); continue; }
       if (failed) { next.push(it); continue; }
-      const r = await addExitPermitLine(id, it.part_id, it.qty, it.note);
+      const r = await addExitPermitLine(id, it.part_id, it.qty, it.note, lang);
       if (r.error) { failed = r.error; next.push(it); }
       else next.push({ ...it, flushed: true });
     }
@@ -311,7 +311,7 @@ export function PermitFormModal({
       const fd = new FormData();
       fd.set("permitId", id);
       fd.set("file", file);
-      const res = await uploadExitPermitFile(fd);
+      const res = await uploadExitPermitFile(fd, lang);
       if (res.error) { failed = `${file.name}: ${res.error}`; left.push(file); }
     }
     setStagedFiles(left);
@@ -323,7 +323,7 @@ export function PermitFormModal({
     const input = buildInput();
 
     if (permitId) {
-      const res = await updateExitPermitDraft(permitId, input);
+      const res = await updateExitPermitDraft(permitId, input, lang);
       const failed = res.error
         ? null
         : (await flushPending(permitId)) ?? (await flushFiles(permitId));
@@ -334,7 +334,7 @@ export function PermitFormModal({
       return true;
     }
 
-    const res = await createExitPermitDraft(input);
+    const res = await createExitPermitDraft(input, lang);
     // createExitPermitDraft returns the new row; updateExitPermitDraft does
     // not. Narrow on the property rather than on which branch ran, so the
     // types stay honest about what each action actually returns.
@@ -371,7 +371,7 @@ export function PermitFormModal({
     }
 
     setBusyLine(true);
-    const res = await addExitPermitLine(permitId, newPartId, qty, newNote || null);
+    const res = await addExitPermitLine(permitId, newPartId, qty, newNote || null, lang);
     setBusyLine(false);
     if (res.error) { setError(res.error); return; }
     setNewPartId(""); setNewQty(""); setNewNote("");
@@ -590,7 +590,7 @@ export function PermitFormModal({
                         onBlur={async (e) => {
                           const q = Number(e.target.value);
                           if (q === Number(saved.qty)) return;
-                          const res = await updateExitPermitLineQty(permitId, saved.id, q);
+                          const res = await updateExitPermitLineQty(permitId, saved.id, q, lang);
                           if (res.error) setError(res.error); else onRefresh();
                         }}
                         className={cn(INPUT, "w-24")}
@@ -633,7 +633,7 @@ export function PermitFormModal({
                             setPending((s) => s.filter((x) => x.key !== row.key));
                             return;
                           }
-                          const res = await removeExitPermitLine(permitId, saved.id);
+                          const res = await removeExitPermitLine(permitId, saved.id, lang);
                           if (res.error) setError(res.error); else onRefresh();
                         }}
                         className="h-8 w-8 rounded-lg grid place-items-center text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
@@ -781,7 +781,7 @@ function PermitFiles({
               const fd = new FormData();
               fd.set("permitId", permitId);
               fd.set("file", file);
-              const res = await uploadExitPermitFile(fd);
+              const res = await uploadExitPermitFile(fd, lang);
               if (res.error) { onError(`${file.name}: ${res.error}`); setBusy(false); return; }
             }
             setBusy(false);
@@ -824,7 +824,7 @@ export function ConfirmExitModal({
             disabled={busy || lines.length === 0 || short.length > 0}
             onClick={async () => {
               setBusy(true); setError(null);
-              const res = await confirmExitPermit(permit.id);
+              const res = await confirmExitPermit(permit.id, lang);
               setBusy(false);
               if (res.error) { setError(res.error); return; }
               onClose();
@@ -961,7 +961,7 @@ export function ReturnModal({
               const payload = open
                 .map((l) => ({ line_id: l.id, qty: Number(qtys[l.id] ?? 0) }))
                 .filter((x) => x.qty > 0);
-              const res = await recordExitPermitReturn(permit.id, payload, returnedOn, note || null);
+              const res = await recordExitPermitReturn(permit.id, payload, returnedOn, note || null, lang);
               setBusy(false);
               if (res.error) { setError(res.error); return; }
               onClose();
@@ -1113,7 +1113,7 @@ export function VoidModal({
             disabled={busy}
             onClick={async () => {
               setBusy(true); setError(null);
-              const res = await voidExitPermit(permit.id, reason || null);
+              const res = await voidExitPermit(permit.id, reason || null, lang);
               setBusy(false);
               if (res.error) { setError(res.error); return; }
               onClose();
