@@ -8,15 +8,9 @@
       "port": 4321
     },
     {
-      "name": "aquafleet-3002",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "3002", "--directory", "preview"],
-      "port": 3002
-    },
-    {
       "name": "bousla-next",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["next", "dev", "-p", "3010"],
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "NEXT_DIST_DIR=.next-dev-3010 npx next dev -p 3010"],
       "port": 3010
     }
   ]
