@@ -183,6 +183,10 @@ function fmtPhaseStamp(iso: string | null): string {
 // Date.getDay() and MONTH_KEYS by Date.getMonth(), exactly as before — the
 // order and the arity are unchanged, so every existing index still lands on the
 // same word.
+//
+// Both key sets now resolve against `common`: the weekday names left
+// `trips.board.weekday` once the maintenance calendar became a second reader.
+// Nothing about this array changes — only the namespace the words come from.
 const WEEKDAY_KEYS = ["0", "1", "2", "3", "4", "5", "6"] as const;
 const MONTH_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"] as const;
 
@@ -1692,7 +1696,7 @@ export default function ProjectsBoard({
                 <div className="flex items-baseline justify-between gap-1">
                   <span className="inline-flex items-baseline gap-1.5 min-w-0">
                     <span className="text-[10px] font-semibold uppercase tracking-wide muted">
-                      {t(`trips.board.weekday.${WEEKDAY_KEYS[d.dow]}`, lang)}
+                      {t(`common.weekdayShort.${WEEKDAY_KEYS[d.dow]}`, lang)}
                     </span>
                     <span className="text-lg font-semibold tabular-nums leading-none">{d.dayNum}</span>
                   </span>

@@ -244,6 +244,37 @@ export const dict = {
       "11": { en: "Nov", ar: "نوفمبر" },
       "12": { en: "Dec", ar: "ديسمبر" },
     },
+    /**
+     * The seven weekday abbreviations, keyed by `Date.getDay()` — so "0" is
+     * Sunday and the keys are the raw getDay() numbers, not a 1-based count.
+     * Quoted for the same reason `monthShort`'s are: a bare numeric key becomes
+     * a number in the object type and LeafPaths drops it.
+     *
+     * These were `trips.board.weekday`, read by the projects board, while the
+     * maintenance calendar kept its own module-scope pair. That was two Arabic
+     * wordings for the same seven days: the board's اثنين/ثلاثاء/أربعاء/خميس/
+     * جمعة against the calendar's three-letter اثن/ثلا/أرب/خمي/جمع. Turki ruled
+     * the board's wording wins, so the calendar's five truncations are gone and
+     * both screens read this.
+     *
+     * The leaf sits in `common`, not in `trips`, because `trips.board.weekday`
+     * would misdescribe itself the moment maintenance read it — the same rule
+     * that moved the month names here, and the reason its old comment said a
+     * leaf earns `common` by being needed in more than one file. Maintenance is
+     * that second file.
+     *
+     * Still the SHORT form, not the full يوم الأحد: both call sites render into
+     * a ~10px uppercase slot above a day number, and the long form wraps.
+     */
+    weekdayShort: {
+      "0": { en: "Sun", ar: "أحد" },
+      "1": { en: "Mon", ar: "اثنين" },
+      "2": { en: "Tue", ar: "ثلاثاء" },
+      "3": { en: "Wed", ar: "أربعاء" },
+      "4": { en: "Thu", ar: "خميس" },
+      "5": { en: "Fri", ar: "جمعة" },
+      "6": { en: "Sat", ar: "سبت" },
+    },
   },
   mt: {
     calendar: { en: "Maintenance Calendar", ar: "تقويم الصيانة" },
@@ -8439,20 +8470,10 @@ export const dict = {
       prevWeek: { en: "Previous week", ar: "الأسبوع السابق" },
       nextWeek: { en: "Next week", ar: "الأسبوع التالي" },
       weekOf: { en: "Week of", ar: "أسبوع" },
-      // WEEKDAY_LBL was a module-level array indexed by Date.getDay(), so the
-      // keys are the getDay() numbers — QUOTED, because a numeric-looking key
-      // must stay a string for the TKey union to resolve. The Arabic is the
-      // SHORT form: this renders into a 10px uppercase slot above the day
-      // number, and the full يوم الأحد would wrap the cell.
-      weekday: {
-        "0": { en: "Sun", ar: "أحد" },
-        "1": { en: "Mon", ar: "اثنين" },
-        "2": { en: "Tue", ar: "ثلاثاء" },
-        "3": { en: "Wed", ar: "أربعاء" },
-        "4": { en: "Thu", ar: "خميس" },
-        "5": { en: "Fri", ar: "جمعة" },
-        "6": { en: "Sat", ar: "سبت" },
-      },
+      // `weekday` MOVED to `common.weekdayShort` — the maintenance calendar
+      // became the second reader, which is exactly the condition the comment
+      // four lines up names. The values are unchanged; see that leaf's header
+      // for the Arabic wording call it settled.
       // The right-hand header label is "Today" / "Yesterday" / "Tomorrow", or
       // a "3 Jun"-style date built from `common.monthShort`. "Today" is
       // `trips.deliveries.today` — same route, same word, already a leaf.

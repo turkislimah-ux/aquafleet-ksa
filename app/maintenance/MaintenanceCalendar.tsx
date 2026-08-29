@@ -85,22 +85,19 @@ type CalItem =
 // whole risk that moved the names into the dictionary.
 const MONTH_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"] as const;
 
-// WEEKDAYS STAY LOCAL, deliberately, and this is not an oversight to tidy later.
+// The weekdays followed the months out of this file, but a step later and for a
+// different reason. The names themselves were never the problem — the two sets
+// DISAGREED. This calendar wrote the Arabic as three-letter truncations (اثن،
+// ثلا، أرب، خمي، جمع) where the projects board wrote the longer short form
+// (اثنين، ثلاثاء، أربعاء، خميس، جمعة), so unifying them was a wording call, not
+// a dedupe, and it was left standing until Turki made it. He ruled the board's
+// wording wins: five of the seven Arabic labels here change, أحد and سبت do not,
+// and the English is untouched.
 //
-// `trips.board.weekday` already holds a Sun–Sat set, so the obvious move is to
-// fold these onto it — but its Arabic is the LONGER short form (اثنين، ثلاثاء،
-// أربعاء، خميس، جمعة) where this calendar uses three-letter truncations (اثن،
-// ثلا، أرب، خمي، جمع). Five of the seven Arabic labels would change. That is a
-// copy decision, not a dedupe, and this change is a dedupe.
-//
-// Adding a second weekday set to a SHARED namespace would be worse than leaving
-// these here: it would put two competing Arabic wordings for the same seven days
-// in the dictionary, which is exactly the drift the month promotion exists to
-// prevent — only harder to notice, because both spellings would look official.
-// Unifying the two wordings is the real fix and needs someone to choose which
-// one wins.
-const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const WEEKDAYS_AR = ["أحد", "اثن", "ثلا", "أرب", "خمي", "جمع", "سبت"];
+// Indexed by Date.getDay(), same as before, so "0" is Sunday — the keys ARE the
+// getDay() numbers rather than a 1-based count, which is the one way this array
+// differs in shape from MONTH_KEYS above.
+const WEEKDAY_KEYS = ["0", "1", "2", "3", "4", "5", "6"] as const;
 
 export default function MaintenanceCalendar({
   lang,
@@ -177,7 +174,6 @@ export default function MaintenanceCalendar({
   }, [weekStart]);
 
   const todayKey = ymd(new Date());
-  const WEEK = lang === "ar" ? WEEKDAYS_AR : WEEKDAYS_EN;
   // Only the month NAME follows `lang`; the day number stays Latin digits in
   // both languages, as it did before and as every other monthShort caller does.
   const monthFmt = (d: Date) => `${t(`common.monthShort.${MONTH_KEYS[d.getMonth()]}`, lang)} ${d.getDate()}`;
@@ -285,7 +281,7 @@ export default function MaintenanceCalendar({
                   own margin-inline-start:auto) — top-right of the card,
                   not a separate line underneath like before. */}
               <div className="flex items-baseline gap-1.5 shrink-0">
-                <span className="text-[11px] muted uppercase tracking-wide font-semibold">{WEEK[c.dow]}</span>
+                <span className="text-[11px] muted uppercase tracking-wide font-semibold">{t(`common.weekdayShort.${WEEKDAY_KEYS[c.dow]}`, lang)}</span>
                 <span className="text-base font-bold tabular-nums">{c.date.getDate()}</span>
                 {today && <span className="ms-auto text-[10px] font-bold text-brand-600">{t("mt.today", lang)}</span>}
               </div>
