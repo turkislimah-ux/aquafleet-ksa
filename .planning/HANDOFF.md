@@ -118,8 +118,9 @@ batch, never committed.** This batch used `/tmp/f-verify.mjs` and then
 `/tmp/subtitle-verify.mjs`. It diffs the working dictionary against
 `git show HEAD:lib/i18n.ts`, so its baseline can never be a hand-copied list —
 and it imports `typescript` by absolute path, which is precisely why it cannot
-live in the repo. The COMMITTED guard is `scripts/i18n-seed-label-check.mjs`,
-**and it is RED — see §6.**
+live in the repo. The COMMITTED guard is
+`scripts/i18n-lookup-single-source-check.mjs` — green, and §6 says what it now
+asserts.
 
 **A SCRATCH HARNESS GOES STALE THE MOMENT YOU COMMIT.** `/tmp/f-verify.mjs`
 compared against `HEAD`, so once `524539f` landed, `HEAD` became the very commit
@@ -432,35 +433,56 @@ inherit page direction and own alignment. And **`dir` does not reach a
 
 ## 6. GUARDS
 
-### ⚠ `scripts/i18n-seed-label-check.mjs` — the STANDING guard, and it is **RED**
+### `scripts/i18n-lookup-single-source-check.mjs` — the STANDING guard. GREEN.
 
 ```
-$ node scripts/i18n-seed-label-check.mjs
-lookup groups: 2   built-in labels checked: 9
+$ node scripts/i18n-lookup-single-source-check.mjs
+lookup tables: 2   built-in keys enumerated: 9
 
-SEED LABEL FAIL   9 built-in label(s) disagree with the seed
-    drivers.role.fleet_manager — seeded 'Fleet Manager' but no dictionary key
-    …8 more, one per built-in role and leave type
-exit=1
+SINGLE SOURCE PASS   no dictionary name exists for any of the 9 built-in lookup rows
+exit=0
 ```
 
-**This is not a defect it found — it is the guard's PREMISE being deleted.** Its
-invariant was *"every BUILT-IN row's dictionary `en` must equal the label seeded
-into the DB, byte for byte."* `524539f` removed the dictionary side of that
-comparison on purpose, so all 9 lookups now miss and it fails by construction.
-Nothing is wrong with the app. **It was left RED and not touched, because
-silently rewriting a committed guard inside a documentation commit is exactly the
-wrong way to retire an invariant.** It needs a call — §9 item 1.
+**THE INVARIANT IS THE INVERSE OF WHAT IT USED TO BE, AND THE FILE WAS RENAMED SO
+NOBODY READS THE OLD ONE OFF THE NAME.** It was `i18n-seed-label-check.mjs`
+(`git mv`, so `-M` shows the link) and it asserted *"every BUILT-IN row's
+dictionary `en` equals the label seeded into the DB, byte for byte"* — a
+comparison of two copies. `524539f` deleted one of the copies on purpose, so that
+check failed by construction, on all 9 lookups, with nothing wrong in the app.
 
-The guard is otherwise sound and worth keeping the machinery of: it reads the
+**Having only ONE copy is now the invariant.** The guard asserts that NO
+dictionary leaf exists for any built-in lookup row, and that nothing at all lives
+under the retired `drivers.role` / `drivers.leaveType` namespaces. The failure it
+prevents is a future session re-adding `drivers.role.fleet_manager` from habit or
+from an old handoff — a second name, authoritative on some screens, diverging
+from the row on the rest, and invisible in English.
+
+**IT WAS PROVEN TO FIRE, NOT JUST TO PASS.** An absence check passes trivially
+when it is checking nothing, so the guard takes an optional dictionary path
+purely so the negative control can run against a doctored copy. Both arms were
+made to fail before the green was trusted:
+
+```
+$ node scripts/i18n-lookup-single-source-check.mjs /tmp/negctl.ts
+SINGLE SOURCE FAIL   2 lookup name(s) have a second copy in the dictionary
+    drivers.role.fleet_manager — dictionary says 'Fleet Manager' …
+    drivers.role.made_up — namespace 'drivers.role' is retired …
+```
+
+**Run the negative control again after any edit to this file.** A guard that
+cannot be made to fail is not a guard, and this one's whole job is to be absent.
+
+Machinery kept from the old version, all of it still load-bearing: it reads the
 dictionary through the TypeScript AST (never by regex — `i18n.ts` is full of
-Arabic prose in comments), parses the seed migrations rather than hand-copying a
-list, and derives its root from `git rev-parse --show-toplevel` with a
+Arabic prose in comments), parses the built-in keys out of the seed migrations
+rather than hand-copying a list, treats a zero-row parse as a FAILURE rather than
+a pass, and derives its root from `git rev-parse --show-toplevel` with a
 `process.cwd()` fallback so it runs from a tarball checkout.
 
-**⚠ ITS `SEED_GROUPS` LIST IS HAND-MAINTAINED AND SILENT BY OMISSION.** A missing
-entry passes green while the table drifts — an omission is indistinguishable from
-a pass. That failure mode survives whatever is decided about the invariant.
+**⚠ ITS `SEED_GROUPS` LIST IS HAND-MAINTAINED AND SILENT BY OMISSION.** A new
+self-naming lookup table added without an entry passes green while a second name
+creeps back — an omission is indistinguishable from a pass. That failure mode
+survived the inversion unchanged; it is the one thing to watch.
 
 **⚠ AND `archive_document_types` MUST NOT BE ADDED TO IT.** That table is
 **Pattern B** (§4): `label_en`/`label_ar`, no `is_default`, no `label` column,
@@ -481,13 +503,12 @@ matches nothing and the guard reports *"seed INSERT parsed to zero built-in rows
 Every route in the app is wired. What is left is smaller and mostly listed in §8
 and §9. In rough priority:
 
-1. **Decide the guard's fate (§9 item 1).** It is red in `main` right now. That is
-   the only thing here that makes a clean checkout look broken.
-2. **The Sales-Returns wording tail** (§8 item 1) — the last unambiguous
-   wording drift with a settled ruling behind it.
-3. **A full Arabic-mode read-through with fresh eyes.** Ten batches plus five
+1. **The Sales-Returns wording tail** (§8 item 1) — the last unambiguous wording
+   drift with a settled ruling behind it.
+2. **A full Arabic-mode read-through with fresh eyes.** Ten batches plus five
    sweeps have landed; nobody has walked the whole app in Arabic since Trips
    shipped. Cheaper than any further static analysis at this point.
+3. **The two orphan handoff files** (§9 item 1) — third refresh carrying them.
 
 **~~The Trips `InvoiceDetailModal` RTL defect~~ — FIXED, struck.** The
 `dir="rtl"` moved off the block onto an inner `<span>`
@@ -529,17 +550,7 @@ All re-verified at this refresh. **Three items struck as DONE.**
 
 ## 9. OPEN — needs a human call
 
-1. **⚠ `scripts/i18n-seed-label-check.mjs` IS RED IN `main`.** Its invariant was
-   deleted deliberately by `524539f` (§6). Three options, none taken:
-   **(a) delete it** — the drift it guarded is now structurally impossible,
-   because the dictionary no longer holds a second copy of these names;
-   **(b) invert it** — assert that NO `drivers.role.*` / `drivers.leaveType.*`
-   key exists, which turns it into a guard against the dictionary re-growing a
-   second source; **(c) repoint it** at the 0169/0170 seeds and compare the
-   migration files against the LIVE rows instead of against the dictionary.
-   **(b) preserves the original intent most closely** and keeps the AST
-   machinery earning its keep. Not decided.
-2. **Two ORPHAN tracked handoff files.** `HANDOFF.md` at the repo root and
+1. **Two ORPHAN tracked handoff files.** `HANDOFF.md` at the repo root and
    `.planning/SESSION-HANDOFF.md`. Both predate the entire Arabic effort, both
    describe state that has moved a long way, and **`CLAUDE.md` §5 names only
    `.planning/HANDOFF.md` as ours.** A fresh session told to "read the handoff"
@@ -548,7 +559,7 @@ All re-verified at this refresh. **Three items struck as DONE.**
    refresh in a row to carry it forward untouched** — either do it or drop it.
    (`.planning/gsd-handoff-clobber-note.md` is also tracked and is a deliberate
    warning note, not an orphan.)
-3. **`.claude/settings.json` is untracked and NOT gitignored.** It shows in every
+2. **`.claude/settings.json` is untracked and NOT gitignored.** It shows in every
    `git status` and has been excluded by name from each commit. Decide: commit it,
    or add it to `.gitignore`. Leaving it is how a `git add .` accident happens —
    and `CLAUDE.md` §5 forbids `git add .` precisely because of files like this.
