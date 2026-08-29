@@ -1,7 +1,14 @@
-# SESSION HANDOFF — Arabic Phase 3: EVERY ROUTE IS WIRED, AND THE LOOKUP TABLES NOW OWN THEIR OWN NAMES
+# SESSION HANDOFF — ARABIC PHASE 3 IS CLOSED. Every route wired, every parked item resolved, read-through passed.
 
-**HEAD `f56457d` · branch `main` · 0 ahead / 0 behind · DB head `0170` · tree
+**HEAD `0c48aa9` · branch `main` · 0 ahead / 0 behind · DB head `0170` · tree
 CLEAN.**
+
+**READ THIS FILE'S §7 BEFORE PLANNING ANY ARABIC WORK — there is none left.**
+(`CLAUDE.md` has its own §7, the money/schema rules, one paragraph down. The two
+are unrelated and both get cited here.) Turki walked the whole app in Arabic on
+2026-08-29 and found nothing. Everything below this line is the RECORD of how
+that was reached, kept because several of its conclusions look like unfinished
+work and are not.
 
 **Read `CLAUDE.md` first** — it is the rulebook and §7 is the durable money/schema
 record. This file is a POINTER to §7, never the record itself. It holds CURRENT
@@ -516,21 +523,25 @@ matches nothing and the guard reports *"seed INSERT parsed to zero built-in rows
 
 ---
 
-## 7. NEXT — no route batches remain
+## 7. NOTHING IS NEXT — the Arabic effort is CLOSED
 
-Every route is wired, **§9 is fully closed, and as of 2026-08-29 NOTHING IN §8 IS
-OPEN EITHER.** Items 1 and 3 were closed by work, item 6 by Turki's ruling that
-`تصريح` in the `archive_document_types` seed is correct and stays. Item 1 was the
-last unambiguous wording drift with a settled ruling behind it.
+**Turki walked the whole app in Arabic on 2026-08-29 and reported no defects.**
+That was the last open item anywhere in this file: every route is wired, §9 is
+closed, and all six of §8's items are resolved — 1 and 3 by work, 6 by his ruling
+that `تصريح` in the `archive_document_types` seed is correct and stays.
 
-**One thing remains, and it is not a task on this list — it is a read-through.**
-Ten batches plus five sweeps have landed and nobody has walked the whole app in
-Arabic since Trips shipped. **That is now the only way another wording defect
-gets found.** Grep has run out of things to point at: item 3 was opened expecting
-thirteen missing fallbacks and found zero, and item 1 was settled by counting
-existing usages rather than by discovering anything new. **A future session that
-opens this file looking for static work to do should stop and say so** rather
-than manufacture a sweep.
+**THE CORRECT ANSWER TO "WHAT ARABIC WORK IS LEFT" IS: NONE. Do not manufacture
+a sweep.** The read-through was the only remaining way to find a defect, because
+static analysis had already run out: §8 item 3 was opened expecting thirteen
+missing fallbacks and found zero, and item 1 was settled by counting usages that
+were already correct rather than by discovering anything new. A session that
+opens this file looking for a batch to run should say there isn't one.
+
+What that read-through is NOT evidence of: it was a human pass over rendered
+screens, so it covers wording and layout in the states he happened to visit. It
+does not certify empty states, error paths, or any string behind a condition he
+did not trigger. **If one of those turns up later it is a new finding, not a
+reason to distrust the pass or re-run the whole effort.**
 
 **~~The Trips `InvoiceDetailModal` RTL defect~~ — FIXED, struck.** The
 `dir="rtl"` moved off the block onto an inner `<span>`
