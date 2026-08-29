@@ -1,13 +1,15 @@
 # SESSION HANDOFF — ARABIC PHASE 3 IS CLOSED. Feature #3 shipped. Feature #4 closed with NO WORK.
 
-**HEAD `e57d696` · branch `main` · 0 ahead / 0 behind · highest migration FILE
-`0171` · tree CLEAN.**
+**HEAD `9164e01` at the moment this line was written · branch `main` · 0 ahead / 0
+behind · highest migration FILE `0171` · tree CLEAN.** This file's own commit lands
+on top of that hash, so HEAD is one ahead of it by the time anyone reads this.
 
-**§10 IS THE NEWEST SECTION AND HOLDS THE ONLY OPEN ITEM.** Two commits landed
-after this file was last refreshed at `0c48aa9`. A live-DB read while writing §10
-found that the `user_profiles` TABLE comment still carries the retired claim that
-`preferred_language` is *"a display label only"*. That is now false. It is the one
-actionable thing in this document; everything else is a record.
+**THERE IS NO OPEN ITEM LEFT IN THIS FILE. §10 IS NOW ENTIRELY A RECORD.** The one
+that stood there — `0171` applied to the COLUMN comment but not the TABLE comment —
+was CLOSED on 2026-08-29. The table comment was corrected directly in the live DB,
+and `supabase/migrations/0171_*.sql` was reconciled to the as-applied text of BOTH
+statements. §10 keeps the reasoning because the reasoning is still worth reading;
+nothing in it is actionable. **Do not re-raise it from this file's older wording.**
 
 **READ THIS FILE'S §7 BEFORE PLANNING ANY ARABIC WORK — there is none left.**
 (`CLAUDE.md` has its own §7, the money/schema rules, one paragraph down. The two
@@ -305,8 +307,9 @@ from plain UI chrome — that grouping is his reading pass.
 ## 4. DB STATE — MOVED. 0168 → 0171.
 
 **Highest migration FILE `0171_preferred_language_login_only.sql`. 169 `.sql`
-files.** `0168`, `0169` and `0170` are all applied and verified live. **`0171` is
-applied only IN PART — see §10, which is the one open item in this file.**
+files** (re-counted 2026-08-29). `0168`, `0169` and `0170` are all applied and
+verified live. **`0171` is FULLY APPLIED as of 2026-08-29 — both the column comment
+and the table comment. It was half-applied for a while; see §10 for the record.**
 
 **Do NOT read `supabase_migrations.schema_migrations` to answer "what is the DB
 head".** It stops at `20260824231520` and contains ZERO `017x` rows, because our
@@ -319,7 +322,7 @@ a migration by reading the OBJECT it changed — that is how §10's finding surf
 | `0168_lookup_label_ar.sql` | adds nullable `label_ar` to `staff_roles` and `leave_types` |
 | `0169_builtin_role_labels_bilingual.sql` | seeds Arabic for the **5 built-in roles** |
 | `0170_builtin_leave_type_labels_bilingual.sql` | seeds Arabic for the **4 built-in leave types** |
-| `0171_preferred_language_login_only.sql` | comment-only. Retires 0159's "do not wire" ban on `preferred_language`. **Half-applied — §10.** |
+| `0171_preferred_language_login_only.sql` | comment-only. Retires 0159's "do not wire" ban on `preferred_language`. **Fully applied — table AND column. §10.** |
 
 0169 and 0170 are DATA ONLY — no schema change, no table created, so
 `CLAUDE.md` §6's anon-revoke footer does not apply. Both are idempotent, both
@@ -706,28 +709,46 @@ handler, not from an effect: `router.refresh()` fires its RSC request before Rea
 flushes passive effects, so an effect-written cookie arrives after the layout has
 already rendered `<html lang>`.
 
-### ⚠ OPEN — THE ONE ACTIONABLE ITEM IN THIS FILE
+### ✔ CLOSED 2026-08-29 — `0171` IS FULLY APPLIED. NOTHING TO DO. DO NOT REOPEN.
 
-**`0171` IS HALF-APPLIED. The live `user_profiles` TABLE comment still says:**
+**This block used to be the one open item in this file. It is kept INVERTED rather
+than deleted**, because a deleted warning is indistinguishable from one that was
+never written, and the next reader who finds `0159`'s retired sentence quoted
+anywhere else needs to land here and stop.
 
-> *"preferred_language is a display label only — the real UI language is
-> localStorage[\"lang\"] and the two are allowed to disagree."*
+**What was open.** `0171` had reached the COLUMN comment but not the TABLE comment,
+so the live `user_profiles` table description still carried the retired claim that
+`preferred_language` is *"a display label only"* whose real source is
+`localStorage["lang"]`. Both clauses were false — the second one already false
+before feature #3, since `98798f0` moved first paint to cookies.
 
-Both clauses are now false, and the second was already false before feature #3 —
-`98798f0` moved first paint to cookies, so localStorage has not been "the real UI
-language" for some time. Read live from the DB, not from the file.
+**What closed it, and how it was verified.** The table comment was corrected
+directly in the live DB through MCP. Then `supabase/migrations/0171_*.sql` was
+reconciled to the AS-APPLIED text of both statements. The check was a hash, not a
+read: each SQL literal was extracted from the file, its doubled `''` un-escaped,
+and its length + md5 compared against `md5(obj_description(...))` and
+`md5(col_description(...))` from the live database.
 
-The COLUMN comment WAS updated and is correct in substance (login-only, toggle
-does not write back, `en | ar | null`). Only the table comment was missed.
+| object | length | md5 | file vs DB |
+|---|---|---|---|
+| `user_profiles` table comment | 1093 | `c91628f3b0353c2f7d0b421331818d73` | **identical** |
+| `.preferred_language` column comment | 276 | `74addae261c9d3c7fbe37a3dec88f3b4` | **identical** |
 
-**A related divergence to know before touching either.** The live column comment
-is a short hand-written paraphrase, **not the text in
-`supabase/migrations/0171_*.sql`** — the file's version is several times longer
-and carries the "do NOT turn this into a two-way sync" ruling and the CHECK note.
-The two AGREE on behaviour and disagree on wording. Do not blind-copy one over the
-other; decide which text is wanted, then apply it as a numbered migration so the
-file and the database stop drifting. This is `CLAUDE.md` §6's stale-comment trap
-caught in the act, and §5's "the DB outranks the notes" is why it was found at all.
+The stale phrases are gone as well as replaced: `position('display label only' in …)`
+and `position('localStorage' in …)` both return 0 on the live table comment.
+
+**THE DRIFT WAS THE REAL HAZARD, AND IT WENT BOTH WAYS.** The file's drafts were
+LONGER than what was actually applied by hand in the SQL Editor — for the column
+too, not only the table. A comment-only migration leaves nothing in the schema to
+diff against, so a file that disagrees with the live description reads as correct
+forever, right up until a fresh `db reset` makes the FILE the truth and silently
+reverts the applied wording. `CLAUDE.md` §5's "the DB outranks the notes" is what
+decided the direction: the applied text won, and `0171` is now a RECORD of what is
+live rather than a competing draft of it. Its header says so, and says do not run it.
+
+**No `0172` comment migration is needed, and one must not be created.** (`0172` was
+briefly used by the `invoice_drafts` table below, which was dropped and never
+committed — the number is free, but there is nothing pending to spend it on.)
 
 ### FEATURE #4 — invoice drafts. CLOSED. NO WORK NEEDED. DO NOT REOPEN.
 

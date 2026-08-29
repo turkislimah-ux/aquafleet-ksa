@@ -69,12 +69,29 @@
 -- SECURITY DEFINER function, so §6's re-revoke rule does not apply here.
 
 -- ---------------------------------------------------------------------
--- The table comment repeats the retired claim, so it is restated whole.
--- `comment on` replaces the description outright; there is no way to edit
--- one clause of it.
+-- BOTH STATEMENTS BELOW ARE THE AS-APPLIED TEXT — ALREADY LIVE, DO NOT RUN.
+--
+-- This file was drafted with longer wording than what was actually applied.
+-- The table comment was applied by hand in the SQL Editor in a later pass,
+-- with the shorter phrasing below, and the column comment had been applied
+-- the same way. What `obj_description` and `col_description` return today is
+-- what is written here, verbatim, verified 2026-08-29.
+--
+-- THAT DRIFT WAS THE REAL HAZARD, and it is worth naming because it is silent.
+-- A comment-only migration leaves nothing in the schema to compare against, so
+-- a file that disagrees with the live description reads as correct forever —
+-- until a fresh `db reset`, at which point the FILE becomes the truth and
+-- quietly reverts the applied wording. CLAUDE.md's rule that the database
+-- outranks the notes is what decides which way the reconciliation runs: the
+-- applied text wins, and this file is now a record of it rather than a
+-- competing draft of it.
+--
+-- Re-running either statement is a no-op that rewrites the same description.
+-- `comment on` replaces a description OUTRIGHT — there is no way to edit one
+-- clause of it — which is why each is restated whole rather than patched.
 -- ---------------------------------------------------------------------
 comment on table public.user_profiles is
-  'Self-entered personal profile (0159) — one optional row per auth user, every column nullable, RLS restricted to user_id = auth.uid() for both read and write. EXPLICITLY NOT LINKED TO ANY EMPLOYEE OR HR RECORD BY DESIGN: no foreign key to staff, drivers or leave_periods, no iqama, no salary, no leave, no employment data, and none may be added. The absence of an auth-to-employee link is a safety feature — it means no query can widen from a cosmetic profile to payroll or identity documents, because the join does not exist. job_title is a free-text cosmetic label, NOT a role and NOT a permission; nothing may branch on it. The emergency contact is what the user chose to share with colleagues, NOT the HR contact of record. preferred_language is the account language, applied to the session at sign-in only (0171) — see its own comment. avatar_path is a storage path into profile-images, never image bytes. No row at all and a row of all-NULLs are the same state: nothing filled in.';
+  'Self-entered personal profile (0159) — one optional row per auth user, every column nullable, RLS restricted to user_id = auth.uid() for both read and write. EXPLICITLY NOT LINKED TO ANY EMPLOYEE OR HR RECORD BY DESIGN: no foreign key to staff, drivers or leave_periods, no iqama, no salary, no leave, no employment data, and none may be added. The absence of an auth-to-employee link is a safety feature — it means no query can widen from a cosmetic profile to payroll or identity documents, because the join does not exist. job_title is a free-text cosmetic label, NOT a role and NOT a permission; nothing may branch on it. The emergency contact is what the user chose to share with colleagues, NOT the HR contact of record. preferred_language is read at login to set the session language (login-only model, migration 0171, superseding 0159''s note); the in-app header toggle changes language for the current session only and does not write back. avatar_path is a storage path into profile-images, never image bytes. No row at all and a row of all-NULLs are the same state: nothing filled in.';
 
 comment on column public.user_profiles.preferred_language is
-  'THE ACCOUNT LANGUAGE, APPLIED AT LOGIN ONLY (0171, superseding 0159''s "do not wire" note). en, ar, or NULL for no preference. On sign-in the app seeds the session from this value — cookie and localStorage together — so the user lands in their own language on any device. NULL changes nothing: no preference means the device keeps what it was showing. The in-app language toggle is per-session and per-device and NEVER writes back to this column, so a mid-session switch holds until the next login re-asserts the account value. Do NOT turn this into a two-way sync: that is what 0159 forbade, and the reason still holds — a per-account value and a per-device value have different lifetimes and a continuous sync fights the user on every machine they switch to. The CHECK accepts exactly the two languages lib/i18n.ts can render.';
+  'The user''s account language. Read at login to set the session language (login-only model, migration 0171, superseding 0159''s note). The in-app header toggle changes language for the current session only and does NOT write back here. Values: ''en'' | ''ar'' | null (no preference).';
