@@ -1113,7 +1113,7 @@ export const dict = {
     headline: {
       revenue: {
         label: { en: "Revenue", ar: "الإيرادات" },
-        sub: { en: "this month, net of VAT", ar: "هذا الشهر، بدون VAT" },
+        sub: { en: "this month, net of VAT", ar: "هذا الشهر، بدون الضريبة" },
       },
       operating_margin: {
         label: { en: "Operating margin", ar: "هامش التشغيل" },
@@ -1339,7 +1339,7 @@ export const dict = {
       heading: { en: "Needs action", ar: "يحتاج إلى إجراء" },
       viewAllCount: { en: "View all ({n})", ar: "عرض الكل ({n})" },
       readFailed: { en: "Could not read the queue.", ar: "تعذّر قراءة قائمة المهام." },
-      emptyTitle: { en: "Nothing waiting", ar: "لا شيء معلّق" },
+      emptyTitle: { en: "Nothing waiting", ar: "لا شيء قيد الانتظار" },
       emptyBody: { en: "Every queue is clear right now.", ar: "كل قوائم الموافقات والمهام فارغة." },
       modalTitle: { en: "Everything that needs action", ar: "كل ما يحتاج إجراء" },
       // A relative timestamp follows immediately, so the trailing space stays.
@@ -1865,7 +1865,7 @@ export const dict = {
       delayed: { en: "Delayed", ar: "متأخرة" },
       overdue: { en: "Overdue", ar: "متأخر" },
       costInternal: { en: "internal", ar: "داخلي" },
-      costExternal: { en: "external, incl. VAT", ar: "خارجي، شامل VAT" },
+      costExternal: { en: "external, incl. VAT", ar: "خارجي، شامل الضريبة" },
     },
 
     // ---- danger zone ------------------------------------------------------
@@ -3338,7 +3338,9 @@ export const dict = {
   // ===========================================================================
   // The accounting vocabulary here is the standard Saudi/IFRS Arabic, not a
   // fresh translation: الإيرادات / التكاليف التشغيلية / الربح التشغيلي / صافي
-  // الربح / هامش التشغيل / الذمم المدينة / ضريبة القيمة المضافة / الزكاة. Where
+  // الربح / هامش التشغيل / الذمم المدينة / الضريبة / الزكاة. VAT is named
+  // `الضريبة` in prose and "VAT" as a standalone label; the spelled-out
+  // ضريبة القيمة المضافة is not used in any rendered string. Where
   // the same concept is already keyed elsewhere in this file the site points at
   // THAT key rather than restating it — dashboard.costType.* for the five cost
   // buckets, mt.vat / mt.subtotal / mt.discount for the money vocabulary, and
@@ -3551,12 +3553,12 @@ export const dict = {
       note: {
         revenue: {
           en: "Confirmed invoices, net of VAT",
-          ar: "فواتير مؤكدة، بعد استبعاد VAT",
+          ar: "فواتير مؤكدة، بعد استبعاد الضريبة",
         },
         operatingProfit: { en: "Before other expenses", ar: "قبل المصروفات الأخرى" },
         collections: {
           en: "Cash received, VAT included",
-          ar: "نقد محصَّل، شامل VAT",
+          ar: "نقد محصَّل، شامل الضريبة",
         },
         receivables: {
           en: "As of today, not the picked period",
@@ -3690,7 +3692,7 @@ export const dict = {
       },
       basesNote: {
         en: "These are different bases on purpose. Revenue is earned when an invoice is confirmed and excludes VAT; collections are cash banked when it is paid and include VAT. They are never added together.",
-        ar: "هذان أساسان مختلفان عن قصد. يُكتسب الإيراد عند تأكيد الفاتورة ولا يشمل ضريبة القيمة المضافة؛ والمتحصّلات نقد يُودع عند السداد ويشمل الضريبة. ولا يُجمعان أبدًا.",
+        ar: "هذان أساسان مختلفان عن قصد. يُكتسب الإيراد عند تأكيد الفاتورة ولا يشمل الضريبة؛ والمتحصّلات نقد يُودع عند السداد ويشمل الضريبة. ولا يُجمعان أبدًا.",
       },
       topupsNote: {
         en: "Prepaid top-ups of {v} this month are cash in but are neither revenue nor an invoice payment, so they appear in neither line.",
@@ -3844,7 +3846,7 @@ export const dict = {
 
       footer: {
         en: "Revenue is confirmed invoices net of VAT. Parts are costed FIFO at the moment they leave stock — stock purchases are not a cost here, they become one when consumed. Payroll applies current salaries to whoever was employed in the period, as salaries are not effective-dated. Margin is computed from this period's own revenue, never averaged from its months.",
-        ar: "الإيراد هو الفواتير المؤكدة صافية من ضريبة القيمة المضافة. وتُكلَّف قطع الغيار بطريقة «الوارد أولًا صادر أولًا» لحظة خروجها من المخزون — فمشتريات المخزون ليست تكلفة هنا، وإنما تصبح تكلفة عند الاستهلاك. وتطبّق الرواتب المرتبات الحالية على من كان موظفًا في الفترة، إذ إن المرتبات ليست مؤرَّخة السريان. ويُحسب الهامش من إيراد الفترة نفسها، ولا يُؤخذ كمتوسط لأشهرها.",
+        ar: "الإيراد هو الفواتير المؤكدة صافية من الضريبة. وتُكلَّف قطع الغيار بطريقة «الوارد أولًا صادر أولًا» لحظة خروجها من المخزون — فمشتريات المخزون ليست تكلفة هنا، وإنما تصبح تكلفة عند الاستهلاك. وتطبّق الرواتب المرتبات الحالية على من كان موظفًا في الفترة، إذ إن المرتبات ليست مؤرَّخة السريان. ويُحسب الهامش من إيراد الفترة نفسها، ولا يُؤخذ كمتوسط لأشهرها.",
       },
 
       // Margin's "variance" is a POINT difference, not a percent. `{v}` is the
@@ -3956,7 +3958,7 @@ export const dict = {
       totalReversed: { en: "Total reversed", ar: "إجمالي المرتجع" },
       note: {
         en: "Revenue is net of VAT and counts every invoice that has been confirmed, including those since paid. Sales returns are shown on their own line and are already excluded from the revenue above — the two are never netted silently. Outstanding is the amount still due, which on a prepaid account can be less than the invoice value because part was covered by balance.",
-        ar: "الإيراد صافٍ من ضريبة القيمة المضافة ويشمل كل فاتورة مؤكدة، بما فيها المسددة لاحقًا. وتُعرض مردودات المبيعات في بند مستقل وهي مستبعَدة أصلًا من الإيراد أعلاه — فلا تُصافى الاثنتان بصمت. والمستحق هو المبلغ الباقي، وقد يقل في الحساب المدفوع مقدَّمًا عن قيمة الفاتورة لأن جزءًا منها غُطِّي من الرصيد.",
+        ar: "الإيراد صافٍ من الضريبة ويشمل كل فاتورة مؤكدة، بما فيها المسددة لاحقًا. وتُعرض مردودات المبيعات في بند مستقل وهي مستبعَدة أصلًا من الإيراد أعلاه — فلا تُصافى الاثنتان بصمت. والمستحق هو المبلغ الباقي، وقد يقل في الحساب المدفوع مقدَّمًا عن قيمة الفاتورة لأن جزءًا منها غُطِّي من الرصيد.",
       },
     },
 
@@ -4777,7 +4779,7 @@ export const dict = {
       },
       collected: {
         en: "{v} of cash was collected in the period. Collections are VAT-inclusive and land when an invoice is paid, so they will not equal revenue.",
-        ar: "حُصِّل {v} نقدًا خلال الفترة. المتحصّلات شاملة لضريبة القيمة المضافة وتقع عند سداد الفاتورة، فلن تساوي الإيرادات.",
+        ar: "حُصِّل {v} نقدًا خلال الفترة. المتحصّلات شاملة الضريبة وتقع عند سداد الفاتورة، فلن تساوي الإيرادات.",
       },
       noCash: {
         en: "No cash was collected against invoices in this period.",
@@ -7125,7 +7127,7 @@ export const dict = {
       headFinanceTitle: { en: "Finance", ar: "المالية" },
       headFinanceSubtitle: {
         en: "Prepaid balances, top-ups, and customer statements — pre-VAT.",
-        ar: "الأرصدة المدفوعة مقدمًا والإيداعات وكشوف حسابات العملاء — قبل ضريبة القيمة المضافة.",
+        ar: "الأرصدة المدفوعة مقدمًا والإيداعات وكشوف حسابات العملاء — قبل الضريبة.",
       },
       // NewProjectModal's trigger. It renders into the shell's header slot,
       // which is why it sits in this group and not in a file-shaped one of
@@ -7513,8 +7515,11 @@ export const dict = {
      * divergence. Turki closed it: "VAT" is the LABEL everywhere, the customer
      * PDF included, so `lib/invoicePdfTemplate.ts` was brought to the screen's
      * wording rather than the reverse. The copy-byte-for-byte rule above is
-     * therefore back to holding with no exceptions. VAT spelled out in ARABIC
-     * survives only where it is prose inside a sentence, never as a label.
+     * therefore back to holding with no exceptions. The spelled-out
+     * `ضريبة القيمة المضافة` is now gone from EVERY rendered string, label and
+     * prose alike. Prose that has to name the tax says `الضريبة` — the short
+     * form the reports section was already using — so the long form survives
+     * only in comments like this one, describing history.
      *
      * EVERY NUMBER STAYS LATIN. Nothing in this group formats a figure: amounts
      * come from `formatSar`/`formatNum` and dates from `formatDate`, all pinned
@@ -7991,7 +7996,7 @@ export const dict = {
       colPhoto: { en: "Photo", ar: "الصورة" },
       formSubtitle: {
         en: "Pre-VAT amount. Adds to the customer's prepaid balance immediately.",
-        ar: "المبلغ قبل ضريبة القيمة المضافة. يُضاف إلى رصيد العميل المدفوع مقدمًا فورًا.",
+        ar: "المبلغ قبل الضريبة. يُضاف إلى رصيد العميل المدفوع مقدمًا فورًا.",
       },
       selectCustomer: { en: "Select customer…", ar: "اختر عميلاً…" },
       // The unit and the tax basis are inside the label, so the whole thing is
@@ -8038,7 +8043,7 @@ export const dict = {
       sampleRef: { en: "Ref. {ref}", ar: "المرجع {ref}" },
       subPrepaid: {
         en: "Add Balance credits and delivered-trip/charge debits (VAT-inclusive), oldest first.",
-        ar: "أرصدة مضافة وخصوم الرحلات المسلَّمة والرسوم (شاملة ضريبة القيمة المضافة)، الأقدم أولاً.",
+        ar: "أرصدة مضافة وخصوم الرحلات المسلَّمة والرسوم (شاملة الضريبة)، الأقدم أولاً.",
       },
       subPostpaid: {
         en: "Delivered trips and recorded payments, oldest first.",
@@ -8066,7 +8071,9 @@ export const dict = {
       // VAT column head is read as the Latin acronym by the people who use it,
       // and the spelled-out ضريبة القيمة المضافة made a narrow numeric column
       // wrap. Scope is the standalone LABEL only: the long VAT SENTENCES
-      // elsewhere in the dictionary keep their Arabic.
+      // elsewhere in the dictionary keep their Arabic — but in the SHORT form
+      // `الضريبة`, never the spelled-out `ضريبة القيمة المضافة`, which no
+      // longer appears in a rendered string anywhere in the app.
       //
       // The Batch 9 follow-up is CLOSED — the terminology sweep carried the
       // rule to the other three standalone labels, so `mt.vat`,
