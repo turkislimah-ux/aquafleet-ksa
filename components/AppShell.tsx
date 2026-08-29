@@ -159,16 +159,42 @@ type AppCtx = { lang: Lang; setLang: (l: Lang) => void; theme: "light" | "dark";
 const Ctx = createContext<AppCtx>({ lang: "en", setLang: () => {}, theme: "light", setTheme: () => {} });
 export const useApp = () => useContext(Ctx);
 
+/**
+ * Persist a display preference where the SERVER can read it on the next
+ * request. Written in the same action as the localStorage write so the two can
+ * never disagree except by outside interference (a cleared jar, a second tab
+ * on an older build) — which the restore pass below repairs.
+ *
+ * Deliberately not httpOnly: this is written from the client. Not Secure
+ * either, because dev runs on http://localhost and these carry no secret —
+ * they are "ar" or "en", "dark" or "light". Lax so a normal navigation sends
+ * them; without that the server would render the default on every link click.
+ */
+function writePrefCookie(name: "lang" | "theme", value: string) {
+  if (typeof document === "undefined") return;
+  document.cookie = `${name}=${value}; path=/; max-age=31536000; samesite=lax`;
+}
+
 export default function AppShell({
   children,
   viewer,
+  initialLang = "en",
+  initialTheme = "light",
 }: {
   children: React.ReactNode;
   /** Read server-side in app/layout.tsx. Null on /login and when signed out. */
   viewer?: Viewer | null;
+  /**
+   * Seeded from the `lang`/`theme` cookies in app/layout.tsx. These MUST be the
+   * same values the server used to render <html>, or React's first client pass
+   * disagrees with the markup and hydration mismatches. Defaults match the
+   * layout's own fallbacks for the no-cookie case.
+   */
+  initialLang?: Lang;
+  initialTheme?: "light" | "dark";
 }) {
-  const [lang, setLangState] = useState<Lang>("en");
-  const [theme, setThemeState] = useState<"light" | "dark">("light");
+  const [lang, setLangState] = useState<Lang>(initialLang);
+  const [theme, setThemeState] = useState<"light" | "dark">(initialTheme);
   const pathname = usePathname();
 
   // BUG FIX (pre-existing, found while rebuilding this header): language and
@@ -215,6 +241,20 @@ export default function AppShell({
     return () => { cancelled = true; };
   }, [settingsOpen]);
 
+  // RECONCILIATION, NOT RESTORE. State already arrives correct from the cookie
+  // (initialLang/initialTheme), so in the normal case this effect finds
+  // localStorage agreeing and changes nothing.
+  //
+  // It still has to run, for the case where the two stores disagree — a user
+  // who cleared cookies but not site data, or whose cookie expired. localStorage
+  // stays the winner there, matching the read order this had before, and the
+  // persist effects below then rewrite the cookie so the NEXT load is right at
+  // first paint. The correction lands post-hydration, after React has matched
+  // the server markup, so it costs a silent repaint and never a mismatch.
+  //
+  // It must stay an effect for exactly that reason: reading localStorage during
+  // render would put a value in the first client pass that the server could not
+  // have known.
   useEffect(() => {
     const savedLang = (typeof window !== "undefined" && localStorage.getItem("lang")) as Lang | null;
     const savedTheme = (typeof window !== "undefined" && localStorage.getItem("theme")) as "light" | "dark" | null;
@@ -225,19 +265,56 @@ export default function AppShell({
 
   // Applying dir/lang/class is NOT gated — the DOM should always reflect
   // current state. Only the write-back is gated.
+  //
+  // On first paint these are now no-ops: the server already rendered dir, lang
+  // and the theme class from the cookies. They still carry every LATER change,
+  // which is the toggles.
   useEffect(() => {
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
     document.documentElement.lang = lang;
-    if (hydrated) localStorage.setItem("lang", lang);
+    if (hydrated) {
+      localStorage.setItem("lang", lang);
+      writePrefCookie("lang", lang);
+    }
   }, [lang, hydrated]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    if (hydrated) localStorage.setItem("theme", theme);
+    if (hydrated) {
+      localStorage.setItem("theme", theme);
+      writePrefCookie("theme", theme);
+    }
   }, [theme, hydrated]);
 
   const setLang = (l: Lang) => setLangState(l);
   const setTheme = (m: "light" | "dark") => setThemeState(m);
+
+  // SHARED TERMINAL: the display preferences leave with the session. Run from
+  // the sign-out button, alongside lib/actions/auth.ts deleting the cookies.
+  //
+  // Three stores hold the preference and all three have to go, each for its own
+  // reason: the COOKIE is what app/layout.tsx renders <html> from on first
+  // paint (the server action's job); LOCALSTORAGE is what the reconciliation
+  // effect restores from after hydration, so a survivor there flips the next
+  // user back to Arabic even with the cookie gone; and the LIVE STATE matters
+  // because signOut redirects with a client-side navigation and this component
+  // never unmounts — without the reset, the login screen the outgoing user is
+  // handing over stays Arabic and dark until something reloads.
+  //
+  // The reset re-runs the persist effects, which write "en"/"light" back into
+  // both stores. That is the same result the deleted cookie produces, so the
+  // client and server halves agree however the race lands.
+  const clearDevicePrefs = () => {
+    try {
+      localStorage.removeItem("lang");
+      localStorage.removeItem("theme");
+    } catch {
+      // Private mode, or storage blocked by policy. The cookie delete is the
+      // authoritative half and does not depend on this succeeding.
+    }
+    setLangState("en");
+    setThemeState("light");
+  };
 
   // /login renders standalone, without the app chrome — but STILL INSIDE the
   // language context, which is why this is a Provider and not a bare fragment.
@@ -537,7 +614,7 @@ export default function AppShell({
                   {theme === "light" ? <Moon className="h-4 w-4" aria-hidden /> : <Sun className="h-4 w-4" aria-hidden />}
                 </button>
 
-                <AccountMenu viewer={viewer ?? null} lang={lang} avatarUrl={avatarUrl} />
+                <AccountMenu viewer={viewer ?? null} lang={lang} avatarUrl={avatarUrl} onSignOut={clearDevicePrefs} />
               </div>
             </header>
 
@@ -857,8 +934,14 @@ function NotificationItem({
  *    image is loading.
  */
 function AccountMenu({
-  viewer, lang, avatarUrl,
-}: { viewer: Viewer | null; lang: Lang; avatarUrl: string | null }) {
+  viewer, lang, avatarUrl, onSignOut,
+}: {
+  viewer: Viewer | null;
+  lang: Lang;
+  avatarUrl: string | null;
+  /** Clears the device-local display preferences. See the sign-out form below. */
+  onSignOut: () => void;
+}) {
   const emailLocal = viewer?.email?.split("@")[0] ?? null;
   // `?? ""` only feeds arText a string when there is no viewer at all; the
   // result is still falsy, so the `|| emailLocal || "—"` chain behaves exactly
@@ -918,9 +1001,26 @@ function AccountMenu({
         )}
       </span>
 
+      {/* The server action deletes the lang/theme COOKIES; this clears their
+          localStorage twins and drops the live state back to the defaults.
+          All three are needed, and each covers a different survivor:
+
+          - cookie      → what app/layout.tsx reads to render <html> on first paint
+          - localStorage → what the reconciliation effect restores from after
+                           hydration, which would flip the next user straight
+                           back to Arabic even with the cookie gone
+          - live state  → signOut redirects with a CLIENT-side navigation, so
+                          AppShell never unmounts. Without this reset the login
+                          screen the outgoing user is looking at stays Arabic
+                          and dark until someone reloads.
+
+          onClick runs before the form submits. Resetting state re-runs the
+          persist effects, which rewrite both stores as "en"/"light" — the same
+          default the deleted cookie produces, so the two paths agree. */}
       <form action={signOut} className="shrink-0">
         <button
           type="submit"
+          onClick={onSignOut}
           aria-label={t("shared.chrome.logOut", lang)}
           title={t("shared.chrome.logOut", lang)}
           className="focus-ring grid h-8 w-8 place-items-center rounded-full transition-colors [touch-action:manipulation] muted hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400"
