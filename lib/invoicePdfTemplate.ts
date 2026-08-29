@@ -227,7 +227,7 @@ function lineTable(title: string, titleAr: string, lines: PdfLine[], totals: Pdf
             <th>${label("Date", "التاريخ")}</th>
             <th>${label("Description", "البيان")}</th>
             <th class="num">${label("Amount", "المبلغ")}</th>
-            <th class="num">${label("VAT", "ضريبة القيمة المضافة")}</th>
+            <th class="num">${label("VAT", "VAT")}</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -239,7 +239,7 @@ function lineTable(title: string, titleAr: string, lines: PdfLine[], totals: Pdf
           </tr>
           <tr>
             <td colspan="2"></td>
-            <td class="num">${label("VAT", "ضريبة القيمة المضافة")}</td>
+            <td class="num">${label("VAT", "VAT")}</td>
             <td class="num" dir="ltr">${fmtSar(totals.vat)}</td>
           </tr>
           <tr class="total-row">
@@ -449,7 +449,7 @@ export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
       <div class="grand-row"><span>${label("Special Charges (covered)", "رسوم إضافية (مغطاة)")}</span><span dir="ltr">${fmtSar(
           data.chargeLines.filter((l) => l.covered).reduce((sum, l) => sum + l.amount_sar, 0),
         )}</span></div>
-      <div class="grand-row"><span>${label("Total VAT", "إجمالي ضريبة القيمة المضافة")}</span><span dir="ltr">${fmtSar(data.grand.vat)}</span></div>
+      <div class="grand-row"><span>${label("Total VAT", "إجمالي VAT")}</span><span dir="ltr">${fmtSar(data.grand.vat)}</span></div>
       <div class="grand-row grand-final"><span>${label("TOTAL", "الإجمالي")}</span><span dir="ltr">${fmtSar(data.grand.total)}</span></div>
     </div>
 

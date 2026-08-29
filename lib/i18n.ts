@@ -364,7 +364,10 @@ export const dict = {
     invoiceNumber: { en: "Invoice Number", ar: "رقم الفاتورة" },
     invoiceDate: { en: "Invoice Date", ar: "تاريخ الفاتورة" },
     subtotal: { en: "Subtotal", ar: "المجموع الفرعي" },
-    vat: { en: "VAT", ar: "ضريبة القيمة المضافة" },
+    // "VAT" STAYS LATIN IN ARABIC as a standalone LABEL — the standing rule
+    // `trips.statement.colVat` already follows. SHARED: this leaf renders on
+    // app/maintenance/OutsourcedJobDetailModal.tsx AND app/reports/StatementsTab.tsx.
+    vat: { en: "VAT", ar: "VAT" },
     grandTotal: { en: "Grand Total", ar: "الإجمالي" },
     actualCost: { en: "Actual Total", ar: "الإجمالي الفعلي" },
     osNoJobs: { en: "No outsourced jobs in this view", ar: "لا توجد أعمال خارجية في هذا العرض" },
@@ -1110,7 +1113,7 @@ export const dict = {
     headline: {
       revenue: {
         label: { en: "Revenue", ar: "الإيرادات" },
-        sub: { en: "this month, net of VAT", ar: "هذا الشهر، بدون الضريبة" },
+        sub: { en: "this month, net of VAT", ar: "هذا الشهر، بدون VAT" },
       },
       operating_margin: {
         label: { en: "Operating margin", ar: "هامش التشغيل" },
@@ -1190,7 +1193,7 @@ export const dict = {
         hint: { en: "Received stock not yet signed off", ar: "مخزون مستلم لم يُعتمد بعد" },
       },
       consumption_pending_approval: {
-        label: { en: "Consumption approvals pending", ar: "موافقات استهلاك معلقة" },
+        label: { en: "Consumption approvals pending", ar: "موافقات استهلاك قيد الانتظار" },
         hint: { en: "An overlay — approving moves no stock", ar: "طبقة مراجعة — الموافقة لا تحرّك المخزون" },
       },
       invoice_unpaid: {
@@ -1312,12 +1315,16 @@ export const dict = {
       ok: { en: "Valid", ar: "سارية" },
     },
 
-    /** ONE driver's derived state. Arabic differs from `driverMix` on purpose
-     *  — that one counts a group, this one describes a person. */
+    /** ONE driver's derived state — DRIVER_STATE_LABELS (lib/driver-state.ts)
+     *  rendered for this route. Word for word equal to `fleet.driverState` and
+     *  to `driverMix` below: one enum, one set of words, every route. It used
+     *  to read خامل / خارج الدوام here, which described the CLOCK rather than
+     *  the workload the state actually encodes — see the note on
+     *  `fleet.driverState` for why متاح / غير مكلف is the right pair. */
     driverState: {
       active: { en: "Active", ar: "نشط" },
-      idle: { en: "Idle", ar: "خامل" },
-      off_duty: { en: "Off duty", ar: "خارج الدوام" },
+      idle: { en: "Idle", ar: "متاح" },
+      off_duty: { en: "Off duty", ar: "غير مكلف" },
       on_leave: { en: "On leave", ar: "في إجازة" },
     },
 
@@ -1351,19 +1358,25 @@ export const dict = {
       jobsRunning: { en: "Jobs running", ar: "أعمال جارية" },
     },
 
-    /** Truck mix bar. Arabic is feminine (شاحنة) — a truck, not a driver. */
+    /** Truck mix bar. Word for word equal to `fleet.truckState` / `fleet.kpi`
+     *  — the same buildTruckStatusMap enum, so the same fact must not read
+     *  differently on two routes. `idle` is في الموقف (parked in the yard),
+     *  which says WHERE the truck is rather than that it stopped. Arabic is
+     *  feminine (شاحنة) wherever the word inflects. */
     fleetState: {
       active: { en: "Active", ar: "نشطة" },
-      idle: { en: "Idle", ar: "متوقفة" },
+      idle: { en: "Idle", ar: "في الموقف" },
       maintenance: { en: "Maintenance", ar: "صيانة" },
     },
 
-    /** Driver mix bar — the headcount view, distinct from `driverState`. */
+    /** Driver mix bar — the headcount view of the same enum `driverState`
+     *  above renders one row of. Same words, deliberately: counting a group
+     *  and describing a person are the same fact at two zoom levels. */
     driverMix: {
-      active: { en: "Active", ar: "في الخدمة" },
+      active: { en: "Active", ar: "نشط" },
       idle: { en: "Idle", ar: "متاح" },
-      offDuty: { en: "Off duty", ar: "خارج الخدمة" },
-      onLeave: { en: "On leave", ar: "إجازة" },
+      offDuty: { en: "Off duty", ar: "غير مكلف" },
+      onLeave: { en: "On leave", ar: "في إجازة" },
     },
 
     activity: {
@@ -1590,12 +1603,13 @@ export const dict = {
       // Trucks are feminine in Arabic, so these do NOT reuse `status.active` /
       // `status.idle` (نشط / متوقف, masculine).
       //
-      // `idle` NO LONGER matches dashboard.fleetState (متوقفة). Turki's wording:
-      // an idle truck is في الموقف — parked in the yard — which says WHERE it is
-      // rather than that it stopped. It MUST stay equal to truckState.idle
-      // below: the KPI card, the filter chip and the table pill all count the
-      // same buildTruckStatusMap enum, so a reader seeing three different words
-      // would think they were three different facts.
+      // An idle truck is في الموقف — parked in the yard — which says WHERE it
+      // is rather than that it stopped. It MUST stay equal to truckState.idle
+      // below AND to dashboard.fleetState.idle: the KPI card, the filter chip,
+      // the table pill and the dashboard mix bar all count the same
+      // buildTruckStatusMap enum, so a reader seeing different words would
+      // think they were different facts. (dashboard.fleetState read متوقفة
+      // until the terminology sweep aligned it here.)
       active: { en: "Active", ar: "نشطة" },
       inMaintenance: { en: "In Maintenance", ar: "في الصيانة" },
       idle: { en: "Idle", ar: "في الموقف" },
@@ -1608,8 +1622,8 @@ export const dict = {
     // read these instead.
     //
     // `idle` is في الموقف and must stay equal to kpi.idle above — same enum,
-    // same source map, three surfaces. `maintenance` / `active` are still the
-    // dashboard.fleetState wording.
+    // same source map, three surfaces on this route. All three words are also
+    // the dashboard.fleetState wording, so the mix bar and these pills agree.
     truckState: {
       maintenance: { en: "Maintenance", ar: "صيانة" },
       active: { en: "Active", ar: "نشطة" },
@@ -1620,13 +1634,15 @@ export const dict = {
     // status.off_duty / status.leave ("Off Duty" / "On Leave"), so those cannot
     // be reused here.
     //
-    // `idle` and `off_duty` NO LONGER match dashboard.driverState (خامل /
-    // خارج الدوام). Both of those describe the driver; Turki's wording describes
-    // his WORKLOAD, which is what the fleet page is actually about:
+    // These four words are CANONICAL for the driver-state enum: dashboard's
+    // `driverState` and `driverMix` were aligned to them by the terminology
+    // sweep, so one enum reads one way on every route. The wording describes
+    // the driver's WORKLOAD, which is what the state actually encodes:
     //   idle     = has a truck, no active project -> متاح, free to take work
     //   off_duty = has no truck at all            -> غير مكلف, not tasked
-    // خارج الدوام was wrong on its own terms — it reads "outside working hours",
-    // but the state has nothing to do with the clock.
+    // The dashboard's old خامل / خارج الدوام were wrong on their own terms —
+    // خارج الدوام reads "outside working hours", but the state has nothing to
+    // do with the clock. Change a word here and change it on the dashboard.
     //
     // متاح here is the SAME WORD as availability.available below, and the two
     // render side by side in the driver picker (Status column vs Availability
@@ -1849,7 +1865,7 @@ export const dict = {
       delayed: { en: "Delayed", ar: "متأخرة" },
       overdue: { en: "Overdue", ar: "متأخر" },
       costInternal: { en: "internal", ar: "داخلي" },
-      costExternal: { en: "external, incl. VAT", ar: "خارجي، شامل الضريبة" },
+      costExternal: { en: "external, incl. VAT", ar: "خارجي، شامل VAT" },
     },
 
     // ---- danger zone ------------------------------------------------------
@@ -2680,7 +2696,7 @@ export const dict = {
       kpiOneVoteHint: { en: "Need a matching second", ar: "تحتاج صوتًا ثانيًا مطابقًا" },
       kpiDecided: { en: "Decided", ar: "محسومة" },
       kpiDecidedHint: { en: "Moved to the Approvals Ledger", ar: "انتقلت إلى سجل الاعتمادات" },
-      kpiValue: { en: "Value pending", ar: "قيمة معلّقة" },
+      kpiValue: { en: "Value pending", ar: "قيمة قيد الانتظار" },
       kpiValueHint: {
         en: "Parts and vendor spend not yet ruled on",
         ar: "قطع وإنفاق موردين لم يُبتّ فيها بعد",
@@ -2736,6 +2752,17 @@ export const dict = {
       // repo reads one route's namespace from another. `common.note` /
       // `mt.note` are already a matching pair on exactly that reasoning.
       colReference: { en: "Reference", ar: "المرجع" },
+      // NOT `consumption.shared.kind`, which this column used to read. That
+      // leaf is the ExitPermitKind head — Returnable vs Permanent, the
+      // MOVEMENT type — and ConsumptionClient's permits table and
+      // ExitPermitModals' form field are its two correct consumers. The word
+      // here answers a different question: WHICH KIND OF THING is awaiting a
+      // decision (exit permit / in-house / outsourced), off
+      // `consumption.approvals.short*`. Same word today, two different enums,
+      // so a future edit to the movement-type wording must not silently move
+      // this head. Archive's identical column already has its own
+      // `archive.ledger.thKind` on exactly this reasoning.
+      colKind: { en: "Kind", ar: "النوع" },
       colWhat: { en: "What", ar: "ماذا" },
       colWhen: { en: "When", ar: "متى" },
       colVotes: { en: "Votes", ar: "الأصوات" },
@@ -2761,7 +2788,7 @@ export const dict = {
       colDate: { en: "Date", ar: "التاريخ" },
       colRepairer: { en: "Repairer", ar: "الورشة" },
       colSubtotal: { en: "Subtotal", ar: "المجموع الفرعي" },
-      colVat: { en: "VAT", ar: "ضريبة القيمة المضافة" },
+      colVat: { en: "VAT", ar: "VAT" },
       colDiscount: { en: "Discount", ar: "الخصم" },
 
 
@@ -2913,7 +2940,7 @@ export const dict = {
       splitTitle: { en: "Maintenance vs exit permits", ar: "الصيانة مقابل أذونات الخروج" },
       splitHint: { en: "Where this period's consumption went", ar: "إلى أين ذهب استهلاك هذه الفترة" },
       warehouseTitle: { en: "By warehouse", ar: "حسب المستودع" },
-      warehouseHint: { en: "Which stock room it came out of", ar: "من أي مخزن خرجت" },
+      warehouseHint: { en: "Which stock room it came out of", ar: "من أي مستودع خرجت" },
       warehouseEmpty: { en: "No warehouse data this period.", ar: "لا توجد بيانات مستودعات لهذه الفترة." },
       destTitle: { en: "By destination", ar: "حسب الوجهة" },
       destHint: {
@@ -3446,7 +3473,7 @@ export const dict = {
       outstanding: { en: "Outstanding", ar: "المستحق" },
       paid: { en: "Paid", ar: "المسدد" },
       parts: { en: "Parts", ar: "قطع الغيار" },
-      permits: { en: "Permits", ar: "التصاريح" },
+      permits: { en: "Permits", ar: "الأذونات" },
       projectsServed: { en: "Projects served", ar: "المشاريع المخدومة" },
       reason: { en: "Reason", ar: "السبب" },
       // Sales-Returns-only header, despite living in the shared `th` block:
@@ -3524,12 +3551,12 @@ export const dict = {
       note: {
         revenue: {
           en: "Confirmed invoices, net of VAT",
-          ar: "فواتير مؤكدة، بعد استبعاد ضريبة القيمة المضافة",
+          ar: "فواتير مؤكدة، بعد استبعاد VAT",
         },
         operatingProfit: { en: "Before other expenses", ar: "قبل المصروفات الأخرى" },
         collections: {
           en: "Cash received, VAT included",
-          ar: "نقد محصَّل، شامل ضريبة القيمة المضافة",
+          ar: "نقد محصَّل، شامل VAT",
         },
         receivables: {
           en: "As of today, not the picked period",
@@ -3830,7 +3857,7 @@ export const dict = {
     // is no total leaf, no net leaf and no "payable to ZATCA" leaf, because
     // there is no such row and there must not be one.
     vat: {
-      title: { en: "VAT by source", ar: "ضريبة القيمة المضافة حسب المصدر" },
+      title: { en: "VAT by source", ar: "VAT حسب المصدر" },
       intro: {
         en: "Every VAT amount the period recorded, listed beside where it came from. Nothing here is totalled or netted, and none of it forms part of the profit above.",
         ar: "كل مبلغ ضريبة سجّلته الفترة، مدرَجًا بجانب مصدره. لا شيء هنا يُجمع أو يُقاصّ، ولا يدخل أي منه في الربح أعلاه.",
@@ -4148,13 +4175,13 @@ export const dict = {
       workOrders: { en: "Work orders", ar: "أوامر العمل" },
       outsourcedJobs: { en: "Outsourced jobs", ar: "الأعمال الخارجية" },
       maintenanceEvents: { en: "Maintenance events", ar: "أحداث الصيانة" },
-      exitPermits: { en: "Exit permits", ar: "تصاريح الخروج" },
+      exitPermits: { en: "Exit permits", ar: "أذونات الخروج" },
       byMonth: { en: "By month", ar: "حسب الشهر" },
       // The <strong> here OPENS a complete sentence, so the split is at a
       // sentence boundary and both languages read naturally either side.
       countsNoteBefore: {
         en: "Trips, work orders, outsourced jobs and permits are event counts, so they add across months.",
-        ar: "الرحلات وأوامر العمل والأعمال الخارجية والتصاريح أعداد أحداث، فتُجمع عبر الأشهر.",
+        ar: "الرحلات وأوامر العمل والأعمال الخارجية والأذونات أعداد أحداث، فتُجمع عبر الأشهر.",
       },
       countsNoteStrong: {
         en: "Trucks that moved does not.",
@@ -5491,7 +5518,7 @@ export const dict = {
       // and read a boolean, not this enum — same words, different question.
       status: {
         approved: { en: "Approved", ar: "معتمدة" },
-        pending: { en: "Pending", ar: "معلَّقة" },
+        pending: { en: "Pending", ar: "قيد الانتظار" },
         denied: { en: "Denied", ar: "مرفوضة" },
       },
     },
@@ -5507,7 +5534,7 @@ export const dict = {
       unpaidBalance: { en: "Unpaid balance", ar: "الرصيد غير المدفوع" },
       statPool: { en: "Current Pool", ar: "المجمَّع الحالي" },
       statApproved: { en: "Approved (awaiting pay)", ar: "معتمدة (بانتظار الصرف)" },
-      statPending: { en: "Pending Review", ar: "قيد المراجعة" },
+      statPending: { en: "Pending Review", ar: "قيد الانتظار" },
       statAvg: { en: "Avg per Driver", ar: "المتوسط لكل سائق" },
       thBase: { en: "Base (Projects × Trips)", ar: "الأساس (المشاريع × الرحلات)" },
       specialsBonuses: { en: "Specials / Bonuses", ar: "الاستثنائية / المكافآت" },
@@ -5809,7 +5836,11 @@ export const dict = {
       staff: { en: "Staff", ar: "الموظفون" },
       truck: { en: "Truck", ar: "الشاحنات" },
       customer: { en: "Customer", ar: "العملاء" },
-      ledger: { en: "Approvals Ledger", ar: "سجل الموافقات" },
+      // «سجل الاعتمادات», NOT «سجل الموافقات» — this label is the TARGET of
+      // five cross-references on the Consumption Approvals tab, which all name
+      // it by that word, and of the vocabulary ruling above
+      // `consumption.approvalsTab`. Renaming it here breaks those pointers.
+      ledger: { en: "Approvals Ledger", ar: "سجل الاعتمادات" },
     },
 
     // Page-header actions. Four separate leaves rather than one with a token,
@@ -6192,7 +6223,7 @@ export const dict = {
       sectionDetails: { en: "Details", ar: "التفاصيل" },
       thRepairer: { en: "Repairer", ar: "الورشة" },
       thQtyDrawn: { en: "Qty drawn", ar: "الكمية المسحوبة" },
-      thSubtotalVat: { en: "Subtotal + VAT", ar: "الإجمالي الفرعي + الضريبة" },
+      thSubtotalVat: { en: "Subtotal + VAT", ar: "الإجمالي الفرعي + VAT" },
       thOnHand: { en: "On hand", ar: "المتوفر" },
       thValue: { en: "Value", ar: "القيمة" },
       noStockMovement: {
@@ -6580,14 +6611,14 @@ export const dict = {
       // lib/approvals-ledger.ts; nothing outside this tab read either, and a
       // pure derivation module is the wrong place for display text.
       kind: {
-        exit_permit: { en: "Exit permit", ar: "تصريح خروج" },
+        exit_permit: { en: "Exit permit", ar: "إذن خروج" },
         work_order: { en: "In-house work order", ar: "أمر عمل داخلي" },
         outsourced_job: { en: "Outsourced job", ar: "عمل خارجي" },
         purchase_order: { en: "Purchase order", ar: "أمر شراء" },
         stock_receipt: { en: "Stock receipt", ar: "إشعار استلام" },
       },
       kindShort: {
-        exit_permit: { en: "Permit", ar: "تصريح" },
+        exit_permit: { en: "Permit", ar: "إذن" },
         work_order: { en: "In-house", ar: "داخلي" },
         outsourced_job: { en: "Outsourced", ar: "خارجي" },
         purchase_order: { en: "PO", ar: "أمر شراء" },
@@ -6690,19 +6721,19 @@ export const dict = {
       revotableUntil: {
         one: {
           en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
-          ar: "قابل لإعادة التصويت حتى {date} (يوم واحد متبقٍ). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب موافقات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+          ar: "قابل لإعادة التصويت حتى {date} (يوم واحد متبقٍ). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
         },
         two: {
           en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
-          ar: "قابل لإعادة التصويت حتى {date} (يومان متبقيان). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب موافقات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+          ar: "قابل لإعادة التصويت حتى {date} (يومان متبقيان). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
         },
         few: {
           en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
-          ar: "قابل لإعادة التصويت حتى {date} ({n} أيام متبقية). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب موافقات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+          ar: "قابل لإعادة التصويت حتى {date} ({n} أيام متبقية). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
         },
         many: {
           en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
-          ar: "قابل لإعادة التصويت حتى {date} ({n} يومًا متبقيًا). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب موافقات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+          ar: "قابل لإعادة التصويت حتى {date} ({n} يومًا متبقيًا). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
         },
       },
     },
@@ -7475,13 +7506,15 @@ export const dict = {
      * counterpart there was written fresh and is marked `FRESH` on its own line
      * so the next reader can tell the two apart without diffing two files.
      *
-     * "VAT" IS LATIN IN BOTH LANGUAGES, AND THIS DIVERGES FROM THE PDF ON
-     * PURPOSE. The PDF renders the LABEL as `ضريبة القيمة المضافة`; on screen
-     * the app's standing rule is that VAT is written "VAT" in Arabic too — the
-     * same call `trips.statement.colVat` and `trips.statement.vatSplit` already
-     * make. Two keys below (`totalVat`, and the `vatSplit`/`chargesSubtotal`
-     * money strips) are therefore the only places where the sheet and the PDF
-     * deliberately read differently. Everything else matches.
+     * "VAT" IS LATIN IN BOTH LANGUAGES, AND THE PDF NOW AGREES. The sheet and
+     * the PDF used to diverge here on purpose — the PDF spelled the label
+     * `ضريبة القيمة المضافة` while the screen wrote "VAT" — and `totalVat`,
+     * `vatSplit` and `chargesSubtotal` were the three keys carrying that
+     * divergence. Turki closed it: "VAT" is the LABEL everywhere, the customer
+     * PDF included, so `lib/invoicePdfTemplate.ts` was brought to the screen's
+     * wording rather than the reverse. The copy-byte-for-byte rule above is
+     * therefore back to holding with no exceptions. VAT spelled out in ARABIC
+     * survives only where it is prose inside a sentence, never as a label.
      *
      * EVERY NUMBER STAYS LATIN. Nothing in this group formats a figure: amounts
      * come from `formatSar`/`formatNum` and dates from `formatDate`, all pinned
@@ -7964,7 +7997,7 @@ export const dict = {
       // The unit and the tax basis are inside the label, so the whole thing is
       // one leaf. "SAR" stays Latin — it is the ISO currency code every money
       // figure in this app is printed with.
-      fAmount: { en: "Amount (SAR, pre-VAT)", ar: "المبلغ (SAR، قبل الضريبة)" },
+      fAmount: { en: "Amount (SAR, pre-VAT)", ar: "المبلغ (SAR، قبل VAT)" },
       amountPlaceholder: { en: "e.g. 5000", ar: "مثال: 5000" },
       fEtfRef: { en: "ETF Ref. number", ar: "رقم مرجع ETF" },
       refPlaceholder: { en: "e.g. bank transfer ref", ar: "مثال: مرجع التحويل البنكي" },
@@ -8029,15 +8062,17 @@ export const dict = {
       // table's own.
       colRef: { en: "Ref", ar: "المرجع" },
       colRunningBalance: { en: "Running Balance", ar: "الرصيد الجاري" },
-      // "VAT" STAYS LATIN IN ARABIC — Turki's call, Batch 9 follow-up. The
-      // statement's VAT column head is read as the Latin acronym by the people
-      // who use it, and the spelled-out ضريبة القيمة المضافة made a narrow
-      // numeric column wrap. Scope is the standalone LABEL only: the long VAT
-      // SENTENCES elsewhere in the dictionary keep their Arabic, and
-      // `consumption.approvalsTab.colVat` — the same head on a DIFFERENT
-      // route — was left alone because this batch is the Trips route.
-      // `trips.project.fVat` is a different concept again (tax registration
-      // number) and is likewise untouched.
+      // "VAT" STAYS LATIN IN ARABIC — Turki's call, Batch 9. The statement's
+      // VAT column head is read as the Latin acronym by the people who use it,
+      // and the spelled-out ضريبة القيمة المضافة made a narrow numeric column
+      // wrap. Scope is the standalone LABEL only: the long VAT SENTENCES
+      // elsewhere in the dictionary keep their Arabic.
+      //
+      // The Batch 9 follow-up is CLOSED — the terminology sweep carried the
+      // rule to the other three standalone labels, so `mt.vat`,
+      // `consumption.approvalsTab.colVat` and `reports.vat.title` now read
+      // Latin too. `trips.project.fVat` is a different concept again (tax
+      // registration number) and is still untouched.
       colVat: { en: "VAT", ar: "VAT" },
       // The Type column's four NAMED row kinds. The fifth renders the trip's
       // water type through waterTypeLabel(), off the enum value.

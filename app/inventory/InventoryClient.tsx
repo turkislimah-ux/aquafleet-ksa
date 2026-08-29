@@ -1608,8 +1608,8 @@ function ViewPartModal({
                 <TH>{lang === "en" ? "Qty purchased" : "الكمية المشتراة"}</TH>
                 <TH>{lang === "en" ? "Qty remaining" : "الكمية المتبقية"}</TH>
                 <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
-                <TH>{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}</TH>
-                <TH>{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل الضريبة)"}</TH>
+                <TH>VAT (15%)</TH>
+                <TH>{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل VAT)"}</TH>
                 <TH>{lang === "en" ? "Status" : "الحالة"}</TH>
               </tr>
             </thead>
@@ -2176,7 +2176,7 @@ function ReceivePartsModal({
                     <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
                     <TH>{lang === "en" ? "Actual qty received" : "الكمية الفعلية"}</TH>
                     <TH>{lang === "en" ? "Actual unit price" : "سعر الوحدة الفعلي"}</TH>
-                    <TH>{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}</TH>
+                    <TH>VAT (15%)</TH>
                     <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
                     <TH></TH>
                   </tr>
@@ -2270,7 +2270,7 @@ function ReceivePartsModal({
                       >
                         <div className="text-[11px] muted tabular-nums">{formatSarVat(vatDoc.subtotal)}</div>
                         <div className="text-[11px] muted tabular-nums">
-                          + {formatSarVat(vatDoc.vat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                          + {formatSarVat(vatDoc.vat)} VAT
                         </div>
                         <div className="tabular font-bold text-brand-600">{formatSarVat(vatDoc.total)}</div>
                       </td>

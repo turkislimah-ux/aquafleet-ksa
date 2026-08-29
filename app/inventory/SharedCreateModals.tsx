@@ -918,11 +918,11 @@ export function AddPartModal({
                 return (
                   <div className="flex items-center gap-3 text-xs mt-1">
                     <span>
-                      <span className="muted">{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}:</span>{" "}
+                      <span className="muted">VAT (15%):</span>{" "}
                       <span className="font-medium tabular-nums">{formatSarVat(doc.vat)}</span>
                     </span>
                     <span>
-                      <span className="muted">{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل الضريبة)"}:</span>{" "}
+                      <span className="muted">{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل VAT)"}:</span>{" "}
                       <span className="font-medium tabular-nums">{formatSarVat(doc.total)}</span>
                     </span>
                   </div>
@@ -1203,11 +1203,11 @@ export function AdjustItemModal({
                 return (
                   <div className="flex items-center gap-3 text-xs mt-1">
                     <span>
-                      <span className="muted">{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}:</span>{" "}
+                      <span className="muted">VAT (15%):</span>{" "}
                       <span className="font-medium tabular-nums">{formatSarVat(doc.vat)}</span>
                     </span>
                     <span>
-                      <span className="muted">{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل الضريبة)"}:</span>{" "}
+                      <span className="muted">{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل VAT)"}:</span>{" "}
                       <span className="font-medium tabular-nums">{formatSarVat(doc.total)}</span>
                     </span>
                   </div>

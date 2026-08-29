@@ -921,7 +921,7 @@ export function NewPOModal({
                     <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
                     <TH>{lang === "en" ? "Qty" : "الكمية"}</TH>
                     <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
-                    <TH>{lang === "en" ? "VAT (15%)" : "ضريبة القيمة المضافة (15%)"}</TH>
+                    <TH>VAT (15%)</TH>
                     <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
                     <TH></TH>
                   </tr>
@@ -1012,7 +1012,7 @@ export function NewPOModal({
                             document total appears in this feature now. */}
                         <div className="text-[11px] muted tabular-nums">{formatSarVat(vatDoc.subtotal)}</div>
                         <div className="text-[11px] muted tabular-nums">
-                          + {formatSarVat(vatDoc.vat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                          + {formatSarVat(vatDoc.vat)} VAT
                         </div>
                         <div className="tabular font-bold text-brand-600">{formatSarVat(vatDoc.total)}</div>
                       </td>
@@ -1156,7 +1156,7 @@ export function POListModal({
                   <TH>{lang === "en" ? "Supplier" : "المورد"}</TH>
                   <TH>{lang === "en" ? "Issued on" : "تاريخ الإصدار"}</TH>
                   <TH>{lang === "en" ? "Expected delivery" : "تاريخ التسليم المتوقع"}</TH>
-                  <TH>{lang === "en" ? "PO Total (incl. VAT)" : "إجمالي الأمر (شامل الضريبة)"}</TH>
+                  <TH>{lang === "en" ? "PO Total (incl. VAT)" : "إجمالي الأمر (شامل VAT)"}</TH>
                   <TH></TH>
                 </tr>
               </thead>
@@ -1468,7 +1468,7 @@ export function PODetailModal({
                 <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
                 <TH>{lang === "en" ? "Qty" : "الكمية"}</TH>
                 <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
-                <TH>{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}</TH>
+                <TH>VAT (15%)</TH>
                 <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
               </tr>
             </thead>
@@ -1531,7 +1531,7 @@ export function PODetailModal({
                       total. */}
                   <div className="text-[11px] muted tabular-nums">{formatSarVat(docSubtotal)}</div>
                   <div className="text-[11px] muted tabular-nums">
-                    + {formatSarVat(docVat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                    + {formatSarVat(docVat)} VAT
                   </div>
                   <div className="tabular font-bold text-brand-600">{formatSarVat(docTotal)}</div>
                 </td>
@@ -2051,7 +2051,7 @@ export function ReceivePOModal({
                   <TH>{lang === "en" ? "Ordered unit price" : "سعر الوحدة المطلوب"}</TH>
                   <TH>{lang === "en" ? "Actual qty received" : "الكمية الفعلية"}</TH>
                   <TH>{lang === "en" ? "Actual unit price" : "سعر الوحدة الفعلي"}</TH>
-                  <TH>{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}</TH>
+                  <TH>VAT (15%)</TH>
                   <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
                   <TH></TH>
                 </tr>
@@ -2174,7 +2174,7 @@ export function ReceivePOModal({
                         total. */}
                     <div className="text-[11px] muted tabular-nums">{formatSarVat(vatDoc.subtotal)}</div>
                     <div className="text-[11px] muted tabular-nums">
-                      + {formatSarVat(vatDoc.vat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                      + {formatSarVat(vatDoc.vat)} VAT
                     </div>
                     <div className="tabular font-bold text-brand-600">{formatSarVat(vatDoc.total)}</div>
                   </td>
@@ -2828,7 +2828,7 @@ export function ApprovalsTab({
               <TH>{lang === "en" ? "Reference" : "المرجع"}</TH>
               <TH>{lang === "en" ? "Supplier" : "المورد"}</TH>
               <TH>{lang === "en" ? "Received on" : "تاريخ الاستلام"}</TH>
-              <TH>{lang === "en" ? "Actual Total (incl. VAT)" : "الإجمالي الفعلي (شامل الضريبة)"}</TH>
+              <TH>{lang === "en" ? "Actual Total (incl. VAT)" : "الإجمالي الفعلي (شامل VAT)"}</TH>
               <TH>{lang === "en" ? "Votes" : "الأصوات"}</TH>
               <TH></TH>
             </tr>
@@ -2894,7 +2894,7 @@ export function ApprovalsTab({
                         (pre-VAT), then VAT, then bold Actual Total. */}
                     <div className="muted">{formatSarVat(actualSubtotal)}</div>
                     <div className="muted">
-                      + {formatSarVat(actualVat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                      + {formatSarVat(actualVat)} VAT
                     </div>
                     <div className="font-medium">{formatSarVat(actualTotal)}</div>
                   </TD>
@@ -3144,7 +3144,7 @@ export function ReceiptDetailModal({
                 <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
                 <TH>{lang === "en" ? "Qty" : "الكمية"}</TH>
                 <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
-                <TH>{lang === "en" ? "VAT (15%)" : "ض.ق.م (15%)"}</TH>
+                <TH>VAT (15%)</TH>
                 <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
               </tr>
             </thead>
@@ -3192,7 +3192,7 @@ export function ReceiptDetailModal({
                 <td className="py-2.5 px-3 border-t text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                   <div className="text-[11px] muted tabular-nums">{formatSarVat(receipt.total_cost_sar)}</div>
                   <div className="text-[11px] muted tabular-nums">
-                    + {formatSarVat(receipt.vat_sar)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                    + {formatSarVat(receipt.vat_sar)} VAT
                   </div>
                   <div className="tabular font-bold text-brand-600">{formatSarVat(receiptTotal)}</div>
                 </td>
@@ -3751,7 +3751,7 @@ export function PartFinanceSummaryCard({
               stay VAT-free. */}
           <div className="text-lg font-semibold tabular-nums">{formatSarVat(purchasesTotal)}</div>
           <div className="text-[11px] muted tabular-nums">
-            {formatSarVat(totalPurchased)} + {formatSarVat(purchasesVat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+            {formatSarVat(totalPurchased)} + {formatSarVat(purchasesVat)} VAT
           </div>
           <div className="text-[11px] muted">
             {purchaseCount} {lang === "en" ? "PO lines" : "بنود أوامر"}
@@ -3916,7 +3916,7 @@ export function PartFinanceModal({
                   <TH>{lang === "en" ? "PO #" : "رقم الأمر"}</TH>
                   <TH>{lang === "en" ? "Qty" : "الكمية"}</TH>
                   <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
-                  <TH>{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل الضريبة)"}</TH>
+                  <TH>{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل VAT)"}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -3955,7 +3955,7 @@ export function PartFinanceModal({
                       <TD className="tabular-nums">
                         <div className="font-medium">{formatSarVat(cost + vat)}</div>
                         <div className="muted text-[11px]">
-                          {formatSarVat(cost)} + {formatSarVat(vat)} {lang === "en" ? "VAT" : "ض.ق.م"}
+                          {formatSarVat(cost)} + {formatSarVat(vat)} VAT
                         </div>
                       </TD>
                     </tr>

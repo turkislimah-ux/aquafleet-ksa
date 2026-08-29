@@ -303,7 +303,7 @@ export default function ApprovalsTab({
               <tr>
                 <TH>{null}</TH>
                 <TH>{t("consumption.approvalsTab.colReference", lang)}</TH>
-                <TH>{t("consumption.shared.kind", lang)}</TH>
+                <TH>{t("consumption.approvalsTab.colKind", lang)}</TH>
                 <TH>{t("consumption.approvalsTab.colWhat", lang)}</TH>
                 <TH>{t("consumption.approvalsTab.colWhen", lang)}</TH>
                 <TH>{t("consumption.shared.value", lang)}</TH>
