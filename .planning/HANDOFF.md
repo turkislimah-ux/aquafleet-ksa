@@ -1,6 +1,6 @@
-# SESSION HANDOFF — ARABIC PHASE 3 IS CLOSED. Feature #3 shipped. Feature #4 closed with NO WORK.
+# SESSION HANDOFF — ARABIC PHASE 3 IS CLOSED. Features #2 and #3 shipped. Feature #4 closed with NO WORK.
 
-**HEAD `9164e01` at the moment this line was written · branch `main` · 0 ahead / 0
+**HEAD `4f19acb` at the moment this line was written · branch `main` · 0 ahead / 0
 behind · highest migration FILE `0171` · tree CLEAN.** This file's own commit lands
 on top of that hash, so HEAD is one ahead of it by the time anyone reads this.
 
@@ -677,14 +677,63 @@ is already right.
 
 ---
 
-## 10. AFTER THE ARABIC WORK — FEATURE #3 SHIPPED, FEATURE #4 CLOSED UNBUILT
+## 10. AFTER THE ARABIC WORK — FEATURES #2 AND #3 SHIPPED, #4 CLOSED UNBUILT
 
-Two commits landed after `0c48aa9`, the state §§1-9 describe:
+Five commits landed after `0c48aa9`, the state §§1-9 describe:
 
 | Hash | Date | What it did |
 |---|---|---|
 | `7005dca` | 08-29 | Arabic Phase 3 is closed — the read-through passed and nothing is left |
-| `e57d696` | 08-29 | **Apply the account language at login, on any device (0171)** |
+| `e57d696` | 08-29 | **Feature #3 — apply the account language at login, on any device (0171)** |
+| `3fefcf1` | 08-29 | re-pointed this file at current state and recorded the then-open 0171 item |
+| `9164e01` | 08-29 | **Feature #2 — export any report on the Reports page as CSV, period included** |
+| `4f19acb` | 08-29 | reconciled `0171` with the live comments and CLOSED that open item |
+
+### FEATURE #2 — per-tab CSV export on Reports. SHIPPED, verified in-browser.
+
+Newest of the three, and listed first for that reason. One **Export CSV** button in
+the Reports page header exports **the tab currently on screen**, in that tab's own
+shape — real column headings, one row per line.
+
+**It reuses the commissions export rather than inventing a second one.** The four
+Excel workarounds earned by `3f9c7b8` (UTF-8 BOM built from its code point, a
+leading `sep=,` because Excel follows the SYSTEM list separator, CRLF terminators,
+`\r` quoted inside cells) moved to **`lib/csv.ts`** and `app/drivers/CommissionsTab.tsx`
+now imports them. That file's OUTPUT is byte-for-byte unchanged: it keeps its own
+assembly line-for-line and deliberately does NOT route through `buildCsv()`, which
+writes a title/period preamble commissions has never had. No new dependency.
+
+**`app/reports/exportSource.ts` is the wiring, and registration is why there is no
+lifted state.** The Reports page has no shared period — Overview's month lives in
+`ReportsClient`, the statements own `periodType`+`start`, Daily Trips owns
+`period`+`anchor`. So the MOUNTED report hands the header a closure over its own
+rows and its own period (`useCsvSource`), and the effect CLEANUP is what stops a tab
+switch from exporting the screen the user just left. The period reaches the filename
+and the preamble row.
+
+**Nine registration sites, nine shapes:** `overview`, `pnl`, `revenue`,
+`receivables`, `costs`, `operations`, `custom`, `payslips`, `daily-trips`.
+
+**Where Export is greyed, and it now says why.** Two views have no table to hand
+over: the **Narrative** statement, and the **payslip register once a single payslip
+is open** — that body is a numbered signed DOCUMENT with its own print button, so
+the builder returns null rather than export a one-row file. The button carries
+`disabled:pointer-events-none`, so a `title` on the button itself would never fire;
+the tooltip sits on a WRAPPER span that keeps its pointer events, and only when
+disabled. String is `reports.shell.exportDisabled`, EN+AR.
+
+**Every exported cell is the RAW number.** `formatSar` rounds to whole riyals AND
+appends " SAR", so it is not export-safe; units live in the HEADING (`withSar` /
+`withPct`) or a per-row Unit column. Read-only throughout — no report calculation,
+view or money math was touched.
+
+**Daily Trips exports PART 1 ONLY, and that is 0166's isolation rule, not an
+oversight.** The hand-typed manual side-log carries none of the money model's
+provenance and is totalled separately on screen. A CSV cannot hold that separation:
+put both in one sheet and the Revenue column selects as a single range, handing the
+reader exactly the combined figure the screen refuses to show. Two tables in one
+file is the same trap wearing a blank row. No project-total rows either, for the
+mirror-image reason.
 
 ### FEATURE #3 — account language at login. SHIPPED, verified in-browser.
 
