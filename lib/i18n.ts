@@ -384,6 +384,104 @@ export const dict = {
     editRepairer: { en: "Edit Repairer", ar: "تعديل الورشة" },
     uploadInvoice: { en: "Upload invoice", ar: "رفع فاتورة" },
     changeInvoice: { en: "Change file", ar: "تغيير الملف" },
+    // Batch E1 — the last inline `lang === "en" ? … : …` copy in
+    // app/maintenance, lifted here VERBATIM. Every pair below is the exact
+    // string that was rendering before the move; nothing was retranslated or
+    // reworded, so both languages are byte-identical to the previous build.
+    // Three of the moved sites are NOT here because a correct leaf already
+    // existed and was reused instead of duplicated: `mt.description`
+    // (RepairerFormModal) and `common.close` (both detail modals).
+    fName: { en: "Name", ar: "الاسم" },
+    // "الاسم بالعربية" — the UNPARENTHESISED variant, which is what this form
+    // was rendering. `customers.fNameAr` and `settings.fNameAr` hold
+    // "الاسم (بالعربية)"; they are a different namespace and a different
+    // string, so reusing either would have silently changed this label.
+    fNameAr: { en: "Name (Arabic)", ar: "الاسم بالعربية" },
+    selectMechanic: { en: "Select mechanic", ar: "اختر فنياً" },
+    noMechanics: { en: "No mechanics available", ar: "لا يوجد فنيون متاحون" },
+    // SHARED by both create modals — NewWorkOrderModal and
+    // NewOutsourcedJobModal held identical copies of this sentence inline.
+    noActiveMechanics: {
+      en: "No active mechanic staff found — add one via the People page before scheduling a job.",
+      ar: "لا يوجد فني نشط — أضف فنياً من صفحة الموظفين قبل جدولة عمل.",
+    },
+    // Also shared by both create modals (the description-chip filter).
+    noMatches: { en: "No matches", ar: "لا توجد نتائج" },
+    // The FALLBACK half of `p.category || (…)` — the data selection stays in
+    // NewWorkOrderModal, only the printed string moved.
+    uncategorized: { en: "Uncategorized", ar: "غير مصنف" },
+    noPartsReserved: { en: "No parts reserved yet", ar: "لم تُحجز قطع بعد" },
+    // Lower-case in English on purpose: it trails a formatted SAR figure
+    // ("1,250.00 SAR estimated"), it is not a standalone label.
+    estimated: { en: "estimated", ar: "تقديري" },
+    // `consumption.shared.warehouse` holds this same pair, but it is another
+    // route's namespace — the house rule is to promote to `common` only when a
+    // second route genuinely reads the same leaf, not to reach sideways.
+    warehouse: { en: "Warehouse", ar: "المستودع" },
+    allWarehouses: { en: "All warehouses", ar: "كل المستودعات" },
+    noPartsInWarehouse: { en: "No parts in this warehouse", ar: "لا توجد قطع في هذا المستودع" },
+    /**
+     * Count sentence for reservations hidden by the warehouse filter.
+     *
+     * BUCKETED BECAUSE THE ENGLISH ALREADY BRANCHED — the call site read
+     * `hiddenSelectedCount === 1 ? "part is" : "parts are"`, spliced mid-
+     * sentence. That fragment-splice is exactly what Arabic cannot survive, so
+     * the whole sentence moves as four complete strings.
+     *
+     * THE FOUR ARABIC VALUES ARE DELIBERATELY IDENTICAL, and that is not an
+     * oversight. The inline Arabic had NO plural handling at all — one string
+     * served every count — and this batch is a MOVE: retranslating here would
+     * change what Arabic renders and break the very byte-identity this commit
+     * is verified against. Repeating the current string across all four buckets
+     * reproduces today's output exactly while putting the structure in place,
+     * so giving Arabic its real dual/3-10/11+ forms later is a dictionary-only
+     * edit with no call-site change. FLAGGED for that follow-up.
+     */
+    hiddenReservedParts: {
+      one: {
+        en: "{n} reserved part is in another warehouse — still reserved, still in the estimate above.",
+        ar: "{n} من القطع المحجوزة في مستودع آخر — لا تزال محجوزة ومحتسبة في التقدير أعلاه.",
+      },
+      two: {
+        en: "{n} reserved parts are in another warehouse — still reserved, still in the estimate above.",
+        ar: "{n} من القطع المحجوزة في مستودع آخر — لا تزال محجوزة ومحتسبة في التقدير أعلاه.",
+      },
+      few: {
+        en: "{n} reserved parts are in another warehouse — still reserved, still in the estimate above.",
+        ar: "{n} من القطع المحجوزة في مستودع آخر — لا تزال محجوزة ومحتسبة في التقدير أعلاه.",
+      },
+      many: {
+        en: "{n} reserved parts are in another warehouse — still reserved, still in the estimate above.",
+        ar: "{n} من القطع المحجوزة في مستودع آخر — لا تزال محجوزة ومحتسبة في التقدير أعلاه.",
+      },
+    },
+    today: { en: "Today", ar: "اليوم" },
+    noteOptional: { en: "Note (optional)", ar: "ملاحظة (اختياري)" },
+    confirmDeleteWorkOrder: {
+      en: "Permanently delete this work order? This cannot be undone.",
+      ar: "حذف أمر العمل هذا نهائياً؟ لا يمكن التراجع عن هذا الإجراء.",
+    },
+    confirmDeleteOutsourcedJob: {
+      en: "Permanently delete this outsourced job? This cannot be undone.",
+      ar: "حذف هذا العمل الخارجي نهائياً؟ لا يمكن التراجع عن هذا الإجراء.",
+    },
+    odometerAtService: { en: "Odometer at service", ar: "العداد عند الصيانة" },
+    // NOT a reuse of `mt.subtotal` five lines up, which reads "المجموع الفرعي".
+    // The work-order parts table was rendering the shorter "المجموع" inline,
+    // and this batch moves strings without changing them. The two Arabic
+    // wordings for one English word are a real copy question — flagged, and
+    // deliberately left for a copy decision rather than settled here.
+    lineSubtotal: { en: "Subtotal", ar: "المجموع" },
+    inventoryAutoReduced: {
+      en: "Inventory is automatically reduced when the maintenance team consumes parts.",
+      ar: "ينخفض المخزون تلقائياً عند استهلاك فريق الصيانة للقطع.",
+    },
+    noChange: { en: "No change", ar: "لا تغيير" },
+    vsLastMonth: { en: "vs last month", ar: "مقارنة بالشهر الماضي" },
+    pageSubtitle: {
+      en: "Work orders, preventive schedules, and history",
+      ar: "أوامر العمل والصيانة الوقائية والسجل",
+    },
   },
   // Global search (Polish Batch 1). `common.search` above stays as-is — it
   // is the generic per-page filter placeholder used by Fleet/Inventory/etc.

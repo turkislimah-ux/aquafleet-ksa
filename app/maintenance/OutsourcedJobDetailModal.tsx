@@ -197,9 +197,7 @@ export default function OutsourcedJobDetailModal({
   // generic top-of-modal `error` banner every other lifecycle error uses.
   const deletable = job.status === "scheduled";
   async function onDelete() {
-    if (!confirm(lang === "en"
-      ? "Permanently delete this outsourced job? This cannot be undone."
-      : "حذف هذا العمل الخارجي نهائياً؟ لا يمكن التراجع عن هذا الإجراء.")) return;
+    if (!confirm(t("mt.confirmDeleteOutsourcedJob", lang))) return;
     setLifecycleBusy(true);
     setDeleteBlockMessage(null);
     const res = await deleteOutsourcedJob(job.id);
@@ -549,7 +547,7 @@ export default function OutsourcedJobDetailModal({
                   />
                 </div>
                 <div>
-                  <label className="text-xs muted block mb-1">{lang === "en" ? "Note (optional)" : "ملاحظة (اختياري)"}</label>
+                  <label className="text-xs muted block mb-1">{t("mt.noteOptional", lang)}</label>
                   <input
                     value={form.note}
                     onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
@@ -697,7 +695,7 @@ export default function OutsourcedJobDetailModal({
               <span className="text-xs muted">{t("mt.allTasksRequired", lang)}</span>
             )}
           </div>
-          <Btn variant="outline" onClick={onClose}>{lang === "en" ? "Close" : "إغلاق"}</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("common.close", lang)}</Btn>
         </div>
       </div>
     </ModalOverlay>

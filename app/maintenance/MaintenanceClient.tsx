@@ -174,9 +174,9 @@ function MonthTrendStat({ label, thisMonth, lastMonth, lang }: { label: string; 
   let trendNode: React.ReactNode;
   if (lastMonth === 0) {
     if (thisMonth === 0) {
-      trendNode = <span className="muted">{lang === "en" ? "No change" : "لا تغيير"}</span>;
+      trendNode = <span className="muted">{t("mt.noChange", lang)}</span>;
     } else {
-      trendNode = <span className="text-emerald-600 dark:text-emerald-400">{`+${thisMonth}`} {lang === "en" ? "vs last month" : "مقارنة بالشهر الماضي"}</span>;
+      trendNode = <span className="text-emerald-600 dark:text-emerald-400">{`+${thisMonth}`} {t("mt.vsLastMonth", lang)}</span>;
     }
   } else {
     const pct = Math.round(((thisMonth - lastMonth) / lastMonth) * 100);
@@ -184,7 +184,7 @@ function MonthTrendStat({ label, thisMonth, lastMonth, lang }: { label: string; 
     const flat = pct === 0;
     trendNode = (
       <span className={flat ? "muted" : up ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}>
-        {flat ? "→" : up ? "↑" : "↓"} {Math.abs(pct)}% {lang === "en" ? "vs last month" : "مقارنة بالشهر الماضي"}
+        {flat ? "→" : up ? "↑" : "↓"} {Math.abs(pct)}% {t("mt.vsLastMonth", lang)}
       </span>
     );
   }
@@ -457,7 +457,7 @@ export default function MaintenanceClient({
     <div className="space-y-5">
       <PageHeader
         title={t("nav.maintenance", lang)}
-        subtitle={lang === "en" ? "Work orders, preventive schedules, and history" : "أوامر العمل والصيانة الوقائية والسجل"}
+        subtitle={t("mt.pageSubtitle", lang)}
         actions={
           track === "in_house" ? (
             <Btn variant="primary" onClick={() => setNewWOOpen(true)} disabled={trucks.length === 0}>

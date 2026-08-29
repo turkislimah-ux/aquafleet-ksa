@@ -253,7 +253,7 @@ export default function MaintenanceCalendar({
               <div className="flex items-baseline gap-1.5 shrink-0">
                 <span className="text-[11px] muted uppercase tracking-wide font-semibold">{WEEK[c.dow]}</span>
                 <span className="text-base font-bold tabular-nums">{c.date.getDate()}</span>
-                {today && <span className="ms-auto text-[10px] font-bold text-brand-600">{lang === "en" ? "Today" : "اليوم"}</span>}
+                {today && <span className="ms-auto text-[10px] font-bold text-brand-600">{t("mt.today", lang)}</span>}
               </div>
 
               {/* Job list — scrolls internally, no truncate-to-3/"+N more"

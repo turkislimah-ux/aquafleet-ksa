@@ -79,7 +79,7 @@ export function MechanicPicker({
         style={inputStyle}
       >
         <span className={cn("truncate flex items-center gap-1.5", !selected && "muted")}>
-          {selected ? mechName(selected) : (lang === "en" ? "Select mechanic" : "اختر فنياً")}
+          {selected ? mechName(selected) : t("mt.selectMechanic", lang)}
           {selectedOnLeave && <MtStatusPill kind="on_leave" label={t("status.leave", lang)} />}
         </span>
         <ChevronDown className="h-4 w-4 muted shrink-0" />
@@ -90,7 +90,7 @@ export function MechanicPicker({
           style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
         >
           {mechanics.length === 0 ? (
-            <div className="px-3 py-2 text-sm muted">{lang === "en" ? "No mechanics available" : "لا يوجد فنيون متاحون"}</div>
+            <div className="px-3 py-2 text-sm muted">{t("mt.noMechanics", lang)}</div>
           ) : (
             mechanics.map((m) => {
               const onLeave = onLeaveMechanicIds.has(m.id);

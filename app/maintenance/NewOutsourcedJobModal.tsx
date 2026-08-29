@@ -289,9 +289,7 @@ export default function NewOutsourcedJobModal({
         <div className="p-4 space-y-4">
           {mechanics.length === 0 && (
             <div className="rounded-lg px-3 py-2 text-sm bg-amber-500/10 text-amber-700 dark:text-amber-300">
-              {lang === "en"
-                ? "No active mechanic staff found — add one via the People page before scheduling a job."
-                : "لا يوجد فني نشط — أضف فنياً من صفحة الموظفين قبل جدولة عمل."}
+              {t("mt.noActiveMechanics", lang)}
             </div>
           )}
           {error && (
@@ -434,7 +432,7 @@ export default function NewOutsourcedJobModal({
               <div className="max-h-36 overflow-y-auto scrollbar-thin">
                 <div className="flex flex-wrap gap-1.5">
                   {visibleDescriptions.length === 0 ? (
-                    <p className="muted text-xs py-2">{lang === "en" ? "No matches" : "لا توجد نتائج"}</p>
+                    <p className="muted text-xs py-2">{t("mt.noMatches", lang)}</p>
                   ) : (
                     visibleDescriptions.map((d) => {
                       const on = selectedChipIds.includes(d.id);

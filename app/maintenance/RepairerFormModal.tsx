@@ -134,11 +134,11 @@ export default function RepairerFormModal({
 
           <div className="grid grid-cols-2 gap-3">
             <label className="text-sm">
-              <span className="text-xs muted block mb-1">{lang === "en" ? "Name" : "الاسم"} *</span>
+              <span className="text-xs muted block mb-1">{t("mt.fName", lang)} *</span>
               <input value={name} onChange={(e) => setName(e.target.value)} className={INPUT} style={INPUT_STYLE} />
             </label>
             <label className="text-sm">
-              <span className="text-xs muted block mb-1">{lang === "en" ? "Name (Arabic)" : "الاسم بالعربية"}</span>
+              <span className="text-xs muted block mb-1">{t("mt.fNameAr", lang)}</span>
               <input dir="rtl" value={nameAr} onChange={(e) => setNameAr(e.target.value)} className={INPUT} style={INPUT_STYLE} />
             </label>
             <label className="text-sm">
@@ -164,7 +164,7 @@ export default function RepairerFormModal({
           </div>
 
           <label className="text-sm block">
-            <span className="text-xs muted block mb-1">{lang === "en" ? "Description" : "الوصف"}</span>
+            <span className="text-xs muted block mb-1">{t("mt.description", lang)}</span>
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={cn(INPUT, "resize-none")} style={INPUT_STYLE} />
           </label>
 

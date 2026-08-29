@@ -275,9 +275,7 @@ export default function WorkOrderDetailModal({
   // button never even shows once that's no longer true.
   const deletable = workOrder.status === "open";
   async function onDelete() {
-    if (!confirm(lang === "en"
-      ? "Permanently delete this work order? This cannot be undone."
-      : "حذف أمر العمل هذا نهائياً؟ لا يمكن التراجع عن هذا الإجراء.")) return;
+    if (!confirm(t("mt.confirmDeleteWorkOrder", lang))) return;
     setLifecycleBusy(true);
     setError(null);
     const res = await deleteWorkOrder(workOrder.id);
@@ -378,7 +376,7 @@ export default function WorkOrderDetailModal({
               <div className={delayed ? "text-rose-600 font-semibold" : ""}>{formatDate(workOrder.due_by)}</div>
             </div>
             <div>
-              <div className="muted mb-0.5">{lang === "en" ? "Odometer at service" : "العداد عند الصيانة"}</div>
+              <div className="muted mb-0.5">{t("mt.odometerAtService", lang)}</div>
               <div className="tabular-nums">{workOrder.odometer_at_service != null ? `${workOrder.odometer_at_service} km` : "—"}</div>
             </div>
           </div>
@@ -450,7 +448,7 @@ export default function WorkOrderDetailModal({
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("common.part", lang)}</th>
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("common.qty", lang)}</th>
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("common.unitPrice", lang)}</th>
-                    <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{lang === "en" ? "Subtotal" : "المجموع"}</th>
+                    <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("mt.lineSubtotal", lang)}</th>
                     <th className="text-start font-medium muted py-2 px-3 text-xs uppercase">{t("mt.photos", lang)}</th>
                   </tr>
                 </thead>
@@ -536,9 +534,7 @@ export default function WorkOrderDetailModal({
             )}
             {workOrder.inventory_deducted_at && (
               <div className="px-3 py-2 text-[11px] muted border-t" style={{ borderColor: "rgb(var(--border))" }}>
-                {lang === "en"
-                  ? "Inventory is automatically reduced when the maintenance team consumes parts."
-                  : "ينخفض المخزون تلقائياً عند استهلاك فريق الصيانة للقطع."}
+                {t("mt.inventoryAutoReduced", lang)}
               </div>
             )}
           </div>
@@ -583,7 +579,7 @@ export default function WorkOrderDetailModal({
               <span className="text-xs muted">{t("mt.allTasksRequired", lang)}</span>
             )}
           </div>
-          <Btn variant="outline" onClick={onClose}>{lang === "en" ? "Close" : "إغلاق"}</Btn>
+          <Btn variant="outline" onClick={onClose}>{t("common.close", lang)}</Btn>
         </div>
       </div>
 

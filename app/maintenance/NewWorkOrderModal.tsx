@@ -41,7 +41,7 @@ import { Fragment, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEffect } from "react";
 import { Plus, Minus, X } from "lucide-react";
-import { t, arText } from "@/lib/i18n";
+import { t, arText, fill, plural } from "@/lib/i18n";
 import { cn, formatSar, todayKey } from "@/lib/utils";
 import { Btn } from "@/components/ui";
 import type { Truck, Staff, Part, RepairDescription, WorkOrder, WorkOrderTask, WorkOrderPart, CompanySettings, Warehouse } from "@/lib/db-types";
@@ -232,7 +232,7 @@ export default function NewWorkOrderModal({
     const sorted = [...visibleParts].sort((a, b) => (a.category ?? "").localeCompare(b.category ?? "") || a.name.localeCompare(b.name));
     const groups = new Map<string, Part[]>();
     for (const p of sorted) {
-      const cat = p.category || (lang === "en" ? "Uncategorized" : "غير مصنف");
+      const cat = p.category || t("mt.uncategorized", lang);
       const arr = groups.get(cat) ?? [];
       arr.push(p);
       groups.set(cat, arr);
@@ -399,9 +399,7 @@ export default function NewWorkOrderModal({
         <div className="p-4 space-y-4">
           {mechanics.length === 0 && (
             <div className="rounded-lg px-3 py-2 text-sm bg-amber-500/10 text-amber-700 dark:text-amber-300">
-              {lang === "en"
-                ? "No active mechanic staff found — add one via the People page before scheduling a job."
-                : "لا يوجد فني نشط — أضف فنياً من صفحة الموظفين قبل جدولة عمل."}
+              {t("mt.noActiveMechanics", lang)}
             </div>
           )}
           {isEdit && editableStatus !== "open" && (
@@ -527,7 +525,7 @@ export default function NewWorkOrderModal({
               <div className="max-h-36 overflow-y-auto scrollbar-thin">
                 <div className="flex flex-wrap gap-1.5">
                   {visibleDescriptions.length === 0 ? (
-                    <p className="muted text-xs py-2">{lang === "en" ? "No matches" : "لا توجد نتائج"}</p>
+                    <p className="muted text-xs py-2">{t("mt.noMatches", lang)}</p>
                   ) : (
                     visibleDescriptions.map((d) => {
                       const on = selectedChipIds.includes(d.id);
@@ -557,9 +555,9 @@ export default function NewWorkOrderModal({
               <label className="text-xs muted !mb-0">{t("mt.partsAndEquipment", lang)}</label>
               <span className="text-xs">
                 {lines.length === 0 ? (
-                  <span className="muted">{lang === "en" ? "No parts reserved yet" : "لم تُحجز قطع بعد"}</span>
+                  <span className="muted">{t("mt.noPartsReserved", lang)}</span>
                 ) : (
-                  <span className="font-medium">{formatSar(estimatedCost)} {lang === "en" ? "estimated" : "تقديري"}</span>
+                  <span className="font-medium">{formatSar(estimatedCost)} {t("mt.estimated", lang)}</span>
                 )}
               </span>
             </div>
@@ -579,12 +577,15 @@ export default function NewWorkOrderModal({
                   className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b"
                   style={{ borderColor: "rgb(var(--border))" }}
                 >
-                  {/* Inline, not an i18n key — same convention as "No parts
-                      reserved yet" above; `common.warehouse` does not exist
-                      and one label does not justify widening that namespace. */}
-                  <span className="text-[11px] muted me-1">{lang === "en" ? "Warehouse" : "المستودع"}</span>
+                  {/* Batch E1 moved this label and "All warehouses" below into
+                      `mt`, along with "No parts reserved yet" above — the note
+                      that used to sit here argued for keeping them inline
+                      because `common.warehouse` did not exist. It still does
+                      not; these live in `mt` precisely so the shared namespace
+                      is not widened for one route's labels. */}
+                  <span className="text-[11px] muted me-1">{t("mt.warehouse", lang)}</span>
                   {[
-                    { id: "all", label: lang === "en" ? "All warehouses" : "كل المستودعات", count: parts.length },
+                    { id: "all", label: t("mt.allWarehouses", lang), count: parts.length },
                     // Warehouse names are English-only by design — see
                     // warehouseNameById above.
                     ...warehouses.map((w) => ({ id: w.id, label: w.name, count: partCountByWarehouse.get(w.id) ?? 0 })),
@@ -633,7 +634,7 @@ export default function NewWorkOrderModal({
                     {partsByCategory.length === 0 && (
                       <tr>
                         <td colSpan={4} className="px-3 py-6 text-center muted text-xs border-t" style={{ borderColor: "rgb(var(--border))" }}>
-                          {lang === "en" ? "No parts in this warehouse" : "لا توجد قطع في هذا المستودع"}
+                          {t("mt.noPartsInWarehouse", lang)}
                         </td>
                       </tr>
                     )}
@@ -722,9 +723,7 @@ export default function NewWorkOrderModal({
                 explanation, which would read as a bug. */}
             {hiddenSelectedCount > 0 && (
               <p className="text-[11px] muted mt-1.5">
-                {lang === "en"
-                  ? `${hiddenSelectedCount} reserved ${hiddenSelectedCount === 1 ? "part is" : "parts are"} in another warehouse — still reserved, still in the estimate above.`
-                  : `${hiddenSelectedCount} من القطع المحجوزة في مستودع آخر — لا تزال محجوزة ومحتسبة في التقدير أعلاه.`}
+                {fill(t(`mt.hiddenReservedParts.${plural(hiddenSelectedCount)}`, lang), { n: hiddenSelectedCount })}
               </p>
             )}
           </div>
