@@ -4081,13 +4081,13 @@ export const dict = {
       },
       returnsHead: {
         en: "Sales returns (reversed invoicing)",
-        ar: "مردودات المبيعات (فواتير المرتجعة)",
+        ar: "مرتجعات المبيعات (الفواتير المرتجعة)",
       },
       noneInPeriod: { en: "None in this period.", ar: "لا شيء في هذه الفترة." },
       totalReversed: { en: "Total reversed", ar: "إجمالي المرتجع" },
       note: {
         en: "Revenue is net of VAT and counts every invoice that has been confirmed, including those since paid. Sales returns are shown on their own line and are already excluded from the revenue above — the two are never netted silently. Outstanding is the amount still due, which on a prepaid account can be less than the invoice value because part was covered by balance.",
-        ar: "الإيراد صافٍ من الضريبة ويشمل كل فاتورة مؤكدة، بما فيها المسددة لاحقًا. وتُعرض مردودات المبيعات في بند مستقل وهي مستبعَدة أصلًا من الإيراد أعلاه — فلا تُصافى الاثنتان بصمت. والمستحق هو المبلغ الباقي، وقد يقل في الحساب المدفوع مقدَّمًا عن قيمة الفاتورة لأن جزءًا منها غُطِّي من الرصيد.",
+        ar: "الإيراد صافٍ من الضريبة ويشمل كل فاتورة مؤكدة، بما فيها المسددة لاحقًا. وتُعرض مرتجعات المبيعات في بند مستقل وهي مستبعَدة أصلًا من الإيراد أعلاه — فلا تُصافى الاثنتان بصمت. والمستحق هو المبلغ الباقي، وقد يقل في الحساب المدفوع مقدَّمًا عن قيمة الفاتورة لأن جزءًا منها غُطِّي من الرصيد.",
       },
     },
 
@@ -4940,7 +4940,7 @@ export const dict = {
       },
       salesReturns: {
         en: "{v} of previously confirmed invoicing was reversed as sales returns. Revenue above already excludes it — the two are never netted silently.",
-        ar: "عُكس {v} من فوترة مؤكدة سابقًا كمردودات مبيعات. والإيراد أعلاه يستبعده أصلًا — ولا يُصافى الطرفان بصمت أبدًا.",
+        ar: "حُوِّل {v} من فوترة مؤكدة سابقًا إلى مرتجعات مبيعات. والإيراد أعلاه يستبعده أصلًا — ولا يُصافى الطرفان بصمت أبدًا.",
       },
       // {d} of {t} trips … {k} truck(s) … {w} work order(s).
       //

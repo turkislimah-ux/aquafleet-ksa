@@ -1,6 +1,6 @@
 # SESSION HANDOFF — Arabic Phase 3: EVERY ROUTE IS WIRED, AND THE LOOKUP TABLES NOW OWN THEIR OWN NAMES
 
-**HEAD `96f4b2a` · branch `main` · 0 ahead / 0 behind · DB head `0170` · tree
+**HEAD `f56457d` · branch `main` · 0 ahead / 0 behind · DB head `0170` · tree
 CLEAN.**
 
 **Read `CLAUDE.md` first** — it is the rulebook and §7 is the durable money/schema
@@ -89,6 +89,18 @@ so English is byte-identical as a property of the CSS). Phase 2 is `9e60b8f`,
 **Follow-ups that are NOT their own commits and should not be looked for:** the
 consumption إذن sweep is inside `a4bf764`; the Reports wording and RTL fixes are
 inside `c736ff1`.
+
+### Landed AFTER this refresh was first written — housekeeping, same session
+
+Kept out of the table above so "since the last refresh" keeps meaning what it
+says. This file is the refresh; these four followed it.
+
+| Hash | Date | What it did |
+|---|---|---|
+| `3b84df1` | 08-29 | this refresh itself, plus the guard recorded RED |
+| `96f4b2a` | 08-29 | the guard INVERTED and renamed — §6 |
+| `6b3c0c2` | 08-29 | `.claude/settings.json` ignored — §9 item 2 |
+| `f56457d` | 08-29 | `.planning/SESSION-HANDOFF.md` deleted, §9 item 1 corrected |
 
 ---
 
@@ -257,8 +269,10 @@ Four are prose comments. Four are legitimate mechanism — `AppShell` sets
 `document.dir`, `layout.tsx` is `98798f0`'s cookie-driven first paint,
 `lib/dashboard.ts` picks the `Intl` locale, and `PartsUsageTab` mirrors an SVG
 x-coordinate, which is the CORRECT fix for the `viewBox` trap, not a leftover.
-The rest select from a BILINGUAL DATA PAIR (§8 item 3). `app/iot` and `app/routes`
-are the deferred IoT and Route-Optimization pages.
+The rest — 13 — select from a BILINGUAL DATA PAIR, and **every one was opened and
+cleared: §8 item 3 is CLOSED, not pending.** Read it before treating any number
+here as a defect count. `app/iot` and `app/routes` are the deferred IoT and
+Route-Optimization pages.
 
 **`MaintenanceCalendar` is no longer on this list** — `d6c91b4` and `287336e`
 moved its month and weekday arrays into the dictionary.
@@ -422,6 +436,11 @@ Termination keeps the شطب family. Total loss carries **تالف** (button,
 standalone) and **تالفة** (inside `…على أنها ___`, feminine agreement) on purpose
 — do not unify them. Reversed invoicing is **المرتجع**, but the Dashboard feed
 verb `invoice_voided` was deliberately LEFT as مرتجع مبيعات.
+**مردودات is RETIRED and must not come back:** the noun is مرتجع / مرتجعات and
+the verb is تحويل … إلى, both settled by census rather than by taste — twelve
+sites already said it that way and three did not. The regression test is
+`grep -rn 'مردود' lib app components` returning nothing — **scoped to code on
+purpose**, since this file necessarily spells the retired word out to retire it.
 
 **RTL: `text-align: start` resolves against the ELEMENT'S OWN direction.** Put
 `dir` on an inner `<span>` that fixes only glyph order; let the outer element
@@ -499,14 +518,19 @@ matches nothing and the guard reports *"seed INSERT parsed to zero built-in rows
 
 ## 7. NEXT — no route batches remain
 
-Every route in the app is wired and **§9 is fully closed** — nothing is waiting on
-a human call. Two things remain, both small:
+Every route in the app is wired and **§9 is fully closed.** The static work is
+finished: §8's items 1 and 3 both closed this session, and **item 1 was the last
+unambiguous wording drift with a settled ruling behind it.** What is left cannot
+be moved by more analysis:
 
-1. **The Sales-Returns wording tail** (§8 item 1) — the last unambiguous wording
-   drift with a settled ruling behind it.
-2. **A full Arabic-mode read-through with fresh eyes.** Ten batches plus five
+1. **A full Arabic-mode read-through with fresh eyes.** Ten batches plus five
    sweeps have landed; nobody has walked the whole app in Arabic since Trips
-   shipped. Cheaper than any further static analysis at this point.
+   shipped. **This is now the only way another wording defect gets found** —
+   grep has run out of things to point at, which is exactly what item 3 turning
+   out to be a non-issue demonstrates.
+2. **§8 item 6 is Turki's call and nothing else is blocked on it.** A one-word
+   ruling on the `archive_document_types` seed either closes it or leaves it
+   correct as-is.
 
 **~~The Trips `InvoiceDetailModal` RTL defect~~ — FIXED, struck.** The
 `dir="rtl"` moved off the block onto an inner `<span>`
@@ -519,20 +543,60 @@ a human call. Two things remain, both small:
 
 ## 8. PARKED — a wording-consistency pass at the very end
 
-All re-verified at this refresh. **Three items struck as DONE.**
+All re-verified at this refresh. **Five items struck as DONE** — three at the
+refresh, items 1 and 3 after it.
 
-1. **The Reports Sales-Returns tail.** Still live: `lib/i18n.ts:4084` and `:4090`
-   say مردودات while the table says المرتجع, and `:4943` still opens عُكس.
-   `:4084` mixes both inside one string. Highest-confidence item remaining.
+1. ~~**The Reports Sales-Returns tail.**~~ — **DONE. Struck.** Three `ar:` values
+   changed, English untouched: `lib/i18n.ts:4084`, `:4090`, `:4943`.
+   **What settled it was a census, not a preference.** The house term for a
+   reversed invoice is **مرتجع مبيعات** at twelve sites — the PDF, the void
+   dialog, the email subject and body, the Dashboard feed, Global Search. Only
+   these three said **مردودات المبيعات**, so they were the outliers and the
+   twelve were the standard; `grep -rn 'مردود'` now returns nothing across
+   `lib`, `app`, `components`.
+   - `:4084` also had **broken definite agreement** — `فواتير المرتجعة`, an
+     indefinite noun carrying a definite adjective. Now `الفواتير المرتجعة`.
+     This was a grammar defect sitting inside the wording defect and neither
+     the ruling nor the previous note mentioned it; it was visible only on
+     reading the string.
+   - `:4943` opened with **عُكس**, a verb used nowhere else. The house
+     construction is `تحويل … إلى` (`:7727`, `:7918`, `:7920`), so it now reads
+     `حُوِّل {v} … إلى مرتجعات مبيعات`.
+   - **`:1368` `invoice_voided` was NOT touched** and must stay مرتجع مبيعات —
+     §5 records that as deliberate. It is one line away from the strings that
+     did change.
 2. ~~`تصاريح` → `أذونات` in three Reports sites~~ — **DONE. Struck.** No
    `تصاريح` remains in `lib/i18n.ts` except at `:2655`, inside the comment that
    RECORDS the ruling, which must stay.
-3. **The bilingual-data-pair sites do not fall back.** They read
-   `lang === "ar" ? x.ar : x.en` directly; `arText()` exists precisely to return
-   the base when the Arabic is blank. Not a bug today, but it is the fourth
-   drifted pattern `8b7ab8d` set out to kill, surviving in a handful of places
-   (§3's ternary list). Audit before touching — several may be static constants
-   where fallback is meaningless.
+3. ~~**The bilingual-data-pair sites do not fall back.**~~ — **CLOSED, and it was
+   never a defect. No code changed.** The audit this item asked for was done and
+   it disproved the item. **Do not re-open it from the ternary count alone** —
+   that count is what made this look like a bug for three refreshes.
+
+   All 13 non-comment, non-mechanism ternaries were opened. Every one is safe,
+   for one of four reasons:
+   - **Static bilingual constants**, where a fallback has nothing to fall back
+     from: `UTILIZATION_BAND` and the summary/widget registries
+     (`DashboardClient.tsx:1130`, `:1763`, `:1809`), `NAV_DESTINATIONS`
+     (`GlobalSearch.tsx:224`), and `lib/issues.ts`'s category/status pairs
+     (`IssuesSection.tsx:92`) — the last deliberately kept beside the CHECK
+     constraint that defines them, with the reasoning already in the file.
+   - **Not a name at all:** `NotificationsSection.tsx:95` picks the language of
+     one error message.
+   - **Deferred routes:** `app/routes/page.tsx:115`, `app/iot/page.tsx:50`.
+   - **DB-backed but blank-proof BY WRITE PATH** — the only case that needed
+     real checking. `repair_descriptions` and `outsourced_descriptions` have
+     `en` and `ar` both `not null` (0060:98, 0068:182), every seeded row is
+     bilingual, and the sole inline-add path writes **`ar: arTrim || enTrim`**
+     (`app/maintenance/actions.ts:231`, `osActions.ts:391`). An empty Arabic
+     name cannot reach the table, so `NewWorkOrderModal.tsx:198`/`:543` and
+     `NewOutsourcedJobModal.tsx:158`/`:450` have nothing to fall back from.
+     **NOT NULL alone would not have been enough** — `''` satisfies it; the
+     coalesce in the writer is what makes this true.
+   - `InventoryClient.tsx:1224` is the opposite of the bug: it already uses
+     `arText` for the primary name and derives the secondary from the RESOLVED
+     primary, precisely so a part with no Arabic name does not print the same
+     English string twice. The reasoning is in the file at `:1216`.
 4. ~~The Dashboard "Idle" words~~ — **DONE. Struck.** See §5.
 5. ~~`MaintenanceCalendar` keeps `MONTHS_AR` / `WEEKDAYS_AR` as component-local
    arrays~~ — **DONE. Struck.** `d6c91b4` and `287336e` moved both into the
