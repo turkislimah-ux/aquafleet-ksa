@@ -64,7 +64,6 @@ export const dict = {
   kpi: {
     activeTrucks: { en: "Active Trucks", ar: "الشاحنات النشطة" },
     fleetSize: { en: "Fleet Size", ar: "حجم الأسطول" },
-    avgHealth: { en: "Avg Fleet Health", ar: "متوسط حالة الأسطول" },
     utilization: { en: "Utilization", ar: "معدل الاستخدام" },
     onTime: { en: "On-Time Delivery", ar: "التسليم في الوقت" },
     litersDelivered: { en: "Liters Delivered (30d)", ar: "اللترات الموردة (30 يوم)" },
@@ -83,7 +82,6 @@ export const dict = {
     driver: { en: "Driver", ar: "السائق" },
     depot: { en: "Depot", ar: "المستودع" },
     status: { en: "Status", ar: "الحالة" },
-    health: { en: "Health", ar: "الحالة الفنية" },
     odometer: { en: "Odometer", ar: "العداد" },
     actions: { en: "Actions", ar: "إجراءات" },
     view: { en: "View", ar: "عرض" },
@@ -1869,18 +1867,6 @@ export const dict = {
     utilNoteBody2: {
       en: "rather than 0%, because there is nothing to measure against.",
       ar: "بدلاً من 0%، لأنه لا يوجد ما تُقاس عليه.",
-    },
-
-    // ---- health placeholder ----------------------------------------------
-    health: {
-      aria: { en: "Health {pct}%", ar: "الحالة الفنية {pct}%" },
-      notActiveAria: { en: "Health monitoring not active yet", ar: "مراقبة الحالة الفنية غير مفعّلة بعد" },
-      awaitingSensors: { en: "Awaiting IoT sensors", ar: "بانتظار حسّاسات إنترنت الأشياء" },
-      noteBold: { en: "Health monitoring is not active yet.", ar: "مراقبة الحالة الفنية غير مفعّلة بعد." },
-      noteBody: {
-        en: "The health bar is a placeholder — it activates once IoT sensors are fitted to the fleet and integrated, at which point each truck reports its own condition.",
-        ar: "شريط الحالة الفنية عنصر مؤقت — يعمل بمجرد تركيب حسّاسات إنترنت الأشياء على الأسطول وربطها، وعندها تُبلّغ كل شاحنة عن حالتها بنفسها.",
-      },
     },
 
     // ---- months, for the "Utilization is <Month> <Year>" label ------------

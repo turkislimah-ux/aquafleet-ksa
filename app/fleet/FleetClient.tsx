@@ -28,7 +28,7 @@ import {
 // fleet.truckState / fleet.driverState instead. No other route is affected.
 import { useApp } from "@/components/AppShell";
 import { t, type Lang } from "@/lib/i18n";
-import { Activity, Eye, Filter, Pencil, Plus, Truck as TruckIcon, Users, X } from "lucide-react";
+import { Eye, Filter, Pencil, Plus, Truck as TruckIcon, Users, X } from "lucide-react";
 import ScrollLock from "@/components/ScrollLock";
 
 type Kpis = {
@@ -56,34 +56,6 @@ function lastServiceLabel(iso: string | null): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-/**
- * THE HEALTH BAR IS CHROME, NOT DATA — it reads nothing, on purpose.
- *
- * health_score was a demo-era column with no source: null on every truck,
- * written by nothing, and it is being dropped from the table. Rather than
- * delete the column from the list and leave a hole where fleet health belongs,
- * the bar stays as a placeholder for the IoT phase that will fill it.
- *
- * It renders a fixed EMPTY state — grey track, 0% fill — for every truck. There
- * is no prop, so it cannot accidentally start reflecting a stale or fabricated
- * figure, and no number is printed beside it: "0" would be a reading, and we
- * have no reading. The note at the bottom of the page says why it is empty.
- *
- * THE COLOUR SCALE IS BUILT AND DORMANT, so the day sensors land the only
- * change is passing a value in:
- *     <= 40   critical    rose
- *     <= 70   attention   amber
- *      > 70   healthy     emerald
- * With no data none of those thresholds fire — grey is not on the scale, it is
- * the absence of one. Track geometry matches preview/app.css's .bar-track
- * (6px, fully rounded) and the w-28 column width the demo uses.
- */
-function healthScaleClass(pct: number): string {
-  if (pct <= 40) return "bg-rose-500";
-  if (pct <= 70) return "bg-amber-500";
-  return "bg-emerald-500";
 }
 
 /**
@@ -162,30 +134,6 @@ function UtilizationCell({ row, lang }: { row: TruckUtilizationRow | undefined; 
           />
         </div>
       )}
-    </div>
-  );
-}
-
-function HealthBar({ pct, lang }: { pct?: number; lang: Lang }) {
-  const hasReading = typeof pct === "number";
-  const width = hasReading ? Math.max(0, Math.min(100, pct)) : 0;
-  return (
-    <div className="w-28">
-      <div
-        className="h-1.5 rounded-full bg-black/5 dark:bg-white/10 overflow-hidden"
-        role="img"
-        aria-label={
-          hasReading
-            ? t("fleet.health.aria", lang).replace("{pct}", () => String(width))
-            : t("fleet.health.notActiveAria", lang)
-        }
-        title={hasReading ? undefined : t("fleet.health.awaitingSensors", lang)}
-      >
-        <div
-          className={cn("h-full transition-[width] duration-300", hasReading ? healthScaleClass(width) : "bg-transparent")}
-          style={{ width: `${width}%` }}
-        />
-      </div>
     </div>
   );
 }
@@ -465,11 +413,9 @@ export default function FleetClient({
               <TH>{t("common.status", lang)}</TH>
               <TH>{t("common.driver", lang)}</TH>
               <TH>{t("fleet.cols.assignedProject", lang)}</TH>
-              {/* Utilization sits with the operational story (status -> driver
-                  -> project -> how much the truck is actually used) and before
-                  Health, which is still an inert placeholder. */}
+              {/* Utilization closes the operational story: status -> driver ->
+                  project -> how much the truck is actually used. */}
               <TH>{t("kpi.utilization", lang)}</TH>
-              <TH>{t("common.health", lang)}</TH>
               <TH>{t("common.capacity", lang)}</TH>
               <TH>{t("common.odometer", lang)}</TH>
               <TH>{t("fleet.cols.lastService", lang)}</TH>
@@ -480,7 +426,7 @@ export default function FleetClient({
             {list.length === 0 && (
               <tr>
                 <td
-                  colSpan={13}
+                  colSpan={12}
                   className="py-6 px-3 border-t text-center muted text-sm"
                   style={{ borderColor: "rgb(var(--border))" }}
                 >
@@ -561,9 +507,6 @@ export default function FleetClient({
                 <TD>
                   <UtilizationCell row={utilizationByTruck[tr.id]} lang={lang} />
                 </TD>
-                <TD>
-                  <HealthBar lang={lang} />
-                </TD>
                 <TD className="tabular-nums font-medium">
                   {tr.capacity_m3 != null ? `${tr.capacity_m3} m³` : "—"}
                 </TD>
@@ -611,18 +554,6 @@ export default function FleetClient({
           <b>{t("fleet.utilNoteBold", lang).replace("{month}", () => monthLabel(utilizationMonth, lang))}</b>{" "}
           {t("fleet.utilNoteBody1", lang)} <b>{t("common.na", lang)}</b>{" "}
           {t("fleet.utilNoteBody2", lang)}
-        </span>
-      </p>
-
-      {/* Says why the Health column is empty. Sits under the table rather than
-          in the column header because it explains a state, not a heading — and
-          without it an empty bar on every row reads as a bug rather than as a
-          feature that has not arrived. */}
-      <p className="flex items-start gap-2 text-[11px] muted leading-relaxed">
-        <Activity className="h-3.5 w-3.5 shrink-0 mt-px" aria-hidden />
-        <span>
-          <b>{t("fleet.health.noteBold", lang)}</b>{" "}
-          {t("fleet.health.noteBody", lang)}
         </span>
       </p>
 
