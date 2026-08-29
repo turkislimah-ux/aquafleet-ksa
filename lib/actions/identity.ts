@@ -47,6 +47,12 @@ export type Viewer = {
   nameAr: string | null;
   /** Human label from staff_roles (e.g. "Fleet Manager"), not the raw key. */
   roleLabel: string | null;
+  /**
+   * Arabic name from staff_roles, or null. Null for a custom role — only the
+   * seeded built-ins carry one — so the header must fall back to `roleLabel`
+   * rather than blanking. Pair them with `arText`, never read alone.
+   */
+  roleLabelAr: string | null;
 };
 
 export async function getViewer(): Promise<Viewer | null> {
@@ -81,19 +87,23 @@ export async function getViewer(): Promise<Viewer | null> {
     // Not an error state worth surfacing — just means no staff row. The account
     // name still applies: a user with no staff row who set a display name should
     // see it, not their email's local part.
-    return { email, name: accountName, nameAr: null, roleLabel: null };
+    return { email, name: accountName, nameAr: null, roleLabel: null, roleLabelAr: null };
   }
 
   let roleLabel: string | null = null;
+  let roleLabelAr: string | null = null;
   if (data.role) {
     const { data: roleRow } = await supabase
       .from("staff_roles")
-      .select("label")
+      .select("label, label_ar")
       .eq("key", data.role)
       .maybeSingle();
     // Fall back to the raw key rather than showing nothing — a missing
-    // lookup row should degrade to "fleet_manager", not to blank.
+    // lookup row should degrade to "fleet_manager", not to blank. The Arabic
+    // half stays null in that case: there is no row to have read it from, and
+    // `arText` then shows the key in both languages rather than inventing one.
     roleLabel = roleRow?.label ?? data.role;
+    roleLabelAr = roleRow?.label_ar ?? null;
   }
 
   // The account name wins in BOTH languages when it is set — hence nameAr going
@@ -104,5 +114,6 @@ export async function getViewer(): Promise<Viewer | null> {
     name: accountName ?? data.name ?? null,
     nameAr: accountName ? null : (data.name_ar ?? null),
     roleLabel,
+    roleLabelAr,
   };
 }

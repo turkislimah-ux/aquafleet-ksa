@@ -948,7 +948,13 @@ function AccountMenu({
   // as it did before.
   const displayName =
     arText(viewer?.name ?? "", viewer?.nameAr, lang) || emailLocal || "—";
-  const subtitle = viewer?.roleLabel ?? viewer?.email ?? null;
+  // Same pairing every other role display uses (StaffTab's `roleName`): the
+  // Arabic name in Arabic mode when the role has one, the English label
+  // otherwise. A custom role has no Arabic half and reads as typed in both.
+  // `||` rather than `??`, matching displayName above — an empty label should
+  // fall through to the email, not render a blank subtitle.
+  const subtitle =
+    arText(viewer?.roleLabel ?? "", viewer?.roleLabelAr, lang) || viewer?.email || null;
 
   // Initials from the display name: two words -> two letters, one word -> one.
   const initials =
