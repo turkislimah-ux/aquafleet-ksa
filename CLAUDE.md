@@ -204,108 +204,12 @@ The next three rules are one lesson in three places.
 
 ---
 
-## 7. Durable money & schema rules
+## 7. Current state & what's next
 
-Rules that must survive any future change — not a status report; see the header.
+**Do NOT append build history, implementation notes, or money rules here.**
+- Money/schema rules → `.claude/skills/aquafleet-domain/SKILL.md`
+- Session state → `.planning/HANDOFF.md`
+- If this file exceeds 15KB, Code is appending. Cut back to this stub.
 
-- **A WRITE-OFF ROW CARRIES NO PAYMENT MODE (0143).** `archive_project_guarded`
-  records exactly customer, project, amount, reason, actor.
-  `customer_write_offs.payment_mode` existed 0139→0143, was written on every
-  forced archive and **read by nothing**. Do not re-add: a write-off is a frozen
-  AMOUNT, the mode the debt was owed under stays resolvable live from the project,
-  and `invoices.payment_mode` is the one snapshot genuinely read.
-  - **Dropping a column an RPC writes is ONE transaction, not two.** plpgsql
-    bodies are not dependency-tracked, so `drop column` succeeds silently against
-    a live writer and fails as 42703 at the next forced archive, mid-override.
-    Recreate the writer and drop the column together, then assert the body with
-    `pg_get_functiondef`. Bare drop over CASCADE — an unexpected dependent should
-    fail loudly.
-- **A RECORDED BALANCE RETURN IS A DEBIT (0142).** A `customer_balance_returns`
-  row REDUCES spendable prepaid credit, same class as consumption. Netted at FACE
-  VALUE — a refund is cash leaving, not a taxable supply, so no `× 1.15` — and
-  never modelled as a negative top-up (`topups_sar` means "money paid in"). Before
-  0142 nothing subtracted a return, so a refunded customer's credit stayed
-  spendable after the money was gone.
-  - **EXACTLY TWO EXPRESSIONS, and it stays two:** `returnedTotal()` in
-    `lib/prepaid.ts` is the ONE TS-side summation — every consumer IMPORTS it
-    rather than restating it, including `lib/invoice.ts` — and
-    `v_customer_prepaid_balance` is the SQL side. `v_customer_amount_payable` and
-    `v_invoice_outstanding_live` inherit through `balance_sar`. Do not add a third.
-    (`buildStatementItems` consumes the return ROWS for the ledger, not the
-    summation — a different use of the same data, not a second expression.)
-- **ARCHIVE IS NOT A ONE-WAY DOOR (0141).** `restore_customer_guarded` un-archives
-  a customer AND its project in one transaction on one timestamp, and reverses an
-  active write-off by **marking** it (`reversed_at`, `reversed_by`) while KEEPING
-  the row — amount/reason/actor stay frozen. It writes **no balance**: never delete
-  a `customer_balance_returns` row, never post a compensating negative top-up to
-  "undo" an archive.
-  - **Write-off suppression is ACTIVE-only, and `and w.reversed_at is null`
-    belongs in the JOIN condition** of `v_customer_amount_payable` and
-    `v_invoice_outstanding_live`. In a WHERE clause it turns the LEFT JOIN inner
-    and drops every customer who never had a write-off.
-  - **The partial index and the conflict target are ONE change.**
-    `customer_write_offs` has a partial unique index on active rows
-    (`(customer_id) where reversed_at is null`, not a table-wide
-    `UNIQUE(customer_id)`), matched by `archive_project_guarded`'s `on conflict
-    (customer_id) where reversed_at is null`. Split them and you get 42P10 — or,
-    worse and silently, a re-archived debtor whose insert collides with the old
-    reversed row and writes nothing. **Any rewrite of that RPC must read the
-    conflict target back afterwards.**
-- **A TRIP OWNS THE COMMISSION TERMS IT WAS DELIVERED UNDER (0152).**
-  `trips.commission_mode` / `.commission_base_sar` / `.commission_bump_pct` are a
-  COPY of `commission_config_at(project_id, trip_date)` taken at the delivery
-  moment: all three or none (`trips_commission_terms_all_or_none`), NULL until
-  delivered, NULL forever for a trip with no project or no driver, re-stamped on
-  every re-delivery. `commission_base_sar` is the INPUT RATE and `commission_sar`
-  is the MONEY — do not swap them in a select, which is why the base column is not
-  called `commission_value`.
-  - **VALUES, NEVER A FK to `project_commission_history`.** That row is mutable in
-    place: `set_project_commission` upserts on `(project_id, effective_from)` and
-    `created_at` is not in the SET list, so it dates the FIRST write — a FK would
-    reprice already-delivered trips. Measured trace (R TTT, 15 → 20 → 15 in one
-    afternoon, six trips stamped 15/15/20/20/15/15) in 0152's header. Corollary:
-    **`created_at` is NOT a change-moment signal;** never build a freeze rule on it.
-  - **`recomputeDailyCommission` RE-RANKS, it does not RE-RATE.** It re-derives
-    `commission_sar` from EACH trip's own frozen terms at that trip's live
-    position — never reads `commission_config_at` for the bucket, never writes the
-    three term columns. That resolver is read at ONE place: the delivery stamp in
-    `priceDelivery`. Paid trips hold a position but are never re-stamped.
-- **`update_project_with_customer` DOES NOT TAKE A COMMISSION (0150 → 0153).**
-  The three parameters are gone; passing one is a PGRST202, the intended loud
-  failure. `set_project_commission` (0148) is the ONLY path that moves a commission
-  figure on an existing project, so no unrelated save can revert one from a stale
-  pre-fill. Do not re-add them.
-  - **`create_project_with_customer` is a DIFFERENT function and keeps its three**
-    — creation writes them and 0147's INSERT trigger makes them the baseline
-    history row. The two RPCs' argument blocks are byte-identical around `p_rate`,
-    so a blind find-replace breaks project creation: disambiguate on `p_project_id`.
-  - **Dropping a parameter is a DROP+CREATE, and DROP DISCARDS THE ACL.** Postgres
-    allows only TRAILING defaults, which is why 0151 had to MOVE the three before
-    0153 could remove them. See §6's function rule — this is the same trap.
-
-- **TAX: NO INCOME TAX. ZAKAT IS INDICATIVE. VAT IS NEVER PROFIT.** Bin Slimah is
-  100 % Saudi-owned, so no corporate income tax applies — **never add an
-  income-tax line.** Zakat shown in the P&L is an ESTIMATE only (2.5 % of
-  profit-before-Zakat, clamped to 0 on a loss, `indicativeZakat()` in
-  `lib/reports.ts`); real Zakat is assessed on the ZATCA balance-sheet base, which
-  this app has no data for — so it must keep saying "indicative" on screen. VAT is
-  a liability collected for ZATCA: display-only, itemised per source, **never
-  netted and never added to or subtracted from any profit figure.** This is the
-  one rule here the database cannot confirm — it is Turki's fact about his own
-  company, like §1's fleet figures. Do not "verify" it away.
-  - **`grand_total_sar` is VAT-INCLUSIVE, `grand_subtotal_sar` is not,** and
-    mixing them is how VAT re-enters profit through the back door. Revenue
-    correctly uses the subtotal.
-  - **P&L COST views are VAT-EXCLUSIVE; CASH-MOVEMENT views are VAT-INCLUSIVE, and
-    the split is DELIBERATE — do not "make them consistent" (0167).** Cost:
-    `v_os_cost_monthly`, `v_maintenance_cost_per_truck_monthly`, `v_daily_operations`
-    expense workshop at `subtotal_sar - discount_sar`, because a cost that reaches
-    `net_profit_sar` also reaches the Zakat estimate. Cash: `v_collections_monthly`,
-    `v_purchasing_spend_monthly` use `grand_total_sar` — real money moved and VAT
-    moved with it. Check which side of that line any new view lands on.
-
-**Deferred:** effective-dated CUSTOMER rates (`projects.rate_per_trip_sar` is
-still one live column — no history table, no `rate_at()` resolver; **driver
-COMMISSION is already effective-dated**, 0146–0149, so this is the rate half only,
-and 0128's `trips.rate_sar` freeze is a per-trip snapshot, not a rate history),
-Route Optimization, Predictive AI, IoT, drivers/staff table unification (v2).
+**State:** DB at migration 0171. All pages built+verified. Arabic phase closed.
+Read `.planning/HANDOFF.md` for current work.
