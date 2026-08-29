@@ -895,6 +895,12 @@ export async function getReceiptStatus(
   return { status, confirmedNotPending: status !== "pending_approval" };
 }
 
+// Leads every purchase_orders-mirror failure returned by approveReceipt /
+// rejectReceipt. The vote itself is already committed at this point, so the
+// message has to say so — the operator must not read this as "try again".
+const MIRROR_FAILED_PREFIX =
+  "Your vote was recorded and this receipt is resolved, but the purchase order's own status could not be updated: ";
+
 export async function approveReceipt(
   receiptId: string,
   comment: string | null,
@@ -923,6 +929,17 @@ export async function approveReceipt(
   // Mirror onto purchase_orders ONLY once the vote actually finalizes —
   // see this file's own header for why mirroring every vote would drift
   // once vote-changing exists.
+  //
+  // The mirror is DERIVED state (stock_receipts is the source of truth, and
+  // the approvals queue + its guard both read it now), so a failed mirror can
+  // no longer wedge a row. It is still real drift, and a console.error that
+  // RETURNED SUCCESS is exactly how five POs ended up pending_approval with an
+  // approved receipt and zero votes. So it is returned, never swallowed.
+  //
+  // `receipt` is returned ALONGSIDE the error: the vote RPC already committed,
+  // so the caller must be able to tell "vote landed, mirror drifted" from
+  // "vote failed" and must not prompt for the same vote again.
+  let mirrorError: string | null = null;
   if (receipt.status === "approved" && receiptRow?.po_id) {
     const { data: votes } = await supabase
       .from("stock_receipt_approvals")
@@ -936,12 +953,15 @@ export async function approveReceipt(
         p_actor: vote.approver_email,
       });
       if (poError && !/already approved/i.test(poError.message)) {
-        console.error("approveReceipt: purchase_orders status mirror failed:", poError.message);
+        mirrorError = poError.message;
       }
     }
   }
 
   revalidatePath("/inventory");
+  if (mirrorError) {
+    return { error: `${MIRROR_FAILED_PREFIX}${mirrorError}`, receipt };
+  }
   return { error: null, receipt };
 }
 
@@ -977,6 +997,9 @@ export async function rejectReceipt(
   // one call, from the completing actor, with the receipt's own final
   // reason (not necessarily this call's p_reason — the first voter's own
   // reason may differ and is never compared, per the vote model).
+  // Same contract as approveReceipt's mirror above: returned, not logged, and
+  // always alongside `receipt` so the caller knows the vote itself landed.
+  let mirrorError: string | null = null;
   if (receipt.status === "rejected" && receiptRow?.po_id) {
     const { error: poError } = await supabase.rpc("reject_purchase_order", {
       p_po_id: receiptRow.po_id,
@@ -984,10 +1007,13 @@ export async function rejectReceipt(
       p_actor: actor,
     });
     if (poError && !/awaiting approval/i.test(poError.message)) {
-      console.error("rejectReceipt: purchase_orders status mirror failed:", poError.message);
+      mirrorError = poError.message;
     }
   }
 
   revalidatePath("/inventory");
+  if (mirrorError) {
+    return { error: `${MIRROR_FAILED_PREFIX}${mirrorError}`, receipt };
+  }
   return { error: null, receipt };
 }

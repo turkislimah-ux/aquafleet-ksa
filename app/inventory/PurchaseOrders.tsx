@@ -2410,6 +2410,12 @@ export function ApproveReceiptModal({
     const res = await approveReceipt(receiptId, comment.trim() || null);
     setSaving(false);
     if (res.error) {
+      // A vote that landed still returns its receipt — the RPC committed and
+      // only the derived purchase_orders mirror failed. Refresh so the queue
+      // (which reads the receipt's own status, not the PO's) drops the row
+      // either way, and show the message rather than swallowing it. Without
+      // this, a mirror failure would leave a resolved row looking unactioned.
+      if (res.receipt) router.refresh();
       setError(res.error);
       return;
     }
@@ -2562,6 +2568,12 @@ export function RejectReceiptModal({
       // outcome)..."), and the outcome-mismatch block — no client-side
       // re-derivation of any of these, the RPC's own guard is the only
       // source of truth.
+      //
+      // A returned `receipt` means the vote DID land and only the derived
+      // purchase_orders mirror failed (see MIRROR_FAILED_PREFIX in
+      // actions.ts). Refresh so the queue drops the row on the receipt's
+      // own status, then show the message — same contract as approve.
+      if (res.receipt) router.refresh();
       setError(res.error);
       return;
     }
@@ -2735,10 +2747,28 @@ export function ApprovalsTab({
     return m;
   }, [suppliers]);
 
+  // ONE authoritative status, and it is the RECEIPT's. Votes land on
+  // stock_receipt_approvals -> stock_receipts, so stock_receipts.status is the
+  // source of truth and purchase_orders.status is a derived mirror.
+  //
+  // This USED to admit a PO on purchase_orders.status while stillPending()
+  // below guarded on the linked receipt's status — two tables that can
+  // disagree. When they did, the row was permanently visible and permanently
+  // unvotable, and router.refresh() could never clear it because it re-read
+  // purchase_orders, the table that was wrong. Five POs sat here that way:
+  // pending_approval, receipt already approved, zero votes.
+  //
+  // Admission is therefore the SAME predicate the guard uses. A PO with no
+  // receipt at all is excluded for the same reason — there is nothing to vote
+  // on, so showing it could only reproduce the visible-but-unvotable state.
   const queue: ApprovalRow[] = useMemo(() => {
     const poRows: ApprovalRow[] = purchaseOrders
-      .filter((o) => o.status === "pending_approval")
-      .map((po) => ({ kind: "po", po, receipt: stockReceipts.find((r) => r.po_id === po.id) ?? null }));
+      .map((po) => ({
+        kind: "po" as const,
+        po,
+        receipt: stockReceipts.find((r) => r.po_id === po.id) ?? null,
+      }))
+      .filter((row) => row.receipt?.status === "pending_approval");
     const directRows: ApprovalRow[] = stockReceipts
       .filter((r) => r.receipt_type === "direct" && r.status === "pending_approval")
       .map((receipt) => ({ kind: "direct", receipt }));
