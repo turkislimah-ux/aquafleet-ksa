@@ -267,7 +267,7 @@ export default function StatementsTab({
           that is what it will eventually produce — one more statement. */}
       <button
         onClick={() => setCustomOpen(true)}
-        className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition
+        className="ms-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition
                    border-transparent text-brand-600 dark:text-brand-300 hover:bg-brand-500/10"
       >
         <Sparkles className="h-3.5 w-3.5" />
@@ -467,7 +467,7 @@ export default function StatementsTab({
           ))}
         </select>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ms-auto flex items-center gap-2">
           <Btn variant="outline" onClick={onManageExpenses}>
             <Pencil className="h-4 w-4" />{t("reports.statements.manageExpenses", lang)}
           </Btn>
@@ -518,12 +518,12 @@ export default function StatementsTab({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b" style={{ borderColor: "rgb(var(--border))" }}>
-                <th className="text-left font-medium muted pb-2">&nbsp;</th>
-                <th className="text-right font-medium muted pb-2 w-[150px]">{current.label}</th>
-                <th className="text-right font-medium muted pb-2 w-[150px]">{prior?.label ?? "—"}</th>
-                <th className="text-right font-medium muted pb-2 w-[130px]">{t("reports.th.variance", lang)}</th>
+                <th className="text-start font-medium muted pb-2">&nbsp;</th>
+                <th className="text-end font-medium muted pb-2 w-[150px]">{current.label}</th>
+                <th className="text-end font-medium muted pb-2 w-[150px]">{prior?.label ?? "—"}</th>
+                <th className="text-end font-medium muted pb-2 w-[130px]">{t("reports.th.variance", lang)}</th>
                 {/* A bare symbol, left as one. "%" is not English. */}
-                <th className="text-right font-medium muted pb-2 w-[90px]">%</th>
+                <th className="text-end font-medium muted pb-2 w-[90px]">%</th>
               </tr>
             </thead>
 
@@ -555,7 +555,7 @@ export default function StatementsTab({
                       stays RAW: it was never run through formatNum here, and
                       routing it through one now would insert a thousands
                       separator this sentence never had. */}
-                  <td colSpan={4} className="pb-2 pl-4 text-[11px] text-amber-700 dark:text-amber-300">
+                  <td colSpan={4} className="pb-2 ps-4 text-[11px] text-amber-700 dark:text-amber-300">
                     {fill(t(`reports.pnl.uncosted.${plural(current.filling_uncosted_trips)}`, lang),
                       { n: current.filling_uncosted_trips })}
                   </td>
@@ -573,7 +573,7 @@ export default function StatementsTab({
               <SectionHead>{t("reports.pnl.headOtherExpenses", lang)}</SectionHead>
               {categories.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-2 pl-4 muted text-xs">
+                  <td colSpan={5} className="py-2 ps-4 muted text-xs">
                     {t("reports.pnl.noExpenses", lang)}
                   </td>
                 </tr>
@@ -584,11 +584,11 @@ export default function StatementsTab({
                         typed into ExpensesModal — there is no enum and no
                         `_ar` column, so this renders whatever was entered, in
                         whatever language it was entered in. */}
-                    <td className="py-1.5 pl-4">{c.category}</td>
-                    <td className="py-1.5 text-right tabular-nums">{formatSar(c.expenses_sar)}</td>
-                    <td className="py-1.5 text-right tabular-nums muted">—</td>
-                    <td className="py-1.5 text-right tabular-nums muted">—</td>
-                    <td className="py-1.5 text-right tabular-nums muted">—</td>
+                    <td className="py-1.5 ps-4">{c.category}</td>
+                    <td className="py-1.5 text-end tabular-nums">{formatSar(c.expenses_sar)}</td>
+                    <td className="py-1.5 text-end tabular-nums muted">—</td>
+                    <td className="py-1.5 text-end tabular-nums muted">—</td>
+                    <td className="py-1.5 text-end tabular-nums muted">—</td>
                   </tr>
                 ))
               )}
@@ -617,7 +617,7 @@ export default function StatementsTab({
                     whole reason this paragraph is keyed rather than left. The
                     space is on the same line as `<>`, so JSX keeps it; it is
                     the sentence separator, not part of either value. */}
-                <td colSpan={5} className="pt-2 pl-4 text-[11px] muted italic leading-relaxed">
+                <td colSpan={5} className="pt-2 ps-4 text-[11px] muted italic leading-relaxed">
                   {t("reports.pnl.zakatNote", lang)}
                   {!zakat.applies && <> {t("reports.pnl.zakatLoss", lang)}</>}
                 </td>
@@ -677,8 +677,8 @@ export default function StatementsTab({
                 {/* `mt.vat` — the money vocabulary was already keyed by the
                     maintenance batch, so this heading reads it rather than
                     minting a second spelling of one word. */}
-                <th className="text-left font-medium muted pb-2">{t("reports.th.source", lang)}</th>
-                <th className="text-right font-medium muted pb-2 w-[170px]">{t("mt.vat", lang)}</th>
+                <th className="text-start font-medium muted pb-2">{t("reports.th.source", lang)}</th>
+                <th className="text-end font-medium muted pb-2 w-[170px]">{t("mt.vat", lang)}</th>
               </tr>
             </thead>
             <tbody>
@@ -929,22 +929,22 @@ function Line({
     <tr className={cn(rule && "border-t")} style={rule ? { borderColor: "rgb(var(--border))" } : undefined}>
       {/* twMerge resolves the weight, so `estimate` reliably wins over `bold`
           on the two cells that carry both. */}
-      <td className={cn("py-1.5", indent && "pl-4", bold && "font-semibold",
+      <td className={cn("py-1.5", indent && "ps-4", bold && "font-semibold",
         estimate && "italic font-normal")}>{label}</td>
-      <td className={cn("py-1.5 text-right tabular-nums", bold && "font-semibold",
+      <td className={cn("py-1.5 text-end tabular-nums", bold && "font-semibold",
         estimate && "italic font-normal",
         signed && cur < 0 && "text-rose-600 dark:text-rose-400")}>
         {formatSar(cur)}
       </td>
-      <td className={cn("py-1.5 text-right tabular-nums muted", estimate && "italic")}>
+      <td className={cn("py-1.5 text-end tabular-nums muted", estimate && "italic")}>
         {hasPrior ? formatSar(pri as number) : "—"}
       </td>
-      <td className={cn("py-1.5 text-right tabular-nums",
+      <td className={cn("py-1.5 text-end tabular-nums",
         tone === "ok" ? "text-emerald-600 dark:text-emerald-400" :
         tone === "bad" ? "text-rose-600 dark:text-rose-400" : "muted")}>
         {d ? `${d.abs > 0 ? "+" : ""}${formatSar(d.abs)}` : "—"}
       </td>
-      <td className={cn("py-1.5 text-right tabular-nums",
+      <td className={cn("py-1.5 text-end tabular-nums",
         tone === "ok" ? "text-emerald-600 dark:text-emerald-400" :
         tone === "bad" ? "text-rose-600 dark:text-rose-400" : "muted")}>
         {/* An em dash, not a fabricated percentage, when the base is zero. */}
@@ -976,11 +976,11 @@ function VatRow({
 }) {
   return (
     <tr>
-      <td className={cn("py-1.5", indent && "pl-4", isMuted && "muted")}>
+      <td className={cn("py-1.5", indent && "ps-4", isMuted && "muted")}>
         <span>{label}</span>
         {hint && <span className="ms-2 text-[11px] muted">{hint}</span>}
       </td>
-      <td className={cn("py-1.5 text-right tabular-nums", isMuted && "muted")}>
+      <td className={cn("py-1.5 text-end tabular-nums", isMuted && "muted")}>
         {formatSar(value)}
       </td>
     </tr>
@@ -998,10 +998,10 @@ function MarginLine({ cur, pri, lang }: { cur: number | null; pri: number | null
   const points = cur !== null && pri !== null ? cur - pri : null;
   return (
     <tr>
-      <td className="py-1.5 pl-4 muted">{t("reports.metric.operatingMargin", lang)}</td>
-      <td className="py-1.5 text-right tabular-nums">{formatShare(cur)}</td>
-      <td className="py-1.5 text-right tabular-nums muted">{formatShare(pri)}</td>
-      <td className={cn("py-1.5 text-right tabular-nums",
+      <td className="py-1.5 ps-4 muted">{t("reports.metric.operatingMargin", lang)}</td>
+      <td className="py-1.5 text-end tabular-nums">{formatShare(cur)}</td>
+      <td className="py-1.5 text-end tabular-nums muted">{formatShare(pri)}</td>
+      <td className={cn("py-1.5 text-end tabular-nums",
         points === null ? "muted" :
         points > 0 ? "text-emerald-600 dark:text-emerald-400" :
         points < 0 ? "text-rose-600 dark:text-rose-400" : "muted")}>
@@ -1011,7 +1011,7 @@ function MarginLine({ cur, pri, lang }: { cur: number | null; pri: number | null
           ? "—"
           : fill(t("reports.pnl.pts", lang), { v: `${points > 0 ? "+" : ""}${points.toFixed(1)}` })}
       </td>
-      <td className="py-1.5 text-right muted">—</td>
+      <td className="py-1.5 text-end muted">—</td>
     </tr>
   );
 }

@@ -316,7 +316,7 @@ export default function OutsourcedTrack({
                       <tr onClick={() => toggleExpanded(truckId)} className={cn("cursor-pointer transition", OS_URGENT_ROW_TONE[urgent])}>
                         <td colSpan={8} className="px-3 py-2.5" style={{ borderTop: "1px solid rgb(var(--border))" }}>
                           <div className="flex items-center gap-2 flex-wrap font-medium">
-                            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="rtl:-scale-x-100 h-4 w-4" />}
                             <span className="font-mono text-xs">{truck?.plate ?? truckId}</span>
                             <span className="text-sm">{truck?.model ?? ""}</span>
                             <span className="ms-auto text-[11px] font-normal muted">{rows.length} {t("mt.jobCount", lang)}</span>

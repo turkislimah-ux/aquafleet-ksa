@@ -442,7 +442,7 @@ export default function ConsumptionClient({
                                 ? "consumption.shared.collapseAria"
                                 : "consumption.shared.expandAria", lang)}
                             >
-                              {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="rtl:-scale-x-100 h-4 w-4" />}
                             </button>
                           </TD>
                           <TD>

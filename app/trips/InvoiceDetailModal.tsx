@@ -1313,7 +1313,7 @@ export default function InvoiceDetailModal({
                 key={type}
                 type="button"
                 onClick={() => sendTemplate(type)}
-                className="w-full text-left rounded-lg border border-app px-3 py-2 text-sm hover:border-brand-500 hover:bg-brand-500/10"
+                className="w-full text-start rounded-lg border border-app px-3 py-2 text-sm hover:border-brand-500 hover:bg-brand-500/10"
               >
                 {/* Keyed off the TEMPLATE VALUE `type`, the same value
                     sendTemplate() dispatches on. The picker never reads a
@@ -1939,10 +1939,17 @@ function HideAmountDueToggle({
           (hidden ? "bg-[rgb(var(--border))]" : "bg-brand-600")
         }
       >
+        {/* The knob is placed with inset-inline-start, not translate-x. It used
+            to have no inset at all and slide with a physical translate, which
+            works only while the static position is the left edge — in Arabic
+            the static position is the RIGHT edge, so the "on" translate pushed
+            the knob out of the track. The two offsets below are the same pixels
+            the translates produced in LTR (2px and 14px on a 28px track holding
+            a 12px knob), so English is unchanged. */}
         <span
           className={
-            "absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform " +
-            (hidden ? "translate-x-0.5" : "translate-x-3.5")
+            "absolute top-0.5 h-3 w-3 rounded-full bg-white transition-[inset-inline-start] " +
+            (hidden ? "start-0.5" : "start-3.5")
           }
         />
       </span>

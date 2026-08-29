@@ -246,8 +246,8 @@ export default function ExpensesModal({
                   <TH>{tt("reports.th.category")}</TH>
                   <TH>{tt("common.note")}</TH>
                   <TH>{tt("reports.th.enteredBy")}</TH>
-                  <TH className="text-right">{tt("reports.th.amount")}</TH>
-                  <TH className="text-right">{tt("common.actions")}</TH>
+                  <TH className="text-end">{tt("reports.th.amount")}</TH>
+                  <TH className="text-end">{tt("common.actions")}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -257,8 +257,8 @@ export default function ExpensesModal({
                     <TD>{row.category}</TD>
                     <TD className="muted">{row.note ?? "—"}</TD>
                     <TD className="muted text-xs">{row.entered_by ?? "—"}</TD>
-                    <TD className="text-right tabular-nums">{formatSar(row.amount_sar)}</TD>
-                    <TD className="text-right">
+                    <TD className="text-end tabular-nums">{formatSar(row.amount_sar)}</TD>
+                    <TD className="text-end">
                       {confirmId === row.id ? (
                         <span className="inline-flex items-center gap-1.5">
                           <span className="text-xs muted">{tt("reports.expenses.confirmDelete")}</span>

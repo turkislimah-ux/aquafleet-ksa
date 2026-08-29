@@ -306,7 +306,7 @@ export default function ArchiveCustomerTab({
                   onClick={() => toggleCollapsed(c.id)}
                   className="flex items-start gap-2 text-start flex-1 min-w-0"
                 >
-                  {isCollapsed ? <ChevronRight className="h-4 w-4 mt-0.5 shrink-0" /> : <ChevronDown className="h-4 w-4 mt-0.5 shrink-0" />}
+                  {isCollapsed ? <ChevronRight className="rtl:-scale-x-100 h-4 w-4 mt-0.5 shrink-0" /> : <ChevronDown className="h-4 w-4 mt-0.5 shrink-0" />}
                   <span className="min-w-0">
                     <span className="font-semibold block truncate">
                       {c.name}

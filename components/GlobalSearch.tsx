@@ -902,7 +902,7 @@ function RecentList({
             >
               <Clock className="h-4 w-4 shrink-0 muted" aria-hidden />
               <span className="min-w-0 flex-1 truncate text-sm">{r}</span>
-              <ArrowRight className="h-3.5 w-3.5 shrink-0 muted" aria-hidden />
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 muted rtl:-scale-x-100" aria-hidden />
             </button>
           ))}
         </div>

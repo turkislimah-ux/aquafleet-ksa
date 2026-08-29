@@ -655,7 +655,7 @@ export default function BreakdownReport({
             {/* Right: rate + commission money block. Numbers green; labels/type
                 plain. print-color-adjust (globals.css #breakdown-print) keeps the
                 green from flattening to black in the printed PDF. */}
-            <div className="shrink-0 text-right text-sm">
+            <div className="shrink-0 text-end text-sm">
               <div>
                 <span>{t("common.rate", lang)} </span>
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">

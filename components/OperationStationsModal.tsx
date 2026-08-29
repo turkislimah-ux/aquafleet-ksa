@@ -128,7 +128,7 @@ export default function OperationStationsModal({
                 <tr>
                   <TH>{t("shared.stations.thName", lang)}</TH>
                   <TH>{t("shared.stations.thCoordinates", lang)}</TH>
-                  <TH className="text-right">{t("common.actions", lang)}</TH>
+                  <TH className="text-end">{t("common.actions", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -151,7 +151,7 @@ export default function OperationStationsModal({
                     <TD className="tabular-nums text-xs">
                       {s.latitude != null && s.longitude != null ? `${s.latitude}, ${s.longitude}` : "—"}
                     </TD>
-                    <TD className="text-right">
+                    <TD className="text-end">
                       <div className="inline-flex gap-1">
                         <button
                           type="button"

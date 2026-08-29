@@ -808,7 +808,7 @@ function ChartCard({
           {action}
           <Link href={href} aria-label={title}
             className="focus-ring rounded p-1 muted transition-colors hover:text-brand-600">
-            <ArrowUpRight className="h-4 w-4" aria-hidden />
+            <ArrowUpRight className="h-4 w-4 rtl:-scale-x-100" aria-hidden />
           </Link>
         </div>
       </div>
@@ -1135,9 +1135,13 @@ function FleetUtilizationCard({
               target rather than in isolation — a bare 45.9% says nothing about
               whether that is good. */}
           <div className="relative h-2 w-full rounded-full bg-black/5 dark:bg-white/10 overflow-hidden">
+            {/* insetInlineStart, not left: the bar below is a plain block, so
+                it fills from the reading start — the right edge in Arabic. A
+                physical `left` left the band marking 20-40% of a bar that
+                grows the other way. LTR is unchanged; there start IS left. */}
             <div
               className="absolute inset-y-0 bg-emerald-500/15"
-              style={{ left: "60%", width: "20%" }}
+              style={{ insetInlineStart: "60%", width: "20%" }}
               aria-hidden
             />
             <div
@@ -1583,7 +1587,7 @@ function ActionCard({ row, lang }: { row: ActionItemRow; lang: Lang }) {
           {row.oldest_at && <> · {t("dashboard.actions.oldestPrefix", lang)}{relativeTime(row.oldest_at, lang)}</>}
         </span>
       </span>
-      <ArrowUpRight className="h-4 w-4 shrink-0 muted" aria-hidden />
+      <ArrowUpRight className="h-4 w-4 shrink-0 muted rtl:-scale-x-100" aria-hidden />
     </Link>
   );
 }

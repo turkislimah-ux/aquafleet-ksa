@@ -524,7 +524,7 @@ export default function FleetClient({
                       type="button"
                       title={t("fleet.assign.changeDriverTitle", lang)}
                       onClick={() => openAssign(tr)}
-                      className="inline-flex items-center gap-1.5 -mx-2 rounded-md px-2 py-1 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                      className="inline-flex items-center gap-1.5 -mx-2 rounded-md px-2 py-1 text-start hover:bg-black/5 dark:hover:bg-white/5"
                     >
                       <Users className="h-3.5 w-3.5 muted shrink-0" />
                       <span>{tr.driverName}</span>

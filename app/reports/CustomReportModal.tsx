@@ -188,7 +188,7 @@ export default function CustomReportModal({
                       disabled={!legal}
                       title={legal ? undefined : fill(t("reports.builder.notAvailable", lang), { g: groupingWord })}
                       className={cn(
-                        "flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left text-sm transition",
+                        "flex items-center gap-2 px-2.5 py-2 rounded-lg border text-start text-sm transition",
                         on && legal
                           ? "border-brand-600 bg-brand-500/10"
                           : legal

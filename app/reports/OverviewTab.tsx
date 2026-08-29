@@ -309,7 +309,7 @@ export default function OverviewTab({
                     <span className="font-medium">{tt(b.labelKey)}</span>
                     <span className="tabular-nums">
                       {formatSar(b.value)}
-                      <span className="muted text-xs ml-2">{formatShare(share)}</span>
+                      <span className="muted text-xs ms-2">{formatShare(share)}</span>
                     </span>
                   </div>
                   <div className="mt-1.5 h-2 rounded-full overflow-hidden" style={{ background: "rgb(var(--border))" }}>
@@ -391,8 +391,8 @@ export default function OverviewTab({
               <thead>
                 <tr>
                   <TH>{tt("common.truck")}</TH>
-                  <TH className="text-right">{tt("reports.th.trips")}</TH>
-                  <TH className="text-right">{tt("common.revenue")}</TH>
+                  <TH className="text-end">{tt("reports.th.trips")}</TH>
+                  <TH className="text-end">{tt("common.revenue")}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -401,8 +401,8 @@ export default function OverviewTab({
                 {trucksThisMonth.slice(0, 8).map((r) => (
                   <tr key={r.truck_id}>
                     <TD>{r.plate}</TD>
-                    <TD className="text-right tabular-nums">{formatNum(r.trips)}</TD>
-                    <TD className="text-right tabular-nums">{formatSar(r.allocated_revenue_sar)}</TD>
+                    <TD className="text-end tabular-nums">{formatNum(r.trips)}</TD>
+                    <TD className="text-end tabular-nums">{formatSar(r.allocated_revenue_sar)}</TD>
                   </tr>
                 ))}
               </tbody>
@@ -423,9 +423,9 @@ export default function OverviewTab({
               <thead>
                 <tr>
                   <TH>{tt("common.truck")}</TH>
-                  <TH className="text-right">{tt("reports.th.parts")}</TH>
-                  <TH className="text-right">{tt("reports.th.outsourced")}</TH>
-                  <TH className="text-right">{tt("reports.th.total")}</TH>
+                  <TH className="text-end">{tt("reports.th.parts")}</TH>
+                  <TH className="text-end">{tt("reports.th.outsourced")}</TH>
+                  <TH className="text-end">{tt("reports.th.total")}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -433,13 +433,13 @@ export default function OverviewTab({
                 {maintThisMonth.slice(0, 8).map((r) => (
                   <tr key={r.truck_id}>
                     <TD>{r.plate}</TD>
-                    <TD className="text-right tabular-nums muted">
+                    <TD className="text-end tabular-nums muted">
                       {r.maintenance_parts_sar === 0 ? "—" : formatSar(r.maintenance_parts_sar)}
                     </TD>
-                    <TD className="text-right tabular-nums muted">
+                    <TD className="text-end tabular-nums muted">
                       {r.os_payments_sar === 0 ? "—" : formatSar(r.os_payments_sar)}
                     </TD>
-                    <TD className="text-right tabular-nums font-medium">
+                    <TD className="text-end tabular-nums font-medium">
                       {formatSar(r.total_maintenance_sar)}
                     </TD>
                   </tr>
@@ -497,8 +497,8 @@ export default function OverviewTab({
               <tr>
                 <TH>{tt("reports.th.invoice")}</TH>
                 <TH>{tt("reports.th.customer")}</TH>
-                <TH className="text-right">{tt("reports.th.days")}</TH>
-                <TH className="text-right">{tt("reports.th.outstanding")}</TH>
+                <TH className="text-end">{tt("reports.th.days")}</TH>
+                <TH className="text-end">{tt("reports.th.outstanding")}</TH>
               </tr>
             </thead>
             <tbody>
@@ -506,7 +506,7 @@ export default function OverviewTab({
                 <tr key={r.invoice_id}>
                   <TD>{r.invoice_number ?? "—"}</TD>
                   <TD>{r.customer_name}</TD>
-                  <TD className="text-right tabular-nums">
+                  <TD className="text-end tabular-nums">
                     <span className={cn(
                       r.days_outstanding > 90 ? "text-rose-600 dark:text-rose-400 font-medium" :
                       r.days_outstanding > 60 ? "text-amber-600 dark:text-amber-400" : "",
@@ -514,7 +514,7 @@ export default function OverviewTab({
                       {formatNum(r.days_outstanding)}
                     </span>
                   </TD>
-                  <TD className="text-right tabular-nums">{formatSar(r.outstanding_sar)}</TD>
+                  <TD className="text-end tabular-nums">{formatSar(r.outstanding_sar)}</TD>
                 </tr>
               ))}
             </tbody>
@@ -589,7 +589,7 @@ function MiniStat({
   // A real <button> when it acts like one — keyboard focus and Enter come free,
   // which a click handler on a div would silently not provide.
   return onClick ? (
-    <button type="button" onClick={onClick} className="text-left w-full">{body}</button>
+    <button type="button" onClick={onClick} className="text-start w-full">{body}</button>
   ) : body;
 }
 

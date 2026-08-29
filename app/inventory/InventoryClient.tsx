@@ -811,12 +811,12 @@ export default function InventoryClient({
               <Card className="!p-3">
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="relative flex-1 min-w-[200px]">
-                    <Search className="h-4 w-4 muted absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <Search className="h-4 w-4 muted absolute start-2.5 top-1/2 -translate-y-1/2" />
                     <input
                       value={q}
                       onChange={(e) => setQ(e.target.value)}
                       placeholder={lang === "en" ? "Search part name, SKU…" : "بحث بالاسم أو الرمز…"}
-                      className="h-9 pl-8 pr-3 rounded-lg border text-sm w-full"
+                      className="h-9 ps-8 pe-3 rounded-lg border text-sm w-full"
                       style={INPUT_STYLE}
                     />
                   </div>
@@ -1282,7 +1282,7 @@ function PartsTable({
                     brand) icon-only square, low-stock-only — same order
                     preview uses (View, then chart, then cart), not the
                     reverse this row used to render. */}
-                <TD className="text-right whitespace-nowrap">
+                <TD className="text-end whitespace-nowrap">
                   <div className="inline-flex items-center gap-1.5">
                     <button
                       type="button"
@@ -2482,7 +2482,7 @@ function AdjustStockModal({
               <span className="muted">{lang === "en" ? "Part" : "القطعة"}</span>
               <div className="px-3 py-2 rounded-lg border text-sm" style={INPUT_STYLE}>
                 <span className="font-medium">{arText(part.name, part.name_ar, lang)}</span>
-                <span className="muted ml-2 font-mono text-xs">{part.sku}</span>
+                <span className="muted ms-2 font-mono text-xs">{part.sku}</span>
               </div>
             </div>
 

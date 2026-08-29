@@ -1192,7 +1192,7 @@ export function POListModal({
                       <TD className="tabular font-medium">
                         {formatSarVat(po.total_sar || poTotal(po.id, purchaseOrderLines))}
                       </TD>
-                      <TD className="text-right">
+                      <TD className="text-end">
                         <button
                           type="button"
                           onClick={(e) => {
@@ -2120,7 +2120,7 @@ export function ReceivePOModal({
                       <TD className="tabular font-semibold">
                         {formatSar((Number(l.received_qty) || 0) * (Number(l.received_unit_price_sar) || 0))}
                       </TD>
-                      <TD className="text-right whitespace-nowrap">
+                      <TD className="text-end whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5">
                           {l.line_id !== null && (
                             <span
@@ -2931,7 +2931,7 @@ export function ApprovalsTab({
                       </div>
                     )}
                   </TD>
-                  <TD className="text-right whitespace-nowrap">
+                  <TD className="text-end whitespace-nowrap">
                     <div className="inline-flex items-center gap-1.5">
                       <button
                         type="button"

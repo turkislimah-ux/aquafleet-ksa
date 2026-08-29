@@ -263,7 +263,7 @@ export default function ApprovalsLedgerTab({
                           className="h-7 w-7 rounded-lg grid place-items-center hover:bg-black/5 dark:hover:bg-white/5"
                           aria-label={t(open ? "archive.ledger.collapse" : "archive.ledger.expand", lang)}
                         >
-                          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="rtl:-scale-x-100 h-4 w-4" />}
                         </button>
                       </TD>
                       <TD><span className="font-mono text-xs font-medium">{r.reference}</span></TD>

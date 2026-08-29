@@ -1655,7 +1655,7 @@ export default function ProjectsBoard({
           </div>
           <div className="flex-1 flex items-center justify-center gap-1.5">
             <Btn variant="outline" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label={t("trips.board.prevWeek", lang)}>
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="rtl:-scale-x-100 h-4 w-4" />
             </Btn>
             <span
               className="inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium tabular-nums"
@@ -1665,7 +1665,7 @@ export default function ProjectsBoard({
               {weekRangeLabel}
             </span>
             <Btn variant="outline" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label={t("trips.board.nextWeek", lang)}>
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="rtl:-scale-x-100 h-4 w-4" />
             </Btn>
           </div>
           <span className="text-sm font-medium muted shrink-0 tabular-nums">{selectedDayLabel}</span>

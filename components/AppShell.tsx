@@ -925,7 +925,7 @@ function AccountMenu({
           title={t("shared.chrome.logOut", lang)}
           className="focus-ring grid h-8 w-8 place-items-center rounded-full transition-colors [touch-action:manipulation] muted hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400"
         >
-          <LogOut className="h-4 w-4" aria-hidden />
+          <LogOut className="h-4 w-4 rtl:-scale-x-100" aria-hidden />
         </button>
       </form>
     </div>

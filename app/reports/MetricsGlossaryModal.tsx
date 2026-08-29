@@ -229,7 +229,7 @@ function MetricEntry({ m, lang }: { m: MetricDictionaryRow; lang: Lang }) {
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="text-sm font-medium">{m.label}</span>
         <code className="font-mono text-[11px] muted break-all">{m.metric_key}</code>
-        <span className="ml-auto text-[11px] muted uppercase tracking-wide shrink-0">{m.unit}</span>
+        <span className="ms-auto text-[11px] muted uppercase tracking-wide shrink-0">{m.unit}</span>
       </div>
 
       <p className="mt-1 text-sm leading-relaxed">{m.meaning}</p>

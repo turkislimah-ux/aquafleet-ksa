@@ -720,7 +720,7 @@ function ChartFrame({
           {/* Y axis — left */}
           <div className="shrink-0 relative" style={{ width: GUTTER, height: PLOT_H }}>
             {ticks.map((t) => (
-              <div key={t} className="absolute right-1 -translate-y-1/2 text-[10px] muted tabular-nums"
+              <div key={t} className="absolute end-1 -translate-y-1/2 text-[10px] muted tabular-nums"
                 style={{ top: `${(1 - t) * 100}%` }}>
                 {compact(leftMax * t)}
               </div>
@@ -746,7 +746,7 @@ function ChartFrame({
           {rightMax !== undefined && (
             <div className="shrink-0 relative" style={{ width: RIGHT, height: PLOT_H }}>
               {ticks.map((t) => (
-                <div key={t} className="absolute left-1 -translate-y-1/2 text-[10px] tabular-nums text-emerald-600 dark:text-emerald-400"
+                <div key={t} className="absolute start-1 -translate-y-1/2 text-[10px] tabular-nums text-emerald-600 dark:text-emerald-400"
                   style={{ top: `${(1 - t) * 100}%` }}>
                   {compact(rightMax * t)}
                 </div>

@@ -180,7 +180,7 @@ export default function MaintenanceCalendar({
             onClick={() => setWeekStart((d) => { const n = new Date(d.getTime()); n.setDate(n.getDate() - 7); return n; })}
             title={t("mt.prevWeek", lang)}
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="rtl:-scale-x-100 h-4 w-4" />
           </button>
           <div className="px-3 py-1.5 rounded-lg border text-sm font-medium min-w-[180px] text-center" style={{ borderColor: "rgb(var(--border))" }}>
             {t("mt.weekOf", lang)} {weekHeader}
@@ -191,7 +191,7 @@ export default function MaintenanceCalendar({
             onClick={() => setWeekStart((d) => { const n = new Date(d.getTime()); n.setDate(n.getDate() + 7); return n; })}
             title={t("mt.nextWeek", lang)}
           >
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="rtl:-scale-x-100 h-4 w-4" />
           </button>
         </div>
         {/* P2 item 2 — legend "bolder": preview's own .cal-pill (a small

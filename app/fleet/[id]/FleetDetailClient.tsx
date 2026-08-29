@@ -300,7 +300,7 @@ export default function FleetDetailClient({
           className="mt-3 inline-flex items-center gap-2 h-9 px-3 rounded-lg border text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5"
           style={{ borderColor: "rgb(var(--border))" }}
         >
-          <ArrowLeft className="h-4 w-4" /> {t("fleet.detail.backToFleet", lang)}
+          <ArrowLeft className="h-4 w-4 rtl:-scale-x-100" /> {t("fleet.detail.backToFleet", lang)}
         </Link>
       </div>
     );
@@ -416,7 +416,7 @@ export default function FleetDetailClient({
         href="/fleet"
         className="inline-flex items-center gap-2 text-sm font-medium muted hover:opacity-80"
       >
-        <ArrowLeft className="h-4 w-4" /> {t("fleet.detail.back", lang)}
+        <ArrowLeft className="h-4 w-4 rtl:-scale-x-100" /> {t("fleet.detail.back", lang)}
       </Link>
 
       <PageHeader

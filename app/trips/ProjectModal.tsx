@@ -717,7 +717,7 @@ export default function ProjectModal({
                 <button
                   type="button"
                   onClick={() => selectPaymentMode("postpaid")}
-                  className={`rounded-lg border px-3 py-2 text-left text-sm ${paymentMode === "postpaid" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
+                  className={`rounded-lg border px-3 py-2 text-start text-sm ${paymentMode === "postpaid" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
                 >
                   <div className="font-medium">{t("labels.postpaid", lang)}</div>
                   <div className="muted text-[11px]">{t("trips.project.hPostpaid", lang)}</div>
@@ -725,7 +725,7 @@ export default function ProjectModal({
                 <button
                   type="button"
                   onClick={() => selectPaymentMode("prepaid")}
-                  className={`rounded-lg border px-3 py-2 text-left text-sm ${paymentMode === "prepaid" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
+                  className={`rounded-lg border px-3 py-2 text-start text-sm ${paymentMode === "prepaid" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
                 >
                   <div className="font-medium">{t("labels.prepaid", lang)}</div>
                   <div className="muted text-[11px]">{t("trips.project.hPrepaid", lang)}</div>
@@ -794,7 +794,7 @@ export default function ProjectModal({
                   type="button"
                   disabled={commissionUnavailable}
                   onClick={() => setCommMode("fixed")}
-                  className={`rounded-lg border px-3 py-2 text-left text-sm disabled:opacity-50 ${commMode === "fixed" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
+                  className={`rounded-lg border px-3 py-2 text-start text-sm disabled:opacity-50 ${commMode === "fixed" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
                 >
                   <div className="font-medium">{t("labels.commFixed", lang)}</div>
                   <div className="muted text-[11px]">{t("trips.project.hFixed", lang)}</div>
@@ -803,7 +803,7 @@ export default function ProjectModal({
                   type="button"
                   disabled={commissionUnavailable}
                   onClick={() => setCommMode("scalable")}
-                  className={`rounded-lg border px-3 py-2 text-left text-sm disabled:opacity-50 ${commMode === "scalable" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
+                  className={`rounded-lg border px-3 py-2 text-start text-sm disabled:opacity-50 ${commMode === "scalable" ? "border-brand-500 bg-brand-500/10" : "border-app"}`}
                 >
                   <div className="font-medium">{t("labels.commScalable", lang)}</div>
                   <div className="muted text-[11px]">{t("trips.project.hScalable", lang)}</div>

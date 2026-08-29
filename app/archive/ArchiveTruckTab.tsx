@@ -272,7 +272,7 @@ export default function ArchiveTruckTab({
                   onClick={() => toggleCollapsed(g.id)}
                   className="flex items-start gap-2 text-start flex-1 min-w-0"
                 >
-                  {isCollapsed ? <ChevronRight className="h-4 w-4 mt-0.5 shrink-0" /> : <ChevronDown className="h-4 w-4 mt-0.5 shrink-0" />}
+                  {isCollapsed ? <ChevronRight className="rtl:-scale-x-100 h-4 w-4 mt-0.5 shrink-0" /> : <ChevronDown className="h-4 w-4 mt-0.5 shrink-0" />}
                   <span className={cn("h-2.5 w-2.5 rounded-full mt-1.5 shrink-0", groupDot(g.color))} />
                   <span className="min-w-0">
                     <span className="font-semibold block truncate">{g.title}</span>
@@ -412,7 +412,7 @@ export default function ArchiveTruckTab({
                                       </>
                                     ) : (
                                       <span className="inline-flex items-center gap-1 text-xs muted ps-3">
-                                        <CornerDownRight className="h-3 w-3" />
+                                        <CornerDownRight className="rtl:-scale-x-100 h-3 w-3" />
                                         {d.title}
                                       </span>
                                     )}
@@ -1079,7 +1079,7 @@ function MaintenanceJobModal({
                         {l.onHandBefore !== null && l.onHandAfter !== null ? (
                           <span className="inline-flex items-center gap-1">
                             <span className="muted">{l.onHandBefore}</span>
-                            <ArrowRight className="h-3 w-3 muted shrink-0" />
+                            <ArrowRight className="rtl:-scale-x-100 h-3 w-3 muted shrink-0" />
                             <span className="font-medium">{l.onHandAfter}</span>
                           </span>
                         ) : (

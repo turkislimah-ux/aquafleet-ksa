@@ -195,7 +195,7 @@ export default function WaterStationsModal({
                   <TH>{t("trips.stations.colCity", lang)}</TH>
                   <TH>{t("trips.stations.colCoordinates", lang)}</TH>
                   <TH>{t("trips.stations.colTypesCost", lang)}</TH>
-                  <TH className="text-right">{t("common.actions", lang)}</TH>
+                  <TH className="text-end">{t("common.actions", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -370,7 +370,7 @@ function StationRowView({
       <TD>
         <span className="font-medium">{s.name}</span>
         {s.is_default && (
-          <span className="ml-2 text-[10px] uppercase tracking-wide muted">{t("trips.stations.defaultTag", lang)}</span>
+          <span className="ms-2 text-[10px] uppercase tracking-wide muted">{t("trips.stations.defaultTag", lang)}</span>
         )}
       </TD>
       <TD>{s.city ?? "—"}</TD>
@@ -394,7 +394,7 @@ function StationRowView({
           })}
         </div>
       </TD>
-      <TD className="text-right">
+      <TD className="text-end">
         <div className="inline-flex gap-1">
           <button
             type="button"

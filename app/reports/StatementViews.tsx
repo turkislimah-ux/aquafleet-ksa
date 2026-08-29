@@ -173,32 +173,32 @@ export function RevenueStatement({
           <thead>
             <tr>
               <TH>{t("reports.th.customer", lang)}</TH>
-              <TH className="text-right">{t("reports.th.invoices", lang)}</TH>
-              <TH className="text-right">{t("reports.metric.revenue", lang)}</TH>
-              <TH className="text-right">{t("reports.th.paid", lang)}</TH>
-              <TH className="text-right">{t("reports.th.outstanding", lang)}</TH>
+              <TH className="text-end">{t("reports.th.invoices", lang)}</TH>
+              <TH className="text-end">{t("reports.metric.revenue", lang)}</TH>
+              <TH className="text-end">{t("reports.th.paid", lang)}</TH>
+              <TH className="text-end">{t("reports.th.outstanding", lang)}</TH>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.name}>
                 <TD>{r.name}</TD>
-                <TD className="text-right tabular-nums">{formatNum(r.count)}</TD>
-                <TD className="text-right tabular-nums">{formatSar(r.revenue)}</TD>
-                <TD className="text-right tabular-nums muted">
+                <TD className="text-end tabular-nums">{formatNum(r.count)}</TD>
+                <TD className="text-end tabular-nums">{formatSar(r.revenue)}</TD>
+                <TD className="text-end tabular-nums muted">
                   {r.paid === 0 ? "—" : formatSar(r.paid)}
                 </TD>
-                <TD className="text-right tabular-nums">
+                <TD className="text-end tabular-nums">
                   {r.outstanding === 0 ? <span className="muted">—</span> : formatSar(r.outstanding)}
                 </TD>
               </tr>
             ))}
             <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
               <TD>{t("reports.th.total", lang)}</TD>
-              <TD className="text-right tabular-nums">{formatNum(sumOver(rows, (r) => r.count))}</TD>
-              <TD className="text-right tabular-nums">{formatSar(totals.revenue)}</TD>
-              <TD className="text-right tabular-nums">{formatSar(totals.paid)}</TD>
-              <TD className="text-right tabular-nums">{formatSar(totals.outstanding)}</TD>
+              <TD className="text-end tabular-nums">{formatNum(sumOver(rows, (r) => r.count))}</TD>
+              <TD className="text-end tabular-nums">{formatSar(totals.revenue)}</TD>
+              <TD className="text-end tabular-nums">{formatSar(totals.paid)}</TD>
+              <TD className="text-end tabular-nums">{formatSar(totals.outstanding)}</TD>
             </tr>
           </tbody>
         </Table>
@@ -217,7 +217,7 @@ export function RevenueStatement({
               <tr>
                 <TH>{t("reports.th.invoice", lang)}</TH>
                 <TH>{t("reports.th.reason", lang)}</TH>
-                <TH className="text-right">{t("reports.th.reversed", lang)}</TH>
+                <TH className="text-end">{t("reports.th.reversed", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -225,13 +225,13 @@ export function RevenueStatement({
                 <tr key={r.invoice_id}>
                   <TD>{r.invoice_number ?? "—"}</TD>
                   <TD className="muted">{r.void_reason ?? "—"}</TD>
-                  <TD className="text-right tabular-nums">{formatSar(r.reversed_revenue_sar)}</TD>
+                  <TD className="text-end tabular-nums">{formatSar(r.reversed_revenue_sar)}</TD>
                 </tr>
               ))}
               <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
                 <TD>{t("reports.revenue.totalReversed", lang)}</TD>
                 <TD>{""}</TD>
-                <TD className="text-right tabular-nums">{formatSar(returned)}</TD>
+                <TD className="text-end tabular-nums">{formatSar(returned)}</TD>
               </tr>
             </tbody>
           </Table>
@@ -270,9 +270,9 @@ export function ReceivablesStatement({
             <thead>
               <tr>
                 <TH>{t("reports.th.band", lang)}</TH>
-                <TH className="text-right">{t("reports.th.invoices", lang)}</TH>
-                <TH className="text-right">{t("reports.th.outstanding", lang)}</TH>
-                <TH className="text-right">{t("reports.th.share", lang)}</TH>
+                <TH className="text-end">{t("reports.th.invoices", lang)}</TH>
+                <TH className="text-end">{t("reports.th.outstanding", lang)}</TH>
+                <TH className="text-end">{t("reports.th.share", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -282,24 +282,24 @@ export function ReceivablesStatement({
                       Digits and punctuation only, so it goes in unchanged and
                       un-reformatted; only the word beside it is keyed. */}
                   <TD>{fill(t("reports.receivables.bandDays", lang), { b: b.bucket })}</TD>
-                  <TD className="text-right tabular-nums">{formatNum(b.count)}</TD>
-                  <TD className="text-right tabular-nums">
+                  <TD className="text-end tabular-nums">{formatNum(b.count)}</TD>
+                  <TD className="text-end tabular-nums">
                     {b.value === 0 ? <span className="muted">—</span> : formatSar(b.value)}
                   </TD>
-                  <TD className="text-right tabular-nums muted">
+                  <TD className="text-end tabular-nums muted">
                     {formatShare(total > 0 ? (b.value / total) * 100 : null)}
                   </TD>
                 </tr>
               ))}
               <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
                 <TD>{t("reports.th.total", lang)}</TD>
-                <TD className="text-right tabular-nums">{formatNum(sumOver(bands, (b) => b.count))}</TD>
-                <TD className="text-right tabular-nums">{formatSar(total)}</TD>
+                <TD className="text-end tabular-nums">{formatNum(sumOver(bands, (b) => b.count))}</TD>
+                <TD className="text-end tabular-nums">{formatSar(total)}</TD>
                 {/* Not keyed: the band shares always total 100 %, so this is a
                     figure written as a constant, not a sentence. It matches
                     formatShare()'s output and stays Latin in both languages
                     like every other number on the page. */}
-                <TD className="text-right tabular-nums">100.0%</TD>
+                <TD className="text-end tabular-nums">100.0%</TD>
               </tr>
             </tbody>
           </Table>
@@ -313,8 +313,8 @@ export function ReceivablesStatement({
                 <TH>{t("reports.th.invoice", lang)}</TH>
                 <TH>{t("reports.th.customer", lang)}</TH>
                 <TH>{t("reports.th.confirmed", lang)}</TH>
-                <TH className="text-right">{t("reports.th.days", lang)}</TH>
-                <TH className="text-right">{t("reports.th.outstanding", lang)}</TH>
+                <TH className="text-end">{t("reports.th.days", lang)}</TH>
+                <TH className="text-end">{t("reports.th.outstanding", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -323,7 +323,7 @@ export function ReceivablesStatement({
                   <TD>{r.invoice_number ?? "—"}</TD>
                   <TD>{r.customer_name}</TD>
                   <TD className="muted">{r.confirmed_at.slice(0, 10)}</TD>
-                  <TD className="text-right tabular-nums">
+                  <TD className="text-end tabular-nums">
                     {/* Same day-colouring convention as the Overview. */}
                     <span className={cn(
                       r.days_outstanding > 90 ? "text-rose-600 dark:text-rose-400 font-medium" :
@@ -332,7 +332,7 @@ export function ReceivablesStatement({
                       {formatNum(r.days_outstanding)}
                     </span>
                   </TD>
-                  <TD className="text-right tabular-nums">{formatSar(r.outstanding_sar)}</TD>
+                  <TD className="text-end tabular-nums">{formatSar(r.outstanding_sar)}</TD>
                 </tr>
               ))}
             </tbody>
@@ -506,9 +506,9 @@ export function CostStatement({
               <thead>
                 <tr>
                   <TH>{t("reports.th.waterType", lang)}</TH>
-                  <TH className="text-right">{t("reports.th.fills", lang)}</TH>
-                  <TH className="text-right">{t("reports.th.uncosted", lang)}</TH>
-                  <TH className="text-right">{t("common.cost", lang)}</TH>
+                  <TH className="text-end">{t("reports.th.fills", lang)}</TH>
+                  <TH className="text-end">{t("reports.th.uncosted", lang)}</TH>
+                  <TH className="text-end">{t("common.cost", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -518,19 +518,19 @@ export function CostStatement({
                         The map is shared with Trips and translating it is that
                         batch's job, not a reports-local second copy. */}
                     <TD>{WATER_TYPE_LABELS[wt as WaterType] ?? wt}</TD>
-                    <TD className="text-right tabular-nums">{v.costed}</TD>
-                    <TD className={cn("text-right tabular-nums",
+                    <TD className="text-end tabular-nums">{v.costed}</TD>
+                    <TD className={cn("text-end tabular-nums",
                       v.uncosted > 0 && "text-amber-700 dark:text-amber-300")}>
                       {v.uncosted || "—"}
                     </TD>
-                    <TD className="text-right tabular-nums">{formatSar(v.sar)}</TD>
+                    <TD className="text-end tabular-nums">{formatSar(v.sar)}</TD>
                   </tr>
                 ))}
                 <tr className="font-semibold border-t" style={{ borderColor: "rgb(var(--border))" }}>
                   <TD>{t("reports.th.total", lang)}</TD>
-                  <TD className="text-right tabular-nums">{fillCosted}</TD>
-                  <TD className="text-right tabular-nums">{fillUncosted || "—"}</TD>
-                  <TD className="text-right tabular-nums">{formatSar(fillTotal)}</TD>
+                  <TD className="text-end tabular-nums">{fillCosted}</TD>
+                  <TD className="text-end tabular-nums">{fillUncosted || "—"}</TD>
+                  <TD className="text-end tabular-nums">{formatSar(fillTotal)}</TD>
                 </tr>
               </tbody>
             </Table>
@@ -544,9 +544,9 @@ export function CostStatement({
               <thead>
                 <tr>
                   <TH>{t("reports.th.station", lang)}</TH>
-                  <TH className="text-right">{t("reports.th.fills", lang)}</TH>
-                  <TH className="text-right">{t("reports.th.uncosted", lang)}</TH>
-                  <TH className="text-right">{t("common.cost", lang)}</TH>
+                  <TH className="text-end">{t("reports.th.fills", lang)}</TH>
+                  <TH className="text-end">{t("reports.th.uncosted", lang)}</TH>
+                  <TH className="text-end">{t("common.cost", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -556,19 +556,19 @@ export function CostStatement({
                   // the key the immutable identity anyway.
                   <tr key={v.key}>
                     <TD>{v.name ?? fill(t("reports.costs.stationRemoved", lang), { k: v.key })}</TD>
-                    <TD className="text-right tabular-nums">{v.costed}</TD>
-                    <TD className={cn("text-right tabular-nums",
+                    <TD className="text-end tabular-nums">{v.costed}</TD>
+                    <TD className={cn("text-end tabular-nums",
                       v.uncosted > 0 && "text-amber-700 dark:text-amber-300")}>
                       {v.uncosted || "—"}
                     </TD>
-                    <TD className="text-right tabular-nums">{formatSar(v.sar)}</TD>
+                    <TD className="text-end tabular-nums">{formatSar(v.sar)}</TD>
                   </tr>
                 ))}
                 <tr className="font-semibold border-t" style={{ borderColor: "rgb(var(--border))" }}>
                   <TD>{t("reports.th.total", lang)}</TD>
-                  <TD className="text-right tabular-nums">{fillCosted}</TD>
-                  <TD className="text-right tabular-nums">{fillUncosted || "—"}</TD>
-                  <TD className="text-right tabular-nums">{formatSar(fillTotal)}</TD>
+                  <TD className="text-end tabular-nums">{fillCosted}</TD>
+                  <TD className="text-end tabular-nums">{fillUncosted || "—"}</TD>
+                  <TD className="text-end tabular-nums">{formatSar(fillTotal)}</TD>
                 </tr>
               </tbody>
             </Table>
@@ -587,9 +587,9 @@ export function CostStatement({
           <thead>
             <tr>
               <TH>{t("reports.th.truck", lang)}</TH>
-              <TH className="text-right">{t("reports.th.parts", lang)}</TH>
-              <TH className="text-right">{t("reports.th.outsourced", lang)}</TH>
-              <TH className="text-right">{t("reports.th.total", lang)}</TH>
+              <TH className="text-end">{t("reports.th.parts", lang)}</TH>
+              <TH className="text-end">{t("reports.th.outsourced", lang)}</TH>
+              <TH className="text-end">{t("reports.th.total", lang)}</TH>
             </tr>
           </thead>
           <tbody>
@@ -598,20 +598,20 @@ export function CostStatement({
             {trucks.map((tr) => (
               <tr key={tr.plate}>
                 <TD>{tr.plate}</TD>
-                <TD className="text-right tabular-nums muted">
+                <TD className="text-end tabular-nums muted">
                   {tr.parts === 0 ? "—" : formatSar(tr.parts)}
                 </TD>
-                <TD className="text-right tabular-nums muted">
+                <TD className="text-end tabular-nums muted">
                   {tr.os === 0 ? "—" : formatSar(tr.os)}
                 </TD>
-                <TD className="text-right tabular-nums font-medium">{formatSar(tr.total)}</TD>
+                <TD className="text-end tabular-nums font-medium">{formatSar(tr.total)}</TD>
               </tr>
             ))}
             <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
               <TD>{t("reports.th.total", lang)}</TD>
-              <TD className="text-right tabular-nums">{formatSar(partsTotal)}</TD>
-              <TD className="text-right tabular-nums">{formatSar(osTotal)}</TD>
-              <TD className="text-right tabular-nums">{formatSar(partsTotal + osTotal)}</TD>
+              <TD className="text-end tabular-nums">{formatSar(partsTotal)}</TD>
+              <TD className="text-end tabular-nums">{formatSar(osTotal)}</TD>
+              <TD className="text-end tabular-nums">{formatSar(partsTotal + osTotal)}</TD>
             </tr>
           </tbody>
         </Table>
@@ -626,21 +626,21 @@ export function CostStatement({
         <thead>
           <tr>
             <TH>{t("common.component", lang)}</TH>
-            <TH className="text-right">{t("reports.th.amount", lang)}</TH>
+            <TH className="text-end">{t("reports.th.amount", lang)}</TH>
           </tr>
         </thead>
         <tbody>
           <tr>
             <TD>{t("reports.costs.staffSalaries", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatSar(sumOver(pay, (r) => r.staff_salary_sar))}</TD>
+            <TD className="text-end tabular-nums">{formatSar(sumOver(pay, (r) => r.staff_salary_sar))}</TD>
           </tr>
           <tr>
             <TD>{t("reports.costs.driverSalaries", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatSar(sumOver(pay, (r) => r.driver_salary_sar))}</TD>
+            <TD className="text-end tabular-nums">{formatSar(sumOver(pay, (r) => r.driver_salary_sar))}</TD>
           </tr>
           <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
             <TD>{t("reports.costs.totalPayroll", lang)}</TD>
-            <TD className="text-right tabular-nums">
+            <TD className="text-end tabular-nums">
               {formatSar(sumOver(pay, (r) => r.staff_salary_sar + r.driver_salary_sar))}
             </TD>
           </tr>
@@ -672,29 +672,29 @@ export function CostStatement({
             <thead>
               <tr>
                 <TH>{t("reports.costs.earnedAccrual", lang)}</TH>
-                <TH className="text-right">{t("reports.th.amount", lang)}</TH>
+                <TH className="text-end">{t("reports.th.amount", lang)}</TH>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <TD>{t("reports.costs.tripCommission", lang)}</TD>
-                <TD className="text-right tabular-nums">{formatSar(sumOver(com, (r) => r.trip_commission_sar))}</TD>
+                <TD className="text-end tabular-nums">{formatSar(sumOver(com, (r) => r.trip_commission_sar))}</TD>
               </tr>
               <tr>
                 <TD>{t("reports.costs.specials", lang)}</TD>
-                <TD className="text-right tabular-nums">{formatSar(sumOver(com, (r) => r.specials_sar))}</TD>
+                <TD className="text-end tabular-nums">{formatSar(sumOver(com, (r) => r.specials_sar))}</TD>
               </tr>
               <tr>
                 <TD>{t("reports.costs.adjustments", lang)}</TD>
-                <TD className="text-right tabular-nums">{formatSar(sumOver(com, (r) => r.adjustments_sar))}</TD>
+                <TD className="text-end tabular-nums">{formatSar(sumOver(com, (r) => r.adjustments_sar))}</TD>
               </tr>
               <tr>
                 <TD>{t("reports.costs.bonuses", lang)}</TD>
-                <TD className="text-right tabular-nums">{formatSar(sumOver(com, (r) => r.bonus_sar))}</TD>
+                <TD className="text-end tabular-nums">{formatSar(sumOver(com, (r) => r.bonus_sar))}</TD>
               </tr>
               <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
                 <TD>{t("reports.costs.totalEarned", lang)}</TD>
-                <TD className="text-right tabular-nums">{formatSar(earned)}</TD>
+                <TD className="text-end tabular-nums">{formatSar(earned)}</TD>
               </tr>
             </tbody>
           </Table>
@@ -704,17 +704,17 @@ export function CostStatement({
             <thead>
               <tr>
                 <TH>{t("reports.costs.paidCash", lang)}</TH>
-                <TH className="text-right">{t("reports.th.amount", lang)}</TH>
+                <TH className="text-end">{t("reports.th.amount", lang)}</TH>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <TD>{t("reports.costs.payouts", lang)}</TD>
-                <TD className="text-right tabular-nums">{formatNum(sumOver(comPaid, (r) => r.payout_count))}</TD>
+                <TD className="text-end tabular-nums">{formatNum(sumOver(comPaid, (r) => r.payout_count))}</TD>
               </tr>
               <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
                 <TD>{t("reports.costs.totalPaid", lang)}</TD>
-                <TD className="text-right tabular-nums">{formatSar(paid)}</TD>
+                <TD className="text-end tabular-nums">{formatSar(paid)}</TD>
               </tr>
             </tbody>
           </Table>
@@ -738,19 +738,19 @@ export function CostStatement({
         <thead>
           <tr>
             <TH>{t("reports.th.measure", lang)}</TH>
-            <TH className="text-right">{t("reports.th.value", lang)}</TH>
+            <TH className="text-end">{t("reports.th.value", lang)}</TH>
           </tr>
         </thead>
         <tbody>
           <tr>
             <TD>{t("reports.costs.stockReceived", lang)}</TD>
-            <TD className="text-right tabular-nums">
+            <TD className="text-end tabular-nums">
               {formatSar(sumOver(pur, (r) => r.received_stock_value_sar))}
             </TD>
           </tr>
           <tr>
             <TD>{t("reports.costs.receipts", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatNum(sumOver(pur, (r) => r.receipt_count))}</TD>
+            <TD className="text-end tabular-nums">{formatNum(sumOver(pur, (r) => r.receipt_count))}</TD>
           </tr>
         </tbody>
       </Table>
@@ -899,22 +899,22 @@ export function OperationsStatement({
               <thead>
                 <tr>
                   <TH>{t("common.driver", lang)}</TH>
-                  <TH className="text-right">{t("reports.th.tripsScheduled", lang)}</TH>
-                  <TH className="text-right">{t("reports.metric.tripsDelivered", lang)}</TH>
-                  <TH className="text-right">{t("reports.th.notDelivered", lang)}</TH>
-                  <TH className="text-right">{t("reports.th.completionRate", lang)}</TH>
+                  <TH className="text-end">{t("reports.th.tripsScheduled", lang)}</TH>
+                  <TH className="text-end">{t("reports.metric.tripsDelivered", lang)}</TH>
+                  <TH className="text-end">{t("reports.th.notDelivered", lang)}</TH>
+                  <TH className="text-end">{t("reports.th.completionRate", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
                 {drivers.map((d) => (
                   <tr key={d.key}>
                     {driverCell(d)}
-                    <TD className="text-right tabular-nums">{formatNum(d.scheduled)}</TD>
-                    <TD className="text-right tabular-nums">{formatNum(d.delivered)}</TD>
-                    <TD className="text-right tabular-nums">
+                    <TD className="text-end tabular-nums">{formatNum(d.scheduled)}</TD>
+                    <TD className="text-end tabular-nums">{formatNum(d.delivered)}</TD>
+                    <TD className="text-end tabular-nums">
                       {d.notDelivered === 0 ? <span className="muted">—</span> : formatNum(d.notDelivered)}
                     </TD>
-                    <TD className="text-right tabular-nums font-medium">{formatShare(d.completion)}</TD>
+                    <TD className="text-end tabular-nums font-medium">{formatShare(d.completion)}</TD>
                   </tr>
                 ))}
               </tbody>
@@ -931,18 +931,18 @@ export function OperationsStatement({
               <thead>
                 <tr>
                   <TH>{t("common.driver", lang)}</TH>
-                  <TH className="text-right">{t("reports.th.shareScheduled", lang)}</TH>
-                  <TH className="text-right">{t("reports.th.shareDelivered", lang)}</TH>
+                  <TH className="text-end">{t("reports.th.shareScheduled", lang)}</TH>
+                  <TH className="text-end">{t("reports.th.shareDelivered", lang)}</TH>
                 </tr>
               </thead>
               <tbody>
                 {drivers.map((d) => (
                   <tr key={d.key}>
                     {driverCell(d)}
-                    <TD className="text-right tabular-nums">
+                    <TD className="text-end tabular-nums">
                       {formatShare(driverScheduled > 0 ? (d.scheduled / driverScheduled) * 100 : null)}
                     </TD>
-                    <TD className="text-right tabular-nums">
+                    <TD className="text-end tabular-nums">
                       {formatShare(driverDelivered > 0 ? (d.delivered / driverDelivered) * 100 : null)}
                     </TD>
                   </tr>
@@ -979,21 +979,21 @@ export function OperationsStatement({
         <thead>
           <tr>
             <TH>{t("reports.th.measure", lang)}</TH>
-            <TH className="text-right">{t("reports.th.value", lang)}</TH>
+            <TH className="text-end">{t("reports.th.value", lang)}</TH>
           </tr>
         </thead>
         <tbody>
           <tr>
             <TD>{t("reports.th.tripsScheduled", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatNum(trips)}</TD>
+            <TD className="text-end tabular-nums">{formatNum(trips)}</TD>
           </tr>
           <tr>
             <TD>{t("reports.metric.tripsDelivered", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatNum(delivered)}</TD>
+            <TD className="text-end tabular-nums">{formatNum(delivered)}</TD>
           </tr>
           <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
             <TD>{t("reports.ops.deliveryCompletionRate", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatShare(completion)}</TD>
+            <TD className="text-end tabular-nums">{formatShare(completion)}</TD>
           </tr>
           <tr>
             <TD>
@@ -1004,23 +1004,23 @@ export function OperationsStatement({
                 <span className="muted text-xs"> {t("reports.ops.mostInAnyMonth", lang)}</span>
               )}
             </TD>
-            <TD className="text-right tabular-nums">{formatNum(peakTrucks)}</TD>
+            <TD className="text-end tabular-nums">{formatNum(peakTrucks)}</TD>
           </tr>
           <tr>
             <TD>{t("reports.ops.workOrders", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatNum(workOrders)}</TD>
+            <TD className="text-end tabular-nums">{formatNum(workOrders)}</TD>
           </tr>
           <tr>
             <TD>{t("reports.ops.outsourcedJobs", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatNum(osJobs)}</TD>
+            <TD className="text-end tabular-nums">{formatNum(osJobs)}</TD>
           </tr>
           <tr>
             <TD>{t("reports.ops.maintenanceEvents", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatNum(maintenanceEvents)}</TD>
+            <TD className="text-end tabular-nums">{formatNum(maintenanceEvents)}</TD>
           </tr>
           <tr>
             <TD>{t("reports.ops.exitPermits", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatNum(permits)}</TD>
+            <TD className="text-end tabular-nums">{formatNum(permits)}</TD>
           </tr>
         </tbody>
       </Table>
@@ -1034,28 +1034,28 @@ export function OperationsStatement({
             <thead>
               <tr>
                 <TH>{t("reports.th.month", lang)}</TH>
-                <TH className="text-right">{t("reports.th.trips", lang)}</TH>
-                <TH className="text-right">{t("reports.th.delivered", lang)}</TH>
-                <TH className="text-right">{t("reports.th.completion", lang)}</TH>
-                <TH className="text-right">{t("reports.th.trucks", lang)}</TH>
-                <TH className="text-right">{t("reports.th.wos", lang)}</TH>
-                <TH className="text-right">{t("reports.th.osJobs", lang)}</TH>
-                <TH className="text-right">{t("reports.th.permits", lang)}</TH>
+                <TH className="text-end">{t("reports.th.trips", lang)}</TH>
+                <TH className="text-end">{t("reports.th.delivered", lang)}</TH>
+                <TH className="text-end">{t("reports.th.completion", lang)}</TH>
+                <TH className="text-end">{t("reports.th.trucks", lang)}</TH>
+                <TH className="text-end">{t("reports.th.wos", lang)}</TH>
+                <TH className="text-end">{t("reports.th.osJobs", lang)}</TH>
+                <TH className="text-end">{t("reports.th.permits", lang)}</TH>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.month}>
                   <TD>{r.month.slice(0, 7)}</TD>
-                  <TD className="text-right tabular-nums">{formatNum(r.trips_total)}</TD>
-                  <TD className="text-right tabular-nums">{formatNum(r.trips_delivered)}</TD>
-                  <TD className="text-right tabular-nums">
+                  <TD className="text-end tabular-nums">{formatNum(r.trips_total)}</TD>
+                  <TD className="text-end tabular-nums">{formatNum(r.trips_delivered)}</TD>
+                  <TD className="text-end tabular-nums">
                     {formatShare(r.trips_total > 0 ? (r.trips_delivered / r.trips_total) * 100 : null)}
                   </TD>
-                  <TD className="text-right tabular-nums">{formatNum(r.trucks_active)}</TD>
-                  <TD className="text-right tabular-nums">{formatNum(r.work_orders)}</TD>
-                  <TD className="text-right tabular-nums">{formatNum(r.outsourced_jobs)}</TD>
-                  <TD className="text-right tabular-nums">{formatNum(r.exit_permits)}</TD>
+                  <TD className="text-end tabular-nums">{formatNum(r.trucks_active)}</TD>
+                  <TD className="text-end tabular-nums">{formatNum(r.work_orders)}</TD>
+                  <TD className="text-end tabular-nums">{formatNum(r.outsourced_jobs)}</TD>
+                  <TD className="text-end tabular-nums">{formatNum(r.exit_permits)}</TD>
                 </tr>
               ))}
             </tbody>
@@ -1181,7 +1181,7 @@ export function CustomStatement({
             <tr>
               <TH>{" "}</TH>
               {report.columns.map((c) => (
-                <TH key={c.id} className="text-right">
+                <TH key={c.id} className="text-end">
                   {/* The column carries a KEY, not a label — report-builder
                       resolved the metric to `labelKey` so the heading and the
                       builder's own picker cannot drift apart. The basis reads
@@ -1206,7 +1206,7 @@ export function CustomStatement({
               <tr key={i}>
                 <TD>{r.label}</TD>
                 {r.values.map((v, i) => (
-                  <TD key={report.columns[i].id} className="text-right tabular-nums">
+                  <TD key={report.columns[i].id} className="text-end tabular-nums">
                     {v === null ? <span className="muted">—</span>
                       : report.columns[i].unit === "percent" ? formatShare(v)
                       : report.columns[i].unit === "count" ? formatNum(v)
@@ -1394,10 +1394,10 @@ export function PayslipsStatement({
                     reports.th.* leaves the cost and revenue tables read. */}
                 <TH>{t("common.driver", lang)}</TH>
                 <TH>{t("reports.th.month", lang)}</TH>
-                <TH className="text-right">{t("reports.th.salary", lang)}</TH>
-                <TH className="text-right">{t("reports.th.commission", lang)}</TH>
+                <TH className="text-end">{t("reports.th.salary", lang)}</TH>
+                <TH className="text-end">{t("reports.th.commission", lang)}</TH>
                 <TH>{t("reports.th.basis", lang)}</TH>
-                <TH className="text-right">{t("reports.th.net", lang)}</TH>
+                <TH className="text-end">{t("reports.th.net", lang)}</TH>
                 <TH>{t("common.status", lang)}</TH>
               </tr>
             </thead>
@@ -1424,8 +1424,8 @@ export function PayslipsStatement({
                   >
                     <TD className="font-medium">{r.driver_name}</TD>
                     <TD className="muted">{monthLabelOf(r.period_start)}</TD>
-                    <TD className="text-right tabular-nums">{formatSar(salary)}</TD>
-                    <TD className="text-right tabular-nums">{formatSar(commission)}</TD>
+                    <TD className="text-end tabular-nums">{formatSar(salary)}</TD>
+                    <TD className="text-end tabular-nums">{formatSar(commission)}</TD>
                     <TD>
                       <BasisChip
                         basis={doc ? doc.commission_basis : r.commission_basis}
@@ -1433,7 +1433,7 @@ export function PayslipsStatement({
                         lang={lang}
                       />
                     </TD>
-                    <TD className="text-right tabular-nums font-semibold">{formatSar(net)}</TD>
+                    <TD className="text-end tabular-nums font-semibold">{formatSar(net)}</TD>
                     <TD>
                       {/* PRIORITY, ruled: an issued number is the strongest fact
                           (the document exists), then TERMINATED — leaving the
@@ -1664,7 +1664,7 @@ function PayslipDocument({
         <tbody>
           <tr>
             <TD className="font-medium">{t("reports.payslips.basicSalary", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatSar(f.salary)}</TD>
+            <TD className="text-end tabular-nums">{formatSar(f.salary)}</TD>
           </tr>
           <tr>
             <TD>
@@ -1674,27 +1674,27 @@ function PayslipDocument({
               <span className="font-medium">{t("reports.th.commission", lang)}</span>{" "}
               <BasisChip basis={f.basis} settled={f.settled} lang={lang} />
             </TD>
-            <TD className="text-right tabular-nums">{formatSar(f.commission)}</TD>
+            <TD className="text-end tabular-nums">{formatSar(f.commission)}</TD>
           </tr>
           <tr>
             <TD>{t("reports.payslips.specialPayments", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatSar(f.specials)}</TD>
+            <TD className="text-end tabular-nums">{formatSar(f.specials)}</TD>
           </tr>
           <tr>
             <TD>{t("reports.costs.adjustments", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatSar(f.adjustments)}</TD>
+            <TD className="text-end tabular-nums">{formatSar(f.adjustments)}</TD>
           </tr>
           <tr>
             <TD>{t("reports.payslips.bonus", lang)}</TD>
-            <TD className="text-right tabular-nums">{formatSar(f.bonus)}</TD>
+            <TD className="text-end tabular-nums">{formatSar(f.bonus)}</TD>
           </tr>
           <tr>
             <TD className="muted">{t("reports.payslips.deductions", lang)}</TD>
-            <TD className="text-right tabular-nums muted">{formatSar(f.deductions)}</TD>
+            <TD className="text-end tabular-nums muted">{formatSar(f.deductions)}</TD>
           </tr>
           <tr className="border-t-2">
             <TD className="font-semibold">{t("reports.payslips.netPay", lang)}</TD>
-            <TD className="text-right tabular-nums font-semibold text-base">{formatSar(f.net)}</TD>
+            <TD className="text-end tabular-nums font-semibold text-base">{formatSar(f.net)}</TD>
           </tr>
         </tbody>
       </Table>
@@ -1899,9 +1899,9 @@ function CommissionReviewTable({
             <thead>
               <tr>
                 <TH>{t("common.driver", lang)}</TH>
-                <TH className="text-right">{t("reports.th.trips", lang)}</TH>
+                <TH className="text-end">{t("reports.th.trips", lang)}</TH>
                 <TH>{t("reports.th.projectsServed", lang)}</TH>
-                <TH className="text-right">{t("reports.th.commissionEarned", lang)}</TH>
+                <TH className="text-end">{t("reports.th.commissionEarned", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -1915,7 +1915,7 @@ function CommissionReviewTable({
                       </span>
                     )}
                   </TD>
-                  <TD className="text-right tabular-nums align-top">{formatNum(d.trips)}</TD>
+                  <TD className="text-end tabular-nums align-top">{formatNum(d.trips)}</TD>
                   <TD className="align-top">
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5">
                       {/* Iterated as ENTRIES so the chip can key on the
@@ -1934,16 +1934,16 @@ function CommissionReviewTable({
                         ))}
                     </div>
                   </TD>
-                  <TD className="text-right tabular-nums font-semibold align-top">
+                  <TD className="text-end tabular-nums font-semibold align-top">
                     {formatSar(d.commission)}
                   </TD>
                 </tr>
               ))}
               <tr className="border-t-2">
                 <TD className="font-semibold">{t("reports.th.total", lang)}</TD>
-                <TD className="text-right tabular-nums font-semibold">{formatNum(totals.trips)}</TD>
+                <TD className="text-end tabular-nums font-semibold">{formatNum(totals.trips)}</TD>
                 <TD>{""}</TD>
-                <TD className="text-right tabular-nums font-semibold">
+                <TD className="text-end tabular-nums font-semibold">
                   {formatSar(totals.commission)}
                 </TD>
               </tr>

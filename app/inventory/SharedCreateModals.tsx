@@ -1477,7 +1477,7 @@ export function InvoiceFileTile({
         type="button"
         onClick={onRemove}
         title={lang === "en" ? "Remove" : "حذف"}
-        className="absolute top-1 right-1 w-5 h-5 grid place-items-center rounded-full bg-rose-700 text-white text-[11px] leading-none opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-1 end-1 w-5 h-5 grid place-items-center rounded-full bg-rose-700 text-white text-[11px] leading-none opacity-0 group-hover:opacity-100 transition-opacity"
       >
         ×
       </button>
