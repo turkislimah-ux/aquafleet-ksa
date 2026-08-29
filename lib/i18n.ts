@@ -5536,7 +5536,7 @@ export const dict = {
       unpaidBalance: { en: "Unpaid balance", ar: "الرصيد غير المدفوع" },
       statPool: { en: "Current Pool", ar: "المجمَّع الحالي" },
       statApproved: { en: "Approved (awaiting pay)", ar: "معتمدة (بانتظار الصرف)" },
-      statPending: { en: "Pending Review", ar: "قيد الانتظار" },
+      statPending: { en: "Pending Review", ar: "قيد المراجعة" },
       statAvg: { en: "Avg per Driver", ar: "المتوسط لكل سائق" },
       thBase: { en: "Base (Projects × Trips)", ar: "الأساس (المشاريع × الرحلات)" },
       specialsBonuses: { en: "Specials / Bonuses", ar: "الاستثنائية / المكافآت" },
@@ -5545,7 +5545,7 @@ export const dict = {
       noneInMonth: { en: "No commission activity in {month}.", ar: "لا يوجد نشاط عمولات في {month}." },
       rules: {
         en: "Rules: commission accrues per delivered trip based on the project's rate (auto-derived — not editable here), and lands in the month the trip ran. Specials, the bonus & adjustments are added on top of the month they are filed under. Review each line in the Breakdown — pending & approved count, denied is excluded. Approve the payout, then Pay to freeze a History record and settle {month}. Every other month is untouched and stays payable on its own.",
-        ar: "القواعد: تُحتسب العمولة عن كل رحلة مسلَّمة وفق سعر المشروع (يُشتق تلقائياً — وغير قابل للتعديل هنا)، وتُقيَّد في الشهر الذي جرت فيه الرحلة. أما البنود الاستثنائية والمكافأة والتسويات فتُضاف فوق الشهر المقيَّدة تحته. راجع كل بند في التفصيل — المعلَّقة والمعتمدة تُحتسبان والمرفوضة تُستبعد. اعتمد الصرف، ثم ادفع لتجميد سجل في السجلّ وتسوية {month}. تبقى كل الأشهر الأخرى كما هي وقابلة للصرف كلٌّ على حدة.",
+        ar: "القواعد: تُحتسب العمولة عن كل رحلة مسلَّمة وفق سعر المشروع (يُشتق تلقائياً — وغير قابل للتعديل هنا)، وتُقيَّد في الشهر الذي جرت فيه الرحلة. أما البنود الاستثنائية والمكافأة والتسويات فتُضاف فوق الشهر المقيَّدة تحته. راجع كل بند في التفصيل — تُحتسب البنود قيد الانتظار والمعتمدة وتُستبعد المرفوضة. اعتمد الصرف، ثم ادفع لتجميد سجل في السجلّ وتسوية {month}. تبقى كل الأشهر الأخرى كما هي وقابلة للصرف كلٌّ على حدة.",
       },
       approve: { en: "Approve", ar: "اعتماد" },
       deny: { en: "Deny", ar: "رفض" },
@@ -5562,7 +5562,7 @@ export const dict = {
       approvePayout: { en: "Approve payout", ar: "اعتماد الصرف" },
       reviewPost: {
         en: ". Pending and approved both count toward the total; denied is excluded.",
-        ar: ". المعلَّقة والمعتمدة تُحتسبان في الإجمالي، والمرفوضة تُستبعد.",
+        ar: ". تُحتسب البنود قيد الانتظار والمعتمدة في الإجمالي، وتُستبعد المرفوضة.",
       },
       // Two WHOLE sentences chosen on `cycle.approved_by` — a DATA presence
       // check — rather than one sentence with a " by {who}" tail spliced on.
@@ -6723,19 +6723,19 @@ export const dict = {
       revotableUntil: {
         one: {
           en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
-          ar: "قابل لإعادة التصويت حتى {date} (يوم واحد متبقٍ). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+          ar: "قابل لإعادة التصويت حتى {date} (يوم واحد متبقٍ). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك بحالة قيد الانتظار، ويخرج من هذا السجل.",
         },
         two: {
           en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
-          ar: "قابل لإعادة التصويت حتى {date} (يومان متبقيان). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+          ar: "قابل لإعادة التصويت حتى {date} (يومان متبقيان). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك بحالة قيد الانتظار، ويخرج من هذا السجل.",
         },
         few: {
           en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
-          ar: "قابل لإعادة التصويت حتى {date} ({n} أيام متبقية). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+          ar: "قابل لإعادة التصويت حتى {date} ({n} أيام متبقية). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك بحالة قيد الانتظار، ويخرج من هذا السجل.",
         },
         many: {
           en: "Re-votable until {date} ({n} days left). A re-vote that drops this below two matching votes returns it to the Consumption Approvals tab as pending, and it leaves this ledger.",
-          ar: "قابل لإعادة التصويت حتى {date} ({n} يومًا متبقيًا). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك كمعلّق، ويخرج من هذا السجل.",
+          ar: "قابل لإعادة التصويت حتى {date} ({n} يومًا متبقيًا). إعادة تصويت تُنقص هذا عن تصويتين متطابقين تعيده إلى تبويب اعتمادات الاستهلاك بحالة قيد الانتظار، ويخرج من هذا السجل.",
         },
       },
     },
