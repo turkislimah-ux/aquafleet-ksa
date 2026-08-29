@@ -518,19 +518,19 @@ matches nothing and the guard reports *"seed INSERT parsed to zero built-in rows
 
 ## 7. NEXT — no route batches remain
 
-Every route in the app is wired and **§9 is fully closed.** The static work is
-finished: §8's items 1 and 3 both closed this session, and **item 1 was the last
-unambiguous wording drift with a settled ruling behind it.** What is left cannot
-be moved by more analysis:
+Every route is wired, **§9 is fully closed, and as of 2026-08-29 NOTHING IN §8 IS
+OPEN EITHER.** Items 1 and 3 were closed by work, item 6 by Turki's ruling that
+`تصريح` in the `archive_document_types` seed is correct and stays. Item 1 was the
+last unambiguous wording drift with a settled ruling behind it.
 
-1. **A full Arabic-mode read-through with fresh eyes.** Ten batches plus five
-   sweeps have landed; nobody has walked the whole app in Arabic since Trips
-   shipped. **This is now the only way another wording defect gets found** —
-   grep has run out of things to point at, which is exactly what item 3 turning
-   out to be a non-issue demonstrates.
-2. **§8 item 6 is Turki's call and nothing else is blocked on it.** A one-word
-   ruling on the `archive_document_types` seed either closes it or leaves it
-   correct as-is.
+**One thing remains, and it is not a task on this list — it is a read-through.**
+Ten batches plus five sweeps have landed and nobody has walked the whole app in
+Arabic since Trips shipped. **That is now the only way another wording defect
+gets found.** Grep has run out of things to point at: item 3 was opened expecting
+thirteen missing fallbacks and found zero, and item 1 was settled by counting
+existing usages rather than by discovering anything new. **A future session that
+opens this file looking for static work to do should stop and say so** rather
+than manufacture a sweep.
 
 **~~The Trips `InvoiceDetailModal` RTL defect~~ — FIXED, struck.** The
 `dir="rtl"` moved off the block onto an inner `<span>`
@@ -541,10 +541,14 @@ be moved by more analysis:
 
 ---
 
-## 8. PARKED — a wording-consistency pass at the very end
+## 8. WAS PARKED — ALL SIX RESOLVED. Kept for the reasoning, not as a queue.
 
-All re-verified at this refresh. **Five items struck as DONE** — three at the
-refresh, items 1 and 3 after it.
+This was the end-of-effort wording pass. **There is nothing left in it.** Three
+items were struck at the refresh, 1 and 3 closed by work afterwards, and 6 by
+Turki's ruling. **Items 3 and 6 are the two to read before doing anything here:**
+one is a defect that turned out not to exist, the other is a correct string that
+looks like a missed sweep. Both invite a future session to "fix" something that
+is already right.
 
 1. ~~**The Reports Sales-Returns tail.**~~ — **DONE. Struck.** Three `ar:` values
    changed, English untouched: `lib/i18n.ts:4084`, `:4090`, `:4943`.
@@ -601,12 +605,23 @@ refresh, items 1 and 3 after it.
 5. ~~`MaintenanceCalendar` keeps `MONTHS_AR` / `WEEKDAYS_AR` as component-local
    arrays~~ — **DONE. Struck.** `d6c91b4` and `287336e` moved both into the
    dictionary; `287336e` settled the weekday wording in `common`.
-6. **⚠ DO NOT BLANKET-REPLACE تصريح IN THE DATABASE.**
-   `supabase/migrations/0085` seeds `archive_document_types` with
-   `('permit','Permit','تصريح')`. That is a DOCUMENT TYPE, a different domain from
-   the consumption exit-permit the إذن ruling covers, and it is DB data rather
-   than dictionary copy. It may well be correct as-is. **Turki's call; flagged,
-   not changed.**
+6. ~~**⚠ DO NOT BLANKET-REPLACE تصريح IN THE DATABASE.**~~ — **SETTLED by Turki
+   on 2026-08-29: تصريح is CORRECT here and stays. Do not re-raise, and do not
+   "finish" the إذن sweep by touching it.**
+   `supabase/migrations/0085_archive_document_identity_fields.sql:86` seeds
+   `archive_document_types` with `('permit', 'Permit', 'تصريح')`. That is an
+   ARCHIVED DOCUMENT TYPE — a government or municipal permit that exists as a
+   piece of paper — and the إذن ruling covers the consumption EXIT PERMIT, a
+   warehouse gate pass. **Same English word, two different real-world documents,
+   so the Arabic diverging is the point rather than a drift.**
+
+   The trap this leaves behind: a future session greps `تصريح`, finds one hit
+   outside the dictionary, and "completes" the sweep. **Measured — the word
+   survives at exactly three places and all three are correct:**
+   `0085:86` (this seed row), and `lib/i18n.ts:2645` and `:2654`, both inside the
+   comment that records the إذن ruling and argues from the old word. Item 2 above
+   is about the PLURAL `تصاريح`, which survives only at `:2655` in that same
+   comment — a different string, so do not treat the two greps as one.
 
 ---
 
