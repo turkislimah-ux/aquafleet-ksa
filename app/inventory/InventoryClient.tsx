@@ -275,7 +275,7 @@ import {
   receiveLooseParts,
   type ReceiveLine,
 } from "./actions";
-import { arText } from "@/lib/i18n";
+import { arText, fill, plural, t } from "@/lib/i18n";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -571,15 +571,19 @@ export default function InventoryClient({
   return (
     <div className="space-y-5">
       <PageHeader
-        title={lang === "en" ? "Inventory" : "المخزون"}
+        title={t("inventory.stock.pageTitle", lang)}
         subtitle={
           // preview's c.invSubtitle ("Parts, fluids, tires & equipment across
           // 3 warehouses", i18n.js:321) hardcodes preview's own demo data —
           // matched here on real warehouse count instead of copying "3"
           // verbatim, so the message stays correct as warehouses are added.
-          lang === "en"
-            ? `Parts, fluids, tires & equipment across ${warehouses.length} warehouse${warehouses.length === 1 ? "" : "s"}`
-            : `قطع وسوائل وإطارات ومعدات في ${warehouses.length} ${warehouses.length === 1 ? "مستودع" : "مستودعات"}`
+          //
+          // The count picks the Arabic sentence, not a fragment: Arabic needs
+          // the noun itself to change with the numeral, which the old
+          // `n === 1 ? "مستودع" : "مستودعات"` splice could not do.
+          fill(t(`inventory.stock.subtitleWarehouses.${plural(warehouses.length)}`, lang), {
+            n: warehouses.length,
+          })
         }
         actions={
           <>
@@ -612,7 +616,7 @@ export default function InventoryClient({
                     ("newPO": "New Purchase Order" / "أمر شراء جديد" — only
                     the English string was ever shortened here; Arabic
                     already matched). */}
-                {lang === "en" ? "New Purchase Order" : "أمر شراء جديد"}
+                {t("inventory.shared.newPurchaseOrder", lang)}
               </Btn>
             )}
             {/* preview/'s header has no standalone "new part" button — new-
@@ -632,7 +636,7 @@ export default function InventoryClient({
                 }}
               >
                 <PackagePlus className="h-4 w-4" />
-                {lang === "en" ? "Add Parts" : "إضافة قطع"}
+                {t("inventory.stock.addParts", lang)}
               </Btn>
             )}
             {/* AI-Suggest-PO (Phase 7, migration 0053) — preview's own
@@ -654,9 +658,7 @@ export default function InventoryClient({
                 title={
                   aiPurchaseSuggestion
                     ? undefined
-                    : lang === "en"
-                    ? "Nothing to reorder — all parts above threshold."
-                    : "لا شيء للطلب — كل القطع فوق الحد."
+                    : t("inventory.stock.nothingReorderAll", lang)
                 }
               >
                 {/* Item 6 (polish round) — purple/blue gradient, this app's
@@ -673,7 +675,7 @@ export default function InventoryClient({
                   disabled={!aiPurchaseSuggestion}
                 >
                   <Zap className="h-4 w-4" />
-                  {lang === "en" ? "AI-Suggest" : "اقتراح ذكي"}
+                  {t("inventory.shared.aiSuggest", lang)}
                 </Btn>
               </span>
             )}
@@ -735,24 +737,24 @@ export default function InventoryClient({
               Turki's explicit call. */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <Stat
-              label={lang === "en" ? "Inventory Value" : "قيمة المخزون"}
+              label={t("inventory.shared.inventoryValue", lang)}
               value={formatSar(kpiInventoryValue)}
               tone="info"
             />
-            <Stat label={lang === "en" ? "SKUs" : "أصناف"} value={kpiSkuCount} />
+            <Stat label={t("inventory.stock.skus", lang)} value={kpiSkuCount} />
             {/* preview's c.lowStock ("Low Stock Items"/"أصناف منخفضة", i18n.js:234) */}
             <Stat
-              label={lang === "en" ? "Low Stock Items" : "أصناف منخفضة"}
+              label={t("inventory.stock.lowStockItems", lang)}
               value={kpiLowStockCount}
               tone={kpiLowStockCount > 0 ? "bad" : "ok"}
             />
             <Stat
-              label={lang === "en" ? "Open POs" : "أوامر مفتوحة"}
+              label={t("inventory.shared.openPos", lang)}
               value={kpiOpenPOsCount}
               tone={kpiOpenPOsCount > 0 ? "info" : "ok"}
             />
             <Stat
-              label={lang === "en" ? "Pending Approval" : "بانتظار الاعتماد"}
+              label={t("inventory.stock.pendingApproval", lang)}
               value={kpiPendingReviewCount}
               tone={kpiPendingReviewCount > 0 ? "warn" : "ok"}
             />
@@ -769,9 +771,9 @@ export default function InventoryClient({
           >
             {(
               [
-                ["inventory", lang === "en" ? "Inventory Levels" : "مستويات المخزون", null],
-                ["approvals", lang === "en" ? "Approvals" : "الموافقات", pendingReviewCount],
-                ["analysis", lang === "en" ? "Financial Analysis" : "التحليل المالي", null],
+                ["inventory", t("inventory.stock.inventoryLevels", lang), null],
+                ["approvals", t("inventory.stock.tabApprovals", lang), pendingReviewCount],
+                ["analysis", t("inventory.stock.financialAnalysis", lang), null],
               ] as const
             ).map(([key, label, count]) => (
               <button
@@ -815,7 +817,7 @@ export default function InventoryClient({
                     <input
                       value={q}
                       onChange={(e) => setQ(e.target.value)}
-                      placeholder={lang === "en" ? "Search part name, SKU…" : "بحث بالاسم أو الرمز…"}
+                      placeholder={t("inventory.stock.searchPartName", lang)}
                       className="h-9 ps-8 pe-3 rounded-lg border text-sm w-full"
                       style={INPUT_STYLE}
                     />
@@ -829,7 +831,7 @@ export default function InventoryClient({
                       )}
                       style={cat !== "all" ? { borderColor: "rgb(var(--border))" } : undefined}
                     >
-                      {lang === "en" ? "All" : "الكل"}
+                      {t("common.all", lang)}
                     </button>
                     {FILTER_CATS.map((c) => (
                       <button
@@ -1129,12 +1131,10 @@ function EmptyWarehouseState({ lang }: { lang: "en" | "ar" }) {
       <WarehouseIcon className="h-8 w-8 muted" aria-hidden />
       <div className="max-w-sm">
         <p className="font-medium">
-          {lang === "en" ? "No warehouses yet" : "لا توجد مستودعات بعد"}
+          {t("inventory.stock.noWarehousesYet", lang)}
         </p>
         <p className="text-sm muted mt-1">
-          {lang === "en"
-            ? "Add your first warehouse in Settings — the gear at the bottom of the sidebar — then Warehouses. Parts and stock are tracked per warehouse."
-            : "أضف أول مستودع من الإعدادات — رمز الترس أسفل الشريط الجانبي — ثم المستودعات. تُتتبَّع القطع والمخزون لكل مستودع."}
+          {t("inventory.stock.addYourFirst", lang)}
         </p>
       </div>
     </div>
@@ -1155,7 +1155,7 @@ function StockCell({ part, lang }: { part: Part; lang: "en" | "ar" }) {
       </div>
       {part.reorder_level != null && (
         <span className="text-[10px] muted">
-          {lang === "en" ? "reorder at" : "إعادة الطلب عند"} {part.reorder_level}
+          {t("inventory.stock.reorderAtInline", lang)} {part.reorder_level}
         </span>
       )}
     </div>
@@ -1191,13 +1191,13 @@ function PartsTable({
       <Table>
         <thead style={{ background: "rgba(0,0,0,0.02)" }}>
           <tr>
-            <TH>{lang === "en" ? "SKU" : "الرمز"}</TH>
-            <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
-            <TH>{lang === "en" ? "Category" : "الفئة"}</TH>
-            <TH>{lang === "en" ? "Warehouse" : "المستودع"}</TH>
-            <TH>{lang === "en" ? "Stock" : "المخزون"}</TH>
-            <TH>{lang === "en" ? "Unit Cost" : "تكلفة الوحدة"}</TH>
-            <TH>{lang === "en" ? "Stock Value" : "قيمة المخزون"}</TH>
+            <TH>{t("inventory.shared.sku", lang)}</TH>
+            <TH>{t("common.part", lang)}</TH>
+            <TH>{t("inventory.stock.thCategory", lang)}</TH>
+            <TH>{t("inventory.shared.warehouse", lang)}</TH>
+            <TH>{t("inventory.stock.thStock", lang)}</TH>
+            <TH>{t("inventory.stock.thUnitCost", lang)}</TH>
+            <TH>{t("inventory.shared.stockValue", lang)}</TH>
             <TH></TH>
           </tr>
         </thead>
@@ -1205,7 +1205,7 @@ function PartsTable({
           {parts.length === 0 && (
             <tr>
               <td colSpan={8} className="py-8 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                {lang === "en" ? "No parts match these filters." : "لا توجد قطع مطابقة لهذه الفلاتر."}
+                {t("inventory.stock.noPartsMatch", lang)}
               </td>
             </tr>
           )}
@@ -1290,12 +1290,12 @@ function PartsTable({
                         e.stopPropagation();
                         onView(p);
                       }}
-                      title={lang === "en" ? "View" : "عرض"}
+                      title={t("common.view", lang)}
                       className="h-8 px-2.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 hover:border-brand-500/45"
                       style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
                     >
                       <Eye className="h-3.5 w-3.5" />
-                      {lang === "en" ? "View" : "عرض"}
+                      {t("common.view", lang)}
                     </button>
                     <button
                       type="button"
@@ -1303,7 +1303,7 @@ function PartsTable({
                         e.stopPropagation();
                         onFinance(p);
                       }}
-                      title={lang === "en" ? "Financial report" : "التقرير المالي"}
+                      title={t("inventory.stock.financialReport", lang)}
                       className="h-8 w-8 rounded-lg border inline-flex items-center justify-center hover:border-brand-500/45"
                       style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
                     >
@@ -1316,7 +1316,7 @@ function PartsTable({
                           e.stopPropagation();
                           onQuickReorder(p);
                         }}
-                        title={lang === "en" ? "Quick reorder" : "إعادة طلب سريعة"}
+                        title={t("inventory.stock.quickReorder", lang)}
                         className="h-8 w-8 rounded-lg bg-brand-600 hover:bg-brand-700 text-white inline-flex items-center justify-center"
                       >
                         <ShoppingCart className="h-3.5 w-3.5" />
@@ -1481,19 +1481,19 @@ function ViewPartModal({
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-4">
           <div>
-            <div className="text-[11px] muted uppercase">{lang === "en" ? "SKU" : "الرمز"}</div>
+            <div className="text-[11px] muted uppercase">{t("inventory.shared.sku", lang)}</div>
             <div className="font-mono font-medium">{part.sku}</div>
           </div>
           <div>
-            <div className="text-[11px] muted uppercase">{lang === "en" ? "Category" : "الفئة"}</div>
+            <div className="text-[11px] muted uppercase">{t("inventory.stock.thCategory", lang)}</div>
             <div className="font-medium">{categoryLabel(part.category, lang)}</div>
           </div>
           <div>
-            <div className="text-[11px] muted uppercase">{lang === "en" ? "Warehouse" : "المستودع"}</div>
+            <div className="text-[11px] muted uppercase">{t("inventory.shared.warehouse", lang)}</div>
             <div className="font-medium">{warehouseName}</div>
           </div>
           <div>
-            <div className="text-[11px] muted uppercase">{lang === "en" ? "Supplier" : "المورد"}</div>
+            <div className="text-[11px] muted uppercase">{t("inventory.shared.supplier", lang)}</div>
             <div className="font-medium">{part.supplier ?? "—"}</div>
           </div>
         </div>
@@ -1507,20 +1507,20 @@ function ViewPartModal({
         <Card className="!p-4 mb-4 !bg-[rgba(16,185,129,.05)] dark:!bg-[rgba(16,185,129,.06)]">
           <div className="flex items-center gap-2 mb-3">
             <Banknote className="h-4 w-4 muted" />
-            <h4 className="font-semibold text-sm">{lang === "en" ? "Pricing snapshot" : "ملخص السعر"}</h4>
+            <h4 className="font-semibold text-sm">{t("inventory.stock.pricingSnapshot", lang)}</h4>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Current price" : "السعر الحالي"}</div>
+              <div className="text-[11px] muted uppercase">{t("inventory.stock.currentPrice", lang)}</div>
               <div className="text-lg font-semibold tabular-nums text-brand-600">
                 {currentLot != null ? formatSar(currentLot.price_sar) : "—"}
               </div>
               <div className="text-[11px] muted">
-                {lang === "en" ? "per" : "لكل"} {part.unit ?? ""}
+                {t("inventory.stock.perUnit", lang)} {part.unit ?? ""}
               </div>
             </div>
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Previous price" : "السعر السابق"}</div>
+              <div className="text-[11px] muted uppercase">{t("inventory.stock.previousPrice", lang)}</div>
               <div className="text-lg font-semibold tabular-nums">
                 {previousLot != null ? (
                   <span className="line-through muted">{formatSar(previousLot.price_sar)}</span>
@@ -1541,11 +1541,11 @@ function ViewPartModal({
                   {Math.abs(priceDeltaPct)}%
                 </div>
               ) : (
-                <div className="text-[11px] muted">{lang === "en" ? "Single tier" : "دفعة وحيدة"}</div>
+                <div className="text-[11px] muted">{t("inventory.stock.singleTier", lang)}</div>
               )}
             </div>
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Avg Cost" : "متوسط التكلفة"}</div>
+              <div className="text-[11px] muted uppercase">{t("inventory.stock.avgCost", lang)}</div>
               <div className="text-lg font-semibold tabular-nums">
                 {/* Deliberate deviation from preview's 0-decimal fmtSar — Turki
                     wants weighted-avg cost specifically shown to 2 decimals
@@ -1553,32 +1553,30 @@ function ViewPartModal({
                 {avgCost != null ? `${formatNum(avgCost, 2)} SAR` : "—"}
               </div>
               <div className="text-[11px] muted">
-                {lang === "en" ? "Stock value" : "قيمة المخزون"}: {formatSar(totalValue)}
+                {t("inventory.stock.stockValue", lang)}: {formatSar(totalValue)}
               </div>
             </div>
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Stock" : "المخزون"}</div>
+              <div className="text-[11px] muted uppercase">{t("inventory.stock.thStock", lang)}</div>
               <div className={cn("text-lg font-semibold tabular-nums", low ? "text-rose-600" : "")}>
                 {part.qty_on_hand} {part.unit ?? ""}
               </div>
               <div className={cn("text-[11px]", low ? "text-rose-600" : "muted")}>
-                {low ? (lang === "en" ? "Below reorder level" : "تحت حد إعادة الطلب") : lang === "en" ? "In stock" : "متوفّر"}
+                {low ? (t("inventory.stock.belowReorderLevel", lang)) : t("inventory.stock.inStock", lang)}
                 {" · "}
-                {lang === "en" ? "Reorder at" : "إعادة الطلب عند"} {part.reorder_level ?? "—"}
+                {t("inventory.stock.reorderAt", lang)} {part.reorder_level ?? "—"}
               </div>
             </div>
           </div>
           <p className="text-[11px] muted mt-3">
-            {lang === "en"
-              ? "Older stock at the previous price stays consumable until depleted."
-              : "المخزون القديم بالسعر السابق يبقى قابلاً للاستهلاك حتى ينفد."}
+            {t("inventory.stock.olderStockPrevious", lang)}
           </p>
         </Card>
 
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Boxes className="h-4 w-4 muted" />
-            <h3 className="text-sm font-semibold">{lang === "en" ? "Stock batches" : "دفعات المخزون"}</h3>
+            <h3 className="text-sm font-semibold">{t("inventory.stock.stockBatches", lang)}</h3>
           </div>
           <Btn
             variant="outline"
@@ -1597,43 +1595,41 @@ function ViewPartModal({
             }}
           >
             <PackagePlus className="h-4 w-4" />
-            {lang === "en" ? "Add Parts" : "إضافة قطع"}
+            {t("inventory.stock.addParts", lang)}
           </Btn>
         </div>
         <Card className="!p-0 overflow-hidden mb-4">
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH>{lang === "en" ? "Received on" : "تاريخ الاستلام"}</TH>
-                <TH>{lang === "en" ? "Qty purchased" : "الكمية المشتراة"}</TH>
-                <TH>{lang === "en" ? "Qty remaining" : "الكمية المتبقية"}</TH>
-                <TH>{lang === "en" ? "Unit cost" : "تكلفة الوحدة"}</TH>
+                <TH>{t("inventory.shared.receivedOn", lang)}</TH>
+                <TH>{t("inventory.stock.qtyPurchased", lang)}</TH>
+                <TH>{t("inventory.stock.qtyRemaining", lang)}</TH>
+                <TH>{t("inventory.shared.unitCost", lang)}</TH>
                 <TH>VAT (15%)</TH>
-                <TH>{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل VAT)"}</TH>
-                <TH>{lang === "en" ? "Status" : "الحالة"}</TH>
+                <TH>{t("inventory.shared.totalInclVat", lang)}</TH>
+                <TH>{t("common.status", lang)}</TH>
               </tr>
             </thead>
             <tbody>
               {loadingLots && (
                 <tr>
                   <td colSpan={7} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                    {lang === "en" ? "Loading…" : "جارٍ التحميل…"}
+                    {t("common.loading", lang)}
                   </td>
                 </tr>
               )}
               {!loadingLots && lotsError && (
                 <tr>
                   <td colSpan={7} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                    {lang === "en"
-                      ? "Price batches aren't available yet (pending setup)."
-                      : "دفعات الأسعار غير متاحة بعد (بانتظار الإعداد)."}
+                    {t("inventory.stock.priceBatchesArent", lang)}
                   </td>
                 </tr>
               )}
               {!loadingLots && !lotsError && lots.length === 0 && (
                 <tr>
                   <td colSpan={7} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                    {lang === "en" ? "No price batches yet." : "لا توجد دفعات أسعار بعد."}
+                    {t("inventory.stock.noPriceBatches", lang)}
                   </td>
                 </tr>
               )}
@@ -1689,41 +1685,39 @@ function ViewPartModal({
 
         <div className="mb-2 flex items-center gap-2">
           <History className="h-4 w-4 muted" />
-          <h3 className="text-sm font-semibold">{lang === "en" ? "Movement history" : "سجل الحركات"}</h3>
+          <h3 className="text-sm font-semibold">{t("inventory.stock.movementHistory", lang)}</h3>
         </div>
         <Card className="!p-0 overflow-hidden mb-4">
           <Table>
             <thead style={{ background: "rgba(0,0,0,0.02)" }}>
               <tr>
-                <TH>{lang === "en" ? "Type" : "النوع"}</TH>
-                <TH>{lang === "en" ? "Change" : "التغيير"}</TH>
-                <TH>{lang === "en" ? "After" : "بعد"}</TH>
-                <TH>{lang === "en" ? "Note" : "ملاحظة"}</TH>
-                <TH>{lang === "en" ? "By" : "بواسطة"}</TH>
-                <TH>{lang === "en" ? "Date" : "التاريخ"}</TH>
+                <TH>{t("common.type", lang)}</TH>
+                <TH>{t("inventory.stock.thChange", lang)}</TH>
+                <TH>{t("inventory.stock.thAfter", lang)}</TH>
+                <TH>{t("common.note", lang)}</TH>
+                <TH>{t("inventory.stock.thBy", lang)}</TH>
+                <TH>{t("common.date", lang)}</TH>
               </tr>
             </thead>
             <tbody>
               {loadingMovements && (
                 <tr>
                   <td colSpan={6} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                    {lang === "en" ? "Loading…" : "جارٍ التحميل…"}
+                    {t("common.loading", lang)}
                   </td>
                 </tr>
               )}
               {!loadingMovements && movementsError && (
                 <tr>
                   <td colSpan={6} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                    {lang === "en"
-                      ? "Movement history isn't available yet (pending setup)."
-                      : "سجل الحركات غير متاح بعد (بانتظار الإعداد)."}
+                    {t("inventory.stock.movementHistoryIsnt", lang)}
                   </td>
                 </tr>
               )}
               {!loadingMovements && !movementsError && movements.length === 0 && (
                 <tr>
                   <td colSpan={6} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
-                    {lang === "en" ? "No movements yet." : "لا توجد حركات بعد."}
+                    {t("inventory.stock.noMovementsYet", lang)}
                   </td>
                 </tr>
               )}
@@ -1767,7 +1761,7 @@ function ViewPartModal({
         <Card className="!p-4 mb-4 !bg-[rgba(139,92,246,.05)] dark:!bg-[rgba(139,92,246,.07)]">
           <div className="flex items-center gap-2 mb-3">
             <Banknote className="h-4 w-4 muted" />
-            <h3 className="text-sm font-semibold">{lang === "en" ? "Financial summary" : "الملخص المالي"}</h3>
+            <h3 className="text-sm font-semibold">{t("inventory.stock.financialSummary", lang)}</h3>
           </div>
           <PartFinanceSummaryCard
             lang={lang}
@@ -1784,26 +1778,26 @@ function ViewPartModal({
         </Card>
 
         <Card className="!p-4">
-          <h3 className="text-sm font-semibold mb-3">{lang === "en" ? "Reorder info" : "معلومات إعادة الطلب"}</h3>
+          <h3 className="text-sm font-semibold mb-3">{t("inventory.stock.reorderInfo", lang)}</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Suggested qty" : "الكمية المقترحة"}</div>
+              <div className="text-[11px] muted uppercase">{t("inventory.stock.suggestedQty", lang)}</div>
               <div className="font-medium tabular-nums">
                 {part.reorder_qty ?? "—"} {part.unit ?? ""}
               </div>
             </div>
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Supplier" : "المورد"}</div>
+              <div className="text-[11px] muted uppercase">{t("inventory.shared.supplier", lang)}</div>
               <div className="font-medium">{part.supplier ?? "—"}</div>
             </div>
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Lead time" : "مدة التوريد"}</div>
+              <div className="text-[11px] muted uppercase">{t("inventory.stock.leadTime", lang)}</div>
               <div className="font-medium tabular-nums">
-                {part.lead_time_days != null ? `${part.lead_time_days} ${lang === "en" ? "days" : "يوم"}` : "—"}
+                {part.lead_time_days != null ? `${part.lead_time_days} ${t("common.days", lang)}` : "—"}
               </div>
             </div>
             <div>
-              <div className="text-[11px] muted uppercase">{lang === "en" ? "Total value" : "القيمة الإجمالية"}</div>
+              <div className="text-[11px] muted uppercase">{t("inventory.stock.totalValue", lang)}</div>
               <div className="font-medium tabular-nums">{reorderValue != null ? formatSar(reorderValue) : "—"}</div>
             </div>
           </div>
@@ -1811,7 +1805,7 @@ function ViewPartModal({
 
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <Btn variant="outline" onClick={onClose}>
-            {lang === "en" ? "Close" : "إغلاق"}
+            {t("common.close", lang)}
           </Btn>
           {/* Item 7 (polish round) — "Adjust Item": edit descriptive info,
               distinct from "Adjust Stock" right after it (that one is the
@@ -1819,11 +1813,11 @@ function ViewPartModal({
               qty_on_hand at all, see AdjustItemModal's own header). */}
           <Btn variant="outline" onClick={() => onAdjustItem(part)}>
             <Pencil className="h-4 w-4" />
-            {lang === "en" ? "Adjust Item" : "تعديل الصنف"}
+            {t("inventory.shared.adjustItem", lang)}
           </Btn>
           <Btn variant="outline" onClick={() => onAdjust(part)}>
             <SlidersHorizontal className="h-4 w-4" />
-            {lang === "en" ? "Adjust Stock" : "تعديل المخزون"}
+            {t("inventory.stock.adjustStock", lang)}
           </Btn>
           {/* Item 1, follow-up batch — preview's own conditional Create-PO
               footer button (see this file's header comment, line ~17-18),
@@ -1833,7 +1827,7 @@ function ViewPartModal({
           {stockTier(part) === "critical" && (
             <Btn variant="primary" onClick={() => onQuickReorder(part)}>
               <ShoppingCart className="h-4 w-4" />
-              {lang === "en" ? "Create PO" : "إنشاء أمر شراء"}
+              {t("inventory.stock.createPo", lang)}
             </Btn>
           )}
         </div>
@@ -2017,23 +2011,21 @@ function ReceivePartsModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!supplierId) {
-      setError(lang === "en" ? "Supplier is required." : "المورد مطلوب.");
+      setError(t("inventory.shared.supplierIsRequired", lang));
       return;
     }
     if (!warehouseId) {
-      setError(lang === "en" ? "Warehouse is required." : "المستودع مطلوب.");
+      setError(t("inventory.shared.warehouseIsRequired", lang));
       return;
     }
     if (!linesValid) {
       setError(
-        lang === "en"
-          ? "Add at least one line with a positive quantity."
-          : "أضف بنداً واحداً على الأقل بكمية موجبة."
+        t("inventory.shared.addLeastOne", lang)
       );
       return;
     }
     if (files.length === 0) {
-      setError(lang === "en" ? "An invoice must be uploaded before saving." : "يجب رفع فاتورة قبل الحفظ.");
+      setError(t("inventory.shared.invoiceMustUploaded", lang));
       return;
     }
 
@@ -2066,12 +2058,10 @@ function ReceivePartsModal({
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold">
-                {lang === "en" ? "Add Parts to Inventory" : "إضافة قطع للمخزون"}
+                {t("inventory.stock.addPartsInventory", lang)}
               </h2>
               <p className="text-xs muted mt-0.5">
-                {lang === "en"
-                  ? "Receive new stock from a supplier. Invoice upload is required."
-                  : "استلام مخزون جديد من مورّد. رفع الفاتورة إلزامي."}
+                {t("inventory.stock.receiveNewStock", lang)}
               </p>
             </div>
             <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
@@ -2081,7 +2071,7 @@ function ReceivePartsModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Supplier *" : "المورد *"}</span>
+              <span className="muted">{t("inventory.shared.fSupplier", lang)}</span>
               <div className="flex gap-2">
                 <select
                   value={supplierId}
@@ -2091,7 +2081,7 @@ function ReceivePartsModal({
                   required
                 >
                   <option value="" disabled>
-                    {lang === "en" ? "Pick a supplier…" : "اختر مورّداً…"}
+                    {t("inventory.shared.pickASupplier", lang)}
                   </option>
                   {allSuppliers.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -2102,13 +2092,13 @@ function ReceivePartsModal({
                 {/* preview's own trigger is plain text, no icon glyph — the
                     "+" lives in the label itself (pages-2.js ~2647). */}
                 <Btn type="button" variant="outline" onClick={() => setNewSupplierOpen(true)}>
-                  {lang === "en" ? "+ Supplier" : "+ مورّد"}
+                  {t("inventory.shared.addSupplier", lang)}
                 </Btn>
               </div>
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Warehouse *" : "المستودع *"}</span>
+              <span className="muted">{t("inventory.shared.fWarehouse", lang)}</span>
               {/* No inline "+ Warehouse" here anymore — Create Warehouse is
                   the page header's job only (per-warehouse tabs). */}
               <select
@@ -2136,7 +2126,7 @@ function ReceivePartsModal({
           <div>
             <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
               <span className="text-[11px] muted uppercase">
-                {lang === "en" ? "Line items" : "بنود الأمر"}
+                {t("inventory.shared.lineItems", lang)}
               </span>
               <div className="flex items-center gap-2">
                 {/* Item 2 (follow-up polish) — widened (260px -> 380px);
@@ -2147,19 +2137,19 @@ function ReceivePartsModal({
                     onChange={setAddPartId}
                     parts={partsInWarehouse}
                     lang={lang}
-                    placeholder={lang === "en" ? "Pick a part to add…" : "اختر قطعة للإضافة…"}
+                    placeholder={t("inventory.shared.pickPartAdd", lang)}
                   />
                 </div>
                 <Btn type="button" variant="outline" onClick={addLine}>
                   <Plus className="h-4 w-4" />
-                  {lang === "en" ? "Add line" : "إضافة بند"}
+                  {t("inventory.shared.addLine", lang)}
                 </Btn>
                 {/* preview's INV.openNewPart trigger — bound right next to
                     Add line (pages-2.js ~2682), the ONLY place a brand-new
                     catalog item gets created. */}
                 <Btn type="button" variant="primary" onClick={() => setNewItemOpen(true)}>
                   <Plus className="h-4 w-4" />
-                  {lang === "en" ? "New Item" : "صنف جديد"}
+                  {t("inventory.shared.newItem", lang)}
                 </Btn>
               </div>
             </div>
@@ -2173,11 +2163,11 @@ function ReceivePartsModal({
               <Table>
                 <thead>
                   <tr>
-                    <TH>{lang === "en" ? "Part" : "القطعة"}</TH>
-                    <TH>{lang === "en" ? "Actual qty received" : "الكمية الفعلية"}</TH>
-                    <TH>{lang === "en" ? "Actual unit price" : "سعر الوحدة الفعلي"}</TH>
+                    <TH>{t("common.part", lang)}</TH>
+                    <TH>{t("inventory.shared.actualQtyReceived", lang)}</TH>
+                    <TH>{t("inventory.shared.actualUnitPrice", lang)}</TH>
                     <TH>VAT (15%)</TH>
-                    <TH>{lang === "en" ? "Subtotal" : "المجموع الفرعي"}</TH>
+                    <TH>{t("inventory.shared.subtotal", lang)}</TH>
                     <TH></TH>
                   </tr>
                 </thead>
@@ -2189,9 +2179,7 @@ function ReceivePartsModal({
                         className="py-6 px-3 border-t text-center muted text-sm"
                         style={{ borderColor: "rgb(var(--border))" }}
                       >
-                        {lang === "en"
-                          ? "No lines yet — pick a part above to add one."
-                          : "لا توجد بنود — اختر قطعة أعلاه لإضافتها."}
+                        {t("inventory.stock.noLinesYet", lang)}
                       </td>
                     </tr>
                   ) : (
@@ -2239,7 +2227,7 @@ function ReceivePartsModal({
                               type="button"
                               onClick={() => removeLine(idx)}
                               className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 text-rose-600"
-                              title={lang === "en" ? "Delete" : "حذف"}
+                              title={t("common.delete", lang)}
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -2262,7 +2250,7 @@ function ReceivePartsModal({
                         className="text-end font-semibold py-2.5 px-3 border-t text-sm"
                         style={{ borderColor: "rgb(var(--border))" }}
                       >
-                        {lang === "en" ? "Actual total" : "الإجمالي الفعلي"}
+                        {t("inventory.shared.actualTotal", lang)}
                       </td>
                       <td
                         className="py-2.5 px-3 border-t text-sm"
@@ -2303,7 +2291,7 @@ function ReceivePartsModal({
           >
             <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
               <span className="text-sm font-medium flex items-center gap-1.5">
-                {lang === "en" ? "Invoice (required)" : "الفاتورة (إلزامية)"}
+                {t("inventory.shared.invoiceRequired", lang)}
                 <span
                   className="inline-block w-1.5 h-1.5 rounded-full"
                   style={{ background: files.length === 0 ? "#f43f5e" : "#10b981" }}
@@ -2311,7 +2299,7 @@ function ReceivePartsModal({
               </span>
               <Btn type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
                 <Upload className="h-4 w-4" />
-                {lang === "en" ? "Add invoice" : "إضافة فاتورة"}
+                {t("inventory.shared.addInvoice", lang)}
               </Btn>
               <input
                 ref={fileInputRef}
@@ -2329,9 +2317,7 @@ function ReceivePartsModal({
             {files.length === 0 ? (
               <div className="flex items-center justify-center text-center h-14 rounded-md">
                 <p className="text-xs muted px-3">
-                  {lang === "en"
-                    ? "Upload at least one invoice image or PDF. Drag a file or click to browse."
-                    : "ارفع صورة فاتورة أو PDF واحداً على الأقل. اسحب ملفاً أو اضغط للاستعراض."}
+                  {t("inventory.shared.uploadLeastOne", lang)}
                 </p>
               </div>
             ) : (
@@ -2348,20 +2334,20 @@ function ReceivePartsModal({
             )}
             {files.length > 0 && (
               <p className="text-[11px] muted mt-1.5">
-                {files.length} {lang === "en" ? "invoices attached" : "فاتورة مرفقة"}
+                {files.length} {t("inventory.shared.invoicesAttachedSuffix", lang)}
               </p>
             )}
           </div>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="muted">{lang === "en" ? "Note" : "ملاحظة"}</span>
+            <span className="muted">{t("common.note", lang)}</span>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
               className={INPUT}
               style={INPUT_STYLE}
               rows={2}
-              placeholder={lang === "en" ? "optional" : "اختياري"}
+              placeholder={t("inventory.shared.optionalHint", lang)}
             />
           </label>
 
@@ -2369,7 +2355,7 @@ function ReceivePartsModal({
 
           <div className="flex justify-end gap-2">
             <Btn type="button" variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
+              {t("common.cancel", lang)}
             </Btn>
             <button
               type="submit"
@@ -2377,7 +2363,7 @@ function ReceivePartsModal({
               className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
             >
               {saving ? null : <Check className="h-4 w-4" />}
-              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Save & receive" : "حفظ واستلام"}
+              {saving ? (t("common.saving", lang)) : t("inventory.stock.saveReceive", lang)}
             </button>
           </div>
         </form>
@@ -2445,12 +2431,12 @@ function AdjustStockModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (newQtyNum == null || newQtyNum < 0) {
-      setError(lang === "en" ? "New quantity cannot be negative." : "لا يمكن أن تكون الكمية الجديدة سالبة.");
+      setError(t("inventory.stock.newQuantityCannot", lang));
       return;
     }
     if (!note.trim()) {
       setError(
-        lang === "en" ? "Adjustment requires a note explaining the reason." : "يتطلب التعديل ملاحظة توضح السبب."
+        t("inventory.stock.adjustmentRequiresNote", lang)
       );
       return;
     }
@@ -2471,7 +2457,7 @@ function AdjustStockModal({
       <div className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={submit}>
           <div className="flex items-start justify-between gap-4 mb-4">
-            <h2 className="text-lg font-semibold">{lang === "en" ? "Adjust stock" : "تعديل المخزون"}</h2>
+            <h2 className="text-lg font-semibold">{t("inventory.stock.adjustStockTitle", lang)}</h2>
             <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
               <X className="h-4 w-4" />
             </button>
@@ -2479,7 +2465,7 @@ function AdjustStockModal({
 
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Part" : "القطعة"}</span>
+              <span className="muted">{t("common.part", lang)}</span>
               <div className="px-3 py-2 rounded-lg border text-sm" style={INPUT_STYLE}>
                 <span className="font-medium">{arText(part.name, part.name_ar, lang)}</span>
                 <span className="muted ms-2 font-mono text-xs">{part.sku}</span>
@@ -2487,11 +2473,11 @@ function AdjustStockModal({
             </div>
 
             <p className="text-xs muted">
-              {lang === "en" ? "Current stock:" : "المخزون الحالي:"} {part.qty_on_hand} {part.unit ?? ""}
+              {t("inventory.stock.currentStock", lang)} {part.qty_on_hand} {part.unit ?? ""}
             </p>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "New quantity *" : "الكمية الجديدة *"}</span>
+              <span className="muted">{t("inventory.stock.fNewQuantity", lang)}</span>
               <input
                 value={newQty}
                 onChange={(e) => setNewQty(e.target.value.replace(/-/g, ""))}
@@ -2502,7 +2488,7 @@ function AdjustStockModal({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Reason *" : "السبب *"}</span>
+              <span className="muted">{t("inventory.stock.fReason", lang)}</span>
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -2510,7 +2496,7 @@ function AdjustStockModal({
                 style={INPUT_STYLE}
                 rows={2}
                 required
-                placeholder={lang === "en" ? "e.g. physical count correction" : "مثال: تصحيح بعد الجرد الفعلي"}
+                placeholder={t("inventory.stock.egPhysicalCountCorrection", lang)}
               />
             </label>
           </div>
@@ -2519,14 +2505,14 @@ function AdjustStockModal({
 
           <div className="mt-5 flex justify-end gap-2">
             <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
+              {t("common.cancel", lang)}
             </Btn>
             <button
               type="submit"
               disabled={!canSubmit || saving}
               className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
             >
-              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Adjust stock" : "تعديل المخزون"}
+              {saving ? (t("common.saving", lang)) : t("inventory.stock.adjustStockTitle", lang)}
             </button>
           </div>
         </form>

@@ -63,7 +63,7 @@ import {
   type PartUpdateInput,
 } from "./actions";
 import ScrollLock from "@/components/ScrollLock";
-import { arText } from "@/lib/i18n";
+import { arText, t } from "@/lib/i18n";
 
 // Shared modal backdrop — "risky batch" Stage 3, items 1 + 7. Every
 // Inventory modal used to render its own `fixed inset-0` backdrop INLINE
@@ -154,7 +154,7 @@ export function SupplierContactCard({ lang, supplier }: { lang: "en" | "ar"; sup
   return (
     <Card className="!p-3 !bg-[rgba(11,126,234,.06)] dark:!bg-[rgba(96,196,255,.06)]">
       <div className="text-[11px] muted uppercase tracking-wide mb-1">
-        {lang === "en" ? "Supplier contact" : "بيانات المورّد"}
+        {t("inventory.shared.supplierContact", lang)}
       </div>
       {!supplier ? (
         <div className="text-sm muted">—</div>
@@ -164,15 +164,15 @@ export function SupplierContactCard({ lang, supplier }: { lang: "en" | "ar"; sup
           {supplier.name_ar && <div className="text-xs muted mb-1">{supplier.name_ar}</div>}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs mt-1">
             <div>
-              <span className="muted">{lang === "en" ? "Contact person" : "الشخص المسؤول"}:</span>{" "}
+              <span className="muted">{t("inventory.shared.contactPerson", lang)}:</span>{" "}
               {supplier.contact_person ?? "—"}
             </div>
             <div>
-              <span className="muted">{lang === "en" ? "Phone" : "الهاتف"}:</span>{" "}
+              <span className="muted">{t("inventory.shared.phone", lang)}:</span>{" "}
               <span className="font-mono">{supplier.phone ?? "—"}</span>
             </div>
             <div>
-              <span className="muted">{lang === "en" ? "Email" : "البريد الإلكتروني"}:</span>{" "}
+              <span className="muted">{t("inventory.shared.email", lang)}:</span>{" "}
               <span className="font-mono">{supplier.email ?? "—"}</span>
             </div>
           </div>
@@ -295,7 +295,7 @@ export function PartPicker({
         >
           {parts.length === 0 ? (
             <div className="px-3 py-2 text-sm muted">
-              {lang === "en" ? "No parts available" : "لا توجد قطع متاحة"}
+              {t("inventory.forms.noPartsAvailable", lang)}
             </div>
           ) : (
             parts.map((p) => {
@@ -522,7 +522,7 @@ export function NewSupplierModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) {
-      setError(lang === "en" ? "Supplier name is required." : "اسم المورّد مطلوب.");
+      setError(t("inventory.forms.supplierNameRequired", lang));
       return;
     }
     const input: SupplierInput = {
@@ -553,7 +553,7 @@ export function NewSupplierModal({
         <form onSubmit={submit}>
           <div className="flex items-start justify-between gap-4 mb-1">
             <h2 className="text-lg font-semibold">
-              {lang === "en" ? "Add a new supplier" : "إضافة مورّد جديد"}
+              {t("inventory.forms.addNewSupplier", lang)}
             </h2>
             <button
               type="button"
@@ -564,36 +564,34 @@ export function NewSupplierModal({
             </button>
           </div>
           <p className="text-sm muted mb-4">
-            {lang === "en"
-              ? "Quickly add a supplier. They'll be available in every Add Parts dropdown."
-              : "إضافة مورّد بسرعة. سيظهر فوراً في جميع القوائم."}
+            {t("inventory.forms.quicklyAddSupplier", lang)}
           </p>
 
           <div className="grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Supplier name *" : "اسم المورّد *"}</span>
+              <span className="muted">{t("inventory.forms.fSupplierName", lang)}</span>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
                 required
-                placeholder={lang === "en" ? "e.g. Al-Khaleej Heavy Trucks" : "مثال: الخليج للشاحنات الثقيلة"}
+                placeholder={t("inventory.forms.egAlKhaleejHeavy", lang)}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Name (Arabic)" : "الاسم (عربي)"}</span>
+              <span className="muted">{t("inventory.forms.fNameAr", lang)}</span>
               <input
                 value={nameAr}
                 onChange={(e) => setNameAr(e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
                 dir="rtl"
-                placeholder={lang === "en" ? "optional" : "اختياري"}
+                placeholder={t("inventory.shared.optionalHint", lang)}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Phone" : "الهاتف"}</span>
+              <span className="muted">{t("inventory.shared.phone", lang)}</span>
               <input
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
@@ -603,7 +601,7 @@ export function NewSupplierModal({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Email" : "البريد الإلكتروني"}</span>
+              <span className="muted">{t("inventory.shared.email", lang)}</span>
               <input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -613,13 +611,13 @@ export function NewSupplierModal({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Contact person" : "جهة الاتصال"}</span>
+              <span className="muted">{t("inventory.shared.contactPerson", lang)}</span>
               <input
                 value={contactPerson}
                 onChange={(e) => setContactPerson(e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
-                placeholder={lang === "en" ? "Contact person" : "جهة الاتصال"}
+                placeholder={t("inventory.shared.contactPerson", lang)}
               />
             </label>
           </div>
@@ -628,7 +626,7 @@ export function NewSupplierModal({
 
           <div className="mt-5 flex justify-end gap-2">
             <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
+              {t("common.cancel", lang)}
             </Btn>
             <button
               type="submit"
@@ -637,8 +635,8 @@ export function NewSupplierModal({
             >
               {saving ? null : <Save className="h-4 w-4" />}
               {saving
-                ? lang === "en" ? "Saving…" : "جارٍ الحفظ…"
-                : lang === "en" ? "Add a new supplier" : "إضافة مورّد جديد"}
+                ? t("common.saving", lang)
+                : t("inventory.forms.addNewSupplier", lang)}
             </button>
           </div>
         </form>
@@ -755,7 +753,7 @@ export function AddPartModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) {
-      setError(lang === "en" ? "Every field is required." : "جميع الحقول مطلوبة.");
+      setError(t("inventory.forms.everyFieldRequired", lang));
       return;
     }
     const input: PartInput = {
@@ -777,7 +775,7 @@ export function AddPartModal({
     const res = await createPart(input);
     setSaving(false);
     if (res.error || !res.part) {
-      setError(res.error ?? (lang === "en" ? "Could not create item." : "تعذّر إنشاء الصنف."));
+      setError(res.error ?? (t("inventory.forms.couldNotCreate", lang)));
       return;
     }
     onCreated(res.part);
@@ -794,25 +792,23 @@ export function AddPartModal({
         <form onSubmit={submit}>
           <div className="flex items-start justify-between gap-4 mb-1">
             <h2 className="text-lg font-semibold">
-              {lang === "en" ? "New item / equipment" : "صنف / معدة جديدة"}
+              {t("inventory.forms.newItemEquipment", lang)}
             </h2>
             <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
               <X className="h-4 w-4" />
             </button>
           </div>
           <p className="text-sm muted mb-4">
-            {lang === "en"
-              ? "Create a brand-new item or equipment type. It's added to the catalog and dropped straight into your current list."
-              : "أنشئ صنفًا أو معدة جديدة. تُضاف للكتالوج وتُدرج مباشرة في قائمتك الحالية."}
+            {t("inventory.forms.createBrandNew", lang)}
           </p>
 
           <div className="grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Item / Equipment name *" : "اسم الصنف / المعدة *"}</span>
+              <span className="muted">{t("inventory.forms.fItemEquipmentName", lang)}</span>
               <input value={name} onChange={(e) => setName(e.target.value)} className={INPUT} style={INPUT_STYLE} required />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Name (Arabic) *" : "الاسم (عربي) *"}</span>
+              <span className="muted">{t("inventory.forms.fNameArabic", lang)}</span>
               <input
                 value={nameAr}
                 onChange={(e) => setNameAr(e.target.value)}
@@ -824,7 +820,7 @@ export function AddPartModal({
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "SKU *" : "رمز الصنف *"}</span>
+              <span className="muted">{t("inventory.forms.fSku", lang)}</span>
               <input
                 value={sku}
                 onChange={(e) => setSku(e.target.value)}
@@ -834,7 +830,7 @@ export function AddPartModal({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Warehouse" : "المستودع"}</span>
+              <span className="muted">{t("inventory.shared.warehouse", lang)}</span>
               <div className="px-3 py-2 rounded-lg border text-sm" style={INPUT_STYLE}>
                 {warehouseName}
               </div>
@@ -847,12 +843,12 @@ export function AddPartModal({
                 free text on parts, 0043 — no migration needed) and becomes
                 a selectable suggestion here again next time. */}
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Category *" : "الفئة *"}</span>
+              <span className="muted">{t("inventory.forms.fCategory", lang)}</span>
               <ComboInput
                 value={category}
                 onChange={setCategory}
                 options={categoryOptions.map((c) => ({ value: c, label: categoryLabel(c, lang) }))}
-                placeholder={lang === "en" ? "Pick or type a category…" : "اختر أو اكتب فئة…"}
+                placeholder={t("inventory.forms.pickTypeCategory", lang)}
               />
             </label>
             {/* Unit picker — units table (migration 0049), NOT free text
@@ -861,7 +857,7 @@ export function AddPartModal({
                 meaning, both visible) plus a "+ Unit" trigger to define a
                 new one. The stored value is the CODE. */}
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Unit *" : "الوحدة *"}</span>
+              <span className="muted">{t("inventory.forms.fUnit", lang)}</span>
               <div className="flex gap-2">
                 <select
                   value={unitCode}
@@ -871,7 +867,7 @@ export function AddPartModal({
                   required
                 >
                   <option value="" disabled>
-                    {lang === "en" ? "Pick a unit…" : "اختر وحدة…"}
+                    {t("inventory.forms.pickAUnit", lang)}
                   </option>
                   {allUnits.map((u) => (
                     <option key={u.id} value={u.code}>
@@ -880,13 +876,13 @@ export function AddPartModal({
                   ))}
                 </select>
                 <Btn type="button" variant="outline" onClick={() => setNewUnitOpen(true)}>
-                  {lang === "en" ? "+ Unit" : "+ وحدة"}
+                  {t("inventory.forms.addUnit", lang)}
                 </Btn>
               </div>
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Unit price (SAR) *" : "سعر الوحدة (ر.س) *"}</span>
+              <span className="muted">{t("inventory.forms.fUnitPriceSar", lang)}</span>
               <input
                 value={unitCost}
                 onChange={(e) => setUnitCost(blockNegative(e.target.value))}
@@ -922,7 +918,7 @@ export function AddPartModal({
                       <span className="font-medium tabular-nums">{formatSarVat(doc.vat)}</span>
                     </span>
                     <span>
-                      <span className="muted">{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل VAT)"}:</span>{" "}
+                      <span className="muted">{t("inventory.shared.totalInclVat", lang)}:</span>{" "}
                       <span className="font-medium tabular-nums">{formatSarVat(doc.total)}</span>
                     </span>
                   </div>
@@ -930,7 +926,7 @@ export function AddPartModal({
               })()}
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Reorder level *" : "حد إعادة الطلب *"}</span>
+              <span className="muted">{t("inventory.forms.fReorderLevel", lang)}</span>
               <input
                 value={reorderLevel}
                 onChange={(e) => setReorderLevel(blockNegative(e.target.value))}
@@ -942,7 +938,7 @@ export function AddPartModal({
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Reorder qty *" : "كمية إعادة الطلب *"}</span>
+              <span className="muted">{t("inventory.forms.fReorderQty", lang)}</span>
               <input
                 value={reorderQty}
                 onChange={(e) => setReorderQty(blockNegative(e.target.value))}
@@ -958,7 +954,7 @@ export function AddPartModal({
 
           <div className="mt-5 flex justify-end gap-2">
             <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
+              {t("common.cancel", lang)}
             </Btn>
             <button
               type="submit"
@@ -966,7 +962,7 @@ export function AddPartModal({
               className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
             >
               {saving ? null : <Save className="h-4 w-4" />}
-              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Create item" : "إنشاء الصنف"}
+              {saving ? (t("common.saving", lang)) : t("inventory.forms.createItem", lang)}
             </button>
           </div>
         </form>
@@ -1074,7 +1070,7 @@ export function AdjustItemModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) {
-      setError(lang === "en" ? "Every required field must be filled." : "يجب تعبئة كل الحقول المطلوبة.");
+      setError(t("inventory.forms.everyRequiredField", lang));
       return;
     }
     const input: PartUpdateInput = {
@@ -1093,7 +1089,7 @@ export function AdjustItemModal({
     const res = await updatePart(part.id, input);
     setSaving(false);
     if (res.error || !res.part) {
-      setError(res.error ?? (lang === "en" ? "Could not save changes." : "تعذّر حفظ التغييرات."));
+      setError(res.error ?? (t("inventory.forms.couldNotSave", lang)));
       return;
     }
     onUpdated(res.part);
@@ -1109,24 +1105,22 @@ export function AdjustItemModal({
       >
         <form onSubmit={submit}>
           <div className="flex items-start justify-between gap-4 mb-1">
-            <h2 className="text-lg font-semibold">{lang === "en" ? "Adjust Item" : "تعديل الصنف"}</h2>
+            <h2 className="text-lg font-semibold">{t("inventory.shared.adjustItem", lang)}</h2>
             <button type="button" onClick={close} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
               <X className="h-4 w-4" />
             </button>
           </div>
           <p className="text-sm muted mb-4">
-            {lang === "en"
-              ? "Edit this item's descriptive info. SKU and quantity on hand can't be changed here — quantity only ever moves through Adjust Stock or receiving."
-              : "عدّل معلومات هذا الصنف. لا يمكن تغيير رمز الصنف أو الكمية المتوفرة من هنا — الكمية تتغيّر فقط عبر تعديل المخزون أو الاستلام."}
+            {t("inventory.forms.editItemsDescriptive", lang)}
           </p>
 
           <div className="grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Item / Equipment name *" : "اسم الصنف / المعدة *"}</span>
+              <span className="muted">{t("inventory.forms.fItemEquipmentName", lang)}</span>
               <input value={name} onChange={(e) => setName(e.target.value)} className={INPUT} style={INPUT_STYLE} required />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Name (Arabic) *" : "الاسم (عربي) *"}</span>
+              <span className="muted">{t("inventory.forms.fNameArabic", lang)}</span>
               <input
                 value={nameAr}
                 onChange={(e) => setNameAr(e.target.value)}
@@ -1140,29 +1134,29 @@ export function AdjustItemModal({
             {/* Locked — read-only, same disabled-box pattern AddPartModal's
                 own Warehouse field already uses. */}
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "SKU" : "رمز الصنف"}</span>
+              <span className="muted">{t("inventory.shared.sku", lang)}</span>
               <div className="px-3 py-2 rounded-lg border text-sm font-mono" style={INPUT_STYLE}>
                 {part.sku}
               </div>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Warehouse" : "المستودع"}</span>
+              <span className="muted">{t("inventory.shared.warehouse", lang)}</span>
               <div className="px-3 py-2 rounded-lg border text-sm" style={INPUT_STYLE}>
                 {warehouseName}
               </div>
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Category *" : "الفئة *"}</span>
+              <span className="muted">{t("inventory.forms.fCategory", lang)}</span>
               <ComboInput
                 value={category}
                 onChange={setCategory}
                 options={categoryOptions.map((c) => ({ value: c, label: categoryLabel(c, lang) }))}
-                placeholder={lang === "en" ? "Pick or type a category…" : "اختر أو اكتب فئة…"}
+                placeholder={t("inventory.forms.pickTypeCategory", lang)}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Unit *" : "الوحدة *"}</span>
+              <span className="muted">{t("inventory.forms.fUnit", lang)}</span>
               <div className="flex gap-2">
                 <select
                   value={unitCode}
@@ -1172,7 +1166,7 @@ export function AdjustItemModal({
                   required
                 >
                   <option value="" disabled>
-                    {lang === "en" ? "Pick a unit…" : "اختر وحدة…"}
+                    {t("inventory.forms.pickAUnit", lang)}
                   </option>
                   {allUnits.map((u) => (
                     <option key={u.id} value={u.code}>
@@ -1181,13 +1175,13 @@ export function AdjustItemModal({
                   ))}
                 </select>
                 <Btn type="button" variant="outline" onClick={() => setNewUnitOpen(true)}>
-                  {lang === "en" ? "+ Unit" : "+ وحدة"}
+                  {t("inventory.forms.addUnit", lang)}
                 </Btn>
               </div>
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Unit price (SAR) *" : "سعر الوحدة (ر.س) *"}</span>
+              <span className="muted">{t("inventory.forms.fUnitPriceSar", lang)}</span>
               <input
                 value={unitCost}
                 onChange={(e) => setUnitCost(blockNegative(e.target.value))}
@@ -1207,7 +1201,7 @@ export function AdjustItemModal({
                       <span className="font-medium tabular-nums">{formatSarVat(doc.vat)}</span>
                     </span>
                     <span>
-                      <span className="muted">{lang === "en" ? "Total (incl. VAT)" : "الإجمالي (شامل VAT)"}:</span>{" "}
+                      <span className="muted">{t("inventory.shared.totalInclVat", lang)}:</span>{" "}
                       <span className="font-medium tabular-nums">{formatSarVat(doc.total)}</span>
                     </span>
                   </div>
@@ -1215,7 +1209,7 @@ export function AdjustItemModal({
               })()}
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Reorder level *" : "حد إعادة الطلب *"}</span>
+              <span className="muted">{t("inventory.forms.fReorderLevel", lang)}</span>
               <input
                 value={reorderLevel}
                 onChange={(e) => setReorderLevel(blockNegative(e.target.value))}
@@ -1227,7 +1221,7 @@ export function AdjustItemModal({
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Reorder qty *" : "كمية إعادة الطلب *"}</span>
+              <span className="muted">{t("inventory.forms.fReorderQty", lang)}</span>
               <input
                 value={reorderQty}
                 onChange={(e) => setReorderQty(blockNegative(e.target.value))}
@@ -1238,7 +1232,7 @@ export function AdjustItemModal({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Lead time (days)" : "مدة التوريد (أيام)"}</span>
+              <span className="muted">{t("inventory.forms.leadTimeDays", lang)}</span>
               <input
                 value={leadTimeDays}
                 onChange={(e) => setLeadTimeDays(blockNegative(e.target.value))}
@@ -1249,13 +1243,13 @@ export function AdjustItemModal({
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Supplier" : "المورّد"}</span>
+              <span className="muted">{t("inventory.shared.supplier", lang)}</span>
               <input
                 value={supplier}
                 onChange={(e) => setSupplier(e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
-                placeholder={lang === "en" ? "Free text — set at receipt time otherwise" : "نص حر — يُحدد وقت الاستلام غير ذلك"}
+                placeholder={t("inventory.forms.freeTextSet", lang)}
               />
             </label>
           </div>
@@ -1264,7 +1258,7 @@ export function AdjustItemModal({
 
           <div className="mt-5 flex justify-end gap-2">
             <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
+              {t("common.cancel", lang)}
             </Btn>
             <button
               type="submit"
@@ -1272,7 +1266,7 @@ export function AdjustItemModal({
               className="h-9 px-3 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 inline-flex items-center gap-2"
             >
               {saving ? null : <Save className="h-4 w-4" />}
-              {saving ? (lang === "en" ? "Saving…" : "جارٍ الحفظ…") : lang === "en" ? "Save changes" : "حفظ التغييرات"}
+              {saving ? (t("common.saving", lang)) : t("inventory.shared.saveChanges", lang)}
             </button>
           </div>
         </form>
@@ -1325,7 +1319,7 @@ function NewUnitModal({
     e.preventDefault();
     if (!canSubmit) {
       setError(
-        lang === "en" ? "Code and English label are required." : "الرمز والاسم بالإنجليزية مطلوبان."
+        t("inventory.forms.codeEnglishLabel", lang)
       );
       return;
     }
@@ -1339,7 +1333,7 @@ function NewUnitModal({
     const res = await createUnit(input);
     setSaving(false);
     if (res.error || !res.unit) {
-      setError(res.error ?? (lang === "en" ? "Could not create unit." : "تعذّر إنشاء الوحدة."));
+      setError(res.error ?? (t("inventory.forms.couldNotCreateUnit", lang)));
       return;
     }
     onCreated(res.unit);
@@ -1355,7 +1349,7 @@ function NewUnitModal({
         <form onSubmit={submit}>
           <div className="flex items-start justify-between gap-4 mb-4">
             <h2 className="text-lg font-semibold">
-              {lang === "en" ? "Add a new unit" : "إضافة وحدة جديدة"}
+              {t("inventory.forms.addNewUnit", lang)}
             </h2>
             <button
               type="button"
@@ -1368,36 +1362,36 @@ function NewUnitModal({
 
           <div className="flex flex-col gap-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Code *" : "الرمز *"}</span>
+              <span className="muted">{t("inventory.forms.fCode", lang)}</span>
               <input
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
                 required
-                placeholder={lang === "en" ? "e.g. box" : "مثال: box"}
+                placeholder={t("inventory.forms.egUnitCode", lang)}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "English label *" : "التسمية بالإنجليزية *"}</span>
+              <span className="muted">{t("inventory.forms.fEnglishLabel", lang)}</span>
               <input
                 value={labelEn}
                 onChange={(e) => setLabelEn(e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
                 required
-                placeholder={lang === "en" ? "e.g. Box" : "مثال: Box"}
+                placeholder={t("inventory.forms.egUnitLabel", lang)}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="muted">{lang === "en" ? "Arabic label" : "التسمية بالعربية"}</span>
+              <span className="muted">{t("inventory.forms.arabicLabel", lang)}</span>
               <input
                 value={labelAr}
                 onChange={(e) => setLabelAr(e.target.value)}
                 className={INPUT}
                 style={INPUT_STYLE}
                 dir="rtl"
-                placeholder={lang === "en" ? "optional" : "اختياري"}
+                placeholder={t("inventory.shared.optionalHint", lang)}
               />
             </label>
           </div>
@@ -1406,7 +1400,7 @@ function NewUnitModal({
 
           <div className="mt-5 flex justify-end gap-2">
             <Btn variant="outline" onClick={close}>
-              {lang === "en" ? "Cancel" : "إلغاء"}
+              {t("common.cancel", lang)}
             </Btn>
             <button
               type="submit"
@@ -1415,8 +1409,8 @@ function NewUnitModal({
             >
               {saving ? null : <Save className="h-4 w-4" />}
               {saving
-                ? lang === "en" ? "Saving…" : "جارٍ الحفظ…"
-                : lang === "en" ? "Add a new unit" : "إضافة وحدة جديدة"}
+                ? t("common.saving", lang)
+                : t("inventory.forms.addNewUnit", lang)}
             </button>
           </div>
         </form>
@@ -1476,7 +1470,7 @@ export function InvoiceFileTile({
       <button
         type="button"
         onClick={onRemove}
-        title={lang === "en" ? "Remove" : "حذف"}
+        title={t("inventory.shared.remove", lang)}
         className="absolute top-1 end-1 w-5 h-5 grid place-items-center rounded-full bg-rose-700 text-white text-[11px] leading-none opacity-0 group-hover:opacity-100 transition-opacity"
       >
         ×

@@ -9002,6 +9002,426 @@ export const dict = {
     // and cannot drift from the badge it replaces. "ذكاء" matches the Arabic
     // already used by this badge's own tooltip ("أنشأه الذكاء").
     aiPill: { en: "★ AI", ar: "★ ذكاء" },
+
+    /**
+     * The inventory screens' UI copy, moved here from inline
+     * `lang === "en" ? … : …` conditionals in app/inventory. Every value below
+     * is the string that was already on screen, lifted verbatim in both
+     * languages — this was a move, so nothing here was re-translated and
+     * nothing rendered changes.
+     *
+     * One known wording problem is left ALONE on purpose, because fixing it
+     * would make this a copy change instead of a move: "شامل VAT" in the three
+     * `totalInclVat`-style values keeps VAT in Latin inside Arabic prose, which
+     * the VAT convention says should read "شامل الضريبة" — Latin VAT is for
+     * standalone labels.
+     *
+     * The strings whose English resolved to a DIFFERENT Arabic somewhere — SKU,
+     * Supplier, "Contact person", Remove, Approvals, Variance, "Received by",
+     * "After", "Name (Arabic)" — came in a second pass, because keying them
+     * meant deciding which Arabic wins rather than lifting one. Each landed one
+     * of three ways, and the key's own comment says which:
+     *   - inventory disagreed with ITSELF → take inventory's majority spelling,
+     *     which in all four cases is also this dictionary's (`shared.sku`,
+     *     `.supplier`, `.contactPerson`, `.remove`, and `stock.tabApprovals`,
+     *     `po.thVariance`);
+     *   - same English, different FACT → a separate key, Arabic untouched
+     *     (`stock.thAfter`, `po.receivedBy`);
+     *   - no majority to reconcile to → Arabic untouched and the split named
+     *     (`forms.fNameAr`).
+     *
+     * Some values below duplicate a leaf that already exists in ANOTHER
+     * feature's namespace. That is deliberate and follows how this dictionary
+     * already works: `common` is the shared namespace, and a feature-scoped key
+     * "would misdescribe itself" — see `common.na` — when a second feature
+     * starts reading it. Those pairs are promotion candidates for `common`, and
+     * promoting them is an edit to the OTHER callers, not to inventory.
+     */
+    /**
+     * Copy rendered by MORE THAN ONE of the three inventory files. The split
+     * between these four groups is derived from actual call sites, not taste:
+     * a pair used in one file lives in that file's group, a pair used in two or
+     * more lives here. That is what makes the group name a fact about the app
+     * rather than a label someone has to keep true by hand.
+     */
+    shared: {
+      newPurchaseOrder: { en: "New Purchase Order", ar: "أمر شراء جديد" },
+      aiSuggest: { en: "AI-Suggest", ar: "اقتراح ذكي" },
+      inventoryValue: { en: "Inventory Value", ar: "قيمة المخزون" },
+      openPos: { en: "Open POs", ar: "أوامر مفتوحة" },
+      warehouse: { en: "Warehouse", ar: "المستودع" },
+      stockValue: { en: "Stock Value", ar: "قيمة المخزون" },
+      receivedOn: { en: "Received on", ar: "تاريخ الاستلام" },
+      unitCost: { en: "Unit cost", ar: "تكلفة الوحدة" },
+      totalInclVat: { en: "Total (incl. VAT)", ar: "الإجمالي (شامل VAT)" },
+      adjustItem: { en: "Adjust Item", ar: "تعديل الصنف" },
+      supplierIsRequired: { en: "Supplier is required.", ar: "المورد مطلوب." },
+      warehouseIsRequired: { en: "Warehouse is required.", ar: "المستودع مطلوب." },
+      addLeastOne: { en: "Add at least one line with a positive quantity.", ar: "أضف بنداً واحداً على الأقل بكمية موجبة." },
+      invoiceMustUploaded: { en: "An invoice must be uploaded before saving.", ar: "يجب رفع فاتورة قبل الحفظ." },
+      fSupplier: { en: "Supplier *", ar: "المورد *" },
+      pickASupplier: { en: "Pick a supplier…", ar: "اختر مورّداً…" },
+      addSupplier: { en: "+ Supplier", ar: "+ مورّد" },
+      fWarehouse: { en: "Warehouse *", ar: "المستودع *" },
+      lineItems: { en: "Line items", ar: "بنود الأمر" },
+      pickPartAdd: { en: "Pick a part to add…", ar: "اختر قطعة للإضافة…" },
+      addLine: { en: "Add line", ar: "إضافة بند" },
+      newItem: { en: "New Item", ar: "صنف جديد" },
+      actualQtyReceived: { en: "Actual qty received", ar: "الكمية الفعلية" },
+      actualUnitPrice: { en: "Actual unit price", ar: "سعر الوحدة الفعلي" },
+      subtotal: { en: "Subtotal", ar: "المجموع الفرعي" },
+      actualTotal: { en: "Actual total", ar: "الإجمالي الفعلي" },
+      invoiceRequired: { en: "Invoice (required)", ar: "الفاتورة (إلزامية)" },
+      addInvoice: { en: "Add invoice", ar: "إضافة فاتورة" },
+      uploadLeastOne: { en: "Upload at least one invoice image or PDF. Drag a file or click to browse.", ar: "ارفع صورة فاتورة أو PDF واحداً على الأقل. اسحب ملفاً أو اضغط للاستعراض." },
+      invoicesAttachedSuffix: { en: "invoices attached", ar: "فاتورة مرفقة" },
+      optionalHint: { en: "optional", ar: "اختياري" },
+      supplierContact: { en: "Supplier contact", ar: "بيانات المورّد" },
+      phone: { en: "Phone", ar: "الهاتف" },
+      email: { en: "Email", ar: "البريد الإلكتروني" },
+      saveChanges: { en: "Save changes", ar: "حفظ التغييرات" },
+
+      // The four below are the strings inventory spelled TWO ways itself. Each
+      // value is inventory's own majority spelling, which is also the spelling
+      // the rest of this dictionary already uses — so keying them removes a
+      // disagreement rather than inventing a wording. The minority spelling
+      // each one replaces is named so the change is reviewable, not silent.
+
+      /** Was "رمز الصنف" at the Edit-item modal's read-only SKU (SharedCreateModals). */
+      sku: { en: "SKU", ar: "الرمز" },
+      /** Was "المورّد" (with shadda) at the Edit-item modal's Supplier field. */
+      supplier: { en: "Supplier", ar: "المورد" },
+      /** Was "جهة الاتصال" at the New-supplier modal's label and placeholder. */
+      contactPerson: { en: "Contact person", ar: "الشخص المسؤول" },
+      /** Was "حذف" ("delete") on the invoice-thumbnail remove button. */
+      remove: { en: "Remove", ar: "إزالة" },
+    },
+    /** Copy rendered only by InventoryClient.tsx — the stock list, part drawer and adjust flow. */
+    stock: {
+      pageTitle: { en: "Inventory", ar: "المخزون" },
+      addParts: { en: "Add Parts", ar: "إضافة قطع" },
+      nothingReorderAll: { en: "Nothing to reorder — all parts above threshold.", ar: "لا شيء للطلب — كل القطع فوق الحد." },
+      skus: { en: "SKUs", ar: "أصناف" },
+      lowStockItems: { en: "Low Stock Items", ar: "أصناف منخفضة" },
+      pendingApproval: { en: "Pending Approval", ar: "بانتظار الاعتماد" },
+      inventoryLevels: { en: "Inventory Levels", ar: "مستويات المخزون" },
+      financialAnalysis: { en: "Financial Analysis", ar: "التحليل المالي" },
+      searchPartName: { en: "Search part name, SKU…", ar: "بحث بالاسم أو الرمز…" },
+      noWarehousesYet: { en: "No warehouses yet", ar: "لا توجد مستودعات بعد" },
+      addYourFirst: { en: "Add your first warehouse in Settings — the gear at the bottom of the sidebar — then Warehouses. Parts and stock are tracked per warehouse.", ar: "أضف أول مستودع من الإعدادات — رمز الترس أسفل الشريط الجانبي — ثم المستودعات. تُتتبَّع القطع والمخزون لكل مستودع." },
+      reorderAtInline: { en: "reorder at", ar: "إعادة الطلب عند" },
+      thCategory: { en: "Category", ar: "الفئة" },
+      thStock: { en: "Stock", ar: "المخزون" },
+      thUnitCost: { en: "Unit Cost", ar: "تكلفة الوحدة" },
+      noPartsMatch: { en: "No parts match these filters.", ar: "لا توجد قطع مطابقة لهذه الفلاتر." },
+      financialReport: { en: "Financial report", ar: "التقرير المالي" },
+      quickReorder: { en: "Quick reorder", ar: "إعادة طلب سريعة" },
+      pricingSnapshot: { en: "Pricing snapshot", ar: "ملخص السعر" },
+      currentPrice: { en: "Current price", ar: "السعر الحالي" },
+      perUnit: { en: "per", ar: "لكل" },
+      previousPrice: { en: "Previous price", ar: "السعر السابق" },
+      singleTier: { en: "Single tier", ar: "دفعة وحيدة" },
+      avgCost: { en: "Avg Cost", ar: "متوسط التكلفة" },
+      stockValue: { en: "Stock value", ar: "قيمة المخزون" },
+      belowReorderLevel: { en: "Below reorder level", ar: "تحت حد إعادة الطلب" },
+      inStock: { en: "In stock", ar: "متوفّر" },
+      reorderAt: { en: "Reorder at", ar: "إعادة الطلب عند" },
+      olderStockPrevious: { en: "Older stock at the previous price stays consumable until depleted.", ar: "المخزون القديم بالسعر السابق يبقى قابلاً للاستهلاك حتى ينفد." },
+      stockBatches: { en: "Stock batches", ar: "دفعات المخزون" },
+      qtyPurchased: { en: "Qty purchased", ar: "الكمية المشتراة" },
+      qtyRemaining: { en: "Qty remaining", ar: "الكمية المتبقية" },
+      priceBatchesArent: { en: "Price batches aren't available yet (pending setup).", ar: "دفعات الأسعار غير متاحة بعد (بانتظار الإعداد)." },
+      noPriceBatches: { en: "No price batches yet.", ar: "لا توجد دفعات أسعار بعد." },
+      movementHistory: { en: "Movement history", ar: "سجل الحركات" },
+      thChange: { en: "Change", ar: "التغيير" },
+      thBy: { en: "By", ar: "بواسطة" },
+      movementHistoryIsnt: { en: "Movement history isn't available yet (pending setup).", ar: "سجل الحركات غير متاح بعد (بانتظار الإعداد)." },
+      noMovementsYet: { en: "No movements yet.", ar: "لا توجد حركات بعد." },
+      financialSummary: { en: "Financial summary", ar: "الملخص المالي" },
+      reorderInfo: { en: "Reorder info", ar: "معلومات إعادة الطلب" },
+      suggestedQty: { en: "Suggested qty", ar: "الكمية المقترحة" },
+      leadTime: { en: "Lead time", ar: "مدة التوريد" },
+      totalValue: { en: "Total value", ar: "القيمة الإجمالية" },
+      adjustStock: { en: "Adjust Stock", ar: "تعديل المخزون" },
+      createPo: { en: "Create PO", ar: "إنشاء أمر شراء" },
+      addPartsInventory: { en: "Add Parts to Inventory", ar: "إضافة قطع للمخزون" },
+      receiveNewStock: { en: "Receive new stock from a supplier. Invoice upload is required.", ar: "استلام مخزون جديد من مورّد. رفع الفاتورة إلزامي." },
+      noLinesYet: { en: "No lines yet — pick a part above to add one.", ar: "لا توجد بنود — اختر قطعة أعلاه لإضافتها." },
+      saveReceive: { en: "Save & receive", ar: "حفظ واستلام" },
+      newQuantityCannot: { en: "New quantity cannot be negative.", ar: "لا يمكن أن تكون الكمية الجديدة سالبة." },
+      adjustmentRequiresNote: { en: "Adjustment requires a note explaining the reason.", ar: "يتطلب التعديل ملاحظة توضح السبب." },
+      adjustStockTitle: { en: "Adjust stock", ar: "تعديل المخزون" },
+      currentStock: { en: "Current stock:", ar: "المخزون الحالي:" },
+      fNewQuantity: { en: "New quantity *", ar: "الكمية الجديدة *" },
+      fReason: { en: "Reason *", ar: "السبب *" },
+      egPhysicalCountCorrection: { en: "e.g. physical count correction", ar: "مثال: تصحيح بعد الجرد الفعلي" },
+
+      /**
+       * The Inventory tab strip's third tab. Was "الموافقات" inline, which is
+       * the only place inventory says موافقة: its own queue heading is
+       * `po.approvalsQueue` ("قائمة الاعتمادات") and every neighbouring string
+       * — `stock.pendingApproval`, `po.awaitingApproval`, `po.approvedBy` — is
+       * built on اعتماد. "الاعتمادات" also matches `consumption.client
+       * .tabApprovals`, the same tab in the Consumption strip.
+       */
+      tabApprovals: { en: "Approvals", ar: "الاعتمادات" },
+
+      /**
+       * Movement-history column: the on-hand quantity AFTER the movement.
+       * Deliberately NOT `consumption.modals.colAfter`, which renders
+       * "بعد الخروج" ("after the exit") — correct there because that table only
+       * lists exits, and wrong here, where the same column also carries
+       * receipts and manual adjustments. Same English, different fact.
+       */
+      thAfter: { en: "After", ar: "بعد" },
+
+      /**
+       * The page subtitle, counted on the live warehouse count.
+       *
+       * English is the SAME sentence in all four buckets and reproduces the old
+       * `warehouse${n === 1 ? "" : "s"}` exactly: `plural()` tests `n === 1`
+       * before it looks at `n % 100`, so 1 is the only value that reaches
+       * `one`, and every other n — including 101 — lands on two/few/many, all
+       * of which print "warehouses".
+       *
+       * Arabic is written whole per bucket rather than spliced, so the numeral,
+       * the noun and its case agree: مستودع واحد / مستودعين / N مستودعات /
+       * N مستودعًا. The old inline version printed "1 مستودع" and "2 مستودعات",
+       * both wrong; those two counts are the visible change here.
+       *
+       * The `many` bucket carries the accusative tanwīn (مستودعًا, not مستودع)
+       * because 11–99 takes a SINGULAR ACCUSATIVE tamyīz. It is spelled out
+       * because the noun is indefinite and standalone — contrast a tamyīz that
+       * is itself the first term of an iḍāfa, which takes the same accusative
+       * case but no tanwīn (see `consumption.workOrders`).
+       */
+      subtitleWarehouses: {
+        one: { en: "Parts, fluids, tires & equipment across {n} warehouse", ar: "قطع وسوائل وإطارات ومعدات في مستودع واحد" },
+        two: { en: "Parts, fluids, tires & equipment across {n} warehouses", ar: "قطع وسوائل وإطارات ومعدات في مستودعين" },
+        few: { en: "Parts, fluids, tires & equipment across {n} warehouses", ar: "قطع وسوائل وإطارات ومعدات في {n} مستودعات" },
+        many: { en: "Parts, fluids, tires & equipment across {n} warehouses", ar: "قطع وسوائل وإطارات ومعدات في {n} مستودعًا" },
+      },
+    },
+    /** Copy rendered only by PurchaseOrders.tsx — PO list, detail, approvals and receiving. */
+    po: {
+      direct: { en: "Direct", ar: "مباشر" },
+      generatedByAi: { en: "Generated by AI", ar: "أنشأه الذكاء" },
+      activeProcurement: { en: "Active procurement", ar: "العمليات النشطة" },
+      awaitingReceipt: { en: "Awaiting receipt", ar: "بانتظار الاستلام" },
+      pendingReview: { en: "Pending review", ar: "بانتظار المراجعة" },
+      someLinesWere: { en: "Some lines were removed — they don't belong to the newly selected warehouse.", ar: "أُزيلت بعض البنود — لا تنتمي إلى المستودع المختار حديثًا." },
+      couldNotSave: { en: "Could not save purchase order.", ar: "تعذّر حفظ أمر الشراء." },
+      editPurchaseOrder: { en: "Edit Purchase Order", ar: "تعديل أمر الشراء" },
+      purchaseOrderInternal: { en: "A Purchase Order is an internal request to procure parts. Issuing moves no stock — receiving is a separate step.", ar: "أمر الشراء طلب داخلي لاقتناء القطع. الإصدار لا يحرّك أي مخزون — الاستلام خطوة منفصلة." },
+      lockedPartOnly: { en: "Locked — this part only exists in this warehouse.", ar: "مقفل — هذه القطعة موجودة في هذا المستودع فقط." },
+      expectedDelivery: { en: "Expected delivery", ar: "تاريخ التسليم المتوقع" },
+      noLineItems: { en: "No line items yet.", ar: "لا توجد بنود بعد." },
+      estimatedTotal: { en: "Estimated total", ar: "الإجمالي التقديري" },
+      saveDraft: { en: "Save draft", ar: "حفظ مسوّدة" },
+      issuingBusy: { en: "Issuing…", ar: "جارٍ الإصدار…" },
+      saveIssue: { en: "Save & Issue", ar: "حفظ وإصدار" },
+      issueNow: { en: "Issue now", ar: "إصدار الآن" },
+      openPurchaseOrders: { en: "Open Purchase Orders", ar: "أوامر الشراء المفتوحة" },
+      noOpenPurchase: { en: "No open purchase orders.", ar: "لا توجد أوامر شراء مفتوحة." },
+      poNumber: { en: "PO Number", ar: "رقم الأمر" },
+      issuedOn: { en: "Issued on", ar: "تاريخ الإصدار" },
+      poTotalIncl: { en: "PO Total (incl. VAT)", ar: "إجمالي الأمر (شامل VAT)" },
+      printAsInvoice: { en: "Print as Invoice", ar: "طباعة كفاتورة" },
+      requestedBy: { en: "Requested by", ar: "طلب بواسطة" },
+      orderedSuffix: { en: "ordered", ar: "مطلوب" },
+      approvedBy: { en: "Approved by", ar: "تم الاعتماد من" },
+      awaitingApproval: { en: "Awaiting approval", ar: "بانتظار الاعتماد" },
+      rejectedBy: { en: "Rejected by", ar: "رُفض من" },
+      issue: { en: "Issue", ar: "إصدار" },
+      receiveStock: { en: "Receive Stock", ar: "استلام المخزون" },
+      reject: { en: "Reject", ar: "رفض" },
+      approve: { en: "Approve", ar: "اعتماد" },
+      purchaseOrdersAwaiting: { en: "Purchase Orders Awaiting Receipt", ar: "أوامر الشراء بانتظار الاستلام" },
+      noPosAwaiting: { en: "No POs awaiting receipt.", ar: "لا أوامر بانتظار الاستلام." },
+      pickIssuedPo: { en: "Pick an issued PO to record what physically arrived. Step 2 of purchasing.", ar: "اختر أمرًا صادرًا لتسجيل ما وصل فعلاً. الخطوة الثانية من الشراء." },
+      everyLineNeeds: { en: "Every line needs a positive received quantity and a non-negative price.", ar: "كل بند يحتاج كمية مستلمة موجبة وسعراً غير سالب." },
+      receivePurchaseOrder: { en: "Receive Purchase Order", ar: "استلام أمر الشراء" },
+      confirmWhatActually: { en: "Confirm what actually arrived. Invoice upload is required — this moves stock into inventory.", ar: "أكّد ما وصل فعلاً. رفع الفاتورة إلزامي — هذا يُدخل المخزون فعليًا." },
+      detachPurchaseOrder: { en: "Detach from this purchase order", ar: "فصل عن أمر الشراء هذا" },
+      leaveUncheckedReceive: { en: "Leave unchecked to receive against this PO — it will move to Pending Approval and include any extra parts you add below.", ar: "اتركه دون تحديد للاستلام مقابل أمر الشراء هذا — سينتقل إلى بانتظار الاعتماد ويشمل أي قطع إضافية تضيفها أدناه." },
+      orderedQty: { en: "Ordered qty", ar: "الكمية المطلوبة" },
+      orderedUnitPrice: { en: "Ordered unit price", ar: "سعر الوحدة المطلوب" },
+      extraNotPo: { en: "Extra — not on PO", ar: "إضافي — ليس في الأمر" },
+      match: { en: "Match", ar: "مطابق" },
+      noOtherParts: { en: "No other parts in this warehouse", ar: "لا توجد قطع أخرى في هذا المستودع" },
+      addExtraPart: { en: "Add extra part", ar: "إضافة قطعة إضافية" },
+      saveLooseReceipt: { en: "Save as loose receipt", ar: "حفظ كاستلام مباشر" },
+      confirmReceipt: { en: "Confirm receipt", ar: "تأكيد الاستلام" },
+      directReceipt: { en: "Direct Receipt", ar: "استلام مباشر" },
+      noVotesYet: { en: "No votes yet", ar: "لا توجد أصوات بعد" },
+      awaitingMatchingSecond: { en: "awaiting a matching second vote", ar: "بانتظار صوت ثانٍ مطابق" },
+      noReceiptLinked: { en: "No receipt is linked to this record yet.", ar: "لا يوجد إيصال مرتبط بهذا السجل بعد." },
+      hasAlreadyBeen: { en: "This has already been resolved — closing this form. Refresh to see its final state.", ar: "تم حسم هذا بالفعل — سيُغلق هذا النموذج. حدّث الصفحة لرؤية حالته النهائية." },
+      bothApproversMust: { en: "Both approvers must cast the SAME action — two approves, or two matching rejects.", ar: "يجب أن يتخذ المعتمِدان نفس الإجراء — اعتمادان، أو رفضان متطابقان." },
+      optionalComment: { en: "Optional comment", ar: "تعليق اختياري" },
+      bothApproversMustPick: { en: "Both approvers must pick the SAME outcome — reason may differ.", ar: "يجب أن يختار المعتمِدان نفس النتيجة — يمكن أن يختلف السبب." },
+      rejectionOutcome: { en: "Rejection outcome", ar: "نتيجة الرفض" },
+      keepPartsVoid: { en: "Keep parts, void cost", ar: "الاحتفاظ بالقطع، إلغاء التكلفة" },
+      stockStaysHand: { en: "Stock stays on hand — this receipt's cost lots are repriced to 0.", ar: "يبقى المخزون كما هو — تُعاد تسعير دفعات هذا الإيصال إلى صفر." },
+      removeStockEntirely: { en: "Remove stock entirely", ar: "إزالة المخزون بالكامل" },
+      reversesStockReceipt: { en: "Reverses the stock this receipt added. Blocked if any of it has already been consumed.", ar: "يعكس المخزون الذي أضافه هذا الإيصال. يُمنع إذا استُهلك جزء منه بالفعل." },
+      rejectionReason: { en: "Rejection reason", ar: "سبب الرفض" },
+      wasAlreadyResolved: { en: "That was already resolved by someone else — refreshing…", ar: "تم حسم هذا بالفعل من قبل شخص آخر — يتم التحديث…" },
+      approvalsQueue: { en: "Approvals Queue", ar: "قائمة الاعتمادات" },
+      bothApproversMustCast: { en: "Both approvers must cast the same action to finalize", ar: "يجب أن يتخذ المعتمِدان نفس الإجراء لحسم الأمر" },
+      nothingAwaitingApproval: { en: "Nothing awaiting approval.", ar: "لا شيء بانتظار الاعتماد." },
+      reference: { en: "Reference", ar: "المرجع" },
+      actualTotalIncl: { en: "Actual Total (incl. VAT)", ar: "الإجمالي الفعلي (شامل VAT)" },
+      votes: { en: "Votes", ar: "الأصوات" },
+      hasAlreadyBeenResolved: { en: "This has already been resolved — refreshing…", ar: "تم حسم هذا بالفعل — يتم التحديث…" },
+      noTraceablePrice: { en: "No traceable price lot — this line cannot be rejected (either outcome).", ar: "لا توجد دفعة سعر يمكن تتبعها — لا يمكن رفض هذا البند (أي نتيجة)." },
+      notTraceable: { en: "Not traceable", ar: "غير قابل للتتبع" },
+      spend30d: { en: "Spend (30d)", ar: "الإنفاق (30 يوم)" },
+      spend90d: { en: "Spend (90d)", ar: "الإنفاق (90 يوم)" },
+      topSpendCategories: { en: "Top spend categories (90d)", ar: "أعلى فئات الإنفاق (90 يوم)" },
+      noApprovedSpend: { en: "No approved spend yet", ar: "لا يوجد إنفاق معتمد بعد" },
+      spendBySupplier: { en: "Spend by supplier", ar: "الإنفاق حسب المورّد" },
+      aiInsightsRecommendations: { en: "AI Insights & Recommendations", ar: "رؤى وتوصيات الذكاء" },
+      itemsBelowReorder: { en: "Items below reorder level — consider issuing POs now", ar: "أصناف تحت حد إعادة الطلب — اعتبر إصدار أوامر شراء" },
+      partsWhoseLatest: { en: "Parts whose latest price increased >10% — review supplier alternatives", ar: "قطع ارتفع آخر سعر لها أكثر من 10% — راجع البدائل" },
+      suppliersMultipleSmall: { en: "Suppliers with multiple small POs — consolidating can unlock volume discounts", ar: "موردون بأوامر صغيرة متعددة — التوحيد قد يحقق خصومات الكمية" },
+      noRecommendationsTime: { en: "No recommendations at this time — inventory looks healthy.", ar: "لا توصيات حالياً — المخزون في حالة جيدة." },
+      purchasedButNot: { en: "Purchased but not yet consumed — review storage and assignment.", ar: "تم الشراء ولم يُستهلك بعد — راجع التخزين والإسناد." },
+      stockPricingLook: { en: "Stock and pricing look healthy. No action recommended.", ar: "المخزون والسعر في حالة جيدة. لا حاجة لإجراء." },
+      purchases: { en: "Purchases", ar: "المشتريات" },
+      poLines: { en: "PO lines", ar: "بنود أوامر" },
+      consumption: { en: "Consumption", ar: "الاستهلاك" },
+      allTime: { en: "all time", ar: "الإجمالي" },
+      inStock: { en: "in stock", ar: "في المخزون" },
+      priceTrend: { en: "Price Trend", ar: "اتجاه السعر" },
+      vsHistoricalBatches: { en: "vs historical batches", ar: "مقابل الدفعات السابقة" },
+      purchaseHistory: { en: "Purchase history", ar: "سجل المشتريات" },
+      thPoNumber: { en: "PO #", ar: "رقم الأمر" },
+      noPurchasesYet: { en: "No purchases yet", ar: "لا توجد مشتريات بعد" },
+      viewPart: { en: "View Part", ar: "عرض القطعة" },
+
+      /**
+       * The PO / receipt detail grid's "Received by" field — the person's name.
+       * Deliberately NOT `consumption.modals.printRoleReceivedBy` ("المُستلِم"),
+       * which is a signature-block ROLE on the printed voucher, sitting beside
+       * `printRoleIssuedBy`, `printRoleGate` and `signatureLine`. Two surfaces,
+       * two registers. The English matching is a coincidence of the label.
+       */
+      receivedBy: { en: "Received by", ar: "استُلم بواسطة" },
+
+      /**
+       * Receiving-form badge on a line whose received qty or price differs from
+       * what was ordered. Was "فرق" inline; "الفرق" is what `reports.th.variance`
+       * already prints for the same computed quantity.
+       */
+      thVariance: { en: "Variance", ar: "الفرق" },
+
+      /**
+       * Pre-filled note on an AI-suggested PO, counted on the parts in the
+       * suggestion. This one is built OUTSIDE the render — the suggestion
+       * carries both languages as data — so both are filled at build time and
+       * the caller still picks with `lang`.
+       *
+       * English is one sentence across all four buckets and reproduces the old
+       * `part${n === 1 ? "" : "s"}` exactly. The old Arabic was invariant
+       * ("N قطعة"); the singular, the dual and 3–10 now agree with their
+       * numeral, and 11+ carries the accusative tanwīn (قطعةً) the invariant
+       * form was missing.
+       */
+      aiSuggestionNote: {
+        one: { en: "AI suggestion · {n} part at/below reorder level.", ar: "اقتراح ذكي · قطعة واحدة عند/تحت حد الطلب." },
+        two: { en: "AI suggestion · {n} parts at/below reorder level.", ar: "اقتراح ذكي · قطعتان عند/تحت حد الطلب." },
+        few: { en: "AI suggestion · {n} parts at/below reorder level.", ar: "اقتراح ذكي · {n} قطع عند/تحت حد الطلب." },
+        many: { en: "AI suggestion · {n} parts at/below reorder level.", ar: "اقتراح ذكي · {n} قطعةً عند/تحت حد الطلب." },
+      },
+
+      // The five below interpolate a value into a sentence. Each token stands
+      // where the template literal already had its `${…}`, so the rendered
+      // string is unchanged in both languages. `{unit}` appears twice in two of
+      // them — `fill()` replaces every occurrence, not the first.
+
+      /** Keeps its trailing space: the caller appends the raw error after it. */
+      savedDraftIssuingFailed: { en: "Saved as draft ({po}), but issuing failed: ", ar: "حُفظ كمسوّدة ({po})، لكن تعذّر الإصدار: " },
+      looseReceiptDetached: {
+        en: "This will be saved as a plain loose receipt — {po} stays issued, unreceived, and none of its lines change. Every line below can now be removed.",
+        ar: "سيُحفظ هذا كاستلام مباشر عادي — يبقى {po} صادراً وغير مستلم، ولن تتغيّر أي من بنوده. يمكن الآن إزالة أي بند أدناه.",
+      },
+      tipStockCritical: {
+        en: "Stock critical — only {qty} {unit} left vs reorder level of {level}. Recommend issuing a PO of {reorderQty} {unit} immediately.",
+        ar: "المخزون حرج — يتبقى {qty} {unit} مقابل حد إعادة طلب {level}. يُوصى بإصدار أمر شراء بكمية {reorderQty} {unit} فورًا.",
+      },
+      tipPriceUp: {
+        en: "Price up {pct}% over historical batches. Compare quotes from alternative suppliers before the next PO.",
+        ar: "ارتفع السعر {pct}% مقارنة بالدفعات السابقة. قارن العروض من موردين بدلاء قبل أمر الشراء التالي.",
+      },
+      tipOverstocked: {
+        en: "Overstocked at {qty} {unit} (>3× reorder level). Consider postponing the next PO.",
+        ar: "مخزون زائد عند {qty} {unit} (>3× حد الطلب). فكّر في تأجيل أمر الشراء التالي.",
+      },
+
+      // The four below are the "you have already voted" notices. They were two
+      // nested conditionals — language outside, prior vote inside — which is
+      // why they sat out the mechanical batch. Splitting them by prior vote
+      // makes each a plain leaf; the `lang` branch becomes t()'s argument.
+      voteAlreadyApproved: { en: "You've already voted Approve — submitting again just reaffirms it.", ar: "لقد صوّتَّ بالاعتماد مسبقًا — الإرسال مرة أخرى يؤكد ذلك فقط." },
+      voteRejectBecomesApprove: { en: "You previously voted Reject — submitting this will change your vote to Approve.", ar: "صوّتَّ سابقًا بالرفض — الإرسال هنا سيغيّر صوتك إلى اعتماد." },
+      /** `{outcome}` is the rejection-outcome label, or empty when none was stored. */
+      voteAlreadyRejected: { en: "You've already voted Reject ({outcome}) — submitting again updates it.", ar: "صوّتَّ بالرفض مسبقًا ({outcome}) — الإرسال يحدّثه." },
+      voteApproveBecomesReject: { en: "You previously voted Approve — submitting this will change your vote to Reject.", ar: "صوّتَّ بالاعتماد سابقًا — الإرسال هنا سيغيّر صوتك إلى رفض." },
+    },
+    /** Copy rendered only by SharedCreateModals.tsx — the create/edit modals for parts, suppliers, categories and units. */
+    forms: {
+      noPartsAvailable: { en: "No parts available", ar: "لا توجد قطع متاحة" },
+      supplierNameRequired: { en: "Supplier name is required.", ar: "اسم المورّد مطلوب." },
+      addNewSupplier: { en: "Add a new supplier", ar: "إضافة مورّد جديد" },
+      quicklyAddSupplier: { en: "Quickly add a supplier. They'll be available in every Add Parts dropdown.", ar: "إضافة مورّد بسرعة. سيظهر فوراً في جميع القوائم." },
+      fSupplierName: { en: "Supplier name *", ar: "اسم المورّد *" },
+      egAlKhaleejHeavy: { en: "e.g. Al-Khaleej Heavy Trucks", ar: "مثال: الخليج للشاحنات الثقيلة" },
+      everyFieldRequired: { en: "Every field is required.", ar: "جميع الحقول مطلوبة." },
+      couldNotCreate: { en: "Could not create item.", ar: "تعذّر إنشاء الصنف." },
+      newItemEquipment: { en: "New item / equipment", ar: "صنف / معدة جديدة" },
+      createBrandNew: { en: "Create a brand-new item or equipment type. It's added to the catalog and dropped straight into your current list.", ar: "أنشئ صنفًا أو معدة جديدة. تُضاف للكتالوج وتُدرج مباشرة في قائمتك الحالية." },
+      fItemEquipmentName: { en: "Item / Equipment name *", ar: "اسم الصنف / المعدة *" },
+      fNameArabic: { en: "Name (Arabic) *", ar: "الاسم (عربي) *" },
+      fSku: { en: "SKU *", ar: "رمز الصنف *" },
+      fCategory: { en: "Category *", ar: "الفئة *" },
+      pickTypeCategory: { en: "Pick or type a category…", ar: "اختر أو اكتب فئة…" },
+      fUnit: { en: "Unit *", ar: "الوحدة *" },
+      pickAUnit: { en: "Pick a unit…", ar: "اختر وحدة…" },
+      addUnit: { en: "+ Unit", ar: "+ وحدة" },
+      fUnitPriceSar: { en: "Unit price (SAR) *", ar: "سعر الوحدة (ر.س) *" },
+      fReorderLevel: { en: "Reorder level *", ar: "حد إعادة الطلب *" },
+      fReorderQty: { en: "Reorder qty *", ar: "كمية إعادة الطلب *" },
+      createItem: { en: "Create item", ar: "إنشاء الصنف" },
+      everyRequiredField: { en: "Every required field must be filled.", ar: "يجب تعبئة كل الحقول المطلوبة." },
+      couldNotSave: { en: "Could not save changes.", ar: "تعذّر حفظ التغييرات." },
+      editItemsDescriptive: { en: "Edit this item's descriptive info. SKU and quantity on hand can't be changed here — quantity only ever moves through Adjust Stock or receiving.", ar: "عدّل معلومات هذا الصنف. لا يمكن تغيير رمز الصنف أو الكمية المتوفرة من هنا — الكمية تتغيّر فقط عبر تعديل المخزون أو الاستلام." },
+      leadTimeDays: { en: "Lead time (days)", ar: "مدة التوريد (أيام)" },
+      freeTextSet: { en: "Free text — set at receipt time otherwise", ar: "نص حر — يُحدد وقت الاستلام غير ذلك" },
+      codeEnglishLabel: { en: "Code and English label are required.", ar: "الرمز والاسم بالإنجليزية مطلوبان." },
+      couldNotCreateUnit: { en: "Could not create unit.", ar: "تعذّر إنشاء الوحدة." },
+      addNewUnit: { en: "Add a new unit", ar: "إضافة وحدة جديدة" },
+      fCode: { en: "Code *", ar: "الرمز *" },
+      egUnitCode: { en: "e.g. box", ar: "مثال: box" },
+      fEnglishLabel: { en: "English label *", ar: "التسمية بالإنجليزية *" },
+      egUnitLabel: { en: "e.g. Box", ar: "مثال: Box" },
+      arabicLabel: { en: "Arabic label", ar: "التسمية بالعربية" },
+
+      /**
+       * The New-supplier modal's optional Arabic-name field. Sibling of
+       * `fNameArabic` above, which is the Add-part modal's REQUIRED one.
+       *
+       * Arabic left exactly as it rendered. This dictionary now spells one
+       * label three ways — "الاسم بالعربية" (mt, drivers.form, drivers.staff),
+       * "الاسم (بالعربية)" (customers, archive) and "الاسم (عربي)" (both
+       * inventory keys) — so there is no single existing key to reconcile
+       * against, and adopting any one of them here would still leave
+       * `fNameArabic` next door disagreeing. The fix is `common.fNameAr` plus
+       * migrating all seven callers; that is a copy change across five
+       * features, not an inventory move.
+       */
+      fNameAr: { en: "Name (Arabic)", ar: "الاسم (عربي)" },
+    },
   },
 } as const;
 
