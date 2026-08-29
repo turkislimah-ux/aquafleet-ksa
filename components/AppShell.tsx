@@ -155,8 +155,21 @@ function NavRow({ item, lang, pathname }: {
   );
 }
 
-type AppCtx = { lang: Lang; setLang: (l: Lang) => void; theme: "light" | "dark"; setTheme: (m: "light" | "dark") => void };
-const Ctx = createContext<AppCtx>({ lang: "en", setLang: () => {}, theme: "light", setTheme: () => {} });
+type AppCtx = {
+  lang: Lang;
+  setLang: (l: Lang) => void;
+  /** Login only — see seedLangFromAccount. Not for the header toggle. */
+  seedLangFromAccount: (l: Lang) => void;
+  theme: "light" | "dark";
+  setTheme: (m: "light" | "dark") => void;
+};
+const Ctx = createContext<AppCtx>({
+  lang: "en",
+  setLang: () => {},
+  seedLangFromAccount: () => {},
+  theme: "light",
+  setTheme: () => {},
+});
 export const useApp = () => useContext(Ctx);
 
 /**
@@ -255,6 +268,12 @@ export default function AppShell({
   // It must stay an effect for exactly that reason: reading localStorage during
   // render would put a value in the first client pass that the server could not
   // have known.
+  //
+  // IT CANNOT OVERRIDE A LOGIN-TIME ACCOUNT LANGUAGE, and that is by
+  // construction rather than by a guard: it has [] deps, so it runs at mount —
+  // on /login, BEFORE the user signs in — and seedLangFromAccount writes
+  // localStorage as well as the cookie, so on any later full load the two stores
+  // already agree and this pass finds nothing to correct.
   useEffect(() => {
     const savedLang = (typeof window !== "undefined" && localStorage.getItem("lang")) as Lang | null;
     const savedTheme = (typeof window !== "undefined" && localStorage.getItem("theme")) as "light" | "dark" | null;
@@ -288,6 +307,33 @@ export default function AppShell({
 
   const setLang = (l: Lang) => setLangState(l);
   const setTheme = (m: "light" | "dark") => setThemeState(m);
+
+  // THE ACCOUNT LANGUAGE SEEDS A SESSION AT LOGIN — AND ONLY AT LOGIN (0171).
+  //
+  // This is the "REPLACES localStorage, not a second writer beside it" path
+  // 0159 named. It runs once, at sign-in, from app/login/page.tsx: the account
+  // value becomes THIS session's stored preference, and from that moment the
+  // header toggle governs exactly as it always has. Nothing writes back to the
+  // account, so the toggle stays device-local and the next login re-asserts.
+  //
+  // BOTH STORES ARE WRITTEN HERE, SYNCHRONOUSLY, rather than left to the
+  // persist effect below. The login handler calls router.refresh() in the same
+  // turn, and that request is sent before React flushes passive effects — a
+  // cookie written by the effect would arrive after it, so the refreshed layout
+  // would render <html lang="en"> over a session that had just gone Arabic.
+  // Writing localStorage in the same breath keeps the two-store invariant
+  // writePrefCookie documents: they never disagree except by outside
+  // interference.
+  const seedLangFromAccount = (l: Lang) => {
+    setLangState(l);
+    try {
+      localStorage.setItem("lang", l);
+    } catch {
+      // Private mode, or storage blocked by policy — same tolerance as
+      // clearDevicePrefs. The cookie is the half first paint depends on.
+    }
+    writePrefCookie("lang", l);
+  };
 
   // SHARED TERMINAL: the display preferences leave with the session. Run from
   // the sign-out button, alongside lib/actions/auth.ts deleting the cookies.
@@ -329,11 +375,11 @@ export default function AppShell({
   // No chrome renders here, so the toggles are still absent: the language on
   // this screen is whatever the browser last stored.
   if (pathname === "/login") {
-    return <Ctx.Provider value={{ lang, setLang, theme, setTheme }}>{children}</Ctx.Provider>;
+    return <Ctx.Provider value={{ lang, setLang, seedLangFromAccount, theme, setTheme }}>{children}</Ctx.Provider>;
   }
 
   return (
-    <Ctx.Provider value={{ lang, setLang, theme, setTheme }}>
+    <Ctx.Provider value={{ lang, setLang, seedLangFromAccount, theme, setTheme }}>
       <SearchDockProvider>
         {/*
           --app-sidebar-w is published for page chrome that has to clear the

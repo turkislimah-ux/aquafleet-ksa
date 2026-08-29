@@ -65,7 +65,16 @@
 --
 -- ===========================================================================
 -- preferred_language IS COSMETIC AND CAN DISAGREE WITH THE REAL UI LANGUAGE
+--   *** SUPERSEDED BY 0171 — READ THAT FIRST. THE COLUMN IS NOW WIRED. ***
 -- ===========================================================================
+-- Nothing below is edited: it is the reasoning as it stood, and it is still the
+-- reason a two-way sync is banned. What changed is that the app now does the one
+-- thing the last sentence of this block sanctioned — the account value REPLACES
+-- the device store at login and never writes back — so the "do NOT wire" line is
+-- no longer the current instruction. The line numbers cited below are also stale
+-- (first paint reads a cookie now, not localStorage). 0171 carries both
+-- corrections and the live column comment.
+--
 -- THE REAL i18n SWITCH IS NOT THIS COLUMN. Measured, not assumed: the app reads
 -- and writes `localStorage["lang"]` in components/AppShell.tsx (lines 61 and
 -- 73), typed `Lang = "en" | "ar"` from lib/i18n.ts. That is what actually

@@ -486,10 +486,10 @@ export default function ProfileSection({ open, lang }: { open: boolean; lang: "e
 
                 <Field
                   label={t("settings.profile.fPreferredLanguage", lang)}
-                  // Stated plainly because the alternative is a control that
-                  // looks like the language switch and is not one. The real
-                  // switch is the header toggle (localStorage, per-device);
-                  // this is a per-account label. 0159 forbids syncing them.
+                  // Two controls, two lifetimes, and the hint says which is
+                  // which: this is the ACCOUNT language, applied at login on
+                  // any device (0171), while the header toggle is the SESSION
+                  // switch and never writes back here.
                   hint={t("settings.profile.hPreferredLanguage", lang)}
                 >
                   <select

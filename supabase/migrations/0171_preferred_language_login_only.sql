@@ -1,0 +1,80 @@
+-- ===========================================================================
+-- 0171 — preferred_language IS NOW WIRED, AT LOGIN ONLY. COMMENT-ONLY.
+-- ===========================================================================
+-- NO SCHEMA CHANGE. The column, its type and its CHECK all landed in 0159 and
+-- are exactly what this feature needs. What changes is the INSTRUCTION carried
+-- by 0159's comments, which told a reader the opposite of what the app now does.
+--
+-- This migration exists because a comment does not refresh itself. Per CLAUDE.md
+-- §6, `create or replace` keeps the same OID and leaves the old comment in
+-- place; there is no view here, but the same failure applies to any object whose
+-- description outlives the design it described. Left alone, the next person to
+-- read user_profiles in the database would find "do not wire this into the
+-- language switch as a sync" and correctly conclude the login seed is a bug.
+--
+-- ---------------------------------------------------------------------------
+-- WHAT 0159 ACTUALLY FORBADE, AND WHY THIS IS NOT THAT
+-- ---------------------------------------------------------------------------
+-- 0159 banned ONE IMPLEMENTATION, not the feature, and it named the sanctioned
+-- alternative in the same breath:
+--
+--   "do NOT wire this column into the language switch as a 'sync', because a
+--    per-account value and a per-device value have different lifetimes and the
+--    sync would fight the user every time they switch machines. If the language
+--    switch ever should become per-account, that is a deliberate change that
+--    REPLACES localStorage, not a second writer added beside it."
+--
+-- The trap it described is real and is still avoided here. A "sync" is
+-- CONTINUOUS and BIDIRECTIONAL: it would push the account value at the device
+-- mid-session and push every toggle back at the account, so a user who flipped
+-- to English on a shared laptop would find their phone in English tomorrow, and
+-- a user who set Arabic on their account would be flipped back mid-session on a
+-- machine they had deliberately set to English. That is the fight.
+--
+-- WHAT 0171 DOES INSTEAD — the account value is asserted at exactly ONE moment,
+-- sign-in, and never again:
+--
+--   * On login, app/login/page.tsx reads preferred_language on the select that
+--     already fetches default_route, and seeds the session with it: the value is
+--     written to the `lang` cookie AND to localStorage together, so the session
+--     now OWNS it (components/AppShell.tsx, seedLangFromAccount). That is the
+--     "replaces localStorage" half — the account does not sit beside the device
+--     store arguing with it, it sets it and lets go.
+--   * NULL means no preference and changes nothing at all. A user who never
+--     touched the field keeps whatever the device was showing. The seed is
+--     opt-in; it is not a reset to English.
+--   * The header toggle stays DEVICE-LOCAL and writes NOTHING back here. Flip it
+--     mid-session and it holds for that session. The next login re-asserts the
+--     account value. There is no second writer, in either direction.
+--   * lib/supabase/middleware.ts carries the same column on its own copy of that
+--     select (the already-signed-in-arriving-at-/login redirect) but sets the
+--     cookie ONLY when the request has no `lang` cookie at all — a seed into an
+--     empty jar, never an override of a live session preference.
+--
+-- ---------------------------------------------------------------------------
+-- 0159'S STATED MECHANISM WAS ALSO STALE, INDEPENDENTLY OF THE RULING
+-- ---------------------------------------------------------------------------
+-- Its header cited `localStorage["lang"]` at components/AppShell.tsx lines 61
+-- and 73 as what renders the interface. Since the first-paint work that moved
+-- language and theme into cookies, that is wrong on both counts: the server
+-- reads a `lang` COOKIE in app/layout.tsx to render <html lang dir>, and
+-- localStorage is the client-side reconciliation source, not the first-paint
+-- source. The ruling stood on its own reasoning and was not damaged by this, but
+-- a comment naming line numbers in a file that has since been rewritten is a
+-- pointer to nothing. Both descriptions below now name behaviour, not lines.
+--
+-- RLS: UNCHANGED AND UNTOUCHED. Reading preferred_language at login runs under
+-- the user's own session against own_user_profiles (user_id = auth.uid()) —
+-- the same policy default_route has always been read through. No new grant, no
+-- SECURITY DEFINER function, so §6's re-revoke rule does not apply here.
+
+-- ---------------------------------------------------------------------
+-- The table comment repeats the retired claim, so it is restated whole.
+-- `comment on` replaces the description outright; there is no way to edit
+-- one clause of it.
+-- ---------------------------------------------------------------------
+comment on table public.user_profiles is
+  'Self-entered personal profile (0159) — one optional row per auth user, every column nullable, RLS restricted to user_id = auth.uid() for both read and write. EXPLICITLY NOT LINKED TO ANY EMPLOYEE OR HR RECORD BY DESIGN: no foreign key to staff, drivers or leave_periods, no iqama, no salary, no leave, no employment data, and none may be added. The absence of an auth-to-employee link is a safety feature — it means no query can widen from a cosmetic profile to payroll or identity documents, because the join does not exist. job_title is a free-text cosmetic label, NOT a role and NOT a permission; nothing may branch on it. The emergency contact is what the user chose to share with colleagues, NOT the HR contact of record. preferred_language is the account language, applied to the session at sign-in only (0171) — see its own comment. avatar_path is a storage path into profile-images, never image bytes. No row at all and a row of all-NULLs are the same state: nothing filled in.';
+
+comment on column public.user_profiles.preferred_language is
+  'THE ACCOUNT LANGUAGE, APPLIED AT LOGIN ONLY (0171, superseding 0159''s "do not wire" note). en, ar, or NULL for no preference. On sign-in the app seeds the session from this value — cookie and localStorage together — so the user lands in their own language on any device. NULL changes nothing: no preference means the device keeps what it was showing. The in-app language toggle is per-session and per-device and NEVER writes back to this column, so a mid-session switch holds until the next login re-asserts the account value. Do NOT turn this into a two-way sync: that is what 0159 forbade, and the reason still holds — a per-account value and a per-device value have different lifetimes and a continuous sync fights the user on every machine they switch to. The CHECK accepts exactly the two languages lib/i18n.ts can render.';

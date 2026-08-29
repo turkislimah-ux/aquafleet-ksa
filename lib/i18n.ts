@@ -1125,8 +1125,8 @@ export const dict = {
       noPreference: { en: "No preference", ar: "بدون تفضيل" },
       fPreferredLanguage: { en: "Preferred language", ar: "اللغة المفضلة" },
       hPreferredLanguage: {
-        en: "A label only. To change the interface language, use the toggle in the header.",
-        ar: "ملصق فقط. لتغيير لغة الواجهة استخدم زر اللغة في الأعلى.",
+        en: "The language you sign in to, on any device. The header toggle changes it for this session only.",
+        ar: "اللغة التي تفتح بها الواجهة عند تسجيل الدخول من أي جهاز. زر اللغة في الأعلى يغيّرها لهذه الجلسة فقط.",
       },
       gPassword: { en: "Password", ar: "كلمة المرور" },
       fCurrentPassword: { en: "Current password", ar: "كلمة المرور الحالية" },

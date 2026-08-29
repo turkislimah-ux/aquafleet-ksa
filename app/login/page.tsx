@@ -15,7 +15,7 @@ export default function LoginPage() {
   // AppShell renders /login WITHOUT its chrome but WITH the context provider,
   // so this reads the same stored language every other page does. There is no
   // toggle on this screen — see the note at that early return in AppShell.
-  const { lang } = useApp();
+  const { lang, seedLangFromAccount } = useApp();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +33,8 @@ export default function LoginPage() {
       return;
     }
 
-    // WHERE TO LAND — the user's own preference (0159), or the dashboard.
+    // WHERE TO LAND, AND IN WHICH LANGUAGE — the user's own preferences (0159),
+    // or the app's defaults.
     //
     // The session exists by this point, so this select is RLS-scoped to the user
     // who just signed in. A missing row, a null column and a failed read all
@@ -41,10 +42,22 @@ export default function LoginPage() {
     // — nobody is left on the login screen because a preference could not be
     // read, and a route removed by a later release cannot 404 someone out of the
     // app at the one moment they have no way to reach Settings and fix it.
+    //
+    // preferred_language rides along on a query that already runs. It is the
+    // login-only account language (0171): it seeds THIS session and the header
+    // toggle governs from there, so nothing here writes back to the account.
     const { data: profile } = await supabase
       .from("user_profiles")
-      .select("default_route")
+      .select("default_route, preferred_language")
       .maybeSingle();
+
+    // NULL MEANS "NO PREFERENCE" AND MUST CHANGE NOTHING. A user who never set
+    // the field keeps whatever this device was already showing — the seed is an
+    // opt-in, not a reset to English. The literal comparison is also the read
+    // half of 0159's CHECK: an unrenderable third value falls through here
+    // rather than reaching Lang.
+    const pref = profile?.preferred_language;
+    if (pref === "en" || pref === "ar") seedLangFromAccount(pref);
 
     router.push(resolveLandingRoute(profile?.default_route ?? null));
     router.refresh();

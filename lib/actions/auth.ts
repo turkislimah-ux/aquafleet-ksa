@@ -12,9 +12,13 @@ export async function signOut() {
   //
   // app/layout.tsx renders <html lang dir class> from these two cookies, so a
   // stale one would hand the next person at this machine the previous user's
-  // Arabic and dark mode on first paint. They are per-device, not per-account
-  // (see 0159's preferred_language, deliberately unwired), so signing out is
-  // the only moment we know the device changed hands.
+  // Arabic and dark mode on first paint. They hold the SESSION's preferences,
+  // and signing out is the only moment we know the device changed hands.
+  //
+  // Clearing them is what makes the account language work rather than what
+  // fights it: preferred_language (0159, wired at login by 0171) is re-read on
+  // the next sign-in, so the incoming user's own language is applied from a
+  // clean jar instead of inheriting the outgoing user's.
   //
   // Deleted here rather than only on the client so it holds without JS and
   // cannot lose a race with the redirect. AppShell clears the matching

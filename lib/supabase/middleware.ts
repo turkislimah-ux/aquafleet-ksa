@@ -60,19 +60,47 @@ export async function updateSession(request: NextRequest) {
     // this branch exists precisely because they are ALREADY signed in, would be
     // a redirect loop.
     let stored: string | null = null;
+    let language: string | null = null;
     try {
       const { data } = await supabase
         .from("user_profiles")
-        .select("default_route")
+        .select("default_route, preferred_language")
         .maybeSingle();
       stored = data?.default_route ?? null;
+      language = data?.preferred_language ?? null;
     } catch {
       /* fall through to the dashboard */
     }
 
     const url = request.nextUrl.clone();
     url.pathname = resolveLandingRoute(stored);
-    return NextResponse.redirect(url);
+    const redirect = NextResponse.redirect(url);
+
+    // SEED ONLY WHEN THERE IS NOTHING TO OVERRIDE (0171).
+    //
+    // The account language is a LOGIN-time value, and this branch is not login —
+    // it is an already-signed-in user who asked for /login, which normally means
+    // a bookmark or the back button mid-session. Writing the cookie
+    // unconditionally here would re-assert the account language over a header
+    // toggle the user made minutes ago, which is exactly the per-account-fights-
+    // per-device behaviour 0159 refused to allow.
+    //
+    // So it fires only when this device carries no `lang` cookie at all: a
+    // cleared jar with a surviving session, where there is no device preference
+    // to contradict. AppShell writes the cookie and localStorage together, so
+    // the absent cookie is also the closest signal available here that the
+    // client half is empty — the server cannot read localStorage to be sure, and
+    // if one did survive alone, the reconciliation pass still wins as it always
+    // has. A narrow seed, not a second writer.
+    if (!request.cookies.has("lang") && (language === "en" || language === "ar")) {
+      redirect.cookies.set("lang", language, {
+        path: "/",
+        maxAge: 31536000,
+        sameSite: "lax",
+      });
+    }
+
+    return redirect;
   }
 
   return supabaseResponse;
