@@ -48,6 +48,8 @@ import {
   fetchDailyTrips, createDeferredDelivery, updateDeferredDelivery, deleteDeferredDelivery,
   type DailyTripsData,
 } from "@/lib/actions/daily-trips";
+import type { CsvValue } from "@/lib/csv";
+import { useCsvSource, withSar, type RegisterCsv } from "./exportSource";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30";
@@ -119,7 +121,9 @@ function UnpricedFlag({ n, lang }: { n: number; lang: Lang }) {
 // lang comes from the shell context rather than a prop: ReportsClient does not
 // otherwise read it, and threading it through would add a parameter to a
 // component that has no other use for it.
-export default function DailyTripsTab({ today }: { today: string }) {
+export default function DailyTripsTab(
+  { today, registerCsv }: { today: string; registerCsv?: RegisterCsv },
+) {
   const { lang } = useApp();
 
   const [period, setPeriod] = useState<DailyPeriod>("day");
@@ -183,6 +187,75 @@ export default function DailyTripsTab({ today }: { today: string }) {
     range.from === range.to
       ? formatDayKey(range.from)
       : `${formatDayKey(range.from)} — ${formatDayKey(range.to)}`;
+
+  // ==========================================================================
+  // THE CSV — PART 1 ONLY, AND THAT IS THE ISOLATION RULE, NOT AN OVERSIGHT
+  // ==========================================================================
+  // The manual side-log is NOT in this file. It is on screen, so leaving it out
+  // needs a reason, and the reason is the one stated at the top of this module
+  // and enforced by 0166: its figures are hand-typed and carry none of the
+  // provenance the money model depends on, so they are totalled separately and
+  // never added into one combined number.
+  //
+  // A CSV cannot hold that separation. Put both parts in one sheet and the
+  // Revenue column selects as a single range — the reader gets exactly the
+  // combined figure the screen refuses to show them, and no way to tell which
+  // riyals were audited afterwards. Two tables in one file is the same trap
+  // wearing a blank row. So the export is the project record, which is the part
+  // that reconciles against trips, and the side-log stays on screen where its
+  // heading, its note and its own total are attached to it.
+  //
+  // NO PROJECT-TOTAL ROWS either, for the mirror-image reason: a total row
+  // inside a flat table double-counts the moment anyone sums the column. Every
+  // total the screen prints is a sum of rows that are all present here.
+  const buildCsv = useCallback(() => {
+    if (tables.length === 0) return null;
+
+    const rows: CsvValue[][] = [];
+    for (const tbl of tables) {
+      for (const g of tbl.drivers) {
+        for (const r of g.rows) {
+          // THE ZERO ROW SURVIVES THE EXPORT. An assigned driver who drove
+          // nothing keeps his line here for the same reason he keeps it on
+          // paper: an absent name and an idle driver must not look the same.
+          rows.push([
+            tbl.projectName,
+            g.driverName,
+            // The screen renders an em dash for a missing plate; the file
+            // leaves the cell EMPTY. A dash is a glyph a spreadsheet would
+            // treat as text in a column of plates.
+            r.plate,
+            r.trips,
+            r.unpriced,
+            r.commission,
+            r.revenue,
+          ]);
+        }
+      }
+    }
+
+    return {
+      slug: "daily-trips",
+      title: t("reports.daily.printTitle", lang),
+      period: periodLabel,
+      columns: [
+        t("common.project", lang),
+        t("common.driver", lang),
+        t("reports.th.truck", lang),
+        t("reports.th.trips", lang),
+        t("reports.export.unpriced", lang),
+        withSar(t("reports.th.commission", lang), lang),
+        withSar(t("common.revenue", lang), lang),
+      ],
+      rows,
+    };
+    // `tables` is the useMemo above, so its identity only moves when `data`
+    // does; `periodLabel` is a string and compares by value. Neither
+    // re-registers this closure on an unrelated render — which matters here,
+    // because registering sets state one level up and renders again.
+  }, [lang, tables, periodLabel]);
+
+  useCsvSource(registerCsv, buildCsv);
 
   function openCreate() {
     setEditId(null);

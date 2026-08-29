@@ -14,14 +14,16 @@
 // (Turki's call, both times). Recorded so the next reader does not "fix" it
 // back down again: the header is the intended home.
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTabParam } from "@/lib/useTabParam";
 import { useRouter } from "next/navigation";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Download } from "lucide-react";
 import { PageHeader, Btn } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, type TKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { downloadCsv, type CsvSource } from "@/lib/csv";
+import { type RegisterCsv } from "./exportSource";
 import {
   monthsDesc, monthLabel,
   type PnlRow, type CollectionsRow, type RevenueMonthRow, type ReceivableRow,
@@ -144,6 +146,31 @@ export default function ReportsClient(props: ReportsClientProps) {
   const [month, setMonth] = useState<string | null>(months[0] ?? null);
   const active = month && months.includes(month) ? month : months[0] ?? null;
 
+  // THE EXPORT SOURCE — registered by whichever report is on screen. See
+  // exportSource.ts for why the button reaches its data this way round rather
+  // than the period being lifted up here.
+  //
+  // A function held in state has to be SET through the updater form: React
+  // treats a bare function argument as "compute the next state from the
+  // previous one" and would call the closure immediately, storing whatever
+  // table it built at that instant — a snapshot that then never updates.
+  const [exportSource, setExportSource] = useState<CsvSource | null>(null);
+  // Stable identity. The children register from an effect keyed on this, so a
+  // new function every render would re-register on every render.
+  const registerExport = useCallback<RegisterCsv>((src) => {
+    setExportSource(() => src);
+  }, []);
+
+  function runExport() {
+    if (!exportSource) return;
+    const table = exportSource();
+    if (!table) return;
+    // The period the file covers goes in the NAME, not just the header row:
+    // these land in a downloads folder together and "pnl.csv (3)" tells the
+    // reader nothing about which quarter they opened.
+    downloadCsv(table, table.period ?? "");
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -159,29 +186,54 @@ export default function ReportsClient(props: ReportsClientProps) {
         // a period, not a reason to hide the dictionary — the dictionary is what
         // explains what the missing figures WOULD have meant.
         actions={
-          tab === "overview" ? (
-            <div className="flex flex-wrap items-center gap-2">
-              {months.length > 0 && (
-                <label className="flex items-center gap-2 text-sm">
-                  <span className="muted">{t("reports.shell.period", lang)}</span>
-                  <select
-                    value={active ?? ""}
-                    onChange={(e) => setMonth(e.target.value)}
-                    className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
-                    style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
-                  >
-                    {months.map((m) => (
-                      <option key={m} value={m}>{monthLabel(m)}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <Btn variant="outline" onClick={() => setGlossaryOpen(true)}>
-                <BookOpen className="h-4 w-4" />
-                {t("reports.shell.metricsDictionary", lang)}
+          <div className="flex flex-wrap items-center gap-2">
+            {tab === "overview" && (
+              <>
+                {months.length > 0 && (
+                  <label className="flex items-center gap-2 text-sm">
+                    <span className="muted">{t("reports.shell.period", lang)}</span>
+                    <select
+                      value={active ?? ""}
+                      onChange={(e) => setMonth(e.target.value)}
+                      className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
+                      style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
+                    >
+                      {months.map((m) => (
+                        <option key={m} value={m}>{monthLabel(m)}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <Btn variant="outline" onClick={() => setGlossaryOpen(true)}>
+                  <BookOpen className="h-4 w-4" />
+                  {t("reports.shell.metricsDictionary", lang)}
+                </Btn>
+              </>
+            )}
+
+            {/* EXPORT IS ON BOTH TABS — the one control here that is not
+                Overview-scoped, because every report has rows worth taking into
+                a spreadsheet. It is DISABLED, not hidden, when the report on
+                screen has nothing tabular to give (the Narrative statement) or
+                has not loaded yet: a button that vanishes per statement reads as
+                a bug, and a hidden one cannot explain itself. */}
+            {/* THE TOOLTIP IS ON THE WRAPPER, AND IT HAS TO BE. Btn carries
+                `disabled:pointer-events-none`, so a disabled button never
+                receives a hover and a `title` on it would never fire — the grey
+                control would sit there explaining nothing. The span keeps its
+                pointer events, so the browser reads ITS title instead.
+                Set ONLY when disabled: an enabled button explains itself by
+                working, and a tooltip under the cursor there is just noise. */}
+            <span
+              className="inline-flex"
+              title={exportSource ? undefined : t("reports.shell.exportDisabled", lang)}
+            >
+              <Btn variant="outline" onClick={runExport} disabled={!exportSource}>
+                <Download className="h-4 w-4" />
+                {t("reports.shell.exportCsv", lang)}
               </Btn>
-            </div>
-          ) : undefined
+            </span>
+          </div>
         }
       />
 
@@ -215,6 +267,7 @@ export default function ReportsClient(props: ReportsClientProps) {
           {...props}
           months={months}
           month={active}
+          registerCsv={registerExport}
           onManageExpenses={() => setExpensesOpen(true)}
         />
       ) : (
@@ -245,6 +298,7 @@ export default function ReportsClient(props: ReportsClientProps) {
           issuedPayslips={props.issuedPayslips}
           driverCommission={props.driverCommission}
           today={props.today}
+          registerCsv={registerExport}
           onManageExpenses={() => setExpensesOpen(true)}
         />
       )}

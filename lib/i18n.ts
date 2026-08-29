@@ -3493,6 +3493,51 @@ export const dict = {
       },
       period: { en: "Period", ar: "الفترة" },
       metricsDictionary: { en: "Metrics dictionary", ar: "قاموس المقاييس" },
+      // "CSV" stays Latin in the Arabic: it is the file extension the user will
+      // see on the downloaded file, and a transliteration would name something
+      // that does not appear anywhere on their disk.
+      exportCsv: { en: "Export CSV", ar: "تصدير CSV" },
+      // WHY THE BUTTON IS GREY, said out loud. The export button is disabled
+      // rather than hidden on the surfaces that have no table — Narrative is
+      // prose, and a single opened payslip is one document. A control that
+      // vanishes per statement reads as a bug, but a silent grey one reads as a
+      // dead button, which is the same complaint from the other side. This is
+      // the sentence that closes it, and it is deliberately about the VIEW and
+      // not about the button: the reader wants to know what to do next, which
+      // is go to a statement that has rows.
+      exportDisabled: {
+        en: "This view has no table to export.",
+        ar: "لا يحتوي هذا العرض على جدول قابل للتصدير.",
+      },
+    },
+
+    // --- the CSV export ----------------------------------------------------
+    // UNIT WRAPPERS, NOT SECOND SPELLINGS. A CSV heading needs its unit —
+    // "Revenue (SAR)" — because the cell beside it is a bare number with no
+    // formatter to explain it (lib/csv.ts). Every one of those headings already
+    // exists under `reports.th` or `common`, so these keys take an ALREADY
+    // TRANSLATED heading and append the unit, rather than minting a second
+    // Arabic spelling of "Revenue" that can drift from the on-screen one.
+    export: {
+      sarCol: { en: "{c} (SAR)", ar: "{c} (ر.س)" },
+      pctCol: { en: "{c} (%)", ar: "{c} (%)" },
+      // Column headings for the tall Measure/Unit/Value tables (Overview KPIs,
+      // the P&L ledger, the Cost totals) — a shared numeric column can hold
+      // riyals, counts and percentages at once, so the unit rides per ROW.
+      line: { en: "Line", ar: "البند" },
+      measure: { en: "Measure", ar: "المقياس" },
+      unit: { en: "Unit", ar: "الوحدة" },
+      changePct: { en: "Change (%)", ar: "التغير (%)" },
+      // The per-row unit values themselves.
+      unitSar: { en: "SAR", ar: "ر.س" },
+      unitPct: { en: "%", ar: "%" },
+      unitCount: { en: "Count", ar: "عدد" },
+      // Daily Trips' unpriced count as a COLUMN, which the screen has no
+      // equivalent of: on screen it is a chip reading "{n} unpriced" tucked
+      // beside the trip count, and a chip cannot be a heading. Same noun-free
+      // phrasing as `reports.daily.unpricedChip`, so the two never disagree
+      // about what the word is — only about where the number sits.
+      unpriced: { en: "Unpriced", ar: "بدون سعر" },
     },
 
     // The period grain. `key` is the enum ("month"), `label` is this.

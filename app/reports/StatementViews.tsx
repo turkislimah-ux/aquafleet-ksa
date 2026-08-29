@@ -15,7 +15,7 @@
 // Each statement carries its own print id so "print" means "print this
 // statement", not the whole tab. The ids are whitelisted in globals.css.
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Info, Printer } from "lucide-react";
 import { Table, TH, TD, Btn } from "@/components/ui";
 import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
@@ -42,6 +42,11 @@ import {
   type PayslipBasisRow, type IssuedPayslipRow,
   type DriverCommissionByProjectRow,
 } from "@/lib/reports";
+import type { CsvValue } from "@/lib/csv";
+// NOT a violation of the leaf rule above: exportSource.ts imports react,
+// lib/csv and lib/i18n and nothing else — in particular it does not import
+// StatementsTab, so the one-way edge this file depends on still holds.
+import { useCsvSource, withSar, withPct, type RegisterCsv } from "./exportSource";
 
 // MODULE-PRIVATE. Used by 17 call sites in this file and imported by none —
 // StatementsTab takes only the statement components. It was exported from the
@@ -111,11 +116,12 @@ function Empty({ children }: { children: React.ReactNode }) {
 // every figure summed here came out of v_revenue_invoices.
 // ---------------------------------------------------------------------------
 export function RevenueStatement({
-  invoices, returns, outstandingLive, periodStart, periodEnd, label,
+  invoices, returns, outstandingLive, periodStart, periodEnd, label, registerCsv,
 }: {
   invoices: RevenueInvoiceRow[]; returns: SalesReturnRow[];
   outstandingLive: InvoiceOutstandingLiveRow[];
   periodStart: string; periodEnd: string; label: string;
+  registerCsv?: RegisterCsv;
 }) {
   const { lang } = useApp();
   const rows = useMemo(() => {
@@ -161,6 +167,39 @@ export function RevenueStatement({
     outstanding: sumOver(rows, (r) => r.outstanding),
   };
   const returned = sumOver(periodReturns, (r) => r.reversed_revenue_sar);
+
+  // ONE ROW PER CUSTOMER, plus the total line the table already shows.
+  // The sales-returns sub-table below is NOT exported: it is a different grain
+  // (one row per returned invoice, not per customer) and putting it under the
+  // same headings would put a returned amount in the Revenue column. Its total
+  // is on screen and is called out to Turki as an omission.
+  const buildCsv = useCallback(() => {
+    if (rows.length === 0) return null;
+    return {
+      slug: "revenue",
+      title: t("reports.revenue.title", lang),
+      period: label,
+      columns: [
+        t("reports.th.customer", lang),
+        t("reports.th.invoices", lang),
+        withSar(t("reports.metric.revenue", lang), lang),
+        withSar(t("reports.th.paid", lang), lang),
+        withSar(t("reports.th.outstanding", lang), lang),
+      ],
+      rows: [
+        ...rows.map((r): CsvValue[] => [r.name, r.count, r.revenue, r.paid, r.outstanding]),
+        // The invoice count on the total line is a sum of the counts above, the
+        // same figure the footer renders — not a re-count of the source rows.
+        [
+          t("reports.th.total", lang),
+          sumOver(rows, (r) => r.count),
+          totals.revenue, totals.paid, totals.outstanding,
+        ],
+      ],
+    };
+  }, [lang, label, rows, totals.revenue, totals.paid, totals.outstanding]);
+
+  useCsvSource(registerCsv, buildCsv);
 
   return (
     <div id="revenue-print" className="card p-6">
@@ -247,15 +286,63 @@ export function RevenueStatement({
 // RECEIVABLES STATEMENT — a position as of today, not a period measure.
 // ---------------------------------------------------------------------------
 export function ReceivablesStatement({
-  receivables, aging,
-}: { receivables: ReceivableRow[]; aging: AgingRow[] }) {
+  receivables, aging, registerCsv,
+}: { receivables: ReceivableRow[]; aging: AgingRow[]; registerCsv?: RegisterCsv }) {
   const { lang } = useApp();
   const bands = AGING_ORDER.map((b) => {
     const row = aging.find((a) => a.aging_bucket === b);
     return { bucket: b, value: row?.outstanding_sar ?? 0, count: row?.invoice_count ?? 0 };
   });
   const total = sumOver(bands, (b) => b.value);
-  const ordered = [...receivables].sort((a, b) => b.days_outstanding - a.days_outstanding);
+  // MEMOIZED for identity, not for cost. `[...x].sort()` returns a new array
+  // every render, and the export callback below closes over it — an unstable
+  // dep there re-registers on every render, and registering sets state one
+  // level up, so the render that follows re-registers again. Same order, same
+  // rows; only the reference is now stable.
+  const ordered = useMemo(
+    () => [...receivables].sort((a, b) => b.days_outstanding - a.days_outstanding),
+    [receivables],
+  );
+
+  // THE OPEN INVOICES, NOT THE AGING BANDS. The bands are a four-row summary of
+  // the very rows below them — a spreadsheet reader can pivot the band out of
+  // the day count, and cannot recover an invoice from a band. Each row carries
+  // its own band anyway, so nothing in the summary is lost.
+  //
+  // NO `period`. This statement is a position as of today, not a measure over a
+  // range: `Head` prints "As of today" where every other statement prints a
+  // period label, and the file says the same (see CsvTable.period in lib/csv).
+  const buildCsv = useCallback(() => {
+    if (ordered.length === 0) return null;
+    return {
+      slug: "receivables",
+      title: t("reports.receivables.title", lang),
+      period: t("reports.receivables.asOfToday", lang),
+      columns: [
+        t("reports.th.invoice", lang),
+        t("reports.th.customer", lang),
+        t("reports.th.confirmed", lang),
+        t("reports.th.band", lang),
+        t("reports.th.days", lang),
+        withSar(t("reports.th.outstanding", lang), lang),
+      ],
+      rows: ordered.map((r): CsvValue[] => [
+        // An unnumbered invoice writes an EMPTY cell, not the em dash the table
+        // shows: a dash in a spreadsheet is a value someone can filter on by
+        // accident, an empty cell is the absence it actually is.
+        r.invoice_number ?? null,
+        r.customer_name,
+        // The date only, as rendered — confirmed_at is a full timestamp and the
+        // time of day is not what this column reports.
+        r.confirmed_at.slice(0, 10),
+        r.aging_bucket,
+        r.days_outstanding,
+        r.outstanding_sar,
+      ]),
+    };
+  }, [lang, ordered]);
+
+  useCsvSource(registerCsv, buildCsv);
 
   return (
     <div id="receivables-print" className="card p-6">
@@ -351,7 +438,7 @@ export function ReceivablesStatement({
 export function CostStatement({
   maintPerTruck, purchasing, payroll, commissions, commissionsPaid,
   filling, fillingByStation,
-  periodStart, periodEnd, label,
+  periodStart, periodEnd, label, registerCsv,
 }: {
   maintPerTruck: MaintenancePerTruckRow[];
   purchasing: PurchasingRow[];
@@ -361,6 +448,7 @@ export function CostStatement({
   filling: FillingMonthRow[];
   fillingByStation: FillingByStationRow[];
   periodStart: string; periodEnd: string; label: string;
+  registerCsv?: RegisterCsv;
 }) {
   const { lang } = useApp();
   // Per truck: sum the three named measures across the period's months. All
@@ -400,6 +488,22 @@ export function CostStatement({
   // the period picker in StatementsTab.
   const partsTotal = sumOver(trucks, (tr) => tr.parts);
   const osTotal = sumOver(trucks, (tr) => tr.os);
+
+  // HOISTED, NOT NEW. Each of these was written inline in a <TD> below and is
+  // now named so the CSV builder and the cell that renders it read the SAME
+  // expression — a second copy in the builder is a second place for a money
+  // figure to drift. Identical arithmetic, identical order; `earned` and `paid`
+  // above are left exactly as they were.
+  const staffSalary = sumOver(pay, (r) => r.staff_salary_sar);
+  const driverSalary = sumOver(pay, (r) => r.driver_salary_sar);
+  const totalPayroll = sumOver(pay, (r) => r.staff_salary_sar + r.driver_salary_sar);
+  const tripCommission = sumOver(com, (r) => r.trip_commission_sar);
+  const specials = sumOver(com, (r) => r.specials_sar);
+  const adjustments = sumOver(com, (r) => r.adjustments_sar);
+  const bonuses = sumOver(com, (r) => r.bonus_sar);
+  const payoutCount = sumOver(comPaid, (r) => r.payout_count);
+  const stockReceived = sumOver(pur, (r) => r.received_stock_value_sar);
+  const receiptCount = sumOver(pur, (r) => r.receipt_count);
 
   // ---- station fill (0112) ----------------------------------------------
   // Summed across the period's months from the view's own output — no new
@@ -452,6 +556,73 @@ export function CostStatement({
     }
     return [...m.values()].sort((a, b) => b.sar - a.sar);
   }, [fillRows]);
+
+  // THE TOTALS, NOT THE BREAKDOWNS. This statement puts six tables on screen —
+  // fill by water type, fill by station, maintenance per truck, payroll,
+  // commissions earned, commissions paid, plus purchasing — and they have four
+  // different row grains. One CSV cannot hold four grains without either
+  // inventing blank columns or firing four files from one button, so it holds
+  // the scalar totals every one of those tables foots to. The per-truck,
+  // per-station and per-water-type rows are called out as omissions.
+  //
+  // Component | Unit | Value: a single numeric column carrying riyals AND trip
+  // counts, so the unit rides per ROW, the same shape the Overview export uses.
+  const buildCsv = useCallback(() => {
+    const SAR = t("reports.export.unitSar", lang);
+    const CNT = t("reports.export.unitCount", lang);
+    const rows: CsvValue[][] = [
+      // Fill cost. THE UNCOSTED COUNT TRAVELS WITH THE MONEY, here as much as on
+      // screen: sum() skips a fill whose station has no price for its water
+      // type, so `fillTotal` is the total of what is KNOWN and is short by an
+      // unknown amount whenever that count is above zero. A file with the money
+      // and without the count is a total that is quietly wrong.
+      [t("reports.costs.fillHead", lang), SAR, fillTotal],
+      [t("reports.th.fills", lang), CNT, fillCosted],
+      [t("reports.th.uncosted", lang), CNT, fillUncosted],
+
+      [t("reports.th.parts", lang), SAR, partsTotal],
+      [t("reports.th.outsourced", lang), SAR, osTotal],
+      [t("reports.costs.maintHead", lang), SAR, partsTotal + osTotal],
+
+      [t("reports.costs.staffSalaries", lang), SAR, staffSalary],
+      [t("reports.costs.driverSalaries", lang), SAR, driverSalary],
+      [t("reports.costs.totalPayroll", lang), SAR, totalPayroll],
+
+      [t("reports.costs.tripCommission", lang), SAR, tripCommission],
+      [t("reports.costs.specials", lang), SAR, specials],
+      [t("reports.costs.adjustments", lang), SAR, adjustments],
+      [t("reports.costs.bonuses", lang), SAR, bonuses],
+      [t("reports.costs.totalEarned", lang), SAR, earned],
+      // CASH, NOT ACCRUAL — and never netted against the earned lines above.
+      // The two panels sit side by side on screen for exactly that reason.
+      [t("reports.costs.payouts", lang), CNT, payoutCount],
+      [t("reports.costs.totalPaid", lang), SAR, paid],
+
+      // NOT A P&L COST — stock received is inventory moving, expensed when it is
+      // consumed. It sits last, below everything that does belong to the
+      // statement, so no reader takes the column as something that sums.
+      [t("reports.costs.stockReceived", lang), SAR, stockReceived],
+      [t("reports.costs.receipts", lang), CNT, receiptCount],
+    ];
+    return {
+      slug: "costs",
+      title: t("reports.costs.title", lang),
+      period: label,
+      columns: [
+        t("common.component", lang),
+        t("reports.export.unit", lang),
+        t("reports.th.value", lang),
+      ],
+      rows,
+    };
+  }, [
+    lang, label, fillTotal, fillCosted, fillUncosted, partsTotal, osTotal,
+    staffSalary, driverSalary, totalPayroll,
+    tripCommission, specials, adjustments, bonuses, earned, payoutCount, paid,
+    stockReceived, receiptCount,
+  ]);
+
+  useCsvSource(registerCsv, buildCsv);
 
   return (
     <div id="cost-print" className="card p-6">
@@ -632,16 +803,16 @@ export function CostStatement({
         <tbody>
           <tr>
             <TD>{t("reports.costs.staffSalaries", lang)}</TD>
-            <TD className="text-end tabular-nums">{formatSar(sumOver(pay, (r) => r.staff_salary_sar))}</TD>
+            <TD className="text-end tabular-nums">{formatSar(staffSalary)}</TD>
           </tr>
           <tr>
             <TD>{t("reports.costs.driverSalaries", lang)}</TD>
-            <TD className="text-end tabular-nums">{formatSar(sumOver(pay, (r) => r.driver_salary_sar))}</TD>
+            <TD className="text-end tabular-nums">{formatSar(driverSalary)}</TD>
           </tr>
           <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
             <TD>{t("reports.costs.totalPayroll", lang)}</TD>
             <TD className="text-end tabular-nums">
-              {formatSar(sumOver(pay, (r) => r.staff_salary_sar + r.driver_salary_sar))}
+              {formatSar(totalPayroll)}
             </TD>
           </tr>
         </tbody>
@@ -678,19 +849,19 @@ export function CostStatement({
             <tbody>
               <tr>
                 <TD>{t("reports.costs.tripCommission", lang)}</TD>
-                <TD className="text-end tabular-nums">{formatSar(sumOver(com, (r) => r.trip_commission_sar))}</TD>
+                <TD className="text-end tabular-nums">{formatSar(tripCommission)}</TD>
               </tr>
               <tr>
                 <TD>{t("reports.costs.specials", lang)}</TD>
-                <TD className="text-end tabular-nums">{formatSar(sumOver(com, (r) => r.specials_sar))}</TD>
+                <TD className="text-end tabular-nums">{formatSar(specials)}</TD>
               </tr>
               <tr>
                 <TD>{t("reports.costs.adjustments", lang)}</TD>
-                <TD className="text-end tabular-nums">{formatSar(sumOver(com, (r) => r.adjustments_sar))}</TD>
+                <TD className="text-end tabular-nums">{formatSar(adjustments)}</TD>
               </tr>
               <tr>
                 <TD>{t("reports.costs.bonuses", lang)}</TD>
-                <TD className="text-end tabular-nums">{formatSar(sumOver(com, (r) => r.bonus_sar))}</TD>
+                <TD className="text-end tabular-nums">{formatSar(bonuses)}</TD>
               </tr>
               <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
                 <TD>{t("reports.costs.totalEarned", lang)}</TD>
@@ -710,7 +881,7 @@ export function CostStatement({
             <tbody>
               <tr>
                 <TD>{t("reports.costs.payouts", lang)}</TD>
-                <TD className="text-end tabular-nums">{formatNum(sumOver(comPaid, (r) => r.payout_count))}</TD>
+                <TD className="text-end tabular-nums">{formatNum(payoutCount)}</TD>
               </tr>
               <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
                 <TD>{t("reports.costs.totalPaid", lang)}</TD>
@@ -745,12 +916,12 @@ export function CostStatement({
           <tr>
             <TD>{t("reports.costs.stockReceived", lang)}</TD>
             <TD className="text-end tabular-nums">
-              {formatSar(sumOver(pur, (r) => r.received_stock_value_sar))}
+              {formatSar(stockReceived)}
             </TD>
           </tr>
           <tr>
             <TD>{t("reports.costs.receipts", lang)}</TD>
-            <TD className="text-end tabular-nums">{formatNum(sumOver(pur, (r) => r.receipt_count))}</TD>
+            <TD className="text-end tabular-nums">{formatNum(receiptCount)}</TD>
           </tr>
         </tbody>
       </Table>
@@ -789,12 +960,13 @@ type DriverCol = {
 };
 
 export function OperationsStatement({
-  operations, byDriver, periodStart, periodEnd, label, multiMonth,
+  operations, byDriver, periodStart, periodEnd, label, multiMonth, registerCsv,
 }: {
   operations: OperationsRow[];
   byDriver: OperationsByDriverRow[];
   periodStart: string; periodEnd: string; label: string;
   multiMonth: boolean;
+  registerCsv?: RegisterCsv;
 }) {
   const { lang } = useApp();
   const rows = monthsIn(operations, periodStart, periodEnd);
@@ -881,6 +1053,58 @@ export function OperationsStatement({
       )}
     </TD>
   );
+
+  // THE TWO DRIVER TABLES, MERGED INTO ONE. Delivery and Fleet utilisation are
+  // split on screen because eight numeric columns is too wide to read; a
+  // spreadsheet has no such limit and one row per driver is what a reader will
+  // sort and filter. Nothing is lost in the merge — both tables have the same
+  // rows in the same order, and the "drove N trucks" note under a driver's name
+  // becomes its own column rather than a sentence.
+  //
+  // The period-summary table below (trips, trucks that moved, work orders,
+  // maintenance events, exit permits) is NOT here: it is fleet-level, a
+  // different grain from a driver row, and its figures are the P&L spine's own
+  // — the Overview export carries them against a period. Called out as an
+  // omission rather than bolted on as blank-padded rows.
+  const buildCsv = useCallback(() => {
+    if (drivers.length === 0) return null;
+    return {
+      slug: "operations",
+      title: t("reports.ops.title", lang),
+      period: label,
+      columns: [
+        t("common.driver", lang),
+        t("common.truck", lang),
+        t("reports.th.trucks", lang),
+        t("reports.th.tripsScheduled", lang),
+        t("reports.metric.tripsDelivered", lang),
+        t("reports.th.notDelivered", lang),
+        withPct(t("reports.th.completionRate", lang), lang),
+        withPct(t("reports.th.shareScheduled", lang), lang),
+        withPct(t("reports.th.shareDelivered", lang), lang),
+      ],
+      rows: drivers.map((d): CsvValue[] => [
+        // The same fallback the driver cell renders — a null driver_id is the
+        // no-driver-recorded bucket, kept so the rows foot to the total.
+        d.name ?? t("reports.ops.unassigned", lang),
+        d.plate,
+        d.trucksUsed,
+        d.scheduled,
+        d.delivered,
+        d.notDelivered,
+        // RAW PERCENTAGE POINTS in all three, as `formatShare` receives them.
+        // The completion rate comes off the memo, recomputed there from each
+        // driver's own period totals rather than averaged from monthly rates.
+        // The two shares are the same expressions the utilisation cells hold,
+        // over the same period denominators.
+        d.completion,
+        driverScheduled > 0 ? (d.scheduled / driverScheduled) * 100 : null,
+        driverDelivered > 0 ? (d.delivered / driverDelivered) * 100 : null,
+      ]),
+    };
+  }, [lang, label, drivers, driverScheduled, driverDelivered]);
+
+  useCsvSource(registerCsv, buildCsv);
 
   return (
     <div id="ops-print" className="card p-6">
@@ -1162,9 +1386,49 @@ export function NarrativeStatement({
 // there is exactly one place those rules can be got wrong.
 // ---------------------------------------------------------------------------
 export function CustomStatement({
-  report, title, onEdit,
-}: { report: BuiltReport; title: string; onEdit: () => void }) {
+  report, title, onEdit, registerCsv, groupingLabel,
+}: {
+  report: BuiltReport; title: string; onEdit: () => void;
+  registerCsv?: RegisterCsv; groupingLabel: string;
+}) {
   const { lang } = useApp();
+
+  // ALREADY CSV-SHAPED. `BuiltReport` is columns plus one values array per row
+  // in column order — this is the one statement that needs no reshaping at all,
+  // only headings resolved and the unit folded into each of them.
+  //
+  // The BASIS sub-heading (accrual / cash / operational) is dropped: a CSV has
+  // one header row, and a basis spliced into the same cell as the metric name
+  // would make the heading unusable as a pivot label. The builder's notes are
+  // dropped for the same reason the VAT list is — they are prose, and prose in
+  // a numeric column is not a note, it is a broken row.
+  const buildCsv = useCallback(() => {
+    if (report.columns.length === 0 || report.rows.length === 0) return null;
+    return {
+      slug: "custom",
+      title: t("reports.custom.title", lang),
+      period: title,
+      columns: [
+        // The row-label column has a BLANK heading on screen (`<TH>{" "}</TH>`)
+        // because the table sits under a title that already says what the rows
+        // are. A file has no such title beside the header row, so the grouping
+        // — Period, Customer or Truck — is named here.
+        groupingLabel,
+        ...report.columns.map((c) => {
+          const label = t(c.labelKey, lang);
+          return c.unit === "SAR" ? withSar(label, lang)
+            : c.unit === "percent" ? withPct(label, lang)
+            : label;
+        }),
+      ],
+      // `values` is already in `columns` order and already raw — a null stays
+      // null, which writes the empty cell the em dash stands for on screen.
+      rows: report.rows.map((r): CsvValue[] => [r.label, ...r.values]),
+    };
+  }, [lang, title, groupingLabel, report]);
+
+  useCsvSource(registerCsv, buildCsv);
+
   return (
     <div id="custom-print" className="card p-6">
       {/* `title` arrives already composed by the builder and is passed through
@@ -1289,7 +1553,7 @@ function monthLabelOf(iso: string) {
 
 export function PayslipsStatement({
   basis, issued, commission, periodStart, periodEnd, label, today,
-  selectedDriverId, onSelectDriver, onIssue, issuingId,
+  selectedDriverId, onSelectDriver, onIssue, issuingId, registerCsv,
 }: {
   basis: PayslipBasisRow[];
   issued: IssuedPayslipRow[];
@@ -1302,6 +1566,7 @@ export function PayslipsStatement({
   onSelectDriver: (driverId: string | null) => void;
   onIssue: (driverId: string, periodStart: string) => void;
   issuingId: string | null;
+  registerCsv?: RegisterCsv;
 }) {
   const { lang } = useApp();
   const rows = useMemo(
@@ -1322,6 +1587,69 @@ export function PayslipsStatement({
   const selected = selectedDriverId
     ? rows.find((r) => r.driver_id === selectedDriverId) ?? null
     : null;
+
+  // THE REGISTER, AND ONLY WHILE THE REGISTER IS SHOWING. Opening one driver's
+  // payslip replaces the body with a DOCUMENT — a numbered, signed artefact with
+  // a print button of its own, not a table — so the builder returns null there
+  // and the header button disables itself rather than exporting a one-row file
+  // that reads like the register the user just left.
+  //
+  // MUST SIT ABOVE the `if (selected)` return below.
+  const buildCsv = useCallback(() => {
+    if (selected || rows.length === 0) return null;
+    return {
+      slug: "payslips",
+      title: t("reports.statements.tab.payslips", lang),
+      period: label,
+      columns: [
+        t("common.driver", lang),
+        t("reports.th.month", lang),
+        withSar(t("reports.th.salary", lang), lang),
+        withSar(t("reports.th.commission", lang), lang),
+        t("reports.th.basis", lang),
+        withSar(t("reports.th.net", lang), lang),
+        t("common.status", lang),
+      ],
+      rows: rows.map((r): CsvValue[] => {
+        // AN ISSUED SLIP'S FROZEN FIGURES WIN, exactly as the cells below
+        // choose them: a document that exists is what was paid, and a fresh
+        // preview of the same month could differ from it.
+        const doc = issued.find(
+          (i) => i.driver_id === r.driver_id && i.period_start === r.period_start,
+        );
+        const salary = doc ? doc.base_salary_sar : r.base_salary_sar;
+        const comm = doc
+          ? doc.commission_sar + doc.specials_sar + doc.adjustments_sar + doc.bonus_sar
+          : r.commission_sar + r.specials_sar + r.adjustments_sar + r.bonus_sar;
+        const net = doc ? doc.net_sar : r.net_sar;
+        // The chip's own condition, not a second rule: `paid` is basis "paid"
+        // AND settled, everything else reads as earned.
+        const chipBasis = doc ? doc.commission_basis : r.commission_basis;
+        const chipSettled = doc ? doc.commission_settled : r.commission_settled;
+        const basisText = chipBasis === "paid" && chipSettled
+          ? t("reports.payslips.chipPaid", lang)
+          : t("reports.payslips.chipEarned", lang);
+        // SAME PRIORITY AS THE STATUS CELL, in the same order: an issued number
+        // is the strongest fact, then terminated, then a missing hire date,
+        // then a month still running. Changing one without the other is how the
+        // file and the screen start disagreeing about who was paid.
+        const status = doc ? doc.payslip_number
+          : r.terminated ? t("reports.payslips.statusTerminated", lang)
+          : r.hire_date_missing ? t("reports.payslips.statusNoHireDate", lang)
+          : isRunning(r.period_start) ? t("reports.payslips.statusMonthInProgress", lang)
+          : t("reports.payslips.statusNotIssued", lang);
+        return [
+          r.driver_name,
+          monthLabelOf(r.period_start),
+          salary, comm, basisText, net, status,
+        ];
+      }),
+    };
+    // `currentMonthStart` is what `isRunning` closes over, and it is derived
+    // from `today` — so `today` is the dep, not the function.
+  }, [lang, label, rows, issued, selected, today]);
+
+  useCsvSource(registerCsv, buildCsv);
 
   if (selected) {
     const doc = issued.find(

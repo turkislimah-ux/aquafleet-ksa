@@ -18,7 +18,7 @@
 // overlays that were fiddly to get right; nothing here needs that, so the
 // library earns its place rather than 300 lines of hand-rolled SVG.
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, BarChart,
@@ -36,6 +36,8 @@ import {
   type RevenuePerTruckRow, type TopupsRow, type PurchasingRow,
   type MaintenancePerTruckRow,
 } from "@/lib/reports";
+import type { CsvValue } from "@/lib/csv";
+import { useCsvSource, type RegisterCsv } from "./exportSource";
 
 const AXIS = "#94a3b8";      // slate-400 — legible on both themes
 const GRID = "#94a3b833";
@@ -54,13 +56,15 @@ type Props = {
   topups: TopupsRow[];
   purchasing: PurchasingRow[];
   maintPerTruck: MaintenancePerTruckRow[];
+  /** Optional so this tab still renders standalone; see ./exportSource. */
+  registerCsv?: RegisterCsv;
   onManageExpenses: () => void;
 };
 
 export default function OverviewTab({
   months, month, pnl, collections, revenue, receivables, aging,
   payroll, operations, perTruck, topups, purchasing, maintPerTruck,
-  onManageExpenses,
+  registerCsv, onManageExpenses,
 }: Props) {
   const { lang } = useApp();
   // One translator shorthand for the whole tab. `say` fills the `{token}`
@@ -141,6 +145,80 @@ export default function OverviewTab({
     }),
     [aging],
   );
+
+  // ---- CSV export ---------------------------------------------------------
+  // THE KPIs, NOT THE CHARTS. What this tab puts on screen is four big stats,
+  // six small ones, three charts and two per-truck tables — and only the stats
+  // are a table. The charts are the same P&L series over every month, which the
+  // statements tab exports properly; the two per-truck tables are `.slice(0, 8)`
+  // on screen, so exporting what is rendered would ship a truncated file that
+  // looks complete. Both are called out to Turki rather than silently included.
+  //
+  // TALL, NOT WIDE: one row per measure, with the unit in its own COLUMN. The
+  // thirteen figures below are riyals, counts and one percentage, so a single
+  // numeric column cannot carry a unit in its heading the way a per-customer
+  // revenue table can.
+  //
+  // MUST SIT ABOVE the `!month || !p` return below — a hook after an early
+  // return is called on some renders and not others.
+  const buildCsv = useCallback(() => {
+    if (!month || !p) return null;
+    const SAR = tt("reports.export.unitSar");
+    const PCT = tt("reports.export.unitPct");
+    const CNT = tt("reports.export.unitCount");
+    // The prior month is a lookup on data already in props, not a second
+    // derivation — same `rowFor` the render above uses.
+    const purPrev = rowFor(purchasing, prev);
+    const rows: CsvValue[][] = [
+      [tt("reports.metric.revenue"), SAR, p.revenue_sar, pPrev?.revenue_sar ?? null],
+      [tt("reports.metric.operatingCost"), SAR, p.operating_cost_sar, pPrev?.operating_cost_sar ?? null],
+      [tt("reports.metric.operatingProfit"), SAR, p.operating_profit_sar, pPrev?.operating_profit_sar ?? null],
+      // RAW PERCENTAGE POINTS, as the view produced them (0098) — 12.5, not
+      // 0.125. `formatShare` is what turns that into "12.5%" on screen, and a
+      // cell that had been through it would be text.
+      [tt("reports.metric.operatingMargin"), PCT, p.operating_margin_pct, pPrev?.operating_margin_pct ?? null],
+      [tt("reports.metric.otherExpenses"), SAR, p.expenses_sar, pPrev?.expenses_sar ?? null],
+      [tt("reports.metric.netProfit"), SAR, p.net_profit_sar, pPrev?.net_profit_sar ?? null],
+      [tt("reports.metric.collections"), SAR, col?.collected_gross_sar ?? 0, colPrev?.collected_gross_sar ?? null],
+      // A STATE, NOT A MEASURE OVER THE MONTH. The card says so on screen and
+      // the row has to say so here, where there is no card to carry the note:
+      // the measure name takes the qualifier and the prior cell stays EMPTY,
+      // because there is no "last month's as-of-today".
+      [
+        `${tt("reports.overview.outstandingReceivables")} (${tt("reports.receivables.asOfToday")})`,
+        SAR, outstanding, null,
+      ],
+      [tt("reports.metric.tripsDelivered"), CNT, ops?.trips_delivered ?? 0, opsPrev?.trips_delivered ?? null],
+      [tt("reports.th.tripsScheduled"), CNT, ops?.trips_total ?? 0, opsPrev?.trips_total ?? null],
+      [tt("reports.overview.trucksActive"), CNT, ops?.trucks_active ?? 0, opsPrev?.trucks_active ?? null],
+      [tt("reports.th.wos"), CNT, ops?.work_orders ?? 0, opsPrev?.work_orders ?? null],
+      // Stock RECEIVED, not a P&L cost — the card carries `notPnlCost` for
+      // exactly this reason. It sits at the bottom, below the profit lines, so
+      // no reader takes the column as something that sums.
+      [tt("reports.overview.stockPurchased"), SAR, pur?.received_stock_value_sar ?? 0, purPrev?.received_stock_value_sar ?? null],
+    ];
+    return {
+      slug: "overview",
+      title: tt("dashboard.overview"),
+      period: monthLabel(month),
+      columns: [
+        tt("reports.export.measure"),
+        tt("reports.export.unit"),
+        monthLabel(month),
+        // No prior month at the start of the spine — the column would be a
+        // heading over nothing, so it is not written at all.
+        ...(prev ? [monthLabel(prev)] : []),
+      ],
+      // Trim the prior cell off every row when there is no prior column, or
+      // each row is one field longer than the header it sits under.
+      rows: prev ? rows : rows.map((r) => r.slice(0, 3)),
+    };
+    // `lang`, NOT `tt`. `tt` is re-created every render, so depending on it
+    // would re-register on every render — and registering sets state, which
+    // renders again. `lang` is the only thing `tt` reads.
+  }, [lang, month, prev, p, pPrev, col, colPrev, ops, opsPrev, pur, outstanding, purchasing]);
+
+  useCsvSource(registerCsv, buildCsv);
 
   if (!month || !p) {
     return (

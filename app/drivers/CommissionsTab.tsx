@@ -41,6 +41,7 @@ import { useRouter } from "next/navigation";
 import { Download, Plus, Pencil, Eye, Save, Trash2, Check, X, Banknote, Info, Ban, RotateCcw } from "lucide-react";
 import { Stat, StatusPill } from "@/components/ui";
 import { formatSar } from "@/lib/utils";
+import { csvCell, CSV_SEP, CSV_SEP_DIRECTIVE, UTF8_BOM } from "@/lib/csv";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural } from "@/lib/i18n";
 import {
@@ -110,34 +111,12 @@ const STATUS_TONE: Record<ReviewStatus, string> = {
 // t(`drivers.comm.status.${status}`) straight off the stored enum, so there is
 // no second English-only table to keep in step with the dictionary.
 
-function csvCell(v: string | number): string {
-  const s = String(v ?? "");
-  // \r is quoted too. The row terminator below is CRLF, so a bare CR inside a
-  // value would otherwise be read as the start of one — a driver name pasted in
-  // from another system is exactly where that arrives.
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-// Excel opens a .csv with the SYSTEM list separator, not the comma the format is
-// named after. On a locale where that separator is ";" every row lands in a
-// single cell, which is what "the export is broken" looks like to the person
-// opening it. The `sep=` directive is Excel's own override and is honoured
-// whatever the locale, so the file reads the same on every machine.
-//
-// It costs one stray first row in Numbers/Sheets, which do not know the
-// directive. That trade is deliberate: a visible junk row is recoverable in
-// seconds, a silently single-columned sheet is not, and Excel is what this file
-// is exported for.
-const CSV_SEP = ",";
-const CSV_SEP_DIRECTIVE = `sep=${CSV_SEP}`;
-
-// Excel assumes the system ANSI codepage unless a UTF-8 BOM says otherwise, and
-// without it every Arabic driver name renders as mojibake. The BOM is the whole
-// reason this export was unusable for an Arabic roster.
-// Built from its code point rather than typed as a literal: U+FEFF renders as
-// nothing at all, so a literal here would be invisible in every editor and
-// indistinguishable from a stray edit that deleted it.
-const UTF8_BOM = String.fromCharCode(0xfeff);
+// csvCell and the three Excel constants MOVED to lib/csv.ts (imported above)
+// when the Reports export became a second caller. Nothing about this file's
+// output changed: the construction below is still assembled here, line for
+// line, so this .csv is byte-for-byte what it has always been. It deliberately
+// does NOT route through lib/csv.ts's buildCsv() — that helper writes a
+// title/period preamble the Reports files want and this one has never had.
 
 const CHIPS = ["all", "pending", "approved", "denied"] as const;
 type Filter = (typeof CHIPS)[number];

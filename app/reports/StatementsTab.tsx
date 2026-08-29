@@ -57,7 +57,7 @@
 // figures the views produced, which is what lib/reports.ts delta() does
 // everywhere else on this page.
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTabParam } from "@/lib/useTabParam";
 import { Printer, Pencil, Info, Sparkles } from "lucide-react";
@@ -95,6 +95,8 @@ import { buildReport, GROUPING_TKEY, type BuilderSelection } from "@/lib/report-
 import CustomReportModal from "./CustomReportModal";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
+import type { CsvValue } from "@/lib/csv";
+import { useCsvSource, type RegisterCsv } from "./exportSource";
 
 // One statement at a time. That keeps each print id the ONLY print subtree in
 // the DOM, so "Print" prints the statement you are looking at rather than the
@@ -165,6 +167,8 @@ type Props = {
   issuedPayslips: IssuedPayslipRow[];
   driverCommission: DriverCommissionByProjectRow[];
   today: string;
+  /** Optional so this tab still renders standalone; see ./exportSource. */
+  registerCsv?: RegisterCsv;
   onManageExpenses: () => void;
 };
 
@@ -173,7 +177,8 @@ export default function StatementsTab({
   expenseCategories, invoices, outstandingLive, salesReturns, receivables, aging,
   maintPerTruck, purchasing, payroll, commissions, commissionsPaid, operations,
   filling, fillingByStation,
-  collections, metrics, perTruck, opsByDriver, payslipBasis, issuedPayslips, driverCommission, today, onManageExpenses,
+  collections, metrics, perTruck, opsByDriver, payslipBasis, issuedPayslips, driverCommission, today,
+  registerCsv, onManageExpenses,
 }: Props) {
   const { lang } = useApp();
   const [periodType, setPeriodType] = useState<PeriodType>("month");
@@ -237,6 +242,22 @@ export default function StatementsTab({
       .filter((e) => e.period_type === periodType && e.period_start === activeStart)
       .sort((a, b) => b.expenses_sar - a.expenses_sar),
     [expenseCategories, periodType, activeStart],
+  );
+
+  // The generated custom report. MEMOIZED FOR IDENTITY, not for cost: it was
+  // built inline in the JSX below, so every render produced a fresh object.
+  // CustomStatement now closes over it to build its CSV, and an unstable object
+  // there re-registers the export on every render — which sets state one level
+  // up and renders again. Same call, same arguments, same result.
+  const customReport = useMemo(
+    () => customSpec
+      ? buildReport(customSpec, {
+          pnlPeriods, collections, purchasing, operations,
+          invoices, outstandingLive, perTruck, maintPerTruck,
+        }, metrics, lang)
+      : null,
+    [customSpec, pnlPeriods, collections, purchasing, operations,
+     invoices, outstandingLive, perTruck, maintPerTruck, metrics, lang],
   );
 
   // ---- Which statement. Excluded from print. ------------------------------
@@ -308,11 +329,117 @@ export default function StatementsTab({
   //    Print button would be ambiguous. Daily Trips carries its own date input,
   //    its own day/week/month/quarter/year segment and its own Print, so the
   //    branch renders the statement selector and nothing else.
+  // ---- CSV export: the P&L ledger -----------------------------------------
+  // THIS COMPONENT OWNS ONLY THE P&L. Every other statement is a child in
+  // StatementViews and registers its own source; the dispatch below hands
+  // `registerCsv` down to each of them, and passes it to this hook only when
+  // the P&L is the statement showing. Without that guard the parent and the
+  // mounted child would both register and the last effect to run would win.
+  //
+  // MUST SIT ABOVE the two early returns below (`daily`, `!current`) —
+  // a hook after either is called on some renders and not others.
+  //
+  // NO VAT LIST. It is on screen directly under this table, and it is
+  // deliberately absent here: CLAUDE.md §7 says VAT is never netted into and
+  // never subtracted from a profit figure, and a spreadsheet column shared with
+  // the profit lines is an invitation to do exactly that with one =SUM. The VAT
+  // panel's own footnotes say why its lines do not add up to a quantity either.
+  const buildPnl = useCallback(() => {
+    if (!current) return null;
+    const SAR = t("reports.export.unitSar", lang);
+    const PCT = t("reports.export.unitPct", lang);
+    // Same single expression the render uses — §7's "indicative" figure has
+    // exactly one definition and this is not a second one.
+    const z = indicativeZakat(current.net_profit_sar);
+    const zPrior = prior ? indicativeZakat(prior.net_profit_sar) : null;
+
+    // Mirrors <Line>: variance and percent come from `delta`, the same helper
+    // the table cells call, so the file cannot disagree with the screen.
+    const money = (label: string, cur: number, pri?: number): CsvValue[] => {
+      const d = pri !== undefined ? delta(cur, pri) : null;
+      return [label, SAR, cur, pri ?? null, d ? d.abs : null, d ? d.pct : null];
+    };
+    // A heading row: label only, every numeric cell empty. Empty, NOT zero —
+    // "Cost of operations" is not a figure of nothing.
+    const head = (label: string): CsvValue[] => [label, null, null, null, null, null];
+
+    const rows: CsvValue[][] = [
+      money(t("reports.metric.revenue", lang), current.revenue_sar, prior?.revenue_sar),
+
+      head(t("reports.pnl.headCostOfOps", lang)),
+      money(t("reports.pnl.lineParts", lang), current.parts_cost_sar, prior?.parts_cost_sar),
+      money(t("reports.pnl.lineOs", lang), current.os_cost_sar, prior?.os_cost_sar),
+      money(t("reports.metric.payroll", lang), current.payroll_sar, prior?.payroll_sar),
+      money(t("reports.metric.commissions", lang), current.commissions_sar, prior?.commissions_sar),
+      money(t("reports.pnl.lineFilling", lang), current.filling_cost_sar, prior?.filling_cost_sar),
+      money(t("reports.pnl.lineOperatingCost", lang), current.operating_cost_sar, prior?.operating_cost_sar),
+
+      money(t("reports.metric.operatingProfit", lang), current.operating_profit_sar, prior?.operating_profit_sar),
+      // MARGIN IS THE ONE NON-SAR LINE, and its variance is POINTS, not a
+      // percentage of a percentage — `cur - pri`, exactly what <MarginLine>
+      // computes. The last cell is empty for the same reason it is an em dash
+      // on screen: a percent change on a percentage would not mean anything.
+      [
+        t("reports.metric.operatingMargin", lang), PCT,
+        current.operating_margin_pct,
+        prior?.operating_margin_pct ?? null,
+        current.operating_margin_pct !== null && prior?.operating_margin_pct != null
+          ? current.operating_margin_pct - prior.operating_margin_pct
+          : null,
+        null,
+      ],
+
+      head(t("reports.pnl.headOtherExpenses", lang)),
+      // USER DATA — free text typed into ExpensesModal, no `_ar` column, so it
+      // exports in whatever language it was entered in, as it renders. No prior
+      // column: the screen shows an em dash there because the category
+      // breakdown is only ever fetched for the selected period.
+      ...categories.map((c): CsvValue[] => [c.category, SAR, c.expenses_sar, null, null, null]),
+      money(t("reports.pnl.lineExpenses", lang), current.expenses_sar, prior?.expenses_sar),
+
+      money(t("reports.pnl.lineNetProfit", lang), current.net_profit_sar, prior?.net_profit_sar),
+
+      // ZAKAT — INDICATIVE, AND THE CAVEAT TRAVELS WITH THE FIGURE (§7). The
+      // two line labels already carry "indicative" and "Estimated"; the full
+      // note follows as its own label-only row, which is what it is on screen.
+      // A CSV has no footnote area, and a caveat left behind in the browser is
+      // a caveat that never reaches whoever opens the file.
+      head(t("reports.pnl.headZakat", lang)),
+      money(t("reports.pnl.lineZakat", lang), z.estimate, zPrior?.estimate),
+      money(t("reports.pnl.lineAfterZakat", lang), z.profitAfterZakat, zPrior?.profitAfterZakat),
+      head(t("reports.pnl.zakatNote", lang)),
+      ...(z.applies ? [] : [head(t("reports.pnl.zakatLoss", lang))]),
+    ];
+
+    return {
+      slug: "pnl",
+      title: t("reports.pnl.title", lang),
+      period: current.label,
+      columns: [
+        t("reports.export.line", lang),
+        t("reports.export.unit", lang),
+        current.label,
+        // The em dash the <th> renders when there is no prior period, kept
+        // rather than blanked: an empty heading over three empty columns reads
+        // as a broken file, an em dash reads as "there was nothing to compare".
+        prior?.label ?? "—",
+        t("reports.th.variance", lang),
+        t("reports.export.changePct", lang),
+      ],
+      rows,
+    };
+  }, [lang, current, prior, categories]);
+
+  // Registered ONLY while the P&L is the statement on screen. `undefined`
+  // means "do not register", which is what leaves the field clear for whichever
+  // child statement is mounted instead.
+  useCsvSource(statement === "pnl" ? registerCsv : undefined, buildPnl);
+
   if (statement === "daily") {
     return (
       <div className="space-y-4">
         {selector}
-        <DailyTripsTab today={today} />
+        <DailyTripsTab today={today} registerCsv={registerCsv} />
         {builder}
       </div>
     );
@@ -782,11 +909,12 @@ export default function StatementsTab({
           outstandingLive={outstandingLive}
           periodStart={current.period_start} periodEnd={current.period_end}
           label={current.label}
+          registerCsv={registerCsv}
         />
       )}
 
       {statement === "receivables" && (
-        <ReceivablesStatement receivables={receivables} aging={aging} />
+        <ReceivablesStatement receivables={receivables} aging={aging} registerCsv={registerCsv} />
       )}
 
       {statement === "cost" && (
@@ -796,6 +924,7 @@ export default function StatementsTab({
           filling={filling} fillingByStation={fillingByStation}
           periodStart={current.period_start} periodEnd={current.period_end}
           label={current.label}
+          registerCsv={registerCsv}
         />
       )}
 
@@ -805,6 +934,7 @@ export default function StatementsTab({
           byDriver={opsByDriver}
           periodStart={current.period_start} periodEnd={current.period_end}
           label={current.label} multiMonth={multiMonth}
+          registerCsv={registerCsv}
         />
       )}
 
@@ -829,6 +959,7 @@ export default function StatementsTab({
           onIssue={handleIssuePayslip}
           issuingId={issuingPayslip}
           commission={driverCommission}
+          registerCsv={registerCsv}
         />
         </>
       )}
@@ -837,14 +968,16 @@ export default function StatementsTab({
         <NarrativeStatement bullets={narrative} label={current.label} pnl={current} />
       )}
 
-      {statement === "custom" && customSpec && (
+      {statement === "custom" && customSpec && customReport && (
         <CustomStatement
-          report={buildReport(customSpec, {
-            pnlPeriods, collections, purchasing, operations,
-            invoices, outstandingLive, perTruck, maintPerTruck,
-          }, metrics, lang)}
+          report={customReport}
           title={customTitle(customSpec, pnlPeriods, lang)}
           onEdit={() => setCustomOpen(true)}
+          registerCsv={registerCsv}
+          // The heading over the row-label column. Resolved HERE because
+          // GROUPING_TKEY is already imported for the title, and CustomStatement
+          // otherwise has no reason to know what a BuilderSelection is.
+          groupingLabel={t(GROUPING_TKEY[customSpec.grouping], lang)}
         />
       )}
 
