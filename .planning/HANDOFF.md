@@ -499,15 +499,14 @@ matches nothing and the guard reports *"seed INSERT parsed to zero built-in rows
 
 ## 7. NEXT — no route batches remain
 
-Every route in the app is wired. What is left is smaller and mostly listed in §8
-and §9. In rough priority:
+Every route in the app is wired and **§9 is fully closed** — nothing is waiting on
+a human call. Two things remain, both small:
 
 1. **The Sales-Returns wording tail** (§8 item 1) — the last unambiguous wording
    drift with a settled ruling behind it.
 2. **A full Arabic-mode read-through with fresh eyes.** Ten batches plus five
    sweeps have landed; nobody has walked the whole app in Arabic since Trips
    shipped. Cheaper than any further static analysis at this point.
-3. **The two orphan handoff files** (§9 item 1) — third refresh carrying them.
 
 **~~The Trips `InvoiceDetailModal` RTL defect~~ — FIXED, struck.** The
 `dir="rtl"` moved off the block onto an inner `<span>`
@@ -547,15 +546,20 @@ All re-verified at this refresh. **Three items struck as DONE.**
 
 ---
 
-## 9. OPEN — needs a human call
+## 9. CLOSED — both items settled this session, kept for the reasoning
 
-1. **Two ORPHAN tracked handoff files.** `HANDOFF.md` at the repo root and
-   `.planning/SESSION-HANDOFF.md`. Both predate the entire Arabic effort, both
-   describe state that has moved a long way, and **`CLAUDE.md` §5 names only
-   `.planning/HANDOFF.md` as ours.** A fresh session told to "read the handoff"
-   could open the root one and act on badly stale state. Options: delete, or add
-   one line to each pointing here. Still not touched. **This is the second
-   refresh in a row to carry it forward untouched** — either do it or drop it.
+1. ~~Two ORPHAN tracked handoff files~~ — **SETTLED. Struck, and the description
+   was wrong.** They were never a pile of stale state needing a decision: `974dd04`
+   had already reduced both to 25-line SUPERSEDED redirect stubs holding no state
+   at all. Two refreshes described them from their pre-`974dd04` size and this one
+   repeated it without opening them — **a `CLAUDE.md` §5 miss on our own file, and
+   the only item in this refresh that was inherited rather than measured.**
+   `.planning/SESSION-HANDOFF.md` is now DELETED: nothing points at that name, so
+   the stub guarded against a collision that cannot happen.
+   **`HANDOFF.md` at the repo root is KEPT ON PURPOSE and must not be "cleaned
+   up".** It is the highest-collision filename in the repo — a fresh session or a
+   human told to "read the handoff" opens it first — and its whole job is to say
+   SUPERSEDED and point here. It holds no state, so it cannot go stale.
    (`.planning/gsd-handoff-clobber-note.md` is also tracked and is a deliberate
    warning note, not an orphan.)
 2. ~~`.claude/settings.json` is untracked and NOT gitignored~~ — **DONE. Struck.**
