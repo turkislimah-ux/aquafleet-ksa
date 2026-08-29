@@ -1,7 +1,7 @@
 # SESSION HANDOFF — Arabic Phase 3: EVERY ROUTE IS WIRED, AND THE LOOKUP TABLES NOW OWN THEIR OWN NAMES
 
-**HEAD `2952549` · branch `main` · 0 ahead / 0 behind · DB head `0170` · tree
-clean except ONE untracked file, `.claude/settings.json` — never stage it (§9).**
+**HEAD `96f4b2a` · branch `main` · 0 ahead / 0 behind · DB head `0170` · tree
+CLEAN.**
 
 **Read `CLAUDE.md` first** — it is the rulebook and §7 is the durable money/schema
 record. This file is a POINTER to §7, never the record itself. It holds CURRENT
@@ -96,15 +96,14 @@ inside `c736ff1`.
 
 ```
 $ git status --porcelain
-?? .claude/settings.json          ← untracked, NOT ignored, never staged
+                              ← EMPTY
 $ git rev-list --left-right --count origin/main...HEAD
 0	0
 ```
 
-**The one dirty entry is `.claude/settings.json`.** It is untracked and NOT in
-`.gitignore`, so it will keep showing up in every `git status` until someone
-decides whether it belongs in the repo (§9). It has been excluded by name from
-every commit this session.
+**THE TREE IS FULLY CLEAN.** `.claude/settings.json` was the last stray and is now
+ignored (§9 item 2). **A dirty tree here means something real** — there is no
+standing "step around this one file" exception left to remember.
 
 **Both `HANDOFF.json`s stay out of the way and neither is ever staged:**
 `.planning/HANDOFF.json` and `preview/.planning/HANDOFF.json` are gitignored
@@ -559,7 +558,8 @@ All re-verified at this refresh. **Three items struck as DONE.**
    refresh in a row to carry it forward untouched** — either do it or drop it.
    (`.planning/gsd-handoff-clobber-note.md` is also tracked and is a deliberate
    warning note, not an orphan.)
-2. **`.claude/settings.json` is untracked and NOT gitignored.** It shows in every
-   `git status` and has been excluded by name from each commit. Decide: commit it,
-   or add it to `.gitignore`. Leaving it is how a `git add .` accident happens —
-   and `CLAUDE.md` §5 forbids `git add .` precisely because of files like this.
+2. ~~`.claude/settings.json` is untracked and NOT gitignored~~ — **DONE. Struck.**
+   Ignored at `.gitignore:29-32`. **The entry is deliberately narrow and must not
+   be widened to `.claude/`:** `launch.json` and `skills/aquafleet-domain/SKILL.md`
+   are both tracked, and that SKILL.md is the domain rulebook `CLAUDE.md` §4 tells
+   every session to read before any migration or RPC work.

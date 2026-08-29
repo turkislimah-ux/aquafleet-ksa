@@ -25,3 +25,8 @@ preview/.planning/HANDOFF.json
 # during a session. The finished record is .planning/HANDOFF.md, which IS
 # committed. Ignored so no `git add .` can land the draft on main.
 HANDOFF-for-review.md
+
+# Per-machine Claude Code settings. NARROW ON PURPOSE — do NOT widen this to
+# `.claude/`: launch.json and skills/aquafleet-domain/SKILL.md are tracked, and
+# SKILL.md is the domain rulebook CLAUDE.md §4 tells every session to read.
+.claude/settings.json
