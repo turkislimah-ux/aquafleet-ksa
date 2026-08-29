@@ -64,8 +64,41 @@ type CalItem =
   | { kind: "wo"; wo: WorkOrder }
   | { kind: "os"; os: OutsourcedJob };
 
-const MONTHS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+// The twelve month abbreviations were a `MONTHS_EN`/`MONTHS_AR` pair frozen at
+// module scope here — the sixth copy in the app. They now come from
+// `common.monthShort`, whose own header records why: three files in app/trips
+// plus lib/commission-rows.ts each held their own, and two copies of the month
+// naming is how two screens start captioning the same month differently. All
+// twenty-four values were byte-identical to that leaf set, so nothing rendered
+// changes; only the source moved.
+//
+// Indexing MONTH_KEYS rather than casting is the established shape (seven files
+// do it) and it is what keeps the interpolation type-safe: the array is `as
+// const`, so `MONTH_KEYS[n]` is the union "1"|…|"12" and
+// `common.monthShort.${…}` resolves to twelve real TKeys instead of a
+// `${string}` the compiler has to reject. The keys are 1-based because the
+// dictionary's are — `getMonth()` is 0-based, hence the offset lives in this
+// array's ordering rather than in arithmetic at the call site.
+//
+// A duplicated MONTH_KEYS is not the duplication that rule is about: it holds
+// index keys, not words. A key array cannot drift in MEANING, which is the
+// whole risk that moved the names into the dictionary.
+const MONTH_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"] as const;
+
+// WEEKDAYS STAY LOCAL, deliberately, and this is not an oversight to tidy later.
+//
+// `trips.board.weekday` already holds a Sun–Sat set, so the obvious move is to
+// fold these onto it — but its Arabic is the LONGER short form (اثنين، ثلاثاء،
+// أربعاء، خميس، جمعة) where this calendar uses three-letter truncations (اثن،
+// ثلا، أرب، خمي، جمع). Five of the seven Arabic labels would change. That is a
+// copy decision, not a dedupe, and this change is a dedupe.
+//
+// Adding a second weekday set to a SHARED namespace would be worse than leaving
+// these here: it would put two competing Arabic wordings for the same seven days
+// in the dictionary, which is exactly the drift the month promotion exists to
+// prevent — only harder to notice, because both spellings would look official.
+// Unifying the two wordings is the real fix and needs someone to choose which
+// one wins.
 const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAYS_AR = ["أحد", "اثن", "ثلا", "أرب", "خمي", "جمع", "سبت"];
 
@@ -145,8 +178,9 @@ export default function MaintenanceCalendar({
 
   const todayKey = ymd(new Date());
   const WEEK = lang === "ar" ? WEEKDAYS_AR : WEEKDAYS_EN;
-  const MONTHS = lang === "ar" ? MONTHS_AR : MONTHS_EN;
-  const monthFmt = (d: Date) => `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  // Only the month NAME follows `lang`; the day number stays Latin digits in
+  // both languages, as it did before and as every other monthShort caller does.
+  const monthFmt = (d: Date) => `${t(`common.monthShort.${MONTH_KEYS[d.getMonth()]}`, lang)} ${d.getDate()}`;
   const weekHeader = `${monthFmt(cells[0].date)} – ${monthFmt(cells[6].date)}, ${cells[0].date.getFullYear()}`;
 
   let cActive = 0, cPlanned = 0, cDelayed = 0;
