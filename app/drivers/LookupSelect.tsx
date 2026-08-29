@@ -5,13 +5,23 @@
 // add row reveals an inline input that calls `onAdd(label)`, then selects the
 // returned key. A hidden input carries the chosen key into the surrounding form.
 //
-// Used by LeaveSection for the leave-type picker (and shareable with roles).
+// Used by StaffTab (roles), LeaveSection (leave types) and
+// MechanicCommissionsSection (commission types).
+//
+// ONE NAME FIELD, ALWAYS. The optional second Arabic input this carried between
+// 0168 and this batch is gone, along with the `withArabicName` prop that gated
+// it — `staff_roles` and `leave_types` each store one `label` shown as typed
+// (0169, 0170), so there is no second column for a second box to fill.
+// MechanicCommissionsSection is NOT an exception to that: `commission_types` is
+// a genuinely two-column table (`label_en`/`label_ar`, both NOT NULL per 0080)
+// and it composes its own display with `arText` BEFORE passing `items` in, so
+// this component never sees the split. It never passed `withArabicName` either.
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
-import { t, arText } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
 import { cn } from "@/lib/utils";
 
@@ -25,29 +35,25 @@ export default function LookupSelect({
   onAdd,
   addLabel,
   newPlaceholder,
-  withArabicName = false,
 }: {
   name: string;
   items: { key: string; label: string }[];
   defaultKey: string;
-  // 0168: the second argument is the OPTIONAL Arabic name, and it is only ever
-  // passed when `withArabicName` is on. A one-parameter action is still
-  // assignable here — TypeScript allows a callback to ignore trailing
-  // arguments — so a caller that has no Arabic column needs no adapter.
-  onAdd: (label: string, labelAr?: string) => Promise<{ error: string | null; key?: string }>;
+  // ONE NAME, TAKEN AS TYPED. The optional second `labelAr` argument and the
+  // `withArabicName` prop that gated it are both GONE: 0169 and 0170 gave the
+  // built-in roles and leave types a bilingual `label`, which is what removed
+  // the need for a second column and therefore for a second input. Both lookup
+  // tables now store one name and show it verbatim in either app language.
+  onAdd: (label: string) => Promise<{ error: string | null; key?: string }>;
   addLabel?: string;
   newPlaceholder?: string;
-  // Opt-in, because the column only exists on the lookup tables that have it.
-  // Off by default so a caller cannot collect Arabic that its action drops.
-  withArabicName?: boolean;
 }) {
   const { lang } = useApp();
   const router = useRouter();
-  const [extra, setExtra] = useState<{ key: string; label: string; label_ar: string | null }[]>([]);
+  const [extra, setExtra] = useState<{ key: string; label: string }[]>([]);
   const [value, setValue] = useState(defaultKey);
   const [adding, setAdding] = useState(false);
   const [label, setLabel] = useState("");
-  const [labelAr, setLabelAr] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -57,13 +63,13 @@ export default function LookupSelect({
     const map = new Map<string, string>();
     for (const it of items) map.set(it.key, it.label);
     // A row added in THIS session, still absent from `items` until the refresh
-    // lands. Its display is composed HERE, with `lang` in the dep list, instead
-    // of being frozen into state when it was added — a string built at add-time
-    // keeps the language it was added in and survives a language flip unchanged.
-    for (const e of extra) if (!map.has(e.key)) map.set(e.key, arText(e.label, e.label_ar, lang));
+    // lands. Shown as typed, exactly as the refreshed row will be — so `lang` is
+    // no longer a dependency here: there is nothing left to re-compose when the
+    // language flips, because the stored name does not change with it.
+    for (const e of extra) if (!map.has(e.key)) map.set(e.key, e.label);
     if (value && !map.has(value)) map.set(value, value);
     return Array.from(map, ([key, lbl]) => ({ key, label: lbl }));
-  }, [items, extra, value, lang]);
+  }, [items, extra, value]);
 
   // Live slug preview/gate (mirrors the DB CHECK via lib/slug). Empty label →
   // no preview, submit disabled. Invalid slug (starts with digit/_) → loud error.
@@ -73,9 +79,6 @@ export default function LookupSelect({
 
   async function add() {
     const clean = label.trim();
-    // Optional by design: blank stays blank all the way to the action, which
-    // stores NULL. Only the ENGLISH name is required, exactly as before.
-    const cleanAr = withArabicName ? labelAr.trim() : "";
     if (!clean) {
       setErr(t("drivers.lookup.nameRequired", lang));
       return;
@@ -86,32 +89,27 @@ export default function LookupSelect({
     }
     setBusy(true);
     setErr(null);
-    const res = await onAdd(clean, cleanAr || undefined);
+    const res = await onAdd(clean);
     setBusy(false);
     if (res.error || !res.key) {
       setErr(res.error ?? t("drivers.lookup.couldNotAdd", lang));
       return;
     }
-    setExtra((x) => [...x, { key: res.key!, label: clean, label_ar: cleanAr || null }]);
+    setExtra((x) => [...x, { key: res.key!, label: clean }]);
     setValue(res.key);
     setLabel("");
-    setLabelAr("");
     setAdding(false);
     router.refresh();
   }
-  // Clears BOTH names, not just the Arabic one. The two inputs are one form: if
-  // cancel left the English name filled and blanked the Arabic, reopening would
-  // show a half-populated pair and a new Arabic name could be saved against the
-  // previous English one.
   function cancelAdd() {
     setAdding(false);
     setLabel("");
-    setLabelAr("");
     setErr(null);
   }
 
-  // Both add layouts share these, so the one-field and two-field forms cannot
-  // drift apart in copy or behaviour.
+  // The one name field. Not `dir`-locked and not `lang`-driven: it accepts
+  // English or Arabic and stores whichever was typed, so the browser's own
+  // bidi handling is what should decide direction here.
   const nameInput = (
     <input
       value={label}
@@ -158,27 +156,6 @@ export default function LookupSelect({
           ))}
           <option value="__add__">{addLabel ?? t("drivers.lookup.addCustom", lang)}</option>
         </select>
-      ) : withArabicName ? (
-        // Two names side by side, buttons on their own row — three controls plus
-        // a second field in one line leaves neither name readable.
-        <div className="flex flex-col gap-2">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {nameInput}
-            {/* dir on the INPUT, and hardcoded rtl rather than driven by `lang`:
-                this box holds Arabic whichever language the UI is in, so its
-                direction follows the CONTENT. Same treatment as the `name_ar`
-                inputs on the staff and driver forms. */}
-            <input
-              value={labelAr}
-              onChange={(e) => setLabelAr(e.target.value)}
-              dir="rtl"
-              placeholder={t("drivers.lookup.phArName", lang)}
-              className={INPUT}
-              style={INPUT_STYLE}
-            />
-          </div>
-          <div className="flex gap-2 justify-end">{addButtons}</div>
-        </div>
       ) : (
         <div className="flex gap-2">
           {nameInput}

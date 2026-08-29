@@ -32,13 +32,6 @@ import ScrollLock from "@/components/ScrollLock";
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-// The five `staff_roles.is_default = true` keys (0011). A const tuple so that
-// `drivers.role.${key}` types as five real TKeys rather than `string`.
-const BUILTIN_ROLE_KEYS = ["fleet_manager", "ops_supervisor", "mechanic", "inventory_clerk", "dispatcher"] as const;
-type BuiltinRoleKey = (typeof BUILTIN_ROLE_KEYS)[number];
-const isBuiltinRole = (key: string): key is BuiltinRoleKey =>
-  (BUILTIN_ROLE_KEYS as readonly string[]).includes(key);
-
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
@@ -104,15 +97,18 @@ export default function StaffTab({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // The five built-ins translate off their immutable `key` and NEVER consult
-  // `label_ar` — their Arabic lives in the dictionary, and 0168 left the column
-  // NULL on those rows. A custom role goes through `arText`: Arabic shows
-  // `label_ar` when it has one and falls back to the English `label` when it
-  // does not, and English mode always shows `label`. staff_roles holds only
-  // active roles; an assigned role that was later deactivated still falls back
-  // to showing its raw key.
+  // THE ONE PLACE A ROLE IS NAMED. Reads the stored row — no `t()`, no branch
+  // on which role it is: the dictionary's `drivers.role.*` block is gone and
+  // `staff_roles` is the single source of what a role is called.
+  //
+  // `arText` picks `label_ar` only when the app is in Arabic AND the row has a
+  // non-empty Arabic name, else `label` verbatim. The five seeded built-ins
+  // carry both columns and switch with the language; a custom role has
+  // `label_ar` null and shows its typed name in either language.
+  //
+  // staff_roles holds only ACTIVE roles, so an assigned role that was later
+  // deactivated still falls back to showing its raw key. Unchanged.
   const roleName = (key: string) => {
-    if (isBuiltinRole(key)) return t(`drivers.role.${key}`, lang);
     const row = staffRoles.find((r) => r.key === key);
     return row ? arText(row.label, row.label_ar, lang) : key;
   };
@@ -572,14 +568,17 @@ export default function StaffTab({
                     so no adapter is needed; only the copy is passed in.
                     Options run through the same roleName() the rest of the tab
                     uses, so the five built-ins read the same in the dropdown as
-                    they do on the card. */}
+                    they do on the card.
+
+                    NO `withArabicName`: a role is ONE free-type field now, and
+                    what is typed into it is what everyone sees, in whichever
+                    language it was typed. The prop stays on the component for
+                    LeaveSection, which still has a separate Arabic name. */}
                 <LookupSelect
                   name="role"
                   items={staffRoles.map((r) => ({ key: r.key, label: roleName(r.key) }))}
                   defaultKey={editing?.role ?? staffRoles[0]?.key ?? ""}
                   onAdd={addStaffRole}
-                  // staff_roles has label_ar as of 0168, so the add form collects it.
-                  withArabicName
                   addLabel={t("drivers.staff.addRole", lang)}
                   newPlaceholder={t("drivers.staff.phNewRole", lang)}
                 />

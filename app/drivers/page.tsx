@@ -102,6 +102,10 @@ export default async function DriversPage() {
       // Management & support staff — ACTIVE only (soft-deleted hidden), newest first.
       supabase.from("staff").select("*").is("terminated_at", null).order("created_at", { ascending: false }),
       // Roles lookup for the Add/Edit dropdown — active roles, defaults first.
+      // `label_ar` (0168) is selected for DISPLAY only — StaffTab resolves it
+      // through `arText`, and the create form still writes `label` alone. It is
+      // populated on the seeded built-ins and null on custom rows, which fall
+      // back to `label`. Same for leave_types below — one model, both lookups.
       supabase
         .from("staff_roles")
         .select("id, key, label, label_ar, is_default, active, created_at")

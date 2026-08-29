@@ -306,15 +306,18 @@ export type OperationStation = {
 // ---------------------------------------------------------------------------
 
 // One row of the staff_roles lookup table.
+//
+// ASYMMETRIC BY DESIGN: `label_ar` (0168) is on the READ path only. Display
+// resolves through `arText(label, label_ar, lang)` — Arabic name in Arabic mode
+// when the row has one, English `label` otherwise — but the create/edit form
+// takes ONE field and writes `label` alone, so only the seeded built-ins ever
+// carry an Arabic name. A custom role has `label_ar` null and renders its typed
+// label in both languages, which is the intended fallback, not a gap.
+// lib/leave.ts's LeaveType mirrors this exactly; the two lookups are one model.
 export type StaffRole = {
   id: string;
   key: string;
   label: string;
-  // 0168 — optional Arabic display label, for CUSTOM rows only. The five
-  // built-ins translate off `key` through the dictionary (drivers.role.*) and
-  // never read this column, so it stays NULL on them forever. Nullable with no
-  // backfill: a custom role added before 0168 keeps showing its English `label`
-  // in both languages until someone fills the Arabic in.
   label_ar: string | null;
   is_default: boolean;
   active: boolean;

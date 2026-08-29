@@ -5390,8 +5390,14 @@ export const dict = {
     // serve either caller: it carries FULL English names ("January"), and both
     // of these render as "Aug 2026". Values were not edited in the move.
 
-    // The inline "+ Add custom …" lookup (LookupSelect), shared by the leave-type
-    // and the mechanic-commission-type pickers.
+    // The inline "+ Add custom …" lookup (LookupSelect), shared by the role,
+    // leave-type and mechanic-commission-type pickers.
+    //
+    // NO `phArName`. That was the placeholder for the second, Arabic-only input
+    // on the add-custom row, and it went out with the input itself: a role and a
+    // leave type each store ONE name now (0169, 0170), typed in either language
+    // and shown as typed, so there is no second box to label. It was this key's
+    // only consumer — LookupSelect.tsx was the sole reference in the repo.
     lookup: {
       addCustomType: { en: "+ Add custom type…", ar: "+ إضافة نوع مخصّص…" },
       // The generic fallbacks. Both current callers pass their own wording, so
@@ -5405,12 +5411,6 @@ export const dict = {
       mustStartWithLetter: { en: "Label must start with a letter.", ar: "يجب أن يبدأ الاسم بحرف." },
       nameRequired: { en: "Name is required.", ar: "الاسم مطلوب." },
       couldNotAdd: { en: "Could not add.", ar: "تعذّرت الإضافة." },
-      // 0168 — placeholder for the OPTIONAL Arabic name on the add-custom form
-      // (staff roles, leave types). "(optional)" is carried in the placeholder
-      // itself because the inline add row has no field labels to hang it on;
-      // the English name beside it stays required and unmarked. Shown in both
-      // UI languages, so the English copy is not a dead string.
-      phArName: { en: "Arabic name (optional)", ar: "الاسم بالعربية (اختياري)" },
     },
 
     // PersonIdLink — the Iqama/licence number that deep-links into the Archive.
@@ -5820,40 +5820,32 @@ export const dict = {
       deniedReason: { en: "Denied: {reason}", ar: "مرفوضة: {reason}" },
     },
 
-    // The FIVE BUILT-IN staff roles (`staff_roles.is_default = true`, seeded by
-    // 0011). Keyed off the immutable `staff_roles.key`, NEVER off the stored
-    // `label` — and DISPLAY-ONLY: no column is written, no row is rewritten, so
-    // `staff.role` is still the same FK it always was. Any other role (the live
-    // DB carries `finance`, `head_of_maintenance`, `night_dispatcher`) falls
-    // through to its stored English `label`; a `label_ar` column is a separate
-    // later batch.
+    // NO `role` BLOCK — A ROLE'S NAME IS NOT A TRANSLATABLE STRING.
     //
-    // Each `en` here must stay byte-identical to the seeded `label`, because
-    // English used to render straight from the row. If a built-in is ever
-    // renamed in the DB, this is the second place to change.
-    role: {
-      fleet_manager: { en: "Fleet Manager", ar: "مدير الأسطول" },
-      ops_supervisor: { en: "Ops Supervisor", ar: "مشرف العمليات" },
-      mechanic: { en: "Mechanic", ar: "فني ميكانيكي" },
-      inventory_clerk: { en: "Inventory Clerk", ar: "أمين المستودع" },
-      dispatcher: { en: "Dispatcher", ar: "منسّق الحركة" },
-    },
+    // The five built-ins used to be translated here off `staff_roles.key`,
+    // which meant their stored `label` was never rendered and a role had two
+    // names: one in the database, one in this file. The NAME now lives only on
+    // the row — English in `label`, Arabic in `label_ar` (0168) — and StaffTab
+    // resolves it with `arText`. Do not re-add this block: an entry here would
+    // silently outrank the stored name for whichever roles it happened to
+    // list, which is the exact split that was removed.
+    //
+    // The Arabic column is filled on the seeded built-ins ONLY. The create form
+    // takes one field and writes `label` alone, so a custom role has no Arabic
+    // name and `arText` falls back to what its creator typed, in both
+    // languages. That is the intended behaviour for a name, not a gap.
 
-    // The FOUR BUILT-IN leave types (`leave_types.is_default = true`, seeded by
-    // 0012). Exactly the `role` arrangement above, for exactly the same reasons:
-    // keyed off the immutable `leave_types.key`, DISPLAY-ONLY — no column added,
-    // no row rewritten, `leave_periods.leave_type` is still the same FK. The two
-    // custom types in the live DB ("travel meeting", "Night off") fall through to
-    // their stored English `label`; a `label_ar` column is a separate later batch.
+    // NO `leaveType` BLOCK — same model, same reason. It held four entries
+    // (paid / sick / unpaid / off_duty) keyed off the immutable
+    // `leave_types.key`; LeaveSection now resolves the stored row through
+    // `arText` exactly as StaffTab does for roles.
     //
-    // Each `en` is byte-identical to 0012's seeded `label` — "Paid leave", not
-    // "Paid" — because English rendered straight from the row until now.
-    leaveType: {
-      paid: { en: "Paid leave", ar: "إجازة مدفوعة" },
-      sick: { en: "Sick leave", ar: "إجازة مرضية" },
-      unpaid: { en: "Unpaid leave", ar: "إجازة بدون راتب" },
-      off_duty: { en: "Off duty", ar: "خارج الخدمة" },
-    },
+    // The Arabic those four entries carried now lives in
+    // `leave_types.label_ar`, written by migration 0170 (applied); the role
+    // half is 0169. Three of the four strings moved byte-for-byte; `unpaid` is
+    // "إجازة غير مدفوعة" on the row, not the dictionary's "إجازة بدون راتب".
+    // The pre-deletion block is recoverable from git if it is ever needed for
+    // comparison — but the ROW is the source of truth, not that history.
 
     staff: {
       // KPI row.

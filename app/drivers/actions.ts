@@ -262,16 +262,17 @@ export async function terminateStaff(id: string): Promise<ActionResult> {
 // selectable in the role dropdown after the caller refreshes. Slug via the shared
 // lib/slug helper (same transform the form previews; DB CHECK is the hard floor).
 //
-// `labelAr` (0168) is OPTIONAL and applies to this custom row only — built-ins
-// are translated by `key` and never carry it. Blank/whitespace stores NULL
-// rather than "", so `arText` sees an absent value and falls back to `label`
-// instead of rendering an empty string.
+// ONE NAME, TAKEN AS TYPED. `label` is the whole of what a role is called and
+// is shown verbatim to everyone in whichever language it was typed, so this
+// takes ONE argument and never writes `label_ar`. That column stays dormant on
+// this table: 0169 gave the five built-ins a bilingual `label` instead, which
+// is what made a second column unnecessary. LookupSelect's `onAdd` is typed
+// `(label, labelAr?)` and TypeScript lets a one-parameter function ignore the
+// trailing argument, so the caller needs no adapter — see that prop's comment.
 export async function addStaffRole(
   label: string,
-  labelAr?: string,
 ): Promise<{ error: string | null; key?: string }> {
   const clean = label.trim();
-  const cleanAr = labelAr?.trim() || null;
   if (!clean) return { error: "Role name is required." };
   const key = slugifyKey(clean);
   if (!key) return { error: "Role name needs letters or numbers." };
@@ -286,12 +287,12 @@ export async function addStaffRole(
   if (lookupErr) return { error: lookupErr.message };
 
   if (existing) {
-    // REACTIVATION WRITES `active` AND NOTHING ELSE — `label_ar` is deliberately
-    // absent from this payload. Re-adding a name that already exists must not
-    // silently overwrite the Arabic someone entered when the row was created,
-    // and a blank Arabic box here would otherwise null it out. Arabic is
-    // captured once, at creation; editing it later is a separate write path
-    // that does not exist yet.
+    // REACTIVATION WRITES `active` AND NOTHING ELSE — `label` is deliberately
+    // absent from this payload. Re-adding a name whose slug already exists must
+    // not silently rename the existing row: "Night Dispatcher" and "night
+    // dispatcher" slugify to the same key, and the row keeps the name it was
+    // created with. Renaming a role is a separate write path that does not
+    // exist yet.
     if (!existing.active) {
       const { error } = await supabase.from("staff_roles").update({ active: true }).eq("key", key);
       if (error) return { error: error.message };
@@ -302,7 +303,7 @@ export async function addStaffRole(
 
   const { error } = await supabase
     .from("staff_roles")
-    .insert({ key, label: clean, label_ar: cleanAr, is_default: false, active: true });
+    .insert({ key, label: clean, is_default: false, active: true });
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");
@@ -856,15 +857,16 @@ export async function deleteLeave(id: string): Promise<ActionResult> {
 // addStaffRole). Reuses/re-activates an existing key. Selectable after refresh.
 // Slug via the shared lib/slug helper (matches the form preview + DB CHECK).
 //
-// `labelAr` (0168) is OPTIONAL and custom-row-only, exactly as in addStaffRole
-// above — including the blank-becomes-NULL rule, so a skipped Arabic box falls
-// back to `label` rather than rendering empty.
+// ONE NAME, TAKEN AS TYPED — the same collapse as addStaffRole above, and for
+// the same reason. `label` is the whole of what a leave type is called and is
+// shown verbatim to everyone in whichever language it was typed, so this takes
+// ONE argument and never writes `label_ar`. That column stays dormant on this
+// table: 0170 gave the four built-ins a bilingual `label` instead, which is
+// what made a second column unnecessary.
 export async function addLeaveType(
   label: string,
-  labelAr?: string,
 ): Promise<{ error: string | null; key?: string }> {
   const clean = label.trim();
-  const cleanAr = labelAr?.trim() || null;
   if (!clean) return { error: "Type name is required." };
   const key = slugifyKey(clean);
   if (!key) return { error: "Type name needs letters or numbers." };
@@ -891,7 +893,7 @@ export async function addLeaveType(
 
   const { error } = await supabase
     .from("leave_types")
-    .insert({ key, label: clean, label_ar: cleanAr, is_default: false, active: true });
+    .insert({ key, label: clean, is_default: false, active: true });
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");

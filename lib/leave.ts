@@ -9,14 +9,15 @@
 // control the clock (server "now" sliced to a date) and tests stay deterministic.
 
 // One row of the leave_types lookup table (extensible; built-ins seeded).
+//
+// ASYMMETRIC BY DESIGN, exactly as StaffRole in lib/db-types.ts: `label_ar`
+// (0168) is READ for display via `arText(label, label_ar, lang)`, while the
+// create form takes ONE field and writes `label` alone. A type with no Arabic
+// name falls back to its typed label in both languages.
 export type LeaveType = {
   id: string;
   key: string;
   label: string;
-  // 0168 — optional Arabic display label, for CUSTOM rows only. The four
-  // built-ins translate off `key` through the dictionary (drivers.leaveType.*)
-  // and never read this column. Nullable, no backfill; see StaffRole.label_ar
-  // in lib/db-types.ts, which is the same column on the sibling lookup table.
   label_ar: string | null;
   is_default: boolean;
   active: boolean;

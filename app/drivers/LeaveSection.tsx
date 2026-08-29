@@ -25,13 +25,6 @@ import LookupSelect from "./LookupSelect";
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-// The four `leave_types.is_default = true` keys (0012). A const tuple so that
-// `drivers.leaveType.${key}` types as four real TKeys rather than `string`.
-const BUILTIN_LEAVE_TYPE_KEYS = ["paid", "sick", "unpaid", "off_duty"] as const;
-type BuiltinLeaveTypeKey = (typeof BUILTIN_LEAVE_TYPE_KEYS)[number];
-const isBuiltinLeaveType = (key: string): key is BuiltinLeaveTypeKey =>
-  (BUILTIN_LEAVE_TYPE_KEYS as readonly string[]).includes(key);
-
 // ISO date (YYYY-MM-DD) → local display, anchored at midnight so no TZ shift.
 function fmtDate(iso: string): string {
   return formatDate(iso + "T00:00:00");
@@ -66,16 +59,23 @@ export default function LeaveSection({
   // Current-year total (Riyadh local date, via the `today` the caller already
   // derived from todayKey() — never re-derived here with `new Date()`).
   const yearDays = leaveDaysInYear(periods, Number(today.slice(0, 4)));
-  // The four built-ins translate off their immutable `key` and NEVER consult
-  // `label_ar` — their Arabic is in the dictionary and 0168 left the column NULL
-  // on those rows. A custom type goes through `arText`: Arabic shows `label_ar`
-  // when present, else the English `label`; English mode always shows `label`.
-  // Row identity is `key`, never either label — and note the built-in arm does
-  // NOT consult `leaveTypes`, so a built-in still reads correctly if its row
-  // were ever deactivated out of the passed-in list.
-  // The callback param is `lt`, not `t` — `t` is the translator in this file now.
+  // THE ONE PLACE A LEAVE TYPE IS NAMED. Identical in shape to StaffTab's
+  // `roleName`, deliberately: the two lookups are one model. The dictionary's
+  // `drivers.leaveType.*` block is gone — `leave_types` is the single source.
+  //
+  // `arText` picks `label_ar` only in Arabic mode and only when the row has a
+  // non-empty Arabic name; a custom type (night_off, travel_meeting) has none
+  // and shows its typed name in either language.
+  //
+  // `leaveTypes` holds only ACTIVE rows, so a recorded period whose type was
+  // later deactivated falls back to showing its raw key. That is a REGRESSION
+  // RISK the old built-in arm did not have: it answered from the dictionary
+  // without consulting `leaveTypes` at all, so a deactivated built-in still
+  // read correctly. Accepted knowingly — deactivating a built-in leave type is
+  // not a flow the app offers, and the fallback degrades to the key rather
+  // than to a blank.
+  // The callback param is `lt`, not `t` — `t` is the translator in this file.
   const typeLabel = (key: string) => {
-    if (isBuiltinLeaveType(key)) return t(`drivers.leaveType.${key}`, lang);
     const row = leaveTypes.find((lt) => lt.key === key);
     return row ? arText(row.label, row.label_ar, lang) : key;
   };
@@ -242,8 +242,9 @@ export default function LeaveSection({
               items={leaveTypes.map((lt) => ({ key: lt.key, label: typeLabel(lt.key) }))}
               defaultKey={editing?.leave_type ?? defaultType}
               onAdd={addLeaveType}
-              // leave_types has label_ar as of 0168, so the add form collects it.
-              withArabicName
+              // NO `withArabicName`: a leave type is ONE free-type field now,
+              // taken as typed in whichever language it was typed in. The prop
+              // is gone from LookupSelect entirely — this was its last caller.
               addLabel={t("drivers.lookup.addCustomType", lang)}
               newPlaceholder={t("drivers.leave.newType", lang)}
             />
