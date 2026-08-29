@@ -1,7 +1,13 @@
-# SESSION HANDOFF — ARABIC PHASE 3 IS CLOSED. Every route wired, every parked item resolved, read-through passed.
+# SESSION HANDOFF — ARABIC PHASE 3 IS CLOSED. Feature #3 shipped. Feature #4 closed with NO WORK.
 
-**HEAD `0c48aa9` · branch `main` · 0 ahead / 0 behind · DB head `0170` · tree
-CLEAN.**
+**HEAD `e57d696` · branch `main` · 0 ahead / 0 behind · highest migration FILE
+`0171` · tree CLEAN.**
+
+**§10 IS THE NEWEST SECTION AND HOLDS THE ONLY OPEN ITEM.** Two commits landed
+after this file was last refreshed at `0c48aa9`. A live-DB read while writing §10
+found that the `user_profiles` TABLE comment still carries the retired claim that
+`preferred_language` is *"a display label only"*. That is now false. It is the one
+actionable thing in this document; everything else is a record.
 
 **READ THIS FILE'S §7 BEFORE PLANNING ANY ARABIC WORK — there is none left.**
 (`CLAUDE.md` has its own §7, the money/schema rules, one paragraph down. The two
@@ -296,16 +302,24 @@ from plain UI chrome — that grouping is his reading pass.
 
 ---
 
-## 4. DB STATE — MOVED. 0168 → 0170.
+## 4. DB STATE — MOVED. 0168 → 0171.
 
-**Highest migration `0170_builtin_leave_type_labels_bilingual.sql`. 168 `.sql`
-files.** `0168`, `0169` and `0170` are all applied and verified live.
+**Highest migration FILE `0171_preferred_language_login_only.sql`. 169 `.sql`
+files.** `0168`, `0169` and `0170` are all applied and verified live. **`0171` is
+applied only IN PART — see §10, which is the one open item in this file.**
+
+**Do NOT read `supabase_migrations.schema_migrations` to answer "what is the DB
+head".** It stops at `20260824231520` and contains ZERO `017x` rows, because our
+migrations are run by hand in the SQL Editor (`CLAUDE.md` §1) and never register
+there. That table will always look stale and is not evidence of anything. Verify
+a migration by reading the OBJECT it changed — that is how §10's finding surfaced.
 
 | Migration | What it does |
 |---|---|
 | `0168_lookup_label_ar.sql` | adds nullable `label_ar` to `staff_roles` and `leave_types` |
 | `0169_builtin_role_labels_bilingual.sql` | seeds Arabic for the **5 built-in roles** |
 | `0170_builtin_leave_type_labels_bilingual.sql` | seeds Arabic for the **4 built-in leave types** |
+| `0171_preferred_language_login_only.sql` | comment-only. Retires 0159's "do not wire" ban on `preferred_language`. **Half-applied — §10.** |
 
 0169 and 0170 are DATA ONLY — no schema change, no table created, so
 `CLAUDE.md` §6's anon-revoke footer does not apply. Both are idempotent, both
@@ -657,3 +671,98 @@ is already right.
    be widened to `.claude/`:** `launch.json` and `skills/aquafleet-domain/SKILL.md`
    are both tracked, and that SKILL.md is the domain rulebook `CLAUDE.md` §4 tells
    every session to read before any migration or RPC work.
+
+---
+
+## 10. AFTER THE ARABIC WORK — FEATURE #3 SHIPPED, FEATURE #4 CLOSED UNBUILT
+
+Two commits landed after `0c48aa9`, the state §§1-9 describe:
+
+| Hash | Date | What it did |
+|---|---|---|
+| `7005dca` | 08-29 | Arabic Phase 3 is closed — the read-through passed and nothing is left |
+| `e57d696` | 08-29 | **Apply the account language at login, on any device (0171)** |
+
+### FEATURE #3 — account language at login. SHIPPED, verified in-browser.
+
+`user_profiles.preferred_language` (0159) is now wired, at **sign-in only**. The
+login select that already fetched `default_route` carries the column too; a
+non-NULL value seeds the session — `lang` COOKIE and `localStorage` written
+together — so the user lands in their own language on any device. **NULL changes
+nothing**: no preference means the device keeps what it was showing. The header
+toggle stays device-local and writes NOTHING back, so a mid-session switch holds
+until the next login re-asserts the account value.
+
+Touched: `app/login/page.tsx`, `components/AppShell.tsx` (`seedLangFromAccount`),
+`lib/supabase/middleware.ts`, `lib/i18n.ts` (`hPreferredLanguage`, EN+AR),
+`supabase/migrations/0171_*.sql`, plus comment corrections in `0159`,
+`components/settings/ProfileSection.tsx` and `lib/actions/auth.ts`.
+
+**THIS IS NOT A VIOLATION OF 0159'S BAN AND MUST NOT BE "CORRECTED" BACK.** 0159
+forbade a *continuous two-way sync* and named the sanctioned alternative in the
+same breath — a change that REPLACES localStorage rather than writing beside it.
+That is exactly what shipped. The cookie is written SYNCHRONOUSLY in the login
+handler, not from an effect: `router.refresh()` fires its RSC request before React
+flushes passive effects, so an effect-written cookie arrives after the layout has
+already rendered `<html lang>`.
+
+### ⚠ OPEN — THE ONE ACTIONABLE ITEM IN THIS FILE
+
+**`0171` IS HALF-APPLIED. The live `user_profiles` TABLE comment still says:**
+
+> *"preferred_language is a display label only — the real UI language is
+> localStorage[\"lang\"] and the two are allowed to disagree."*
+
+Both clauses are now false, and the second was already false before feature #3 —
+`98798f0` moved first paint to cookies, so localStorage has not been "the real UI
+language" for some time. Read live from the DB, not from the file.
+
+The COLUMN comment WAS updated and is correct in substance (login-only, toggle
+does not write back, `en | ar | null`). Only the table comment was missed.
+
+**A related divergence to know before touching either.** The live column comment
+is a short hand-written paraphrase, **not the text in
+`supabase/migrations/0171_*.sql`** — the file's version is several times longer
+and carries the "do NOT turn this into a two-way sync" ruling and the CHECK note.
+The two AGREE on behaviour and disagree on wording. Do not blind-copy one over the
+other; decide which text is wanted, then apply it as a numbered migration so the
+file and the database stop drifting. This is `CLAUDE.md` §6's stale-comment trap
+caught in the act, and §5's "the DB outranks the notes" is why it was found at all.
+
+### FEATURE #4 — invoice drafts. CLOSED. NO WORK NEEDED. DO NOT REOPEN.
+
+Scoped four times as "move invoice drafts from browser storage to a server table,
+per user, across devices". **Every premise it rested on was measured false.** The
+feature already exists and has since `0025`.
+
+| Claimed | Measured |
+|---|---|
+| drafts live in a `bousla-draft-invoice-v2` localStorage key | **no such key.** `draft-invoice` = ZERO hits repo-wide. The only four keys are `lang`, `theme`, `bousla.dashboardWidgets`, `bousla.recentSearches`. No `sessionStorage` anywhere |
+| one shared key, so starting customer B destroys A's draft | **no.** `create_draft_invoice` (0030) is ONE INSERT; the trip claim is guarded `and invoice_id is null` and RAISES on a trip held elsewhere, rolling back. A's draft is untouched |
+| only one draft can exist at a time | **unlimited, deliberately.** `0025`'s partial unique index on `invoice_number` allows unlimited NULLs "so multiple concurrent drafts never collide" — including several per customer |
+| pricing is effective-dated by trip date (`trip_rate_snapshots`) | **no such table, no `rate_at()` resolver.** `trips.rate_sar` freezes at the DELIVERY moment. Effective-dated CUSTOMER rates remain DEFERRED in `CLAUDE.md` §7 |
+| no invoice or draft is ever hard-deleted | **false.** `delete_draft_invoice()` (0030) runs `delete from public.invoices` behind a draft-only status gate. Confirmed invoices are voided, never deleted |
+
+**What a draft actually is:** a row in `public.invoices` with `status = 'draft'`
+(0025), visible to every authenticated user (`authenticated_all_invoices`,
+`using (true)`), reserving its trips exclusively under 0030. Server-side,
+per-customer, cross-device, concurrent — the whole feature, already built. The
+only client-only state in the create flow is TWO DATE INPUTS
+(`app/trips/InvoicesModal.tsx`, `periodStart` / `periodEnd`, defaulting to
+`todayKey()`), because trip assembly happens server-side inside
+`createDraftInvoice`.
+
+**The `invoice_drafts` episode, recorded so it is not repeated.** A table by that
+name was drafted as `0172`, applied by hand, then dropped once the premises were
+disproved; the migration file has been DELETED and never reached a commit. It
+would have been a SECOND, PRIVATE draft store beside the real one, reserving
+nothing — two users could have assembled overlapping trip selections with no
+collision detected until confirm. Verified after the drop:
+`to_regclass('public.invoice_drafts')` is NULL, its trigger function is gone, and
+the SHARED `set_updated_at()` survived intact, still serving four triggers
+(`deferred_deliveries`, `issue_reports`, `notification_thresholds_user`,
+`user_profiles`) — a `drop … cascade` reaching that function would have silently
+stopped `updated_at` on all four.
+
+**If a future session is asked to "move invoice drafts server-side": the answer is
+that they are already there.** Ask what was actually observed before building.
