@@ -8100,11 +8100,16 @@ export const dict = {
       colSettledBalance: { en: "Settled Balance", ar: "الرصيد المسدد" },
       colAmountPayable: { en: "Amount Payable", ar: "المبلغ الواجب السداد" },
       // The Amount Payable header's `title` tooltip — a DEFINITION, and the one
-      // place either payment mode's rule is written on screen. It is a native
-      // title attribute, so it is a plain string and takes no markup.
+      // place the rule is written on screen. It is a native title attribute, so
+      // it is a plain string and takes no markup.
+      //
+      // ONE RULE FOR BOTH MODES now, and the prepaid half has to say out loud
+      // what it no longer does: adding balance does not move this number. That
+      // sentence is the whole point of the change — without it the column looks
+      // broken to anyone who tops a customer up and sees nothing happen.
       colAmountPayableHint: {
-        en: "What the customer still owes for work already provided, minus what they have paid. Prepaid: their current balance. Postpaid: delivered trips and special charges not yet on a PAID invoice.",
-        ar: "ما يزال العميل مدينًا به مقابل عمل تم تنفيذه بالفعل، مطروحًا منه ما سدده. الدفع المقدم: رصيده الحالي. الدفع الآجل: الرحلات المسلَّمة والرسوم الخاصة التي لم تُدرج بعد في فاتورة مدفوعة.",
+        en: "What the customer still owes for work already provided: delivered trips and special charges not yet on a PAID invoice. Same rule for both payment modes. Only marking an invoice paid reduces it — for a prepaid customer, adding balance does not, because a top-up funds the work rather than settling it. Their balance is a separate figure.",
+        ar: "ما يزال العميل مدينًا به مقابل عمل تم تنفيذه بالفعل: الرحلات المسلَّمة والرسوم الخاصة التي لم تُدرَج بعد في فاتورة مدفوعة. القاعدة نفسها لطريقتَي الدفع. ولا يقل هذا المبلغ إلا بتحديد الفاتورة كمدفوعة — أما في الدفع المقدم فإضافة رصيد لا تقلّله، لأن الإيداع يموّل العمل ولا يسدده. ورصيد العميل رقم منفصل.",
       },
       viewStatement: { en: "View statement", ar: "عرض كشف الحساب" },
       invoices: { en: "Invoices", ar: "الفواتير" },

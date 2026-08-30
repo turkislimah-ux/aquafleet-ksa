@@ -67,7 +67,7 @@ import DeliveriesReportBand, { buildDeliveriesReport } from "./DeliveriesReportB
 // the same way the balance it is compared against does.
 import { round2 } from "@/lib/prepaid";
 import { computeAmountPayable } from "./amountPayable";
-import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { SpecialChargeRow, PaidInvoiceRow } from "./page";
 import ScrollLock from "@/components/ScrollLock";
 
 // Chart palette — emerald for money (consistent with the report), slate/amber for
@@ -105,7 +105,9 @@ export type BreakdownTrip = {
   // rate moved, and could not represent a band holding two frozen rates.
   rate_sar: number | null;
   // invoice_id set AND that invoice is status='paid' (app/trips/page.tsx).
-  // Read ONLY by the Amount payable box, for the postpaid arm.
+  // Read by the Amount payable box, in BOTH payment modes — since the prepaid
+  // arm collapsed onto the same paid-gating, this flag is what decides whether
+  // a delivered trip is still owed on either kind of customer.
   invoiceLocked?: boolean;
 };
 type DriverLite = { id: string; name: string };
@@ -167,8 +169,6 @@ export default function BreakdownReport({
   trips,
   drivers,
   stations,
-  topups,
-  balanceReturns,
   specialCharges,
   paidInvoices,
 }: {
@@ -188,8 +188,13 @@ export default function BreakdownReport({
   // app/trips/page.tsx for the Finance tab and handed here through CustomersTab
   // — this report adds no query of its own, and deliberately does NOT read
   // v_customer_amount_payable (0139): see ./amountPayable's header.
-  topups: TopupRow[];
-  balanceReturns: BalanceReturnRow[];
+  //
+  // NO `topups` / `balanceReturns` ANY MORE. They were threaded here only to
+  // feed computeAmountPayable's old prepaid arm, which netted the pool against
+  // the payable. It no longer has a pool term at all — a prepaid customer's
+  // balance funds delivered work rather than settling it — so the props went
+  // with the argument. Re-adding them would only be useful to a surface that
+  // renders a BALANCE, which this report does not.
   specialCharges: SpecialChargeRow[];
   paidInvoices: PaidInvoiceRow[];
 }) {
@@ -285,27 +290,17 @@ export default function BreakdownReport({
     () => (customerId ? specialCharges.filter((ch) => ch.customer_id === customerId) : []),
     [specialCharges, customerId],
   );
-  const customerTopups = useMemo(
-    () => (customerId ? topups.filter((t) => t.customer_id === customerId) : []),
-    [topups, customerId],
-  );
-  // Refunds of prepaid credit (0142) — a DEBIT on the pool, so Amount Payable
-  // must see them or this report would still count money already handed back.
-  const customerReturns = useMemo(
-    () => (customerId ? balanceReturns.filter((r) => r.customer_id === customerId) : []),
-    [balanceReturns, customerId],
-  );
-
   // AMOUNT PAYABLE — DELIBERATELY NOT MONTH-SLICED. Every other figure in the
   // Financial section is a slice of selMonth; this one is a running total as of
   // now, over all periods, and is labelled as such on screen. Feeding it
   // monthTrips instead would make it a DIFFERENT number from the Finance tab's
   // Amount Payable column, which is the one thing it must not be — so it reads
-  // projectTrips (all months) and the customer's full charge/top-up history.
+  // projectTrips (all months) and the customer's full charge history.
   //
-  // The rule lives in ./amountPayable, shared with FinanceTab. No prepaidBalance
-  // is passed because this report computes no running balance of its own; the
-  // module derives it from the same inputs with the same engine call.
+  // The rule lives in ./amountPayable, shared with FinanceTab, and takes no pool
+  // inputs in either mode: what is payable is delivered work not yet on a PAID
+  // invoice, and a top-up funds that work rather than settling it. This report
+  // computes no running balance of its own and now needs none.
   const amountPayable = useMemo(
     () =>
       computeAmountPayable({
@@ -314,10 +309,8 @@ export default function BreakdownReport({
         projectRate: rate,
         trips: projectTrips,
         charges: customerCharges,
-        topups: customerTopups,
-        returns: customerReturns,
       }),
-    [project, rate, projectTrips, customerCharges, customerTopups, customerReturns],
+    [project, rate, projectTrips, customerCharges],
   );
 
   // payment_date is a plain date (user-entered); paid_at is a full timestamp

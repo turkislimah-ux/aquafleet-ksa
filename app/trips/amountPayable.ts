@@ -8,17 +8,45 @@
 // the value could not simply be read across. The alternatives were to recompute
 // it there (a money rule copied twice is a money rule that can drift in one
 // place, which a69a06d's own message and .claude/skills/aquafleet-domain
-// both forbid) or to fetch v_customer_amount_payable (0139), which would put a
-// SECOND computation of this number on a screen — the exact thing a69a06d
-// rejected, since the view is a declared mirror rather than a separate
-// authority. So the rule moved here instead, to a leaf module that imports
-// nothing from either caller. Same shape as DeliveriesReportBand (b0c386c),
-// which was extracted for the same reason: ProjectsBoard and BreakdownReport
-// both import it one way, so no sibling cycle can form.
+// both forbid) or to fetch v_customer_amount_payable (0139) — which is now
+// doubly wrong, because that view is no longer even the same number for a
+// prepaid customer (see THE VIEW below). So the rule lives here, in a leaf
+// module that imports nothing from either caller. Same shape as
+// DeliveriesReportBand (b0c386c), which was extracted for the same reason:
+// ProjectsBoard and BreakdownReport both import it one way, so no sibling
+// cycle can form.
+//
+// THE RULE, BOTH MODES: the VAT-inclusive value of every DELIVERED trip and
+// every non-void special charge that is NOT YET SETTLED BY A PAID INVOICE.
+// Drafting, reviewing or confirming an invoice does not reduce it; only Mark
+// Paid does, and it clears exactly that invoice's work out of the figure.
+//
+// **A PREPAID CUSTOMER'S POOL IS NOT AN INPUT HERE, AND THAT IS THE POINT.**
+// Adding balance does not reduce what is owed for work already delivered; it
+// funds the work, it does not settle it. So this function takes no top-ups and
+// no balance returns — not "takes them and ignores them", TAKES THEM NOT AT
+// ALL, because a money function that accepts a pool argument reads as one that
+// spends it, and that reading is exactly the old behaviour we removed.
+//
+// THE PREPAID RUNNING BALANCE IS A DIFFERENT NUMBER AND STILL DEDUCTS AT
+// DELIVERY (Model A, untouched). It is derivedBalanceItems() over UNFILTERED
+// inputs — FinanceTab computes it separately and it drives the Running Balance
+// column, the over-balance banner, Settled Balance and the statement. The two
+// figures decoupled deliberately, and a prepaid customer can now hold pool
+// credit AND owe for delivered work at the same time. That is the model.
+//
+// THE VIEW, v_customer_amount_payable (0139), NO LONGER MIRRORS THIS FUNCTION
+// FOR PREPAID, AND MUST NOT BE "RECONCILED" WITH IT. Its prepaid arm stays the
+// running balance because return_customer_balance() gates a real cash refund on
+// `amount_payable_sar > 0` and the archive guard reads the same row — flipping
+// the view to this rule would make a debtor's figure positive and refund them
+// their own debt. The divergence is load-bearing; see
+// .claude/skills/aquafleet-domain/SKILL.md.
 //
 // SIGN IS THE MEANING, not decoration. Negative = owed to us. Zero = settled.
-// Positive = credit the customer holds (prepaid only — a postpaid customer has
-// no pool and so can never compute above 0). Renderers read the sign and add
+// The result is <= 0 by construction in BOTH modes now: with the credits side
+// empty nothing can drive it above zero, so leftover prepaid credit stays where
+// it belongs — in the balance, not here. Renderers read the sign and add
 // nothing of their own.
 //
 // PERIOD-INDEPENDENT BY CONSTRUCTION. Nothing here takes a month or a date
@@ -29,10 +57,8 @@
 
 import {
   derivedBalanceItems,
-  type BalanceReturnLite,
   type ConsumingTrip,
   type ConsumingCharge,
-  type TopupStatementInput,
 } from "@/lib/prepaid";
 import type { PaymentMode, WaterType } from "@/lib/db-types";
 
@@ -50,7 +76,9 @@ export type PayableTrip = {
   water_type?: WaterType | null;
   // invoice_id set AND that invoice is status='paid' (computed in
   // app/trips/page.tsx). A trip on a draft, review, confirmed or void invoice
-  // is NOT locked and still owes.
+  // is NOT locked and still owes. OPTIONAL, and the fallback direction is
+  // deliberate: an absent flag reads as NOT locked, so an unknown lock state
+  // owes rather than silently dropping out of a receivable.
   invoiceLocked?: boolean;
 };
 
@@ -103,6 +131,21 @@ export function toConsumingCharge(ch: PayableCharge): ConsumingCharge {
 }
 
 /**
+ * THE PAID GATE — the single predicate this module turns on, named once so the
+ * trip side and the charge side cannot drift apart, and so a future third slice
+ * has something to import rather than restate.
+ *
+ * `invoiceLocked` (trips) and `paid` (charges) are the SAME notion computed on
+ * the two row shapes in app/trips/page.tsx (`:265` and `:362`), both off the one
+ * `.eq("status", "paid")` query at `:233`. Nothing here re-derives them; these
+ * only say which side of the gate the payable stands on. FinanceTab's Settled
+ * Balance is the exact complement — it filters on the same two flags, the other
+ * way round.
+ */
+export const isUnsettledTrip = (t: PayableTrip): boolean => !t.invoiceLocked;
+export const isUnsettledCharge = (ch: PayableCharge): boolean => !ch.paid;
+
+/**
  * The rule itself.
  *
  * Returns null when there is no project, or when the project's payment_mode is
@@ -110,15 +153,12 @@ export function toConsumingCharge(ch: PayableCharge): ConsumingCharge {
  * without guessing which model to apply, and guessing at a receivable is the one
  * thing migration 0137 exists to prevent. Renderers show that as an em dash.
  *
- * `prepaidBalance` is the caller's ALREADY-COMPUTED running balance
- * (`derivedBalanceItems(topups, allConsuming, allCharges, undefined, returns)`)
- * when it happens to have one, purely so the Finance tab does not compute the
- * identical figure twice per row — it drives that tab's "Total running balance"
- * KPI and over-balance banner as well. Pass null and the prepaid arm computes it
- * here from `topups`/`trips`/`charges`/`returns` instead. BOTH PATHS ARE THE
- * SAME CALL with the same inputs; this is a reuse hatch, not a second formula,
- * and a caller that passes a DIFFERENT number here is misusing it — including a
- * caller that hands over a balance computed WITHOUT its refunds.
+ * ONE PATH FOR BOTH MODES, and the collapse is the point rather than a tidy-up:
+ * prepaid and postpaid now ask the identical question — "what delivered work is
+ * not on a paid invoice" — over identical inputs, so a `mode === "prepaid"`
+ * branch here could only ever differ from the postpaid one by accident. The mode
+ * is still READ, because an unset mode must still return null; it just no longer
+ * selects a formula.
  */
 export function computeAmountPayable(args: {
   mode: PaymentMode | null;
@@ -126,59 +166,25 @@ export function computeAmountPayable(args: {
   projectRate: number;
   trips: PayableTrip[];
   charges: PayableCharge[];
-  topups: TopupStatementInput[];
-  // Recorded refunds of prepaid credit (0142). Defaulted so a caller with none
-  // reads unchanged; a caller that HAS them and omits them would compute a
-  // payable that still counts money already handed back.
-  returns?: BalanceReturnLite[];
-  prepaidBalance?: number | null;
 }): number | null {
-  const { mode, hasProject, projectRate, trips, charges, topups, returns = [] } = args;
+  const { mode, hasProject, projectRate, trips, charges } = args;
   if (!hasProject) return null;
+  if (mode !== "prepaid" && mode !== "postpaid") return null;
 
-  if (mode === "prepaid") {
-    // PREPAID — the answer IS the running balance: top-ups minus the
-    // VAT-inclusive consumption of every delivered trip and every non-void
-    // charge, LESS anything already refunded, so the part their pool does not
-    // cover is exactly its negative side. Charges from draft/review/confirmed
-    // invoices are in there by construction (page.tsx excludes only void).
-    //
-    // Refunds net here for the same reason they net in the engine (0142): once
-    // the money has physically gone back, treating it as still payable would
-    // say we owe it twice.
-    if (args.prepaidBalance != null) return args.prepaidBalance;
-    return derivedBalanceItems(
-      topups,
-      trips.map((t) => toConsumingTrip(t, projectRate)),
-      charges.map(toConsumingCharge),
-      undefined,
-      returns,
-    );
-  }
-
-  if (mode === "postpaid") {
-    // POSTPAID — no pool to net against, so payable is the consumption that has
-    // not been PAID FOR. Drafting, reviewing or confirming an invoice does not
-    // reduce it; only Mark Paid does. That is precisely what the two existing
-    // paid-flags already mean, so there is no new invoice-status predicate here.
-    //
-    // Same engine, no top-ups: derivedBalanceItems([], …) is credits minus
-    // debits with the credits side empty, i.e. the negated VAT-inclusive
-    // consumption of exactly this slice. It reuses consumingItems()'s
-    // delivered-only filter and per-item rounding rather than restating either —
-    // there is no second summation of money anywhere in this file.
-    //
-    // NO RETURNS TERM, and that is not an omission. A balance return refunds
-    // PREPAID CREDIT, and return_customer_balance can only fire when
-    // amount_payable_sar > 0, which the line below shows is impossible here:
-    // postpaid has no pool, so its payable is <= 0 by construction. A postpaid
-    // customer therefore has no refunds to net.
-    return derivedBalanceItems(
-      [],
-      trips.filter((t) => !t.invoiceLocked).map((t) => toConsumingTrip(t, projectRate)),
-      charges.filter((ch) => !ch.paid).map(toConsumingCharge),
-    );
-  }
-
-  return null;
+  // Same engine, no top-ups: derivedBalanceItems([], …) is credits minus debits
+  // with the credits side empty, i.e. the negated VAT-inclusive consumption of
+  // exactly this slice. It reuses consumingItems()'s delivered-only filter
+  // (lib/prepaid.ts:138) and its per-item rounding rather than restating either
+  // — there is no second summation of money anywhere in this file.
+  //
+  // NO RETURNS TERM, and that is not an omission. A balance return refunds
+  // prepaid CREDIT: it moves the pool, not the work. This figure has no pool
+  // term at all, so netting a refund here would shrink a debt because we handed
+  // money back — the wrong direction. Refunds net in the running balance
+  // (lib/prepaid.ts's returnedTotal, 0142); they have no place here.
+  return derivedBalanceItems(
+    [],
+    trips.filter(isUnsettledTrip).map((t) => toConsumingTrip(t, projectRate)),
+    charges.filter(isUnsettledCharge).map(toConsumingCharge),
+  );
 }

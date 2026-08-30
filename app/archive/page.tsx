@@ -165,8 +165,20 @@ export default async function ArchivePage() {
       // detail popup resolves the figures with commission_config_at(). See
       // ArchiveProjectRow.
       .select("id, customer_id, name, initials, rate_per_trip_sar, archived_at, payment_mode, water_type, default_station, start_date, end_date, status, location, description, created_at"),
-    // v_customer_amount_payable (0139) — the one definition of "does this
-    // customer owe us, or do we owe them". Columns are named explicitly and
+    // v_customer_amount_payable (0139) — the ARCHIVE surface's definition of
+    // "does this customer owe us, or do we owe them", and for prepaid that is
+    // their RUNNING BALANCE.
+    //
+    // **IT IS NOT THE SAME NUMBER AS the Trips page's Amount Payable column,
+    // and must not be reconciled with it.** That column asks a different
+    // question — what delivered work is not yet on a PAID invoice
+    // (app/trips/amountPayable.ts) — so a prepaid customer in credit can owe
+    // there and be owed here at the same time. The view stays balance-based
+    // because return_customer_balance() gates a cash refund on
+    // `amount_payable_sar > 0` and the archive guard reads the same row;
+    // flipping it to the column's rule would refund debtors.
+    //
+    // Columns are named explicitly and
     // stop at the eleven CustomerAmountPayableRow declares: the view publishes
     // seven more (customer_name, archived_at, payment_mode, the two component
     // balances, owed_sar, archive_blocked) that nothing on this surface

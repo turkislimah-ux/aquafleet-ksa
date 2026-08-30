@@ -335,19 +335,19 @@ export default function FinanceTab({
       // the project Breakdown report also calls, so the column here and the box
       // there cannot render two different numbers.
       //
-      // `prepaidBalance` hands over the running balance computed above rather
-      // than making the module derive the identical figure a second time — it
-      // is the same derivedBalanceItems() call over the same inputs, and the
-      // "Total running balance" KPI and over-balance banner already sum it.
+      // **`balance` IS DELIBERATELY NOT PASSED IN.** It used to be, as a reuse
+      // hatch, back when the prepaid payable WAS the running balance. It is not
+      // any more: a prepaid customer's pool FUNDS delivered work, it does not
+      // SETTLE it, so only Mark Paid moves this figure. `balance` above is a
+      // different number and stays one — it still drives the running-balance
+      // KPI, the over-balance banner, Settled Balance and the statement. The two
+      // decoupled on purpose; re-feeding one into the other would undo it.
       const amountPayable = computeAmountPayable({
         mode,
         hasProject: project != null,
         projectRate: project?.rate_per_trip_sar ?? 0,
         trips: project ? (tripsByProject.get(project.id) ?? []) : [],
         charges: chargesByCustomer.get(c.id) ?? [],
-        topups: customerTopups,
-        returns: customerReturns,
-        prepaidBalance: balance,
       });
 
       return {

@@ -14,7 +14,7 @@ import type { WaterType, PaymentMode, ProjectCommissionNowRow } from "@/lib/db-t
 import { type DriverState } from "@/lib/driver-state";
 import ProjectModal, { type ProjectInitial } from "./ProjectModal";
 import BreakdownReport from "./BreakdownReport";
-import type { TopupRow, BalanceReturnRow, SpecialChargeRow, PaidInvoiceRow } from "./page";
+import type { SpecialChargeRow, PaidInvoiceRow } from "./page";
 import { useApp } from "@/components/AppShell";
 import { t, fill } from "@/lib/i18n";
 
@@ -109,8 +109,10 @@ export type CustomersTabProps = {
   // report's Financial section (payments table + Amount payable). Already
   // fetched by app/trips/page.tsx for the Finance tab and handed to both tabs
   // by TripsTabs — this tab itself reads none of them.
-  topups: TopupRow[];
-  balanceReturns: BalanceReturnRow[];
+  //
+  // `topups` / `balanceReturns` are NOT among them any more: Amount Payable has
+  // no pool term in either mode, so the Breakdown report stopped taking them.
+  // Only the Finance tab needs a balance, and TripsTabs still hands it those.
   specialCharges: SpecialChargeRow[];
   paidInvoices: PaidInvoiceRow[];
 };
@@ -159,8 +161,6 @@ export default function CustomersTab({
   stations,
   driverStateById,
   leaveUnavailable,
-  topups,
-  balanceReturns,
   specialCharges,
   paidInvoices,
 }: CustomersTabProps) {
@@ -464,8 +464,6 @@ export default function CustomersTab({
         trips={trips}
         drivers={drivers}
         stations={stations}
-        topups={topups}
-        balanceReturns={balanceReturns}
         specialCharges={specialCharges}
         paidInvoices={paidInvoices}
       />

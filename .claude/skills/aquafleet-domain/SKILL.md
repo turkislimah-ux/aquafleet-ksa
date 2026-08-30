@@ -23,6 +23,57 @@ Two files own ALL money math for the **customer-facing finance/invoice system**:
 
 ---
 
+## Amount Payable ≠ the prepaid BALANCE — and the view ≠ the column
+
+Three numbers here look like one number. They are not, and two of them are
+deliberately allowed to disagree. Do not "reconcile" them.
+
+**1. Amount Payable (the COLUMN)** — `app/trips/amountPayable.ts`, rendered on
+the Finance tab and in the project Breakdown report. **One rule, both payment
+modes:** the VAT-inclusive value of every DELIVERED trip and every non-void
+special charge **not yet on a PAID invoice**. Draft / review / confirmed do not
+reduce it; only Mark Paid does. **A prepaid top-up does not reduce it either** —
+a pool FUNDS delivered work, it does not SETTLE it. Sign convention: negative =
+owed to us, zero = settled; `<= 0` by construction, because the function passes
+no credits side to `derivedBalanceItems`.
+
+**2. The prepaid running BALANCE** — `lib/prepaid.ts`'s `derivedBalanceItems`
+over UNFILTERED inputs. Deducts at DELIVERY (**Model A**, unchanged), nets
+top-ups and balance returns, and drives the Running Balance column, the
+over-balance banner, Settled Balance and the statement. A prepaid customer can
+hold pool credit AND owe on the payable column at the same time. That is the
+model, not a bug.
+
+**3. `v_customer_amount_payable.amount_payable_sar` (the VIEW, 0139)** — for
+prepaid this is **the running balance** (negative = owed), i.e. number 2, NOT
+number 1. **This divergence is intentional and load-bearing:**
+
+- `return_customer_balance()` gates a real cash refund on `amount_payable_sar > 0`
+  and freezes that figure into `customer_balance_returns` (the modal has no
+  amount field by design).
+- `archive_project_guarded()` reads `archive_blocked` (prepaid arm:
+  `b.balance_sar < 0` — blocked when NEGATIVE) and `owed_sar`
+  (`GREATEST(0, -amount_payable_sar)`) off the same row.
+
+Flip the view to the column's rule and a debtor's figure turns positive, so the
+refund gate passes and **the RPC pays a customer their own debt**; `owed_sar`
+also collapses to 0, so an archive override would write off nothing. **Leave the
+view balance-based.** Its 0139-era "mirror of the column" framing is obsolete —
+it mirrors the BALANCE.
+
+**Rules:**
+- The paid gate is ONE predicate, computed once server-side in
+  `app/trips/page.tsx`: `invoiceLocked` (trips, `:265`) and `paid` (charges,
+  `:362`), both off the single `.eq("status","paid")` query. Import
+  `isUnsettledTrip` / `isUnsettledCharge` from `amountPayable.ts`; never restate
+  the predicate.
+- Never pass a balance, top-ups or returns into `computeAmountPayable`. It takes
+  none — that is what makes "adding balance does not reduce it" true by
+  construction rather than by discipline.
+- Changing either rule means changing `scripts/amount-payable-check.ts` first.
+
+---
+
 ## Invoice & PO Numbering — Counter-Table Pattern
 
 Gap-free sequential numbers use a dedicated counter table + a function that

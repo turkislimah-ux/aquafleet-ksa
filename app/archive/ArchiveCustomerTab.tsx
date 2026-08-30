@@ -207,6 +207,11 @@ export default function ArchiveCustomerTab({
   // return MARK and the write-off audit. Read, never recomputed here: the
   // figure is the database's, and a second opinion about it is exactly what
   // the return RPC refuses to accept as a form field.
+  //
+  // For prepaid this is the RUNNING BALANCE, which is deliberately NOT the
+  // Trips page's Amount Payable column any more — that one counts delivered
+  // work not yet on a paid invoice. Refunds are about the pool, so the pool is
+  // what this surface reads. See app/archive/page.tsx's note on the view.
   amountPayable: CustomerAmountPayableRow[];
   onOpenInvoice: (invoiceId: string, customerEmail: string | null) => void;
   // LEAF contract: the return popup is owned by ArchiveClient, same as the
