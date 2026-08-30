@@ -8,7 +8,7 @@
 //
 // So if a METRIC is missing, the fix is a migration, not a join added here.
 //
-// FOUR BASE-TABLE READS SIT BELOW, and each one is marked where it happens.
+// SEVEN BASE-TABLE READS SIT BELOW, and each one is marked where it happens.
 // None of them is a metric. The expenses editor fetches the rows it EDITS
 // (every expense FIGURE still comes from a view), and the three VAT source
 // tables feed a LIST that prints each document's own vat_sar beside a label
@@ -16,7 +16,17 @@
 // no view publishes supplier VAT in the first place. The contract's own test
 // is "could this number disagree with what the same view returns"; with
 // nothing derived and no competing view, there is nothing to disagree with.
-// Adding a fifth needs that test answered out loud, in a comment, right here.
+// Adding another needs that test answered out loud, in a comment, right here.
+//
+// READS 5-7 ARE THE VIOLATION TABLES, and the test is answered: they publish no
+// figure. Every violation NUMBER on this page — the claim, the deduction, the
+// unabsorbed remainder — is v_driver_payslip_basis's or driver_payslips', both
+// already fetched here as views. These three rows only ITEMISE which fines a
+// month's deduction was made of, for a month with no snapshot to itemise from
+// yet. The itemisation is not summed into anything: the payslip's own frozen
+// columns state the totals, and the list beneath them is evidence, not
+// arithmetic. Nothing here can disagree with the view, because nothing here
+// computes what the view computes.
 //
 // TWO TABS, both built: Overview (KPIs and charts) and Reports (the printable
 // statement pack). This file fetches every view both of them read, in one
@@ -45,6 +55,12 @@ import type {
   PayslipBasisRow, IssuedPayslipRow, DriverCommissionByProjectRow,
   VatSourceDocRow,
 } from "@/lib/reports";
+import {
+  buildViolationViews,
+  type DriverViolation,
+  type FrozenViolation,
+  type ViolationType,
+} from "@/lib/violations";
 import ReportsClient from "./ReportsClient";
 
 export const dynamic = "force-dynamic";
@@ -74,6 +90,9 @@ export default async function ReportsPage() {
     vatReceiptsRes,
     vatOrdersRes,
     vatWorkshopRes,
+    violationTypesRes,
+    driverViolationsRes,
+    frozenViolationsRes,
   ] = await Promise.all([
     supabase.from("v_pnl_monthly").select("*").order("month"),
     supabase.from("v_collections_monthly").select("*").order("month"),
@@ -185,6 +204,25 @@ export default async function ReportsPage() {
     supabase.from("stock_receipts").select("received_on, vat_sar, status"),
     supabase.from("purchase_orders").select("request_date, vat_sar, status"),
     supabase.from("workshop_payments").select("invoice_date, created_at, vat_sar"),
+    // ---- Traffic violations (0175-0177), for the payslip statement ----------
+    //
+    // BASE TABLES, and the header's rule is not bent: nothing here restates a
+    // figure SQL owns. The money on the payslip — the claim, the deduction, the
+    // remainder — comes from v_driver_payslip_basis and driver_payslips, both
+    // already fetched above. These three rows exist only to ITEMISE what an
+    // UNISSUED month would charge for, since no snapshot exists yet to read.
+    //
+    // An ISSUED month never touches them: it reads its own frozen
+    // snapshot.violations, because a fine can be voided, re-priced or
+    // re-labelled after the fact and the document must keep saying what it said
+    // the day it was handed over.
+    supabase.from("violation_types").select("id, key, label, label_ar, is_default, active"),
+    supabase
+      .from("driver_violations")
+      .select(
+        "id, driver_id, violation_type_id, ref_no, amount_sar, violation_date, payment_status, note, voided_at, created_by, created_at",
+      ),
+    supabase.from("driver_payslip_violations").select("payslip_id, violation_id"),
   ]);
 
   // One honest error line beats ten empty cards that look like real zeros.
@@ -201,7 +239,12 @@ export default async function ReportsPage() {
     opsByDriverRes.error?.message ?? payslipBasisRes.error?.message ??
     issuedPayslipsRes.error?.message ?? driverCommissionRes.error?.message ??
     outstandingLiveRes.error?.message ?? vatReceiptsRes.error?.message ??
-    vatOrdersRes.error?.message ?? vatWorkshopRes.error?.message ?? null;
+    vatOrdersRes.error?.message ?? vatWorkshopRes.error?.message ??
+    // A failed violation read arrives as [] — which on an unissued month is not
+    // "no data", it is the specific claim that this driver was fined nothing,
+    // printed underneath a Deductions line that says otherwise.
+    violationTypesRes.error?.message ?? driverViolationsRes.error?.message ??
+    frozenViolationsRes.error?.message ?? null;
 
   // The three VAT sources ARE in the chain above, unlike an earlier attempt at
   // this panel that carried an "unavailable" flag for them. That flag existed
@@ -497,7 +540,13 @@ export default async function ReportsPage() {
     bonus_sar: n(r.bonus_sar),
     issued_payslip_id: r.issued_payslip_id ? String(r.issued_payslip_id) : null,
     issued_payslip_number: r.issued_payslip_number ? String(r.issued_payslip_number) : null,
+    // net_sar is ALREADY net of deductions_sar as of 0177. The three columns
+    // below are the view's own (19-21), not a client-side derivation — the
+    // preview and the frozen document run the same arithmetic by construction.
     net_sar: n(r.net_sar),
+    violation_deduction_sar: n(r.violation_deduction_sar),
+    deductions_sar: n(r.deductions_sar),
+    unabsorbed_sar: n(r.unabsorbed_sar),
   }));
 
   // The frozen documents. These figures are NEVER recomputed — they are read
@@ -517,7 +566,9 @@ export default async function ReportsPage() {
     specials_sar: n(r.specials_sar),
     adjustments_sar: n(r.adjustments_sar),
     bonus_sar: n(r.bonus_sar),
+    violation_deduction_sar: n(r.violation_deduction_sar),
     deductions_sar: n(r.deductions_sar),
+    unabsorbed_sar: n(r.unabsorbed_sar),
     net_sar: n(r.net_sar),
     // jsonb arrives parsed; the money inside it is display-only detail the
     // document quotes (payout totals, covered trip range), never re-summed
@@ -536,6 +587,20 @@ export default async function ReportsPage() {
       commission_sar: n(r.commission_sar),
     }));
 
+  // ---- Traffic violations, itemised for the payslip statement --------------
+  // The SAME pass the Drivers page runs (lib/violations), fed the SAME payslip
+  // rows the statement above is built from — `issuedPayslips` is reused rather
+  // than re-fetched, so the settlement badge on a fine and the Deductions line
+  // over it are reading one set of numbers.
+  //
+  // Only the UNISSUED months consume this. An issued month reads its snapshot.
+  const violationTypes = (violationTypesRes.data ?? []) as ViolationType[];
+  const { byDriver: violationsByDriver } = buildViolationViews({
+    violations: (driverViolationsRes.data ?? []) as DriverViolation[],
+    frozen: (frozenViolationsRes.data ?? []) as FrozenViolation[],
+    payslips: issuedPayslips,
+  });
+
   return (
     <ReportsClient
       error={error}
@@ -543,6 +608,8 @@ export default async function ReportsPage() {
       payslipBasis={payslipBasis}
       issuedPayslips={issuedPayslips}
       driverCommission={driverCommission}
+      violationsByDriver={violationsByDriver}
+      violationTypes={violationTypes}
       opsByDriver={opsByDriver}
       invoices={invoices}
       outstandingLive={outstandingLive}

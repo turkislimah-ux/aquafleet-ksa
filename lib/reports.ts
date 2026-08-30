@@ -930,15 +930,36 @@ export type PayslipBasisRow = {
   terminated: boolean;
   termination_date: string | null;
   /**
-   * NET PAY, BEFORE DEDUCTIONS — the ONE definition (0118), computed in the
-   * view. issue_driver_payslip freezes `net_sar - deductions_sar` from this
-   * same column, so a preview and the document it becomes cannot disagree.
+   * NET PAY, NET OF VIOLATION DEDUCTIONS — the ONE definition, computed in the
+   * view. REDEFINED BY 0177: this column used to be gross, and the RPC froze
+   * `net_sar - deductions_sar` off it. It no longer does. The view now subtracts
+   * the deduction itself and issue_driver_payslip freezes this column ALONE, so
+   * a preview and the document it becomes cannot disagree.
    *
-   * Deductions are not here because they are a property of the DOCUMENT, not of
-   * the basis: they exist only once a payslip is issued. They are 0 today (no
-   * data source), which is why an unissued row's net_sar is its net pay.
+   * The old note here said deductions were "a property of the DOCUMENT, not of
+   * the basis" and "0 today (no data source)". Both stopped being true at 0177.
+   * Deductions ARE a property of the basis now, because they are a pure function
+   * of (driver, month) — which is exactly what makes the preview trustworthy.
    */
   net_sar: number;
+  /**
+   * The month's live violations BEFORE the clamp — the gross claim against this
+   * payslip. Fines dated in this month with voided_at IS NULL, all of them,
+   * whatever payment_status says: settling a ticket with the authority is a
+   * different question from charging the driver for it.
+   */
+  violation_deduction_sar: number;
+  /**
+   * What the pay could actually absorb: LEAST(violation_deduction_sar, gross).
+   * Already subtracted from net_sar above — do NOT subtract it again.
+   */
+  deductions_sar: number;
+  /**
+   * The part this month's pay could not cover. A RECORD, NOT A CARRY: no later
+   * month reads it, and recovering it is a human decision made outside this
+   * system. Non-zero only when the fines exceeded the pay.
+   */
+  unabsorbed_sar: number;
 };
 
 /**
@@ -981,7 +1002,13 @@ export type IssuedPayslipRow = {
   specials_sar: number;
   adjustments_sar: number;
   bonus_sar: number;
+  /** The month's fines before the clamp, frozen at issue (0177). */
+  violation_deduction_sar: number;
+  /** What this payslip actually took off the driver, frozen at issue. */
   deductions_sar: number;
+  /** Fines the pay could not cover, frozen at issue. A record, not a carry. */
+  unabsorbed_sar: number;
+  /** ALREADY net of deductions_sar. Never subtract it a second time. */
   net_sar: number;
   /** Driver name, salary at issue, the payouts settled, the trips covered. */
   snapshot: PayslipSnapshot | null;
@@ -998,6 +1025,27 @@ export type PayslipSnapshot = {
     bonus_sar: number; total_sar: number;
   }[];
   covered_trips?: { count: number; first_trip?: string | null; last_trip?: string | null };
+  /**
+   * The fines this document charged for, itemised at issue (0177). Read this
+   * rather than re-querying driver_violations: a violation can be voided,
+   * re-labelled or re-priced after the fact, and the document must keep saying
+   * what it said the day it was handed over.
+   */
+  violations?: {
+    month_total_sar?: number;
+    absorbed_sar?: number;
+    unabsorbed_sar?: number;
+    items?: {
+      id: string;
+      ref_no: string;
+      type_key: string | null;
+      type_label: string | null;
+      type_label_ar: string | null;
+      amount_sar: number;
+      violation_date: string;
+      payment_status: string | null;
+    }[];
+  };
 };
 
 /**

@@ -4514,7 +4514,43 @@ export const dict = {
       specialPayments: { en: "Special payments", ar: "مدفوعات خاصة" },
       bonus: { en: "Bonus", ar: "مكافأة" },
       deductions: { en: "Deductions", ar: "الخصومات" },
+      // WHAT the deduction was, said on the line itself. "Deductions 300 SAR"
+      // with no source is the kind of number a driver disputes; naming it
+      // traffic violations points at the table further down that itemises it.
+      deductionsSource: { en: "traffic violations", ar: "مخالفات مرورية" },
+      // THE UNRECOVERED REMAINDER. Only rendered when the fines exceeded the
+      // pay, and it says the no-carry rule out loud: an unabsorbed fine is a
+      // record, not a debt the next payslip collects. Someone reading this slip
+      // must not assume the balance follows the driver automatically, because
+      // it does not — recovering it is a human decision made outside this app.
+      unabsorbedNote: {
+        en: "Fines this month came to {claim} — more than the pay could cover. {taken} was deducted. {left} was not recovered, and is NOT carried into next month.",
+        ar: "بلغت المخالفات هذا الشهر {claim} — أكثر مما يغطيه الراتب. خُصم {taken}. ولم يُسترد {left}، ولا يُرحَّل إلى الشهر التالي.",
+      },
       netPay: { en: "Net pay", ar: "صافي الراتب" },
+
+      // THE ITEMISED FINES BEHIND THE DEDUCTION LINE. A single "Deductions
+      // 300 SAR" row is the figure a driver disputes; this is the answer to
+      // "which fines?".
+      violTitle: { en: "Traffic violations this month", ar: "المخالفات المرورية لهذا الشهر" },
+      violNone: { en: "No traffic violations in this month.", ar: "لا توجد مخالفات مرورية في هذا الشهر." },
+      // WHERE THE LIST CAME FROM — an issued payslip carries its own frozen
+      // copy, so the document stays self-consistent even if a type is later
+      // renamed or a fine re-priced. An unissued month has no document yet and
+      // is therefore read live, which means it can still change.
+      violFrozen: {
+        en: "From the issued payslip's own record — frozen as at issue.",
+        ar: "من سجل مسير الرواتب الصادر — مجمَّدة كما كانت عند الإصدار.",
+      },
+      violLive: {
+        en: "Live figures — this month has not been issued yet, so they can still change.",
+        ar: "أرقام مباشرة — لم يصدر مسير هذا الشهر بعد، وقد تتغير.",
+      },
+      violThRef: { en: "Reference", ar: "الرقم المرجعي" },
+      violThPayment: { en: "Fine paid?", ar: "هل سُددت المخالفة؟" },
+      violThSettlement: { en: "Payroll", ar: "الرواتب" },
+      violTotal: { en: "Total fines", ar: "إجمالي المخالفات" },
+
       // The `one` branch carries NO number in English — the source says
       // "Settled by payout", not "Settled by 1 payout" — which is exactly the
       // freedom EN[one] has. fill() simply finds no token to replace.
@@ -5289,6 +5325,11 @@ export const dict = {
       trips30d: { en: "Trips 30d", ar: "رحلات ٣٠ يوماً" },
       salary: { en: "Salary", ar: "الراتب" },
       unpaidCommission: { en: "Unpaid Commission", ar: "عمولة غير مدفوعة" },
+      // TRAFFIC FINES STILL UNRECOVERED. Deliberately NOT "Violations": the
+      // column is a MONEY column and a count of fines is not what it reports —
+      // a driver with four fines that payroll has already taken out of his pay
+      // belongs at zero here, beside the drivers who owe nothing.
+      outstandingFines: { en: "Outstanding Fines", ar: "مخالفات مستحقة" },
       licenseExp: { en: "License Exp", ar: "انتهاء الرخصة" },
     },
 
@@ -5364,6 +5405,103 @@ export const dict = {
       del: { en: "Delete incident", ar: "حذف حادثة" },
       // `{type}` is the operator's own free text — DATA, quoted verbatim.
       confirmDelete: { en: 'Delete this "{type}" incident?', ar: 'حذف حادثة "{type}" هذه؟' },
+    },
+
+    // TRAFFIC VIOLATIONS (0175/0177). The driver-detail section, plus the two
+    // roster-column strings.
+    //
+    // Reuses common.type / .date / .amount / .status / .note / .add / .cancel /
+    // .save / .saving / .edit rather than minting payroll-local twins — the
+    // column headings here are the same words the rest of the app already uses
+    // for the same ideas.
+    viol: {
+      title: { en: "Traffic Violations", ar: "المخالفات المرورية" },
+      add: { en: "Traffic violation", ar: "مخالفة مرورية" },
+      addTitle: { en: "New traffic violation", ar: "مخالفة مرورية جديدة" },
+      none: { en: "No traffic violations recorded.", ar: "لا توجد مخالفات مرورية مسجَّلة." },
+
+      // THE HEADLINE FIGURE. `{sar}` is a formatted money string, so the money
+      // formatter — not this dictionary — decides its digits and its "SAR".
+      // English's `one` branch carries no `{n}`; fill() simply finds no token,
+      // the same freedom reports.payslips.settledBy uses.
+      outstanding: {
+        one: { en: "{sar} outstanding · 1 unsettled", ar: "{sar} مستحقة · مخالفة واحدة غير مسددة" },
+        two: { en: "{sar} outstanding · 2 unsettled", ar: "{sar} مستحقة · مخالفتان غير مسددتين" },
+        few: { en: "{sar} outstanding · {n} unsettled", ar: "{sar} مستحقة · {n} مخالفات غير مسددة" },
+        many: { en: "{sar} outstanding · {n} unsettled", ar: "{sar} مستحقة · {n} مخالفة غير مسددة" },
+      },
+      noOutstanding: { en: "Nothing outstanding", ar: "لا يوجد مستحق" },
+      // The SAME count, said short enough for a roster cell. A separate key
+      // rather than a truncation of `outstanding` above: that one leads with the
+      // money because it is a callout, and this one sits UNDER the money in a
+      // table row, where repeating the figure would be noise.
+      colCount: {
+        one: { en: "1 fine", ar: "مخالفة واحدة" },
+        two: { en: "2 fines", ar: "مخالفتان" },
+        few: { en: "{n} fines", ar: "{n} مخالفات" },
+        many: { en: "{n} fines", ar: "{n} مخالفة" },
+      },
+      // WHAT "OUTSTANDING" MEANS, on the element that shows it. Payroll takes
+      // fines out of pay automatically, so the interesting number is what pay
+      // has NOT covered — and that is not a figure anyone can reconstruct from
+      // the list below without knowing the rule.
+      outstandingHelp: {
+        en: "Fines on file, less whatever issued payslips have already deducted.",
+        ar: "المخالفات المسجَّلة، ناقص ما خصمته مسيرات الرواتب الصادرة بالفعل.",
+      },
+
+      fType: { en: "Violation type", ar: "نوع المخالفة" },
+      fRef: { en: "Reference number", ar: "الرقم المرجعي" },
+      phRef: { en: "e.g. 1234567890", ar: "مثال: 1234567890" },
+      fAmount: { en: "Amount (SAR)", ar: "المبلغ (ر.س)" },
+      fDate: { en: "Violation date", ar: "تاريخ المخالفة" },
+      fStatus: { en: "Payment status", ar: "حالة السداد" },
+      fNote: { en: "Note (optional)", ar: "ملاحظة (اختياري)" },
+      paid: { en: "Paid", ar: "مسددة" },
+      notPaid: { en: "Not paid", ar: "غير مسددة" },
+      // WHY THE DATE FLOOR EXISTS, said where it bites. An operator who is
+      // simply told "invalid date" will try again with the same date.
+      dateFloor: {
+        en: "Not before {month} — an earlier month may already be paid, and an issued payslip will never pick this up. Future dates are fine.",
+        ar: "ليس قبل {month} — قد يكون شهر أسبق قد صُرف، ومسير الرواتب الصادر لن يلتقط هذه المخالفة أبداً. التواريخ المستقبلية مقبولة.",
+      },
+
+      // ADD-A-TYPE. Both names, because violation_types.label_ar is NOT NULL
+      // and copying the English across would put English on the Arabic screen.
+      typeAdd: { en: "+ Add a new type…", ar: "+ إضافة نوع جديد…" },
+      typeEn: { en: "Type name (English)", ar: "اسم النوع (بالإنجليزية)" },
+      typeAr: { en: "Type name (Arabic)", ar: "اسم النوع (بالعربية)" },
+      typeBoth: {
+        en: "Both names are required — each screen shows the one in its own language.",
+        ar: "الاسمان مطلوبان — كل شاشة تعرض الاسم بلغتها.",
+      },
+
+      recent: { en: "Latest violations", ar: "أحدث المخالفات" },
+      showingOf: { en: "Showing the 3 most recent of {n}.", ar: "عرض أحدث 3 من أصل {n}." },
+
+      // SETTLEMENT — what payroll has done with this fine, as distinct from
+      // whether the DRIVER has paid the government (that is fStatus above).
+      // Two different questions about the same row; both are shown.
+      stDeducted: { en: "Deducted", ar: "مخصومة" },
+      stPartial: { en: "Partly deducted", ar: "مخصومة جزئياً" },
+      stUnsettled: { en: "Unsettled", ar: "غير مسددة" },
+      lockedNote: {
+        en: "On an issued payslip — locked",
+        ar: "على مسير رواتب صادر — مقفلة",
+      },
+
+      editTitle: { en: "Edit violation", ar: "تعديل المخالفة" },
+      voidBtn: { en: "Void", ar: "إبطال" },
+      voidTitle: { en: "Void this violation", ar: "إبطال هذه المخالفة" },
+      voidReason: { en: "Why is it being voided?", ar: "لماذا يتم إبطالها؟" },
+      voidReasonPh: { en: "e.g. Issued to the wrong driver", ar: "مثال: صدرت لسائق خاطئ" },
+      // VOID IS NOT DELETE, and the difference matters to whoever clicks it.
+      voidHint: {
+        en: "The record stays and can still be read — it just leaves every total. Nothing is deleted.",
+        ar: "يبقى السجل ويمكن الاطلاع عليه — لكنه يخرج من كل المجاميع. لا يُحذف شيء.",
+      },
+      voiding: { en: "Voiding…", ar: "جارٍ الإبطال…" },
+      voided: { en: "Voided", ar: "مُبطلة" },
     },
 
     // Driver detail modal. Its salary row is drivers.salary.monthly / .openBtn

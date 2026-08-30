@@ -18,9 +18,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { Info, Printer } from "lucide-react";
 import { Table, TH, TD, Btn } from "@/components/ui";
-import { cn, formatSar, formatNum, todayKey } from "@/lib/utils";
+import { cn, formatSar, formatSarExact, formatNum, todayKey } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
-import { t, fill, plural, type Lang } from "@/lib/i18n";
+import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 // WATER_TYPE_LABELS stays ENGLISH this batch, deliberately. It lives in
 // lib/db-types.ts and is read by 20+ call sites across app/trips/**,
 // lib/invoiceDisplay.ts and a server action — exactly one of them is in
@@ -42,6 +42,10 @@ import {
   type PayslipBasisRow, type IssuedPayslipRow,
   type DriverCommissionByProjectRow,
 } from "@/lib/reports";
+import {
+  inMonth, violationTypeLabel,
+  type DriverViolationView, type ViolationType,
+} from "@/lib/violations";
 import type { CsvValue } from "@/lib/csv";
 // NOT a violation of the leaf rule above: exportSource.ts imports react,
 // lib/csv and lib/i18n and nothing else — in particular it does not import
@@ -1552,13 +1556,23 @@ function monthLabelOf(iso: string) {
 }
 
 export function PayslipsStatement({
-  basis, issued, commission, periodStart, periodEnd, label, today,
+  basis, issued, commission, violationsByDriver, violationTypes,
+  periodStart, periodEnd, label, today,
   selectedDriverId, onSelectDriver, onIssue, issuingId, registerCsv,
 }: {
   basis: PayslipBasisRow[];
   issued: IssuedPayslipRow[];
   /** 0116 — work-month earnings, the review table below the register. */
   commission: DriverCommissionByProjectRow[];
+  /**
+   * 0175-0177 — LIVE fines per driver, newest first, settlement resolved
+   * server-side. Consumed ONLY by the one-driver document, and only for a month
+   * that has no payslip: an issued month itemises from its own frozen snapshot,
+   * because a fine can be voided or re-priced after issue and the document must
+   * keep saying what it said the day it was handed over.
+   */
+  violationsByDriver: Record<string, DriverViolationView[]>;
+  violationTypes: ViolationType[];
   periodStart: string; periodEnd: string; label: string;
   /** Riyadh today, from the server — never new Date() in the client. */
   today: string;
@@ -1662,6 +1676,8 @@ export function PayslipsStatement({
         <PayslipDocument
           row={selected}
           doc={doc}
+          violations={violationsByDriver[selected.driver_id] ?? []}
+          violationTypes={violationTypes}
           running={isRunning(selected.period_start)}
           onBack={() => onSelectDriver(null)}
           onIssue={onIssue}
@@ -1824,6 +1840,134 @@ export function PayslipsStatement({
 }
 
 /**
+ * ONE FINE, AS THE PAYSLIP SHOWS IT — the shape both sources are flattened to.
+ *
+ * Deliberately NOT DriverViolationView. That type carries `voided_at`,
+ * `created_by` and the operator's private `note`, and the frozen snapshot
+ * carries none of them; typing this table as the live row would leave three
+ * fields that are meaningful in one branch and absent in the other, which is
+ * how the two branches start rendering differently. This is the intersection,
+ * and it is exactly what a driver reading the sheet needs.
+ *
+ * THE NOTE IS OMITTED ON PURPOSE. It is on the drivers screen, where it is an
+ * internal remark between operators; this document gets handed to the person
+ * the remark is about.
+ */
+type DocFine = {
+  key: string;
+  label: string;
+  ref: string;
+  amount: number;
+  date: string;
+  /** Did the DRIVER settle it with the authority? `null` = the record does not say. */
+  paid: boolean | null;
+  /** What PAYROLL did with it. A different question; see ViolationSettlement. */
+  state: "deducted" | "partial" | "unsettled";
+};
+
+/**
+ * TWO SOURCES, NEVER BLENDED — the same rule the money figures follow.
+ *
+ * ISSUED MONTH → the payslip's own frozen snapshot. Not the live table: a fine
+ * can be voided, re-priced or re-typed after issue, and a document must keep
+ * saying what it said the day it was handed over. Reading live here would let
+ * a sheet in someone's hand disagree with the same sheet reopened next week.
+ *
+ * UNISSUED MONTH → live rows, narrowed with inMonth(), which is the SAME
+ * half-open [start, next) window v_driver_payslip_basis sums with. A different
+ * window here is the one way this table could itemise a set of fines that is
+ * not the set the Deductions line was computed from.
+ *
+ * The frozen branch's settlement is a MONTH-LEVEL fact and is applied to every
+ * item, because absorption has no per-fine share: the payslip clamps the whole
+ * month's claim against the pay, so "which of these three was the one that did
+ * not fit" has no answer. Saying `partial` on each is the honest reading —
+ * the month was partly recovered, and no row is more settled than another.
+ */
+function buildDocFines(input: {
+  doc: IssuedPayslipRow | null;
+  live: DriverViolationView[];
+  typeById: Map<string, ViolationType>;
+  periodStart: string;
+  lang: Lang;
+}): DocFine[] {
+  const { doc, live, typeById, periodStart, lang } = input;
+
+  if (doc) {
+    // ORDER LEFT EXACTLY AS FROZEN. issue_driver_payslip aggregates its items
+    // `order by dv.violation_date, dv.ref_no` — oldest first — and re-sorting
+    // here would make the printed sheet disagree with the record it was printed
+    // from. The live branch below is sorted to MATCH this, not the reverse.
+    const items = doc.snapshot?.violations?.items ?? [];
+    // deductions_sar is what the pay actually absorbed; unabsorbed_sar is what
+    // it could not. Zero absorbed is NOT "partly deducted" — nothing was taken,
+    // and the month is as unsettled as one that was never issued.
+    const state: DocFine["state"] =
+      doc.deductions_sar <= 0 ? "unsettled" : doc.unabsorbed_sar > 0 ? "partial" : "deducted";
+    return items.map((it) => ({
+      key: it.id,
+      // BOTH LABELS WERE FROZEN, so a type renamed or retired since issue still
+      // prints the name that was on the sheet. arText picks the current
+      // reader's language out of the pair the document itself stored.
+      label: arText(it.type_label ?? "", it.type_label_ar ?? "", lang) || "—",
+      ref: it.ref_no,
+      amount: it.amount_sar,
+      date: it.violation_date,
+      // A string column, so it is tested for the one value that means paid
+      // rather than trusted to be a boolean. Absent reads as unknown, not unpaid.
+      paid: it.payment_status == null ? null : it.payment_status === "paid",
+      state,
+    }));
+  }
+
+  return live
+    .filter((v) => inMonth(v, periodStart))
+    // RE-SORTED, and this is the one place in the app that re-sorts these.
+    // buildViolationViews hands them over NEWEST-first, which is right for the
+    // drivers screen — an operator wants the fine that just arrived at the top.
+    // A payslip is not a feed: it is the document this preview literally
+    // becomes, and issue_driver_payslip freezes oldest-first. Leaving the two
+    // in different orders would mean the sheet visibly reshuffles the moment it
+    // is issued, with no figure having changed. Same tiebreak as the RPC so two
+    // fines on one day cannot swap between the preview and the document.
+    .sort((a, b) =>
+      a.violation_date === b.violation_date
+        ? a.ref_no.localeCompare(b.ref_no)
+        : a.violation_date < b.violation_date ? -1 : 1,
+    )
+    .map((v) => ({
+      key: v.id,
+      label: violationTypeLabel(typeById.get(v.violation_type_id), lang),
+      ref: v.ref_no,
+      amount: v.amount_sar,
+      date: v.violation_date,
+      paid: v.payment_status === "paid",
+      state: v.settlement.state,
+    }));
+}
+
+/** The two settlement chips. Same ring idiom as BasisChip above it. */
+function FineChip({ tone, title, children }: {
+  tone: "ok" | "warn" | "neutral";
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset whitespace-nowrap",
+        tone === "ok" && "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300",
+        tone === "warn" && "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300",
+        tone === "neutral" && "muted ring-[rgb(var(--border))]",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
  * ONE DRIVER, ONE MONTH — the thing you print and hand over.
  *
  * Renders the FROZEN document when one exists and the live preview when it does
@@ -1831,33 +1975,73 @@ export function PayslipsStatement({
  * driver_payslips, a preview reads every figure off the basis view.
  */
 function PayslipDocument({
-  row, doc, running, onBack, onIssue, issuing,
+  row, doc, violations, violationTypes, running, onBack, onIssue, issuing,
 }: {
   row: PayslipBasisRow;
   doc: IssuedPayslipRow | null;
+  /**
+   * This driver's LIVE fines, every month of them, settlement already resolved
+   * server-side. Narrowed to the picked month here — and read ONLY when the
+   * month has no payslip. See buildDocFines.
+   */
+  violations: DriverViolationView[];
+  /** Every type, active and retired — a historical fine still needs its name. */
+  violationTypes: ViolationType[];
   running: boolean;
   onBack: () => void;
   onIssue: (driverId: string, periodStart: string) => void;
   issuing: boolean;
 }) {
   const { lang } = useApp();
+  // BOTH BRANCHES READ THE SAME FOUR FIGURES. The preview branch used to
+  // hardcode `deductions: 0` while reading row.net_sar, which was honest while
+  // the view's net_sar was gross and became a lie the moment 0177 made it
+  // net-of-deduction: the net shrank by the fine and the Deductions line still
+  // said zero, so the slip did not add up on its own face.
+  //
+  // The preview now reads the view's own columns 19-21. That is the WYSIWYG
+  // guarantee end to end — the view computes the deduction, the preview renders
+  // what the view computed, and issue_driver_payslip freezes the same row
+  // without recomputing. A preview and the document it becomes cannot disagree.
   const f = doc
     ? {
         salary: doc.base_salary_sar, commission: doc.commission_sar,
         specials: doc.specials_sar, adjustments: doc.adjustments_sar,
         bonus: doc.bonus_sar, deductions: doc.deductions_sar, net: doc.net_sar,
+        claim: doc.violation_deduction_sar, unabsorbed: doc.unabsorbed_sar,
         basis: doc.commission_basis, settled: doc.commission_settled,
       }
     : {
         salary: row.base_salary_sar, commission: row.commission_sar,
         specials: row.specials_sar, adjustments: row.adjustments_sar,
-        bonus: row.bonus_sar, deductions: 0, net: row.net_sar,
+        bonus: row.bonus_sar, deductions: row.deductions_sar, net: row.net_sar,
+        claim: row.violation_deduction_sar, unabsorbed: row.unabsorbed_sar,
         basis: row.commission_basis, settled: row.commission_settled,
       };
 
   const covered = doc?.snapshot?.covered_trips;
   const payouts = doc?.snapshot?.payouts ?? [];
   const blocked = row.hire_date_missing || running;
+
+  // Built here rather than on the server because it depends on `lang`, which
+  // only the browser knows — the fetch cannot pick a label language for a
+  // reader who can toggle it.
+  const typeById = useMemo(() => {
+    const m = new Map<string, ViolationType>();
+    for (const vt of violationTypes) m.set(vt.id, vt);
+    return m;
+  }, [violationTypes]);
+
+  const fines = useMemo(
+    () => buildDocFines({ doc, live: violations, typeById, periodStart: row.period_start, lang }),
+    [doc, violations, typeById, row.period_start, lang],
+  );
+  // formatSarExact, not formatSar, for every figure in this table INCLUDING the
+  // total. Whole-riyal rounding is right for the earnings breakdown above, where
+  // each line is independent; here the rows are supposed to add up to the total
+  // underneath them, and three fines rounded down make a column that visibly
+  // does not — the one arithmetic error a reader can catch unaided.
+  const finesTotal = sumOver(fines, (x) => x.amount);
 
   // ISSUING IS IRREVERSIBLE AND NUMBERED, so it asks first. There is no delete
   // path for a payslip by design — undoing one means an architect deleting the
@@ -2016,9 +2200,39 @@ function PayslipDocument({
             <TD>{t("reports.payslips.bonus", lang)}</TD>
             <TD className="text-end tabular-nums">{formatSar(f.bonus)}</TD>
           </tr>
+          {/* THE ONE ROW THAT SUBTRACTS. Every line above it adds, so it is the
+              only place a reader can be misled about direction — it renders with
+              an explicit minus and stops being muted the moment it is non-zero,
+              because muted grey is how you style a number that does not matter
+              and this one just took money off someone's pay.
+
+              The sign and the digits are ONE dir="ltr" span. Split, RTL would
+              reorder them and print the minus on the wrong end of the amount —
+              the single worst typo available on a payslip. The rest of this
+              file's money cells are unsigned, which is why they need no wrapper
+              and this one does. */}
           <tr>
-            <TD className="muted">{t("reports.payslips.deductions", lang)}</TD>
-            <TD className="text-end tabular-nums muted">{formatSar(f.deductions)}</TD>
+            <TD className={f.deductions > 0 ? "" : "muted"}>
+              {t("reports.payslips.deductions", lang)}
+              {f.deductions > 0 && (
+                <span className="muted text-[12px]">
+                  {" — "}
+                  {t("reports.payslips.deductionsSource", lang)}
+                </span>
+              )}
+            </TD>
+            <TD
+              className={cn(
+                "text-end tabular-nums",
+                f.deductions > 0 ? "font-medium" : "muted",
+              )}
+            >
+              {f.deductions > 0 ? (
+                <span dir="ltr">{"−"}{formatSar(f.deductions)}</span>
+              ) : (
+                formatSar(0)
+              )}
+            </TD>
           </tr>
           <tr className="border-t-2">
             <TD className="font-semibold">{t("reports.payslips.netPay", lang)}</TD>
@@ -2026,6 +2240,139 @@ function PayslipDocument({
           </tr>
         </tbody>
       </Table>
+
+      {/* THE NO-CARRY RULE, SAID OUT LOUD, ONLY WHEN IT APPLIES. Rendered when
+          the month's fines exceeded what the pay could absorb — f.unabsorbed is
+          the view's own column 21, not a subtraction done here.
+
+          It is deliberately a sentence and not a fourth table row. A row reads
+          as another figure in the arithmetic, and this figure is NOT in the
+          arithmetic: net already stands, and the remainder is a record of what
+          went unrecovered, not a debt this document collects or hands to next
+          month. Recovering it is a human decision made outside this app, so the
+          line has to say so rather than leave the reader to assume a balance
+          follows the driver.
+
+          Amber, matching this file's other two exception callouts (blocked,
+          not-yet-issued) rather than minting a third treatment. Not red: the
+          payslip is correct and issuable — a fine simply outran the pay. */}
+      {f.unabsorbed > 0 && (
+        <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[12px] leading-relaxed">
+          {fill(t("reports.payslips.unabsorbedNote", lang), {
+            claim: formatSar(f.claim),
+            taken: formatSar(f.deductions),
+            left: formatSar(f.unabsorbed),
+          })}
+        </div>
+      )}
+
+      {/* THE ANSWER TO "WHICH FINES?".
+          ────────────────────────────
+          It sits immediately under the Deductions line and its callout because
+          that is where the question is raised: a single "Deductions −300" row
+          is the figure a driver disputes, and the dispute is not about the
+          subtraction, it is about which tickets. Putting the itemisation any
+          further down — beside the commission provenance, say — separates a
+          challenge from its evidence by a screen of unrelated detail.
+
+          IT RENDERS EVEN WHEN THERE ARE NONE, which is the opposite of what an
+          empty table usually deserves. This sheet is handed over and filed. An
+          ABSENT section is ambiguous — no fines, or fines not shown? — and on
+          a document that takes money off someone's pay that ambiguity is the
+          expensive kind. One muted sentence settles it.
+
+          Deliberately NOT no-print. Its whole purpose is to survive onto the
+          paper the driver keeps. */}
+      <h3 className="text-xs uppercase tracking-wide muted font-medium mt-6 mb-2">
+        {t("reports.payslips.violTitle", lang)}
+      </h3>
+
+      {fines.length === 0 ? (
+        <p className="text-[12px] muted">{t("reports.payslips.violNone", lang)}</p>
+      ) : (
+        <>
+          {/* WHERE THE LIST CAME FROM, said before the list. The two sources
+              answer differently on purpose and the reader has no other way to
+              tell which one they are looking at. */}
+          <p className="text-[11px] muted mb-2 leading-relaxed">
+            {t(doc ? "reports.payslips.violFrozen" : "reports.payslips.violLive", lang)}
+          </p>
+
+          <Table>
+            <thead>
+              <tr>
+                <TH>{t("common.type", lang)}</TH>
+                <TH>{t("reports.payslips.violThRef", lang)}</TH>
+                <TH className="text-end">{t("common.amount", lang)}</TH>
+                <TH>{t("common.date", lang)}</TH>
+                <TH>{t("reports.payslips.violThPayment", lang)}</TH>
+                <TH>{t("reports.payslips.violThSettlement", lang)}</TH>
+              </tr>
+            </thead>
+            <tbody>
+              {fines.map((x) => (
+                <tr key={x.key}>
+                  <TD className="whitespace-normal font-medium">{x.label}</TD>
+                  {/* A government reference is a Latin token in both languages,
+                      and monospace because it gets read digit by digit against
+                      a paper notice. Same treatment as the drivers screen. */}
+                  <TD><span dir="ltr" className="font-mono text-xs">{x.ref}</span></TD>
+                  <TD className="text-end tabular-nums">
+                    <span dir="ltr">{formatSarExact(x.amount)}</span>
+                  </TD>
+                  {/* Stored ISO, printed ISO — the same unambiguous form every
+                      other date on this document uses. */}
+                  <TD className="muted"><span dir="ltr">{x.date}</span></TD>
+                  <TD>
+                    {/* TWO DIFFERENT QUESTIONS ABOUT ONE ROW, both answered,
+                        because neither implies the other: a driver can have
+                        settled the ticket with the authority while payroll has
+                        not yet recovered it, and vice versa. Collapsing them
+                        into one badge means guessing which the reader meant. */}
+                    {x.paid === null ? (
+                      <span className="muted">—</span>
+                    ) : (
+                      <FineChip tone={x.paid ? "ok" : "warn"}>
+                        {t(x.paid ? "drivers.viol.paid" : "drivers.viol.notPaid", lang)}
+                      </FineChip>
+                    )}
+                  </TD>
+                  <TD>
+                    <FineChip
+                      tone={x.state === "deducted" ? "ok" : x.state === "partial" ? "warn" : "neutral"}
+                    >
+                      {t(
+                        x.state === "deducted" ? "drivers.viol.stDeducted"
+                          : x.state === "partial" ? "drivers.viol.stPartial"
+                            : "drivers.viol.stUnsettled",
+                        lang,
+                      )}
+                    </FineChip>
+                  </TD>
+                </tr>
+              ))}
+              {/* THE COLUMN HAS TO ADD UP IN FRONT OF THE READER. This total is
+                  what was CLAIMED this month, not what was taken — the taken
+                  figure is the Deductions line above, and when the two differ
+                  the amber callout has already explained why. */}
+              <tr className="border-t font-semibold" style={{ borderColor: "rgb(var(--border))" }}>
+                <TD>{t("reports.payslips.violTotal", lang)}</TD>
+                {/* Every cell rendered, none spanned — the house idiom for a
+                    total row here (see the aging table). colSpan is not on TD's
+                    props and widening a shared primitive for one row would be a
+                    cross-cutting change made for a cosmetic reason. */}
+                <TD>{null}</TD>
+                <TD className="text-end tabular-nums">
+                  <span dir="ltr">{formatSarExact(finesTotal)}</span>
+                </TD>
+                <TD>{null}</TD>
+                <TD>{null}</TD>
+                <TD>{null}</TD>
+              </tr>
+            </tbody>
+          </Table>
+        </>
+      )}
 
       {/* WHAT THE COMMISSION ACTUALLY IS. A number with no provenance on a
           document someone is paid against is worth less than no number. */}

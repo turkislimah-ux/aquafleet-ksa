@@ -78,6 +78,7 @@ import {
   type DriverCommissionByProjectRow,
   type VatSourceDocRow, indicativeZakat,
 } from "@/lib/reports";
+import type { DriverViolationView, ViolationType } from "@/lib/violations";
 import {
   RevenueStatement, ReceivablesStatement, CostStatement,
   OperationsStatement, PayslipsStatement, NarrativeStatement, CustomStatement,
@@ -166,6 +167,9 @@ type Props = {
   payslipBasis: PayslipBasisRow[];
   issuedPayslips: IssuedPayslipRow[];
   driverCommission: DriverCommissionByProjectRow[];
+  /** 0175-0177 — live fines per driver + every type, for the payslip document. */
+  violationsByDriver: Record<string, DriverViolationView[]>;
+  violationTypes: ViolationType[];
   today: string;
   /** Optional so this tab still renders standalone; see ./exportSource. */
   registerCsv?: RegisterCsv;
@@ -177,7 +181,8 @@ export default function StatementsTab({
   expenseCategories, invoices, outstandingLive, salesReturns, receivables, aging,
   maintPerTruck, purchasing, payroll, commissions, commissionsPaid, operations,
   filling, fillingByStation,
-  collections, metrics, perTruck, opsByDriver, payslipBasis, issuedPayslips, driverCommission, today,
+  collections, metrics, perTruck, opsByDriver, payslipBasis, issuedPayslips, driverCommission,
+  violationsByDriver, violationTypes, today,
   registerCsv, onManageExpenses,
 }: Props) {
   const { lang } = useApp();
@@ -959,6 +964,8 @@ export default function StatementsTab({
           onIssue={handleIssuePayslip}
           issuingId={issuingPayslip}
           commission={driverCommission}
+          violationsByDriver={violationsByDriver}
+          violationTypes={violationTypes}
           registerCsv={registerCsv}
         />
         </>

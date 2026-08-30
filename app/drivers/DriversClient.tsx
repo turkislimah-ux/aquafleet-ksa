@@ -65,6 +65,8 @@ import LinkedIdField from "@/components/LinkedIdField";
 import StaffTab from "./StaffTab";
 import type { CommPayout } from "@/lib/commission-rows";
 import ScrollLock from "@/components/ScrollLock";
+import TrafficViolationsSection from "./TrafficViolationsSection";
+import type { DriverViolationView, OutstandingCell, ViolationType } from "@/lib/violations";
 
 const DRIVER_TABS = ["drivers", "commissions", "history", "staff"] as const;
 
@@ -273,6 +275,9 @@ export default function DriversClient({
   driverStateById,
   balanceByDriver,
   openWoByMechanic,
+  violationsByDriver,
+  violationOutstanding,
+  violationTypes,
   error,
 }: {
   // ACTIVE roster only (terminated_at is null) — KPIs, roster grid, pickers.
@@ -322,6 +327,17 @@ export default function DriversClient({
   // Management & Staff mechanics cluster; threaded through here because the
   // fetch belongs to the page, not to StaffTab.
   openWoByMechanic: Record<string, number>;
+  // Traffic violations (0175-0177), all three derived on the server by
+  // lib/violations' single pass — same reasoning as balanceByDriver above.
+  //
+  // byDriver holds LIVE rows only, each with its settlement already resolved, so
+  // no code here decides whether a row is locked. outstanding is keyed by driver
+  // and MISSING for a driver with nothing owed — read it with `?? ` and never
+  // assume a cell exists. violationTypes is every type, active or not, because
+  // the list resolves labels as well as filling the picker.
+  violationsByDriver: Record<string, DriverViolationView[]>;
+  violationOutstanding: Record<string, OutstandingCell>;
+  violationTypes: ViolationType[];
   error: string | null;
 }) {
   const { lang } = useApp();
@@ -699,6 +715,11 @@ export default function DriversClient({
                       this is "total owed", the same all-time basis the roster
                       balance and the Commissions badge already use. */}
                   <TH>{t("drivers.col.unpaidCommission", lang)}</TH>
+                  {/* Deliberately ADJACENT to unpaid commission: the two are the
+                      money either side of one driver — what the company owes
+                      them, and what they still owe against fines. Reading them
+                      together is the point, so they share an edge. */}
+                  <TH>{t("drivers.col.outstandingFines", lang)}</TH>
                   <TH>{t("drivers.col.licenseExp", lang)}</TH>
                   <TH className="text-end" />
                 </tr>
@@ -706,7 +727,7 @@ export default function DriversClient({
               <tbody>
                 {drivers.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
+                    <td colSpan={11} className="py-6 px-3 border-t text-center muted text-sm" style={{ borderColor: "rgb(var(--border))" }}>
                       {t("drivers.none", lang)}
                     </td>
                   </tr>
@@ -771,6 +792,52 @@ export default function DriversClient({
                             <span className="font-semibold" dir="ltr">{formatSar(bal)}</span>
                           ) : (
                             <span className="muted" dir="ltr">{formatSar(0)}</span>
+                          );
+                        })()}
+                      </TD>
+                      {/* Outstanding traffic fines (0175-0177). Money on top, its
+                          count underneath — the count is the secondary fact and
+                          is sized like one, and it is only printed when there IS
+                          something outstanding, so a clean driver's row stays a
+                          single muted zero like the column beside it.
+
+                          NO AMBER, even though this is money the driver owes.
+                          License Exp two cells over already owns amber in this
+                          table, and a second amber meaning in the same row turns
+                          a precise signal into decoration. The bold figure
+                          against a column of muted zeroes is the signal.
+
+                          NEGATIVE IS RENDERED, IN ROSE, ON PURPOSE. lib/
+                          violations does not clamp: below zero means a fine was
+                          voided after a payslip had already absorbed it, i.e. a
+                          document deducted money for something that no longer
+                          exists. That is a defect, not a balance, and it should
+                          look like one rather than being floored to a tidy 0. */}
+                      <TD className="tabular-nums">
+                        {(() => {
+                          const cell = violationOutstanding[d.id];
+                          const sar = cell?.sar ?? 0;
+                          const n = cell?.count ?? 0;
+                          if (sar === 0 && n === 0) {
+                            return <span className="muted" dir="ltr">{formatSar(0)}</span>;
+                          }
+                          return (
+                            <div className="leading-tight">
+                              <span
+                                className={cn(
+                                  "font-semibold",
+                                  sar < 0 && "text-rose-600 dark:text-rose-400",
+                                )}
+                                dir="ltr"
+                              >
+                                {formatSar(sar)}
+                              </span>
+                              {n > 0 && (
+                                <div className="text-[11px] muted">
+                                  {fill(t(`drivers.viol.colCount.${plural(n)}`, lang), { n })}
+                                </div>
+                              )}
+                            </div>
                           );
                         })()}
                       </TD>
@@ -867,6 +934,11 @@ export default function DriversClient({
           leavePeriods={driverLeaveById.get(detail.id) ?? []}
           leaveTypes={leaveTypes}
           incidents={driverIncidentsById.get(detail.id) ?? []}
+          // Live rows for THIS driver, already sorted and settlement-resolved by
+          // lib/violations. Same lookup shape as `incidents` directly above.
+          violations={violationsByDriver[detail.id] ?? []}
+          violationOutstanding={violationOutstanding[detail.id] ?? null}
+          violationTypes={violationTypes}
           today={today}
           onLeaveToday={onLeaveDrivers.has(detail.id)}
           state={driverStateById[detail.id] ?? "off_duty"}
@@ -1144,6 +1216,9 @@ function DriverDetail({
   leavePeriods,
   leaveTypes,
   incidents,
+  violations,
+  violationOutstanding,
+  violationTypes,
   today,
   onLeaveToday,
   state,
@@ -1159,6 +1234,14 @@ function DriverDetail({
   leavePeriods: LeavePeriod[];
   leaveTypes: LeaveType[];
   incidents: DriverIncident[];
+  // Traffic violations, LIVE rows only, newest first, each already carrying its
+  // settlement. `violationOutstanding` is null when this driver owes nothing —
+  // an absent key, not a zeroed cell, so the section can say "nothing
+  // outstanding" without having to distinguish 0-from-arithmetic and 0-from-
+  // nothing-ever-happened.
+  violations: DriverViolationView[];
+  violationOutstanding: OutstandingCell | null;
+  violationTypes: ViolationType[];
   today: string;
   onLeaveToday: boolean;
   state: DriverState;
@@ -1359,6 +1442,22 @@ function DriverDetail({
               ))
             )}
           </div>
+
+          {/* Traffic violations (0175-0177). Placed BETWEEN recent trips and
+              incidents rather than down beside the danger zone: a fine is a
+              consequence of driving, so it reads directly after the driving —
+              and it belongs above incidents because unlike an incident it is
+              money, and money on this panel is acted on, not just recorded.
+
+              Own component, prop assembled server-side, exactly like
+              IncidentsSection below it. */}
+          <TrafficViolationsSection
+            driverId={d.id}
+            violations={violations}
+            types={violationTypes}
+            outstanding={violationOutstanding}
+            today={today}
+          />
 
           {/* Incidents — persist for terminated drivers too (unfiltered fetch,
               plain FK survives soft-delete); add happens from the Edit form,

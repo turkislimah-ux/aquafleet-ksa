@@ -20,6 +20,13 @@ import {
   type CommAdjustmentRow,
   type CommPayout,
 } from "@/lib/commission-rows";
+import {
+  buildViolationViews,
+  type DriverViolation,
+  type FrozenViolation,
+  type PayslipDeductionRow,
+  type ViolationType,
+} from "@/lib/violations";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +56,7 @@ export default async function DriversPage() {
   // Fleet page carried until 22aad18; this is its twin.
   const since = daysAgoKey(30);
 
-  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, staffCommissionsRes, commissionTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes, activeWorkOrdersRes, activeOutsourcedJobsRes, openWorkOrdersRes] =
+  const [driversRes, trucksRes, tripsRes, commTripsRes, cyclesRes, specialsRes, adjustmentsRes, projectsRes, payoutsRes, staffRes, staffRolesRes, leavePeriodsRes, leaveTypesRes, staffCommissionsRes, commissionTypesRes, projectDriversRes, operationStationsRes, driverIncidentsRes, activeWorkOrdersRes, activeOutsourcedJobsRes, openWorkOrdersRes, violationTypesRes, driverViolationsRes, frozenViolationsRes, payslipDeductionsRes] =
     await Promise.all([
       supabase.from("drivers").select("*").order("created_at", { ascending: false }),
       // Terminated trucks vanish from the driver-detail "Current Assignment"
@@ -171,6 +178,38 @@ export default async function DriversPage() {
         .from("work_orders")
         .select("assigned_mechanic_id")
         .in("status", ["open", "in_progress", "awaiting_parts"]),
+      // ---- Traffic violations (0175/0176) + what payroll already took (0177) ----
+      // FOUR fetches feed ONE derivation (buildViolationViews, below). They are
+      // separate reads rather than one join because the arithmetic is not a
+      // per-row join: absorption happens at the payslip grain, and joining a
+      // violation to its payslip's deductions_sar would multiply that month
+      // figure by however many fines the month held.
+      //
+      // ALL types, active and not. The picker shows only the active ones (it
+      // filters), but LABEL RESOLUTION needs every row: a fine written against a
+      // type that was later deactivated must still render its own name instead
+      // of an em-dash, and it is the historical rows — the ones nobody can edit
+      // any more — that are likeliest to point at a retired type.
+      supabase
+        .from("violation_types")
+        .select("id, key, label, label_ar, is_default, active")
+        .order("is_default", { ascending: false })
+        .order("label", { ascending: true }),
+      // UNFILTERED by voided_at — the filtering happens in lib/violations so the
+      // roster column and the detail list cannot drift on what "live" means.
+      // Also unfiltered by driver termination, same reason driver_incidents is:
+      // a terminated driver's detail must still resolve.
+      supabase
+        .from("driver_violations")
+        .select(
+          "id, driver_id, violation_type_id, ref_no, amount_sar, violation_date, payment_status, note, voided_at, created_by, created_at",
+        )
+        .order("violation_date", { ascending: false }),
+      // The freeze table: which fine landed on which issued payslip.
+      supabase.from("driver_payslip_violations").select("payslip_id, violation_id"),
+      // A row EXISTING here means issued — there is no draft state. Only the
+      // three money columns the outstanding definition needs.
+      supabase.from("driver_payslips").select("id, driver_id, deductions_sar, unabsorbed_sar"),
     ]);
 
   // ---- Driver set split (termination) ----------------------------------
@@ -208,6 +247,7 @@ export default async function DriversPage() {
   const commissionTypes = (commissionTypesRes.data ?? []) as StaffCommissionType[];
   const operationStations = (operationStationsRes.data ?? []) as OperationStation[];
   const driverIncidents = (driverIncidentsRes.data ?? []) as DriverIncident[];
+  const violationTypes = (violationTypesRes.data ?? []) as ViolationType[];
   const today = todayKey(); // local (matches trip day-math), not UTC
   const projectsById: Record<string, string> = {};
   const activeProjectIds = new Set<string>();
@@ -270,6 +310,18 @@ export default async function DriversPage() {
     openWoByMechanic[w.assigned_mechanic_id] = (openWoByMechanic[w.assigned_mechanic_id] ?? 0) + 1;
   }
 
+  // ---- Traffic violations: ONE derivation, TWO surfaces --------------------
+  // The detail section's per-driver list and the roster's Outstanding column
+  // come out of the same call, for the same reason balanceByDriver is threaded
+  // rather than recomputed: two surfaces answering "what is still owed" from
+  // two code paths is two chances to answer differently. lib/violations owns
+  // the arithmetic; this page owns the fetching.
+  const { byDriver: violationsByDriver, outstanding: violationOutstanding } = buildViolationViews({
+    violations: (driverViolationsRes.data ?? []) as DriverViolation[],
+    frozen: (frozenViolationsRes.data ?? []) as FrozenViolation[],
+    payslips: (payslipDeductionsRes.data ?? []) as PayslipDeductionRow[],
+  });
+
   const error =
     driversRes.error ||
     trucksRes.error ||
@@ -298,7 +350,18 @@ export default async function DriversPage() {
     // rule (see the Dashboard entry in CLAUDE.md §7) in a different costume:
     // silently reporting the all-clear is worse than reporting nothing.
     activeWorkOrdersRes.error ||
-    activeOutsourcedJobsRes.error;
+    activeOutsourcedJobsRes.error ||
+    // All four violation reads, for the same reason as the two above. A failed
+    // read arrives as `null` → `[]`, and an empty array is not "no data" here,
+    // it is a specific WRONG ANSWER in each case: no violations reads as a clean
+    // driver; no freeze rows reads as nothing-ever-deducted, which unlocks rows
+    // that a payslip has already frozen; no payslips means nothing is subtracted
+    // and every settled fine reappears as outstanding. Money on screen, or an
+    // edit button where there must not be one.
+    violationTypesRes.error ||
+    driverViolationsRes.error ||
+    frozenViolationsRes.error ||
+    payslipDeductionsRes.error;
 
   // Per-driver: count of trips in the last 30 days, and up to 6 most-recent trips.
   const trips30dByDriver: Record<string, number> = {};
@@ -354,6 +417,12 @@ export default async function DriversPage() {
       // disagreeing with the tab it links to.
       balanceByDriver={balanceByDriver}
       openWoByMechanic={openWoByMechanic}
+      // Traffic violations (0175-0177). Same threading discipline as
+      // balanceByDriver directly above: derived once on the server, handed down
+      // as values, never re-derived in a browser.
+      violationsByDriver={violationsByDriver}
+      violationOutstanding={violationOutstanding}
+      violationTypes={violationTypes}
       error={error?.message ?? null}
     />
   );

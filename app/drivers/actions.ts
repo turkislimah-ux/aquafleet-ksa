@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
+import { todayKey } from "@/lib/utils";
 import {
   buildCurrentBaseLines,
   buildPayoutSnapshot,
@@ -1235,6 +1236,260 @@ export async function removeSalaryChange(id: string): Promise<ActionResult> {
   }
 
   const { error } = await supabase.from("salary_history").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  revalidatePath("/reports");
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// TRAFFIC VIOLATIONS (0175 tables, 0177 payslip wiring).
+//
+// A fine written against a driver. It reaches payroll through ONE path and only
+// one: v_driver_payslip_basis sums the driver's live violations for the month
+// and clamps them to what the pay can cover; issue_driver_payslip freezes that
+// figure and the rows behind it. Nothing here computes a deduction, and nothing
+// here may — a second expression for the same money is how a preview and a
+// document start disagreeing.
+//
+// Every write below revalidates BOTH /drivers and /reports. A fine entered on
+// the driver screen changes the payslip preview on the reports screen; leaving
+// /reports stale would show a net that the next issue will not produce.
+//
+// THE FREEZE IS THE EDIT BOUNDARY. Once a violation appears in
+// driver_payslip_violations it is part of an issued document, and both mutating
+// actions refuse it server-side rather than relying on the button being hidden.
+// A UI-only lock is not a lock.
+// ---------------------------------------------------------------------------
+
+/** Is this violation already frozen onto an issued payslip? */
+async function violationIsFrozen(
+  supabase: ReturnType<typeof createClient>,
+  id: string,
+): Promise<{ frozen: boolean; error: string | null }> {
+  const { data, error } = await supabase
+    .from("driver_payslip_violations")
+    .select("payslip_id")
+    .eq("violation_id", id)
+    .maybeSingle();
+  if (error) return { frozen: false, error: error.message };
+  return { frozen: data != null, error: null };
+}
+
+const FROZEN_MSG =
+  "This violation is already on an issued payslip and can no longer be changed. Undo that payslip first if it is wrong.";
+
+/**
+ * Add a violation TYPE. Both names are REQUIRED because violation_types.label
+ * and violation_types.label_ar are both NOT NULL — unlike staff_roles and
+ * leave_types, which store one name shown as typed. Copying the English into
+ * the Arabic column (as addStaffCommissionType does for commission_types) would
+ * satisfy the constraint and put English text on the Arabic screen, so this one
+ * asks for both instead.
+ *
+ * Re-adding a name that exists but was deactivated REACTIVATES it rather than
+ * failing on the unique key — same recovery addStaffCommissionType has.
+ */
+export async function addViolationType(
+  label: string,
+  labelAr: string,
+): Promise<{ error: string | null; key?: string }> {
+  const clean = label.trim();
+  const cleanAr = labelAr.trim();
+  if (!clean) return { error: "English name is required." };
+  if (!cleanAr) return { error: "Arabic name is required." };
+  const key = slugifyKey(clean);
+  if (!key) return { error: "The English name needs letters or numbers." };
+  if (!isValidSlug(key)) return { error: "The English name must start with a letter." };
+
+  const supabase = createClient();
+  const { data: existing, error: lookupErr } = await supabase
+    .from("violation_types")
+    .select("key, active")
+    .eq("key", key)
+    .maybeSingle();
+  if (lookupErr) return { error: lookupErr.message };
+
+  if (existing) {
+    if (!existing.active) {
+      const { error } = await supabase
+        .from("violation_types")
+        .update({ active: true, label: clean, label_ar: cleanAr })
+        .eq("key", key);
+      if (error) return { error: error.message };
+    }
+    revalidatePath("/drivers");
+    revalidatePath("/reports");
+    return { error: null, key };
+  }
+
+  const { error } = await supabase
+    .from("violation_types")
+    .insert({ key, label: clean, label_ar: cleanAr, is_default: false, active: true });
+  if (error) return { error: error.message };
+
+  revalidatePath("/drivers");
+  revalidatePath("/reports");
+  return { error: null, key };
+}
+
+type ViolationInput = {
+  driverId: string;
+  violationTypeId: string;
+  refNo: string;
+  amountSar: number | null;
+  violationDate: string;
+  paymentStatus: string;
+  note: string | null;
+};
+
+function parseViolation(formData: FormData): ViolationInput {
+  return {
+    driverId: str(formData.get("driver_id")),
+    violationTypeId: str(formData.get("violation_type_id")),
+    refNo: str(formData.get("ref_no")),
+    amountSar: numOrNull(formData.get("amount_sar")),
+    violationDate: str(formData.get("violation_date")),
+    paymentStatus: str(formData.get("payment_status")),
+    note: nullable(formData.get("note")),
+  };
+}
+
+function validateViolation(p: ViolationInput): string | null {
+  if (!p.driverId) return "Missing driver.";
+  if (!p.violationTypeId) return "Pick a violation type.";
+  if (!p.refNo) return "Enter the violation reference number.";
+  if (p.amountSar == null || p.amountSar <= 0) return "Enter an amount greater than 0.";
+  if (!ISO_DATE_RE.test(p.violationDate)) return "Pick a violation date.";
+  if (p.paymentStatus !== "paid" && p.paymentStatus !== "not_paid") {
+    return "Payment status must be paid or not paid.";
+  }
+  return null;
+}
+
+/**
+ * The duplicate-reference index is
+ * `unique (driver_id, ref_no) where voided_at is null` (0175), so Postgres
+ * raises 23505 on a repeat. That is the right guard, but its raw message names
+ * the index and not the problem, so it is translated here.
+ */
+function violationWriteError(message: string): string {
+  if (message.includes("driver_violations_driver_ref_live_unique")) {
+    return "This driver already has a live violation with that reference number.";
+  }
+  return message;
+}
+
+/**
+ * NEW violations cannot be dated into a month that has already closed.
+ *
+ * A fine dated into a past month would land in a month whose payslip may
+ * already be issued — and an issued payslip is frozen, so it will never pick
+ * the fine up. The money would sit in a month that is structurally incapable of
+ * absorbing it. Future dates ARE allowed: a fine dated later this month, or
+ * next, is simply one that has not come due yet.
+ *
+ * Enforced on ADD only. On EDIT the floor is deliberately absent — a violation
+ * legitimately entered on the 20th becomes "last month" on the 1st, and a floor
+ * applied there would make a correct old row impossible to correct.
+ */
+function violationDateFloor(): string {
+  return `${todayKey().slice(0, 7)}-01`;
+}
+
+export async function addDriverViolation(formData: FormData): Promise<ActionResult> {
+  const p = parseViolation(formData);
+  const bad = validateViolation(p);
+  if (bad) return { error: bad };
+  if (p.violationDate < violationDateFloor()) {
+    return { error: "A violation cannot be dated before the start of the current month." };
+  }
+
+  const supabase = createClient();
+  const { data: auth } = await supabase.auth.getUser();
+
+  const { error } = await supabase.from("driver_violations").insert({
+    driver_id: p.driverId,
+    violation_type_id: p.violationTypeId,
+    ref_no: p.refNo,
+    amount_sar: p.amountSar,
+    violation_date: p.violationDate,
+    payment_status: p.paymentStatus,
+    note: p.note,
+    created_by: auth?.user?.email ?? null,
+  });
+  if (error) return { error: violationWriteError(error.message) };
+
+  revalidatePath("/drivers");
+  revalidatePath("/reports");
+  return { error: null };
+}
+
+/** Driver is fixed at creation; only the fine's own fields change. */
+export async function updateDriverViolation(id: string, formData: FormData): Promise<ActionResult> {
+  if (!id) return { error: "Missing violation." };
+  const p = parseViolation(formData);
+  const bad = validateViolation(p);
+  if (bad) return { error: bad };
+
+  const supabase = createClient();
+  const lock = await violationIsFrozen(supabase, id);
+  if (lock.error) return { error: lock.error };
+  if (lock.frozen) return { error: FROZEN_MSG };
+
+  const { error } = await supabase
+    .from("driver_violations")
+    .update({
+      violation_type_id: p.violationTypeId,
+      ref_no: p.refNo,
+      amount_sar: p.amountSar,
+      violation_date: p.violationDate,
+      payment_status: p.paymentStatus,
+      note: p.note,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    // Belt and braces with the freeze check above: a violation that was voided
+    // between the read and the write must not come back to life as an edit.
+    .is("voided_at", null);
+  if (error) return { error: violationWriteError(error.message) };
+
+  revalidatePath("/drivers");
+  revalidatePath("/reports");
+  return { error: null };
+}
+
+/**
+ * VOID IS THE DELETE PATH. Never a hard delete: the fine may have been quoted
+ * to the driver, and a row that vanishes cannot be explained. Voiding drops it
+ * out of every live sum (`voided_at is null` is the view's predicate) while
+ * leaving it readable, and the FK from driver_payslip_violations is ON DELETE
+ * RESTRICT precisely so a frozen one cannot be removed at all.
+ */
+export async function voidDriverViolation(id: string, reason: string): Promise<ActionResult> {
+  if (!id) return { error: "Missing violation." };
+  const clean = reason.trim();
+  if (!clean) return { error: "Say why this violation is being voided." };
+
+  const supabase = createClient();
+  const lock = await violationIsFrozen(supabase, id);
+  if (lock.error) return { error: lock.error };
+  if (lock.frozen) return { error: FROZEN_MSG };
+
+  const { data: auth } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from("driver_violations")
+    .update({
+      voided_at: new Date().toISOString(),
+      voided_by: auth?.user?.email ?? null,
+      void_reason: clean,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    // Voiding an already-voided row would overwrite the original reason and
+    // timestamp with a second, later story about the same event.
+    .is("voided_at", null);
   if (error) return { error: error.message };
 
   revalidatePath("/drivers");

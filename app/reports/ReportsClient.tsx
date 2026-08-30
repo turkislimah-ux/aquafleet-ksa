@@ -38,6 +38,7 @@ import {
   type DriverCommissionByProjectRow,
   type VatSourceDocRow,
 } from "@/lib/reports";
+import type { DriverViolationView, ViolationType } from "@/lib/violations";
 import OverviewTab from "./OverviewTab";
 import StatementsTab from "./StatementsTab";
 import MetricsGlossaryModal from "./MetricsGlossaryModal";
@@ -127,6 +128,14 @@ type ReportsClientProps = {
   issuedPayslips: IssuedPayslipRow[];
   /** 0116 — the commission review table's rows (work month, by project). */
   driverCommission: DriverCommissionByProjectRow[];
+  /**
+   * 0175-0177 — LIVE fines per driver, settlement already resolved server-side.
+   * Read ONLY for a month with no payslip yet; an issued month itemises itself
+   * from its own frozen snapshot. `violationTypes` carries every type, retired
+   * ones included, because it resolves labels rather than filling a picker.
+   */
+  violationsByDriver: Record<string, DriverViolationView[]>;
+  violationTypes: ViolationType[];
   /** Per-driver operations (0101) — the Operations statement transposes on it. */
   opsByDriver: OperationsByDriverRow[];
 };
@@ -297,6 +306,8 @@ export default function ReportsClient(props: ReportsClientProps) {
           payslipBasis={props.payslipBasis}
           issuedPayslips={props.issuedPayslips}
           driverCommission={props.driverCommission}
+          violationsByDriver={props.violationsByDriver}
+          violationTypes={props.violationTypes}
           today={props.today}
           registerCsv={registerExport}
           onManageExpenses={() => setExpensesOpen(true)}
