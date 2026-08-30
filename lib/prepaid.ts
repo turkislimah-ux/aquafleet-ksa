@@ -525,11 +525,28 @@ export type CoveredUnpaidItemsResult = {
  * stays Covered and everything after it falls Unpaid — which is precisely the
  * position a refunded customer is in.
  *
+ * THE POOL IS A LIFETIME NET — asOfDate gates NEITHER SIDE of it (Turki,
+ * locked). Any deposit pays any invoice regardless of the deposit's date, past
+ * or future, and every refund comes off it regardless of the refund's date.
+ * That is exactly what v_customer_prepaid_balance reports: neither its topups
+ * sub-select nor its returns sub-select carries a date predicate.
+ *
+ * This function used to cut the pool at `topup_date <= asOfDate`; with asOfDate
+ * = the invoice's periodEnd that silently dropped every
+ * backdated-invoice-plus-later-deposit case, the customer's own money going
+ * uncounted against their own trips. The returns term carried the same cut, and
+ * ungating only the deposits would have over-stated the pool by any refund
+ * dated after periodEnd — both halves move together or the pool is not a net.
+ *
+ * asOfDate still scopes CONSUMPTION — consumingItems() below keeps filtering
+ * trips and charges by date, so an invoice for a period still bills only that
+ * period's work. The two duties are separable and only the pool side changed.
+ *
  * Invariant (enforced by the harness on every case): coveredTotal +
  * unpaidTotal === sum of every consumingItems() consumedAmount, and
- * remainingBalance − unpaidTotal === derivedBalanceItems(topups, trips,
- * charges, asOfDate, returns) for the same inputs. Netting returns into the
- * pool preserves the second identity exactly — both sides lose the same term.
+ * remainingBalance − unpaidTotal === the same lifetime-credit balance the
+ * harness reconciles against. Netting returns into the pool preserves the
+ * second identity exactly — both sides lose the same term.
  */
 export function splitCoveredUnpaidItems(
   topups: TopupLite[],
@@ -538,10 +555,7 @@ export function splitCoveredUnpaidItems(
   asOfDate?: string,
   returns: BalanceReturnLite[] = [],
 ): CoveredUnpaidItemsResult {
-  let pool = round2(
-    round2(topups.filter((t) => asOfDate == null || t.topup_date <= asOfDate).reduce((s, t) => s + t.amount_sar, 0)) -
-      returnedTotal(returns, asOfDate),
-  );
+  let pool = round2(round2(topups.reduce((s, t) => s + t.amount_sar, 0)) - returnedTotal(returns));
 
   const items = consumingItems(trips, charges, asOfDate);
   const covered: ConsumedItem[] = [];

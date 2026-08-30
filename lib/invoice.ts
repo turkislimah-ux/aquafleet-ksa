@@ -455,12 +455,15 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   // shares that same entering value.
   // MUST match splitCoveredUnpaidItems' own starting pool exactly, because the
   // walk below re-derives the entering balance from it. Refunds net out here
-  // for that reason and no other — same filter (<= periodEnd), same summation
-  // helper (returnedTotal, imported rather than restated), same rounding.
-  const startingPool = round2(
-    round2(topups.filter((t) => t.topup_date <= periodEnd).reduce((s, t) => s + t.amount_sar, 0)) -
-      returnedTotal(returns, periodEnd),
-  );
+  // for that reason and no other — same summation helper (returnedTotal,
+  // imported rather than restated), same rounding.
+  //
+  // NEITHER side is cut at periodEnd, matching the engine's lifetime net pool
+  // (Turki, locked — see splitCoveredUnpaidItems). This line previously
+  // restated both a `topup_date <= periodEnd` filter and a periodEnd-gated
+  // returnedTotal; the two sites have to move together or the entering-balance
+  // walk would start from a different number than the split it is walking.
+  const startingPool = round2(round2(topups.reduce((s, t) => s + t.amount_sar, 0)) - returnedTotal(returns));
   const coveredLineIds = new Set(coveredTripEntries.map((e) => e.id));
   let poolWalk = startingPool;
   let coveredBalance = poolWalk;

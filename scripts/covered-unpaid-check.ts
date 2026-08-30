@@ -59,8 +59,36 @@ function checkInvariant(
   check(`${name} — invariant: coveredTotal + unpaidTotal = sum(all consumedAmount)`, sumTotals, allItemsTotal);
 
   const reconciled = Math.round((r.remainingBalance - r.unpaidTotal) * 100) / 100;
-  const balance = derivedBalanceItems(topups, trips, charges, asOfDate, returns);
-  check(`${name} — invariant: remainingBalance - unpaidTotal = derivedBalanceItems`, reconciled, balance);
+  // derivedBalanceItems is a POINT-IN-TIME balance and still cuts BOTH sides at
+  // asOfDate. splitCoveredUnpaidItems' pool is now a LIFETIME NET (Turki,
+  // locked: any deposit pays any invoice regardless of date, and every refund
+  // comes off the pool regardless of date). The two therefore differ by exactly
+  // the top-ups dated after asOfDate MINUS the refunds dated after asOfDate, and
+  // invariant 2 restates that delta rather than being weakened or deleted.
+  //
+  // Both terms are required. Adding lateTopups alone would leave the check
+  // failing by any late refund — the same asymmetry that, left in the engine,
+  // would have over-stated the pool.
+  //
+  // This does NOT loosen the check where it matters: every production caller of
+  // derivedBalanceItems passes asOfDate = undefined (app/trips/actions.ts:1109,
+  // amountPayable.ts:150/:176, FinanceTab.tsx:287/:301), and with no asOfDate
+  // both terms are 0 and this is byte-identical to the original assertion.
+  const lateTopups =
+    asOfDate == null
+      ? 0
+      : Math.round(topups.filter((t) => t.topup_date > asOfDate).reduce((s, t) => s + t.amount_sar, 0) * 100) / 100;
+  const lateReturns =
+    asOfDate == null
+      ? 0
+      : Math.round(returns.filter((r2) => r2.returned_on > asOfDate).reduce((s, r2) => s + r2.amount_sar, 0) * 100) / 100;
+  const balance =
+    Math.round((derivedBalanceItems(topups, trips, charges, asOfDate, returns) + lateTopups - lateReturns) * 100) / 100;
+  check(
+    `${name} — invariant: remainingBalance - unpaidTotal = derivedBalanceItems + late top-ups - late refunds`,
+    reconciled,
+    balance,
+  );
 
   const splitIds = [...r.covered.map((e) => e.id), ...r.unpaid.map((e) => e.id)].sort();
   const allIds = consumingItems(trips, charges, asOfDate).map((e) => e.id).sort();
@@ -254,10 +282,49 @@ function checkInvariant(
     { id: "t1", trip_date: "2026-06-05", delivered_at: "2026-06-05T08:00:00.000Z", rate_sar: 400 },
     { id: "t2", trip_date: "2026-07-20", delivered_at: "2026-07-20T08:00:00.000Z", rate_sar: 400 }, // after cutoff
   ];
-  // Only u1 (500) and t1 (consumedAmount 460) in scope -> remainingBalance = 40
-  // (was 100 under old pre-VAT math).
+  // asOfDate scopes CONSUMPTION ONLY. t2 (2026-07-20) is out of period and
+  // stays out — an invoice for a period bills that period's trips. But u2 IS
+  // counted despite being dated after the cutoff: top-ups are a lifetime pool
+  // (Turki, locked), so the pool is the full 1000, not 500.
+  //
+  // Expected: pool 1000 - t1's consumedAmount 460 = 540 remaining.
+  // (Under the old date-gated pool this read 40, from a 500 pool.)
   const r = checkInvariant("asOfDate cutoff", topups, trips, [], "2026-06-30");
-  check("asOfDate cutoff: only t1 in scope, covered", [r.covered.map((e) => e.id), r.unpaid, r.remainingBalance], [["t1"], [], 40]);
+  check("asOfDate cutoff: only t1 in scope, covered", [r.covered.map((e) => e.id), r.unpaid, r.remainingBalance], [["t1"], [], 540]);
+}
+
+// --- LOCKED RULE: a top-up dated AFTER periodEnd still pays the invoice ------
+// This is the regression guard for the same-date coupling bug: invoicing a PAST
+// period while the deposit landed later (the backdating pattern) must still
+// apply the deposit. Before the fix the topup_date <= periodEnd cut dropped u1
+// entirely, the pool was 0, and every trip fell Unpaid despite the customer
+// having paid.
+{
+  const topups: TopupLite[] = [{ id: "u1", amount_sar: 1000, topup_date: "2026-08-30" }]; // AFTER periodEnd
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-05", delivered_at: "2026-06-05T08:00:00.000Z", rate_sar: 400 },
+    { id: "t2", trip_date: "2026-06-06", delivered_at: "2026-06-06T08:00:00.000Z", rate_sar: 400 },
+  ];
+  const r = checkInvariant("late top-up pays a back-dated period", topups, trips, [], "2026-06-30");
+  check(
+    "late top-up: both in-period trips covered from the later deposit, 80 left",
+    [r.covered.map((e) => e.id), r.unpaid, r.remainingBalance],
+    [["t1", "t2"], [], 80],
+  );
+  // The trip window is untouched: a trip outside the period is still excluded,
+  // however much money the pool has. Proves the two duties stayed separable.
+  const withLater = checkInvariant(
+    "late top-up does not widen the TRIP window",
+    topups,
+    [...trips, { id: "t3", trip_date: "2026-07-20", delivered_at: "2026-07-20T08:00:00.000Z", rate_sar: 400 }],
+    [],
+    "2026-06-30",
+  );
+  check(
+    "trip outside period stays out despite a full pool",
+    [withLater.covered.map((e) => e.id), withLater.unpaid],
+    [["t1", "t2"], []],
+  );
 }
 
 // --- Money rounding (no float drift) -------------------------------------------
@@ -418,14 +485,56 @@ function checkInvariant(
     [[], ["t1", "t2"], 0],
   );
 
-  // asOfDate gates a refund the same way it gates a top-up.
-  const notYet = checkInvariant("refund — dated after asOfDate", topups, trips, [], "2026-06-09", [
+  // LOCKED RULE: asOfDate gates NEITHER side of the pool. A refund dated after
+  // asOfDate still comes off it, exactly as a top-up dated after asOfDate still
+  // pays into it. This case previously asserted the opposite (pool untouched,
+  // both trips covered, 80 left) — that was the date-gated reading, and it is
+  // inverted here rather than deleted so the rule stays pinned by a test that
+  // fails loudly if the gate is ever restored.
+  //
+  // Pool = 1000 - 300 = 700 (the refund counts despite 2026-06-10 > 2026-06-09).
+  // Consumption is still cut at asOfDate, but both trips are in period, so the
+  // queue is t1(460) + t2(460): t1 covered -> 240 left, t2 no longer fits.
+  const lateRefund = checkInvariant("refund — dated after asOfDate still nets off the pool", topups, trips, [], "2026-06-09", [
     { id: "r1", amount_sar: 300, returned_on: "2026-06-10" },
   ]);
   check(
-    "refund not yet dated: pool untouched, both trips still covered",
-    [notYet.covered.map((e) => e.id), notYet.unpaid.map((e) => e.id), notYet.remainingBalance],
-    [["t1", "t2"], [], 80],
+    "late refund: pool is a lifetime net, t2 falls to unpaid",
+    [lateRefund.covered.map((e) => e.id), lateRefund.unpaid.map((e) => e.id), lateRefund.remainingBalance],
+    [["t1"], ["t2"], 240],
+  );
+
+  // Both halves late, together: the pool must be the NET of them, not one side
+  // ungated and the other still cut. Deposits 1000 + 500 (the 500 dated after
+  // asOfDate) less a 300 refund also dated after asOfDate = 1200. Queue is
+  // t1(460) + t2(460) = 920, so 280 remains.
+  //
+  // Ungating deposits alone would read 1500 here and leave 580 — the exact
+  // over-statement this case exists to catch.
+  const netBothLate = checkInvariant(
+    "refund — late deposit AND late refund net together",
+    [...topups, { id: "u2", amount_sar: 500, topup_date: "2026-06-11" }],
+    trips,
+    [],
+    "2026-06-09",
+    [{ id: "r1", amount_sar: 300, returned_on: "2026-06-10" }],
+  );
+  check(
+    "late deposit + late refund: pool = 1000 + 500 - 300, both trips covered, 280 left",
+    [netBothLate.covered.map((e) => e.id), netBothLate.unpaid, netBothLate.remainingBalance],
+    [["t1", "t2"], [], 280],
+  );
+
+  // The refund does NOT touch the consumption side: it moves the FIFO wall, it
+  // never removes an item from the queue. covered ∪ unpaid is unchanged whether
+  // the refund is dated before or after asOfDate — same two trips either way.
+  check(
+    "refund never changes total consumption (920 with or without the late refund)",
+    [
+      Math.round((lateRefund.coveredTotal + lateRefund.unpaidTotal) * 100) / 100,
+      Math.round((netBothLate.coveredTotal + netBothLate.unpaidTotal) * 100) / 100,
+    ],
+    [920, 920],
   );
 }
 
