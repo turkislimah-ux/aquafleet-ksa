@@ -111,6 +111,17 @@ Loading every skill at once wastes context and has crashed sessions.
   never written. **Code-then-migrate** for breaking schema changes: build against
   the new schema, migrate, verify in-browser, commit together. Additive changes
   (new nullable/defaulted columns) are lower-risk.
+- **BARE STATEMENTS ONLY — a migration file carries no `begin;` / `commit;`.**
+  The SQL Editor already runs each submission in its own transaction: a nested
+  `begin;` emits `WARNING: there is already a transaction in progress` and is
+  ignored, then the file's trailing `commit;` ends the EDITOR's transaction. The
+  grids print, the run reads as a success, and **nothing was created** — 0173 v1
+  did exactly this. That editor transaction is also what satisfies §6's
+  "re-revoke in the same transaction".
+- **A MIGRATION'S OWN RESULT-GRID IS NOT PROOF IT APPLIED.** Verification SELECTs
+  are a claim; the catalog is the evidence. Confirm against `pg_index` /
+  `pg_proc` / `has_function_privilege` after the fact, never by reading what the
+  migration printed.
 - **Turki verifies in-browser before every commit.** Nothing commits unverified.
 - **THE DATABASE OUTRANKS THE NOTES on any question of DB state.** The architect
   applies corrections through MCP: those touch the database and **never touch the
@@ -189,7 +200,13 @@ The next three rules are one lesson in three places.
   `=X/postgres`); revoking `anon` alone leaves it and changes nothing. Read back
   with `has_function_privilege('anon', …, 'execute')` = false — **never via
   `proacl` matching**, `'%=X/%'` also matches `postgres=X/postgres` and reports
-  every function as leaking. Not hypothetical: 0115 defined
+  every function as leaking. **And identify the function by
+  `p.oid::regprocedure::text = 'fn_name(uuid,integer)'`, never by
+  `pg_get_function_identity_arguments()`** — on PG15+ that returns argument
+  NAMES (`'p_project_id uuid, p_year integer'`), so a filter of `= 'uuid,
+  integer'` matches ZERO rows and reports a healthy function as missing and
+  anon-executable. A false catastrophe reads exactly like a real one.
+  Not hypothetical: 0115 defined
   `issue_driver_payslip`, 0118 replaced it without re-revoking, and a definer
   money RPC sat callable by anyone with the anon key — bypassing RLS *and* 0161's
   table revoke, since a definer runs as its owner. Proven by probe (business-logic
@@ -211,5 +228,9 @@ The next three rules are one lesson in three places.
 - Session state → `.planning/HANDOFF.md`
 - If this file exceeds 15KB, Code is appending. Cut back to this stub.
 
-**State:** DB at migration 0171. All pages built+verified. Arabic phase closed.
+**State:** DB at migration 0174. All pages built+verified. Arabic phase closed.
 Read `.planning/HANDOFF.md` for current work.
+
+**Do not read this number out of `schema_migrations`** — neither an MCP-applied
+migration nor a SQL Editor run writes a ledger row, so the ledger's max version
+lags permanently. The files on disk and the objects in the catalog are the record.
