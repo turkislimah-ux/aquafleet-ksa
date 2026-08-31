@@ -330,12 +330,31 @@ export async function updateDraftInvoicePeriod(
   });
   if (syncErr) return { error: syncErr.message };
 
-  const { error } = await supabase
+  const { data: hit, error } = await supabase
     .from("invoices")
     .update({ period_start: periodStart, period_end: periodEnd })
     .eq("id", invoiceId)
-    .eq("status", "draft");
+    .eq("status", "draft")
+    // READ BACK — the .eq("status","draft") above is a TOCTOU backstop for the
+    // status check at the top of this function, and a backstop nobody reads is
+    // not a backstop. setInvoiceReview and revertInvoiceToDraft both already do
+    // this; this was the one guarded invoice write in the file that did not.
+    //
+    // The sync RPC has ALREADY RUN by the time we get here, and that ordering
+    // stays deliberately (see the header: a double-claim must abort with the
+    // period untouched). So on a miss the reservation reflects the new range
+    // while the invoice keeps the old one. This read-back REPORTS that, it does
+    // not repair it — re-syncing to the previous range is a second write that
+    // can fail in turn. Say so out loud rather than return a clean success.
+    .select("id")
+    .maybeSingle();
   if (error) return { error: error.message };
+  if (!hit) {
+    return {
+      error:
+        "This invoice left Draft while the period was being changed — the period was not saved. Reopen it as a draft and try again.",
+    };
+  }
   revalidatePath("/trips");
   return { error: null };
 }

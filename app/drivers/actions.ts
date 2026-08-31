@@ -497,6 +497,20 @@ function normReview(status: ItemReview): "pending" | "approved" | "denied" {
   return status === "active" ? "pending" : status;
 }
 
+/**
+ * The review write matched no row. Two ways to get here: the line was paid
+ * from another tab between this screen's read and this write (0131 tags it
+ * with payout_id and the `.is("payout_id", null)` guard then filters it out),
+ * or the line was deleted outright. The paid case is the one that happens, so
+ * it gets the wording — same choice VIOLATION_GONE_MSG makes further down.
+ *
+ * setCommissionBonus refuses the same freeze LOUDLY, with a read before the
+ * upsert. These two carry the guard in the write instead, which is cheaper and
+ * race-free but silent on its own: PostgREST calls a zero-row UPDATE a success.
+ */
+const ITEM_PAID_MSG =
+  "That line is already paid — it is frozen into the payout record and can no longer be reviewed.";
+
 export async function setSpecialStatus(
   id: string,
   status: ItemReview,
@@ -507,12 +521,19 @@ export async function setSpecialStatus(
   const next = normReview(status);
 
   const supabase = createClient();
-  const { error } = await supabase
+  const { data: hit, error } = await supabase
     .from("commission_specials")
     .update({ status: next, deny_reason: next === "denied" ? (reason ?? null) : null })
     .eq("id", id)
-    .is("payout_id", null);
+    .is("payout_id", null)
+    // READ BACK. Without this the guard above is invisible: a paid line comes
+    // back { error: null }, the page revalidates, and the chip re-renders from
+    // the database still showing its old status under a success toast. The
+    // manager is told the deny landed on money that has already gone out.
+    .select("id")
+    .maybeSingle();
   if (error) return { error: error.message };
+  if (!hit) return { error: ITEM_PAID_MSG };
 
   revalidatePath("/drivers");
   return { error: null };
@@ -528,12 +549,17 @@ export async function setAdjustmentStatus(
   const next = normReview(status);
 
   const supabase = createClient();
-  const { error } = await supabase
+  const { data: hit, error } = await supabase
     .from("commission_adjustments")
     .update({ status: next, deny_reason: next === "denied" ? (reason ?? null) : null })
     .eq("id", id)
-    .is("payout_id", null);
+    .is("payout_id", null)
+    // Same read-back, same reason, as setSpecialStatus above. The two paths are
+    // one screen control over two tables; a fix on one only is a fix on neither.
+    .select("id")
+    .maybeSingle();
   if (error) return { error: error.message };
+  if (!hit) return { error: ITEM_PAID_MSG };
 
   revalidatePath("/drivers");
   return { error: null };
