@@ -4,11 +4,10 @@
 
 - **DB is at migration 0177.** No migration this session — docs, one new
   harness, one `package.json` line. Working tree clean, 0 ahead / 0 behind.
-- **`CLAUDE.md` is at 15,311 bytes — 49 under the 15,360 (§7) tripwire.** The
-  next line added to it trips §7 and forces the §5/§6 compression pass. That pass
-  was offered this session and Turki declined it; it is not overdue, it is the
-  toll on the next edit. Compress by re-verifying every claim, not by trimming
-  prose blind — both prior passes found a stale fact.
+- **`CLAUDE.md` is at 14,901 bytes — 459 under the 15,360 (§7) tripwire.** The
+  §5/§6 compression pass ran this session (`067635a`) and bought that room. Done
+  as an audit, not a trim, per §5: it found two stale claims (below). Next pass,
+  same method — re-verify every claim; all three so far found a stale fact.
 - **MCP-applied migrations write NO `schema_migrations` ledger row.** Neither do
   SQL Editor runs. The migration FILE is the record. The ledger's max version
   lags reality and always will — **the objects in the catalog are the truth, the
@@ -29,6 +28,8 @@
 | 4 | `npm run test:money` — all ten money harnesses, fail-fast | `46bccf3` |
 | 5 | Handoff rewrite, then two corrections it did not survive (below) | `5847cc8`, `c30aaf0`, `c06f3e0` |
 | 6 | `CLAUDE.md` §5: measure a justification before writing it down | `708e7da` |
+| 7 | Session wrap; the customer count scoped to live rows | `773d2cb` |
+| 8 | `CLAUDE.md` §5/§6 compression pass + the audit behind it | `067635a` |
 
 ---
 
@@ -169,7 +170,9 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
   a "matches/proves" is never written from memory or off a filename); the `grep -c`
   comment-epitaph trap with its fix (§5 — strip comment lines, use `grep -F` on
   patterns with parens); migrations are BARE STATEMENTS with no
-  `begin;`/`commit;` (§5); identify a function by `oid::regprocedure::text`,
+  `begin;`/`commit;` **from 0173 on — 147 of the 175 files up to 0172 still
+  carry them, and they are NOT broken; do not "fix" them** (§5); identify a
+  function by `oid::regprocedure::text`,
   never `pg_get_function_identity_arguments()` which returns argument NAMES on
   PG15+ (§6); a migration's own result-grid is not proof it applied (§5).
 
