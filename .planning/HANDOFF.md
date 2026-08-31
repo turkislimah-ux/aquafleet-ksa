@@ -88,9 +88,11 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
   share name, VAT and CR when they serve different projects; each holds its OWN
   prepaid pool and its own invoices. **Do NOT add a VAT/CR uniqueness constraint
   or a dedupe/merge guard** — it would block a valid case, and merging would pool
-  two balances that must stay apart. The two "Seder Facility mang./Mang. Co."
-  records are this pattern; their matching placeholder VAT/CR is expected, and it
-  is why the DB reads as 3 prepaid customers.
+  two balances that must stay apart. **VAT/CR carries no identity signal:**
+  re-measured 2026-08-31, `123456789012345` / `1234567890` is an unfilled
+  placeholder on **5 of 7** customers, so a uniqueness constraint would fail on
+  five existing rows today. The two "Seder Facility mang./Mang. Co." records are
+  separate by ruling, not because their identity fields match.
 - The traffic-violations money model (0175–0177) — moved out of this file last
   session so the two cannot drift.
 
@@ -140,6 +142,12 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
   exits 0). Always `cd` to the repo root **and** use
   `./node_modules/.bin/tsc --noEmit --project tsconfig.json`. Pinning the
   tsconfig alone is NOT enough — the binary resolution is the other half.
+- **A MIGRATION'S FILENAME IS NOT ITS OBJECT NAME.** Probing the catalog for a
+  table named after the file reports a healthy migration as MISSING, and a false
+  catastrophe reads exactly like a real one (§6). `0177_payslip_violation_
+  deductions.sql` creates `driver_payslip_violations`, not
+  `payslip_violation_deductions`. Read the `create table` line out of the file
+  first, then query for THAT name.
 - **A cleanup line placed after `exit 1` never runs.** Proving a guard can fail
   by injecting a temp failing script leaves that temp file behind, because the
   loop exits before the `rm`. Re-check the tree; do not trust the `rm` you wrote.

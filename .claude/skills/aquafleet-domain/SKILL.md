@@ -112,9 +112,17 @@ So: **do NOT add a VAT/CR uniqueness constraint, and do NOT add a dedupe or
 merge guard on `customers`.** Either would block a valid case, and merging two
 such records would silently pool two balances that must stay apart.
 
-A matching placeholder VAT/CR is expected, not a data-quality defect — the two
-"Seder Facility mang./Mang. Co." records (sharing VAT `123456789012345`, CR
-`1234567890`) are this pattern, and are why the DB reads as 3 prepaid customers.
+**VAT/CR carries NO identity signal on current data — do not reason from it.**
+Re-measured 2026-08-31: `123456789012345` / `1234567890` is an unfilled
+placeholder on **5 of 7** customers — MMM construction, both Seder records,
+TEST 111 and Turki Contraction. It is not a marker of the same company, so a
+shared VAT/CR neither proves nor suggests a duplicate. That also makes the rule
+above load-bearing rather than hypothetical: a uniqueness constraint would fail
+immediately on five existing rows.
+
+The two "Seder Facility mang./Mang. Co." records (differing only in the case of
+"mang.") are 2 of the 3 prepaid customers. They are separate by ruling, not
+because their identity fields match.
 
 ---
 
