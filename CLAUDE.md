@@ -146,6 +146,13 @@ Loading every skill at once wastes context and has crashed sessions.
   several sessions, and the note was wrong about both its paid status and its count.
 - **Re-measure a number before quoting it, including numbers in our own files.**
   A figure in a handoff is a pointer, not evidence.
+- **"X because Y" is only as strong as Y — measure Y THIS turn, before the note
+  is written.** A count, a cause, a "matches/proves" never comes from memory or
+  off a filename. Both self-caught this session: a VAT/CR "match" counted on 2
+  rows instead of the table (placeholder on 5 of 7 live customers), and a table
+  name taken from its migration's filename, which reports a healthy migration as
+  MISSING (§6). Notes earn the strictest check — the next session trusts them
+  without re-measuring.
 - **No build history in this file.** It is rules only; state goes to HANDOFF.md.
   Past 20KB, check for appended diary — and compress by re-verifying every claim,
   not by trimming prose blind. Both prior compression passes found a stale fact;
