@@ -10,6 +10,20 @@
   storage key, the display-only boundary, the freeze/edit gate, the signed-URL
   read, and the `window.open`/`noopener` lock) is in the domain skill under
   **Traffic Violations → "The notice photo (0178)"** — do not restate it here.
+- **A cleanup pass over the whole violations feature then landed (`178df21`) —
+  audit first, fix second, no migration.** It found and closed a real race: all
+  four violation mutators carried `.is("voided_at", null)` and none of them
+  looked at whether the predicate had fired, so a fine voided in another tab
+  between an action's read and its write returned `{ error: null }` having
+  changed nothing. `removeDriverViolationImage` was the one with damage — it
+  went on to delete the storage object while the row still pointed at it. All
+  four now read back with `.select("id").maybeSingle()`.
+- **`178df21` WAS NOT VERIFIED IN-BROWSER — Turki directed the commit from the
+  measured gates.** Unlike `7dcdaaf` and `5ea0001` above, which were. The
+  in-browser checklist for it (16 scenarios: staff add/edit/view/replace/remove,
+  payslip edit on unissued, issued read-only, rose-vs-amber, and the two-tab
+  race) was written and is **UNRUN**. If violations behave oddly, that is the
+  first place to look, and the checklist is in the `178df21` session transcript.
 - **`CLAUDE.md` is at 14,901 bytes — 459 under the 15,360 (§7) tripwire.** The
   §5/§6 compression pass ran this session (`067635a`) and bought that room. Done
   as an audit, not a trim, per §5: it found two stale claims (below). Next pass,
@@ -20,7 +34,9 @@
   ledger is not.** Do not "discover" a missing migration from a ledger query and
   do not re-apply one on that basis. Check `pg_proc` / `pg_index` first.
 - **No open decisions and no known defects.** O-1 and O-2 were both ruled and
-  closed; nothing was reopened.
+  closed; nothing was reopened. **One open VERIFICATION, though** — `178df21`'s
+  checklist, above. Unverified is not the same as defective, and it is not the
+  same as clean either.
 
 ---
 
@@ -30,6 +46,8 @@
 |---|---|---|
 | 1 | Notice photo: `image_path` + private `violation-images` bucket — `0178` | `7dcdaaf` |
 | 2 | Notice photo app layer: staff upload/view/replace/remove; payslip view on issued + edit/void/photo on unissued; `noopener` pop-up fix | `5ea0001` |
+| 3 | Notice photo recorded as a durable domain rule | `1bdc9d6` |
+| 4 | Violations cleanup: photo state machine + save tail deduped into `usePhotoDraft`/`applyPhotoChanges`; zero-row read-back on all four mutators; rose-vs-amber split on the staff screen; 4 exports dropped, 2 dead i18n keys deleted, 3 stale `file:line` pointers made name-based | `178df21` |
 
 ---
 
@@ -181,6 +199,32 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 - **A cleanup line placed after `exit 1` never runs.** Proving a guard can fail
   by injecting a temp failing script leaves that temp file behind, because the
   loop exits before the `rm`. Re-check the tree; do not trust the `rm` you wrote.
+- **A CHECK WHOSE RANGE MATCHES NOTHING PRINTS A CLEAN PASS.** Sibling of §5's
+  comment-epitaph trap and just as convincing. Caught live in `178df21`:
+  `awk '/^      viol: \{/,/^      \},/'` over `lib/i18n.ts` used a six-space
+  indent against a four-space block, matched zero lines, and reported both
+  deleted keys as confirmed gone. The extractor had found nothing at all.
+  **Every extract-then-grep needs a negative control on the EXTRACT step** — one
+  count proving the range is non-empty (`grep -c` for anything at all in it)
+  before the absence inside it means anything. Same run: a
+  `grep -F 'viol.recent' lib/i18n.ts` is **vacuously 0 in every possible state**,
+  because the dictionary nests and that dotted string never appears there. The
+  load-bearing check was the dotted-key sweep across the whole tree.
+- **`file:line` POINTERS IN `SKILL.md` ROT SILENTLY, AND NOTHING GUARDS THEM.**
+  Three were stale in one pass: `TrafficViolationsSection.tsx:134` (already
+  wrong at HEAD by 10 lines), `actions.ts:1682` and `actions.ts:1592` (both
+  correct at HEAD, both moved by that same pass). All three are now name-based —
+  "grep for this symbol in this file" — so they stop rotting. **Do not add new
+  `file:line` citations to a skill or a note; cite the symbol.** After any pass
+  that shifts lines in a cited file, re-grep:
+  `grep -rnE '\.tsx?:[0-9]+' --include='*.md' .claude/`
+  **One citation survives that grep and is CORRECT today:** `SKILL.md:148`'s
+  `invoiceActions.ts:1035` — re-measured, line 1035 of `app/trips/invoiceActions.ts`
+  is indeed `coveredLines: inv.covered_lines ?? [],`. Left alone because
+  `frozen-split-check.ts` already asserts that exact string is present, so the
+  claim has a real guard and only the line number can rot. Convert it the next
+  time anything edits that file. The `.planning/review-*.md` docs hold six more,
+  unconverted on purpose — historical records, not live guidance.
 - Locks promoted into `CLAUDE.md` and living there now, not here: **measure a
   justification before recording it** (§5, new this session — a count, a cause,
   a "matches/proves" is never written from memory or off a filename); the `grep -c`
@@ -208,9 +252,21 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-**Nothing is queued.** Ask Turki for the next item rather than picking one.
+**No FEATURE is queued** — ask Turki for the next one rather than picking. Two
+pieces of follow-through are outstanding, and neither is a feature.
 
-1. Parked papercut: `InvoicesModal`'s period default — both bounds default to
+1. **Run the `178df21` in-browser checklist** (see State, above). It is the one
+   outstanding verification, not a new feature.
+2. **Consider promoting the PostgREST zero-row rule into `SKILL.md`.** Measured
+   absent from both `CLAUDE.md` and the domain skill —
+   `grep -nF -e maybeSingle -e 'zero-row'` over both returns nothing. The rule:
+   **a PostgREST `UPDATE` that matches no row is reported as SUCCESS**, so any
+   write carrying a guard predicate (`.is("voided_at", null)`, a status filter, a
+   tenant scope) must end `.select("id").maybeSingle()` and treat a null row as
+   the failure. Without it the guard is decoration. Not done in `178df21` —
+   scope was the violations feature, and a repo-wide sweep for the same shape on
+   other tables has NOT been run. That sweep is the real work here.
+3. Parked papercut: `InvoicesModal`'s period default — both bounds default to
    today, so the default range is a single day. Pre-existing, untouched.
 
 **NOTIFICATIONS + SETTINGS IS BUILT AND LIVE — do NOT plan it.** Earlier
