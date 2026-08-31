@@ -299,7 +299,7 @@ Draft → Review → Confirmed → Paid
 
 ---
 
-## Traffic Violations & Payslip Deductions (0175–0177)
+## Traffic Violations & Payslip Deductions (0175–0178)
 
 ### The three tables
 
@@ -402,6 +402,83 @@ Read-only aggregation on top of 0177 — **it adds no money object.**
   and "which one was the outstanding one" has no answer. Deducted = issued and
   fully absorbed; Partly deducted = left a remainder; **Unsettled = absorbed
   nothing at all** (zero absorbed is not "partly" anything).
+
+### The notice photo (0178) — evidence, not money
+
+`driver_violations.image_path` — **nullable `text`**, one optional photo of the
+paper notice per fine. Measured live: `format_type` = `text`, `attnotnull` =
+false.
+
+- **It is a STORAGE KEY the app generates, never the uploaded filename:**
+  `` `${driverId}/${violationId}-${Date.now()}.${ext}` `` (actions.ts:1592).
+  A user-supplied name is attacker-controlled and collides.
+- **DISPLAY ONLY, and the catalog says so.** **Zero** views in `public` mention
+  `image_path` — `v_driver_payslip_basis` included — and
+  `issue_driver_payslip(uuid,date,text)`, the freeze RPC, does not mention it
+  either. No deduction, no freeze, no snapshot copies it. A photo cannot move a
+  number.
+- **A VOID KEEPS THE PHOTO.** `voidDriverViolation` touches no storage and does
+  not null the column — verified line-by-line over its body. A voided fine keeps
+  its evidence for the same reason it stays readable at all.
+
+**Read path: private bucket + short-lived signed URL. There is no public URL.**
+
+- Bucket `violation-images`, `public = false`, created **by migration 0178** —
+  buckets ARE migration DDL here. **13 buckets, 13 private, 0 public** (live
+  `storage.buckets`), and all 13 ids appear in migration files.
+- Reads go through `getDriverViolationImageUrl` → `createSignedUrl(path, 300)`
+  (actions.ts:1682). `getPublicUrl` appears **nowhere** in the repo; the only
+  textual hit is the comment asserting that.
+- The **4-policy authenticated CRUD set** on `storage.objects` — select /
+  insert / update / delete, role `authenticated`, each `bucket_id =
+  'violation-images'` — written `drop policy if exists` then `create policy`,
+  the measured house convention (136 drops against 147 creates repo-wide).
+- **The 5 MB cap is APP-SIDE ONLY.** `storage.buckets.file_size_limit` is
+  **null** for this bucket; the ceiling lives in `validateViolationImage`
+  (client) and again in the upload action (server). Do not assume Storage will
+  reject an oversized object.
+
+**EDIT RULE — the photo inherits the fine's freeze, exactly.**
+
+Editable on the **staff page** and on an **UNISSUED payslip**; **read-only
+(view / open in a new tab) once frozen onto an issued payslip.** Enforced
+server-side, not merely hidden: `violationIsFrozen()` + `FROZEN_MSG` guard all
+four mutators — `updateDriverViolation` (1453), `voidDriverViolation` (1492),
+`uploadDriverViolationImage` (1573), `removeDriverViolationImage` (1627).
+`getDriverViolationImageUrl` (1666) is **deliberately unguarded**: reading
+evidence is not editing a document, and a frozen fine is the one most likely to
+be disputed.
+
+**The payslip surface added NO new mutation path.** It imports and calls those
+same guarded actions; the client gate `!doc && !x.locked` is the explanation,
+never the lock. Adding a brand-new fine stays staff-page-only.
+
+### LOCK — `window.open` with `noopener` returns NULL by spec
+
+Do **not** write `window.open(url, "_blank", "noopener")` — or open a blank tab
+with `noopener` in the feature string — and then read the null return as a
+pop-up block. MDN, `Window/open`: *"the new window will not have access to the
+originating window via `Window.opener` and returns `null`."* A window denied an
+opener is also denied *to* its opener, so the handle needed to navigate the tab
+never arrives.
+
+This shipped as a bug: the payslip photo appeared blocked on every click while
+no blocker was involved. The working shape, for any signed URL fetched after a
+click:
+
+```ts
+const tab = window.open("", "_blank");  // sync, inside the user gesture
+if (tab) tab.opener = null;             // about:blank is same-origin — sever by hand
+const res = await getSignedUrl(id);     // the await that would have cost the gesture
+if (tab) tab.location.href = res.url;
+else /* null NOW means a real blocker */;
+```
+
+Open **before** the await (a post-await `window.open` loses the gesture and is
+genuinely blocked), and null the opener manually to get what `noopener` was
+for. Where a second click is acceptable, the drivers screen's pattern avoids
+the problem outright: fetch, render, and offer full-size as a real
+`<a target="_blank" rel="noopener noreferrer">` on an already-fetched URL.
 
 ### Locked decisions (do not re-litigate)
 

@@ -243,7 +243,7 @@ The next three rules are one lesson in three places.
 - Session state → `.planning/HANDOFF.md`
 - If this file exceeds 15KB, Code is appending. Cut back to this stub.
 
-**State:** DB at migration 0177. All pages built+verified. Arabic phase closed.
+**State:** DB at migration 0178. All pages built+verified. Arabic phase closed.
 Read `.planning/HANDOFF.md` for current work.
 
 **Do not read this number out of `schema_migrations`** — neither an MCP-applied

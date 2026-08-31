@@ -2,8 +2,14 @@
 
 ## State
 
-- **DB is at migration 0177.** No migration this session — docs, one new
-  harness, one `package.json` line. Working tree clean, 0 ahead / 0 behind.
+- **DB is at migration 0178.** `0178_violation_notice_image.sql` added
+  `driver_violations.image_path` and the private `violation-images` bucket.
+  Working tree clean, 0 ahead / 0 behind.
+- **The traffic-violation notice photo shipped** — schema + bucket `7dcdaaf`,
+  app layer `5ea0001`, verified in-browser before both. The durable rule (the
+  storage key, the display-only boundary, the freeze/edit gate, the signed-URL
+  read, and the `window.open`/`noopener` lock) is in the domain skill under
+  **Traffic Violations → "The notice photo (0178)"** — do not restate it here.
 - **`CLAUDE.md` is at 14,901 bytes — 459 under the 15,360 (§7) tripwire.** The
   §5/§6 compression pass ran this session (`067635a`) and bought that room. Done
   as an audit, not a trim, per §5: it found two stale claims (below). Next pass,
@@ -19,6 +25,15 @@
 ---
 
 ## Closed this session
+
+| # | Item | Commit |
+|---|---|---|
+| 1 | Notice photo: `image_path` + private `violation-images` bucket — `0178` | `7dcdaaf` |
+| 2 | Notice photo app layer: staff upload/view/replace/remove; payslip view on issued + edit/void/photo on unissued; `noopener` pop-up fix | `5ea0001` |
+
+---
+
+## Closed in the previous session
 
 | # | Item | Commit |
 |---|---|---|
@@ -105,7 +120,8 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
   table holds 8 and `Turki 1` has `archived_at` set. Scope to
   `archived_at is null`. The figure is right; the bare `count(*)` is not.
 - The traffic-violations money model (0175–0177) — moved out of this file last
-  session so the two cannot drift.
+  session so the two cannot drift. The notice photo (0178) went straight there
+  for the same reason.
 
 ---
 
