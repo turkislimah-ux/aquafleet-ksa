@@ -70,6 +70,8 @@
 | 4 | Violations cleanup: photo state machine + save tail deduped into `usePhotoDraft`/`applyPhotoChanges`; zero-row read-back on all four mutators; rose-vs-amber split on the staff screen; 4 exports dropped, 2 dead i18n keys deleted, 3 stale `file:line` pointers made name-based | `178df21` |
 | 5 | Handoff updated with that pass and the two traps it exposed | `36d6c66` |
 | 6 | Repo-wide zero-row sweep, then its three findings closed: read-back on `setSpecialStatus`, `setAdjustmentStatus` (shared `ITEM_PAID_MSG`) and `updateDraftInvoicePeriod` | `9e4ca3b` |
+| 7 | Sweep + the rotted `invoiceActions.ts:1035` pointer recorded; that pointer converted to a symbol grep | `2efd4bb` |
+| 8 | The zero-row rule promoted into `SKILL.md` — including the three classes that are NOT findings | `97964b7` |
 
 ---
 
@@ -300,34 +302,19 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-**No FEATURE is queued** — ask Turki for the next one rather than picking. Two
-pieces of follow-through are outstanding, and neither is a feature.
+**No FEATURE is queued** — ask Turki for the next one rather than picking. ONE
+piece of follow-through is outstanding, and it is not a feature.
 
 1. **Run the `178df21` in-browser checklist** (see State, above). It is the one
-   outstanding verification, not a new feature.
-2. **Promote the PostgREST zero-row rule into `SKILL.md` — the sweep that was
-   blocking it is now DONE (`9e4ca3b`, see State).** The rule: **a PostgREST
-   `UPDATE`/`DELETE` that matches no row is reported as SUCCESS**, so a write
-   carrying a guard predicate (`.is("voided_at", null)`, `.is("payout_id", null)`,
-   a status filter) must read back — `.select("id").maybeSingle()`, or
-   `.select("id")` plus a `data.length` test — and treat the miss as the failure.
-   Without it the guard is decoration. It now has seven fixed sites across four
-   tables (`driver_violations` ×4, `commission_specials`, `commission_adjustments`,
-   `invoices`), not one feature's worth. **Still absent from both files —
-   re-measured at `9e4ca3b`:** `grep -nF -e maybeSingle -e 'zero-row' CLAUDE.md
-   .claude/skills/aquafleet-domain/SKILL.md` exits 1, no hits.
-   Three things the sweep taught that belong in the rule, not just the fix:
-   - **`.select()` without `single` is a legitimate second shape** — it returns
-     an array, so a miss IS detectable, but only if the caller tests `.length`.
-     `updateExitPermitDraft` and `deleteExitPermitDraft` do; both are correct,
-     and neither uses `maybeSingle`.
-   - **A guard on a UNIQUE column is an identity lookup, not a guard.** That is
-     11 of the 22 survivors. Check `pg_constraint` before calling one a finding.
-   - **On a miss, the bail must sit above any destructive follow-on** — the
-     `removeDriverViolationImage` lesson. Where the follow-on deliberately runs
-     FIRST (`updateDraftInvoicePeriod`'s sync RPC, so a double-claim aborts with
-     the period untouched), the read-back reports the residue instead of
-     repairing it, and the comment has to say which.
+   outstanding verification. **`9e4ca3b` needs the same treatment** — its miss
+   path is a two-tab race, so ordinary clicking will not reach it.
+2. ~~Promote the PostgREST zero-row rule into `SKILL.md`~~ — **DONE (`97964b7`).**
+   It lives under **"A GUARDED WRITE MUST READ BACK"**, next to RPC Conventions:
+   the two honest read-back shapes, the bail-above-destroy ordering, the three
+   classes that are NOT findings (UNIQUE-column identity lookups, bulk writes,
+   scoping filters behind a prior check), and how to re-sweep. **Do not restate
+   any of it here** — same reason the violations money model and the notice photo
+   moved out of this file.
 3. Parked papercut: `InvoicesModal`'s period default — both bounds default to
    today, so the default range is a single day. Pre-existing, untouched.
 
