@@ -203,6 +203,87 @@ Every Supabase RPC in this project follows these rules:
 
 ---
 
+## A GUARDED WRITE MUST READ BACK — PostgREST calls a zero-row UPDATE a SUCCESS
+
+**`.update()` / `.delete()` that matches NO row returns `{ error: null }`.** It is
+not an error in PostgREST; it is an UPDATE with a `WHERE` that matched nothing,
+which SQL considers a normal outcome. So a write whose guard predicate filtered
+it out reports success having changed nothing, the page revalidates, and the row
+re-renders **from the database in its old state under a success message**. The
+user is told the thing happened. It did not.
+
+**Therefore: any write carrying a guard beyond its key must read back.** Two
+honest shapes, both in use and both correct:
+
+```ts
+// 1. Single row — the common case.
+const { data: hit, error } = await supabase
+  .from("t").update({ … }).eq("id", id)
+  .is("payout_id", null)          // ← the guard
+  .select("id").maybeSingle();    // ← without this the guard is decoration
+if (error) return { error: error.message };
+if (!hit) return { error: SOMETHING_HONEST };
+
+// 2. `.select()` WITHOUT single returns an ARRAY, so a miss is detectable too —
+//    but only if the caller actually tests it. updateExitPermitDraft and
+//    deleteExitPermitDraft both do. This shape is not a bug; a missing
+//    `.length` test is.
+const { data, error } = await supabase.from("t").delete()… .select("id");
+if (!data || data.length === 0) return { error: t("…", lang) };
+```
+
+**ORDERING: the `!hit` bail goes ABOVE any destructive follow-on.** This is where
+the rule stops being cosmetic. `removeDriverViolationImage` deleted the storage
+object *after* a row-write that its own guard could filter out — a miss erased a
+file the surviving row still pointed at. Bail first, then destroy.
+
+**Where the follow-on deliberately runs FIRST, the read-back REPORTS the residue
+instead of repairing it — and the comment must say which.**
+`updateDraftInvoicePeriod` syncs its trip reservation before writing the period,
+on purpose, so a genuine double-claim aborts with the period untouched. On a
+guard miss the reservation therefore reflects the new range while the invoice
+keeps the old one. Re-syncing would be a second write that can fail in turn. Say
+so out loud; do not silently return success, and do not "fix" the ordering.
+
+### What is NOT a guard — do not add read-backs to these
+
+A repo-wide sweep (2026-08-31, 203 files, 107 write chains) found 22 guarded
+chains with no read-back and **none was a defect.** Before calling one a finding:
+
+- **A filter on a UNIQUE column is an IDENTITY LOOKUP, not a state gate** — 11
+  of the 22. `key` is UNIQUE on all six lookup tables (`staff_roles`,
+  `leave_types`, `commission_types`, `violation_types`, `water_stations`,
+  `archive_document_types`), and `commission_periods` has a unique index on
+  `(driver_id, month_key)`. **Check `pg_constraint` before deciding.**
+- **Bulk writes, where zero rows is the CORRECT outcome** — 9 of the 22.
+  Unassigning every truck from a driver, deleting a PO's lines, the
+  approve-everything-still-pending flips. A read-back here would invent a
+  failure. `trips`' commission heal filters `.is("commission_mode", null)`
+  precisely so a concurrent stamp wins; a miss is the desired result.
+- **A scoping filter behind a real prior check** — `updateExitPermitLineQty` and
+  `removeExitPermitLine` call `assertDraft` first; `.eq("exit_permit_id", …)` is
+  scope, so a miss is a caller bug, not a race.
+
+### Evidence, and how to re-sweep
+
+Seven sites fixed across four tables: `driver_violations` ×4
+(`updateDriverViolation`, `voidDriverViolation`, and the two image writes —
+`178df21`), then `setSpecialStatus`, `setAdjustmentStatus` and
+`updateDraftInvoicePeriod` (`9e4ca3b`). The freeze predicates the rule protects
+are `.is("voided_at", null)`, `.is("payout_id", null)` and
+`.eq("status","draft")` — a voided fine, a paid commission line, a non-draft
+invoice.
+
+To re-sweep: find `.from("…")` chains containing `.update(`/`.delete(`/`.upsert(`,
+and classify by (a) filters beyond the key, (b) presence of a read-back.
+**Blank comments BEFORE parsing, never after** — prose commas end a chain early
+and apostrophes open phantom strings, and a scanner that gets this wrong reports
+an existing read-back as missing while printing a clean report. Point it at
+`driver_violations` first: four writes, all four read back. Known answer, both
+directions.
+
+---
+
 ## One-SKU-One-Warehouse Rule
 
 A part (SKU) exists in exactly one warehouse. `parts.warehouse_id` is a
