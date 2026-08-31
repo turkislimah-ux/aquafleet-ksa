@@ -24,6 +24,26 @@
   payslip edit on unissued, issued read-only, rose-vs-amber, and the two-tab
   race) was written and is **UNRUN**. If violations behave oddly, that is the
   first place to look, and the checklist is in the `178df21` session transcript.
+- **The repo-wide sweep for that same zero-row shape RAN, and closed the three
+  sites it found (`9e4ca3b`).** 203 files, 107 write chains: 13 guarded chains
+  read back, 22 guarded ones do not, 72 carry no guard beyond a key. The 22 were
+  triaged one by one and **none is a defect** — 11 filter on a UNIQUE column so
+  the "guard" is really an identity lookup (`key` on all six lookup tables;
+  `commission_periods_driver_month_idx` on the pair), 9 are bulk writes where
+  zero rows is the correct outcome, 2 (`updateExitPermitLineQty` /
+  `removeExitPermitLine`) run `assertDraft` first and only scope by parent id.
+  **Do not re-triage them from the raw count.**
+  The three that were real: `setSpecialStatus` and `setAdjustmentStatus`
+  (`.is("payout_id", null)` is the payment freeze — a miss told a manager his
+  deny landed on money already paid out) and `updateDraftInvoicePeriod`
+  (`.eq("status","draft")`, and the only guarded invoice write in its file that
+  did not read back).
+- **`9e4ca3b` WAS ALSO NOT VERIFIED IN-BROWSER** — same as `178df21`, directed
+  from the measured gates. The bails are proven *reachable* against live data
+  (10 paid specials, 6 paid adjustments, 26 non-draft invoices) and the error
+  strings are proven to reach a screen (`run()` in `CommissionsTab.tsx`,
+  `DenyModal`'s confirm in the same file, `InvoiceDetailModal`'s
+  `setPeriodError`). Reachable and wired is not the same as seen.
 - **`CLAUDE.md` is at 14,901 bytes — 459 under the 15,360 (§7) tripwire.** The
   §5/§6 compression pass ran this session (`067635a`) and bought that room. Done
   as an audit, not a trim, per §5: it found two stale claims (below). Next pass,
@@ -48,6 +68,8 @@
 | 2 | Notice photo app layer: staff upload/view/replace/remove; payslip view on issued + edit/void/photo on unissued; `noopener` pop-up fix | `5ea0001` |
 | 3 | Notice photo recorded as a durable domain rule | `1bdc9d6` |
 | 4 | Violations cleanup: photo state machine + save tail deduped into `usePhotoDraft`/`applyPhotoChanges`; zero-row read-back on all four mutators; rose-vs-amber split on the staff screen; 4 exports dropped, 2 dead i18n keys deleted, 3 stale `file:line` pointers made name-based | `178df21` |
+| 5 | Handoff updated with that pass and the two traps it exposed | `36d6c66` |
+| 6 | Repo-wide zero-row sweep, then its three findings closed: read-back on `setSpecialStatus`, `setAdjustmentStatus` (shared `ITEM_PAID_MSG`) and `updateDraftInvoicePeriod` | `9e4ca3b` |
 
 ---
 
@@ -210,6 +232,25 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
   `grep -F 'viol.recent' lib/i18n.ts` is **vacuously 0 in every possible state**,
   because the dictionary nests and that dotted string never appears there. The
   load-bearing check was the dotted-key sweep across the whole tree.
+- **A CODE SCANNER YOU WROTE THIS TURN NEEDS A KNOWN-ANSWER CONTROL BEFORE ANY
+  OF ITS OUTPUT MEANS ANYTHING.** The zero-row sweep's scanner shipped two
+  parser bugs, one after the other, and **both printed a clean, plausible,
+  well-formatted report**. (1) A chain inside `Promise.all([…])` never reaches a
+  `;` of its own, so the statement-walker overran and glued siblings together —
+  it reported three `.select()` READS as one guarded write and hid a real chain.
+  (2) Fixing that by ending on a depth-0 `,` moved the failure: prose inside
+  mid-chain comments carries commas, which truncated a chain immediately before
+  its `.select("id").maybeSingle()` and reported a read-back **added two commits
+  earlier** as missing. Apostrophes in comments opened phantom string literals
+  the same way. **Blank comments before scanning, never after** — and the only
+  reason either bug was caught is that the file under test had a known answer
+  (four `driver_violations` writes, all read back). Point every new scanner at
+  something you already know the answer to, in both directions: a site it must
+  find and a site it must not. Same failure family, seen again on the commit
+  checks for `9e4ca3b`: `grep -Fc 'payout_id\", null'` inside single quotes
+  greps for a literal backslash and returns a confident **0**, and a
+  `grep -B6 … | grep -c` window undercounts multi-line chains. Both looked like
+  results.
 - **`file:line` POINTERS IN `SKILL.md` ROT SILENTLY, AND NOTHING GUARDS THEM.**
   Three were stale in one pass: `TrafficViolationsSection.tsx:134` (already
   wrong at HEAD by 10 lines), `actions.ts:1682` and `actions.ts:1592` (both
@@ -218,13 +259,20 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
   `file:line` citations to a skill or a note; cite the symbol.** After any pass
   that shifts lines in a cited file, re-grep:
   `grep -rnE '\.tsx?:[0-9]+' --include='*.md' .claude/`
-  **One citation survives that grep and is CORRECT today:** `SKILL.md:148`'s
-  `invoiceActions.ts:1035` — re-measured, line 1035 of `app/trips/invoiceActions.ts`
-  is indeed `coveredLines: inv.covered_lines ?? [],`. Left alone because
-  `frozen-split-check.ts` already asserts that exact string is present, so the
-  claim has a real guard and only the line number can rot. Convert it the next
-  time anything edits that file. The `.planning/review-*.md` docs hold six more,
-  unconverted on purpose — historical records, not live guidance.
+  **THE LAST SURVIVING CITATION HAS NOW ROTTED AND BEEN CONVERTED, ON SCHEDULE.**
+  `SKILL.md`'s `invoiceActions.ts:1035` was re-measured correct one session ago
+  and left standing with the note "convert it the next time anything edits that
+  file". `9e4ca3b` edited that file — 19 lines added above it — and line 1035 is
+  now `name_ar: seller?.legal_name_ar ?? null,` while `coveredLines` sits at
+  1054. Caught by running the grep above as part of the handoff write, not by
+  anything automatic. It is now name-based ("grep `coveredLines:
+  inv.covered_lines`"), so **the grep above now returns NOTHING over `.claude/` —
+  exit 1, zero hits.** The dead pointers quoted in this lock are the only ones
+  left anywhere live, and they are in THIS file, as examples. The
+  `.planning/review-*.md` docs
+  hold six more, unconverted on purpose — historical records, not live guidance.
+  **The lesson is the schedule, not the pointer:** "correct today, convert it
+  later" survived exactly one commit, and the commit that broke it was ours.
 - Locks promoted into `CLAUDE.md` and living there now, not here: **measure a
   justification before recording it** (§5, new this session — a count, a cause,
   a "matches/proves" is never written from memory or off a filename); the `grep -c`
@@ -257,15 +305,29 @@ pieces of follow-through are outstanding, and neither is a feature.
 
 1. **Run the `178df21` in-browser checklist** (see State, above). It is the one
    outstanding verification, not a new feature.
-2. **Consider promoting the PostgREST zero-row rule into `SKILL.md`.** Measured
-   absent from both `CLAUDE.md` and the domain skill —
-   `grep -nF -e maybeSingle -e 'zero-row'` over both returns nothing. The rule:
-   **a PostgREST `UPDATE` that matches no row is reported as SUCCESS**, so any
-   write carrying a guard predicate (`.is("voided_at", null)`, a status filter, a
-   tenant scope) must end `.select("id").maybeSingle()` and treat a null row as
-   the failure. Without it the guard is decoration. Not done in `178df21` —
-   scope was the violations feature, and a repo-wide sweep for the same shape on
-   other tables has NOT been run. That sweep is the real work here.
+2. **Promote the PostgREST zero-row rule into `SKILL.md` — the sweep that was
+   blocking it is now DONE (`9e4ca3b`, see State).** The rule: **a PostgREST
+   `UPDATE`/`DELETE` that matches no row is reported as SUCCESS**, so a write
+   carrying a guard predicate (`.is("voided_at", null)`, `.is("payout_id", null)`,
+   a status filter) must read back — `.select("id").maybeSingle()`, or
+   `.select("id")` plus a `data.length` test — and treat the miss as the failure.
+   Without it the guard is decoration. It now has seven fixed sites across four
+   tables (`driver_violations` ×4, `commission_specials`, `commission_adjustments`,
+   `invoices`), not one feature's worth. **Still absent from both files —
+   re-measured at `9e4ca3b`:** `grep -nF -e maybeSingle -e 'zero-row' CLAUDE.md
+   .claude/skills/aquafleet-domain/SKILL.md` exits 1, no hits.
+   Three things the sweep taught that belong in the rule, not just the fix:
+   - **`.select()` without `single` is a legitimate second shape** — it returns
+     an array, so a miss IS detectable, but only if the caller tests `.length`.
+     `updateExitPermitDraft` and `deleteExitPermitDraft` do; both are correct,
+     and neither uses `maybeSingle`.
+   - **A guard on a UNIQUE column is an identity lookup, not a guard.** That is
+     11 of the 22 survivors. Check `pg_constraint` before calling one a finding.
+   - **On a miss, the bail must sit above any destructive follow-on** — the
+     `removeDriverViolationImage` lesson. Where the follow-on deliberately runs
+     FIRST (`updateDraftInvoicePeriod`'s sync RPC, so a double-claim aborts with
+     the period untouched), the read-back reports the residue instead of
+     repairing it, and the comment has to say which.
 3. Parked papercut: `InvoicesModal`'s period default — both bounds default to
    today, so the default range is a single day. Pre-existing, untouched.
 

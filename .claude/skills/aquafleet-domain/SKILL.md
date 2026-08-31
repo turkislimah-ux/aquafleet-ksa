@@ -145,8 +145,9 @@ change is not the sole cause and "revert it" would not close it.
 
 **Why this is not a defect:** confirmed / paid / void invoices render and print
 from the frozen `covered_lines` / `unpaid_lines` jsonb and the stored total
-columns (0027's freeze law) — `invoiceActions.ts:1035` reads them verbatim, and
-no user-facing view re-derives an issued invoice. No document drifts. Only
+columns (0027's freeze law) — `invoiceActions.ts` reads them verbatim (grep
+`coveredLines: inv.covered_lines`), and no user-facing view re-derives an
+issued invoice. No document drifts. Only
 draft and review recompute live, which is the point of freezing at confirm.
 
 **Treatment: LEFT as-is** (Turki, 2026-08-31). The freeze rule is correct as
