@@ -166,9 +166,33 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-1. **Notifications + Settings feature** (catalog in chat memory, architecture
-   ruled, `0154` pending — renumber, that slot is long past). Nothing blocks it.
-2. Parked papercut: `InvoicesModal`'s period default — both bounds default to
+**Nothing is queued.** Ask Turki for the next item rather than picking one.
+
+1. Parked papercut: `InvoicesModal`'s period default — both bounds default to
    today, so the default range is a single day. Pre-existing, untouched.
+
+**NOTIFICATIONS + SETTINGS IS BUILT AND LIVE — do NOT plan it.** Earlier
+revisions of this file listed it as the next feature with "`0154` pending,
+renumber, that slot is long past". Wrong twice: `0154` is applied and on disk as
+`0154_notifications_data_layer.sql`, and the slot is taken by **this very
+feature**. Re-measured 2026-08-31:
+
+- Migrations `0154` (data layer), `0155` (blue event branches), `0158` (per-user
+  thresholds), `0160` (drop `notification_events`); settings via `0029`, `0042`,
+  `0171`.
+- Tables `notification_prefs`, `notification_thresholds`,
+  `notification_thresholds_user`, `notification_dismissals`, `company_settings`,
+  plus view `v_my_notifications`.
+- `components/settings/{SettingsModal,NotificationsSection,CompanySettingsSection}.tsx`,
+  `lib/actions/{notifications,notification-settings}.ts`,
+  `lib/notification-{format,thresholds}.ts` — all mounted from
+  `components/AppShell.tsx`. Settings is a MODAL, not a route; there is no
+  `app/settings/`, and its absence is not a gap.
+- Guarded by `scripts/notification-format-check.ts`, whose fixtures are real
+  `v_my_notifications` rows.
+
+**This is the "never re-raise an item because a note still lists it open" rule
+(`CLAUDE.md` §5) catching a live case.** The contradicting evidence sat in the
+harness header the whole time and was read without being noticed.
 
 Read `.claude/skills/aquafleet-domain/SKILL.md` for domain constraints.
