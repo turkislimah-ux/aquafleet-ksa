@@ -99,38 +99,36 @@ Loading every skill at once wastes context and has crashed sessions.
   has silently staged nothing before.
 - **Inspect the staged blob, not the working tree:** `git show :<path>` is what
   would actually be committed. A file can be correct on disk and blank in the index.
-- **A `grep -c` FOR A REMOVED IDENTIFIER HITS THE COMMENT THAT DOCUMENTS THE
-  REMOVAL — STRIP COMMENTS BEFORE TRUSTING THE COUNT.** A prose epitaph keeps
-  failing the check that exists to confirm the burial, and it reads exactly like
-  a failed fix. Seen on `amountPayable.ts` (`topups\|returns`), on
-  `StatementViews.tsx` (`grep -c 'deductions: 0'` → 1, the hit being the comment
-  saying the hardcode was removed), and **4+ times in the prepaid lifetime-net
-  pass**, where the docblock naming the dead gate returned 2 for an expected 0.
-  The fix — pipe the count through a comment filter first:
+- **A `grep -c` FOR A REMOVED IDENTIFIER HITS THE COMMENT DOCUMENTING THE
+  REMOVAL — STRIP COMMENTS BEFORE TRUSTING THE COUNT.** The epitaph fails the
+  very check that confirms the burial, and reads exactly like a failed fix. Seen
+  on `amountPayable.ts`, on `StatementViews.tsx`, 4+ times in the prepaid
+  lifetime-net pass, and again on §6's own `divide-` regression grep. The fix:
 ```sh
   git show :<path> | grep -nF '<identifier>' | grep -vE '^\s*[0-9]+:\s*(\*|//|--|/\*)'
 ```
-  Empty = genuinely gone. **Use `grep -F` whenever the pattern holds parens or
-  other metacharacters** — an unescaped `(` false-zeroes the count and reports a
-  live call site as removed. Read the surrounding lines, never the number alone.
+  Empty = genuinely gone. **Use `grep -F` when the pattern holds parens** — an
+  unescaped `(` false-zeroes the count and reports a live call site as removed.
+  Read the surrounding lines, never the number alone.
 - **Quote dynamic-route paths:** `git add 'app/fleet/[id]/page.tsx'` — zsh globs
   `[id]` silently. **Avoid `!` in commit messages** (history expansion).
 - **HANDOFF files:** `.planning/HANDOFF.md` is ours and committed — read at session
   start, write at session end; state lives THERE, not here. Both `HANDOFF.json`s
   (`.planning/` and `preview/.planning/`) are gsd's — see the header.
-- **Migrations:** numbered sequentially (`00NN_name.sql`), **DRAFTED to disk and
-  never self-applied by Claude Code** — draft, stop, let Turki/the architect run
-  it. **Verify the file exists on disk** (`ls supabase/migrations/ | tail -3` +
-  `cat`) before it is run; migrations have been "drafted in conversation" and
-  never written. **Code-then-migrate** for breaking schema changes: build against
-  the new schema, migrate, verify in-browser, commit together. Additive changes
-  (new nullable/defaulted columns) are lower-risk.
-- **BARE STATEMENTS ONLY — a migration file carries no `begin;` / `commit;`.**
+- **Migrations:** sequential `00NN_name.sql`, **DRAFTED to disk and never
+  self-applied by Claude Code** — draft, stop, let Turki/the architect run it.
+  **Verify the file exists on disk** (`ls supabase/migrations/ | tail -3`) before
+  it runs; migrations have been "drafted in conversation" and never written.
+  **Code-then-migrate** for breaking schema changes: build against the new
+  schema, migrate, verify in-browser, commit together. Additive columns are lower-risk.
+- **BARE STATEMENTS ONLY — a NEW migration carries no `begin;` / `commit;`.**
   The SQL Editor already runs each submission in its own transaction: a nested
-  `begin;` emits `WARNING: there is already a transaction in progress` and is
-  ignored, then the file's trailing `commit;` ends the EDITOR's transaction. The
-  grids print, the run reads as a success, and **nothing was created** — 0173 v1
-  did exactly this. That editor transaction is also what satisfies §6's
+  `begin;` warns and is ignored, then the trailing `commit;` ends the EDITOR's
+  transaction. Grids print, the run reads green, **nothing was created** — 0173
+  v1 did exactly this. **0173 is the boundary: 0173+ are bare, while 147 of the
+  175 files up to 0172 still carry `begin;`/`commit;`.** Those predate the rule
+  and went in by another path — do NOT "fix" them; 147 false hits is a false
+  catastrophe (§6). That editor transaction is also what satisfies §6's
   "re-revoke in the same transaction".
 - **A MIGRATION'S OWN RESULT-GRID IS NOT PROOF IT APPLIED.** Verification SELECTs
   are a claim; the catalog is the evidence. Confirm against `pg_index` /
@@ -153,10 +151,10 @@ Loading every skill at once wastes context and has crashed sessions.
   name taken from its migration's filename, which reports a healthy migration as
   MISSING (§6). Notes earn the strictest check — the next session trusts them
   without re-measuring.
-- **No build history in this file.** It is rules only; state goes to HANDOFF.md.
-  Past 20KB, check for appended diary — and compress by re-verifying every claim,
-  not by trimming prose blind. Both prior compression passes found a stale fact;
-  the audit is the payoff, the bytes are the pretext.
+- **No build history in this file.** Rules only; state goes to HANDOFF.md. §7's
+  15KB cap is the trigger — this line read "past 20KB" and contradicted it.
+  **Compress by re-verifying every claim, never by trimming prose blind.** All
+  three passes so far found a stale fact. The audit is the payoff, bytes the pretext.
 
 ---
 
@@ -174,14 +172,13 @@ Loading every skill at once wastes context and has crashed sessions.
   the name only.
 - **`todayKey()` / local-date helpers** for Riyadh — avoid UTC skew.
 - **`divide-*` CARRIES ITS OWN COLOUR: `divide-y divide-[rgb(var(--border))]`.**
-  `border-color` is not inherited, so an inline `borderColor` on the container
-  paints its own frame only — the rules `divide-y` creates stay at preflight's
-  `#e5e7eb`. Light mode sits one step off that and dark mode does not, so it looks
-  right in the mode you develop in; that is how it reached seven sites. Nothing
-  else covers it: no `borderColor.DEFAULT`, no `@layer base` rule for `*`. On a
-  border-less container the inline style is inert anyway (preflight zeroes
-  border-width) — delete it, don't leave it implying the rules are handled.
-  **An uncoloured `divide-` IS the bug**; grep is the regression test.
+  `border-color` is not inherited, so an inline `borderColor` paints the
+  container's own frame only — `divide-y`'s rules stay at preflight `#e5e7eb`,
+  right in light mode and wrong in dark, which is how it reached seven sites.
+  Nothing else covers it: no `borderColor.DEFAULT`, no `@layer base` for `*`. On
+  a border-less container that inline style is inert — delete it. **An uncoloured
+  `divide-` IS the bug**; grep is the regression test — clean today, its only hit
+  being a comment (§5).
 
 **WHAT SURVIVES A REPLACEMENT IS NOT OBVIOUS — AND WHAT DOES NOT IS A PERMISSION.**
 The next three rules are one lesson in three places.
@@ -194,8 +191,8 @@ The next three rules are one lesson in three places.
   revoke all on public.X from anon;
   grant select on public.X to authenticated;
 ```
-  Re-measure after every view change — the two counts MATCHING is the check, not
-  the number:
+  Re-measure after every view change — the counts MATCHING is the check, not the
+  number (50 / 50 / 0 today):
 ```sql
   select count(*) as views,
          count(*) filter (where c.reloptions::text[] @> array['security_invoker=true']) as security_invoker,
@@ -217,28 +214,25 @@ The next three rules are one lesson in three places.
 ```sql
   revoke execute on function public.X(<exact identity args>) from public, anon;
 ```
-  **BOTH grantees.** The offending entry is the PUBLIC one (EMPTY grantee,
-  `=X/postgres`); revoking `anon` alone leaves it and changes nothing. Read back
-  with `has_function_privilege('anon', …, 'execute')` = false — **never via
-  `proacl` matching**, `'%=X/%'` also matches `postgres=X/postgres` and reports
-  every function as leaking. **And identify the function by
+  **BOTH grantees.** The offender is the PUBLIC entry (EMPTY grantee,
+  `=X/postgres`); revoking `anon` alone changes nothing. Read back with
+  `has_function_privilege('anon', …, 'execute')` = false — **never via `proacl`
+  matching**, since `'%=X/%'` also matches `postgres=X/postgres` and reports
+  every function as leaking. **Identify the function by
   `p.oid::regprocedure::text = 'fn_name(uuid,integer)'`, never by
   `pg_get_function_identity_arguments()`** — on PG15+ that returns argument
-  NAMES (`'p_project_id uuid, p_year integer'`), so a filter of `= 'uuid,
-  integer'` matches ZERO rows and reports a healthy function as missing and
-  anon-executable. A false catastrophe reads exactly like a real one.
-  Not hypothetical: 0115 defined
-  `issue_driver_payslip`, 0118 replaced it without re-revoking, and a definer
-  money RPC sat callable by anyone with the anon key — bypassing RLS *and* 0161's
-  table revoke, since a definer runs as its owner. Proven by probe (business-logic
-  23514, not permission 42501), closed in **0163**; **0164** locked the guarded
-  RPCs. Invariant: **zero NON-TRIGGER functions anon-executable** (trigger
-  functions are unreachable via PostgREST; several legitimately remain).
+  NAMES, so a filter of `'uuid, integer'` matches ZERO rows and reports a healthy
+  function as missing and anon-executable. A false catastrophe reads exactly like
+  a real one. Not hypothetical: 0115 defined `issue_driver_payslip`, 0118
+  replaced it without re-revoking, leaving a definer money RPC callable by anyone
+  holding the anon key — bypassing RLS *and* 0161's table revoke, since a definer
+  runs as its owner. Closed in **0163**; **0164** locked the guarded RPCs.
+  Invariant: **zero NON-TRIGGER functions anon-executable** — measured 0 today
+  (trigger functions are unreachable via PostgREST; several legitimately remain).
 - **New tables in `public` still end with `revoke all on public.X from anon`,**
-  even though 0161 revoked anon everywhere and stopped future tables inheriting
-  grants. That default-privileges change only affects tables created AFTER it, so
-  on a fresh `db reset` every earlier migration creates its table first — and the
-  per-table line is what makes each migration correct read on its own.
+  even though 0161 revoked anon everywhere. Default privileges only affect tables
+  created AFTER it, so on a fresh `db reset` every earlier migration runs first —
+  the per-table line is what makes each migration correct on its own.
 
 ---
 
