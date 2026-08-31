@@ -97,7 +97,9 @@ export type BalanceReturnLite = {
   id: string;
   amount_sar: number;
   // Caller-resolved calendar date of the refund (customer_balance_returns
-  // .returned_on, NOT NULL). Same asOfDate-filter convention as topup_date.
+  // .returned_on, NOT NULL). Carried for ORDERING and display — the statement
+  // interleaves the row by this date. It no longer gates any pool sum: like
+  // topup_date, it is a lifetime credit-side term (see derivedBalanceItems).
   returned_on: string;
 };
 
@@ -112,6 +114,14 @@ export type BalanceReturnLite = {
 // balance) instead of reading it off the split, so it has to net returns with
 // the SAME filter and the SAME rounding this uses. Importing the function is
 // how that stays true; restating the reduce over there is how it drifts.
+//
+// `asOfDate` IS NOW PASSED BY NOBODY, and it is kept rather than deleted on
+// purpose. Every one of the three call sites (derivedBalanceItems,
+// splitCoveredUnpaidItems, lib/invoice.ts's startingPool) sums returns over the
+// customer's whole life, because the pool is a lifetime net — so the parameter
+// is a dormant option, not a used one. It stays because "sum refunds as of a
+// date" is a coherent question a future REPORT could ask of this helper without
+// touching a pool; what must never come back is a POOL that asks it.
 export function returnedTotal(returns: BalanceReturnLite[], asOfDate?: string): number {
   return round2(
     returns
@@ -314,11 +324,24 @@ export function consumingItems(
 }
 
 /**
- * v3 derived balance = sum(top-ups up to asOfDate) - sum(VAT-inclusive
- * consumption up to asOfDate, via consumingItems) - sum(balance returns up to
- * asOfDate). Pure; recomputed fresh every call. `charges` defaults to `[]` so a
- * trips-only caller still gets correct VAT-inclusive trip consumption without
- * needing to pass charges.
+ * v3 derived balance = sum(ALL top-ups) - sum(VAT-inclusive consumption up to
+ * asOfDate, via consumingItems) - sum(ALL balance returns). Pure; recomputed
+ * fresh every call. `charges` defaults to `[]` so a trips-only caller still
+ * gets correct VAT-inclusive trip consumption without needing to pass charges.
+ *
+ * THE POOL IS A LIFETIME NET; asOfDate SCOPES CONSUMPTION ONLY. Same rule, same
+ * words, as splitCoveredUnpaidItems below (Turki, locked) — and that is the
+ * whole reason the two sums above lost their date filter. The credit side used
+ * to cut at `topup_date <= asOfDate` and `returned_on <= asOfDate`, which was
+ * INERT (every production caller passes asOfDate = undefined) but LOADED: the
+ * first caller to pass a date would have got a balance that contradicts the
+ * invoice engine's pool, v_customer_prepaid_balance and the Finance KPI at
+ * once, silently, and by the exact value of the top-ups dated after that date.
+ * Removing the gate changes no current number and closes that.
+ *
+ * asOfDate STAYS on consumingItems() and is load-bearing there —
+ * lib/invoice.ts:415 passes periodEnd to scope an invoice's consumption to its
+ * period. Deleting the parameter would take that with it.
  *
  * `returns` (0142) defaults to `[]` — a caller with no refunds to report gets
  * byte-identical numbers to before. It is the LAST parameter for that reason:
@@ -337,11 +360,10 @@ export function derivedBalanceItems(
   asOfDate?: string,
   returns: BalanceReturnLite[] = [],
 ): number {
-  const credits = round2(
-    topups.filter((t) => asOfDate == null || t.topup_date <= asOfDate).reduce((s, t) => s + t.amount_sar, 0),
-  );
+  // NO asOfDate on either credit term — see the LIFETIME NET note above.
+  const credits = round2(topups.reduce((s, t) => s + t.amount_sar, 0));
   const debits = round2(consumingItems(trips, charges, asOfDate).reduce((s, e) => s + e.consumedAmount, 0));
-  const returned = returnedTotal(returns, asOfDate);
+  const returned = returnedTotal(returns);
   return round2(credits - debits - returned);
 }
 
@@ -427,8 +449,11 @@ export function buildStatementItems(
   settlements: SettlementStatementInput[] = [],
   returns: BalanceReturnLite[] = [],
 ): StatementItemEntry[] {
+  // EVERY top-up, no date gate — the pool is a lifetime net (see
+  // derivedBalanceItems' note). The closing runningBalance below must equal
+  // that function over the same inputs, so the two credit sides cannot be
+  // filtered differently without breaking the invariant this file is built on.
   const credits = topups
-    .filter((t) => asOfDate == null || t.topup_date <= asOfDate)
     .map((t) => ({
       kind: "topup" as const,
       id: t.id,
@@ -448,6 +473,11 @@ export function buildStatementItems(
     water_type: e.kind === "trip" ? e.water_type ?? null : null,
   }));
 
+  // SETTLEMENTS KEEP THEIR GATE, deliberately. A settlement is not the pool —
+  // it is a record-only row tracing a paid invoice, contributes nothing to the
+  // running balance, and so cannot desync the closing figure from
+  // derivedBalanceItems no matter how it is filtered. An invoice paid after the
+  // date being asked about has genuinely not been paid yet as of that date.
   const settlementRows = settlements
     .filter((s) => asOfDate == null || s.date <= asOfDate)
     .map((s) => ({
@@ -459,8 +489,10 @@ export function buildStatementItems(
       reference: s.invoice_number,
     }));
 
+  // EVERY refund, no date gate — the other half of the pool, same rule as the
+  // top-ups above. A return DOES move the running balance, so unlike a
+  // settlement it cannot keep a gate the credit sum does not have.
   const returnRows = returns
-    .filter((r) => asOfDate == null || r.returned_on <= asOfDate)
     .map((r) => ({
       kind: "return" as const,
       id: r.id,

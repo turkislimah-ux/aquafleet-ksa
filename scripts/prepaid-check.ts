@@ -88,22 +88,65 @@ check(
   );
 }
 
-// --- asOfDate cutoff: future top-ups/trips excluded ---------------------------
+// --- asOfDate cutoff: CONSUMPTION only, never the credit side -----------------
+// This case used to assert 385 — "excludes later top-ups AND trips". Half of
+// that is no longer the rule: asOfDate scopes CONSUMPTION and nothing else, so
+// the later top-up counts and only the later trip drops out. Kept and inverted
+// rather than deleted, because the number it now asserts is the exact one that
+// would move if the credit-side gate ever came back.
 {
   const futureTopups: TopupLite[] = [
     { id: "u1", amount_sar: 500, topup_date: "2026-06-01" },
-    { id: "u2", amount_sar: 500, topup_date: "2026-07-15" }, // after cutoff
+    { id: "u2", amount_sar: 500, topup_date: "2026-07-15" }, // after cutoff — STILL COUNTS
   ];
   const futureTrips: ConsumingTrip[] = [
     { id: "t1", trip_date: "2026-06-05", delivered_at: "2026-06-05T08:00:00.000Z", rate_sar: 100 },
+    { id: "t2", trip_date: "2026-07-20", delivered_at: "2026-07-20T08:00:00.000Z", rate_sar: 100 }, // after cutoff — EXCLUDED
+  ];
+  // Credits are lifetime: 500 + 500 = 1000. Consumption cuts at the date:
+  // 100 * 1.15 = 115. 1000 - 115 = 885.
+  check(
+    "asOfDate cutoff excludes the later TRIP but not the later top-up: 1000 - 115 = 885",
+    derivedBalanceItems(futureTopups, futureTrips, [], "2026-06-30"),
+    885,
+  );
+  // The consumption gate itself, stated alone so a future change to it fails
+  // here and not only through the composite figure above.
+  check(
+    "asOfDate still scopes consumption (lib/invoice.ts:415 depends on it)",
+    consumingItems(futureTrips, [], "2026-06-30").map((e) => e.id),
+    ["t1"],
+  );
+}
+
+// --- buildStatementItems: the same credit rule, on the ledger -----------------
+// The closing runningBalance must equal derivedBalanceItems over the same
+// inputs — the invariant in that function's docblock. If only ONE of the two
+// had lost its credit-side gate, this is where it would show.
+{
+  const topups: TopupStatementInput[] = [
+    { id: "u1", amount_sar: 500, topup_date: "2026-06-01", note: null, reference: null },
+    { id: "u2", amount_sar: 500, topup_date: "2026-07-15", note: null, reference: null }, // after cutoff
+  ];
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-05", delivered_at: "2026-06-05T08:00:00.000Z", rate_sar: 100 },
     { id: "t2", trip_date: "2026-07-20", delivered_at: "2026-07-20T08:00:00.000Z", rate_sar: 100 }, // after cutoff
   ];
-  // 100 * 1.15 = 115 consumed, 500 - 115 = 385.
+  const returns: BalanceReturnLite[] = [{ id: "r1", amount_sar: 100, returned_on: "2026-07-25" }]; // after cutoff
+  const stmt = buildStatementItems(topups, trips, [], "2026-06-30", [], returns);
+  check("statement under asOfDate: late top-up and late refund both appear, late trip does not", stmt.map((e) => e.kind), [
+    "topup",
+    "trip",
+    "topup",
+    "return",
+  ]);
   check(
-    "asOfDate cutoff excludes later top-ups and trips: 500 - 115 = 385",
-    derivedBalanceItems(futureTopups, futureTrips, [], "2026-06-30"),
-    385,
+    "statement under asOfDate: closing balance still equals derivedBalanceItems",
+    stmt[stmt.length - 1].runningBalance,
+    derivedBalanceItems(topups, trips, [], "2026-06-30", returns),
   );
+  // 500 -> 385 (t1) -> 885 (u2) -> 785 (refund).
+  check("statement under asOfDate: running balances", stmt.map((e) => e.runningBalance), [500, 385, 885, 785]);
 }
 
 // --- Money rounding (no float drift) -----------------------------------------
@@ -319,10 +362,29 @@ check(
   // THE REGRESSION GUARD. Same inputs, returns omitted = the pre-0142 answer.
   check("return: omitting returns reproduces the old un-netted figure", derivedBalanceItems(topups, trips), 540);
 
-  // asOfDate must gate a refund the same way it gates a top-up: a refund that
-  // has not happened yet cannot have reduced anything.
-  check("return: dated AFTER asOfDate is not yet netted", derivedBalanceItems(topups, trips, [], "2026-06-09", returns), 540);
-  check("return: dated ON asOfDate is netted (inclusive, same as topup_date)", derivedBalanceItems(topups, trips, [], "2026-06-10", returns), 0);
+  // THE GATE THESE TWO CASES ONCE ASSERTED IS GONE, AND ITS ABSENCE IS THE
+  // RULE NOW. They used to read "a refund dated AFTER asOfDate is not yet
+  // netted" (540) and "dated ON asOfDate is netted" (0) — the point-in-time
+  // credit side. The pool is a LIFETIME NET at every site (Turki, locked; see
+  // derivedBalanceItems' note and splitCoveredUnpaidItems'), so a refund nets
+  // whatever date is asked about: the answer is 0 on BOTH sides of the refund
+  // date, and the pair is kept — inverted, not deleted — precisely because a
+  // future edit that re-introduces the gate would make them disagree again.
+  check("return: dated AFTER asOfDate still nets (lifetime pool)", derivedBalanceItems(topups, trips, [], "2026-06-09", returns), 0);
+  check("return: dated ON asOfDate nets (unchanged by the cutover)", derivedBalanceItems(topups, trips, [], "2026-06-10", returns), 0);
+  // And the same for the OTHER credit term, on the same inputs: a top-up dated
+  // after asOfDate counts too. 1000 + 250 - 460 - 540 = 250.
+  check(
+    "top-up: dated AFTER asOfDate still counts (lifetime pool)",
+    derivedBalanceItems(
+      [...topups, { id: "u2", amount_sar: 250, topup_date: "2026-07-20", note: null, reference: null }],
+      trips,
+      [],
+      "2026-06-09",
+      returns,
+    ),
+    250,
+  );
 
   // Partial refund — the pool keeps the remainder, it is not all-or-nothing.
   check(

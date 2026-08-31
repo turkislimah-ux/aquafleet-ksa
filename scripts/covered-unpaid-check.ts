@@ -59,36 +59,21 @@ function checkInvariant(
   check(`${name} — invariant: coveredTotal + unpaidTotal = sum(all consumedAmount)`, sumTotals, allItemsTotal);
 
   const reconciled = Math.round((r.remainingBalance - r.unpaidTotal) * 100) / 100;
-  // derivedBalanceItems is a POINT-IN-TIME balance and still cuts BOTH sides at
-  // asOfDate. splitCoveredUnpaidItems' pool is now a LIFETIME NET (Turki,
-  // locked: any deposit pays any invoice regardless of date, and every refund
-  // comes off the pool regardless of date). The two therefore differ by exactly
-  // the top-ups dated after asOfDate MINUS the refunds dated after asOfDate, and
-  // invariant 2 restates that delta rather than being weakened or deleted.
+  // THE CORRECTION TERMS ARE GONE BECAUSE THE DIVERGENCE THEY CORRECTED IS.
+  // This assertion carried `+ lateTopups - lateReturns` for one reason: the
+  // pool inside splitCoveredUnpaidItems had become a LIFETIME NET while
+  // derivedBalanceItems still cut BOTH credit sides at asOfDate, so the two
+  // differed by exactly the top-ups dated after asOfDate minus the refunds
+  // dated after it. derivedBalanceItems now sums both credit terms over the
+  // customer's whole life too, so the delta is identically zero at every
+  // asOfDate and re-adding it would DOUBLE-COUNT — it does, loudly: leaving
+  // these terms in place fails all five dated cases below.
   //
-  // Both terms are required. Adding lateTopups alone would leave the check
-  // failing by any late refund — the same asymmetry that, left in the engine,
-  // would have over-stated the pool.
-  //
-  // This does NOT loosen the check where it matters: every production caller of
-  // derivedBalanceItems passes asOfDate = undefined (app/trips/actions.ts:1109,
-  // amountPayable.ts:150/:176, FinanceTab.tsx:287/:301), and with no asOfDate
-  // both terms are 0 and this is byte-identical to the original assertion.
-  const lateTopups =
-    asOfDate == null
-      ? 0
-      : Math.round(topups.filter((t) => t.topup_date > asOfDate).reduce((s, t) => s + t.amount_sar, 0) * 100) / 100;
-  const lateReturns =
-    asOfDate == null
-      ? 0
-      : Math.round(returns.filter((r2) => r2.returned_on > asOfDate).reduce((s, r2) => s + r2.amount_sar, 0) * 100) / 100;
-  const balance =
-    Math.round((derivedBalanceItems(topups, trips, charges, asOfDate, returns) + lateTopups - lateReturns) * 100) / 100;
-  check(
-    `${name} — invariant: remainingBalance - unpaidTotal = derivedBalanceItems + late top-ups - late refunds`,
-    reconciled,
-    balance,
-  );
+  // Back to the plain form, which is the stronger check: any future re-gating
+  // of either credit side fails here immediately instead of being absorbed by
+  // a correction that quietly cancels it.
+  const balance = Math.round(derivedBalanceItems(topups, trips, charges, asOfDate, returns) * 100) / 100;
+  check(`${name} — invariant: remainingBalance - unpaidTotal = derivedBalanceItems`, reconciled, balance);
 
   const splitIds = [...r.covered.map((e) => e.id), ...r.unpaid.map((e) => e.id)].sort();
   const allIds = consumingItems(trips, charges, asOfDate).map((e) => e.id).sort();
