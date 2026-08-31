@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start -p 3002",
     "lint": "next lint",
-    "preview": "python3 -m http.server 3002 --directory preview"
+    "preview": "python3 -m http.server 3002 --directory preview",
+    "test:money": "for f in prepaid covered-unpaid amount-payable invoice vat commission commission-rows payslip-deduction daily-trips frozen-split; do npx tsx scripts/$f-check.ts || exit 1; done"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
