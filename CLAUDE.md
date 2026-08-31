@@ -99,6 +99,20 @@ Loading every skill at once wastes context and has crashed sessions.
   has silently staged nothing before.
 - **Inspect the staged blob, not the working tree:** `git show :<path>` is what
   would actually be committed. A file can be correct on disk and blank in the index.
+- **A `grep -c` FOR A REMOVED IDENTIFIER HITS THE COMMENT THAT DOCUMENTS THE
+  REMOVAL — STRIP COMMENTS BEFORE TRUSTING THE COUNT.** A prose epitaph keeps
+  failing the check that exists to confirm the burial, and it reads exactly like
+  a failed fix. Seen on `amountPayable.ts` (`topups\|returns`), on
+  `StatementViews.tsx` (`grep -c 'deductions: 0'` → 1, the hit being the comment
+  saying the hardcode was removed), and **4+ times in the prepaid lifetime-net
+  pass**, where the docblock naming the dead gate returned 2 for an expected 0.
+  The fix — pipe the count through a comment filter first:
+```sh
+  git show :<path> | grep -nF '<identifier>' | grep -vE '^\s*[0-9]+:\s*(\*|//|--|/\*)'
+```
+  Empty = genuinely gone. **Use `grep -F` whenever the pattern holds parens or
+  other metacharacters** — an unescaped `(` false-zeroes the count and reports a
+  live call site as removed. Read the surrounding lines, never the number alone.
 - **Quote dynamic-route paths:** `git add 'app/fleet/[id]/page.tsx'` — zsh globs
   `[id]` silently. **Avoid `!` in commit messages** (history expansion).
 - **HANDOFF files:** `.planning/HANDOFF.md` is ours and committed — read at session

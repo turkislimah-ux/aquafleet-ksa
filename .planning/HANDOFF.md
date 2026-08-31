@@ -27,148 +27,42 @@
 
 ---
 
-## THE FEATURE MODEL — do not re-derive this wrong
+## THE FEATURE MODEL — moved, not lost
 
-Every fact below was re-measured out of `pg_index` / `pg_constraint` /
-`pg_attribute` at session close, not read off the migration files.
-
-### The records
-
-- A fine is a `driver_violations` row against ONE driver, typed from
-  `violation_types`. **`label` AND `label_ar` are both NOT NULL** — a new type
-  demands both names, because copying the English across would put English on
-  the Arabic screen.
-- **Reference is unique per driver among LIVE rows only** —
-  `driver_violations_driver_ref_live_unique` on `(driver_id, ref_no)`
-  `WHERE voided_at IS NULL`. A voided fine frees its reference for re-entry.
-- **`voided_at` is the delete path**, with `voided_by` and `void_reason`
-  alongside (both nullable). **Never hard-delete.** A voided fine leaves every
-  total and every list while staying readable in the database — that difference
-  is the entire point.
-
-### The deduction
-
-A payslip deducts **that month's live fines**: `voided_at IS NULL`, dated inside
-the month, **every `payment_status`**. Whether the driver settled the ticket
-with the authority is a different question from whether payroll charges him.
-
-```
-deductions_sar  = LEAST(month_fines, GREATEST(gross, 0))
-unabsorbed_sar  = month_fines - deductions_sar
-net_sar         = gross - deductions_sar          -- clamps at 0
-```
-
-**THREE NUMBERS, DELIBERATELY DISTINCT.** Collapsing any two is the bug this
-model exists to prevent:
-
-| Figure | Means |
-|---|---|
-| gross | the earnings sum, before any fine |
-| `deductions_sar` | what the pay could actually absorb |
-| `unabsorbed_sar` | what it could not |
-
-Guarded in the database, all verified present:
-
-- `driver_payslips_net_nonneg` — `net_sar >= 0`
-- `driver_payslips_deduction_within_violations` — `deductions_sar <= violation_deduction_sar`
-- `driver_payslips_unabsorbed_nonneg`, `driver_payslips_violation_deduction_nonneg`
-
-**`unabsorbed_sar` IS A RECORD, NOT A CARRY.** No cross-month carry, no
-remainder chain, no month-order requirement. No later month reads it. Recovering
-it is a human decision made outside this app. **The deduction is a pure function
-of (driver, month)** — which is exactly what makes the preview trustworthy.
-
-### The freeze
-
-`driver_payslip_violations` records which fines a payslip consumed.
-**`UNIQUE(violation_id)`** (`driver_payslip_violations_violation_unique`) — a
-fine can be consumed by at most one payslip, ever.
-
-- **Frozen fines are LOCKED**: no edit, no void. Enforced in the server action,
-  not merely hidden in the UI.
-- **Settlement status is MONTH-LEVEL, not per-fine.** Absorption has no per-fine
-  share — a month claiming 500 that absorbs 300 leaves 200 across two 250 fines,
-  and "which one was the outstanding one" has no answer. Deducted if the month's
-  payslip is issued and absorbed everything; Partly deducted if it left a
-  remainder; **Unsettled if the payslip absorbed nothing at all** (zero absorbed
-  is not "partly" anything).
-
-### Outstanding
-
-Roster column and driver-detail callout. **`lib/violations.ts` owns it** — one
-arithmetic, three surfaces, so they cannot answer differently.
-
-```
-outstanding = sum(live fines) - sum(deductions_sar across issued payslips)
-            = fines in unissued months + each issued month's unabsorbed_sar
-```
-
-Read-only aggregation on top of 0177 — **it adds no money object.** A fully
-absorbed fine contributes 0; a voided one contributes nothing at all.
-**Not clamped at zero, deliberately:** the only route to a negative is a fine
-voided *after* a payslip absorbed it, which the UI forbids and which would mean
-a document deducted money for a fine that no longer exists. That is a real
-defect worth seeing, and `Math.max(0, …)` would hide exactly the case worth
-finding.
-
-### WYSIWYG
-
-`v_driver_payslip_basis` computes the deduction in **columns 19–21**
-(`violation_deduction_sar`, `deductions_sar`, `unabsorbed_sar`; `net_sar` is
-col 18 and is **already net**). `issue_driver_payslip` freezes those columns
-verbatim — it does **not** recompute, and it no longer subtracts. The preview
-reads the same columns. A preview and the document it becomes cannot disagree.
-
-**The Stage 3 correctness fix was exactly this:** the preview hardcoded
-`deductions: 0` while reading `net_sar`. Honest while the view's net was gross;
-a lie the moment 0177 made it net-of-deduction — the net shrank by the fine and
-the Deductions line still said zero, so the slip did not add up on its own face.
-
-The frozen snapshot's `violations.items` orders **oldest-first**
-(`order by dv.violation_date, dv.ref_no`). The live preview is sorted to match,
-or the sheet visibly reshuffles the moment it is issued with no figure changing.
+**The traffic-violations money model now lives in
+`.claude/skills/aquafleet-domain/SKILL.md` §"Traffic Violations & Payslip
+Deductions (0175–0177)"** — the three tables, the deduction law, the date-floor
+↔ clamp-no-carry link, the four 0177 CHECK constraints, WYSIWYG, Outstanding,
+and the four locked decisions. It is durable money/schema law, not session
+state, and `CLAUDE.md` §7 says that belongs in the skill. Every fact there was
+re-measured out of `pg_index` / `pg_constraint` / `pg_attribute` /
+`pg_get_viewdef` on 2026-08-31 before it was written. **One home, so the two
+cannot drift.**
 
 ---
 
-## Decisions Turki LOCKED this feature (do not re-litigate)
+## CLOSED this session — both open decisions ruled
 
-1. **Clamp-no-carry**, chosen over a remainder chain. The chain needs a stable
-   origin month and the live data has none — June is unissued and the
-   `v_report_months` floor moves.
-2. **Deduct every `payment_status`.** Paid-to-the-authority ≠ recovered-from-pay.
-3. **Date floor = 1st of the current month; future dates allowed.** On ADD only —
-   on edit the floor is absent, since the row's own date is the subject. **This
-   floor is what makes late-fine stranding impossible, which is why no carry is
-   needed.** The two decisions hold each other up; do not revisit one alone.
-4. **RBAC on add-a-type: deferred.** Any authenticated user can add one today.
+### O-1. Historical invoices whose DERIVED split moves — **RULED: LEAVE**
 
----
+Re-measured 2026-08-31: **8** already-issued prepaid invoices (5 paid,
+1 confirmed, 2 void) — not the "8 paid + 1 void" this file previously claimed.
+13,524.00 SAR would move Unpaid → Covered, 7,831.50 of it already collected;
+**2 of the 8 were already divergent before `9c287d6`.**
 
-## OPEN — decisions owed from Turki (raise these, do not bury them)
+**Turki ruled LEAVE as-is. No data touched.** Not a bug: issued invoices render
+and print from frozen columns (0027), so no document drifts. Annotated in
+`.claude/skills/aquafleet-domain/SKILL.md` §"Frozen invoice splits diverging
+from a re-derivation is EXPECTED" so it is not re-investigated. One live item:
+`026-000009`, confirmed and unpaid at 4,243.50 SAR.
 
-Carried forward **unchanged**, from the prepaid lifetime-net change. Nothing is
-broken today; both are judgement calls deliberately NOT made.
+### O-2. `prepaid.ts` date-gated two surfaces — **RULED: MAKE LIFETIME**, done
 
-### O-1. Nine historical invoices whose DERIVED split now moves
-
-8 paid + 1 void. Their **stored/frozen figures are untouched and correct** — the
-printed documents are right and no money changed. But the prepaid pool widened
-(lifetime net, no date gate), so a screen that **re-derives** the covered/unpaid
-split shows a split differing from the printed document.
-
-**Decision owed: reconcile, annotate, or leave. NOT yet decided.**
-
-### O-2. `prepaid.ts` still date-gates two surfaces
-
-`derivedBalanceItems` (`lib/prepaid.ts:341`) and `buildStatementItems` (`:431`)
-still date-gate **both** topups and returns (point-in-time), while the invoice
-engine now does not (lifetime).
-
-**Inert today** — every app caller passes `asOfDate = undefined`. And
-point-in-time may well be **correct** for a running statement. But it is a live
-inconsistency between two surfaces that both answer "what's the balance".
-
-**Decision owed: leave point-in-time, or make it lifetime. NOT yet decided.**
+`dc29e26`. `derivedBalanceItems` and `buildStatementItems` lost their
+**credit-side** gates only; consumption and settlements keep theirs. Verified a
+no-op on current data — all 3 prepaid customers byte-identical
+(−28,290.00 / −32,689.00 / −471.50). Rule now in SKILL.md §"asOfDate scopes
+CONSUMPTION, never the POOL". Harness cases inverted, not deleted.
 
 ### Parked (lower priority)
 
@@ -209,16 +103,9 @@ number than the Trips tab for the same prepaid customer, by design.**
   exits 0). Always `cd` to the repo root **and** use
   `./node_modules/.bin/tsc --noEmit --project tsconfig.json`. Pinning the
   tsconfig alone is NOT enough — the binary resolution is the other half.
-- **A `grep -c` for a removed identifier hits the comment that documents the
-  removal. THIS RECURRED THIS SESSION** — the pre-commit check
-  `grep -c 'deductions: 0'` on the staged `StatementViews.tsx` returned **1**,
-  and the hit was the comment explaining that the hardcode was removed. It read
-  exactly like a failed fix. Previously seen on `amountPayable.ts` with
-  `topups\|returns`. **Split comment from executable text before trusting a
-  count** (`grep -v '^\s*[0-9]*:\s*//'`), or match on identifier SHAPE, and read
-  the surrounding lines rather than the number alone. A prose epitaph will keep
-  failing the check that exists to confirm the burial.
-- Locks promoted into `CLAUDE.md` and living there now, not here: migrations are
+- Locks promoted into `CLAUDE.md` and living there now, not here: the `grep -c`
+  comment-epitaph trap, now with its fix (§5 — strip comment lines, use
+  `grep -F` on patterns with parens); migrations are
   BARE STATEMENTS with no `begin;`/`commit;` (§5); identify a function by
   `oid::regprocedure::text`, never `pg_get_function_identity_arguments()` which
   returns argument NAMES on PG15+ (§6); a migration's own result-grid is not
@@ -232,10 +119,9 @@ number than the Trips tab for the same prepaid customer, by design.**
   `project_id` **OR** `customer_id`. A fully bare `(null, null)` trip is
   **rejected**. The `WT-` fallback series is therefore reached by
   **bare-CUSTOMER** trips — customer set, no project — not by empty trips.
-- `violation_types` is fetched **unfiltered by `active`** on both pages, and the
-  picker filters instead. Label resolution needs retired types: a fine written
-  against a since-deactivated type must still render its name, and the locked
-  historical rows nobody can edit are the likeliest to point at one.
+
+(The `violation_types`-fetched-unfiltered rule moved to SKILL.md with the rest
+of the violations model — it is domain law, not a loose schema note.)
 
 ---
 
@@ -253,12 +139,10 @@ number than the Trips tab for the same prepaid customer, by design.**
 
 ## What's next
 
-1. Turki rules on **O-1** and **O-2** above.
-2. **Promote the violations money model into
-   `.claude/skills/aquafleet-domain/SKILL.md`.** Per `CLAUDE.md` §7 money and
-   schema rules belong there, not in a session handoff — the model section above
-   is durable, not session state, and should migrate on the next domain pass.
-3. Then: Notifications + Settings feature (catalog in chat memory, architecture
-   ruled, `0154` pending — renumber, that slot is long past).
+1. **Notifications + Settings feature** (catalog in chat memory, architecture
+   ruled, `0154` pending — renumber, that slot is long past). Nothing blocks it:
+   O-1 and O-2 are both ruled and closed, and the violations model has migrated
+   to SKILL.md.
+2. Parked papercut: `InvoicesModal`'s single-day default period (above).
 
 Read `.claude/skills/aquafleet-domain/SKILL.md` for domain constraints.

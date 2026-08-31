@@ -74,6 +74,59 @@ it mirrors the BALANCE.
 
 ---
 
+## asOfDate scopes CONSUMPTION, never the POOL
+
+The prepaid pool is a **lifetime net** — `sum(all topups) − sum(all returns)`,
+no date gate — at every site that computes one: `splitCoveredUnpaidItems`,
+`lib/invoice.ts`'s `startingPool`, `derivedBalanceItems`, `buildStatementItems`,
+and `v_customer_prepaid_balance` (which never gated). `9c287d6` moved the
+invoice engine; `dc29e26` moved the last two functions.
+
+**`asOfDate` is a CONSUMPTION filter and nothing else.** It is load-bearing
+there — `lib/invoice.ts` passes `periodEnd` to scope an invoice's consumption to
+its period. Never re-gate a credit side with it: a caller passing a date would
+get a balance contradicting the invoice engine, the view and the Finance KPI at
+once, silently, by exactly the value of the top-ups dated after that date.
+
+- **`buildStatementItems`' settlements filter is the one legitimate exception**
+  and stays gated. A settlement is a record-only row, contributes nothing to the
+  running balance, so it cannot desync the closing figure. Returns are not like
+  this — a return **does** move the balance, so it cannot keep a gate the credit
+  sum lacks.
+- `returnedTotal(returns, asOfDate)` keeps its optional param, **passed by
+  nobody**. A dormant option for a future report, never for a pool.
+- Guarded by `scripts/prepaid-check.ts` and `scripts/covered-unpaid-check.ts`.
+  Both hold inverted cases that assert the gate's ABSENCE — they were rewritten
+  rather than deleted precisely so a re-gating fails loudly.
+
+---
+
+## Frozen invoice splits diverging from a re-derivation is EXPECTED
+
+**Do not re-investigate this as a live bug.** Widening the pool changed what a
+*re-derivation* of the covered/unpaid split returns, but not one stored figure.
+
+**Measured live 2026-08-31:** 8 already-issued prepaid invoices (5 paid,
+1 confirmed, 2 void) re-derive a split differing from their FROZEN split —
+13,524.00 SAR would move Unpaid → Covered, of which 7,831.50 is already
+collected. **2 of the 8 were already divergent BEFORE `9c287d6`**, so the pool
+change is not the sole cause and "revert it" would not close it.
+
+**Why this is not a defect:** confirmed / paid / void invoices render and print
+from the frozen `covered_lines` / `unpaid_lines` jsonb and the stored total
+columns (0027's freeze law) — `invoiceActions.ts:1035` reads them verbatim, and
+no user-facing view re-derives an issued invoice. No document drifts. Only
+draft and review recompute live, which is the point of freezing at confirm.
+
+**Treatment: LEFT as-is** (Turki, 2026-08-31). The freeze rule is correct as
+issued; no data was touched. The one live item is `026-000009`, confirmed and
+unpaid at 4,243.50 SAR.
+
+These counts are a dated measurement, not durable law — **re-measure before
+quoting them.** The durable part is the rule above it.
+
+---
+
 ## Invoice & PO Numbering — Counter-Table Pattern
 
 Gap-free sequential numbers use a dedicated counter table + a function that
@@ -203,6 +256,122 @@ Draft → Review → Confirmed → Paid
 - ZATCA VAT at 15%, document-level rounding (not per-line).
 - Bilingual AR/EN invoice PDF via PDFShift (behind `lib/pdf.ts`).
 - Gap-free yearly invoice numbering (counter-table pattern, see above).
+
+---
+
+## Traffic Violations & Payslip Deductions (0175–0177)
+
+### The three tables
+
+- **`violation_types`** — bilingual lookup. **`label` AND `label_ar` are both
+  NOT NULL**; a new type demands both names, or English lands on the Arabic
+  screen. `key` is immutable (`violation_types_key_unique`) — a rename touches
+  the label only. `active` is a **soft-retire**, not a delete.
+  - **Fetch types UNFILTERED by `active`; let the picker filter.** Label
+    resolution needs retired types — a fine written against a since-deactivated
+    type must still render its name, and the locked historical rows nobody can
+    edit are the likeliest to point at one.
+- **`driver_violations`** — the fines. Child of `drivers`.
+  - **`voided_at` is the delete path**, with `voided_by` + `void_reason`
+    (both nullable). **Never hard-delete.** A voided fine leaves every total and
+    every list while staying readable — that difference is the entire point.
+  - **Reference is unique PER DRIVER among LIVE rows only** —
+    `driver_violations_driver_ref_live_unique` on `(driver_id, ref_no)`
+    `WHERE voided_at IS NULL`. A voided fine frees its reference for re-entry.
+- **`driver_payslip_violations`** — the freeze table, `(payslip_id,
+  violation_id)`. **`UNIQUE(violation_id)`**
+  (`driver_payslip_violations_violation_unique`): a fine can be consumed by **at
+  most one payslip, ever**. Frozen fines are locked — no edit, no void, enforced
+  in the server action, not merely hidden in the UI.
+
+### THE DEDUCTION LAW
+
+A payslip deducts **that month's LIVE fines**: `voided_at IS NULL`, dated inside
+the month, **every `payment_status`**. Settling with the authority is a
+different question from payroll recovering it.
+
+```
+violation_deduction_sar = month_fines                              -- col 19, the claim
+deductions_sar          = LEAST(month_fines, GREATEST(gross, 0))   -- col 20, what pay absorbed
+unabsorbed_sar          = month_fines - deductions_sar             -- col 21, what it could not
+net_sar                 = gross - deductions_sar                   -- col 18, CLAMPS at 0
+```
+
+**THREE FIGURES, DELIBERATELY DISTINCT.** Collapsing any two is the bug this
+model exists to prevent.
+
+**`unabsorbed_sar` IS A RECORD, NOT A CARRY.** No cross-month carry, no
+remainder chain, no month-order requirement, no later month reads it.
+Recovering it is a human decision made outside this app. **The deduction is a
+pure function of `(driver, month)`** — which is what makes the preview
+trustworthy.
+
+**WHY NO CARRY IS NEEDED — the load-bearing link.** On ADD, a violation cannot
+be dated before the **1st of the current month** (`monthStartKey`,
+`TrafficViolationsSection.tsx:134` as the input `min`, and the server owns the
+rule). Future dates are allowed. That floor makes late-stranding impossible: a
+fine can never appear in a month whose payslip is already issued, so there is
+nothing for a carry to rescue. **The floor and clamp-no-carry hold each other
+up — do not revisit one alone.** On EDIT the floor is absent, since the row's
+own date is the subject.
+
+### The clamp is IN THE DATABASE, not just the view
+
+Four CHECK constraints on `driver_payslips`, added by 0177, all verified present
+in `pg_constraint`:
+
+- `driver_payslips_net_nonneg` — `net_sar >= 0`
+- `driver_payslips_violation_deduction_nonneg` — `violation_deduction_sar >= 0`
+- `driver_payslips_unabsorbed_nonneg` — `unabsorbed_sar >= 0`
+- `driver_payslips_deduction_within_violations` — `deductions_sar <= violation_deduction_sar`
+
+### WYSIWYG — preview and document read the same columns
+
+`v_driver_payslip_basis` computes the deduction in **columns 19–21**; `net_sar`
+is col 18 and is **already net**. `issue_driver_payslip(uuid,date,text)` freezes
+those columns **verbatim** — it does not recompute and does not subtract again.
+The preview reads the same columns, so a preview and the document it becomes
+cannot disagree.
+
+- `issue_driver_payslip` is **SECURITY DEFINER** and §6-re-revoked —
+  `has_function_privilege('anon', …, 'execute')` = **false**, `authenticated` =
+  true. Any redefinition must re-revoke in the same transaction.
+- The frozen snapshot's `violations.items` orders **oldest-first**
+  (`order by dv.violation_date, dv.ref_no`); the live preview is sorted to
+  match, or the sheet visibly reshuffles on issue with no figure changing.
+
+### Outstanding
+
+**`lib/violations.ts` owns it** — one arithmetic, three surfaces, so they cannot
+answer differently.
+
+```
+outstanding = sum(live fines) - sum(deductions_sar across ISSUED payslips)
+            = fines in unissued months + each issued month's unabsorbed_sar
+```
+
+Read-only aggregation on top of 0177 — **it adds no money object.**
+
+- **NOT clamped at zero, deliberately.** The only route to a negative is a fine
+  voided *after* a payslip absorbed it — which the UI forbids, and which would
+  mean a document deducted money for a fine that no longer exists. That is a
+  real defect worth seeing; `Math.max(0, …)` would hide exactly the case worth
+  finding.
+- **Settlement status is MONTH-LEVEL, not per-fine.** Absorption has no per-fine
+  share: a month claiming 500 that absorbs 300 leaves 200 across two 250 fines,
+  and "which one was the outstanding one" has no answer. Deducted = issued and
+  fully absorbed; Partly deducted = left a remainder; **Unsettled = absorbed
+  nothing at all** (zero absorbed is not "partly" anything).
+
+### Locked decisions (do not re-litigate)
+
+1. **Clamp-no-carry**, over a remainder chain — the chain needs a stable origin
+   month and the live data has none.
+2. **Deduct every `payment_status`.** Paid-to-the-authority ≠ recovered-from-pay.
+3. **Date floor = 1st of the current month, future dates allowed**, ADD only.
+4. **RBAC on add-a-type: deferred.** Any authenticated user can add one today.
+
+Guarded by `scripts/payslip-deduction-check.ts`.
 
 ---
 
