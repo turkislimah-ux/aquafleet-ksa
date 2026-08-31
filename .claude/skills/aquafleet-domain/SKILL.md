@@ -101,6 +101,23 @@ once, silently, by exactly the value of the top-ups dated after that date.
 
 ---
 
+## Duplicate customer info is ALLOWED — do not add a uniqueness or merge guard
+
+**Two customer records may legitimately share an identical name, VAT number and
+CR number** when they serve different projects. Each holds its **OWN separate
+prepaid pool** and its own invoices; they are distinct counterparties for money
+purposes and only coincide on their identity fields.
+
+So: **do NOT add a VAT/CR uniqueness constraint, and do NOT add a dedupe or
+merge guard on `customers`.** Either would block a valid case, and merging two
+such records would silently pool two balances that must stay apart.
+
+A matching placeholder VAT/CR is expected, not a data-quality defect — the two
+"Seder Facility mang./Mang. Co." records (sharing VAT `123456789012345`, CR
+`1234567890`) are this pattern, and are why the DB reads as 3 prepaid customers.
+
+---
+
 ## Frozen invoice splits diverging from a re-derivation is EXPECTED
 
 **Do not re-investigate this as a live bug.** Widening the pool changed what a
@@ -124,6 +141,15 @@ unpaid at 4,243.50 SAR.
 
 These counts are a dated measurement, not durable law — **re-measure before
 quoting them.** The durable part is the rule above it.
+
+**Re-measure with `npx tsx scripts/frozen-split-check.ts`**, which exists so this
+stops being rebuilt from a throwaway script. It PRINTS the count/SAR (never
+asserts them) and ASSERTS the durable half: **an invoice carries a frozen split
+if and only if it is issued.** Note it reports **10 / 28,474.00 SAR**, not the
+8 / 13,524.00 above — a METHOD difference, not new data: it re-derives void
+invoices too, whose lines were released back to the pool, so they re-derive to
+nothing and book their full stored `amount_due`. Neither figure changes the
+ruling. Read its per-invoice lines, never the total alone.
 
 ---
 
