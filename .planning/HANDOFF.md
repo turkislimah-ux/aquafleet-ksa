@@ -2,72 +2,97 @@
 
 ## State
 
-- **DB is at migration 0177.** Three migrations shipped this session, all
-  applied, all on disk:
-  - `0175_violation_types.sql` — the bilingual, extensible lookup.
-  - `0176_driver_violations.sql` — the fines themselves.
-  - `0177_payslip_violation_deductions.sql` — the payslip wiring + freeze table.
+- **DB is at migration 0177.** No migration this session — docs, one new
+  harness, one `package.json` line. Working tree clean, 0 ahead / 0 behind.
 - **MCP-applied migrations write NO `schema_migrations` ledger row.** Neither do
   SQL Editor runs. The migration FILE is the record. The ledger's max version
   lags reality and always will — **the objects in the catalog are the truth, the
   ledger is not.** Do not "discover" a missing migration from a ledger query and
   do not re-apply one on that basis. Check `pg_proc` / `pg_index` first.
-- All pages built and verified in-browser. No open bugs. Two decisions are owed
-  from Turki (O-1, O-2 below) — open QUESTIONS, not defects.
+- **No open decisions and no known defects.** O-1 and O-2 were both ruled and
+  closed; nothing was reopened.
 
 ---
 
-## Closed this session — Traffic Violations, three stages
+## Closed this session
 
-| # | Stage | Commit |
+| # | Item | Commit |
 |---|---|---|
-| 1 | Schema: `violation_types` + `driver_violations` — `0175`, `0176` | `4fdf30a` |
-| 2 | Payslip deduction wiring + freeze table — `0177` | `5a7c0e6` |
-| 3 | UI: driver-detail section, roster column, payslip fines table, preview fix | `ef899cd` |
+| 1 | Prepaid balance/statement pool made lifetime-net (the O-2 ruling) | `dc29e26` |
+| 2 | Violations model moved into the domain skill; frozen-split annotation | `90c5a9e` |
+| 3 | `scripts/frozen-split-check.ts` + the duplicate-customer rule | `20b847c` |
+| 4 | `npm run test:money` — all ten money harnesses, fail-fast | `46bccf3` |
 
 ---
 
-## THE FEATURE MODEL — moved, not lost
+## THERE IS NOW A MONEY-HARNESS SUITE — USE IT
 
-**The traffic-violations money model now lives in
-`.claude/skills/aquafleet-domain/SKILL.md` §"Traffic Violations & Payslip
-Deductions (0175–0177)"** — the three tables, the deduction law, the date-floor
-↔ clamp-no-carry link, the four 0177 CHECK constraints, WYSIWYG, Outstanding,
-and the four locked decisions. It is durable money/schema law, not session
-state, and `CLAUDE.md` §7 says that belongs in the skill. Every fact there was
-re-measured out of `pg_index` / `pg_constraint` / `pg_attribute` /
-`pg_get_viewdef` on 2026-08-31 before it was written. **One home, so the two
-cannot drift.**
+```sh
+npm run test:money
+```
+
+Ten harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green:
+`prepaid` · `covered-unpaid` · `amount-payable` · `invoice` · `vat` ·
+`commission` · `commission-rows` · `payslip-deduction` · `daily-trips` ·
+`frozen-split`.
+
+- **`notification-format-check` is deliberately NOT in the list** — it is a
+  presentation harness for the notification bell ("No DB, no React"), not money
+  math; its `sar`/`invoice` tokens are notification *text*. Its absence is a
+  decision, not an oversight. Do not "fix" it.
+- **Not wired into `next build` or `safe-build.sh`, on purpose.** Money checks
+  are run deliberately, not on every build. No test framework was added.
+- Fail-fast was **proven, not assumed**: a `process.exit(1)` harness injected at
+  position 3 of a mirror loop stopped the run there and exited 1.
+- **Run it before any money commit.** That is why it exists.
 
 ---
 
-## CLOSED this session — both open decisions ruled
+## The frozen-split guard, and the number that changed
 
-### O-1. Historical invoices whose DERIVED split moves — **RULED: LEAVE**
+`scripts/frozen-split-check.ts` makes the "frozen vs re-derived split" ruling
+self-verifying — it had been rebuilt from a throwaway script twice.
 
-Re-measured 2026-08-31: **8** already-issued prepaid invoices (5 paid,
-1 confirmed, 2 void) — not the "8 paid + 1 void" this file previously claimed.
-13,524.00 SAR would move Unpaid → Covered, 7,831.50 of it already collected;
-**2 of the 8 were already divergent before `9c287d6`.**
+**It ASSERTS the freeze boundary: an invoice carries a frozen split if and only
+if it is ISSUED (confirmed/paid/void).** Live-measured exact — 17 issued all
+frozen, the 1 review not. Falsifiable both ways: issued-but-unfrozen prints a
+zeroed document; frozen-but-draft means freeze-at-confirm fired where it must
+not. A negative control drives the predicate with a row broken each way.
 
-**Turki ruled LEAVE as-is. No data touched.** Not a bug: issued invoices render
-and print from frozen columns (0027), so no document drifts. Annotated in
-`.claude/skills/aquafleet-domain/SKILL.md` §"Frozen invoice splits diverging
-from a re-derivation is EXPECTED" so it is not re-investigated. One live item:
-`026-000009`, confirmed and unpaid at 4,243.50 SAR.
+**It PRINTS, and never asserts, the count and SAR.** Those drift with the data;
+hardcoding them would be a brittle test, not a guard.
 
-### O-2. `prepaid.ts` date-gated two surfaces — **RULED: MAKE LIFETIME**, done
+**The invariant as first specified was WRONG, and the failing run found it.**
+"Every divergence sits on an issued invoice" fails, because every draft/review
+invoice has `covered_lines` NULL, `unpaid_lines` NULL and zero totals — there is
+no stored split on it to diverge *from*. Comparing one is a category error, not a
+finding. The population is scoped to frozen rows, and assertion 1 is what earns
+that filter rather than assuming it.
 
-`dc29e26`. `derivedBalanceItems` and `buildStatementItems` lost their
-**credit-side** gates only; consumption and settlements keep theirs. Verified a
-no-op on current data — all 3 prepaid customers byte-identical
-(−28,290.00 / −32,689.00 / −471.50). Rule now in SKILL.md §"asOfDate scopes
-CONSUMPTION, never the POOL". Harness cases inverted, not deleted.
+**The harness prints 10 / 28,474.00 SAR; SKILL.md's dated annotation says
+8 / 13,524.00. That is METHOD, not data — do NOT chase it.** The harness
+re-derives void invoices too, and a void's lines were released back to the pool
+and re-picked by later invoices, so it re-derives to nearly nothing and books its
+whole stored `amount_due` as "moved". Invoices `1` (void, 11,500.00),
+`026-000006` and `2` account for the 14,950.00 gap. Neither figure disturbs the
+LEAVE ruling. Both are recorded in both places on purpose. **Read the per-invoice
+lines, never the total alone.**
 
-### Parked (lower priority)
+---
 
-`InvoicesModal` period default: both bounds default to today, so the default
-range is a single day. Pre-existing UX papercut, nothing was changed.
+## Domain rules added to the skill this session
+
+Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
+
+- **Duplicate customer info is ALLOWED.** Two customer records may legitimately
+  share name, VAT and CR when they serve different projects; each holds its OWN
+  prepaid pool and its own invoices. **Do NOT add a VAT/CR uniqueness constraint
+  or a dedupe/merge guard** — it would block a valid case, and merging would pool
+  two balances that must stay apart. The two "Seder Facility mang./Mang. Co."
+  records are this pattern; their matching placeholder VAT/CR is expected, and it
+  is why the DB reads as 3 prepaid customers.
+- The traffic-violations money model (0175–0177) — moved out of this file last
+  session so the two cannot drift.
 
 ---
 
@@ -77,17 +102,29 @@ range is a single day. Pre-existing UX papercut, nothing was changed.
 |---|---|---|
 | 1 | Fleet Health column removed (plus its dead i18n keys) | `4982c71` |
 | 2 | Inventory approval-vote wedge fixed; 5 legacy POs backfilled — `0172` | `19f6466` |
-| 3 | Prepaid balance is a **lifetime NET pool** — topups AND returns, no date gate | `9c287d6` |
+| 3 | Prepaid balance is a **lifetime NET pool** — topups AND returns | `9c287d6` |
 | 4 | Trip-ref **gap-fill allocator** — `0173` + `0174` | `3223df5`, `0869576` |
-| 5 | **Prepaid Amount Payable redefined** = unpaid delivered work. TS only, no migration. Guarded by `scripts/amount-payable-check.ts` | `d4c3d3e` |
+| 5 | **Prepaid Amount Payable redefined** = unpaid delivered work | `d4c3d3e` |
+| 6 | Traffic Violations, three stages — `0175`–`0177` | `4fdf30a`, `5a7c0e6`, `ef899cd` |
 
-**On item 5 — the THREE prepaid numbers are deliberately different and two of
-them are allowed to disagree. Do NOT "reconcile" them.** The durable reasoning,
-including why `v_customer_amount_payable` stays balance-based (flipping it makes
-`return_customer_balance()` pay a debtor their own debt), lives in
-`.claude/skills/aquafleet-domain/SKILL.md` §"Amount Payable ≠ the prepaid
-BALANCE". Consequence to expect, not to fix: **the Archive tab shows a different
-number than the Trips tab for the same prepaid customer, by design.**
+---
+
+## Still true, still load-bearing
+
+- **The THREE prepaid numbers are deliberately different and two of them are
+  allowed to disagree. Do NOT "reconcile" them.** Reasoning — including why
+  `v_customer_amount_payable` stays balance-based (flipping it makes
+  `return_customer_balance()` pay a debtor their own debt) — is in SKILL.md
+  §"Amount Payable ≠ the prepaid BALANCE". Consequence to expect, not to fix:
+  **the Archive tab shows a different number than the Trips tab for the same
+  prepaid customer, by design.**
+- **Frozen invoice splits diverging from a re-derivation is EXPECTED** — issued
+  invoices render and print from frozen columns (0027), so no document drifts.
+  One live item: `026-000009`, confirmed and unpaid at 4,243.50 SAR.
+- `trips` has check constraint **`trips_project_or_customer`**: a trip needs
+  `project_id` **OR** `customer_id`. A fully bare `(null, null)` trip is
+  rejected, so the `WT-` fallback series is reached by **bare-CUSTOMER** trips —
+  customer set, no project — not by empty trips.
 
 ---
 
@@ -103,25 +140,15 @@ number than the Trips tab for the same prepaid customer, by design.**
   exits 0). Always `cd` to the repo root **and** use
   `./node_modules/.bin/tsc --noEmit --project tsconfig.json`. Pinning the
   tsconfig alone is NOT enough — the binary resolution is the other half.
+- **A cleanup line placed after `exit 1` never runs.** Proving a guard can fail
+  by injecting a temp failing script leaves that temp file behind, because the
+  loop exits before the `rm`. Re-check the tree; do not trust the `rm` you wrote.
 - Locks promoted into `CLAUDE.md` and living there now, not here: the `grep -c`
-  comment-epitaph trap, now with its fix (§5 — strip comment lines, use
-  `grep -F` on patterns with parens); migrations are
-  BARE STATEMENTS with no `begin;`/`commit;` (§5); identify a function by
-  `oid::regprocedure::text`, never `pg_get_function_identity_arguments()` which
-  returns argument NAMES on PG15+ (§6); a migration's own result-grid is not
-  proof it applied (§5).
-
----
-
-## Schema facts worth keeping
-
-- `trips` has a check constraint **`trips_project_or_customer`**: a trip needs
-  `project_id` **OR** `customer_id`. A fully bare `(null, null)` trip is
-  **rejected**. The `WT-` fallback series is therefore reached by
-  **bare-CUSTOMER** trips — customer set, no project — not by empty trips.
-
-(The `violation_types`-fetched-unfiltered rule moved to SKILL.md with the rest
-of the violations model — it is domain law, not a loose schema note.)
+  comment-epitaph trap with its fix (§5 — strip comment lines, use `grep -F` on
+  patterns with parens); migrations are BARE STATEMENTS with no
+  `begin;`/`commit;` (§5); identify a function by `oid::regprocedure::text`,
+  never `pg_get_function_identity_arguments()` which returns argument NAMES on
+  PG15+ (§6); a migration's own result-grid is not proof it applied (§5).
 
 ---
 
@@ -130,7 +157,7 @@ of the violations model — it is domain law, not a loose schema note.)
 - `CLAUDE.md` is the rules file — read it, don't append to it.
 - Domain rules in `.claude/skills/aquafleet-domain/SKILL.md`.
 - Money gate: salary / rates / commission / invoice / balance → draft, STOP, the
-  architect reviews.
+  architect reviews. **And run `npm run test:money`.**
 - Migration gate: Code drafts → STOPS → the architect reviews and applies.
 - Explicit-path `git add`; inspect the staged blob with `git show :<path>`.
 - **Re-measure any figure in this file before relying on it.** A number here is a
@@ -140,9 +167,8 @@ of the violations model — it is domain law, not a loose schema note.)
 ## What's next
 
 1. **Notifications + Settings feature** (catalog in chat memory, architecture
-   ruled, `0154` pending — renumber, that slot is long past). Nothing blocks it:
-   O-1 and O-2 are both ruled and closed, and the violations model has migrated
-   to SKILL.md.
-2. Parked papercut: `InvoicesModal`'s single-day default period (above).
+   ruled, `0154` pending — renumber, that slot is long past). Nothing blocks it.
+2. Parked papercut: `InvoicesModal`'s period default — both bounds default to
+   today, so the default range is a single day. Pre-existing, untouched.
 
 Read `.claude/skills/aquafleet-domain/SKILL.md` for domain constraints.
