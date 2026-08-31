@@ -114,11 +114,17 @@ such records would silently pool two balances that must stay apart.
 
 **VAT/CR carries NO identity signal on current data — do not reason from it.**
 Re-measured 2026-08-31: `123456789012345` / `1234567890` is an unfilled
-placeholder on **5 of 7** customers — MMM construction, both Seder records,
+placeholder on **5 of 7 LIVE** customers — MMM construction, both Seder records,
 TEST 111 and Turki Contraction. It is not a marker of the same company, so a
 shared VAT/CR neither proves nor suggests a duplicate. That also makes the rule
 above load-bearing rather than hypothetical: a uniqueness constraint would fail
 immediately on five existing rows.
+
+**Recounting this: `customers` holds 8 rows, and `Turki 1` is archived
+(`archived_at` set) — soft-delete keeps it in the table.** A bare `count(*)`
+returns 5 of 8 and reads as if this note were stale. It is not; scope to
+`archived_at is null`. The constraint would still fail — an archived row is
+still a row.
 
 The two "Seder Facility mang./Mang. Co." records (differing only in the case of
 "mang.") are 2 of the 3 prepaid customers. They are separate by ruling, not

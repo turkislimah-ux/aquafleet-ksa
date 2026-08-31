@@ -4,6 +4,11 @@
 
 - **DB is at migration 0177.** No migration this session — docs, one new
   harness, one `package.json` line. Working tree clean, 0 ahead / 0 behind.
+- **`CLAUDE.md` is at 15,311 bytes — 49 under the 15,360 (§7) tripwire.** The
+  next line added to it trips §7 and forces the §5/§6 compression pass. That pass
+  was offered this session and Turki declined it; it is not overdue, it is the
+  toll on the next edit. Compress by re-verifying every claim, not by trimming
+  prose blind — both prior passes found a stale fact.
 - **MCP-applied migrations write NO `schema_migrations` ledger row.** Neither do
   SQL Editor runs. The migration FILE is the record. The ledger's max version
   lags reality and always will — **the objects in the catalog are the truth, the
@@ -22,6 +27,8 @@
 | 2 | Violations model moved into the domain skill; frozen-split annotation | `90c5a9e` |
 | 3 | `scripts/frozen-split-check.ts` + the duplicate-customer rule | `20b847c` |
 | 4 | `npm run test:money` — all ten money harnesses, fail-fast | `46bccf3` |
+| 5 | Handoff rewrite, then two corrections it did not survive (below) | `5847cc8`, `c30aaf0`, `c06f3e0` |
+| 6 | `CLAUDE.md` §5: measure a justification before writing it down | `708e7da` |
 
 ---
 
@@ -90,9 +97,12 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
   or a dedupe/merge guard** — it would block a valid case, and merging would pool
   two balances that must stay apart. **VAT/CR carries no identity signal:**
   re-measured 2026-08-31, `123456789012345` / `1234567890` is an unfilled
-  placeholder on **5 of 7** customers, so a uniqueness constraint would fail on
-  five existing rows today. The two "Seder Facility mang./Mang. Co." records are
-  separate by ruling, not because their identity fields match.
+  placeholder on **5 of 7 LIVE** customers, so a uniqueness constraint would fail
+  on five existing rows today. The two "Seder Facility mang./Mang. Co." records
+  are separate by ruling, not because their identity fields match.
+  **If you recount and get 5 of 8, you have counted the archived row** — the
+  table holds 8 and `Turki 1` has `archived_at` set. Scope to
+  `archived_at is null`. The figure is right; the bare `count(*)` is not.
 - The traffic-violations money model (0175–0177) — moved out of this file last
   session so the two cannot drift.
 
@@ -142,7 +152,10 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
   exits 0). Always `cd` to the repo root **and** use
   `./node_modules/.bin/tsc --noEmit --project tsconfig.json`. Pinning the
   tsconfig alone is NOT enough — the binary resolution is the other half.
-- **A MIGRATION'S FILENAME IS NOT ITS OBJECT NAME.** Probing the catalog for a
+- **A MIGRATION'S FILENAME IS NOT ITS OBJECT NAME.** This is now the *method*
+  under `CLAUDE.md` §5's general rule ("measure Y before writing X because Y") —
+  kept here, not duplicated there, because the procedure is what makes it
+  actionable. Probing the catalog for a
   table named after the file reports a healthy migration as MISSING, and a false
   catastrophe reads exactly like a real one (§6). `0177_payslip_violation_
   deductions.sql` creates `driver_payslip_violations`, not
@@ -151,7 +164,9 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 - **A cleanup line placed after `exit 1` never runs.** Proving a guard can fail
   by injecting a temp failing script leaves that temp file behind, because the
   loop exits before the `rm`. Re-check the tree; do not trust the `rm` you wrote.
-- Locks promoted into `CLAUDE.md` and living there now, not here: the `grep -c`
+- Locks promoted into `CLAUDE.md` and living there now, not here: **measure a
+  justification before recording it** (§5, new this session — a count, a cause,
+  a "matches/proves" is never written from memory or off a filename); the `grep -c`
   comment-epitaph trap with its fix (§5 — strip comment lines, use `grep -F` on
   patterns with parens); migrations are BARE STATEMENTS with no
   `begin;`/`commit;` (§5); identify a function by `oid::regprocedure::text`,
