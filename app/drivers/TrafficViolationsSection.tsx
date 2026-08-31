@@ -25,61 +25,54 @@
 // NO MONEY MATH HERE. Nothing in this file multiplies, clamps or nets anything.
 // The outstanding figure arrives computed (lib/violations.ts, server-side) and
 // a violation reaches payroll only through v_driver_payslip_basis.
+//
+// THE NOTICE PHOTO (0178) IS SUBORDINATE, AND THE LAYOUT SAYS SO. It is the
+// last field in the form and a small chip on the row — never a column of its
+// own. A photo column would be empty on most rows and would sit at the same
+// visual weight as the amount, which is the one thing on this card that
+// actually decides money. The photo is evidence a human occasionally opens; it
+// is not a fact about the fine.
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Ban, Lock, Pencil, ShieldAlert } from "lucide-react";
+import { Ban, ImageIcon, Lock, Pencil, ShieldAlert, X } from "lucide-react";
 import { Btn, Table, TD, TH } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural } from "@/lib/i18n";
 import { cn, formatSar, formatSarExact } from "@/lib/utils";
-import { slugifyKey, isValidSlug } from "@/lib/slug";
 import {
   monthStartKey,
   violationTypeLabel,
+  validateViolationImage,
   type DriverViolationView,
   type OutstandingCell,
   type ViolationType,
 } from "@/lib/violations";
+// THE EDITOR MOVED OUT when the payslip preview needed to edit a fine too.
+// This screen keeps the list, the photo viewer and the void flow; the form,
+// its type picker and its photo control are shared from one place so the two
+// surfaces cannot drift apart. See app/drivers/ViolationForm.tsx.
+import {
+  INPUT,
+  INPUT_STYLE,
+  ViolationForm,
+  draftToForm,
+  emptyDraft,
+  type Draft,
+} from "./ViolationForm";
 import {
   addDriverViolation,
-  addViolationType,
+  getDriverViolationImageUrl,
+  removeDriverViolationImage,
   updateDriverViolation,
+  uploadDriverViolationImage,
   voidDriverViolation,
 } from "./actions";
-
-const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
-const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
 // How many rows the list shows. The spec is the three most recent; anything
 // older is history and belongs on the payslip statement, which is scoped to a
 // month and can show the month's full set.
 const SHOW = 3;
-
-type Draft = {
-  typeId: string;
-  ref: string;
-  amount: string;
-  date: string;
-  status: "paid" | "not_paid";
-  note: string;
-};
-
-function emptyDraft(typeId: string, date: string): Draft {
-  return { typeId, ref: "", amount: "", date, status: "not_paid", note: "" };
-}
-
-function draftToForm(driverId: string, d: Draft): FormData {
-  const fd = new FormData();
-  fd.set("driver_id", driverId);
-  fd.set("violation_type_id", d.typeId);
-  fd.set("ref_no", d.ref);
-  fd.set("amount_sar", d.amount);
-  fd.set("violation_date", d.date);
-  fd.set("payment_status", d.status);
-  fd.set("note", d.note);
-  return fd;
-}
 
 export default function TrafficViolationsSection({
   driverId,
@@ -116,6 +109,23 @@ export default function TrafficViolationsSection({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ---- THE NOTICE PHOTO ---------------------------------------------------
+  // Held apart from `draft` on purpose: a Draft is the row's typed fields and
+  // goes to the server as FormData in one call. The photo is a second,
+  // best-effort call that must not be able to fail the first one, and modelling
+  // it as another Draft key would invite exactly that coupling.
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoCleared, setPhotoCleared] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [photoInputKey, setPhotoInputKey] = useState(0);
+  // A photo that did not upload while the VIOLATION did. Not `error` — that
+  // one means "nothing was saved", and reusing it here would say the opposite
+  // of what happened.
+  const [notice, setNotice] = useState<string | null>(null);
+  // The open viewer: one at a time, holding a signed URL minted seconds ago.
+  const [viewing, setViewing] = useState<{ id: string; url: string } | null>(null);
+  const [viewBusyId, setViewBusyId] = useState<string | null>(null);
+
   const typeById = useMemo(() => {
     const m = new Map<string, ViolationType>();
     for (const vt of types) m.set(vt.id, vt);
@@ -142,16 +152,22 @@ export default function TrafficViolationsSection({
     setVoidingId(null);
     setVoidReason("");
     setError(null);
+    setPhotoFile(null);
+    setPhotoCleared(false);
+    setPhotoError(null);
+    setPhotoInputKey((k) => k + 1);
   }
 
   function openAdd() {
     resetForms();
+    setNotice(null);
     setDraft(emptyDraft(activeTypes[0]?.id ?? "", today));
     setAdding(true);
   }
 
   function openEdit(v: DriverViolationView) {
     resetForms();
+    setNotice(null);
     setDraft({
       typeId: v.violation_type_id,
       ref: v.ref_no,
@@ -163,21 +179,111 @@ export default function TrafficViolationsSection({
     setEditingId(v.id);
   }
 
+  /** The row open in the form, when editing — the photo control needs it. */
+  const editingRow = editingId ? violations.find((v) => v.id === editingId) ?? null : null;
+
+  /**
+   * A picked file is validated HERE for the immediate no, and again on the
+   * server, which is the actual gate. Same shared allow-list on both sides —
+   * `accept` on the input is a filter in the file dialog, not a check.
+   */
+  function pickPhoto(f: File | null) {
+    if (!f) {
+      setPhotoFile(null);
+      setPhotoError(null);
+      return;
+    }
+    const bad = validateViolationImage(f);
+    if (bad) {
+      setPhotoFile(null);
+      setPhotoError(bad);
+      setPhotoInputKey((k) => k + 1);
+      return;
+    }
+    setPhotoError(null);
+    setPhotoFile(f);
+    // Picking a replacement supersedes a pending removal.
+    setPhotoCleared(false);
+  }
+
+  /**
+   * SAVE ORDER: the violation first, its photo second, and the photo can never
+   * fail the violation.
+   *
+   * On ADD the order is forced — the storage key embeds the violation's id
+   * (0178), so the row must exist before its photo can be named. On EDIT it is
+   * a choice, and the same one: an operator who fixed an amount and also
+   * swapped the photo must not lose the amount because Storage hiccuped. A
+   * photo failure comes back as a NOTICE next to a saved row, with the sentence
+   * saying "saved" first.
+   */
   async function submit() {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
+
     const fd = draftToForm(driverId, draft);
-    const res = editingId
-      ? await updateDriverViolation(editingId, fd)
-      : await addDriverViolation(fd);
+    let violationId: string | null = editingId;
+
+    if (editingId) {
+      const res = await updateDriverViolation(editingId, fd);
+      if (res.error) {
+        setBusy(false);
+        setError(res.error);
+        return;
+      }
+    } else {
+      const res = await addDriverViolation(fd);
+      if (res.error || !res.id) {
+        setBusy(false);
+        setError(res.error ?? t("drivers.viol.addNoId", lang));
+        return;
+      }
+      violationId = res.id;
+    }
+
+    // ---- past this line the violation IS saved; nothing below may undo it ---
+    let warn: string | null = null;
+
+    if (photoCleared && editingId) {
+      const r = await removeDriverViolationImage(editingId);
+      if (r.error) warn = r.error;
+    }
+    if (photoFile && violationId) {
+      const form = new FormData();
+      form.set("imageFile", photoFile);
+      const r = await uploadDriverViolationImage(driverId, violationId, form);
+      if (r.error) warn = fill(t("drivers.viol.photoFailedSaved", lang), { err: r.error });
+    }
+
     setBusy(false);
-    if (res.error) {
-      setError(res.error);
+    resetForms();
+    setNotice(warn);
+    setViewing(null);
+    router.refresh();
+  }
+
+  /**
+   * Mint a signed URL and show it. Fetched per click rather than signed at page
+   * load: a 300s URL on a card that stays open behind a modal is a broken image
+   * by the time anybody clicks it.
+   */
+  async function viewPhoto(id: string) {
+    if (viewBusyId) return;
+    if (viewing?.id === id) {
+      setViewing(null);
       return;
     }
-    resetForms();
-    router.refresh();
+    setViewBusyId(id);
+    setNotice(null);
+    const r = await getDriverViolationImageUrl(id);
+    setViewBusyId(null);
+    if (r.error || !r.url) {
+      setNotice(r.error ?? t("drivers.viol.photoUnavailable", lang));
+      return;
+    }
+    setViewing({ id, url: r.url });
   }
 
   async function confirmVoid() {
@@ -246,7 +352,76 @@ export default function TrafficViolationsSection({
           onCancel={resetForms}
           onSubmit={submit}
           heading={t(editingId ? "drivers.viol.editTitle" : "drivers.viol.addTitle", lang)}
+          photo={{
+            file: photoFile,
+            cleared: photoCleared,
+            hasExisting: editingRow?.image_path != null,
+            error: photoError,
+            inputKey: photoInputKey,
+            onPick: pickPhoto,
+            onClear: () => { setPhotoCleared(true); setPhotoFile(null); setPhotoInputKey((k) => k + 1); },
+            onUndoClear: () => setPhotoCleared(false),
+            onView: () => { if (editingId) void viewPhoto(editingId); },
+            viewBusy: viewBusyId !== null && viewBusyId === editingId,
+          }}
         />
+      )}
+
+      {/* THE VIOLATION SAVED AND THE PHOTO DID NOT. Amber, not rose: nothing
+          was lost and nothing needs redoing except the attachment. */}
+      {notice && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] leading-relaxed text-amber-800 dark:text-amber-300">
+          <span className="flex-1">{notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="shrink-0 rounded p-0.5 hover:bg-amber-500/10"
+            aria-label={t("common.close", lang)}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* THE VIEWER. Inline in the card rather than a window: the operator is
+          comparing this photo against the row two lines below it, and a new tab
+          puts the thing being compared on a different screen. The full-size
+          link is a real anchor on an already-fetched URL, so it survives a
+          popup blocker that would have eaten a post-await window.open. */}
+      {viewing && (
+        <div className="mb-3 rounded-lg border border-app p-2">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-[11px] muted">{t("drivers.viol.fPhoto", lang)}</span>
+            <div className="flex items-center gap-2">
+              <a
+                href={viewing.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] underline muted hover:text-[rgb(var(--fg))]"
+              >
+                {t("drivers.viol.photoOpenFull", lang)}
+              </a>
+              <button
+                type="button"
+                onClick={() => setViewing(null)}
+                className="rounded p-1 muted hover:bg-black/5 dark:hover:bg-white/5"
+                aria-label={t("common.close", lang)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element -- a signed URL
+              from a private bucket, expiring in 300s; next/image would want a
+              configured remote pattern for a host that changes per project and
+              would cache a URL built to expire. */}
+          <img
+            src={viewing.url}
+            alt={t("drivers.viol.fPhoto", lang)}
+            className="max-h-64 w-full rounded-md object-contain"
+            style={{ background: "rgb(var(--bg))" }}
+          />
+        </div>
       )}
 
       {violations.length === 0 ? (
@@ -272,6 +447,29 @@ export default function TrafficViolationsSection({
                     <TD className="whitespace-normal">
                       <div className="font-medium">{violationTypeLabel(typeById.get(v.violation_type_id), lang)}</div>
                       {v.note && <div className="text-[11px] muted">{v.note}</div>}
+                      {/* PRESENT ONLY WHEN THERE IS ONE. An "add a photo"
+                          affordance on every row would advertise an optional
+                          field on the screen whose job is what is owed; adding
+                          one happens in the form, where the operator is already
+                          looking at the fine. Locked rows keep this — reading
+                          the evidence is never the half that gets restricted. */}
+                      {v.image_path && (
+                        <button
+                          type="button"
+                          onClick={() => void viewPhoto(v.id)}
+                          disabled={viewBusyId === v.id}
+                          title={t("drivers.viol.photoView", lang)}
+                          className={cn(
+                            "mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-colors",
+                            "ring-[rgb(var(--border))] muted hover:text-[rgb(var(--fg))] hover:bg-black/5 dark:hover:bg-white/5",
+                            viewing?.id === v.id && "text-[rgb(var(--fg))] bg-black/5 dark:bg-white/5",
+                            viewBusyId === v.id && "opacity-60 pointer-events-none",
+                          )}
+                        >
+                          <ImageIcon className="h-3 w-3" />
+                          {viewBusyId === v.id ? t("drivers.viol.photoLoading", lang) : t("drivers.viol.photoChip", lang)}
+                        </button>
+                      )}
                     </TD>
                     {/* A government reference number is a Latin token in both
                         languages — and font-mono because it is read digit by
@@ -355,7 +553,16 @@ export default function TrafficViolationsSection({
           <div className="text-sm font-medium text-rose-700 dark:text-rose-300">
             {t("drivers.viol.voidTitle", lang)}
           </div>
-          <p className="text-[12px] muted leading-relaxed">{t("drivers.viol.voidHint", lang)}</p>
+          <p className="text-[12px] muted leading-relaxed">
+            {t("drivers.viol.voidHint", lang)}
+            {/* SAID ONLY WHEN THERE IS A PHOTO. The photo surviving a void is
+                deliberate (0178) and matches invoice and exit-permit proofs —
+                but it is a surprise worth naming, and naming it on rows with no
+                photo would just be noise. */}
+            {violations.find((v) => v.id === voidingId)?.image_path && (
+              <> {t("drivers.viol.photoKeptOnVoid", lang)}</>
+            )}
+          </p>
           <label className="flex flex-col gap-1 text-sm">
             <span className="muted">{t("drivers.viol.voidReason", lang)}</span>
             <input
@@ -402,269 +609,3 @@ function Chip({ children, tone }: { children: React.ReactNode; tone: "ok" | "war
   );
 }
 
-function ViolationForm({
-  draft, setDraft, types, floor, busy, error, onCancel, onSubmit, heading,
-}: {
-  draft: Draft;
-  setDraft: (d: Draft) => void;
-  types: ViolationType[];
-  /** Undefined on EDIT — see actions.ts violationDateFloor for why. */
-  floor: string | undefined;
-  busy: boolean;
-  error: string | null;
-  onCancel: () => void;
-  onSubmit: () => void;
-  heading: string;
-}) {
-  const { lang } = useApp();
-
-  // Client-side mirror of validateViolation. Not a substitute for it — the
-  // server re-checks every one of these — but a disabled button beats a round
-  // trip that comes back saying "enter an amount".
-  const amount = Number(draft.amount);
-  const ready =
-    draft.typeId !== "" &&
-    draft.ref.trim() !== "" &&
-    draft.amount.trim() !== "" &&
-    Number.isFinite(amount) && amount > 0 &&
-    draft.date !== "" &&
-    (floor === undefined || draft.date >= floor);
-
-  return (
-    <div className="mb-3 rounded-lg border border-app p-3 space-y-3">
-      <div className="text-sm font-medium">{heading}</div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-          <span className="muted">{t("drivers.viol.fType", lang)}</span>
-          <ViolationTypeSelect
-            types={types}
-            value={draft.typeId}
-            onChange={(id) => setDraft({ ...draft, typeId: id })}
-          />
-        </label>
-
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="muted">{t("drivers.viol.fRef", lang)}</span>
-          {/* dir="ltr" on the INPUT, not just its display: the operator is
-              copying a Latin-digit number off a paper notice, and an RTL text
-              field puts the caret on the wrong side while they type it. */}
-          <input
-            dir="ltr"
-            value={draft.ref}
-            onChange={(e) => setDraft({ ...draft, ref: e.target.value })}
-            placeholder={t("drivers.viol.phRef", lang)}
-            className={cn(INPUT, "font-mono")}
-            style={INPUT_STYLE}
-          />
-        </label>
-
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="muted">{t("drivers.viol.fAmount", lang)}</span>
-          <input
-            dir="ltr"
-            type="number"
-            min="0"
-            step="0.01"
-            inputMode="decimal"
-            value={draft.amount}
-            onChange={(e) => setDraft({ ...draft, amount: e.target.value })}
-            className={INPUT}
-            style={INPUT_STYLE}
-          />
-        </label>
-
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="muted">{t("drivers.viol.fDate", lang)}</span>
-          <input
-            type="date"
-            value={draft.date}
-            min={floor}
-            onChange={(e) => setDraft({ ...draft, date: e.target.value })}
-            className={INPUT}
-            style={INPUT_STYLE}
-          />
-          {floor !== undefined && (
-            <span className="text-[11px] muted leading-relaxed">
-              {fill(t("drivers.viol.dateFloor", lang), { month: floor })}
-            </span>
-          )}
-        </label>
-
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="muted">{t("drivers.viol.fStatus", lang)}</span>
-          <select
-            value={draft.status}
-            onChange={(e) => setDraft({ ...draft, status: e.target.value === "paid" ? "paid" : "not_paid" })}
-            className={INPUT}
-            style={INPUT_STYLE}
-          >
-            {/* NOT PAID FIRST, and it is also the default: a fine gets entered
-                because it just arrived, which is the state it arrives in. */}
-            <option value="not_paid">{t("drivers.viol.notPaid", lang)}</option>
-            <option value="paid">{t("drivers.viol.paid", lang)}</option>
-          </select>
-        </label>
-
-        <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-          <span className="muted">{t("drivers.viol.fNote", lang)}</span>
-          <textarea
-            rows={2}
-            value={draft.note}
-            onChange={(e) => setDraft({ ...draft, note: e.target.value })}
-            className={INPUT}
-            style={INPUT_STYLE}
-          />
-        </label>
-      </div>
-
-      {error && <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
-
-      <div className="flex justify-end gap-2">
-        <Btn variant="outline" onClick={onCancel}>{t("common.cancel", lang)}</Btn>
-        <Btn variant="primary" onClick={onSubmit} disabled={!ready || busy}>
-          {busy ? t("common.saving", lang) : t("common.save", lang)}
-        </Btn>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The type dropdown, with an inline "+ Add a new type…".
- *
- * NOT LookupSelect, and the difference is the data, not the taste.
- * `violation_types` stores `label` AND `label_ar`, both NOT NULL — LookupSelect
- * was deliberately reduced to ONE name field when staff_roles and leave_types
- * became single-label tables, and its remaining two-column caller
- * (commission_types) copies the English into the Arabic column to satisfy the
- * constraint. Copying is not acceptable here: these names are shown to Arabic
- * readers as the description of a fine deducted from their pay, and "Running a
- * red light" is not a description in Arabic. So this asks for both, and
- * requires both.
- *
- * It also carries no hidden input: this form submits through a server action
- * with an explicit FormData, not by DOM serialisation, so the selected id is
- * lifted into the draft instead.
- */
-function ViolationTypeSelect({
-  types, value, onChange,
-}: {
-  types: ViolationType[];
-  value: string;
-  onChange: (id: string) => void;
-}) {
-  const { lang } = useApp();
-  const router = useRouter();
-  const [adding, setAdding] = useState(false);
-  const [en, setEn] = useState("");
-  const [ar, setAr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  // A type added in THIS session, still absent from `types` until the refresh
-  // lands. Same gap LookupSelect covers with its `extra` list.
-  const [extra, setExtra] = useState<ViolationType[]>([]);
-
-  // ACTIVE types, PLUS whichever one is already selected even if it has since
-  // been retired. That second clause is not politeness — without it, editing an
-  // old fine whose type was deactivated renders a <select> with no matching
-  // option, the browser silently displays the first one, and pressing Save
-  // rewrites the fine's type to something nobody chose. Retired-but-selected is
-  // shown so it can be kept; it just cannot be picked fresh.
-  const options = useMemo(() => {
-    const m = new Map<string, ViolationType>();
-    for (const vt of types) if (vt.active || vt.id === value) m.set(vt.id, vt);
-    for (const vt of extra) if (!m.has(vt.id)) m.set(vt.id, vt);
-    return Array.from(m.values());
-  }, [types, extra, value]);
-
-  const slug = slugifyKey(en);
-  const canAdd = en.trim() !== "" && ar.trim() !== "" && slug !== "" && isValidSlug(slug);
-
-  async function add() {
-    if (!canAdd || busy) return;
-    setBusy(true);
-    setErr(null);
-    const res = await addViolationType(en.trim(), ar.trim());
-    setBusy(false);
-    if (res.error || !res.key) {
-      setErr(res.error ?? t("drivers.lookup.couldNotAdd", lang));
-      return;
-    }
-    // The action returns the KEY, not the id — the id is what this form
-    // submits, so the refreshed fetch is what actually selects the new type.
-    // Until it lands, the select shows the row we just created, keyed by its
-    // slug so it cannot collide with a uuid.
-    const provisional: ViolationType = {
-      id: res.key, key: res.key, label: en.trim(), label_ar: ar.trim(),
-      is_default: false, active: true,
-    };
-    setExtra((x) => [...x, provisional]);
-    onChange(provisional.id);
-    setEn("");
-    setAr("");
-    setAdding(false);
-    router.refresh();
-  }
-
-  if (adding) {
-    return (
-      <div className="space-y-2">
-        <p className="text-[11px] muted leading-relaxed">{t("drivers.viol.typeBoth", lang)}</p>
-        <input
-          dir="ltr"
-          value={en}
-          onChange={(e) => setEn(e.target.value)}
-          placeholder={t("drivers.viol.typeEn", lang)}
-          className={INPUT}
-          style={INPUT_STYLE}
-          autoFocus
-        />
-        <input
-          dir="rtl"
-          value={ar}
-          onChange={(e) => setAr(e.target.value)}
-          placeholder={t("drivers.viol.typeAr", lang)}
-          className={INPUT}
-          style={INPUT_STYLE}
-        />
-        {en.trim() !== "" && (
-          isValidSlug(slug)
-            ? <p className="text-xs muted">{t("drivers.lookup.savedAs", lang)} <span dir="ltr">{slug}</span></p>
-            : <p className="text-xs text-rose-600 dark:text-rose-400">{t("drivers.lookup.mustStartWithLetter", lang)}</p>
-        )}
-        {err && <p className="text-xs text-rose-600 dark:text-rose-400">{err}</p>}
-        <div className="flex gap-2">
-          <Btn variant="primary" onClick={add} disabled={!canAdd || busy}>
-            {busy ? "…" : t("common.add", lang)}
-          </Btn>
-          <Btn variant="outline" onClick={() => { setAdding(false); setErr(null); }}>
-            {t("common.cancel", lang)}
-          </Btn>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <select
-      value={value}
-      onChange={(e) => {
-        if (e.target.value === "__add__") {
-          setAdding(true);
-          setErr(null);
-        } else {
-          onChange(e.target.value);
-        }
-      }}
-      className={INPUT}
-      style={INPUT_STYLE}
-    >
-      {options.length === 0 && <option value="">—</option>}
-      {options.map((vt) => (
-        <option key={vt.id} value={vt.id}>{violationTypeLabel(vt, lang)}</option>
-      ))}
-      <option value="__add__">{t("drivers.viol.typeAdd", lang)}</option>
-    </select>
-  );
-}

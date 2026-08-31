@@ -202,7 +202,7 @@ export default async function DriversPage() {
       supabase
         .from("driver_violations")
         .select(
-          "id, driver_id, violation_type_id, ref_no, amount_sar, violation_date, payment_status, note, voided_at, created_by, created_at",
+          "id, driver_id, violation_type_id, ref_no, amount_sar, violation_date, payment_status, note, voided_at, created_by, created_at, image_path",
         )
         .order("violation_date", { ascending: false }),
       // The freeze table: which fine landed on which issued payslip.

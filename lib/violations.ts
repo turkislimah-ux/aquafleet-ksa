@@ -10,6 +10,7 @@
 // produced. Nothing in this file decides what a payslip deducts.
 
 import { arText, type Lang } from "@/lib/i18n";
+import { IMAGE_ACCEPT, validateImageFile } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // ROW SHAPES — each field measured off pg_attribute, not off a migration file.
@@ -45,7 +46,45 @@ export type DriverViolation = {
   voided_at: string | null;
   created_by: string | null;
   created_at: string;
+  /**
+   * 0178. OPTIONAL storage key of a photo of the paper notice, in the PRIVATE
+   * `violation-images` bucket. NULL is the normal case.
+   *
+   * IT CARRIES NO MONEY MEANING. `v_driver_payslip_basis` does not select it,
+   * the freeze does not copy it, and nothing in this file reads it — the
+   * outstanding definition below would be identical if the column did not
+   * exist. It is evidence for a human comparing the row against the paper, and
+   * that is the whole of it.
+   *
+   * A PATH, NEVER A URL. The bucket is private and there is no public URL for
+   * it anywhere in the app; a signed URL is minted per view, server-side.
+   */
+  image_path: string | null;
 };
+
+// ---------------------------------------------------------------------------
+// THE NOTICE PHOTO — the same three exports lib/issues.ts and lib/profile.ts
+// publish for their buckets, so a caller never assembles its own rule.
+// ---------------------------------------------------------------------------
+
+/**
+ * 5 MB, matching the issue attachment rather than the tighter avatar cap.
+ *
+ * A violation notice is photographed on a phone against poor light, and the
+ * operator will not be re-shooting it — a refused photo means the fine gets
+ * entered with no evidence at all, which loses exactly what the column exists
+ * for. The DB and the bucket impose no limit of their own (0178 sets none, and
+ * none of the 12 buckets does), so this constant IS the cap.
+ */
+export const MAX_VIOLATION_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/** For an `<input type="file">`. The shared allow-list — SVG stays excluded. */
+export const VIOLATION_IMAGE_ACCEPT = IMAGE_ACCEPT;
+
+/** Null when acceptable, else the reason. Used on BOTH sides of the wire. */
+export function validateViolationImage(file: { size: number; type: string }): string | null {
+  return validateImageFile(file, MAX_VIOLATION_IMAGE_BYTES);
+}
 
 /** One row of `driver_payslip_violations` — the 0177 freeze table. */
 export type FrozenViolation = { payslip_id: string; violation_id: string };

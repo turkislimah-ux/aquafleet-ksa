@@ -16,7 +16,8 @@
 // statement", not the whole tab. The ids are whitelisted in globals.css.
 
 import { useCallback, useMemo, useState } from "react";
-import { Info, Printer } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Ban, ImageIcon, Info, Pencil, Printer, X } from "lucide-react";
 import { Table, TH, TD, Btn } from "@/components/ui";
 import { cn, formatSar, formatSarExact, formatNum, todayKey } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
@@ -43,9 +44,19 @@ import {
   type DriverCommissionByProjectRow,
 } from "@/lib/reports";
 import {
-  inMonth, violationTypeLabel,
+  inMonth, violationTypeLabel, validateViolationImage,
   type DriverViolationView, type ViolationType,
 } from "@/lib/violations";
+// THE FINE EDITOR AND ITS MUTATIONS, BOTH BORROWED WHOLE from the drivers
+// screen. Nothing about editing a violation is re-implemented here: this file
+// decides only WHERE the controls appear and WHEN they are allowed to.
+import {
+  ViolationForm, INPUT, INPUT_STYLE, draftFromRow, draftToForm, type Draft,
+} from "@/app/drivers/ViolationForm";
+import {
+  getDriverViolationImageUrl, removeDriverViolationImage,
+  updateDriverViolation, uploadDriverViolationImage, voidDriverViolation,
+} from "@/app/drivers/actions";
 import type { CsvValue } from "@/lib/csv";
 // NOT a violation of the leaf rule above: exportSource.ts imports react,
 // lib/csv and lib/i18n and nothing else — in particular it does not import
@@ -1855,6 +1866,12 @@ export function PayslipsStatement({
  */
 type DocFine = {
   key: string;
+  /**
+   * The `driver_violations` row this line came from — the SAME id in both
+   * branches, because the frozen snapshot stores `'id', dv.id` (0177:501). It
+   * is what the edit, void and signed-URL actions are called with.
+   */
+  violationId: string;
   label: string;
   ref: string;
   amount: number;
@@ -1863,6 +1880,24 @@ type DocFine = {
   paid: boolean | null;
   /** What PAYROLL did with it. A different question; see ViolationSettlement. */
   state: "deducted" | "partial" | "unsettled";
+  /**
+   * DISPLAY ONLY, and read LIVE in both branches on purpose.
+   *
+   * The snapshot froze the fine's money and its labels, not its evidence, so
+   * there is no frozen image_path to read — 0177 predates the column. Resolving
+   * it live off `driver_violations` is not a freeze violation because a photo
+   * is not a figure: it cannot change what this document charged. Every other
+   * field on this row still comes from the snapshot.
+   */
+  imagePath: string | null;
+  /**
+   * Frozen onto an issued payslip. The SAME signal the drivers screen gates on
+   * (`v.settlement.locked`, from `driver_payslip_violations` via settlementOf),
+   * so a fine that is uneditable there is uneditable here for the same reason.
+   * Always true on the frozen branch — a document's lines are closed by
+   * definition.
+   */
+  locked: boolean;
 };
 
 /**
@@ -1904,8 +1939,19 @@ function buildDocFines(input: {
     // and the month is as unsettled as one that was never issued.
     const state: DocFine["state"] =
       doc.deductions_sar <= 0 ? "unsettled" : doc.unabsorbed_sar > 0 ? "partial" : "deducted";
+    // THE ONE THING READ LIVE, and only this. See DocFine.imagePath: the
+    // snapshot has no image_path to freeze, and a photo changes no figure on
+    // the sheet. A fine missing from `live` (voided since issue, say) simply
+    // has no photo to offer — it does NOT fall back to any other line.
+    const imageById = new Map(live.map((v) => [v.id, v.image_path]));
     return items.map((it) => ({
       key: it.id,
+      violationId: it.id,
+      imagePath: imageById.get(it.id) ?? null,
+      // A DOCUMENT'S LINES ARE CLOSED. Not read off the live row's settlement:
+      // this branch only runs when a payslip exists, which is exactly what
+      // freezes them, and asking the live row could only ever disagree.
+      locked: true,
       // BOTH LABELS WERE FROZEN, so a type renamed or retired since issue still
       // prints the name that was on the sheet. arText picks the current
       // reader's language out of the pair the document itself stored.
@@ -1937,12 +1983,18 @@ function buildDocFines(input: {
     )
     .map((v) => ({
       key: v.id,
+      violationId: v.id,
       label: violationTypeLabel(typeById.get(v.violation_type_id), lang),
       ref: v.ref_no,
       amount: v.amount_sar,
       date: v.violation_date,
       paid: v.payment_status === "paid",
       state: v.settlement.state,
+      imagePath: v.image_path,
+      // Normally false here — a month with no payslip has frozen nothing — but
+      // read off the row rather than hardcoded, so the controls follow the
+      // freeze itself and not this branch's assumption about it.
+      locked: v.settlement.locked,
     }));
 }
 
@@ -2052,6 +2104,202 @@ function PayslipDocument({
   // the figures, and the whole point of confirming is seeing WHAT is about to
   // be frozen. It is dismissable and Cancel is the resting position.
   const [confirming, setConfirming] = useState(false);
+
+  // ---------------------------------------------------------------------
+  // EDITING A FINE FROM THE PREVIEW — unissued months only.
+  //
+  // WHY HERE AT ALL. The Deductions line is disputed on this screen, and until
+  // now the only way to answer the dispute was to leave for the drivers screen,
+  // find the driver, fix the fine and come back to see whether the net moved.
+  // The correction now happens where the question is asked.
+  //
+  // WHY IT CANNOT TOUCH AN ISSUED SLIP. `fine.locked` is the drivers screen's
+  // own signal (settlementOf -> driver_payslip_violations), and on the frozen
+  // branch it is unconditionally true, so the controls are ABSENT rather than
+  // disabled on any issued document. The server refuses independently —
+  // updateDriverViolation and voidDriverViolation both open with
+  // violationIsFrozen and return FROZEN_MSG — so this gate is the explanation,
+  // not the enforcement.
+  //
+  // ADDING is deliberately not offered. A payslip is scoped to one month and
+  // this table is its itemisation; entering a brand-new fine belongs on the
+  // driver's own screen, where the month floor and the full history are.
+  const router = useRouter();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [voidingId, setVoidingId] = useState<string | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [rowBusy, setRowBusy] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
+  const [photoBusyId, setPhotoBusyId] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
+  // THE ATTACHMENT, EDITABLE ON THE SAME TERMS AS THE FINE ITSELF. The photo is
+  // part of the record being corrected, not a separate privilege: a month that
+  // can have its amount fixed can have the wrong notice swapped for the right
+  // one. It rides inside the edit panel, which only opens from a control gated
+  // on `!doc && !x.locked`, so an issued slip reaches none of this — and
+  // uploadDriverViolationImage / removeDriverViolationImage refuse a frozen row
+  // on the server regardless (actions.ts violationIsFrozen).
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoCleared, setPhotoCleared] = useState(false);
+  const [photoFieldError, setPhotoFieldError] = useState<string | null>(null);
+  const [photoInputKey, setPhotoInputKey] = useState(0);
+  // Amber, not rose: the fine saved and only its attachment did not.
+  const [photoNotice, setPhotoNotice] = useState<string | null>(null);
+
+  /** The live row behind a preview line — the only source a draft may load from. */
+  const liveById = useMemo(() => {
+    const m = new Map<string, DriverViolationView>();
+    for (const v of violations) m.set(v.id, v);
+    return m;
+  }, [violations]);
+
+  function closeRowForms() {
+    setEditingId(null);
+    setDraft(null);
+    setVoidingId(null);
+    setVoidReason("");
+    setRowError(null);
+    setPhotoFile(null);
+    setPhotoCleared(false);
+    setPhotoFieldError(null);
+    setPhotoInputKey((k) => k + 1);
+  }
+
+  function openEdit(violationId: string) {
+    const v = liveById.get(violationId);
+    // No live row means nothing to load the form from. Cannot happen on the
+    // preview branch (the lines ARE the live rows) and the controls do not
+    // render on the frozen one.
+    if (!v) return;
+    closeRowForms();
+    setPhotoNotice(null);
+    setEditingId(violationId);
+    setDraft(draftFromRow(v));
+  }
+
+  /**
+   * Validated HERE for the immediate no and again on the server, which is the
+   * actual gate — the same two-sided check the drivers screen makes, through
+   * the same `validateViolationImage`.
+   */
+  function pickPhoto(f: File | null) {
+    if (!f) {
+      setPhotoFile(null);
+      setPhotoFieldError(null);
+      return;
+    }
+    const bad = validateViolationImage(f);
+    if (bad) {
+      setPhotoFile(null);
+      setPhotoFieldError(bad);
+      setPhotoInputKey((k) => k + 1);
+      return;
+    }
+    setPhotoFieldError(null);
+    setPhotoFile(f);
+    // Picking a replacement supersedes a pending removal.
+    setPhotoCleared(false);
+  }
+
+  /**
+   * SAVE ORDER: the fine first, its photo second, and the photo can never fail
+   * the fine — the drivers screen's rule, kept identical here. An operator who
+   * corrected an amount and also swapped the notice must not lose the amount
+   * because Storage hiccuped, so a photo failure comes back as a notice beside
+   * an already-saved row.
+   */
+  async function saveEdit() {
+    if (!editingId || !draft || rowBusy) return;
+    const id = editingId;
+    setRowBusy(true);
+    setRowError(null);
+    setPhotoNotice(null);
+    // THE SAME ACTION THE DRIVERS SCREEN CALLS. No second write path, so the
+    // date floor, the validation and the freeze guard are all the ones already
+    // in force there.
+    const res = await updateDriverViolation(id, draftToForm(row.driver_id, draft));
+    if (res.error) {
+      setRowBusy(false);
+      setRowError(res.error);
+      return;
+    }
+
+    // ---- past this line the fine IS saved; nothing below may undo it -------
+    let warn: string | null = null;
+    if (photoCleared) {
+      const r = await removeDriverViolationImage(id);
+      if (r.error) warn = r.error;
+    }
+    if (photoFile) {
+      const form = new FormData();
+      form.set("imageFile", photoFile);
+      const r = await uploadDriverViolationImage(row.driver_id, id, form);
+      if (r.error) warn = fill(t("drivers.viol.photoFailedSaved", lang), { err: r.error });
+    }
+
+    setRowBusy(false);
+    closeRowForms();
+    setPhotoNotice(warn);
+    // The preview reads v_driver_payslip_basis, which recomputes the deduction
+    // and the net from the live fines. Refreshing the route is what makes the
+    // breakdown above this table agree with the row just edited.
+    router.refresh();
+  }
+
+  async function confirmVoid() {
+    if (!voidingId || rowBusy) return;
+    setRowBusy(true);
+    setRowError(null);
+    const res = await voidDriverViolation(voidingId, voidReason.trim());
+    setRowBusy(false);
+    if (res.error) {
+      setRowError(res.error);
+      return;
+    }
+    closeRowForms();
+    router.refresh();
+  }
+
+  /**
+   * Open the notice photo in a new tab, via a freshly signed 300s URL.
+   *
+   * THE TAB IS OPENED BEFORE THE AWAIT. A window.open() that runs after an
+   * async gap has lost the user-gesture context and popup blockers eat it, so
+   * the blank tab is claimed on the click and its location set once the URL
+   * arrives. If signing fails the tab is closed again rather than left blank.
+   *
+   * `noopener` IS NOT IN THE FEATURE STRING, AND THAT IS THE WHOLE FIX. Passing
+   * it made window.open return null BY SPEC — a window that is denied an opener
+   * is also denied back to its opener — so the handle needed to navigate the
+   * tab never arrived, every click fell into the else branch, and the screen
+   * reported a popup block that had not happened. The tab is severed manually
+   * instead: while it is still about:blank it is same-origin, so its `opener`
+   * can be nulled here, which is what `noopener` would have done for us.
+   *
+   * ALLOWED ON ISSUED SLIPS. Reading evidence is not editing a document, and
+   * getDriverViolationImageUrl carries no freeze check for that reason.
+   */
+  async function openPhoto(violationId: string) {
+    if (photoBusyId) return;
+    setPhotoError(null);
+    setPhotoBusyId(violationId);
+    const tab = window.open("", "_blank");
+    if (tab) tab.opener = null;
+    const res = await getDriverViolationImageUrl(violationId);
+    setPhotoBusyId(null);
+    if (res.error || !res.url) {
+      tab?.close();
+      setPhotoError(res.error ?? t("drivers.viol.photoUnavailable", lang));
+      return;
+    }
+    if (tab) tab.location.href = res.url;
+    // Null NOW means a real blocker, not our own feature string. Say so rather
+    // than silently doing nothing — the operator clicked and deserves an
+    // outcome.
+    else setPhotoError(t("reports.payslips.violPhotoBlocked", lang));
+  }
 
   return (
     <>
@@ -2307,6 +2555,12 @@ function PayslipDocument({
                 <TH>{t("common.date", lang)}</TH>
                 <TH>{t("reports.payslips.violThPayment", lang)}</TH>
                 <TH>{t("reports.payslips.violThSettlement", lang)}</TH>
+                {/* A SCREEN COLUMN, NOT A DOCUMENT ONE. `no-print` is
+                    display:none on paper, so the sheet that gets handed over
+                    is the same six columns it has always been — evidence
+                    links and correction controls are for the person resolving
+                    the dispute, not for the driver's copy. */}
+                <TH className="no-print text-end">{t("common.actions", lang)}</TH>
               </tr>
             </thead>
             <tbody>
@@ -2349,6 +2603,62 @@ function PayslipDocument({
                       )}
                     </FineChip>
                   </TD>
+                  <TD className="no-print text-end">
+                    <div className="inline-flex items-center gap-1">
+                      {/* EVIDENCE FIRST, and on EVERY row that has any —
+                          issued or not. Reading the notice photo is how a
+                          disputed line gets settled, and a frozen document is
+                          the case where someone is most likely to be asking.
+                          There is no attach or replace control here: photos
+                          are managed on the driver's own screen. */}
+                      {x.imagePath && (
+                        <button
+                          type="button"
+                          onClick={() => void openPhoto(x.violationId)}
+                          disabled={photoBusyId === x.violationId}
+                          title={t("drivers.viol.photoView", lang)}
+                          aria-label={t("drivers.viol.photoView", lang)}
+                          className="rounded-md p-1.5 muted hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-60"
+                        >
+                          <ImageIcon className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {/* THE GATE, IN ONE EXPRESSION. `doc` is the issued
+                          document and `x.locked` is the drivers screen's own
+                          freeze signal; either one closes the row. Absent, not
+                          disabled — a greyed button on a payslip invites the
+                          question of how to enable it, and the answer is that
+                          you cannot. */}
+                      {!doc && !x.locked && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => openEdit(x.violationId)}
+                            className="rounded-md p-1.5 muted hover:bg-black/5 dark:hover:bg-white/5"
+                            aria-label={t("drivers.viol.editTitle", lang)}
+                            title={t("drivers.viol.editTitle", lang)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingId(null);
+                              setDraft(null);
+                              setRowError(null);
+                              setVoidReason("");
+                              setVoidingId(x.violationId);
+                            }}
+                            className="rounded-md p-1.5 muted hover:text-rose-600 dark:hover:text-rose-400"
+                            aria-label={t("drivers.viol.voidTitle", lang)}
+                            title={t("drivers.viol.voidTitle", lang)}
+                          >
+                            <Ban className="h-3.5 w-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </TD>
                 </tr>
               ))}
               {/* THE COLUMN HAS TO ADD UP IN FRONT OF THE READER. This total is
@@ -2368,9 +2678,134 @@ function PayslipDocument({
                 <TD>{null}</TD>
                 <TD>{null}</TD>
                 <TD>{null}</TD>
+                <TD className="no-print">{null}</TD>
               </tr>
             </tbody>
           </Table>
+
+          {/* THE PANELS LIVE UNDER THE TABLE, NOT INSIDE IT. An edit form
+              expanded into a row would restructure the very table the reader
+              is comparing figures in, and this one has a total that has to
+              keep adding up in front of them. Both are no-print for the same
+              reason the Actions column is. */}
+          {photoError && (
+            <p className="mt-2 text-[12px] text-rose-600 dark:text-rose-400 no-print">
+              {photoError}
+            </p>
+          )}
+
+          {/* THE FINE SAVED AND THE PHOTO DID NOT. Amber, not rose, and it
+              outlives the panel that produced it: nothing was lost and nothing
+              needs redoing except the attachment. */}
+          {photoNotice && (
+            <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] leading-relaxed text-amber-800 dark:text-amber-300 no-print">
+              <span className="flex-1">{photoNotice}</span>
+              <button
+                type="button"
+                onClick={() => setPhotoNotice(null)}
+                className="shrink-0 rounded p-0.5 hover:bg-amber-500/10"
+                aria-label={t("common.close", lang)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
+          {editingId && draft && (
+            <div className="mt-3 no-print">
+              <ViolationForm
+                draft={draft}
+                setDraft={setDraft}
+                types={violationTypes}
+                // NO DATE FLOOR ON AN EDIT — the same choice the drivers screen
+                // makes. The floor stops a NEW fine being back-dated into a
+                // month that may already be closed; a fine that already exists
+                // in this month is being corrected, not filed.
+                floor={undefined}
+                busy={rowBusy}
+                error={rowError}
+                onCancel={closeRowForms}
+                onSubmit={() => void saveEdit()}
+                heading={t("drivers.viol.editTitle", lang)}
+                // THE PHOTO IS EDITABLE WHEREVER THE FINE IS. This panel only
+                // opens from a control gated on `!doc && !x.locked`, so passing
+                // the field here cannot reach an issued slip; the same View /
+                // Replace / Remove control the drivers screen shows, from the
+                // same component, calling the same two actions.
+                photo={{
+                  file: photoFile,
+                  cleared: photoCleared,
+                  hasExisting:
+                    fines.find((x) => x.violationId === editingId)?.imagePath != null,
+                  error: photoFieldError,
+                  inputKey: photoInputKey,
+                  onPick: pickPhoto,
+                  onClear: () => {
+                    setPhotoCleared(true);
+                    setPhotoFile(null);
+                    setPhotoInputKey((k) => k + 1);
+                  },
+                  onUndoClear: () => setPhotoCleared(false),
+                  // The viewer is this screen's own: a new tab, not the drivers
+                  // screen's inline panel, because the fine being compared is in
+                  // the table two lines up and the photo is the thing that has
+                  // to get bigger.
+                  onView: () => { if (editingId) void openPhoto(editingId); },
+                  viewBusy: photoBusyId !== null && photoBusyId === editingId,
+                }}
+              />
+            </div>
+          )}
+
+          {/* THE SAME PANEL THE DRIVERS SCREEN SHOWS, down to the rose button
+              that is a raw <button> rather than a Btn — Btn has no danger
+              variant, and inventing one for a second caller would widen a
+              shared primitive to match a copy. */}
+          {voidingId && (
+            <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 space-y-2 no-print">
+              <div className="text-sm font-medium text-rose-700 dark:text-rose-300">
+                {t("drivers.viol.voidTitle", lang)}
+              </div>
+              <p className="text-[12px] muted leading-relaxed">
+                {t("drivers.viol.voidHint", lang)}
+                {/* Said only when there is one — same rule as the drivers
+                    screen. The photo outliving the void is deliberate (0178). */}
+                {fines.find((x) => x.violationId === voidingId)?.imagePath && (
+                  <> {t("drivers.viol.photoKeptOnVoid", lang)}</>
+                )}{" "}
+                {/* THE PART THAT IS ONLY TRUE HERE. On the drivers screen a
+                    void changes a list; on this screen it changes the sheet the
+                    reader is looking at, and saying so before the click beats
+                    watching the net move afterwards and wondering. */}
+                {t("reports.payslips.violVoidRecompute", lang)}
+              </p>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="muted">{t("drivers.viol.voidReason", lang)}</span>
+                <input
+                  value={voidReason}
+                  onChange={(e) => setVoidReason(e.target.value)}
+                  placeholder={t("drivers.viol.voidReasonPh", lang)}
+                  className={INPUT}
+                  style={INPUT_STYLE}
+                  autoFocus
+                />
+              </label>
+              {rowError && (
+                <p className="text-xs text-rose-600 dark:text-rose-400">{rowError}</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <Btn variant="outline" onClick={closeRowForms}>{t("common.cancel", lang)}</Btn>
+                <button
+                  type="button"
+                  onClick={() => void confirmVoid()}
+                  disabled={rowBusy || voidReason.trim() === ""}
+                  className="h-9 px-3 rounded-lg text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  {rowBusy ? t("drivers.viol.voiding", lang) : t("drivers.viol.voidBtn", lang)}
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 

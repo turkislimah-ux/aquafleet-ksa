@@ -11,6 +11,7 @@ import {
   type CommExtraRow,
   type CommCycle,
 } from "@/lib/commission-rows";
+import { validateViolationImage } from "@/lib/violations";
 
 export type ActionResult = { error: string | null };
 
@@ -1398,7 +1399,18 @@ function violationDateFloor(): string {
   return `${todayKey().slice(0, 7)}-01`;
 }
 
-export async function addDriverViolation(formData: FormData): Promise<ActionResult> {
+/**
+ * RETURNS THE NEW ID, and that is not a convenience.
+ *
+ * The notice photo's storage key embeds the violation it belongs to
+ * (`driverId/violationId-epoch.ext`, 0178), so the row has to exist before its
+ * photo can be named. The caller therefore adds, reads the id back, and uploads
+ * second — the same two-step addSpecialCharge/uploadSpecialChargeImage does.
+ * Callers that have no photo ignore `id` and read `error` as before.
+ */
+export async function addDriverViolation(
+  formData: FormData,
+): Promise<{ error: string | null; id?: string }> {
   const p = parseViolation(formData);
   const bad = validateViolation(p);
   if (bad) return { error: bad };
@@ -1409,21 +1421,25 @@ export async function addDriverViolation(formData: FormData): Promise<ActionResu
   const supabase = createClient();
   const { data: auth } = await supabase.auth.getUser();
 
-  const { error } = await supabase.from("driver_violations").insert({
-    driver_id: p.driverId,
-    violation_type_id: p.violationTypeId,
-    ref_no: p.refNo,
-    amount_sar: p.amountSar,
-    violation_date: p.violationDate,
-    payment_status: p.paymentStatus,
-    note: p.note,
-    created_by: auth?.user?.email ?? null,
-  });
+  const { data, error } = await supabase
+    .from("driver_violations")
+    .insert({
+      driver_id: p.driverId,
+      violation_type_id: p.violationTypeId,
+      ref_no: p.refNo,
+      amount_sar: p.amountSar,
+      violation_date: p.violationDate,
+      payment_status: p.paymentStatus,
+      note: p.note,
+      created_by: auth?.user?.email ?? null,
+    })
+    .select("id")
+    .single();
   if (error) return { error: violationWriteError(error.message) };
 
   revalidatePath("/drivers");
   revalidatePath("/reports");
-  return { error: null };
+  return { error: null, id: data?.id };
 }
 
 /** Driver is fixed at creation; only the fine's own fields change. */
@@ -1495,4 +1511,177 @@ export async function voidDriverViolation(id: string, reason: string): Promise<A
   revalidatePath("/drivers");
   revalidatePath("/reports");
   return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// THE NOTICE PHOTO (0178) — optional, internal-only, and outside the money.
+//
+// A photo of the paper notice, so an operator can check a reference number and
+// an amount against the document instead of trusting a typed row. It is DISPLAY
+// ONLY: v_driver_payslip_basis does not select image_path, the freeze does not
+// copy it, and nothing below computes anything. Adding, replacing or removing a
+// photo cannot change what a payslip deducts.
+//
+// PRIVATE BUCKET, SIGNED URL, APP-GENERATED KEY — the same three rules every
+// other bucket here follows. There is no getPublicUrl anywhere in this app and
+// this pair does not introduce the first one.
+//
+// THE FREEZE STILL BINDS. A fine on an issued payslip is part of a document
+// that was handed to a person; its photo is the evidence behind that document
+// and is read-only from that moment. Both mutating actions refuse it
+// server-side, exactly as updateDriverViolation and voidDriverViolation do —
+// the hidden button in the UI is the explanation, not the lock.
+//
+// A VOID DOES NOT TOUCH THE PHOTO. voidDriverViolation above removes nothing
+// from storage, deliberately: a voided fine keeps its evidence, the same way a
+// voided invoice keeps its proof of payment. Removal happens only when someone
+// explicitly asks for it, below.
+// ---------------------------------------------------------------------------
+
+const VIOLATION_IMAGE_BUCKET = "violation-images";
+
+/**
+ * Attach or REPLACE the notice photo.
+ *
+ * ORDER MATTERS AND IT IS THE AVATAR'S ORDER: bytes up, row re-pointed, old
+ * object deleted last. Deleting first opens a window where the row points at a
+ * file that is gone, which renders as a broken image on every screen that reads
+ * it. If the row write fails, the object just uploaded is removed instead — a
+ * pointer that never landed must not leave bytes behind.
+ *
+ * The old object's removal is BEST EFFORT and never fails the call: an orphaned
+ * storage object is a harmless leak, while a photo that will not attach because
+ * a delete hiccuped is a broken feature.
+ */
+export async function uploadDriverViolationImage(
+  driverId: string,
+  violationId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  if (!driverId || !violationId) return { error: "Missing violation." };
+
+  const file = formData.get("imageFile");
+  if (!(file instanceof File)) return { error: "No image was selected." };
+
+  // THE REAL GATE. The form checks the same thing for immediate feedback, but a
+  // client-side check is an affordance, not a control — and this is the shared
+  // allow-list, so image/svg+xml stays out here too.
+  const bad = validateViolationImage(file);
+  if (bad) return { error: bad };
+
+  const supabase = createClient();
+  const lock = await violationIsFrozen(supabase, violationId);
+  if (lock.error) return { error: lock.error };
+  if (lock.frozen) return { error: FROZEN_MSG };
+
+  const { data: existing, error: readErr } = await supabase
+    .from("driver_violations")
+    .select("image_path")
+    .eq("id", violationId)
+    .is("voided_at", null)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!existing) return { error: "That violation no longer exists." };
+  const previousPath: string | null = existing.image_path ?? null;
+
+  // APP-GENERATED KEY, NEVER THE UPLOADED FILENAME (0178's column comment). A
+  // raw filename can collide, can carry path separators, and leaks whatever the
+  // photo happened to be called on the phone that took it.
+  const extMatch = /\.([a-zA-Z0-9]{1,10})$/.exec(file.name);
+  const ext = extMatch ? extMatch[1].toLowerCase() : "jpg";
+  const path = `${driverId}/${violationId}-${Date.now()}.${ext}`;
+
+  const { error: upErr } = await supabase.storage
+    .from(VIOLATION_IMAGE_BUCKET)
+    .upload(path, file, { contentType: file.type || "application/octet-stream" });
+  if (upErr) return { error: `Photo upload failed: ${upErr.message}` };
+
+  const { error: rowErr } = await supabase
+    .from("driver_violations")
+    .update({ image_path: path, updated_at: new Date().toISOString() })
+    .eq("id", violationId)
+    .is("voided_at", null);
+  if (rowErr) {
+    await supabase.storage.from(VIOLATION_IMAGE_BUCKET).remove([path]);
+    return { error: rowErr.message };
+  }
+
+  // Only now that nothing points at it any more.
+  if (previousPath && previousPath !== path) {
+    const { error: rmErr } = await supabase.storage
+      .from(VIOLATION_IMAGE_BUCKET)
+      .remove([previousPath]);
+    if (rmErr) console.error("[violations] old notice photo cleanup failed", rmErr);
+  }
+
+  revalidatePath("/drivers");
+  revalidatePath("/reports");
+  return { error: null };
+}
+
+/** Detach the photo. Same order: un-point the row first, delete second. */
+export async function removeDriverViolationImage(violationId: string): Promise<ActionResult> {
+  if (!violationId) return { error: "Missing violation." };
+
+  const supabase = createClient();
+  const lock = await violationIsFrozen(supabase, violationId);
+  if (lock.error) return { error: lock.error };
+  if (lock.frozen) return { error: FROZEN_MSG };
+
+  const { data: existing, error: readErr } = await supabase
+    .from("driver_violations")
+    .select("image_path")
+    .eq("id", violationId)
+    .is("voided_at", null)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!existing?.image_path) return { error: null }; // Already none — not an error.
+
+  const { error: rowErr } = await supabase
+    .from("driver_violations")
+    .update({ image_path: null, updated_at: new Date().toISOString() })
+    .eq("id", violationId)
+    .is("voided_at", null);
+  if (rowErr) return { error: rowErr.message };
+
+  // Best effort, and only now that nothing points at it.
+  const { error: rmErr } = await supabase.storage
+    .from(VIOLATION_IMAGE_BUCKET)
+    .remove([existing.image_path]);
+  if (rmErr) console.error("[violations] notice photo delete failed", rmErr);
+
+  revalidatePath("/drivers");
+  revalidatePath("/reports");
+  return { error: null };
+}
+
+/**
+ * A SHORT-LIVED SIGNED URL, minted per view. 300s, the same TTL every other
+ * private bucket in this app reads with.
+ *
+ * NO FREEZE CHECK, on purpose: a locked violation's photo is exactly the thing
+ * someone needs to look at when they are asking why a payslip deducted what it
+ * did. Reading is never the restricted half — replacing and removing are.
+ */
+export async function getDriverViolationImageUrl(
+  violationId: string,
+): Promise<{ error: string | null; url?: string }> {
+  if (!violationId) return { error: "Missing violation." };
+
+  const supabase = createClient();
+  const { data: row, error: readErr } = await supabase
+    .from("driver_violations")
+    .select("image_path")
+    .eq("id", violationId)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!row?.image_path) return { error: "No photo on file for this violation." };
+
+  const { data, error } = await supabase.storage
+    .from(VIOLATION_IMAGE_BUCKET)
+    .createSignedUrl(row.image_path, 300);
+  if (error || !data?.signedUrl) {
+    return { error: error?.message ?? "Could not generate a link to the photo." };
+  }
+  return { error: null, url: data.signedUrl };
 }

@@ -4550,6 +4550,24 @@ export const dict = {
       violThPayment: { en: "Fine paid?", ar: "هل سُددت المخالفة؟" },
       violThSettlement: { en: "Payroll", ar: "الرواتب" },
       violTotal: { en: "Total fines", ar: "إجمالي المخالفات" },
+      // THE ONE FAILURE THE SERVER NEVER SEES. The photo opens in a tab claimed
+      // synchronously on click, before the signing round-trip, so the browser
+      // treats it as user-initiated; when a blocker swallows it anyway
+      // `window.open` returns null and there is nothing to report but this. It
+      // is deliberately not phrased as an error with the photo — the link was
+      // signed fine, the tab was refused.
+      violPhotoBlocked: {
+        en: "The browser blocked the new tab. Allow pop-ups for this site, then open the photo again.",
+        ar: "منع المتصفح فتح تبويب جديد. اسمح بالنوافذ المنبثقة لهذا الموقع ثم افتح الصورة مرة أخرى.",
+      },
+      // Said only on this screen. Voiding a fine from the drivers list changes
+      // a list; voiding it here changes the sheet being read, and the deduction
+      // and net move with it. Stating that before the click beats letting the
+      // total shift under the reader.
+      violVoidRecompute: {
+        en: "This month has not been issued, so the deduction and net pay on this payslip will be recalculated.",
+        ar: "لم يصدر مسير هذا الشهر بعد، لذا سيُعاد احتساب الخصم وصافي الراتب في هذه القسيمة.",
+      },
 
       // The `one` branch carries NO number in English — the source says
       // "Settled by payout", not "Settled by 1 payout" — which is exactly the
@@ -5419,6 +5437,14 @@ export const dict = {
       add: { en: "Traffic violation", ar: "مخالفة مرورية" },
       addTitle: { en: "New traffic violation", ar: "مخالفة مرورية جديدة" },
       none: { en: "No traffic violations recorded.", ar: "لا توجد مخالفات مرورية مسجَّلة." },
+      // THE INSERT REPORTED NO ERROR AND NO ID. Close to impossible, but the
+      // photo step needs the id to build its storage key, so the save cannot
+      // silently continue — and an operator told only "Add a violation" would
+      // read the form's own title as the failure.
+      addNoId: {
+        en: "The violation could not be confirmed. Reload the page and check whether it was recorded before entering it again.",
+        ar: "تعذّر تأكيد حفظ المخالفة. أعد تحميل الصفحة وتحقّق مما إذا كانت قد سُجّلت قبل إدخالها مرة أخرى.",
+      },
 
       // THE HEADLINE FIGURE. `{sar}` is a formatted money string, so the money
       // formatter — not this dictionary — decides its digits and its "SAR".
@@ -5502,6 +5528,51 @@ export const dict = {
       },
       voiding: { en: "Voiding…", ar: "جارٍ الإبطال…" },
       voided: { en: "Voided", ar: "مُبطلة" },
+
+      // THE NOTICE PHOTO (0178). Optional evidence, never money — the wording
+      // says "notice", not "receipt": this is a picture of the fine that
+      // arrived, not proof that anybody paid it. Calling it a receipt would
+      // invite the reading that an attached photo settles the fStatus above.
+      fPhoto: { en: "Notice photo", ar: "صورة الإشعار" },
+      photoOptional: { en: "Optional", ar: "اختياري" },
+      photoHint: {
+        en: "A picture of the paper notice, kept for reference only. It changes no amount and no deduction.",
+        ar: "صورة للإشعار الورقي، تُحفظ للرجوع إليها فقط. لا تغيّر أي مبلغ ولا أي خصم.",
+      },
+      photoAttach: { en: "Attach a photo", ar: "إرفاق صورة" },
+      photoReplace: { en: "Replace", ar: "استبدال" },
+      photoRemove: { en: "Remove", ar: "إزالة" },
+      // NOT promoted to `common.undo`, on this file's own rule: one caller so
+      // far. It also means something narrower than a general undo — the photo
+      // has not been deleted yet, and this cancels a removal that Save would
+      // have performed.
+      photoUndoRemove: { en: "Keep it", ar: "الإبقاء عليها" },
+      photoOnFile: { en: "Photo on file", ar: "توجد صورة" },
+      photoChip: { en: "Photo", ar: "صورة" },
+      photoView: { en: "View the notice photo", ar: "عرض صورة الإشعار" },
+      photoOpenFull: { en: "Open full size", ar: "فتح بالحجم الكامل" },
+      photoLoading: { en: "Opening…", ar: "جارٍ الفتح…" },
+      // The signing call came back with neither a link nor a reason. Says what
+      // to do rather than what broke, because there is nothing to report.
+      photoUnavailable: {
+        en: "The photo could not be opened. Try again in a moment.",
+        ar: "تعذّر فتح الصورة. أعد المحاولة بعد قليل.",
+      },
+      // THE PHOTO FAILED, THE VIOLATION DID NOT. Said in that order, because
+      // the operator's next question is whether they have to type it all again.
+      photoFailedSaved: {
+        en: "The violation was saved. The photo did not upload: {err} — reopen the violation to try attaching it again.",
+        ar: "تم حفظ المخالفة. لم يتم رفع الصورة: {err} — أعد فتح المخالفة لمحاولة إرفاقها مرة أخرى.",
+      },
+      // NO `photoLockedNote`. A frozen row shows no edit affordance at all, so
+      // the replace and remove controls are not merely disabled — they are
+      // absent, and the chip that remains is a viewer. Writing "the photo can
+      // be viewed but not changed" beside `lockedNote` would name a restriction
+      // on controls the reader is not being shown.
+      photoKeptOnVoid: {
+        en: "Voiding keeps the photo — the evidence outlives the fine.",
+        ar: "الإبطال يُبقي الصورة — يبقى الدليل بعد إلغاء المخالفة.",
+      },
     },
 
     // Driver detail modal. Its salary row is drivers.salary.monthly / .openBtn
