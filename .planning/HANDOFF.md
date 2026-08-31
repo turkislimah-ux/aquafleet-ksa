@@ -18,12 +18,35 @@
   changed nothing. `removeDriverViolationImage` was the one with damage — it
   went on to delete the storage object while the row still pointed at it. All
   four now read back with `.select("id").maybeSingle()`.
-- **`178df21` WAS NOT VERIFIED IN-BROWSER — Turki directed the commit from the
-  measured gates.** Unlike `7dcdaaf` and `5ea0001` above, which were. The
-  in-browser checklist for it (16 scenarios: staff add/edit/view/replace/remove,
-  payslip edit on unissued, issued read-only, rose-vs-amber, and the two-tab
-  race) was written and is **UNRUN**. If violations behave oddly, that is the
-  first place to look, and the checklist is in the `178df21` session transcript.
+- **`178df21`'s checklist HAS NOW BEEN RUN — 11 of 16 scenarios pass, 5 remain.**
+  Passed at the row and the bucket: **1, 3, 4, 5, 6, 7, 8, 9, 15, 16**, plus the
+  size half of **2**. The two that carry the commit are the two-tab races:
+  **15** refused a pending amount edit against a fine voided in the other tab
+  (message exact, `amount_sar` still `88.00` — not a silent success), and **16**
+  refused the photo removal *and left the object in the bucket*, proving the
+  null-row check runs above the storage delete. **9** rendered rose, not amber.
+  **Still unrun: 10, 11, 12** (payslip preview on an unissued month — inline edit
+  moves Deductions+Net, photo View/Replace/Remove, six-column print) — stopped
+  for time, not for a problem. **13, 14 were declined on purpose** (see below).
+  The `.txt` half of **2** was skipped for want of a file and closed in code
+  instead: `validateViolationImage` runs server-side in `uploadDriverViolationImage`
+  *before* `createClient()`, so a crafted request is refused — which is the only
+  thing standing there, since the bucket itself has `file_size_limit: null` and
+  `allowed_mime_types: null`.
+- **THE DOCUMENTED VERIFICATION CONVENTION CANNOT REACH THIS FEATURE.** The repo's
+  convention (`playwright.config.ts`) is a throwaway diagnostic route plus a
+  temporary middleware auth bypass. `driver_violations`, `drivers` and
+  `violation_types` are all `has_table_privilege('anon', …, 'select') = false`,
+  so a bypassed session renders an EMPTY SCREEN, not the feature — measured, not
+  assumed. What worked instead: **Turki clicks each scenario, Claude verifies the
+  row and the storage object over MCP after every one**, holding
+  `dangling`/`orphans` at 0/0 throughout as the instrument.
+  **A SCREENSHOT CANNOT FALSIFY THE BUG THIS COMMIT FIXED** — a zero-row write
+  looks identical to a successful one on screen. Only the read-back separates them.
+  Scenario 7 proved the method earns its cost: it was reported working, but
+  `updated_at` had not moved anywhere in the table, and since `applyPhotoChanges`
+  runs *after* the row write that bumps it, the submit had never happened at all.
+  A redo passed. **A green report is a claim about the screen, not about the row.**
 - **The repo-wide sweep for that same zero-row shape RAN, and closed the three
   sites it found (`9e4ca3b`).** 203 files, 107 write chains: 13 guarded chains
   read back, 22 guarded ones do not, 72 carry no guard beyond a key. The 22 were
@@ -54,9 +77,44 @@
   ledger is not.** Do not "discover" a missing migration from a ledger query and
   do not re-apply one on that basis. Check `pg_proc` / `pg_index` first.
 - **No open decisions and no known defects.** O-1 and O-2 were both ruled and
-  closed; nothing was reopened. **One open VERIFICATION, though** — `178df21`'s
-  checklist, above. Unverified is not the same as defective, and it is not the
-  same as clean either.
+  closed; nothing was reopened. **Two open VERIFICATIONS** — `178df21` scenarios
+  10–14, and all of `9e4ca3b`. Unverified is not the same as defective, and it is
+  not the same as clean either.
+- **13 and 14 ARE DECLINED, NOT PENDING — do not re-raise them as a gap.** They
+  assert that an *issued* payslip shows no Pencil and no Ban but still shows the
+  photo icon. No issued payslip exists for a driver with photographed fines, and
+  the only way to make one is to issue a real gap-free numbered money document
+  that cannot be cleanly un-issued. **The fixture costs more than the assertion.**
+  Both branches were closed by reading `StatementViews.tsx` instead: `buildDocFines`
+  takes the issued branch from `doc.snapshot.violations.items` with `locked: true`
+  hard-coded, so the controls cannot render, and `imagePath` is the one field read
+  live in both branches, so the icon must. If an issued payslip with a photographed
+  fine ever appears in the normal course of business, run them then — do not
+  manufacture one.
+- **Two voided test fines remain on driver `13823f47`** (`123123123` @ 88.00 and
+  `TEST-016` @ 55.00, both created and voided during the checklist run). Left
+  voided rather than hard-deleted — §6 locks soft-delete for operational records,
+  and `app/drivers/page.tsx` filters voided rows out of the list, so they are
+  already invisible. TEST-016's photo is still in the bucket and still correctly
+  pointed at; it is one of the 5 in the 5↔5 count below. **Not litter to clean up.**
+- **The violations photo invariant measured 5 objects ↔ 5 rows, dangling 0,
+  orphans 0** at the end of the run — same shape as the 4↔4 baseline taken before
+  the first click. This is the standing check for the feature:
+```sql
+  with objs as (select name from storage.objects where bucket_id = 'violation-images'),
+       rows_with_path as (select image_path from driver_violations where image_path is not null)
+  select (select count(*) from objs) as objects,
+         (select count(*) from rows_with_path) as rows_with_path,
+         (select count(*) from rows_with_path r
+            where not exists (select 1 from objs o where o.name = r.image_path)) as dangling,
+         (select count(*) from objs o
+            where not exists (select 1 from rows_with_path r where r.image_path = o.name)) as orphans;
+```
+  **`dangling` and `orphans` are different bugs** — a dangling row is a broken
+  photo the user sees, an orphan is a file nobody points at and nobody will ever
+  delete. Scenario 9 was staged by appending `.MISSING` to one `image_path` to
+  force a dangling row, then restored from the value recorded before the edit;
+  the 0/0 above is the post-restore reading.
 
 ---
 
@@ -72,6 +130,7 @@
 | 6 | Repo-wide zero-row sweep, then its three findings closed: read-back on `setSpecialStatus`, `setAdjustmentStatus` (shared `ITEM_PAID_MSG`) and `updateDraftInvoicePeriod` | `9e4ca3b` |
 | 7 | Sweep + the rotted `invoiceActions.ts:1035` pointer recorded; that pointer converted to a symbol grep | `2efd4bb` |
 | 8 | The zero-row rule promoted into `SKILL.md` — including the three classes that are NOT findings | `97964b7` |
+| 9 | `178df21` verified in-browser: 11 of 16 scenarios pass including both two-tab races; 10–12 left unrun, 13–14 declined with reason | (docs only) |
 
 ---
 
