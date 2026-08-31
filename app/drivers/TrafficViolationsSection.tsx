@@ -43,7 +43,6 @@ import { cn, formatSar, formatSarExact } from "@/lib/utils";
 import {
   monthStartKey,
   violationTypeLabel,
-  validateViolationImage,
   type DriverViolationView,
   type OutstandingCell,
   type ViolationType,
@@ -56,16 +55,19 @@ import {
   INPUT,
   INPUT_STYLE,
   ViolationForm,
+  applyPhotoChanges,
   draftToForm,
   emptyDraft,
+  usePhotoDraft,
   type Draft,
+  type PhotoState,
 } from "./ViolationForm";
+// The two image actions are NOT imported here any more — applyPhotoChanges is
+// the only caller of either, on both surfaces.
 import {
   addDriverViolation,
   getDriverViolationImageUrl,
-  removeDriverViolationImage,
   updateDriverViolation,
-  uploadDriverViolationImage,
   voidDriverViolation,
 } from "./actions";
 
@@ -114,17 +116,26 @@ export default function TrafficViolationsSection({
   // goes to the server as FormData in one call. The photo is a second,
   // best-effort call that must not be able to fail the first one, and modelling
   // it as another Draft key would invite exactly that coupling.
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoCleared, setPhotoCleared] = useState(false);
+  //
+  // The state machine itself is shared with the payslip surface — see
+  // usePhotoDraft in ViolationForm.tsx. `photo.error` is the FILE-VALIDATION
+  // message, and it is the only photo message that belongs under the control.
+  const photo = usePhotoDraft();
+
+  // THREE MESSAGES, THREE MEANINGS, AND THEY MUST NOT SHARE A CHANNEL.
+  //
+  //   error      (rose)  — nothing was saved. The form is still open.
+  //   photoError (rose)  — a photo would not OPEN. Nothing was being saved.
+  //   notice     (amber) — the fine SAVED and only its attachment did not.
+  //
+  // The read failure used to land in `notice`, so failing to open a photo
+  // printed an amber box whose entire idiom says a save half-succeeded. Same
+  // names and same tones as the payslip surface now.
   const [photoError, setPhotoError] = useState<string | null>(null);
-  const [photoInputKey, setPhotoInputKey] = useState(0);
-  // A photo that did not upload while the VIOLATION did. Not `error` — that
-  // one means "nothing was saved", and reusing it here would say the opposite
-  // of what happened.
   const [notice, setNotice] = useState<string | null>(null);
   // The open viewer: one at a time, holding a signed URL minted seconds ago.
   const [viewing, setViewing] = useState<{ id: string; url: string } | null>(null);
-  const [viewBusyId, setViewBusyId] = useState<string | null>(null);
+  const [photoBusyId, setPhotoBusyId] = useState<string | null>(null);
 
   const typeById = useMemo(() => {
     const m = new Map<string, ViolationType>();
@@ -152,10 +163,10 @@ export default function TrafficViolationsSection({
     setVoidingId(null);
     setVoidReason("");
     setError(null);
-    setPhotoFile(null);
-    setPhotoCleared(false);
+    // Clears the picked file, the pending removal and the validation message,
+    // and remounts the file input. Closing a form cancels a photo change too.
+    photo.reset();
     setPhotoError(null);
-    setPhotoInputKey((k) => k + 1);
   }
 
   function openAdd() {
@@ -182,29 +193,23 @@ export default function TrafficViolationsSection({
   /** The row open in the form, when editing — the photo control needs it. */
   const editingRow = editingId ? violations.find((v) => v.id === editingId) ?? null : null;
 
-  /**
-   * A picked file is validated HERE for the immediate no, and again on the
-   * server, which is the actual gate. Same shared allow-list on both sides —
-   * `accept` on the input is a filter in the file dialog, not a check.
-   */
-  function pickPhoto(f: File | null) {
-    if (!f) {
-      setPhotoFile(null);
-      setPhotoError(null);
-      return;
-    }
-    const bad = validateViolationImage(f);
-    if (bad) {
-      setPhotoFile(null);
-      setPhotoError(bad);
-      setPhotoInputKey((k) => k + 1);
-      return;
-    }
-    setPhotoError(null);
-    setPhotoFile(f);
-    // Picking a replacement supersedes a pending removal.
-    setPhotoCleared(false);
-  }
+  // THE HOOK'S HALF PLUS THIS SCREEN'S HALF. usePhotoDraft owns the draft state
+  // machine because it is identical on both surfaces; `hasExisting`, `onView`
+  // and `viewBusy` are NOT in it because they are not — this screen opens the
+  // photo into a panel below, the payslip opens it into a tab. Annotated rather
+  // than inferred so a missing key is an error here, not inside the form.
+  const photoProp: PhotoState = {
+    file: photo.file,
+    cleared: photo.cleared,
+    error: photo.error,
+    inputKey: photo.inputKey,
+    onPick: photo.pick,
+    onClear: photo.clear,
+    onUndoClear: photo.undoClear,
+    hasExisting: editingRow?.image_path != null,
+    onView: () => { if (editingId) void viewPhoto(editingId); },
+    viewBusy: photoBusyId !== null && photoBusyId === editingId,
+  };
 
   /**
    * SAVE ORDER: the violation first, its photo second, and the photo can never
@@ -216,6 +221,10 @@ export default function TrafficViolationsSection({
    * swapped the photo must not lose the amount because Storage hiccuped. A
    * photo failure comes back as a NOTICE next to a saved row, with the sentence
    * saying "saved" first.
+   *
+   * THE ADD BRANCH IS THIS SCREEN'S ALONE — the payslip edits existing fines
+   * only. Everything after the fine is written is not: applyPhotoChanges is the
+   * shared tail, so both surfaces order the photo work identically.
    */
   async function submit() {
     if (busy) return;
@@ -244,18 +253,17 @@ export default function TrafficViolationsSection({
     }
 
     // ---- past this line the violation IS saved; nothing below may undo it ---
-    let warn: string | null = null;
-
-    if (photoCleared && editingId) {
-      const r = await removeDriverViolationImage(editingId);
-      if (r.error) warn = r.error;
-    }
-    if (photoFile && violationId) {
-      const form = new FormData();
-      form.set("imageFile", photoFile);
-      const r = await uploadDriverViolationImage(driverId, violationId, form);
-      if (r.error) warn = fill(t("drivers.viol.photoFailedSaved", lang), { err: r.error });
-    }
+    // `cleared` only means anything on an EDIT: a row created a moment ago has
+    // no stored photo to drop, and asking the server to remove one would be a
+    // call whose only possible answer is "there was none".
+    const warn = violationId
+      ? await applyPhotoChanges(
+        driverId,
+        violationId,
+        { file: photo.file, cleared: photo.cleared && editingId != null },
+        lang,
+      )
+      : null;
 
     setBusy(false);
     resetForms();
@@ -268,19 +276,23 @@ export default function TrafficViolationsSection({
    * Mint a signed URL and show it. Fetched per click rather than signed at page
    * load: a 300s URL on a card that stays open behind a modal is a broken image
    * by the time anybody clicks it.
+   *
+   * A FAILURE HERE IS ROSE, NOT AMBER. Nothing was being saved, so the amber
+   * "the fine saved and the photo did not" panel would be describing an event
+   * that did not happen.
    */
   async function viewPhoto(id: string) {
-    if (viewBusyId) return;
+    if (photoBusyId) return;
     if (viewing?.id === id) {
       setViewing(null);
       return;
     }
-    setViewBusyId(id);
-    setNotice(null);
+    setPhotoBusyId(id);
+    setPhotoError(null);
     const r = await getDriverViolationImageUrl(id);
-    setViewBusyId(null);
+    setPhotoBusyId(null);
     if (r.error || !r.url) {
-      setNotice(r.error ?? t("drivers.viol.photoUnavailable", lang));
+      setPhotoError(r.error ?? t("drivers.viol.photoUnavailable", lang));
       return;
     }
     setViewing({ id, url: r.url });
@@ -352,23 +364,31 @@ export default function TrafficViolationsSection({
           onCancel={resetForms}
           onSubmit={submit}
           heading={t(editingId ? "drivers.viol.editTitle" : "drivers.viol.addTitle", lang)}
-          photo={{
-            file: photoFile,
-            cleared: photoCleared,
-            hasExisting: editingRow?.image_path != null,
-            error: photoError,
-            inputKey: photoInputKey,
-            onPick: pickPhoto,
-            onClear: () => { setPhotoCleared(true); setPhotoFile(null); setPhotoInputKey((k) => k + 1); },
-            onUndoClear: () => setPhotoCleared(false),
-            onView: () => { if (editingId) void viewPhoto(editingId); },
-            viewBusy: viewBusyId !== null && viewBusyId === editingId,
-          }}
+          photo={photoProp}
         />
       )}
 
+      {/* A PHOTO WOULD NOT OPEN. Rose, and deliberately NOT the amber panel
+          below it: nothing was being saved, so "the fine saved and the photo
+          did not" would be narrating an event that never happened. Same
+          two-panel split, same two tones, as the payslip surface. */}
+      {photoError && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-[12px] leading-relaxed text-rose-700 dark:text-rose-300">
+          <span className="flex-1">{photoError}</span>
+          <button
+            type="button"
+            onClick={() => setPhotoError(null)}
+            className="shrink-0 rounded p-0.5 hover:bg-rose-500/10"
+            aria-label={t("common.close", lang)}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* THE VIOLATION SAVED AND THE PHOTO DID NOT. Amber, not rose: nothing
-          was lost and nothing needs redoing except the attachment. */}
+          was lost and nothing needs redoing except the attachment. This panel
+          is for SAVE warnings only — read failures land in the rose one above. */}
       {notice && (
         <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] leading-relaxed text-amber-800 dark:text-amber-300">
           <span className="flex-1">{notice}</span>
@@ -457,17 +477,17 @@ export default function TrafficViolationsSection({
                         <button
                           type="button"
                           onClick={() => void viewPhoto(v.id)}
-                          disabled={viewBusyId === v.id}
+                          disabled={photoBusyId === v.id}
                           title={t("drivers.viol.photoView", lang)}
                           className={cn(
                             "mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-colors",
                             "ring-[rgb(var(--border))] muted hover:text-[rgb(var(--fg))] hover:bg-black/5 dark:hover:bg-white/5",
                             viewing?.id === v.id && "text-[rgb(var(--fg))] bg-black/5 dark:bg-white/5",
-                            viewBusyId === v.id && "opacity-60 pointer-events-none",
+                            photoBusyId === v.id && "opacity-60 pointer-events-none",
                           )}
                         >
                           <ImageIcon className="h-3 w-3" />
-                          {viewBusyId === v.id ? t("drivers.viol.photoLoading", lang) : t("drivers.viol.photoChip", lang)}
+                          {photoBusyId === v.id ? t("drivers.viol.photoLoading", lang) : t("drivers.viol.photoChip", lang)}
                         </button>
                       )}
                     </TD>

@@ -12,13 +12,17 @@
  *
  * WHAT EACH SURFACE DOES WITH IT:
  *   drivers screen  → add and edit, photo control included
- *   payslip preview → edit only, on an UNISSUED month, and no photo control
+ *   payslip preview → edit only, on an UNISSUED month, photo control included
  *
- * `photo` IS OPTIONAL FOR THAT REASON. Photos are managed where photos are
- * managed — on the driver's own screen — and the payslip is a document surface
- * that gets printed and handed over. Omitting the prop removes the control
- * rather than disabling it, so the payslip never shows an upload target it
- * would then have to explain.
+ * `photo` IS STILL OPTIONAL, because the rule is not "which screen" but "may
+ * this row be changed at all". A fine that can have its amount corrected can
+ * have the wrong notice swapped for the right one; a fine frozen onto an issued
+ * payslip can have neither, and that surface never opens this form. Omitting
+ * the prop removes the control rather than disabling it, so no caller shows an
+ * upload target it would then have to explain away.
+ *
+ * THE STATE BEHIND THE CONTROL IS SHARED TOO — `usePhotoDraft` below, and
+ * `applyPhotoChanges` for the save tail. Both callers use both.
  */
 
 import { useMemo, useState } from "react";
@@ -26,11 +30,20 @@ import { useRouter } from "next/navigation";
 import { ImageIcon, ImagePlus, Trash2, X } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
-import { t, fill } from "@/lib/i18n";
+import { t, fill, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { slugifyKey, isValidSlug } from "@/lib/slug";
-import { violationTypeLabel, VIOLATION_IMAGE_ACCEPT, type ViolationType } from "@/lib/violations";
-import { addViolationType } from "./actions";
+import {
+  violationTypeLabel,
+  validateViolationImage,
+  VIOLATION_IMAGE_ACCEPT,
+  type ViolationType,
+} from "@/lib/violations";
+import {
+  addViolationType,
+  removeDriverViolationImage,
+  uploadDriverViolationImage,
+} from "./actions";
 
 export const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
@@ -77,6 +90,128 @@ export type PhotoState = {
   onView: () => void;
   viewBusy: boolean;
 };
+
+/** What `usePhotoDraft` hands back: the state machine, minus the surface's half. */
+export type PhotoDraft = {
+  file: File | null;
+  cleared: boolean;
+  error: string | null;
+  inputKey: number;
+  pick: (f: File | null) => void;
+  clear: () => void;
+  undoClear: () => void;
+  /** Back to "nothing picked, nothing pending" — what closing a form means. */
+  reset: () => void;
+};
+
+/**
+ * THE PHOTO'S STATE MACHINE, OWNED ONCE.
+ *
+ * Both surfaces ran a byte-identical copy of this — validate, clear-or-set,
+ * bump the input key, let a pick supersede a pending removal — differing only
+ * in what they had named their setters. Two copies of a four-branch rule is two
+ * chances to fix a bug in one of them.
+ *
+ * WHAT IT DELIBERATELY DOES NOT OWN: `hasExisting`, `onView` and `viewBusy`.
+ * Those are genuinely per-surface — the drivers screen opens an inline panel,
+ * the payslip claims a new tab — and folding them in here would force one
+ * viewer on both. The caller supplies those three and spreads the rest.
+ *
+ * NOTHING HERE TOUCHES STORAGE. This is what Save WILL do, so Cancel cancels.
+ */
+export function usePhotoDraft(): PhotoDraft {
+  const [file, setFile] = useState<File | null>(null);
+  const [cleared, setCleared] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [inputKey, setInputKey] = useState(0);
+
+  return {
+    file,
+    cleared,
+    error,
+    inputKey,
+    /**
+     * Validated HERE for the immediate no, and again on the server, which is
+     * the actual gate. Same shared allow-list on both sides — `accept` on the
+     * input is a filter in the file dialog, not a check.
+     */
+    pick(f) {
+      if (!f) {
+        setFile(null);
+        setError(null);
+        return;
+      }
+      const bad = validateViolationImage(f);
+      if (bad) {
+        setFile(null);
+        setError(bad);
+        // The <input type="file"> holds its own DOM value; remounting it is the
+        // only way to make a rejected pick actually go away.
+        setInputKey((k) => k + 1);
+        return;
+      }
+      setError(null);
+      setFile(f);
+      // Picking a replacement supersedes a pending removal.
+      setCleared(false);
+    },
+    clear() {
+      setCleared(true);
+      setFile(null);
+      setInputKey((k) => k + 1);
+    },
+    undoClear() {
+      setCleared(false);
+    },
+    reset() {
+      setFile(null);
+      setCleared(false);
+      setError(null);
+      setInputKey((k) => k + 1);
+    },
+  };
+}
+
+/**
+ * THE POST-SAVE TAIL, OWNED ONCE — the half of a save that must never be able
+ * to undo the half above it.
+ *
+ * Both surfaces reach here only AFTER the fine itself is written, and both had
+ * their own copy of the same three rules: remove before upload so a
+ * replace-then-clear cannot resurrect the old object, wrap an upload failure in
+ * the sentence that says "saved" first, and return rather than throw so the
+ * caller keeps control of its busy flag.
+ *
+ * RETURNS THE WARNING, DOES NOT RENDER IT. Null means the photo did whatever
+ * was asked. A string means the fine is saved and only its attachment is not —
+ * which is why every caller shows it in amber and none of them in rose.
+ *
+ * `lang` IS A PARAMETER, not a hook read: this is a plain async function called
+ * from an event handler, and the one message it can produce is translated.
+ */
+export async function applyPhotoChanges(
+  driverId: string,
+  violationId: string,
+  change: { file: File | null; cleared: boolean },
+  lang: Lang,
+): Promise<string | null> {
+  let warn: string | null = null;
+
+  if (change.cleared) {
+    const r = await removeDriverViolationImage(violationId);
+    // Already the server's own sentence — nothing to add to it.
+    if (r.error) warn = r.error;
+  }
+
+  if (change.file) {
+    const form = new FormData();
+    form.set("imageFile", change.file);
+    const r = await uploadDriverViolationImage(driverId, violationId, form);
+    if (r.error) warn = fill(t("drivers.viol.photoFailedSaved", lang), { err: r.error });
+  }
+
+  return warn;
+}
 
 /**
  * THE ONE PLACE A DRAFT BECOMES A REQUEST. Both `addDriverViolation` and

@@ -347,9 +347,9 @@ pure function of `(driver, month)`** — which is what makes the preview
 trustworthy.
 
 **WHY NO CARRY IS NEEDED — the load-bearing link.** On ADD, a violation cannot
-be dated before the **1st of the current month** (`monthStartKey`,
-`TrafficViolationsSection.tsx:134` as the input `min`, and the server owns the
-rule). Future dates are allowed. That floor makes late-stranding impossible: a
+be dated before the **1st of the current month** (`monthStartKey`, computed as
+`floor` in `TrafficViolationsSection.tsx` and passed to `ViolationForm.tsx`,
+which spends it as the date input's `min` — and the server owns the rule). Future dates are allowed. That floor makes late-stranding impossible: a
 fine can never appear in a month whose payslip is already issued, so there is
 nothing for a carry to rescue. **The floor and clamp-no-carry hold each other
 up — do not revisit one alone.** On EDIT the floor is absent, since the row's
@@ -410,7 +410,8 @@ paper notice per fine. Measured live: `format_type` = `text`, `attnotnull` =
 false.
 
 - **It is a STORAGE KEY the app generates, never the uploaded filename:**
-  `` `${driverId}/${violationId}-${Date.now()}.${ext}` `` (actions.ts:1592).
+  `` `${driverId}/${violationId}-${Date.now()}.${ext}` `` — built in
+  `uploadDriverViolationImage` (`app/drivers/actions.ts`), its only site.
   A user-supplied name is attacker-controlled and collides.
 - **DISPLAY ONLY, and the catalog says so.** **Zero** views in `public` mention
   `image_path` — `v_driver_payslip_basis` included — and
@@ -427,8 +428,9 @@ false.
   buckets ARE migration DDL here. **13 buckets, 13 private, 0 public** (live
   `storage.buckets`), and all 13 ids appear in migration files.
 - Reads go through `getDriverViolationImageUrl` → `createSignedUrl(path, 300)`
-  (actions.ts:1682). `getPublicUrl` appears **nowhere** in the repo; the only
-  textual hit is the comment asserting that.
+  in `app/drivers/actions.ts` — the sole call, grep by name not by line.
+  `getPublicUrl` appears **nowhere** in the repo; the only textual hits are the
+  two comments asserting that (this bullet and actions.ts's own).
 - The **4-policy authenticated CRUD set** on `storage.objects` — select /
   insert / update / delete, role `authenticated`, each `bucket_id =
   'violation-images'` — written `drop policy if exists` then `create policy`,

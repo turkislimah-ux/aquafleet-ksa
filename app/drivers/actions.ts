@@ -1259,9 +1259,17 @@ export async function removeSalaryChange(id: string): Promise<ActionResult> {
 // /reports stale would show a net that the next issue will not produce.
 //
 // THE FREEZE IS THE EDIT BOUNDARY. Once a violation appears in
-// driver_payslip_violations it is part of an issued document, and both mutating
-// actions refuse it server-side rather than relying on the button being hidden.
-// A UI-only lock is not a lock.
+// driver_payslip_violations it is part of an issued document, and all four
+// mutating actions — update, void, and the two image writes below — refuse it
+// server-side rather than relying on the button being hidden. A UI-only lock is
+// not a lock.
+//
+// EVERY UPDATE HERE CARRIES `.is("voided_at", null)`, AND EVERY ONE OF THEM
+// READS BACK WHETHER IT HIT. PostgREST reports a zero-row update as SUCCESS, so
+// a write filtered out by that predicate — the fine was voided between this
+// action's read and its write — used to return `{ error: null }` having changed
+// nothing. `.select("id").maybeSingle()` turns the miss into a null row, which
+// is the only way to tell "updated" from "matched nothing" here.
 // ---------------------------------------------------------------------------
 
 /** Is this violation already frozen onto an issued payslip? */
@@ -1280,6 +1288,13 @@ async function violationIsFrozen(
 
 const FROZEN_MSG =
   "This violation is already on an issued payslip and can no longer be changed. Undo that payslip first if it is wrong.";
+
+/**
+ * The write matched no row. In practice that means the fine was voided from
+ * another tab between this action's read and its write — "no longer exists" is
+ * the honest word for it, since a voided fine is gone from every live sum.
+ */
+const VIOLATION_GONE_MSG = "That violation no longer exists.";
 
 /**
  * Add a violation TYPE. Both names are REQUIRED because violation_types.label
@@ -1454,7 +1469,7 @@ export async function updateDriverViolation(id: string, formData: FormData): Pro
   if (lock.error) return { error: lock.error };
   if (lock.frozen) return { error: FROZEN_MSG };
 
-  const { error } = await supabase
+  const { data: hit, error } = await supabase
     .from("driver_violations")
     .update({
       violation_type_id: p.violationTypeId,
@@ -1468,8 +1483,14 @@ export async function updateDriverViolation(id: string, formData: FormData): Pro
     .eq("id", id)
     // Belt and braces with the freeze check above: a violation that was voided
     // between the read and the write must not come back to life as an edit.
-    .is("voided_at", null);
+    .is("voided_at", null)
+    // …and the predicate is only a guard if we look at whether it fired. A
+    // filtered-out update is not an error to PostgREST; without this read-back
+    // the caller was told the edit landed when nothing had changed.
+    .select("id")
+    .maybeSingle();
   if (error) return { error: violationWriteError(error.message) };
+  if (!hit) return { error: VIOLATION_GONE_MSG };
 
   revalidatePath("/drivers");
   revalidatePath("/reports");
@@ -1494,7 +1515,7 @@ export async function voidDriverViolation(id: string, reason: string): Promise<A
   if (lock.frozen) return { error: FROZEN_MSG };
 
   const { data: auth } = await supabase.auth.getUser();
-  const { error } = await supabase
+  const { data: hit, error } = await supabase
     .from("driver_violations")
     .update({
       voided_at: new Date().toISOString(),
@@ -1505,8 +1526,17 @@ export async function voidDriverViolation(id: string, reason: string): Promise<A
     .eq("id", id)
     // Voiding an already-voided row would overwrite the original reason and
     // timestamp with a second, later story about the same event.
-    .is("voided_at", null);
+    .is("voided_at", null)
+    // READ BACK, like the other three. This one orphans nothing and destroys
+    // nothing — the predicate already protects the original reason — so the
+    // read-back buys honesty rather than safety: a second void reported success
+    // and left the first one's record standing, which is the right outcome
+    // described by the wrong word. It is also the fourth of four, and a lone
+    // exception is what a future reader has to rediscover as a bug.
+    .select("id")
+    .maybeSingle();
   if (error) return { error: error.message };
+  if (!hit) return { error: VIOLATION_GONE_MSG };
 
   revalidatePath("/drivers");
   revalidatePath("/reports");
@@ -1581,7 +1611,7 @@ export async function uploadDriverViolationImage(
     .is("voided_at", null)
     .maybeSingle();
   if (readErr) return { error: readErr.message };
-  if (!existing) return { error: "That violation no longer exists." };
+  if (!existing) return { error: VIOLATION_GONE_MSG };
   const previousPath: string | null = existing.image_path ?? null;
 
   // APP-GENERATED KEY, NEVER THE UPLOADED FILENAME (0178's column comment). A
@@ -1596,14 +1626,20 @@ export async function uploadDriverViolationImage(
     .upload(path, file, { contentType: file.type || "application/octet-stream" });
   if (upErr) return { error: `Photo upload failed: ${upErr.message}` };
 
-  const { error: rowErr } = await supabase
+  const { data: hit, error: rowErr } = await supabase
     .from("driver_violations")
     .update({ image_path: path, updated_at: new Date().toISOString() })
     .eq("id", violationId)
-    .is("voided_at", null);
-  if (rowErr) {
+    .is("voided_at", null)
+    .select("id")
+    .maybeSingle();
+  // BOTH FAILURES ROLL BACK THE SAME WAY. An error and a zero-row match differ
+  // in cause and not at all in consequence: the bytes are up there and nothing
+  // points at them. Leaving them would be an orphan created by a call that
+  // reported success.
+  if (rowErr || !hit) {
     await supabase.storage.from(VIOLATION_IMAGE_BUCKET).remove([path]);
-    return { error: rowErr.message };
+    return { error: rowErr?.message ?? VIOLATION_GONE_MSG };
   }
 
   // Only now that nothing points at it any more.
@@ -1637,12 +1673,21 @@ export async function removeDriverViolationImage(violationId: string): Promise<A
   if (readErr) return { error: readErr.message };
   if (!existing?.image_path) return { error: null }; // Already none — not an error.
 
-  const { error: rowErr } = await supabase
+  const { data: hit, error: rowErr } = await supabase
     .from("driver_violations")
     .update({ image_path: null, updated_at: new Date().toISOString() })
     .eq("id", violationId)
-    .is("voided_at", null);
+    .is("voided_at", null)
+    .select("id")
+    .maybeSingle();
   if (rowErr) return { error: rowErr.message };
+  // THIS CHECK MUST STAY ABOVE THE DELETE. A zero-row update means the row
+  // still holds its image_path — voided from another tab, and the predicate
+  // filtered us out. Falling through to the delete would erase the object while
+  // the row goes on pointing at it, which is the broken-pointer failure the
+  // whole un-point-then-delete order exists to prevent. Bail with the bytes
+  // intact; the pointer and the object stay agreeing with each other.
+  if (!hit) return { error: VIOLATION_GONE_MSG };
 
   // Best effort, and only now that nothing points at it.
   const { error: rmErr } = await supabase.storage

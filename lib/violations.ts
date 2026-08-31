@@ -74,9 +74,13 @@ export type DriverViolation = {
  * operator will not be re-shooting it — a refused photo means the fine gets
  * entered with no evidence at all, which loses exactly what the column exists
  * for. The DB and the bucket impose no limit of their own (0178 sets none, and
- * none of the 12 buckets does), so this constant IS the cap.
+ * none of the 13 buckets does), so this constant IS the cap.
+ *
+ * NOT EXPORTED — `validateViolationImage` below is the only caller, and it is
+ * the only thing a caller should be reaching for anyway. A second consumer
+ * reading the number would be re-implementing the check.
  */
-export const MAX_VIOLATION_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_VIOLATION_IMAGE_BYTES = 5 * 1024 * 1024;
 
 /** For an `<input type="file">`. The shared allow-list — SVG stays excluded. */
 export const VIOLATION_IMAGE_ACCEPT = IMAGE_ACCEPT;
@@ -130,8 +134,12 @@ export function monthStartKey(todayIso: string): string {
   return `${todayIso.slice(0, 7)}-01`;
 }
 
-/** Half-open month window `[start, next)` — the SAME shape the 0177 view sums with. */
-export function monthRange(periodStart: string): { start: string; end: string } {
+/**
+ * Half-open month window `[start, next)` — the SAME shape the 0177 view sums
+ * with. Not exported: `inMonth` below is the only caller, and asking the
+ * question is what callers want, not building the window themselves.
+ */
+function monthRange(periodStart: string): { start: string; end: string } {
   const y = Number(periodStart.slice(0, 4));
   const m = Number(periodStart.slice(5, 7)); // 1-12
   const ny = m === 12 ? y + 1 : y;
@@ -192,8 +200,12 @@ export type OutstandingCell = {
  *   · every live fine not yet frozen onto an issued payslip, plus
  *   · every live fine frozen onto a payslip that left a remainder.
  * A fine on a fully-absorbed payslip is settled and drops out of both figures.
+ *
+ * Not exported: `buildViolationViews` is the only caller and returns this
+ * alongside the rows, so no surface can obtain one without the other and then
+ * show a total that disagrees with the list under it.
  */
-export function buildViolationOutstanding(input: {
+function buildViolationOutstanding(input: {
   /** All violations; voided rows are filtered here so callers cannot forget. */
   violations: DriverViolation[];
   frozen: FrozenViolation[];
@@ -252,7 +264,12 @@ export type ViolationSettlement = {
   payslipId: string | null;
 };
 
-export function settlementOf(
+/**
+ * Not exported: `buildViolationViews` is the only caller, and it attaches the
+ * result to every row it hands out. A surface computing its own settlement
+ * would be a second answer to a question that already has one.
+ */
+function settlementOf(
   violationId: string,
   payslipOfViolation: Map<string, string>,
   payslipById: Map<string, PayslipDeductionRow>,

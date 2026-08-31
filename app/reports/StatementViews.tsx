@@ -44,18 +44,19 @@ import {
   type DriverCommissionByProjectRow,
 } from "@/lib/reports";
 import {
-  inMonth, violationTypeLabel, validateViolationImage,
+  inMonth, violationTypeLabel,
   type DriverViolationView, type ViolationType,
 } from "@/lib/violations";
 // THE FINE EDITOR AND ITS MUTATIONS, BOTH BORROWED WHOLE from the drivers
-// screen. Nothing about editing a violation is re-implemented here: this file
+// screen. Nothing about editing a violation is re-implemented here — not the
+// form, not the photo state machine, not the post-save photo work: this file
 // decides only WHERE the controls appear and WHEN they are allowed to.
 import {
-  ViolationForm, INPUT, INPUT_STYLE, draftFromRow, draftToForm, type Draft,
+  ViolationForm, INPUT, INPUT_STYLE, applyPhotoChanges, draftFromRow,
+  draftToForm, usePhotoDraft, type Draft, type PhotoState,
 } from "@/app/drivers/ViolationForm";
 import {
-  getDriverViolationImageUrl, removeDriverViolationImage,
-  updateDriverViolation, uploadDriverViolationImage, voidDriverViolation,
+  getDriverViolationImageUrl, updateDriverViolation, voidDriverViolation,
 } from "@/app/drivers/actions";
 import type { CsvValue } from "@/lib/csv";
 // NOT a violation of the leaf rule above: exportSource.ts imports react,
@@ -2141,10 +2142,11 @@ function PayslipDocument({
   // on `!doc && !x.locked`, so an issued slip reaches none of this — and
   // uploadDriverViolationImage / removeDriverViolationImage refuse a frozen row
   // on the server regardless (actions.ts violationIsFrozen).
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoCleared, setPhotoCleared] = useState(false);
-  const [photoFieldError, setPhotoFieldError] = useState<string | null>(null);
-  const [photoInputKey, setPhotoInputKey] = useState(0);
+  //
+  // The draft state machine is the drivers screen's, literally — usePhotoDraft
+  // in ViolationForm.tsx. `photo.error` is the FILE-VALIDATION message, which is
+  // why it is not `photoError` above: that one is a photo that would not OPEN.
+  const photo = usePhotoDraft();
   // Amber, not rose: the fine saved and only its attachment did not.
   const [photoNotice, setPhotoNotice] = useState<string | null>(null);
 
@@ -2161,10 +2163,13 @@ function PayslipDocument({
     setVoidingId(null);
     setVoidReason("");
     setRowError(null);
-    setPhotoFile(null);
-    setPhotoCleared(false);
-    setPhotoFieldError(null);
-    setPhotoInputKey((k) => k + 1);
+    // Clears the picked file, the pending removal and the validation message,
+    // and remounts the file input. Closing a form cancels a photo change too.
+    photo.reset();
+    // A failed OPEN belongs to the panel that was open when it happened. Left
+    // standing, it outlives its own context and reads as a fresh failure on the
+    // next row. The amber save-warning below deliberately DOES outlive it.
+    setPhotoError(null);
   }
 
   function openEdit(violationId: string) {
@@ -2180,35 +2185,11 @@ function PayslipDocument({
   }
 
   /**
-   * Validated HERE for the immediate no and again on the server, which is the
-   * actual gate — the same two-sided check the drivers screen makes, through
-   * the same `validateViolationImage`.
-   */
-  function pickPhoto(f: File | null) {
-    if (!f) {
-      setPhotoFile(null);
-      setPhotoFieldError(null);
-      return;
-    }
-    const bad = validateViolationImage(f);
-    if (bad) {
-      setPhotoFile(null);
-      setPhotoFieldError(bad);
-      setPhotoInputKey((k) => k + 1);
-      return;
-    }
-    setPhotoFieldError(null);
-    setPhotoFile(f);
-    // Picking a replacement supersedes a pending removal.
-    setPhotoCleared(false);
-  }
-
-  /**
    * SAVE ORDER: the fine first, its photo second, and the photo can never fail
-   * the fine — the drivers screen's rule, kept identical here. An operator who
-   * corrected an amount and also swapped the notice must not lose the amount
-   * because Storage hiccuped, so a photo failure comes back as a notice beside
-   * an already-saved row.
+   * the fine — the drivers screen's rule, kept identical here because it is
+   * literally the same code. An operator who corrected an amount and also
+   * swapped the notice must not lose the amount because Storage hiccuped, so a
+   * photo failure comes back as a notice beside an already-saved row.
    */
   async function saveEdit() {
     if (!editingId || !draft || rowBusy) return;
@@ -2227,17 +2208,15 @@ function PayslipDocument({
     }
 
     // ---- past this line the fine IS saved; nothing below may undo it -------
-    let warn: string | null = null;
-    if (photoCleared) {
-      const r = await removeDriverViolationImage(id);
-      if (r.error) warn = r.error;
-    }
-    if (photoFile) {
-      const form = new FormData();
-      form.set("imageFile", photoFile);
-      const r = await uploadDriverViolationImage(row.driver_id, id, form);
-      if (r.error) warn = fill(t("drivers.viol.photoFailedSaved", lang), { err: r.error });
-    }
+    // The shared tail. `cleared` needs no guard here the way it does on the
+    // drivers screen: this surface only ever edits, so there is always a stored
+    // photo the removal could be about.
+    const warn = await applyPhotoChanges(
+      row.driver_id,
+      id,
+      { file: photo.file, cleared: photo.cleared },
+      lang,
+    );
 
     setRowBusy(false);
     closeRowForms();
@@ -2300,6 +2279,27 @@ function PayslipDocument({
     // outcome.
     else setPhotoError(t("reports.payslips.violPhotoBlocked", lang));
   }
+
+  // THE HOOK'S HALF PLUS THIS SCREEN'S HALF, and typed by NAME rather than left
+  // to structural inference at the call site: a PhotoState that has drifted then
+  // fails here, next to the surface that owns the difference, instead of inside
+  // the shared form. The drivers screen builds the same object from the same
+  // hook — only the three view keys differ, which is the point.
+  const photoProp: PhotoState = {
+    file: photo.file,
+    cleared: photo.cleared,
+    error: photo.error,
+    inputKey: photo.inputKey,
+    onPick: photo.pick,
+    onClear: photo.clear,
+    onUndoClear: photo.undoClear,
+    hasExisting: fines.find((x) => x.violationId === editingId)?.imagePath != null,
+    // The viewer is this screen's own: a new tab, not the drivers screen's
+    // inline panel, because the fine being compared is in the table two lines
+    // up and the photo is the thing that has to get bigger.
+    onView: () => { if (editingId) void openPhoto(editingId); },
+    viewBusy: photoBusyId !== null && photoBusyId === editingId,
+  };
 
   return (
     <>
@@ -2609,8 +2609,11 @@ function PayslipDocument({
                           issued or not. Reading the notice photo is how a
                           disputed line gets settled, and a frozen document is
                           the case where someone is most likely to be asking.
-                          There is no attach or replace control here: photos
-                          are managed on the driver's own screen. */}
+                          THE ROW OFFERS READING ONLY. Replacing or removing the
+                          photo lives in the edit panel below, behind the same
+                          `!doc && !x.locked` gate as every other change — so it
+                          is reachable on an unissued month and absent here on
+                          every row, including the ones that can be edited. */}
                       {x.imagePath && (
                         <button
                           type="button"
@@ -2732,27 +2735,7 @@ function PayslipDocument({
                 // the field here cannot reach an issued slip; the same View /
                 // Replace / Remove control the drivers screen shows, from the
                 // same component, calling the same two actions.
-                photo={{
-                  file: photoFile,
-                  cleared: photoCleared,
-                  hasExisting:
-                    fines.find((x) => x.violationId === editingId)?.imagePath != null,
-                  error: photoFieldError,
-                  inputKey: photoInputKey,
-                  onPick: pickPhoto,
-                  onClear: () => {
-                    setPhotoCleared(true);
-                    setPhotoFile(null);
-                    setPhotoInputKey((k) => k + 1);
-                  },
-                  onUndoClear: () => setPhotoCleared(false),
-                  // The viewer is this screen's own: a new tab, not the drivers
-                  // screen's inline panel, because the fine being compared is in
-                  // the table two lines up and the photo is the thing that has
-                  // to get bigger.
-                  onView: () => { if (editingId) void openPhoto(editingId); },
-                  viewBusy: photoBusyId !== null && photoBusyId === editingId,
-                }}
+                photo={photoProp}
               />
             </div>
           )}

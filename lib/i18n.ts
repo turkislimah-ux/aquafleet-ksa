@@ -5502,7 +5502,6 @@ export const dict = {
         ar: "الاسمان مطلوبان — كل شاشة تعرض الاسم بلغتها.",
       },
 
-      recent: { en: "Latest violations", ar: "أحدث المخالفات" },
       showingOf: { en: "Showing the 3 most recent of {n}.", ar: "عرض أحدث 3 من أصل {n}." },
 
       // SETTLEMENT — what payroll has done with this fine, as distinct from
@@ -5527,7 +5526,6 @@ export const dict = {
         ar: "يبقى السجل ويمكن الاطلاع عليه — لكنه يخرج من كل المجاميع. لا يُحذف شيء.",
       },
       voiding: { en: "Voiding…", ar: "جارٍ الإبطال…" },
-      voided: { en: "Voided", ar: "مُبطلة" },
 
       // THE NOTICE PHOTO (0178). Optional evidence, never money — the wording
       // says "notice", not "receipt": this is a picture of the fine that
