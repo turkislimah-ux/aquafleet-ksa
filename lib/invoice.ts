@@ -365,9 +365,13 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
       .filter((e): e is ConsumedItem & { kind: "trip" } => e.kind === "trip")
       .filter((e) => inPeriod(e.trip_date))
       .filter(notReservedElsewhere);
-    const periodCharges = specialCharges
-      .filter((c) => inPeriod(resolveChargeDate(c, periodEnd)))
-      .filter(notReservedElsewhere);
+    // Charges are NOT period-filtered. Each charge is FK-bound to exactly one
+    // invoice at creation, so notReservedElsewhere already scopes this to THIS
+    // invoice's own charges. A charge_date filter here dropped charges that
+    // v_customer_prepaid_balance had already consumed (no date filter there at
+    // all) — see 0181. Trips stay period-filtered; they are not FK-claimed the
+    // same way.
+    const periodCharges = specialCharges.filter(notReservedElsewhere);
 
     const unpaidTripLines = unpaidTripEntries.map(toTripLine);
     const chargeLinesForUnpaid: InvoiceLine[] = periodCharges.map((c) => ({
@@ -427,10 +431,17 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   const coveredLines = coveredTripEntries.map(toTripLine);
   const unpaidLines = unpaidTripEntries.map(toTripLine);
 
-  // Special Charges table: ALL of THIS invoice's charges (period + not
-  // reserved elsewhere), covered+uncovered together, each tagged.
+  // Special Charges table: ALL of THIS invoice's charges (not reserved
+  // elsewhere), covered+uncovered together, each tagged.
+  //
+  // NOT period-filtered — deliberately. Every charge is FK-bound to exactly one
+  // invoice at creation, so notReservedElsewhere alone scopes this correctly,
+  // while v_customer_prepaid_balance consumes EVERY charge on a non-void
+  // invoice with no date filter whatsoever. A charge_date filter here made the
+  // invoice omit charges the balance had already been deducted for (0181).
+  // chargesForEngine above never had this filter, so the two halves of this
+  // same function disagreed.
   const chargeLines: InvoiceLine[] = specialCharges
-    .filter((c) => inPeriod(resolveChargeDate(c, periodEnd)))
     .filter(notReservedElsewhere)
     .map((c) => ({
       id: c.id,
