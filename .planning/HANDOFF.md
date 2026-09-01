@@ -2,7 +2,7 @@
 
 ## State
 
-- **DB is at migration 0181.** Three applied, verified against the CATALOG and
+- **DB is at migration 0182.** Four applied, verified against the CATALOG and
   committed this session:
   - **`0179_rls_initplan_auth_uid_subselect.sql`** (`688b6e2`) wrapped the bare
     `auth.uid()` in five policy predicates as `(select auth.uid())`, so Postgres
@@ -26,13 +26,12 @@
     a regression and not introduced by 0180.
   - **`0181_confirm_invoice_special_charges_guard.sql`** (in `2477946`) — the
     money fix, below.
-- **`[ahead 2]`, working tree clean.** The six-commit backlog this file used to
-  flag WAS pushed; origin now has `0179` and all five skeleton commits. What is
-  unpushed is this session's own pair: `2477946` (money fix + `0181`) and
-  `9a2e6aa` (`0180`). Both are applied to the live DB, `tsc --noEmit` is 0,
-  `test:money` is 10/10, and all four in-browser scenarios passed before either
-  landed. **Push is Turki's call — measure `git status -sb` before quoting this
-  number, it is a pointer and it goes stale the moment anyone pushes.**
+  - **`0182_discard_draft_or_review_invoice.sql`** (in `46b0158`) — the discard
+    capability, below.
+- **In sync with `origin/main` at `46b0158`, working tree clean.** Everything
+  this file used to flag as unpushed is on origin. **This is a pointer and it
+  goes stale the moment anyone commits — measure `git status -sb` before quoting
+  it.**
 - **MONEY FIX — `confirm_invoice` IS NOW AN AUDITOR, NOT A SCRIBE (`2477946`).**
   A confirmed invoice could freeze with NO special charges while the customer's
   prepaid balance had already been consumed by those same charges. **Two sources
@@ -77,16 +76,69 @@
 - **Deploy target: Vercel Pro, function region `fra1`** — next to the
   `eu-central-1` database. Region choice is latency, not preference; moving
   functions away from the DB re-introduces a round-trip per query.
-- **OPEN, UNDER INVESTIGATION — draft-stage charge consumption.**
-  `v_customer_prepaid_balance` counts special charges on **any non-void
-  invoice, including `draft` and `review`**, while the reservation model is
-  **trips-only**. So a charge starts consuming the balance the moment it is
-  typed onto a draft. That reads as an inconsistency rather than a deliberate
-  reservation, but **it is not confirmed as a defect and nothing has been
-  changed.** Investigating what the client already relies on before touching
-  it — the balance view feeds the Trips tab, the Archive tab and Amount
-  Payable, and the three are deliberately different (see below). **Do not
-  "fix" this from the description alone.**
+- **RULED, NOT OPEN — draft-stage charge consumption is RESERVE-AT-DRAFT, and it
+  is CORRECT. Do not restrict it.** The investigation ran this session and
+  closed. `v_customer_prepaid_balance` counts special charges on **any non-void
+  invoice, including `draft` and `review`** — no date filter, `status <> 'void'`
+  is the only status filter. That is not an oversight sitting next to a
+  trips-only reservation model; **a charge reserves balance exactly as a draft
+  invoice reserves trips**, and the user-visible number already behaves that way.
+  - **Nothing in TypeScript reads the view.** `v_customer_prepaid_balance` has 7
+    repo hits and **all 7 are comments**; `charge_consumption_sar` has **zero**
+    hits repo-wide. Consumption reaches the app only DB-side, through three
+    dependent views: `v_customer_amount_payable` (Archive),
+    `v_invoice_outstanding_live` (Reports), and `v_active_alerts` (the bell, via
+    `v_my_notifications`).
+  - **Two money GATES depend on it transitively**, both through
+    `v_customer_amount_payable`: `archive_project_guarded` (refuses to archive
+    while the customer is negative) and `return_customer_balance` (gates a cash
+    refund on `amount_payable_sar > 0`). Restricting the view silently moves both.
+  - **`v_active_alerts` reads `balance_sar` directly** — `prepaid_overdrawn` on
+    `balance_sar < 0`, `prepaid_low_runway` on
+    `balance_sar >= 0 and balance_sar < low_runway_trips * top_rate`.
+  - **The number the user sees ALREADY drops at draft, and it does NOT come from
+    the view.** Finance's Running Balance is computed client-side in
+    `FinanceTab.tsx` over raw `invoice_special_charges` rows fetched in
+    `app/trips/page.tsx` scoped `status !== "void"` — the SAME scope the view
+    uses, reached independently.
+  - **THIS IS WHY IT MUST NOT BE "FIXED" IN ONE PLACE.** The identical
+    `status <> 'void'` scope exists in FOUR sites — the view, the Trips-page
+    fetch, `nonVoidInvoiceIds` in `invoiceActions.ts`, and the alert view. They
+    agree by construction today. Narrowing the view alone would leave the SQL and
+    the TS engine reporting different money for the same customer — **the exact
+    two-sources-of-truth shape closed in `2477946`.** All four move together or
+    none do, and none is the current ruling.
+- **DISCARD SHIPPED — an unfinalised invoice now has a way out (`46b0158`).**
+  Reserve-at-draft being correct is precisely what made the missing exit a real
+  problem: a draft or review invoice HOLDS its reserved trips and its charges'
+  balance, and `delete_draft_invoice` rejected everything that was not `'draft'`,
+  so a stale review invoice was unclearable and quietly kept both.
+  - **`0182` widened the EXISTING function in place — it did not add a second
+    one.** `0019` shipped `archive_project`, `0139` added
+    `archive_project_guarded`, `0140` had to DROP the unguarded one because the
+    second path was the back door around the first. One call site, one signature,
+    nothing to keep in sync, and the migration needs no TypeScript to land with
+    it. **Do not add `discard_invoice` alongside it.**
+  - **Measured live after the fact, not read off the migration (§5):** the gate
+    is `if v_status not in ('draft', 'review')`; `proacl` is
+    `{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}` —
+    **identical to the pre-migration ACL**, so the drop+create footer's revoke AND
+    grant both did their job; `anon_exec` false, `auth`/`service_role` true; and
+    the §6 invariant still measures **0 anon-executable non-trigger functions**.
+  - **The release works through the FKs, measured from `pg_constraint`:**
+    `invoice_special_charges.invoice_id -> c` (CASCADE — deleting the rows is what
+    frees the held balance, on BOTH sides at once) and `trips.invoice_id -> n`
+    (SET NULL). Nothing else references `invoices`, so the delete leaves no orphan.
+  - **`confirmed` / `paid` / `void` are still rejected, and the errors name the
+    right door** — an issued document keeps its number and leaves by
+    `void_invoice`; `paid` goes through `unpay_invoice` first.
+  - **The NAME is historical.** It deletes draft OR review. A rename to
+    `discard_invoice` would be honest but must ship as its own pure-rename unit —
+    migration and call site in ONE commit, or the live path breaks between them.
+  - **`InvoiceDetailModal`'s own delete button is still gated `status === "draft"`**
+    — deliberately left out of scope, so that modal is narrower than its own
+    backend. The list (`InvoicesModal`) is where the widened capability is
+    exposed. A small follow-up unit if the two should match; not a defect.
 - **Invoice `026-000015` is frozen understated and is being LEFT that way.**
   540.50 stored against 2,530.00 consumed. It is dummy data, and the freeze law
   of `0027` means issued invoices render from frozen columns and do not
@@ -189,18 +241,37 @@
   §5/§6 compression pass ran this session (`067635a`) and bought that room. Done
   as an audit, not a trim, per §5: it found two stale claims (below). Next pass,
   same method — re-verify every claim; all three so far found a stale fact.
+- **NEVER RUN `npm run build` WHILE `next dev` IS UP — THEY SHARE `.next/`, AND
+  THE BUILD WINS.** Cost a full debugging cycle this session. `next build` wipes
+  and rewrites `.next/`, so the running dev server's in-memory manifests point at
+  dev assets the production build deleted: `/_next/static/css/app/layout.css` and
+  `/_next/static/chunks/main-app.js` both return **404 serving the HTML 404
+  page**, and the app renders as raw unstyled HTML with all its data present and
+  no hydration. **It looks exactly like a CSS/PostCSS compile error and it is
+  not** — there is no error in the dev log, `tsc` is 0 and `globals.css` is
+  untouched. Tell them apart by fetching the stylesheet directly; a hard refresh
+  cannot help, the 404 is server-side. The fix is `pkill -f "next dev"`, then
+  `rm -rf .next` **with nothing running**, then restart. Use
+  `npx tsc --noEmit` + `npm run test:money` for verification while dev is up, and
+  save the production build for a moment when it is not.
 - **MCP-applied migrations write NO `schema_migrations` ledger row.** Neither do
   SQL Editor runs. The migration FILE is the record. The ledger's max version
   lags reality and always will — **the objects in the catalog are the truth, the
   ledger is not.** Do not "discover" a missing migration from a ledger query and
   do not re-apply one on that basis. Check `pg_proc` / `pg_index` first.
-- **No open decisions. ONE open INVESTIGATION, no known defects.** O-1 and O-2
-  were both ruled and closed; nothing was reopened. The open investigation is
-  draft-stage charge consumption (above) — a suspected inconsistency, not a
-  confirmed defect. **Two open VERIFICATIONS** — `178df21` scenarios 10–14, and
-  all of `9e4ca3b`. Unverified is not the same as defective, and it is not the
-  same as clean either. The money fix (`2477946`) is NOT in either list: it was
-  verified in-browser across all four scenarios before it was committed.
+- **No open decisions, NO open investigations, no known defects.** O-1 and O-2
+  were both ruled and closed; nothing was reopened. Draft-stage charge
+  consumption — the single investigation this file used to carry — was **RULED
+  this session** (above): reserve-at-draft is correct, do not restrict it.
+  **Two open VERIFICATIONS remain** — `178df21` scenarios 10–12, and all of
+  `9e4ca3b`. (13–14 are DECLINED, not pending; see below. An earlier revision of
+  this line said "10–14", which contradicted that ruling two bullets down.)
+  Unverified is not the same as defective, and it is not the same as clean
+  either. Neither the money fix (`2477946`) nor the discard unit (`46b0158`) is
+  in that list: both were verified in-browser before they were committed — for
+  `46b0158`, a review invoice holding trips and charges was deleted, its trips
+  freed, and its charges dropped off the customer's balance, with
+  confirmed/paid/void rows showing neither the wash nor the delete control.
 - **13 and 14 ARE DECLINED, NOT PENDING — do not re-raise them as a gap.** They
   assert that an *issued* payslip shows no Pencil and no Ban but still shows the
   photo icon. No issued payslip exists for a driver with photographed fines, and
@@ -260,6 +331,8 @@
 | 15 | Skeleton loading states, batch 5 — `/inventory`, `/consumption`, `/reports`, `/archive` | `693ce46` |
 | 16 | **MONEY:** special charges must match the balance source or confirm is rejected — `0181` makes `confirm_invoice` an auditor; `lib/invoice.ts` stops period-filtering charges. Applied, 4 scenarios verified in-browser, `test:money` 10/10 | `2477946` |
 | 17 | `search_path` pinned on 8 advisor-flagged functions — `0180`; applied and verified against `pg_proc` | `9a2e6aa` |
+| 18 | Draft-stage charge consumption INVESTIGATED and ruled: reserve-at-draft is correct, the four `status <> 'void'` sites agree by construction, restricting one would fork the money | (docs only) |
+| 19 | **Discard an unfinalised invoice** — `0182` widens `delete_draft_invoice` in place to draft OR review (trips SET NULL, charges CASCADE, confirmed/paid/void still rejected, ACL footer restated); UI adds the amber wash on draft/review rows and a per-row permanent delete behind the shared `GuardBox`; stale draft-only comment on `deleteDraftInvoice` corrected. Applied, ACL and gate re-measured against `pg_proc`, verified in-browser | `46b0158` |
 
 ---
 
@@ -307,10 +380,15 @@ Ten harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green:
 self-verifying — it had been rebuilt from a throwaway script twice.
 
 **It ASSERTS the freeze boundary: an invoice carries a frozen split if and only
-if it is ISSUED (confirmed/paid/void).** Live-measured exact — 17 issued all
-frozen, the 1 review not. Falsifiable both ways: issued-but-unfrozen prints a
-zeroed document; frozen-but-draft means freeze-at-confirm fired where it must
-not. A negative control drives the predicate with a row broken each way.
+if it is ISSUED (confirmed/paid/void).** Re-measured this session, exact both
+ways — **24 issued (3 confirmed + 17 paid + 4 void) all frozen; 6 unfinalised
+(3 draft + 3 review) none frozen.** Falsifiable both ways: issued-but-unfrozen
+prints a zeroed document; frozen-but-draft means freeze-at-confirm fired where
+it must not. A negative control drives the predicate with a row broken each way.
+**An earlier revision of this line read "17 issued, the 1 review not" — those
+counts are DATA and they drift** (the discard work alone deleted a review
+invoice). It is the two-way agreement that is the invariant, never the number;
+re-measure before quoting it (§5).
 
 **It PRINTS, and never asserts, the count and SAR.** Those drift with the data;
 hardcoding them would be a brittle test, not a guard.
@@ -490,12 +568,14 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-**No FEATURE is queued** — ask Turki for the next one rather than picking. Six
-pieces of follow-through are outstanding and none of them is a feature.
+**No FEATURE is queued** — ask Turki for the next one rather than picking. **Four
+pieces of follow-through are outstanding — 1, 3, 4 and 5 below** — and none of
+them is a feature. (Item 2 is kept struck through as a record, not as work.)
 
-1. **Run the `178df21` in-browser checklist** (see State, above). It is the one
-   outstanding verification. **`9e4ca3b` needs the same treatment** — its miss
-   path is a two-tab race, so ordinary clicking will not reach it.
+1. **Run `178df21` scenarios 10–12** (see State, above) — payslip preview on an
+   unissued month. **`9e4ca3b` needs the same treatment** — its miss path is a
+   two-tab race, so ordinary clicking will not reach it. These are the two
+   outstanding verifications.
 2. ~~Promote the PostgREST zero-row rule into `SKILL.md`~~ — **DONE (`97964b7`).**
    It lives under **"A GUARDED WRITE MUST READ BACK"**, next to RPC Conventions:
    the two honest read-back shapes, the bail-above-destroy ordering, the three
@@ -505,20 +585,26 @@ pieces of follow-through are outstanding and none of them is a feature.
    moved out of this file.
 3. Parked papercut: `InvoicesModal`'s period default — both bounds default to
    today, so the default range is a single day. Pre-existing, untouched.
-4. **Two commits are unpushed** — `2477946` (money fix + `0181`) and `9a2e6aa`
-   (`0180`). The previous six-commit backlog was pushed; origin has `0179` and
-   all the skeleton work. Both outstanding commits are applied to the live DB
-   and verified. Ask Turki before pushing. **Re-measure with `git status -sb`
-   before quoting — this number goes stale on the next push.**
-5. **Investigate draft-stage charge consumption** (see State). Question to
-   answer first, before any change: does anything already depend on a draft's
-   charges drawing down the balance? Map the readers of
-   `v_customer_prepaid_balance` — Trips tab, Archive tab, Amount Payable — and
-   remember the three prepaid numbers are deliberately different. **Report
-   findings before proposing a migration.**
-6. **Enable leaked-password protection in the Supabase dashboard.** Not a
+4. **Two optional tidy-ups left by the discard work (`46b0158`), neither a
+   defect** — take them only if asked:
+   - **`InvoiceDetailModal`'s own delete is still gated `status === "draft"`**,
+     so that modal is narrower than the RPC underneath it. Widening it to
+     `draft || review` would match `InvoicesModal`. One-file unit.
+   - **Rename `delete_draft_invoice` → `discard_invoice`.** The name is
+     historical now. **Only as a pure-rename unit — migration and call site in
+     ONE commit**, or the live path breaks between them. Cosmetic; not worth a
+     breakage window on its own.
+5. **Enable leaked-password protection in the Supabase dashboard.** Not a
    migration, not a code change — a console setting. It is the one open item on
    the security posture.
+
+~~Investigate draft-stage charge consumption~~ — **RULED this session**, see
+State. Reserve-at-draft is correct and the four `status <> 'void'` sites agree by
+construction. **Do not reopen it as a task.**
+
+~~Push the outstanding commits~~ — **DONE.** Origin is at `46b0158` and the tree
+is clean. **Re-measure with `git status -sb` before quoting; this goes stale on
+the next commit.**
 
 **NOTIFICATIONS + SETTINGS IS BUILT AND LIVE — do NOT plan it.** Earlier
 revisions of this file listed it as the next feature with "`0154` pending,
