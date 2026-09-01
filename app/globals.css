@@ -708,3 +708,86 @@ html[dir="rtl"] { --dock-dir: -1; }
   }
   #po-print table tr { break-inside: avoid; }
 }
+
+/* ===============================================================
+   Skeleton tokens — ported from preview/app.css:33-43 alongside the
+   skeleton block below. globals.css carries colour tokens only and
+   defines no radius/easing/duration scale, so the block's var()
+   references would otherwise be undefined. That is not a cosmetic
+   miss: an undefined var() inside the `animation` shorthand is
+   invalid at computed-value time, which drops the WHOLE shorthand
+   and leaves animation-name: none — static grey blocks, no shimmer,
+   and nothing in the file to show for it. Names and values are
+   preview's, unchanged, so the two cannot drift.
+   =============================================================== */
+:root {
+  --ease: cubic-bezier(.32, .72, 0, 1);
+  --dur-3: 360ms;
+  --r-3: .75rem;
+  --r-4: 1.125rem;
+}
+
+/* ===============================================================
+   Skeleton loaders — shown for a single beat on every route change
+   so the app reads as "preparing", never "blank". Optical-aligned
+   blocks that match the real layout's rhythm.
+   Ported verbatim from preview/app.css:1396-1460.
+   =============================================================== */
+.skel {
+  position: relative;
+  overflow: hidden;
+  background: rgba(15, 23, 42, .06);
+  border-radius: var(--r-3);
+  isolation: isolate;
+}
+.dark .skel { background: rgba(255, 255, 255, .06); }
+.skel::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, .35) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: shimmer 1.45s var(--ease) infinite;
+  z-index: 1;
+}
+.dark .skel::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, .07) 50%,
+    transparent 100%
+  );
+}
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+[dir="rtl"] .skel::after { animation-direction: reverse; }
+
+.skel-h1 { height: 1.8rem; width: 35%; margin-bottom: .55rem; }
+.skel-line { height: .85rem; border-radius: 9999px; margin-bottom: .55rem; }
+.skel-line.lg { height: 1.1rem; }
+.skel-line.short { width: 35%; }
+.skel-line.medium { width: 60%; }
+.skel-line.full { width: 100%; }
+.skel-stat { height: 5.5rem; border-radius: var(--r-4); }
+.skel-card { height: 12rem; border-radius: var(--r-4); }
+
+/* Skeleton page — visible for ~250 ms on every route change. */
+.skel-page {
+  animation: skel-fade var(--dur-3) var(--ease);
+}
+@keyframes skel-fade {
+  from { opacity: .85; }
+  to   { opacity: 1; }
+}
+.skel-page .skel-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .85rem;
+  margin-bottom: 1.25rem;
+}
+@media (max-width: 768px) {
+  .skel-page .skel-grid { grid-template-columns: repeat(2, 1fr); }
+}
