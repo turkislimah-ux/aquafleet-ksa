@@ -503,10 +503,11 @@ export default function InvoiceDetailModal({
     window.open(r.data.url, "_blank", "noopener,noreferrer");
   }
 
-  // Deletion removes the row entirely (0030 — draft-only, releases reserved
-  // trips) — unlike other actions, refresh()/load() would fail afterward
-  // since invoiceId no longer resolves, so this goes straight back to the
-  // invoice list instead.
+  // Deletion removes the row entirely — draft OR review since 0182, releasing
+  // its reserved trips and, through the charges' ON DELETE CASCADE, the prepaid
+  // balance they were holding. Unlike every other action here, refresh()/load()
+  // would fail afterward since invoiceId no longer resolves, so this goes
+  // straight back to the invoice list instead.
   async function onDeleteDraft() {
     if (!invoiceId) return;
     setBusy(true);
@@ -583,6 +584,14 @@ export default function InvoiceDetailModal({
   if (!open || !invoiceId || !mounted) return null;
 
   const status = raw?.status;
+  // The two statuses delete_draft_invoice accepts since 0182 — an unfinalised
+  // invoice that still HOLDS its reserved trips and, through its special
+  // charges, a prepaid customer's balance. Named once so the button and its
+  // guard cannot drift apart, and so this reads as one rule rather than the
+  // same disjunction typed twice. Matches `isUnfinalized` in InvoicesModal;
+  // both exist because the RPC is the single authority on which statuses can
+  // be discarded, and neither screen may offer a control it would reject.
+  const canDiscard = status === "draft" || status === "review";
   // readOnly folds in here rather than at each call site: `editable` already
   // governs every special-charge mutation, so one AND covers the add form,
   // the remove buttons and the image upload together, with no chance of a
@@ -1070,25 +1079,41 @@ export default function InvoiceDetailModal({
                     {t("trips.invoiceSheet.moveToReview", lang)}
                   </Btn>
                   <Btn variant="outline" onClick={() => setDeletingDraft(true)} className={busy ? "opacity-50 pointer-events-none" : ""}>
-                    <Trash2 className="h-4 w-4" /> {t("trips.invoiceSheet.deleteDraft", lang)}
+                    <Trash2 className="h-4 w-4" /> {t("trips.invoices.discard", lang)}
                   </Btn>
                 </div>
               )}
-              {status === "draft" && deletingDraft && (
+              {/* ONE guard for both statuses, and it deliberately borrows the
+                  `trips.invoices.*` strings the list already uses. The same
+                  irreversible act must not be described two different ways
+                  depending on which screen the operator reached it from — the
+                  list's copy is the complete one (trips released AND charges
+                  stop consuming balance), so it is the one that survives. */}
+              {canDiscard && deletingDraft && (
                 <GuardBox
                   lang={lang}
-                  warning={t("trips.invoiceSheet.guardDeleteDraft", lang)}
+                  warning={t("trips.invoices.guardDiscard", lang)}
                   busy={busy}
-                  confirmLabel={t("trips.invoiceSheet.confirmDeleteDraft", lang)}
+                  confirmLabel={t("trips.invoices.confirmDiscard", lang)}
                   onCancel={() => setDeletingDraft(false)}
                   onConfirm={onDeleteDraft}
                 />
               )}
 
-              {status === "review" && !confirmingConfirm && (
+              {/* `!deletingDraft` matches the draft row above: when the guard
+                  opens, the actions it is asking about get out of its way. */}
+              {status === "review" && !confirmingConfirm && !deletingDraft && (
                 <div className="flex items-center gap-2">
                   <Btn variant="outline" onClick={() => runAction(() => revertInvoiceToDraft(invoiceId))} className={busy ? "opacity-50 pointer-events-none" : ""}>
                     {t("trips.invoiceSheet.backToDraft", lang)}
+                  </Btn>
+                  {/* Discard is reachable directly from Review now (0182). It
+                      sits next to Back-to-Draft rather than beside Confirm
+                      because both are ways OUT of review, and it stays visually
+                      apart from the primary action it must never be mistaken
+                      for. */}
+                  <Btn variant="outline" onClick={() => setDeletingDraft(true)} className={busy ? "opacity-50 pointer-events-none" : ""}>
+                    <Trash2 className="h-4 w-4" /> {t("trips.invoices.discard", lang)}
                   </Btn>
                   <span
                     title={

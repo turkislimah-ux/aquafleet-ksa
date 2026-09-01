@@ -8138,12 +8138,14 @@ export const dict = {
       // ALL FRESH. None of this reaches paper: these are the operator's stage
       // transitions and their guard boxes.
       moveToReview: { en: "Move to Review", ar: "نقل إلى المراجعة" },
-      deleteDraft: { en: "Delete draft", ar: "حذف المسودة" },
-      guardDeleteDraft: {
-        en: "Deletes this draft and releases every trip it had reserved, freeing them for another invoice. This cannot be undone.",
-        ar: "يحذف هذه المسودة ويُحرّر كل رحلة كانت محجوزة لها، لتصبح متاحة لفاتورة أخرى. لا يمكن التراجع عن هذا.",
-      },
-      confirmDeleteDraft: { en: "Yes, delete draft", ar: "نعم، احذف المسودة" },
+      // `deleteDraft` / `guardDeleteDraft` / `confirmDeleteDraft` LIVED HERE and
+      // are deliberately GONE, not misplaced. They said "draft" in both
+      // languages and named only the trips, which stopped being true when 0182
+      // let the same button appear on a review invoice holding a prepaid
+      // customer's balance. Rather than fix the copy in a second place, the
+      // sheet now reads `trips.invoices.discard` / `guardDiscard` /
+      // `confirmDiscard` — the list's strings, which already state the whole
+      // consequence. One irreversible act, one description.
       backToDraft: { en: "Back to Draft", ar: "رجوع إلى المسودة" },
       cannotConfirmTitle: {
         en: "Cannot confirm — undelivered trips in this invoice's period (see list above).",
