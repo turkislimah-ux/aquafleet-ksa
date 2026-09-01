@@ -2,23 +2,96 @@
 
 ## State
 
-- **DB is at migration 0179.** `0179_rls_initplan_fix.sql` wrapped the bare
-  `auth.uid()` in five policy predicates as `(select auth.uid())`, so Postgres
-  hoists it into an InitPlan and evaluates it once per query instead of once per
-  row. Applied to the live DB, committed `688b6e2`. **Re-verified this turn, both
-  directions:** `pg_policies` shows all five predicates wrapped
-  (`issue_reports_insert_own` in `with_check`; `own_notification_dismissals`,
-  `own_notification_prefs`, `own_notification_thresholds_user`,
-  `own_user_profiles` in both `qual` and `with_check`) with the predicates
-  otherwise unchanged, and the performance advisor now returns **zero
-  `auth_rls_initplan` entries** — the five WARNs are gone. What remains from the
-  advisor is `unindexed_foreign_keys` + `unused_index`, all INFO, all pre-existing.
-  `0178_violation_notice_image.sql` (previous head) added
-  `driver_violations.image_path` and the private `violation-images` bucket.
-- **Working tree clean, `[ahead 6]` — NOTHING IS PUSHED.** Six commits sit on
-  local `main` and origin has none of them: `688b6e2` (0179) plus the five
-  skeleton commits below. Push is Turki's call, not an oversight to correct
-  silently.
+- **DB is at migration 0181.** Three applied, verified against the CATALOG and
+  committed this session:
+  - **`0179_rls_initplan_auth_uid_subselect.sql`** (`688b6e2`) wrapped the bare
+    `auth.uid()` in five policy predicates as `(select auth.uid())`, so Postgres
+    hoists it into an InitPlan and evaluates it once per query instead of once
+    per row. Verified both directions: `pg_policies` shows all five wrapped
+    (`issue_reports_insert_own` in `with_check`; `own_notification_dismissals`,
+    `own_notification_prefs`, `own_notification_thresholds_user`,
+    `own_user_profiles` in both `qual` and `with_check`), predicates otherwise
+    unchanged, and the advisor returns **zero `auth_rls_initplan` entries**.
+    **Earlier revisions of this file named it `0179_rls_initplan_fix.sql` —
+    WRONG, and corrected here.** A filename taken from memory is exactly the
+    §5 trap; the file on disk is the record.
+  - **`0180_pin_function_search_path.sql`** (`9a2e6aa`) pinned
+    `search_path = public, pg_temp` on the 8 functions the security advisor
+    flagged `function_search_path_mutable`. `public` stays FIRST so every
+    unqualified reference resolves as before — deliberately non-breaking.
+    `ALTER FUNCTION … SET` touches only `proconfig`; bodies and ACLs are
+    untouched, so §6's re-revoke rule does not apply. Verified: all 8 carry the
+    setting; 7 are `anon_exec = f`, and `set_updated_at()` is `anon_exec = t`
+    but `returns trigger` — §6's accepted class, unreachable via PostgREST, NOT
+    a regression and not introduced by 0180.
+  - **`0181_confirm_invoice_special_charges_guard.sql`** (in `2477946`) — the
+    money fix, below.
+- **`[ahead 2]`, working tree clean.** The six-commit backlog this file used to
+  flag WAS pushed; origin now has `0179` and all five skeleton commits. What is
+  unpushed is this session's own pair: `2477946` (money fix + `0181`) and
+  `9a2e6aa` (`0180`). Both are applied to the live DB, `tsc --noEmit` is 0,
+  `test:money` is 10/10, and all four in-browser scenarios passed before either
+  landed. **Push is Turki's call — measure `git status -sb` before quoting this
+  number, it is a pointer and it goes stale the moment anyone pushes.**
+- **MONEY FIX — `confirm_invoice` IS NOW AN AUDITOR, NOT A SCRIBE (`2477946`).**
+  A confirmed invoice could freeze with NO special charges while the customer's
+  prepaid balance had already been consumed by those same charges. **Two sources
+  of truth for one amount of money:** `lib/invoice.ts` period-filtered special
+  charges by `charge_date`, while `v_customer_prepaid_balance` counts every
+  charge on a non-void invoice with **no date filter at all**. Measured on
+  `026-000015` — snapshot empty, grand total 540.50, balance consumed 2,530.00.
+  - **Server (`0181`):** `confirm_invoice` derives the authoritative charge set
+    from `invoice_special_charges` — the SAME rows the balance view consumes —
+    and **RAISES unless the client payload matches by id AND amount**, before
+    `next_invoice_number()` is claimed, so a rejected confirm burns no number.
+  - **It AUDITS, it does NOT recompute.** The covered/uncovered split stays
+    client-side: it comes from the FIFO walk in `lib/prepaid.ts` over the
+    customer's full history, and the per-line `covered` boolean exists nowhere
+    in the DB. Reimplementing that in plpgsql would fork the money math, which
+    the money-core boundary forbids. **Do not "finish the job" by moving the
+    split into SQL.**
+  - **It compares BASE `amount_sar`, not gross** — both sides then use identical
+    Postgres numeric arithmetic on identical 2dp inputs. Comparing gross would
+    pit JS `round2(x * 1.15)` against PG `round(x * 1.15, 2)`, which diverge on
+    exact-half halalas and would reject CORRECT invoices.
+  - **Client:** `lib/invoice.ts` no longer period-filters special charges, in
+    either arm. Charges are FK-bound to exactly one invoice at creation, so
+    `notReservedElsewhere` already scopes them; the date filter only ever
+    dropped money. Trip period filters are untouched, and `chargesForEngine`
+    never had the filter — so the two halves of that function now agree.
+- **`confirm_invoice`'s ACL — THE GRANT IN `0181`'s FOOTER IS NOT A LEAK.**
+  `0181` is `drop` + `create`, which **wipes the explicit grants**. The live
+  `proacl` is `{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}`
+  — **no PUBLIC entry**; `authenticated` and `service_role` are explicit, not
+  inherited. So the footer must `revoke execute … from public, anon` **AND**
+  `grant execute … to authenticated, service_role`. Revoking alone leaves the
+  function owner-only and **the app loses confirm entirely** — caught in review
+  before it ran, not after. Read back with `has_function_privilege` on all
+  three roles plus `anon`, identified by `oid::regprocedure` (§6).
+- **Security posture: the anon boundary is CLEAN.** The ~49 remaining
+  `authenticated`-definer advisor warnings are **by design** — this is a
+  single-tenant internal app and every staff user is `authenticated`. Do not
+  triage them as findings. **One real item is outstanding and it is not in the
+  repo: leaked-password protection is still OFF and must be enabled in the
+  Supabase dashboard.** No migration can do it.
+- **Deploy target: Vercel Pro, function region `fra1`** — next to the
+  `eu-central-1` database. Region choice is latency, not preference; moving
+  functions away from the DB re-introduces a round-trip per query.
+- **OPEN, UNDER INVESTIGATION — draft-stage charge consumption.**
+  `v_customer_prepaid_balance` counts special charges on **any non-void
+  invoice, including `draft` and `review`**, while the reservation model is
+  **trips-only**. So a charge starts consuming the balance the moment it is
+  typed onto a draft. That reads as an inconsistency rather than a deliberate
+  reservation, but **it is not confirmed as a defect and nothing has been
+  changed.** Investigating what the client already relies on before touching
+  it — the balance view feeds the Trips tab, the Archive tab and Amount
+  Payable, and the three are deliberately different (see below). **Do not
+  "fix" this from the description alone.**
+- **Invoice `026-000015` is frozen understated and is being LEFT that way.**
+  540.50 stored against 2,530.00 consumed. It is dummy data, and the freeze law
+  of `0027` means issued invoices render from frozen columns and do not
+  recompute — so it will not self-correct and that is correct behaviour. Not a
+  defect to chase; not evidence the fix failed.
 - **The skeleton loading-state sweep SHIPPED — 12 `loading.tsx`, one per
   server-fetching route segment.** Commits `d9541f9`, `7b9f3af`, `1f40d42`,
   `a8c39c2`, `693ce46`. The `.skel*` primitives and four tokens
@@ -121,10 +194,13 @@
   lags reality and always will — **the objects in the catalog are the truth, the
   ledger is not.** Do not "discover" a missing migration from a ledger query and
   do not re-apply one on that basis. Check `pg_proc` / `pg_index` first.
-- **No open decisions and no known defects.** O-1 and O-2 were both ruled and
-  closed; nothing was reopened. **Two open VERIFICATIONS** — `178df21` scenarios
-  10–14, and all of `9e4ca3b`. Unverified is not the same as defective, and it is
-  not the same as clean either.
+- **No open decisions. ONE open INVESTIGATION, no known defects.** O-1 and O-2
+  were both ruled and closed; nothing was reopened. The open investigation is
+  draft-stage charge consumption (above) — a suspected inconsistency, not a
+  confirmed defect. **Two open VERIFICATIONS** — `178df21` scenarios 10–14, and
+  all of `9e4ca3b`. Unverified is not the same as defective, and it is not the
+  same as clean either. The money fix (`2477946`) is NOT in either list: it was
+  verified in-browser across all four scenarios before it was committed.
 - **13 and 14 ARE DECLINED, NOT PENDING — do not re-raise them as a gap.** They
   assert that an *issued* payslip shows no Pencil and no Ban but still shows the
   photo icon. No issued payslip exists for a driver with photographed fines, and
@@ -182,6 +258,8 @@
 | 13 | Skeleton loading states, batch 3 — `/drivers`, `/trips` | `1f40d42` |
 | 14 | Skeleton loading states, batch 4 — `/customers`, `/projects`, `/maintenance` | `a8c39c2` |
 | 15 | Skeleton loading states, batch 5 — `/inventory`, `/consumption`, `/reports`, `/archive` | `693ce46` |
+| 16 | **MONEY:** special charges must match the balance source or confirm is rejected — `0181` makes `confirm_invoice` an auditor; `lib/invoice.ts` stops period-filtering charges. Applied, 4 scenarios verified in-browser, `test:money` 10/10 | `2477946` |
+| 17 | `search_path` pinned on 8 advisor-flagged functions — `0180`; applied and verified against `pg_proc` | `9a2e6aa` |
 
 ---
 
@@ -412,8 +490,8 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-**No FEATURE is queued** — ask Turki for the next one rather than picking. ONE
-piece of follow-through is outstanding, and it is not a feature.
+**No FEATURE is queued** — ask Turki for the next one rather than picking. Six
+pieces of follow-through are outstanding and none of them is a feature.
 
 1. **Run the `178df21` in-browser checklist** (see State, above). It is the one
    outstanding verification. **`9e4ca3b` needs the same treatment** — its miss
@@ -427,9 +505,20 @@ piece of follow-through is outstanding, and it is not a feature.
    moved out of this file.
 3. Parked papercut: `InvoicesModal`'s period default — both bounds default to
    today, so the default range is a single day. Pre-existing, untouched.
-4. **Six commits are unpushed.** Nothing is wrong with them — `tsc --noEmit` is 0
-   and every one was verified in-browser before it landed — but origin does not
-   have `0179` or any of the skeleton work. Ask Turki before pushing.
+4. **Two commits are unpushed** — `2477946` (money fix + `0181`) and `9a2e6aa`
+   (`0180`). The previous six-commit backlog was pushed; origin has `0179` and
+   all the skeleton work. Both outstanding commits are applied to the live DB
+   and verified. Ask Turki before pushing. **Re-measure with `git status -sb`
+   before quoting — this number goes stale on the next push.**
+5. **Investigate draft-stage charge consumption** (see State). Question to
+   answer first, before any change: does anything already depend on a draft's
+   charges drawing down the balance? Map the readers of
+   `v_customer_prepaid_balance` — Trips tab, Archive tab, Amount Payable — and
+   remember the three prepaid numbers are deliberately different. **Report
+   findings before proposing a migration.**
+6. **Enable leaked-password protection in the Supabase dashboard.** Not a
+   migration, not a code change — a console setting. It is the one open item on
+   the security posture.
 
 **NOTIFICATIONS + SETTINGS IS BUILT AND LIVE — do NOT plan it.** Earlier
 revisions of this file listed it as the next feature with "`0154` pending,
