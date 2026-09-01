@@ -7571,6 +7571,29 @@ export const dict = {
       colGrandTotal: { en: "Grand Total", ar: "الإجمالي الكلي" },
       colAmountDue: { en: "Amount Due", ar: "المبلغ المستحق" },
       open: { en: "Open", ar: "فتح" },
+
+      // ── Unfinalised rows: the amber wash and the way out ──────────────────
+      // A draft or review invoice HOLDS two things the list cannot show: the
+      // trips it has reserved (invoice_id set = unavailable to any other
+      // invoice) and, for a prepaid customer, its special charges, which are
+      // already deducted from the balance the moment they are recorded. So an
+      // abandoned one is not inert — it quietly keeps money and trips. The row
+      // is washed amber so it cannot be scrolled past, and `discard` is the way
+      // out. 0182 widened delete_draft_invoice from draft-only to draft OR
+      // review, which is what makes the review case reachable at all.
+      unfinalizedHint: {
+        en: "Highlighted rows are not finalized yet — they still hold their reserved trips and the customer's balance.",
+        ar: "الصفوف المظللة لم تُنهَ بعد — لا تزال تحجز رحلاتها ورصيد العميل.",
+      },
+      // Short on the button, complete in the guard. The affordance stays
+      // narrow enough for a table cell; the full consequence is stated where
+      // the operator actually commits to it.
+      discard: { en: "Delete", ar: "حذف" },
+      guardDiscard: {
+        en: "Deletes this invoice permanently. Its reserved trips are released for another invoice, and its special charges stop consuming the customer's balance. This cannot be undone.",
+        ar: "يحذف هذه الفاتورة نهائيًا. تُحرَّر رحلاتها المحجوزة لتصبح متاحة لفاتورة أخرى، وتتوقف رسومها الخاصة عن خصم رصيد العميل. لا يمكن التراجع عن هذا.",
+      },
+      confirmDiscard: { en: "Yes, delete permanently", ar: "نعم، احذف نهائيًا" },
     },
 
     /**

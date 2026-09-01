@@ -1960,7 +1960,13 @@ function HideAmountDueToggle({
   );
 }
 
-function GuardBox({
+// EXPORTED for InvoicesModal's per-row permanent delete. That list already
+// imports this module (it renders InvoiceDetailModal), so this adds no new
+// edge and no cycle — InvoiceDetailModal never imports InvoicesModal. It is
+// exported rather than copied because a destructive confirmation is exactly
+// the thing that must not exist in two visual dialects: one amber panel, one
+// rose confirm button, everywhere the app asks "are you sure".
+export function GuardBox({
   lang,
   warning,
   busy,

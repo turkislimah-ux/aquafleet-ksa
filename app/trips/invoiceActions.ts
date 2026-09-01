@@ -274,8 +274,14 @@ export async function createDraftInvoice(
   return { error: null, data: { id: data.id } };
 }
 
-// Abandons a draft, releasing its reserved trips (0030 — draft-only, see
-// migration header; a Review invoice must Back-to-Draft first).
+// Discards an unfinalised invoice, releasing what it holds. 0182 widened
+// delete_draft_invoice from draft-only to draft OR review — a Review invoice no
+// longer has to go Back-to-Draft first, which is what made a stale one
+// clearable at all. The RPC nulls trips.invoice_id (releasing the reservation)
+// and deletes the row; invoice_special_charges goes with it through the FK's
+// ON DELETE CASCADE, which is what frees a prepaid customer's held balance.
+// Confirmed/paid/void are still rejected there — an issued document leaves by
+// void_invoice, never by delete. The name is historical; see 0182's header.
 export async function deleteDraftInvoice(invoiceId: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.rpc("delete_draft_invoice", { p_invoice_id: invoiceId });

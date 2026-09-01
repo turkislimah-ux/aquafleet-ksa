@@ -8,14 +8,14 @@
 // Drills into InvoiceDetailModal (the actual lifecycle workspace) for both
 // a freshly-created draft and any existing invoice in the list.
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Plus } from "lucide-react";
+import { X, Plus, Trash2 } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
-import { formatSar, todayKey } from "@/lib/utils";
+import { cn, formatSar, todayKey } from "@/lib/utils";
 import { type Invoice } from "@/lib/db-types";
-import { createDraftInvoice, listInvoicesForCustomer } from "./invoiceActions";
-import InvoiceDetailModal from "./InvoiceDetailModal";
+import { createDraftInvoice, deleteDraftInvoice, listInvoicesForCustomer } from "./invoiceActions";
+import InvoiceDetailModal, { GuardBox } from "./InvoiceDetailModal";
 import ScrollLock from "@/components/ScrollLock";
 import { useApp } from "@/components/AppShell";
 import { t, fill } from "@/lib/i18n";
@@ -23,6 +23,31 @@ import { invoiceStatusLabel } from "@/lib/enum-labels";
 
 const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
+
+// UNFINALISED = still mutable, and still HOLDING. Both statuses reserve their
+// trips and consume a prepaid customer's balance through their special
+// charges; only 'confirmed' onwards is a document. Same two statuses
+// delete_draft_invoice accepts since 0182, deliberately — the wash marks
+// exactly the rows the delete button appears on, so the cue and the capability
+// never disagree.
+const isUnfinalized = (status: string) => status === "draft" || status === "review";
+
+// The amber wash. Values are preview/'s warn vocabulary, not picked by eye:
+// amber-500 is #f59e0b, preview's single warn hue (app.css `.pill-warn .dot`,
+// `.col-loading`, `.insight-warn`), and Tailwind's amber is not overridden in
+// tailwind.config.ts, so the token resolves to that exact hex.
+//   resting light .06  — preview `.insight-warn` background, its faded-warn surface
+//   resting dark  .10  — this app's own in-modal row tint (SalaryHistoryModal)
+//   hover  light  .12  — preview `.pill-warn` background
+//   hover  dark   .16  — preview `.modal-body .pill-ok` / `.pill-info` alpha
+// Kept as classes rather than an inline `style`, because an inline background
+// beats every class and would kill the row's hover response outright.
+// Split from the hover so the confirmation row below can carry the wash
+// WITHOUT it: a background that shifts under an open guard panel reads as a
+// second thing happening while the operator is deciding.
+const ROW_UNFINALIZED_BG = "bg-amber-500/[0.06] dark:bg-amber-500/[0.10]";
+const ROW_UNFINALIZED_HOVER = "hover:bg-amber-500/[0.12] dark:hover:bg-amber-500/[0.16]";
+const ROW_PLAIN = "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]";
 
 // settledBalance: prepaid customers only (Finance tab's per-row figure,
 // already computed there — passed through unchanged so InvoiceDetailModal's
@@ -59,6 +84,13 @@ export default function InvoicesModal({
   const [saving, setSaving] = useState(false);
 
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+
+  // Permanent delete, one row at a time. Holding the id (not a boolean) is what
+  // keeps the confirmation anchored to the row it belongs to — opening a second
+  // one closes the first, so two guards can never be armed at once.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Deep-link focus, applied once per open. A plain effect on
   // (invoices, initialInvoiceId) would re-select the invoice the instant the
@@ -100,12 +132,14 @@ export default function InvoicesModal({
     setPeriodStart(todayKey());
     setPeriodEnd(todayKey());
     setSelectedInvoiceId(null);
+    setConfirmingDeleteId(null);
+    setDeleteError(null);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, customer?.id]);
 
   function close() {
-    if (saving) return;
+    if (saving || deleting) return;
     onClose();
   }
 
@@ -130,7 +164,38 @@ export default function InvoicesModal({
     router.refresh();
   }
 
+  // PERMANENT. deleteDraftInvoice calls delete_draft_invoice, which since 0182
+  // accepts draft OR review: it nulls trips.invoice_id for this invoice and
+  // deletes the row, and invoice_special_charges goes with it through the FK's
+  // ON DELETE CASCADE — which is what frees the customer's held balance.
+  //
+  // TWO REFRESHES, BOTH NEEDED, AND THEY ARE NOT THE SAME REFRESH. load() is
+  // this modal's own list, fetched client-side; router.refresh() re-pulls the
+  // Trips page's server props, which is where the released trips and the
+  // recomputed balance actually live. Dropping either one leaves half the
+  // screen showing money and trips the database no longer holds.
+  //
+  // No status check here. The server owns that gate, and duplicating it in the
+  // client would be a second place for the rule to drift — the button is simply
+  // not rendered on rows the RPC would reject.
+  async function onDelete(invoiceId: string) {
+    setDeleting(true);
+    setDeleteError(null);
+    const res = await deleteDraftInvoice(invoiceId);
+    setDeleting(false);
+    if (res.error) {
+      // The server's own message, English — same convention as onCreate.
+      setDeleteError(res.error);
+      return;
+    }
+    setConfirmingDeleteId(null);
+    await load();
+    router.refresh();
+  }
+
   if (!open || !customer) return null;
+
+  const anyUnfinalized = invoices.some((i) => isUnfinalized(i.status));
 
   return (
     <>
@@ -200,28 +265,83 @@ export default function InvoicesModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {invoices.map((inv) => (
-                      <tr key={inv.id} className="hover:bg-black/[0.02] dark:hover:bg-white/[0.03]">
-                        <TD>
-                          {inv.period_start} → {inv.period_end}
-                        </TD>
-                        <TD>
-                          <StatusPill status={inv.status} label={invoiceStatusLabel(inv.status, lang)} />
-                        </TD>
-                        <TD>{inv.invoice_number ?? <span className="muted">—</span>}</TD>
-                        <TD className="tabular-nums">{formatSar(inv.grand_total_sar)}</TD>
-                        <TD className="tabular-nums">{formatSar(inv.amount_due_sar)}</TD>
-                        <TD>
-                          <Btn variant="outline" onClick={() => setSelectedInvoiceId(inv.id)}>
-                            {t("trips.invoices.open", lang)}
-                          </Btn>
-                        </TD>
-                      </tr>
-                    ))}
+                    {invoices.map((inv) => {
+                      const unfinalized = isUnfinalized(inv.status);
+                      const confirming = confirmingDeleteId === inv.id;
+                      return (
+                        <Fragment key={inv.id}>
+                          <tr className={cn(unfinalized ? [ROW_UNFINALIZED_BG, ROW_UNFINALIZED_HOVER] : ROW_PLAIN)}>
+                            <TD>
+                              {inv.period_start} → {inv.period_end}
+                            </TD>
+                            <TD>
+                              <StatusPill status={inv.status} label={invoiceStatusLabel(inv.status, lang)} />
+                            </TD>
+                            <TD>{inv.invoice_number ?? <span className="muted">—</span>}</TD>
+                            <TD className="tabular-nums">{formatSar(inv.grand_total_sar)}</TD>
+                            <TD className="tabular-nums">{formatSar(inv.amount_due_sar)}</TD>
+                            <TD>
+                              <div className="flex items-center gap-2">
+                                <Btn variant="outline" onClick={() => setSelectedInvoiceId(inv.id)}>
+                                  {t("trips.invoices.open", lang)}
+                                </Btn>
+                                {/* Only on rows the RPC would accept. A confirmed
+                                    or paid invoice is a document — it leaves by
+                                    Void, never by delete. */}
+                                {unfinalized && (
+                                  <Btn
+                                    variant="ghost"
+                                    onClick={() => {
+                                      setDeleteError(null);
+                                      setConfirmingDeleteId(confirming ? null : inv.id);
+                                    }}
+                                    disabled={deleting}
+                                    className="text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                    {t("trips.invoices.discard", lang)}
+                                  </Btn>
+                                )}
+                              </div>
+                            </TD>
+                          </tr>
+
+                          {/* The confirmation is its own full-width row rather
+                              than a popup: it sits directly under the invoice it
+                              will destroy, so the period and total being deleted
+                              stay on screen while the operator decides, and it
+                              adds no second stacking layer over an already
+                              stacked modal. */}
+                          {confirming && (
+                            <tr className={ROW_UNFINALIZED_BG}>
+                              <td colSpan={6} className="px-3 pb-3">
+                                <GuardBox
+                                  lang={lang}
+                                  warning={t("trips.invoices.guardDiscard", lang)}
+                                  busy={deleting}
+                                  confirmLabel={t("trips.invoices.confirmDiscard", lang)}
+                                  onCancel={() => setConfirmingDeleteId(null)}
+                                  onConfirm={() => onDelete(inv.id)}
+                                />
+                                {deleteError && (
+                                  <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{deleteError}</p>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </Table>
               </div>
             )
+          )}
+
+          {/* Says what the wash means. Rendered only when something is actually
+              washed — a permanent legend for an absent colour is noise. */}
+          {!loading && !error && anyUnfinalized && (
+            <p className="mt-2 text-xs muted">{t("trips.invoices.unfinalizedHint", lang)}</p>
           )}
         </div>
       </div>
