@@ -2,9 +2,54 @@
 
 ## State
 
-- **DB is at migration 0178.** `0178_violation_notice_image.sql` added
+- **DB is at migration 0179.** `0179_rls_initplan_fix.sql` wrapped the bare
+  `auth.uid()` in five policy predicates as `(select auth.uid())`, so Postgres
+  hoists it into an InitPlan and evaluates it once per query instead of once per
+  row. Applied to the live DB, committed `688b6e2`. **Re-verified this turn, both
+  directions:** `pg_policies` shows all five predicates wrapped
+  (`issue_reports_insert_own` in `with_check`; `own_notification_dismissals`,
+  `own_notification_prefs`, `own_notification_thresholds_user`,
+  `own_user_profiles` in both `qual` and `with_check`) with the predicates
+  otherwise unchanged, and the performance advisor now returns **zero
+  `auth_rls_initplan` entries** — the five WARNs are gone. What remains from the
+  advisor is `unindexed_foreign_keys` + `unused_index`, all INFO, all pre-existing.
+  `0178_violation_notice_image.sql` (previous head) added
   `driver_violations.image_path` and the private `violation-images` bucket.
-  Working tree clean, 0 ahead / 0 behind.
+- **Working tree clean, `[ahead 6]` — NOTHING IS PUSHED.** Six commits sit on
+  local `main` and origin has none of them: `688b6e2` (0179) plus the five
+  skeleton commits below. Push is Turki's call, not an oversight to correct
+  silently.
+- **The skeleton loading-state sweep SHIPPED — 12 `loading.tsx`, one per
+  server-fetching route segment.** Commits `d9541f9`, `7b9f3af`, `1f40d42`,
+  `a8c39c2`, `693ce46`. The `.skel*` primitives and four tokens
+  (`--ease`, `--dur-3`, `--r-3`, `--r-4`) were ported from `preview/app.css`.
+  **`loading.tsx` per segment ONLY — no `<Suspense>` restructuring and no fetch,
+  query or server-action change anywhere in the sweep.** Every page awaits at the
+  top level of the page component, so per-section Suspense would have meant
+  rewriting the fetch; the segment file streams the shell without touching it.
+  - **The primitives are preview's; the GRID CLASSES ARE EACH PAGE'S OWN.**
+    Preview ships a fixed 4-up `.skel-grid` because its demo used one skeleton
+    for every route. Reusing it would reflow Fleet's 5-up strip, Drivers' 6-col
+    row, Inventory's 5-up and Reports' two dissimilar bands the moment data
+    landed — the exact shift the skeleton exists to prevent.
+  - **Spacing mechanism is per-page and must be COPIED, not assumed.** Drivers
+    and Trips space their blocks with `mb-*` and carry `border-b mb-4` on the tab
+    bar; Inventory, Consumption, Reports and Archive wrap in `space-y-5`, so
+    their tab bars carry NO `mb-4` — adding one doubles the gap.
+  - **`/iot`, `/predictive`, `/routes` and `/login` correctly have none.** All
+    four import `supabase/server` zero times. `/login` does await, but inside its
+    submit handler, so there is nothing to stream. **Their absence is measured,
+    not an omission — do not "complete" the sweep by adding them.**
+- **Two accepted trade-offs on record — both are rulings, not open defects.**
+  1. **`/reports`' `BigStat` tile keeps a small residual shift.** Its delta, foot
+     and note rows are conditional on the data, so the tile's final height is not
+     knowable from a static skeleton. Reserving all three would hold a permanent
+     gap the page usually does not fill; reserving none shifts more. Turki saw the
+     residual and accepted it.
+  2. **Every skeleton mirrors its page's DEFAULT tab only.** Non-default tabs are
+     reached through `useTabParam` client state and mount *after* hydration, so
+     they never see a `loading.tsx` at all. A skeleton drawn for them would be
+     dead markup.
 - **The traffic-violation notice photo shipped** — schema + bucket `7dcdaaf`,
   app layer `5ea0001`, verified in-browser before both. The durable rule (the
   storage key, the display-only boundary, the freeze/edit gate, the signed-URL
@@ -131,6 +176,12 @@
 | 7 | Sweep + the rotted `invoiceActions.ts:1035` pointer recorded; that pointer converted to a symbol grep | `2efd4bb` |
 | 8 | The zero-row rule promoted into `SKILL.md` — including the three classes that are NOT findings | `97964b7` |
 | 9 | `178df21` verified in-browser: 11 of 16 scenarios pass including both two-tab races; 10–12 left unrun, 13–14 declined with reason | (docs only) |
+| 10 | RLS `auth.uid()` initplan fix on 5 policies — `0179`; applied live, advisor's 5 `auth_rls_initplan` WARNs cleared | `688b6e2` |
+| 11 | Skeleton loading states, batch 1 — `.skel*` primitives + `--ease`/`--dur-3`/`--r-3`/`--r-4` ported from `preview/app.css`, first routes | `d9541f9` |
+| 12 | Skeleton loading states, batch 2 | `7b9f3af` |
+| 13 | Skeleton loading states, batch 3 — `/drivers`, `/trips` | `1f40d42` |
+| 14 | Skeleton loading states, batch 4 — `/customers`, `/projects`, `/maintenance` | `a8c39c2` |
+| 15 | Skeleton loading states, batch 5 — `/inventory`, `/consumption`, `/reports`, `/archive` | `693ce46` |
 
 ---
 
@@ -376,6 +427,9 @@ piece of follow-through is outstanding, and it is not a feature.
    moved out of this file.
 3. Parked papercut: `InvoicesModal`'s period default — both bounds default to
    today, so the default range is a single day. Pre-existing, untouched.
+4. **Six commits are unpushed.** Nothing is wrong with them — `tsc --noEmit` is 0
+   and every one was verified in-browser before it landed — but origin does not
+   have `0179` or any of the skeleton work. Ask Turki before pushing.
 
 **NOTIFICATIONS + SETTINGS IS BUILT AND LIVE — do NOT plan it.** Earlier
 revisions of this file listed it as the next feature with "`0154` pending,
