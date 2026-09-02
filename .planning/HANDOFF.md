@@ -408,24 +408,37 @@
 | 21 | **`delete_draft_invoice` → `discard_invoice`** — `0183`, one `alter function … rename to`, no ACL footer (rename keeps the OID, so ACL/definer/`search_path` come through untouched). Migration + the one call site + 5 comments in ONE commit, so no window where app and DB disagreed. Applied; re-measured from `pg_proc`: same **OID 21415**, `anon_exec` false. Discard re-tested on draft and review in dev | `55e3ebe` |
 | 22 | **New-invoice period default** — both bounds seeded to `todayKey()`, so the default range was a single day and assembled no trips (the period SELECTS the trips). Now month-to-date via a shared `defaultPeriod()` used by BOTH the `useState` initials and the open-effect re-seed; reuses `monthStartKey`. Inputs and the `start > end` check untouched. Verified in-browser | `6af117d` |
 | 23 | `9e4ca3b`'s two-tab manual verification **DROPPED, not pending** — fixture costs more than the assertion at 3–4 users; the read-back fix itself stands and is reachable-and-wired against live data | (docs only) |
-| 24 | **`178df21` scenarios 10–12 RUN and PASSED in-browser** — payslip preview on an unissued month: inline fine edit moves Deductions+Net (10), photo View/Replace/Remove in the edit panel (11), print preview renders six columns with no controls (12). **The browser is the authority for all three; the catalog corroborates only part, and one number in it is a trap** — see below the table. Last verification on this page, nothing carried forward | (docs only) |
+| 24 | **`178df21` scenarios 10–12 RUN and PASSED in-browser** — payslip preview on an unissued month: inline fine edit moves Deductions+Net (10), photo View/Replace/Remove in the edit panel (11), print preview renders six columns with no controls (12). **Turki's in-browser run is the authority for all three. The catalog corroborates 10 (a two-point delta) and 11's Remove; View, Replace and 12 leave no trace by construction** — see the note below the table before quoting any figure out of it. Last verification on this page, nothing carried forward | (docs only) |
 
 ### What the catalog could and could not corroborate for row 24
 
-Re-measured 2026-09-02, after the run. **Recorded because "verified" and
-"verifiable from here" are not the same thing,** and the next session will read
-this without re-measuring (§5).
+Measured 2026-09-02, around and after the run — scenario 10's first point was
+taken BEFORE its edit and cannot be taken again. **Recorded because "verified"
+and "verifiable from here" are not the same thing,** and the next session will
+read this without re-measuring (§5).
 
-- **Scenario 10 — the row was touched, and `1450.00 / 167.02` IS NOT THE PROOF.**
-  `v_driver_payslip_basis` for Khalid 3 / `2026-08-01` reads
-  `deductions_sar 1450.00`, `net_sar 167.02`. That is the **baseline**: fine
-  `6384902` was edited 100 → 200 (which should have shown **1550 / 67.02**) and
-  then put back, and the row now sits at `100.00` with today's `updated_at`. The
-  view is the exact sum of Khalid 3's three unvoided August fines
-  (250 + 1100 + 100 = 1450), so it agrees with the rows either way. **Do not
-  quote 1450/167.02 as evidence the edit propagated** — it is what the view reads
-  whether or not the edit ever happened. What the catalog shows is that the row
-  was edited today; that the number MOVED on screen was seen in the browser only.
+- **Scenario 10 — PASSED. Browser-verified by Turki, corroborated by a two-point
+  catalog delta.** Deductions and Net moved on screen; the view was read at both
+  ends of the same edit on Khalid 3 / `2026-08-01`:
+
+  | fine `6384902` | `deductions_sar` | `net_sar` |
+  |---|---|---|
+  | pre-edit `200.00` | `1550.00` | `67.02` |
+  | post-edit `100.00` | `1450.00` | `167.02` |
+
+  **The direction is 200 → 100, not 100 → 200.** The fixture had already drifted
+  to 200 before the session opened, so the architect flipped the test direction;
+  `100.00` with today's `updated_at` is the INTENDED end state, **not a
+  reversion**. An earlier revision of this note called it one — wrong, and the
+  correction is the point of this paragraph.
+  **ONLY THE POST-EDIT ROW IS STILL RE-MEASURABLE** — the fine is at 100 now, so
+  the 1550/67.02 point cannot be taken again. It was measured this session,
+  before the edit; that is the evidence, and it is not repeatable.
+  **Do not quote `1450.00 / 167.02` ON ITS OWN as proof of propagation.** Single
+  point, no delta: the view is the exact sum of Khalid 3's three unvoided August
+  fines (250 + 1100 + 100 = 1450), so it reads that whether or not any edit
+  happened. The **pair** is the proof — 100 off the fine, 100 off Deductions,
+  100 onto Net.
 - **Scenario 11 — Remove is corroborated, View and Replace are not observable.**
   Remove is provable and proved: the invariant fell 5↔5 → 3↔3 with
   `dangling`/`orphans` still 0/0, on two rows carrying today's `updated_at` (see
