@@ -231,9 +231,11 @@
   (message exact, `amount_sar` still `88.00` — not a silent success), and **16**
   refused the photo removal *and left the object in the bucket*, proving the
   null-row check runs above the storage delete. **9** rendered rose, not amber.
-  **Still unrun: 10, 11, 12** (payslip preview on an unissued month — inline edit
-  moves Deductions+Net, photo View/Replace/Remove, six-column print) — stopped
-  for time, not for a problem. **13, 14 were declined on purpose** (see below).
+  **10, 11, 12 were left unrun in that sitting** (payslip preview on an unissued
+  month — inline edit moves Deductions+Net, photo View/Replace/Remove,
+  six-column print) — stopped for time, not for a problem — and have **SINCE BEEN
+  RUN AND PASSED**; Closed row 24, with the note under that table on which parts
+  the catalog can corroborate. **13, 14 were declined on purpose** (see below).
   The `.txt` half of **2** was skipped for want of a file and closed in code
   instead: `validateViolationImage` runs server-side in `uploadDriverViolationImage`
   *before* `createClient()`, so a crafted request is refused — which is the only
@@ -316,12 +318,14 @@
   were both ruled and closed; nothing was reopened. Draft-stage charge
   consumption — the single investigation this file used to carry — was **RULED
   this session** (above): reserve-at-draft is correct, do not restrict it.
-  **ONE open VERIFICATION remains** — `178df21` scenarios 10–12. (13–14 are
-  DECLINED and `9e4ca3b`'s two-tab run is DROPPED; neither is pending, both are
-  above. An earlier revision of this line said "10–14", which contradicted the
-  13–14 ruling two bullets down, and an earlier one still carried `9e4ca3b`.)
-  Unverified is not the same as defective, and it is not the same as clean
-  either. Not in that list, because each was verified in-browser before it was
+  **NO open VERIFICATION remains.** `178df21` scenarios 10–12 were RUN and
+  PASSED in-browser — Closed row 24, which also records what the catalog can and
+  cannot corroborate about them. (13–14 are DECLINED and `9e4ca3b`'s two-tab run
+  is DROPPED; neither is pending, both are above. An earlier revision of this
+  line said "10–14", which contradicted the 13–14 ruling two bullets down, and
+  an earlier one still carried `9e4ca3b`; the one before this said 10–12 were
+  still open.) Unverified is not the same as defective, and it is not the same as
+  clean either. Every change here was verified in-browser before it was
   committed: the money fix (`2477946`); the discard unit (`46b0158`) — a review
   invoice holding trips and charges deleted, trips freed, charges off the
   balance, with confirmed/paid/void rows showing neither the wash nor the delete
@@ -343,9 +347,10 @@
   voided rather than hard-deleted — §6 locks soft-delete for operational records,
   and `app/drivers/page.tsx` filters voided rows out of the list, so they are
   already invisible. TEST-016's photo is still in the bucket and still correctly
-  pointed at; it is one of the 5 in the 5↔5 count below. **Not litter to clean up.**
-- **The violations photo invariant measured 5 objects ↔ 5 rows, dangling 0,
-  orphans 0** at the end of the run — same shape as the 4↔4 baseline taken before
+  pointed at — re-measured today, it is one of the 3 in the 3↔3 count below.
+  **Not litter to clean up.**
+- **The violations photo invariant read 5 objects ↔ 5 rows, dangling 0, orphans 0**
+  at the end of the `178df21` run — same shape as the 4↔4 baseline taken before
   the first click. This is the standing check for the feature:
 ```sql
   with objs as (select name from storage.objects where bucket_id = 'violation-images'),
@@ -362,6 +367,17 @@
   delete. Scenario 9 was staged by appending `.MISSING` to one `image_path` to
   force a dangling row, then restored from the value recorded before the edit;
   the 0/0 above is the post-restore reading.
+- **RE-MEASURED 2026-09-02, AFTER SCENARIOS 10–12 — THE LIVE READING IS NOW
+  `3 objects ↔ 3 rows, dangling 0, orphans 0`. 5↔5 above is history, 3↔3 is the
+  baseline.** It fell by two because scenario 11's **Remove** ran on Khalid 3's
+  `28301830` and `6384902`: both rows carry today's `updated_at`, both now have
+  `image_path` null, and **the object count fell in lockstep**, which is the part
+  that matters — Remove deleted the file as well as the pointer, so it left
+  neither a dangling row nor an orphan. The 3 survivors are `TEST-016`
+  (mohammed 2, voided), `274729091` (Khalid 2) and `36483000` (mohammed 3), all
+  last touched 2026-08-31. **A session that reads 5↔5 as live sees two photos
+  "missing" and chases a catastrophe that never happened** — the §5 failure mode,
+  in our own notes.
 
 ---
 
@@ -377,7 +393,7 @@
 | 6 | Repo-wide zero-row sweep, then its three findings closed: read-back on `setSpecialStatus`, `setAdjustmentStatus` (shared `ITEM_PAID_MSG`) and `updateDraftInvoicePeriod` | `9e4ca3b` |
 | 7 | Sweep + the rotted `invoiceActions.ts:1035` pointer recorded; that pointer converted to a symbol grep | `2efd4bb` |
 | 8 | The zero-row rule promoted into `SKILL.md` — including the three classes that are NOT findings | `97964b7` |
-| 9 | `178df21` verified in-browser: 11 of 16 scenarios pass including both two-tab races; 10–12 left unrun, 13–14 declined with reason | (docs only) |
+| 9 | `178df21` verified in-browser: 11 of 16 scenarios pass including both two-tab races; 10–12 left unrun (**since RUN — row 24**), 13–14 declined with reason | (docs only) |
 | 10 | RLS `auth.uid()` initplan fix on 5 policies — `0179`; applied live, advisor's 5 `auth_rls_initplan` WARNs cleared | `688b6e2` |
 | 11 | Skeleton loading states, batch 1 — `.skel*` primitives + `--ease`/`--dur-3`/`--r-3`/`--r-4` ported from `preview/app.css`, first routes | `d9541f9` |
 | 12 | Skeleton loading states, batch 2 | `7b9f3af` |
@@ -392,6 +408,35 @@
 | 21 | **`delete_draft_invoice` → `discard_invoice`** — `0183`, one `alter function … rename to`, no ACL footer (rename keeps the OID, so ACL/definer/`search_path` come through untouched). Migration + the one call site + 5 comments in ONE commit, so no window where app and DB disagreed. Applied; re-measured from `pg_proc`: same **OID 21415**, `anon_exec` false. Discard re-tested on draft and review in dev | `55e3ebe` |
 | 22 | **New-invoice period default** — both bounds seeded to `todayKey()`, so the default range was a single day and assembled no trips (the period SELECTS the trips). Now month-to-date via a shared `defaultPeriod()` used by BOTH the `useState` initials and the open-effect re-seed; reuses `monthStartKey`. Inputs and the `start > end` check untouched. Verified in-browser | `6af117d` |
 | 23 | `9e4ca3b`'s two-tab manual verification **DROPPED, not pending** — fixture costs more than the assertion at 3–4 users; the read-back fix itself stands and is reachable-and-wired against live data | (docs only) |
+| 24 | **`178df21` scenarios 10–12 RUN and PASSED in-browser** — payslip preview on an unissued month: inline fine edit moves Deductions+Net (10), photo View/Replace/Remove in the edit panel (11), print preview renders six columns with no controls (12). **The browser is the authority for all three; the catalog corroborates only part, and one number in it is a trap** — see below the table. Last verification on this page, nothing carried forward | (docs only) |
+
+### What the catalog could and could not corroborate for row 24
+
+Re-measured 2026-09-02, after the run. **Recorded because "verified" and
+"verifiable from here" are not the same thing,** and the next session will read
+this without re-measuring (§5).
+
+- **Scenario 10 — the row was touched, and `1450.00 / 167.02` IS NOT THE PROOF.**
+  `v_driver_payslip_basis` for Khalid 3 / `2026-08-01` reads
+  `deductions_sar 1450.00`, `net_sar 167.02`. That is the **baseline**: fine
+  `6384902` was edited 100 → 200 (which should have shown **1550 / 67.02**) and
+  then put back, and the row now sits at `100.00` with today's `updated_at`. The
+  view is the exact sum of Khalid 3's three unvoided August fines
+  (250 + 1100 + 100 = 1450), so it agrees with the rows either way. **Do not
+  quote 1450/167.02 as evidence the edit propagated** — it is what the view reads
+  whether or not the edit ever happened. What the catalog shows is that the row
+  was edited today; that the number MOVED on screen was seen in the browser only.
+- **Scenario 11 — Remove is corroborated, View and Replace are not observable.**
+  Remove is provable and proved: the invariant fell 5↔5 → 3↔3 with
+  `dangling`/`orphans` still 0/0, on two rows carrying today's `updated_at` (see
+  State). **View leaves no trace at all** — it mints a signed URL client-side.
+  **Replace cannot be separated from Remove after the fact**, since a replaced
+  object that is later removed is simply gone; no photo object in the bucket was
+  created today. Absence here is not evidence of failure, it is the limit of the
+  instrument.
+- **Scenario 12 — no catalog trace exists, by construction.** Print rendering
+  touches nothing. It is browser-only and always will be; do not open it as a
+  gap because MCP cannot see it.
 
 ---
 
@@ -627,17 +672,19 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-**No FEATURE is queued** — ask Turki for the next one rather than picking. **TWO
-pieces of follow-through are outstanding — 1 and 5 below** — and neither is a
-feature. (Items 2, 3 and 4 are kept struck through as records, not as work. Do
+**No FEATURE is queued** — ask Turki for the next one rather than picking. **ONE
+piece of follow-through is outstanding — item 5 below** — and it is not a
+feature. (Items 1, 2, 3 and 4 are kept struck through as records, not as work. Do
 not resurrect a struck item because it still appears in this list.)
 
-1. **Run `178df21` scenarios 10–12** (see State, above) — payslip preview on an
-   unissued month: inline fine edit moves Deductions+Net, photo View/Replace/
-   Remove in the edit panel (View opens a NEW TAB here, unlike the drivers
-   screen), and the print preview still renders six columns with no controls.
-   **This is the ONE outstanding verification.** `9e4ca3b`'s two-tab run was
-   DROPPED, not deferred — see State; do not add it back here.
+1. ~~Run `178df21` scenarios 10–12~~ — **DONE, run and passed in-browser.**
+   Payslip preview on an unissued month: the inline fine edit moved
+   Deductions+Net, photo View/Replace/Remove worked in the edit panel (View opens
+   a NEW TAB here, unlike the drivers screen), and the print preview still
+   renders six columns with no controls. Closed row 24 — **read the note under
+   that table before quoting a figure out of it.** `9e4ca3b`'s two-tab run was
+   DROPPED, not deferred — see State; do not add it back here. **There is no
+   outstanding verification left on this project.**
 2. ~~Promote the PostgREST zero-row rule into `SKILL.md`~~ — **DONE (`97964b7`).**
    It lives under **"A GUARDED WRITE MUST READ BACK"**, next to RPC Conventions:
    the two honest read-back shapes, the bail-above-destroy ordering, the three
