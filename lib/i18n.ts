@@ -7579,8 +7579,8 @@ export const dict = {
       // already deducted from the balance the moment they are recorded. So an
       // abandoned one is not inert — it quietly keeps money and trips. The row
       // is washed amber so it cannot be scrolled past, and `discard` is the way
-      // out. 0182 widened delete_draft_invoice from draft-only to draft OR
-      // review, which is what makes the review case reachable at all.
+      // out. 0182 widened discard_invoice from draft-only to draft OR review,
+      // which is what makes the review case reachable at all.
       unfinalizedHint: {
         en: "Highlighted rows are not finalized yet — they still hold their reserved trips and the customer's balance.",
         ar: "الصفوف المظللة لم تُنهَ بعد — لا تزال تحجز رحلاتها ورصيد العميل.",

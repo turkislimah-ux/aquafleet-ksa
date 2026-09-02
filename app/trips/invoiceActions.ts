@@ -274,17 +274,24 @@ export async function createDraftInvoice(
   return { error: null, data: { id: data.id } };
 }
 
-// Discards an unfinalised invoice, releasing what it holds. 0182 widened
-// delete_draft_invoice from draft-only to draft OR review — a Review invoice no
-// longer has to go Back-to-Draft first, which is what made a stale one
-// clearable at all. The RPC nulls trips.invoice_id (releasing the reservation)
-// and deletes the row; invoice_special_charges goes with it through the FK's
-// ON DELETE CASCADE, which is what frees a prepaid customer's held balance.
-// Confirmed/paid/void are still rejected there — an issued document leaves by
-// void_invoice, never by delete. The name is historical; see 0182's header.
+// Discards an unfinalised invoice, releasing what it holds. 0182 widened the
+// RPC from draft-only to draft OR review — a Review invoice no longer has to go
+// Back-to-Draft first, which is what made a stale one clearable at all; 0183
+// then renamed it delete_draft_invoice -> discard_invoice so the name stopped
+// claiming draft-only. The RPC nulls trips.invoice_id (releasing the
+// reservation) and deletes the row; invoice_special_charges goes with it
+// through the FK's ON DELETE CASCADE, which is what frees a prepaid customer's
+// held balance. Confirmed/paid/void are still rejected there — an issued
+// document leaves by void_invoice, never by delete.
+//
+// THIS STRING IS UNCHECKED BY THE COMPILER. lib/db-types.ts is hand-written row
+// shapes with no generated Functions map, and both Supabase clients are built
+// without a <Database> generic, so supabase.rpc() accepts any string and a typo
+// fails at runtime, not at tsc. It is the only rpc name for this function in
+// the repo; grep is the regression test.
 export async function deleteDraftInvoice(invoiceId: string): Promise<ActionResult> {
   const supabase = createClient();
-  const { error } = await supabase.rpc("delete_draft_invoice", { p_invoice_id: invoiceId });
+  const { error } = await supabase.rpc("discard_invoice", { p_invoice_id: invoiceId });
   if (error) return { error: error.message };
   revalidatePath("/trips");
   return { error: null };

@@ -417,9 +417,10 @@ export type Trip = {
   //   - RESERVED: invoice_id is set. Exclusive to that invoice (no other
   //     non-void invoice may bill this trip), but the trip stays fully
   //     EDITABLE/reversible. Set the moment the trip lands on a draft
-  //     invoice; cleared only when that invoice is voided or deleted (see
+  //     invoice; cleared only when that invoice is voided or discarded (see
   //     migration 0030's create_draft_invoice/sync_draft_reservation/
-  //     void_invoice/delete_draft_invoice). Un-paying a paid invoice does
+  //     void_invoice, and discard_invoice — which 0030 created as
+  //     delete_draft_invoice and 0183 renamed). Un-paying a paid invoice does
   //     NOT release — trips stay reserved to it.
   //   - LOCKED: invoice_id set AND that invoice's status = 'paid'. THIS is
   //     the immutable state (no edit/stage/reversal/delete) — derived, enforced

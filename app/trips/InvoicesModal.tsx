@@ -27,7 +27,7 @@ const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--
 // UNFINALISED = still mutable, and still HOLDING. Both statuses reserve their
 // trips and consume a prepaid customer's balance through their special
 // charges; only 'confirmed' onwards is a document. Same two statuses
-// delete_draft_invoice accepts since 0182, deliberately — the wash marks
+// discard_invoice accepts since 0182, deliberately — the wash marks
 // exactly the rows the delete button appears on, so the cue and the capability
 // never disagree.
 const isUnfinalized = (status: string) => status === "draft" || status === "review";
@@ -164,7 +164,8 @@ export default function InvoicesModal({
     router.refresh();
   }
 
-  // PERMANENT. deleteDraftInvoice calls delete_draft_invoice, which since 0182
+  // PERMANENT. deleteDraftInvoice calls discard_invoice (named
+  // delete_draft_invoice until 0183), which since 0182
   // accepts draft OR review: it nulls trips.invoice_id for this invoice and
   // deletes the row, and invoice_special_charges goes with it through the FK's
   // ON DELETE CASCADE — which is what frees the customer's held balance.

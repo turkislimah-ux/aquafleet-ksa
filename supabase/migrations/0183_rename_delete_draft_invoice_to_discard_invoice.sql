@@ -1,0 +1,75 @@
+-- 0183_rename_delete_draft_invoice_to_discard_invoice.sql
+--
+-- PURE RENAME. No body change, no signature change, no permission change.
+-- 0182 widened delete_draft_invoice from draft-only to draft OR review and left
+-- this note in its own header:
+--   "THE NAME IS NOW HISTORICAL and slightly narrow — it deletes draft OR
+--    review. ... If the name is to change it should be its own pure-rename
+--    unit, migration + call site committed together."
+-- This is that unit. The function no longer deletes only drafts, and a name
+-- that says "draft" is the kind of stale label an operator or a future reader
+-- trusts and then gets wrong. discard_invoice says what it does: it discards an
+-- UNFINALISED invoice (the status gate inside the body is unchanged and still
+-- rejects confirmed/paid/void — an issued document leaves by void_invoice).
+--
+-- WHY ALTER ... RENAME AND NOT drop+create.
+-- CLAUDE.md 6: `create or replace function` and drop+create BOTH reset the ACL
+-- to EXECUTE TO PUBLIC — which anon inherits, and the anon key ships in the
+-- client bundle — and both wipe explicit grants. A drop+create here would also
+-- have to restate SECURITY DEFINER and the pinned search_path (0180), and any
+-- one of those restatements is a chance to get it wrong for zero gain, since
+-- the body is not changing.
+--
+-- ALTER FUNCTION ... RENAME TO changes pg_proc.proname and nothing else. Same
+-- OID, therefore the same row: same proacl, same prosecdef, same proconfig.
+-- There is deliberately NO revoke/grant footer on this migration — adding one
+-- would imply the ACL needed repair, and it does not.
+--
+-- BEFORE-STATE, measured from the live catalog before drafting this, so the
+-- claim above is falsifiable rather than asserted:
+--   fn               delete_draft_invoice(uuid)
+--   oid              21415
+--   prosecdef        true
+--   proconfig        {search_path=public}
+--   proacl           {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+--   has_function_privilege: anon false, authenticated true, service_role true
+-- The same query filtered on proname in ('delete_draft_invoice',
+-- 'discard_invoice') returned exactly ONE row, so there is no name collision to
+-- rename into.
+--
+-- AFTER-CHECK (run this once the rename is applied — it is the whole test):
+--   select p.oid,
+--          p.oid::regprocedure                                as fn,
+--          p.prosecdef                                        as security_definer,
+--          p.proconfig                                        as config,
+--          has_function_privilege('anon',          p.oid, 'execute') as anon_exec,
+--          has_function_privilege('authenticated', p.oid, 'execute') as auth_exec,
+--          has_function_privilege('service_role',  p.oid, 'execute') as svc_exec
+--     from pg_proc p
+--     join pg_namespace n on n.oid = p.pronamespace
+--    where n.nspname = 'public'
+--      and p.proname in ('delete_draft_invoice', 'discard_invoice');
+-- Expect ONE row: oid still 21415, fn now discard_invoice(uuid), prosecdef
+-- true, config {search_path=public}, anon false, authenticated true,
+-- service_role true. Same OID with the new name is the proof that nothing but
+-- the label moved. (Read permissions with has_function_privilege, never by
+-- pattern-matching proacl — CLAUDE.md 6.)
+--
+-- THE CALL SITE MOVES WITH THIS MIGRATION, and there is exactly one:
+--   app/trips/invoiceActions.ts — supabase.rpc("discard_invoice", ...)
+-- Between this migration applying and that TS deploying, whichever lands second
+-- is the breakage window; they are committed as one unit for that reason. Note
+-- that tsc CANNOT catch a missed RPC name here — lib/db-types.ts is hand-written
+-- row shapes with no generated Functions map, and both Supabase clients are
+-- constructed without a <Database> generic, so supabase.rpc() takes any string.
+-- Verified empirically: tsc exits 0 on rpc("this_function_does_not_exist_
+-- anywhere"). The regression test is therefore grep (one call site), the
+-- after-check above, and discarding a review invoice in dev.
+--
+-- 0030 (which created the function) and 0182 (which widened it) still say
+-- delete_draft_invoice and are left exactly as they are. They are the record of
+-- what was true when they ran, and a fresh `db reset` replays them in order:
+-- 0030 creates -> 0182 replaces the body -> 0183 renames. Editing them would
+-- both falsify history and break that replay.
+
+alter function public.delete_draft_invoice(uuid) rename to discard_invoice;

@@ -584,7 +584,7 @@ export default function InvoiceDetailModal({
   if (!open || !invoiceId || !mounted) return null;
 
   const status = raw?.status;
-  // The two statuses delete_draft_invoice accepts since 0182 — an unfinalised
+  // The two statuses discard_invoice accepts since 0182 — an unfinalised
   // invoice that still HOLDS its reserved trips and, through its special
   // charges, a prepaid customer's balance. Named once so the button and its
   // guard cannot drift apart, and so this reads as one rule rather than the
