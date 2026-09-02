@@ -2,8 +2,8 @@
 
 ## State
 
-- **DB is at migration 0182.** Four applied, verified against the CATALOG and
-  committed this session:
+- **DB is at migration 0183.** 181 files on disk, max `0183`. Five applied,
+  verified against the CATALOG and committed this session:
   - **`0179_rls_initplan_auth_uid_subselect.sql`** (`688b6e2`) wrapped the bare
     `auth.uid()` in five policy predicates as `(select auth.uid())`, so Postgres
     hoists it into an InitPlan and evaluates it once per query instead of once
@@ -28,10 +28,11 @@
     money fix, below.
   - **`0182_discard_draft_or_review_invoice.sql`** (in `46b0158`) — the discard
     capability, below.
-- **In sync with `origin/main` at `46b0158`, working tree clean.** Everything
-  this file used to flag as unpushed is on origin. **This is a pointer and it
-  goes stale the moment anyone commits — measure `git status -sb` before quoting
-  it.**
+  - **`0183_rename_delete_draft_invoice_to_discard_invoice.sql`** (`55e3ebe`) —
+    the pure rename, below. One `alter function … rename to`, no footer.
+- **Origin carries through `6af117d` plus this handoff commit; working tree
+  clean.** **This is a pointer and it goes stale the moment anyone commits —
+  measure `git status -sb` before quoting it.**
 - **MONEY FIX — `confirm_invoice` IS NOW AN AUDITOR, NOT A SCRIBE (`2477946`).**
   A confirmed invoice could freeze with NO special charges while the customer's
   prepaid balance had already been consumed by those same charges. **Two sources
@@ -111,14 +112,17 @@
 - **DISCARD SHIPPED — an unfinalised invoice now has a way out (`46b0158`).**
   Reserve-at-draft being correct is precisely what made the missing exit a real
   problem: a draft or review invoice HOLDS its reserved trips and its charges'
-  balance, and `delete_draft_invoice` rejected everything that was not `'draft'`,
-  so a stale review invoice was unclearable and quietly kept both.
+  balance, and `discard_invoice` — then still named `delete_draft_invoice` —
+  rejected everything that was not `'draft'`, so a stale review invoice was
+  unclearable and quietly kept both.
   - **`0182` widened the EXISTING function in place — it did not add a second
     one.** `0019` shipped `archive_project`, `0139` added
     `archive_project_guarded`, `0140` had to DROP the unguarded one because the
     second path was the back door around the first. One call site, one signature,
     nothing to keep in sync, and the migration needs no TypeScript to land with
-    it. **Do not add `discard_invoice` alongside it.**
+    it. **Do not add a SECOND discard path alongside it.** The honest name was
+    all that was ever owed, and `0183` paid it by renaming this same function —
+    not by adding one next to it.
   - **Measured live after the fact, not read off the migration (§5):** the gate
     is `if v_status not in ('draft', 'review')`; `proacl` is
     `{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}` —
@@ -132,9 +136,36 @@
   - **`confirmed` / `paid` / `void` are still rejected, and the errors name the
     right door** — an issued document keeps its number and leaves by
     `void_invoice`; `paid` goes through `unpay_invoice` first.
-  - **The NAME is historical.** It deletes draft OR review. A rename to
-    `discard_invoice` would be honest but must ship as its own pure-rename unit —
-    migration and call site in ONE commit, or the live path breaks between them.
+  - **THE RENAME IS DONE — `0183` / `55e3ebe`, and it is not open.** The old name
+    claimed draft-only, which stopped being true at `0182`. Shipped as the pure
+    unit it needed to be: migration + the single call site + five comments in ONE
+    commit, so no window existed where the app and the database disagreed.
+    - **`alter function public.delete_draft_invoice(uuid) rename to
+      discard_invoice;`** — one statement, bare, **no ACL footer, deliberately.**
+      A rename touches `pg_proc.proname` only: same OID, therefore the same row,
+      therefore the same `proacl`, `prosecdef` and `proconfig`. §6's re-revoke
+      rule applies to `create or replace` and `drop`+`create`, which reset the
+      ACL — **this is why a rename was used instead of drop+create.** A footer
+      here would have implied a repair that was never needed.
+    - **Measured live after the fact, not read off the migration (§5):** ONE row
+      for `proname in ('delete_draft_invoice','discard_invoice')` — `oid` still
+      **21415**, `fn` now `discard_invoice(uuid)`, `prosecdef` true, `proconfig`
+      `{search_path=public}`, `anon_exec` false, `auth`/`service_role` true.
+      **Same OID under the new name is the proof** that nothing but the label
+      moved. Turki then discarded a draft and a review invoice in dev: rows gone,
+      trips freed, charges off the balance.
+    - **`supabase.rpc()` IS UNTYPED IN THIS REPO — tsc CANNOT catch RPC-name
+      drift.** `lib/db-types.ts` is hand-written row shapes with no generated
+      `Functions` map, and both clients are built without a `<Database>` generic.
+      Proven, not assumed: `tsc` exits **0** on
+      `rpc("this_function_does_not_exist_anywhere")`. So the regression test for
+      any future RPC rename is **grep + the catalog + a click**, never `tsc`.
+      There is exactly one call site (`invoiceActions.ts`,
+      `supabase.rpc("discard_invoice", …)`).
+    - **`0030` and `0182` still say `delete_draft_invoice` and MUST stay that
+      way.** They record what was true when they ran, and a fresh `db reset`
+      replays 0030 creates → 0182 replaces the body → 0183 renames. "Fixing"
+      them would falsify history and break the replay.
   - **`InvoiceDetailModal`'s gate WAS widened to match — DONE (`bcad04f`), do not
     re-raise it.** It was left at `status === "draft"` when `46b0158` shipped, so
     the sheet was briefly narrower than its own backend; it now reads a named
@@ -236,12 +267,29 @@
   deny landed on money already paid out) and `updateDraftInvoicePeriod`
   (`.eq("status","draft")`, and the only guarded invoice write in its file that
   did not read back).
-- **`9e4ca3b` WAS ALSO NOT VERIFIED IN-BROWSER** — same as `178df21`, directed
-  from the measured gates. The bails are proven *reachable* against live data
-  (10 paid specials, 6 paid adjustments, 26 non-draft invoices) and the error
-  strings are proven to reach a screen (`run()` in `CommissionsTab.tsx`,
-  `DenyModal`'s confirm in the same file, `InvoiceDetailModal`'s
-  `setPeriodError`). Reachable and wired is not the same as seen.
+- **`9e4ca3b`'S MANUAL VERIFICATION IS DROPPED — NOT PENDING. Do not carry it
+  forward as "unverified" and do not re-raise it.** The fix itself shipped and
+  stands; what was dropped is the hand-staged two-tab collision that would
+  demonstrate it.
+  - **Why dropped:** reaching the miss path means holding one tab mid-action
+    while a second tab pays the payout or moves the invoice out of Draft — a
+    setup that has to be built by hand for each of the three sites, against live
+    money rows, and torn down after. **At 3–4 users the collision it guards is
+    rare; the fixture costs more than the assertion.** Same call, same reasoning
+    as `178df21` scenarios 13–14.
+  - **What stands in its place, and it is not nothing:** the bails are proven
+    *reachable* against live data (10 paid specials, 6 paid adjustments, 26
+    non-draft invoices) and the error strings are proven to reach a screen
+    (`run()` in `CommissionsTab.tsx`, `DenyModal`'s confirm in the same file,
+    `InvoiceDetailModal`'s `setPeriodError`). The change is also a strict
+    improvement by construction: before it, a filtered-out write returned
+    `{ error: null }`; after it, the same write reports. **A read-back cannot
+    make the success path worse** — it adds a `.select("id")` to a write that
+    already ran.
+  - **Reachable and wired is still not the same as seen** — that stays true, and
+    it is the honest cost of this decision, not an argument against it. If a
+    manager ever reports a deny that "worked" on a paid line, or a period edit
+    that silently didn't take, run the two-tab setup then.
 - **`CLAUDE.md` is at 14,901 bytes — 459 under the 15,360 (§7) tripwire.** The
   §5/§6 compression pass ran this session (`067635a`) and bought that room. Done
   as an audit, not a trim, per §5: it found two stale claims (below). Next pass,
@@ -268,15 +316,17 @@
   were both ruled and closed; nothing was reopened. Draft-stage charge
   consumption — the single investigation this file used to carry — was **RULED
   this session** (above): reserve-at-draft is correct, do not restrict it.
-  **Two open VERIFICATIONS remain** — `178df21` scenarios 10–12, and all of
-  `9e4ca3b`. (13–14 are DECLINED, not pending; see below. An earlier revision of
-  this line said "10–14", which contradicted that ruling two bullets down.)
+  **ONE open VERIFICATION remains** — `178df21` scenarios 10–12. (13–14 are
+  DECLINED and `9e4ca3b`'s two-tab run is DROPPED; neither is pending, both are
+  above. An earlier revision of this line said "10–14", which contradicted the
+  13–14 ruling two bullets down, and an earlier one still carried `9e4ca3b`.)
   Unverified is not the same as defective, and it is not the same as clean
-  either. Neither the money fix (`2477946`) nor the discard unit (`46b0158`) is
-  in that list: both were verified in-browser before they were committed — for
-  `46b0158`, a review invoice holding trips and charges was deleted, its trips
-  freed, and its charges dropped off the customer's balance, with
-  confirmed/paid/void rows showing neither the wash nor the delete control.
+  either. Not in that list, because each was verified in-browser before it was
+  committed: the money fix (`2477946`); the discard unit (`46b0158`) — a review
+  invoice holding trips and charges deleted, trips freed, charges off the
+  balance, with confirmed/paid/void rows showing neither the wash nor the delete
+  control; the rename (`55e3ebe`) — discard re-tested on both draft and review
+  after `0183` applied; and the period default (`6af117d`).
 - **13 and 14 ARE DECLINED, NOT PENDING — do not re-raise them as a gap.** They
   assert that an *issued* payslip shows no Pencil and no Ban but still shows the
   photo icon. No issued payslip exists for a driver with photographed fines, and
@@ -337,8 +387,11 @@
 | 16 | **MONEY:** special charges must match the balance source or confirm is rejected — `0181` makes `confirm_invoice` an auditor; `lib/invoice.ts` stops period-filtering charges. Applied, 4 scenarios verified in-browser, `test:money` 10/10 | `2477946` |
 | 17 | `search_path` pinned on 8 advisor-flagged functions — `0180`; applied and verified against `pg_proc` | `9a2e6aa` |
 | 18 | Draft-stage charge consumption INVESTIGATED and ruled: reserve-at-draft is correct, the four `status <> 'void'` sites agree by construction, restricting one would fork the money | (docs only) |
-| 19 | **Discard an unfinalised invoice** — `0182` widens `delete_draft_invoice` in place to draft OR review (trips SET NULL, charges CASCADE, confirmed/paid/void still rejected, ACL footer restated); UI adds the amber wash on draft/review rows and a per-row permanent delete behind the shared `GuardBox`; stale draft-only comment on `deleteDraftInvoice` corrected. Applied, ACL and gate re-measured against `pg_proc`, verified in-browser | `46b0158` |
+| 19 | **Discard an unfinalised invoice** — `0182` widens `delete_draft_invoice` (renamed `discard_invoice` at `0183`, row 21) in place to draft OR review (trips SET NULL, charges CASCADE, confirmed/paid/void still rejected, ACL footer restated); UI adds the amber wash on draft/review rows and a per-row permanent delete behind the shared `GuardBox`; stale draft-only comment on `deleteDraftInvoice` corrected. Applied, ACL and gate re-measured against `pg_proc`, verified in-browser | `46b0158` |
 | 20 | `InvoiceDetailModal`'s own delete gate widened to match — named `canDiscard`, Delete added to the Review action row, sheet repointed at the list's `discard`/`guardDiscard`/`confirmDiscard` strings and the 3 orphaned `trips.invoiceSheet` keys deleted. Verified in-browser | `bcad04f` |
+| 21 | **`delete_draft_invoice` → `discard_invoice`** — `0183`, one `alter function … rename to`, no ACL footer (rename keeps the OID, so ACL/definer/`search_path` come through untouched). Migration + the one call site + 5 comments in ONE commit, so no window where app and DB disagreed. Applied; re-measured from `pg_proc`: same **OID 21415**, `anon_exec` false. Discard re-tested on draft and review in dev | `55e3ebe` |
+| 22 | **New-invoice period default** — both bounds seeded to `todayKey()`, so the default range was a single day and assembled no trips (the period SELECTS the trips). Now month-to-date via a shared `defaultPeriod()` used by BOTH the `useState` initials and the open-effect re-seed; reuses `monthStartKey`. Inputs and the `start > end` check untouched. Verified in-browser | `6af117d` |
+| 23 | `9e4ca3b`'s two-tab manual verification **DROPPED, not pending** — fixture costs more than the assertion at 3–4 users; the read-back fix itself stands and is reachable-and-wired against live data | (docs only) |
 
 ---
 
@@ -574,14 +627,17 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-**No FEATURE is queued** — ask Turki for the next one rather than picking. **Four
-pieces of follow-through are outstanding — 1, 3, 4 and 5 below** — and none of
-them is a feature. (Item 2 is kept struck through as a record, not as work.)
+**No FEATURE is queued** — ask Turki for the next one rather than picking. **TWO
+pieces of follow-through are outstanding — 1 and 5 below** — and neither is a
+feature. (Items 2, 3 and 4 are kept struck through as records, not as work. Do
+not resurrect a struck item because it still appears in this list.)
 
 1. **Run `178df21` scenarios 10–12** (see State, above) — payslip preview on an
-   unissued month. **`9e4ca3b` needs the same treatment** — its miss path is a
-   two-tab race, so ordinary clicking will not reach it. These are the two
-   outstanding verifications.
+   unissued month: inline fine edit moves Deductions+Net, photo View/Replace/
+   Remove in the edit panel (View opens a NEW TAB here, unlike the drivers
+   screen), and the print preview still renders six columns with no controls.
+   **This is the ONE outstanding verification.** `9e4ca3b`'s two-tab run was
+   DROPPED, not deferred — see State; do not add it back here.
 2. ~~Promote the PostgREST zero-row rule into `SKILL.md`~~ — **DONE (`97964b7`).**
    It lives under **"A GUARDED WRITE MUST READ BACK"**, next to RPC Conventions:
    the two honest read-back shapes, the bail-above-destroy ordering, the three
@@ -589,14 +645,16 @@ them is a feature. (Item 2 is kept struck through as a record, not as work.)
    scoping filters behind a prior check), and how to re-sweep. **Do not restate
    any of it here** — same reason the violations money model and the notice photo
    moved out of this file.
-3. Parked papercut: `InvoicesModal`'s period default — both bounds default to
-   today, so the default range is a single day. Pre-existing, untouched.
-4. **Rename `delete_draft_invoice` → `discard_invoice`** — the one tidy-up left
-   by the discard work, and not a defect. The name is historical: it deletes
-   draft OR review. **Only as a pure-rename unit — migration and call site in ONE
-   commit**, or the live path breaks between them. Cosmetic; not worth a
-   breakage window on its own. (The other tidy-up this item used to carry —
-   `InvoiceDetailModal`'s draft-only gate — is **DONE in `bcad04f`**.)
+3. ~~Parked papercut: `InvoicesModal`'s period default~~ — **DONE (`6af117d`).**
+   Both bounds seeded to `todayKey()`, which made the default range a single day
+   and — since the period SELECTS the trips — assembled nothing on a normal day.
+   Now month-to-date, seeded from one `defaultPeriod()` in both the `useState`
+   initials and the open-effect. Closed row 22.
+4. ~~Rename `delete_draft_invoice` → `discard_invoice`~~ — **DONE (`0183` /
+   `55e3ebe`).** Shipped as the pure-rename unit it had to be, migration + call
+   site in one commit. Closed row 21; the ACL reasoning is in State. (The other
+   tidy-up this item used to carry — `InvoiceDetailModal`'s draft-only gate — was
+   **DONE in `bcad04f`**.)
 5. **Enable leaked-password protection in the Supabase dashboard.** Not a
    migration, not a code change — a console setting. It is the one open item on
    the security posture.
@@ -605,9 +663,9 @@ them is a feature. (Item 2 is kept struck through as a record, not as work.)
 State. Reserve-at-draft is correct and the four `status <> 'void'` sites agree by
 construction. **Do not reopen it as a task.**
 
-~~Push the outstanding commits~~ — **DONE.** Origin is at `46b0158` and the tree
-is clean. **Re-measure with `git status -sb` before quoting; this goes stale on
-the next commit.**
+~~Push the outstanding commits~~ — **DONE.** Origin carries through `6af117d`
+plus this handoff commit, tree clean. **Re-measure with `git status -sb` before
+quoting; this goes stale on the next commit.**
 
 **NOTIFICATIONS + SETTINGS IS BUILT AND LIVE — do NOT plan it.** Earlier
 revisions of this file listed it as the next feature with "`0154` pending,
