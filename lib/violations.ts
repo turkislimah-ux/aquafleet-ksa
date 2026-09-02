@@ -129,6 +129,13 @@ export function violationTypeLabel(vt: ViolationType | undefined, lang: Lang): s
  * fine would then sit in a month that can never absorb it. There is no DB
  * CHECK for this (it is a policy about entry, not an invariant about data), so
  * the form is where it is enforced.
+ *
+ * SECOND CALLER, AND IT IS NOT A FLOOR: `defaultPeriod` in
+ * app/trips/InvoicesModal.tsx seeds a new invoice's period at month-to-date.
+ * Nothing is constrained there — it is a default an operator may edit. Kept
+ * here rather than copied because 1st-of-month should have ONE expression in
+ * this repo; if a third, non-violations caller appears, move it to lib/utils
+ * rather than growing this list.
  */
 export function monthStartKey(todayIso: string): string {
   return `${todayIso.slice(0, 7)}-01`;

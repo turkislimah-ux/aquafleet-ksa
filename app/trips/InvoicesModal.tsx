@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { X, Plus, Trash2 } from "lucide-react";
 import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
 import { cn, formatSar, todayKey } from "@/lib/utils";
+import { monthStartKey } from "@/lib/violations";
 import { type Invoice } from "@/lib/db-types";
 import { createDraftInvoice, deleteDraftInvoice, listInvoicesForCustomer } from "./invoiceActions";
 import InvoiceDetailModal, { GuardBox } from "./InvoiceDetailModal";
@@ -55,6 +56,31 @@ const ROW_PLAIN = "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]";
 // undefined/null for postpaid (no balance concept).
 export type InvoiceCustomer = { id: string; name: string; email: string | null; settledBalance?: number | null };
 
+/**
+ * The seed range for a NEW invoice: 1st of the current month → today.
+ *
+ * BOTH BOUNDS USED TO SEED TO `todayKey()`, which made the default period a
+ * single day. That is not a cosmetic default — the period SELECTS THE TRIPS:
+ * `createDraftInvoice` runs `assembleForCustomerPeriod` over exactly this range
+ * and reserves what it finds. A today→today default therefore assembled only
+ * trips dated today, which on a normal day is none, and the operator either
+ * retyped both dates every time or created an empty draft. Month-to-date is the
+ * range this screen is actually used for.
+ *
+ * SEEDED IN TWO PLACES — the `useState` initials and the open-effect that
+ * re-seeds on every reopen — so it is named once here. Two literals in two
+ * places is how a default drifts into disagreeing with itself.
+ *
+ * `monthStartKey` is imported rather than re-derived: it is the repo's single
+ * 1st-of-month expression, and this file has no business owning a second one.
+ * A seed, not a constraint — both inputs stay editable and the `periodStart >
+ * periodEnd` check in `onCreate` is untouched.
+ */
+function defaultPeriod(): { start: string; end: string } {
+  const today = todayKey();
+  return { start: monthStartKey(today), end: today };
+}
+
 export default function InvoicesModal({
   open,
   onClose,
@@ -78,8 +104,8 @@ export default function InvoicesModal({
   const [error, setError] = useState<string | null>(null);
 
   const [creating, setCreating] = useState(false);
-  const [periodStart, setPeriodStart] = useState(todayKey());
-  const [periodEnd, setPeriodEnd] = useState(todayKey());
+  const [periodStart, setPeriodStart] = useState(() => defaultPeriod().start);
+  const [periodEnd, setPeriodEnd] = useState(() => defaultPeriod().end);
   const [createError, setCreateError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -129,8 +155,12 @@ export default function InvoicesModal({
     if (!open || !customer) return;
     setCreating(false);
     setCreateError(null);
-    setPeriodStart(todayKey());
-    setPeriodEnd(todayKey());
+    // Re-seed from the SAME source as the initial state above. Reopening the
+    // modal must land on the default an operator would get on a fresh mount —
+    // including after midnight, and after they edited the dates last time.
+    const period = defaultPeriod();
+    setPeriodStart(period.start);
+    setPeriodEnd(period.end);
     setSelectedInvoiceId(null);
     setConfirmingDeleteId(null);
     setDeleteError(null);
