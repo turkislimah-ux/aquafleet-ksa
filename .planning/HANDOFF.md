@@ -135,10 +135,15 @@
   - **The NAME is historical.** It deletes draft OR review. A rename to
     `discard_invoice` would be honest but must ship as its own pure-rename unit —
     migration and call site in ONE commit, or the live path breaks between them.
-  - **`InvoiceDetailModal`'s own delete button is still gated `status === "draft"`**
-    — deliberately left out of scope, so that modal is narrower than its own
-    backend. The list (`InvoicesModal`) is where the widened capability is
-    exposed. A small follow-up unit if the two should match; not a defect.
+  - **`InvoiceDetailModal`'s gate WAS widened to match — DONE (`bcad04f`), do not
+    re-raise it.** It was left at `status === "draft"` when `46b0158` shipped, so
+    the sheet was briefly narrower than its own backend; it now reads a named
+    `canDiscard`, mirroring `isUnfinalized` in `InvoicesModal`. Both screens and
+    the RPC agree on which statuses are discardable. The sheet also stopped
+    carrying its own copy for the act: it reads `trips.invoices.discard` /
+    `guardDiscard` / `confirmDiscard`, and the three orphaned
+    `trips.invoiceSheet` keys were deleted. **One irreversible act, one
+    description** — the same reason `GuardBox` is exported rather than copied.
 - **Invoice `026-000015` is frozen understated and is being LEFT that way.**
   540.50 stored against 2,530.00 consumed. It is dummy data, and the freeze law
   of `0027` means issued invoices render from frozen columns and do not
@@ -333,6 +338,7 @@
 | 17 | `search_path` pinned on 8 advisor-flagged functions — `0180`; applied and verified against `pg_proc` | `9a2e6aa` |
 | 18 | Draft-stage charge consumption INVESTIGATED and ruled: reserve-at-draft is correct, the four `status <> 'void'` sites agree by construction, restricting one would fork the money | (docs only) |
 | 19 | **Discard an unfinalised invoice** — `0182` widens `delete_draft_invoice` in place to draft OR review (trips SET NULL, charges CASCADE, confirmed/paid/void still rejected, ACL footer restated); UI adds the amber wash on draft/review rows and a per-row permanent delete behind the shared `GuardBox`; stale draft-only comment on `deleteDraftInvoice` corrected. Applied, ACL and gate re-measured against `pg_proc`, verified in-browser | `46b0158` |
+| 20 | `InvoiceDetailModal`'s own delete gate widened to match — named `canDiscard`, Delete added to the Review action row, sheet repointed at the list's `discard`/`guardDiscard`/`confirmDiscard` strings and the 3 orphaned `trips.invoiceSheet` keys deleted. Verified in-browser | `bcad04f` |
 
 ---
 
@@ -585,15 +591,12 @@ them is a feature. (Item 2 is kept struck through as a record, not as work.)
    moved out of this file.
 3. Parked papercut: `InvoicesModal`'s period default — both bounds default to
    today, so the default range is a single day. Pre-existing, untouched.
-4. **Two optional tidy-ups left by the discard work (`46b0158`), neither a
-   defect** — take them only if asked:
-   - **`InvoiceDetailModal`'s own delete is still gated `status === "draft"`**,
-     so that modal is narrower than the RPC underneath it. Widening it to
-     `draft || review` would match `InvoicesModal`. One-file unit.
-   - **Rename `delete_draft_invoice` → `discard_invoice`.** The name is
-     historical now. **Only as a pure-rename unit — migration and call site in
-     ONE commit**, or the live path breaks between them. Cosmetic; not worth a
-     breakage window on its own.
+4. **Rename `delete_draft_invoice` → `discard_invoice`** — the one tidy-up left
+   by the discard work, and not a defect. The name is historical: it deletes
+   draft OR review. **Only as a pure-rename unit — migration and call site in ONE
+   commit**, or the live path breaks between them. Cosmetic; not worth a
+   breakage window on its own. (The other tidy-up this item used to carry —
+   `InvoiceDetailModal`'s draft-only gate — is **DONE in `bcad04f`**.)
 5. **Enable leaked-password protection in the Supabase dashboard.** Not a
    migration, not a code change — a console setting. It is the one open item on
    the security posture.
