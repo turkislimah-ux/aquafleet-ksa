@@ -8073,6 +8073,20 @@ export const dict = {
       // `vatSplit` — and note the operand order differs from it (the word VAT
       // trails here), which is why it is a separate key and not a reuse.
       totalCardSplit: { en: "{subtotal} + {vat} VAT", ar: "{subtotal} + {vat} VAT" },
+      // FRESH — the Grand Total stack's trip row. Grand Total is the WHOLE
+      // invoice now (covered trips AND unpaid trips AND every special charge,
+      // one document-level VAT pass), so its rows can no longer say "covered":
+      // the covered/unpaid distinction is settled by the Amount Due card and by
+      // the two trip tables, not by the document's own total.
+      subtotalTrips: {
+        en: "Subtotal (Trips)",
+        ar: "المجموع الفرعي (الرحلات)",
+      },
+      // `subtotalCovered` / `chargesCovered` are the AS-FROZEN stack's rows,
+      // kept for invoices confirmed under the old covered-only Grand Total
+      // whose stored figures do not obey the current law. They render in the
+      // shape they were issued in — see GrandTotalStack's call site. Do not
+      // delete: an issued document is never re-derived (freeze law 0027).
       subtotalCovered: {
         en: "Subtotal (Covered trips)",
         ar: "المجموع الفرعي (الرحلات المغطاة)",
@@ -8161,7 +8175,12 @@ export const dict = {
       payWithBalance: { en: "Pay with Balance", ar: "السداد من الرصيد" },
       markPaid: { en: "Mark Paid", ar: "تحديد كمدفوعة" },
       settledBalance: { en: "Settled balance", ar: "الرصيد المسوّى" },
-      thisInvoiceGrand: { en: "This invoice (Grand Total)", ar: "هذه الفاتورة (الإجمالي الكلي)" },
+      // RENAMED from "This invoice (Grand Total)". The row is the balance
+      // DRAW-DOWN, and the balance only ever paid the covered portion. Grand
+      // Total now carries the unpaid trips and uncovered charges too — money
+      // the customer still owes — so labelling the draw-down with it would
+      // promise the pool settles a figure it does not.
+      thisInvoiceGrand: { en: "This invoice (covered by balance)", ar: "هذه الفاتورة (المغطّى بالرصيد)" },
       remainingSettled: { en: "Remaining settled balance", ar: "الرصيد المسوّى المتبقي" },
       balanceNote: {
         en: "The balance already covered these trips/charges at delivery — this just records the settlement and locks them. No new money changes hands.",

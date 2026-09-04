@@ -278,6 +278,59 @@ function checkInvariant(
   check("asOfDate cutoff: only t1 in scope, covered", [r.covered.map((e) => e.id), r.unpaid, r.remainingBalance], [["t1"], [], 540]);
 }
 
+// --- INVERTED: asOfDate cuts TRIPS ONLY — a charge is never date-scoped -----
+// This case asserts the ABSENCE of a filter, and it is written that way on
+// purpose. consumingItems() used to carry `charge_date <= asOfDate` alongside
+// the trip cut above, which stranded FUTURE-dated charges: the invoice listed
+// them (chargeLines is ungated — 0181), v_customer_prepaid_balance deducted
+// them (no date predicate there, ever), and the FIFO walk refused to cover
+// them. Money asked for in one place and settled in another. Live invoice
+// 026-000017 is exactly this shape.
+//
+// A charge is scoped by the invoice FK it is created against, never by date.
+// Re-adding the gate flips ch-future out of `covered` and fails HERE.
+//
+// The old filter was one-sided (`<=`), so ch-past passed either way — ch-future
+// is the only line in this block that can detect the regression.
+{
+  const topups: TopupLite[] = [{ id: "u1", amount_sar: 1000, topup_date: "2026-06-01" }];
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-05", delivered_at: "2026-06-05T08:00:00.000Z", rate_sar: 400 }, // consumes 460
+  ];
+  const charges: ConsumingCharge[] = [
+    { id: "ch-past", charge_date: "2026-06-10", amount_sar: 100, label: "before cutoff" }, // 115
+    { id: "ch-future", charge_date: "2026-07-20", amount_sar: 100, label: "AFTER cutoff" }, // 115
+  ];
+  // 1000 - 460 - 115 - 115 = 310 remaining, everything covered.
+  const r = checkInvariant("charges ignore asOfDate", topups, trips, charges, "2026-06-30");
+  check(
+    "charge gate ABSENT: the after-cutoff charge is covered like any other",
+    [r.covered.map((e) => e.id).sort(), r.unpaid, r.remainingBalance],
+    [["ch-future", "ch-past", "t1"], [], 310],
+  );
+}
+
+// --- ...and refused on the MERITS when the pool is short, not on its date ---
+// The complement. Removing the gate must not make every charge covered — a
+// short pool still refuses it, which is the outcome that has to look identical
+// whatever the charge's date. Pool 500: t1 consumes 460, leaving 40, and the
+// charge's 115 does not fit.
+{
+  const topups: TopupLite[] = [{ id: "u1", amount_sar: 500, topup_date: "2026-06-01" }];
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-05", delivered_at: "2026-06-05T08:00:00.000Z", rate_sar: 400 },
+  ];
+  const charges: ConsumingCharge[] = [
+    { id: "ch-future", charge_date: "2026-07-20", amount_sar: 100, label: "AFTER cutoff" },
+  ];
+  const r = checkInvariant("short pool refuses the late charge on merit", topups, trips, charges, "2026-06-30");
+  check(
+    "charge gate ABSENT: a short pool still refuses it — unpaid, not invisible",
+    [r.covered.map((e) => e.id), r.unpaid.map((e) => e.id), r.remainingBalance],
+    [["t1"], ["ch-future"], 40],
+  );
+}
+
 // --- LOCKED RULE: a top-up dated AFTER periodEnd still pays the invoice ------
 // This is the regression guard for the same-date coupling bug: invoicing a PAST
 // period while the deposit landed later (the backdating pattern) must still

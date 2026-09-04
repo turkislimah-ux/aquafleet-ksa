@@ -28,6 +28,15 @@
 import { readFileSync } from "fs";
 import path from "path";
 import type { InvoiceStatus, InvoicePaymentMethod } from "./db-types";
+// The money-core's own rounding, imported rather than restated: the stack's
+// reconcile test compares a sum against a frozen total to the halala, so a
+// second round2 with its own epsilon handling could disagree with the engine
+// that produced the figure and silently flip a healthy invoice to the
+// as-issued fallback.
+// Imported via ./vat, the same path the popup uses (it re-exports prepaid's
+// one implementation) — so "same function" is visible at both call sites and
+// not a fact you have to go and check.
+import { round2 } from "./vat";
 
 let fontFaceCss: string | null = null;
 function getFontFaceCss(): string {
@@ -337,6 +346,50 @@ export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
         ? `<p class="notice ok">${label("Paid", "مدفوعة")}${data.paidAt ? ` on ${esc(data.paidAt.slice(0, 10))}` : ""}${data.paymentMethod ? ` via ${esc(PAYMENT_METHOD_EN[data.paymentMethod])} / ${esc(PAYMENT_METHOD_AR[data.paymentMethod])}` : ""}</p>`
         : "";
 
+  // --- Prepaid Grand Total stack rows ---------------------------------------
+  // MIRRORS app/trips/InvoiceDetailModal.tsx's GrandTotalStack EXACTLY (the
+  // 0%-deviation rule): same source, same test, same fallback, same labels.
+  // Change one of these two and change the other in the same commit.
+  //
+  // Grand Total is the WHOLE invoice — every trip this document lists, covered
+  // or unpaid, plus every special charge, covered or not. So the rows sum the
+  // LINES being printed above them and cannot disagree with those tables.
+  //
+  // Note the trip sum spans coveredLines AND unpaidLines even when
+  // hideAmountDue suppressed the Unpaid Trips table: the toggle hides a table,
+  // it does not remove trips from the invoice's own total. Hiding the section
+  // while quietly shrinking TOTAL would change what the customer is billed.
+  const pdfTripsSubtotal = round2(
+    [...data.coveredLines, ...data.unpaidLines].reduce((s, l) => s + l.amount_sar, 0),
+  );
+  const pdfChargesSubtotal = round2(data.chargeLines.reduce((s, l) => s + l.amount_sar, 0));
+  // An invoice frozen under the old covered-only Grand Total holds a stored
+  // total that EXCLUDES lines it prints, so line-derived rows would render a
+  // stack visibly not adding up to its own TOTAL. Those render as issued
+  // instead — arithmetic test, not a status check, so a corrected row starts
+  // reconciling on its own with nothing here to re-key. (0027: an issued
+  // document is read verbatim, never re-derived.)
+  const pdfStackReconciles =
+    round2(pdfTripsSubtotal + pdfChargesSubtotal + data.grand.vat) === data.grand.total;
+  // The as-issued row. `!== false` so a pre-0036 snapshot carrying no coverage
+  // flag counts as covered — that is what the engine that froze this grand
+  // total did, and this row has to keep adding up to it. Previously written
+  // `l.covered` (truthy), which excluded those legacy lines here while the
+  // popup included them: the two documents disagreed by exactly one unflagged
+  // charge. Same predicate on both sides now.
+  const pdfFrozenCoveredCharges = round2(
+    data.chargeLines.filter((l) => l.covered !== false).reduce((s, l) => s + l.amount_sar, 0),
+  );
+  const grandStackRows = pdfStackReconciles
+    ? [
+        { en: "Subtotal (Trips)", ar: "المجموع الفرعي (الرحلات)", amount: pdfTripsSubtotal },
+        { en: "Special Charges", ar: "رسوم إضافية", amount: pdfChargesSubtotal },
+      ]
+    : [
+        { en: "Subtotal (Covered trips)", ar: "المجموع الفرعي (الرحلات المغطاة)", amount: data.covered.subtotal },
+        { en: "Special Charges (covered)", ar: "رسوم إضافية (مغطاة)", amount: pdfFrozenCoveredCharges },
+      ];
+
   return `<!doctype html>
 <html>
 <head>
@@ -445,10 +498,9 @@ export function buildInvoicePdfHtml(data: PdfInvoiceData): string {
 
     <div class="grand-stack">
       <h3>${label("Grand Total", "الإجمالي الكلي")}</h3>
-      <div class="grand-row"><span>${label("Subtotal (Covered trips)", "المجموع الفرعي (الرحلات المغطاة)")}</span><span dir="ltr">${fmtSar(data.covered.subtotal)}</span></div>
-      <div class="grand-row"><span>${label("Special Charges (covered)", "رسوم إضافية (مغطاة)")}</span><span dir="ltr">${fmtSar(
-          data.chargeLines.filter((l) => l.covered).reduce((sum, l) => sum + l.amount_sar, 0),
-        )}</span></div>
+      ${grandStackRows
+        .map((r) => `<div class="grand-row"><span>${label(r.en, r.ar)}</span><span dir="ltr">${fmtSar(r.amount)}</span></div>`)
+        .join("\n      ")}
       <div class="grand-row"><span>${label("Total VAT", "إجمالي VAT")}</span><span dir="ltr">${fmtSar(data.grand.vat)}</span></div>
       <div class="grand-row grand-final"><span>${label("TOTAL", "الإجمالي")}</span><span dir="ltr">${fmtSar(data.grand.total)}</span></div>
     </div>

@@ -4,7 +4,7 @@
 //   npx tsx scripts/invoice-check.ts
 // Exits 0 if every case passes, 1 otherwise (CI-friendly).
 
-import { assembleInvoice, canEditSpecialCharges, type SpecialChargeInput } from "../lib/invoice";
+import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type SpecialChargeInput } from "../lib/invoice";
 import type { ConsumingTrip, TopupLite } from "../lib/prepaid";
 import type { InvoiceStatus } from "../lib/db-types";
 
@@ -17,6 +17,40 @@ function check(name: string, got: unknown, want: unknown) {
 }
 function checkTrue(name: string, cond: boolean) {
   check(name, cond, true);
+}
+
+const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+// ============================================================================
+// THE TWO MONEY INVARIANTS. Asserted on EVERY assembled case in this file,
+// both payment modes, by calling reconciles() at the end of each block.
+//
+//   1. covered + amountDue === grand, on subtotal AND vat AND total.
+//   2. every line on the document is inside grand.subtotal — the sum of
+//      coveredLines + unpaidLines + chargeLines pre-VAT amounts IS grand's
+//      subtotal, exactly. Nothing can be displayed and un-totalled.
+//
+// These exist because both were violated in production and neither was caught:
+// grand was built from covered lines only, so 8 of 24 live invoices did not
+// add up and 38,709.00 SAR of delivered work sat on invoices whose grand total
+// excluded it. A per-case expected-value assertion cannot catch that class of
+// fault — it only proves the engine still does what it did. An identity can.
+// Never assert a total in this file without also calling reconciles().
+// ============================================================================
+function reconciles(name: string, r: InvoiceAssembly) {
+  check(
+    `${name}: covered + amountDue === grand (subtotal/vat/total)`,
+    {
+      subtotal: r2(r.covered.subtotal + r.amountDue.subtotal),
+      vat: r2(r.covered.vat + r.amountDue.vat),
+      total: r2(r.covered.total + r.amountDue.total),
+    },
+    r.grand,
+  );
+  const everyLine = r2(
+    [...r.coveredLines, ...r.unpaidLines, ...r.chargeLines].reduce((s, l) => s + l.amount_sar, 0),
+  );
+  check(`${name}: every line is inside grand.subtotal (nothing dropped)`, everyLine, r.grand.subtotal);
 }
 
 // --- Postpaid: no covered table, Amount Due === Grand exactly (same input) ---
@@ -39,6 +73,7 @@ function checkTrue(name: string, cond: boolean) {
   check("postpaid: unpaidLines = both trips", r.unpaidLines.map((l) => l.id).sort(), ["t1", "t2"]);
   check("postpaid: amountDue totals", r.amountDue, { subtotal: 600, vat: 90, total: 690 });
   checkTrue("postpaid: amountDue === grand EXACTLY (same input line set)", JSON.stringify(r.amountDue) === JSON.stringify(r.grand));
+  reconciles("postpaid", r);
 }
 
 // --- Postpaid + special charge: charge lands in Unpaid/Amount Due table ------
@@ -57,6 +92,7 @@ function checkTrue(name: string, cond: boolean) {
   check("charge: appears in unpaidLines with kind=charge", r.unpaidLines.find((l) => l.id === "ch1")?.kind, "charge");
   check("charge: NOT in coveredLines", r.coveredLines.length, 0);
   check("charge: amountDue = 300+150 -> subtotal 450, vat 67.5, total 517.5", r.amountDue, { subtotal: 450, vat: 67.5, total: 517.5 });
+  reconciles("postpaid charge", r);
 }
 
 // --- Prepaid: global-then-filter rule — an EARLIER period's trip drains the --
@@ -85,6 +121,7 @@ function checkTrue(name: string, cond: boolean) {
     r.unpaidLines.some((l) => l.id === "tB-this-period") && !r.coveredLines.some((l) => l.id === "tB-this-period"),
   );
   checkTrue("global-then-filter: May's trip does not appear in this invoice at all (outside period)", !r.unpaidLines.some((l) => l.id === "tA-prior-period") && !r.coveredLines.some((l) => l.id === "tA-prior-period"));
+  reconciles("global-then-filter", r);
 }
 
 // --- Prepaid: period boundary excludes trips just outside it -----------------
@@ -106,6 +143,10 @@ function checkTrue(name: string, cond: boolean) {
   });
   const allIds = [...r.coveredLines, ...r.unpaidLines].map((l) => l.id);
   check("period boundary: only 'inside' trip appears", allIds, ["inside"]);
+  // grand is scoped to what the DOCUMENT shows, not to what the pool consumed:
+  // 'before' and 'after' drained the pool but are not on this invoice, so they
+  // are outside grand too. reconciles() is what pins that down.
+  reconciles("period boundary", r);
 }
 
 // --- Reconciliation: covered ∪ unpaid (period-filtered) === every delivered --
@@ -130,6 +171,7 @@ function checkTrue(name: string, cond: boolean) {
   const ids = [...r.coveredLines, ...r.unpaidLines].map((l) => l.id).sort();
   check("reconciliation: t1/t2/t3 covered+unpaid (t4 undelivered excluded)", ids, ["t1", "t2", "t3"]);
   checkTrue("reconciliation: no id duplicated across the two tables", new Set(ids).size === ids.length);
+  reconciles("reconciliation", r);
 }
 
 // --- THE covered/unpaid boundary-flip + two-table rounding-divergence proof -
@@ -141,16 +183,19 @@ function checkTrue(name: string, cond: boolean) {
 // 0.06 -> doesn't fit -> hitWall -> t2 AND t3 both unpaid) — the boundary
 // flips to 1 covered/2 unpaid. This is the exact divergence the user flagged
 // when specifying the v3 cutover.
-//   covered:   subtotal 0.05 (t1 only)  -> vat round(0.0075) = 0.01 -> total 0.06
-//   amountDue: subtotal 0.10 (t2+t3)    -> = ledger.unpaid.subtotal (0.12,
-//              VAT-inclusive consumedAmount sum) -> vat = 0.12-0.10 = 0.02
-//   grand: covered trips + covered charges (none) — same single line as
-//     covered table (no covered charges here) -> identical to covered: 0.06
-// naive sum of the two shown tables' totals: 0.06 + 0.12 = 0.18, vs
-// grand.total = 0.06 — v3's grand deliberately EXCLUDES unpaid trips (spec
-// §9, reversed from v2), so this is now a structural divergence (different
-// line sets), not merely a rounding one — still proves "don't sum the
-// tables to get the grand total."
+// IT IS ALSO THE ROUNDING-RESIDUE PROOF, and this is where the two rounding
+// conventions are furthest apart at the smallest scale:
+//   grand:     ALL THREE trips, one document-level pass — subtotal 0.15,
+//              vat round2(0.0225) = 0.02, total 0.17
+//   amountDue: subtotal 0.10 (t2+t3), total = ledger.unpaid.subtotal 0.12
+//              (per-item VAT-inclusive consumedAmount, 0.06+0.06), vat 0.02
+//   covered:   grand - amountDue = 0.05 / 0.00 / 0.05
+//
+// A STANDALONE calculateVat() pass over covered's own line would say
+// 0.05/0.01/0.06 — a halala more. THAT HALALA IS THE POINT: the two
+// conventions genuinely differ, and the derived form is what puts the
+// difference somewhere harmless (a settled figure) instead of leaving the
+// invoice not adding up. covered.total is deliberately 0.05, not 0.06.
 {
   const trips: ConsumingTrip[] = [
     { id: "t1", trip_date: "2026-06-01", delivered_at: "2026-06-01T10:00:00Z", rate_sar: 0.05 },
@@ -169,12 +214,18 @@ function checkTrue(name: string, cond: boolean) {
   });
   check("boundary flip: only t1 covered (was t1+t2 under old pre-VAT math)", r.coveredLines.map((l) => l.id), ["t1"]);
   check("boundary flip: t2+t3 unpaid (was just t3 under old pre-VAT math)", r.unpaidLines.map((l) => l.id), ["t2", "t3"]);
-  check("divergence proof: covered table = 0.05/0.01/0.06", r.covered, { subtotal: 0.05, vat: 0.01, total: 0.06 });
-  check("divergence proof: amountDue table = 0.10/0.02/0.12", r.amountDue, { subtotal: 0.1, vat: 0.02, total: 0.12 });
-  check("divergence proof: grand = 0.05/0.01/0.06 (covered-only, unpaid trips excluded per v3 §9)", r.grand, { subtotal: 0.05, vat: 0.01, total: 0.06 });
-  const naiveSum = Math.round((r.covered.total + r.amountDue.total) * 100) / 100;
-  checkTrue("divergence proof: naive sum of table totals (0.18) != grand.total (0.06)", naiveSum !== r.grand.total);
-  check("divergence proof: naive sum actually is 0.18", naiveSum, 0.18);
+  check("divergence proof: grand = ALL THREE trips, one document pass = 0.15/0.02/0.17", r.grand, { subtotal: 0.15, vat: 0.02, total: 0.17 });
+  check("divergence proof: amountDue table = 0.10/0.02/0.12 (per-item, pool-exact)", r.amountDue, { subtotal: 0.1, vat: 0.02, total: 0.12 });
+  check("divergence proof: covered = grand - amountDue = 0.05/0.00/0.05", r.covered, { subtotal: 0.05, vat: 0, total: 0.05 });
+  // THE RESIDUE, NAMED. A standalone calculateVat() over covered's own single
+  // 0.05 line returns vat 0.01 / total 0.06 — one halala MORE than the derived
+  // covered above. Both are defensible roundings; they cannot both be used at
+  // once without the invoice failing to add up. This asserts the halala landed
+  // in covered.vat (settled, display-only) and NOT in amountDue (what the
+  // customer is actually asked to pay, which stays pool-exact).
+  check("divergence proof: a standalone pass over covered's line would say 0.06", r2(0.05 * 1.15), 0.06);
+  checkTrue("divergence proof: the residue is absorbed by covered.vat, not amountDue", r.covered.total !== r2(0.05 * 1.15) && r.amountDue.total === 0.12);
+  reconciles("divergence proof", r);
 }
 
 // --- THE STRANDED-CHARGE FIX: an uncovered charge reaches Amount Due --------
@@ -189,7 +240,10 @@ function checkTrue(name: string, cond: boolean) {
 // lib/prepaid.ts had already deducted its 517.50 from the balance — and
 // because a charge is FK-bound to one invoice at creation and hidden from
 // every other by reservedElsewhereIds, it could never be billed later either.
-// AFTER: it lands in amountDue, which is the only figure that changes.
+// AFTER: it lands in amountDue AND in grand. Two fixes stacked here — the
+// earlier one widened Amount Due to carry uncovered charges; this one widened
+// grand to carry every line, so the charge is no longer asked for in one figure
+// and absent from the document's own total. covered falls out as the remainder.
 {
   const trips: ConsumingTrip[] = [
     { id: "t1", trip_date: "2026-07-17", delivered_at: "2026-07-17T10:00:00Z", rate_sar: 500 },
@@ -212,7 +266,12 @@ function checkTrue(name: string, cond: boolean) {
     vat: 67.5,
     total: 517.5,
   });
-  check("stranded-charge: grand UNCHANGED — covered trip only, uncovered charge excluded", r.grand, {
+  check("stranded-charge: grand = covered trip 500 + the uncovered charge 450, one VAT pass", r.grand, {
+    subtotal: 950,
+    vat: 142.5,
+    total: 1092.5,
+  });
+  check("stranded-charge: covered = grand - amountDue = the trip alone", r.covered, {
     subtotal: 500,
     vat: 75,
     total: 575,
@@ -230,6 +289,7 @@ function checkTrue(name: string, cond: boolean) {
     Math.round((r.amountDue.total - (r.ledger?.unpaid.subtotal ?? 0)) * 100) / 100,
     517.5,
   );
+  reconciles("stranded-charge", r);
 }
 
 // --- Unpaid TRIPS and an uncovered charge TOGETHER (the two halves add) -----
@@ -257,7 +317,9 @@ function checkTrue(name: string, cond: boolean) {
   check("both halves: charge uncovered", r.chargeLines.find((l) => l.id === "ch1")?.covered, false);
   check("both halves: ledger.unpaid.subtotal is the TRIP half only (230)", r.ledger?.unpaid.subtotal, 230);
   check("both halves: amountDue = 230 (trips) + 115 (charge)", r.amountDue, { subtotal: 300, vat: 45, total: 345 });
-  check("both halves: grand still covered-only (575)", r.grand.total, 575);
+  check("both halves: grand = tA 500 + tB 200 + charge 100, one VAT pass", r.grand, { subtotal: 800, vat: 120, total: 920 });
+  check("both halves: covered = grand - amountDue = tA alone", r.covered, { subtotal: 500, vat: 75, total: 575 });
+  reconciles("both halves", r);
 }
 
 // --- A COVERED charge must NOT leak into Amount Due (the complement) --------
@@ -282,6 +344,68 @@ function checkTrue(name: string, cond: boolean) {
   check("covered charge: tagged covered", r.chargeLines.find((l) => l.id === "ch1")?.covered, true);
   check("covered charge: amountDue stays ZERO", r.amountDue, { subtotal: 0, vat: 0, total: 0 });
   check("covered charge: grand = trip 500 + charge 100, one VAT pass", r.grand, { subtotal: 600, vat: 90, total: 690 });
+  check("covered charge: covered = the whole invoice (nothing due)", r.covered, { subtotal: 600, vat: 90, total: 690 });
+  reconciles("covered charge", r);
+}
+
+// --- A FUTURE-DATED charge is covered when the pool suffices ----------------
+// THE INVERTED REGRESSION GUARD. This case FAILS LOUDLY if the charge_date
+// gate ever returns to consumingItems().
+//
+// The charge is dated 2026-08-15, AFTER periodEnd 2026-07-31. Under the old
+// `charge_date <= asOfDate` filter it never reached the FIFO walk, so it could
+// not be covered no matter how large the pool — while chargeLines listed it and
+// v_customer_prepaid_balance (no date predicate, ever) had already deducted its
+// 115.00. Live invoice 026-000017 is exactly this: a 1,000.00 charge dated
+// after its period, shown, deducted, and billed to nobody.
+//
+// Note the old filter was ONE-SIDED (`<=`), so only FUTURE-dated charges were
+// stranded — a past-dated charge always passed, which is why this went unseen.
+// A charge is scoped by its invoice FK, never by date; periodEnd scopes TRIPS.
+{
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-07-10", delivered_at: "2026-07-10T10:00:00Z", rate_sar: 500 },
+  ];
+  const topups: TopupLite[] = [{ id: "top1", amount_sar: 2000, topup_date: "2026-07-01" }];
+  const r = assembleInvoice({
+    customerId: "c1",
+    paymentMode: "prepaid",
+    periodStart: "2026-07-01",
+    periodEnd: "2026-07-31",
+    trips,
+    topups,
+    specialCharges: [{ id: "ch1", label: "charge dated after periodEnd", amount_sar: 100, charge_date: "2026-08-15" }],
+  });
+  check("future-dated charge: still listed on the invoice (was already true — 0181)", r.chargeLines.map((l) => l.id), ["ch1"]);
+  check("future-dated charge: COVERED — pool 2000 easily holds 575 + 115", r.chargeLines.find((l) => l.id === "ch1")?.covered, true);
+  check("future-dated charge: amountDue stays ZERO (was 115 due on a settled charge)", r.amountDue, { subtotal: 0, vat: 0, total: 0 });
+  check("future-dated charge: inside grand = trip 500 + charge 100", r.grand, { subtotal: 600, vat: 90, total: 690 });
+  reconciles("future-dated charge", r);
+}
+
+// --- A FUTURE-DATED charge is UNCOVERED when the pool does not suffice ------
+// The complement of the case above, and the half that proves the gate's removal
+// did not simply flip every charge to covered. Pool 600: the trip consumes 575,
+// leaving 25, so the charge's 115 does not fit. It reaches the FIFO walk (no
+// date gate) and is refused there on the MERITS, which is the difference.
+{
+  const trips: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-07-10", delivered_at: "2026-07-10T10:00:00Z", rate_sar: 500 },
+  ];
+  const topups: TopupLite[] = [{ id: "top1", amount_sar: 600, topup_date: "2026-07-01" }];
+  const r = assembleInvoice({
+    customerId: "c1",
+    paymentMode: "prepaid",
+    periodStart: "2026-07-01",
+    periodEnd: "2026-07-31",
+    trips,
+    topups,
+    specialCharges: [{ id: "ch1", label: "charge dated after periodEnd", amount_sar: 100, charge_date: "2026-08-15" }],
+  });
+  check("future-dated charge (poor pool): uncovered on the merits, not by date", r.chargeLines.find((l) => l.id === "ch1")?.covered, false);
+  check("future-dated charge (poor pool): amountDue = the charge alone", r.amountDue, { subtotal: 100, vat: 15, total: 115 });
+  check("future-dated charge (poor pool): inside grand all the same", r.grand, { subtotal: 600, vat: 90, total: 690 });
+  reconciles("future-dated charge (poor pool)", r);
 }
 
 // --- Empty period / no trips --------------------------------------------------
@@ -301,6 +425,7 @@ function checkTrue(name: string, cond: boolean) {
     { subtotal: 0, vat: 0, total: 0 },
   ]);
   check("empty: no lines", [r.coveredLines, r.unpaidLines], [[], []]);
+  reconciles("empty", r);
 }
 
 // --- paymentMode unset throws (never silently defaults) ----------------------
@@ -374,6 +499,11 @@ function checkTrue(name: string, cond: boolean) {
   checkTrue("reserve-exclusion: t3 stays Unpaid (pool already spent on t2, not un-drained by exclusion)", r.unpaidLines.some((l) => l.id === "t3"));
   check("reserve-exclusion: t2 absent from unpaidLines too (never appears anywhere on this invoice)", r.unpaidLines.some((l) => l.id === "t2"), false);
   check("reserve-exclusion: covered totals recomputed over remaining line only", r.covered, { subtotal: 100, vat: 15, total: 115 });
+  // grand drops t2 with the tables. A line reserved by ANOTHER invoice is that
+  // invoice's to total; carrying it here would bill the same trip on two
+  // documents. reconciles() proves the exclusion reached all three figures.
+  check("reserve-exclusion: grand = t1 + t3 only, t2 excluded from the total too", r.grand, { subtotal: 200, vat: 30, total: 230 });
+  reconciles("reserve-exclusion", r);
 }
 
 // --- Reserve-at-draft exclusion — postpaid: reserved-elsewhere trip simply -
@@ -395,6 +525,7 @@ function checkTrue(name: string, cond: boolean) {
   });
   check("postpaid reserve-exclusion: only t1 billable", r.unpaidLines.map((l) => l.id), ["t1"]);
   check("postpaid reserve-exclusion: amountDue = just t1", r.amountDue, { subtotal: 300, vat: 45, total: 345 });
+  reconciles("postpaid reserve-exclusion", r);
 }
 
 // --- No exclusion given (default) — existing callers/behavior unaffected ---
@@ -410,6 +541,7 @@ function checkTrue(name: string, cond: boolean) {
     specialCharges: [],
   });
   check("no reservedElsewhereTripIds param: nothing excluded, t1 present", r.unpaidLines.map((l) => l.id), ["t1"]);
+  reconciles("no exclusion", r);
 }
 
 // --- Special-charge lock: editable Draft/Review only, frozen from Confirm --

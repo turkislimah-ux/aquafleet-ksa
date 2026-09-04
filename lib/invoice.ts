@@ -56,10 +56,40 @@
 //   zero, computed from the SAME splitCoveredUnpaidItems() walk (never
 //   re-derived) so they can't disagree with coveredLines/unpaidLines.
 //
-// GRAND TOTAL (v3 §9, REVERSED from v2): built ONLY from what's actually
-// settled on this invoice — covered trips (pre-VAT) + covered special
-// charges (pre-VAT), ONE combined VAT pass. Unpaid trips are explicitly
-// EXCLUDED (the opposite of v2, where grand = covered + unpaid combined).
+// GRAND TOTAL = THE WHOLE INVOICE, AND covered + amountDue === grand ALWAYS.
+// The money law, both payment modes, on subtotal AND VAT AND total:
+//
+//   grand     = ONE document-level VAT pass over EVERY line the invoice shows
+//               — covered trips + unpaid trips + ALL special charges,
+//               covered or not. Nothing on the document sits outside it.
+//   amountDue = the collectible: unpaid trips + UNCOVERED charges, summed
+//               per-item VAT-inclusive so it ties to the pool (see below).
+//   covered   = grand − amountDue, component-wise. DERIVED, never its own VAT
+//               pass — that is what makes the identity exact rather than
+//               approximate, and it is the only arrangement where ZATCA's
+//               document-level rounding of grand and the pool-exact per-item
+//               rounding of amountDue both survive.
+//
+// v3 §9 SHIPPED THE REVERSE AND IT WAS A REAL BUG, measured on live data
+// before this changed. Grand was built ONLY from what was settled (covered
+// trips + covered charges), covered from covered TRIPS alone, amountDue from
+// unpaid trips + uncovered charges — three sets that neither cover nor
+// partition the invoice, so:
+//
+//   grand − (covered + amountDue) = coveredCharges − unpaidTrips − uncoveredCharges
+//
+// Nothing forced that to zero, and it was not zero on 8 of 24 invoices. The
+// negative side cost money: 026-000014's grand total came out 32,844.00 SAR
+// short of its own delivered work and 026-000007's 471.50 short, and since
+// those trips stay invoice_id-reserved on a PAID invoice they were billable
+// nowhere else — the dead end the stranded-charge note above describes,
+// reached by the TRIPS half instead. 38,709.00 SAR across four invoices. The
+// positive side (covered charges inside grand but missing from
+// covered_subtotal) moved no cash but proved the fault was structural: one
+// object, two behaviours, decided by nothing but which set it landed in.
+//
+// Do NOT re-narrow grand to "what is settled". The figure describing the
+// settled portion is `covered`, which now genuinely holds it, charges included.
 //
 // AMOUNT DUE (v3 §9, NARROWED from v2; WIDENED AGAIN by the stranded-charge
 // fix): = the Unpaid TRIPS table's own VAT-inclusive subtotal PLUS this
@@ -96,12 +126,20 @@
 // rewritten, which is the same "fix forward, never rewrite applied history"
 // rule the migrations follow.
 //
-// Each independently-rounded total (covered / amountDue / grand) is its own
-// document-level calculateVat() pass (or, for amountDue, derived directly
-// from the ledger's per-item VAT-inclusive sum — see below). They are NOT
-// required to reconcile to each other to the halala — same "document-level,
-// not summed" principle Commit 4 already locked in. The harness proves this
-// divergence is expected, not a bug.
+// THE THREE TOTALS RECONCILE EXACTLY, AND THAT IS ENFORCED, NOT HOPED FOR.
+// This paragraph used to say the opposite — that each total was its own
+// independently-rounded pass and they were "NOT required to reconcile to each
+// other to the halala". That licence is what let a 32,844.00 SAR hole read as
+// a rounding convention. Only TWO of the three are now computed: grand (one
+// document-level pass, ZATCA) and amountDue (per-item, pool-exact). covered is
+// their difference, so covered + amountDue === grand on all three figures by
+// construction — the same reason postpaid has always reconciled (grand and
+// amountDue are literally the same call there).
+//
+// The two rounding conventions still differ by up to a halala, as they always
+// did; the difference now has a defined home (covered's VAT) instead of
+// leaking into whether the invoice adds up. scripts/invoice-check.ts asserts
+// the identity on EVERY case, both modes — see reconciles().
 //
 // POSTPAID — completely unchanged (per Step 3 instruction, do not touch):
 // no balance/FIFO/coverage concept applies. coveredLines is always [],
@@ -416,6 +454,11 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     label: c.label,
   }));
 
+  // periodEnd scopes TRIP consumption only. consumingItems() no longer gates
+  // charges by date, so a charge dated after periodEnd now reaches the FIFO
+  // walk and can be covered like any other — it used to be displayed by
+  // chargeLines below, deducted by v_customer_prepaid_balance, and refused
+  // coverage here, all at once (026-000017).
   const split = splitCoveredUnpaidItems(topups, trips, chargesForEngine, periodEnd, returns);
 
   const coveredTripEntries = split.covered
@@ -439,8 +482,11 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   // while v_customer_prepaid_balance consumes EVERY charge on a non-void
   // invoice with no date filter whatsoever. A charge_date filter here made the
   // invoice omit charges the balance had already been deducted for (0181).
-  // chargesForEngine above never had this filter, so the two halves of this
-  // same function disagreed.
+  //
+  // 0181 removed the filter from THIS half only. The MATH half kept it one
+  // level down, inside consumingItems(), so the disagreement survived in the
+  // shape that mattered more: the charge was listed here and refused coverage
+  // there. Both halves are ungated now — see splitCoveredUnpaidItems above.
   const chargeLines: InvoiceLine[] = specialCharges
     .filter(notReservedElsewhere)
     .map((c) => ({
@@ -506,8 +552,12 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   };
 
   // ---- covered / amountDue / grand (InvoiceTableTotals) ----
+  // ORDER OF DERIVATION IS THE WHOLE RULE (see the GRAND TOTAL header note):
+  // grand is computed FIRST, from every line; amountDue keeps its own
+  // pool-exact rule; covered is what is left. covered is therefore never
+  // computed from its own line set — deriving it was how covered charges went
+  // missing from covered_subtotal while sitting inside grand.
   const coveredTripVatItems = toVatItems(coveredTripEntries);
-  const coveredVat = calculateVat(coveredTripVatItems);
 
   // Amount Due = unpaid TRIPS + UNCOVERED special charges, VAT-inclusive.
   // The trips half is still taken verbatim from ledger.unpaid.subtotal (never
@@ -537,10 +587,36 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     total: amountDueTotal,
   };
 
-  // Grand Total (v3, reversed from v2): covered trips + covered charges
-  // only, ONE combined VAT pass. Unpaid trips excluded entirely.
-  const coveredChargeLines = chargeLines.filter((l) => l.covered === true);
-  const grandVat = calculateVat([...coveredTripVatItems, ...chargesToVatItems(coveredChargeLines.map((l) => ({ id: l.id, label: l.description, amount_sar: l.amount_sar })))]);
+  // GRAND TOTAL = the whole invoice. EVERY line this document shows: covered
+  // trips + unpaid trips + every special charge, covered or not. ONE
+  // document-level calculateVat() pass, so the printed VAT is rounded once
+  // against the full taxable base exactly as ZATCA requires (lib/vat.ts).
+  const grandVat = calculateVat([
+    ...coveredTripVatItems,
+    ...toVatItems(unpaidTripEntries),
+    ...chargesToVatItems(chargeLines.map((l) => ({ id: l.id, label: l.description, amount_sar: l.amount_sar }))),
+  ]);
+  const grand: InvoiceTableTotals = {
+    subtotal: grandVat.subtotal,
+    vat: grandVat.vatAmount,
+    total: grandVat.grandTotal,
+  };
+
+  // COVERED = GRAND − AMOUNT DUE, component-wise. Not its own VAT pass, on
+  // purpose: subtraction is what makes covered + amountDue === grand hold on
+  // all three figures identically rather than approximately, and it is the
+  // only arrangement in which BOTH the ZATCA document-level rounding of grand
+  // AND the pool-exact per-item rounding of amountDue survive. The <= 0.01
+  // residue between the two conventions lands here, in the already-SETTLED
+  // figure, where it settles nothing — never in the collectible.
+  //
+  // The subtotals are exact sums either way (no rounding to disagree about),
+  // so this only ever moves a halala of VAT.
+  const covered: InvoiceTableTotals = {
+    subtotal: round2(grand.subtotal - amountDue.subtotal),
+    vat: round2(grand.vat - amountDue.vat),
+    total: round2(grand.total - amountDue.total),
+  };
 
   return {
     customerId,
@@ -550,9 +626,9 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     coveredLines,
     unpaidLines,
     chargeLines,
-    covered: { subtotal: coveredVat.subtotal, vat: coveredVat.vatAmount, total: coveredVat.grandTotal },
+    covered,
     amountDue,
-    grand: { subtotal: grandVat.subtotal, vat: grandVat.vatAmount, total: grandVat.grandTotal },
+    grand,
     ledger,
     sellerSnapshot,
     buyerSnapshot,

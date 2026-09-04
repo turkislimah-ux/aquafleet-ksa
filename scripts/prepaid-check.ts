@@ -111,11 +111,40 @@ check(
     885,
   );
   // The consumption gate itself, stated alone so a future change to it fails
-  // here and not only through the composite figure above.
+  // here and not only through the composite figure above. assembleInvoice()
+  // passes periodEnd here to scope an invoice's TRIP consumption to its period.
   check(
-    "asOfDate still scopes consumption (lib/invoice.ts:415 depends on it)",
+    "asOfDate still scopes TRIP consumption (assembleInvoice depends on it)",
     consumingItems(futureTrips, [], "2026-06-30").map((e) => e.id),
     ["t1"],
+  );
+
+  // --- THE OTHER HALF OF THE GATE, ASSERTED ABSENT ------------------------
+  // INVERTED CASE. asOfDate scopes TRIPS ONLY. consumingItems() used to carry
+  // a second filter, `charge_date <= asOfDate`, that stranded FUTURE-dated
+  // charges: they were listed on the invoice, deducted by
+  // v_customer_prepaid_balance (which never had a date predicate), and refused
+  // coverage here — all at once. Live invoice 026-000017 is that shape.
+  //
+  // A charge is scoped by its invoice FK, set at creation. It is never
+  // date-scoped. This asserts the gate's ABSENCE, so re-adding it fails HERE
+  // rather than silently on a customer's document. Note the old filter was
+  // one-sided (`<=`), so ch-past always passed — only ch-future proves it gone.
+  const gateProbeCharges: ConsumingCharge[] = [
+    { id: "ch-past", charge_date: "2026-06-05", amount_sar: 10, label: "before cutoff" },
+    { id: "ch-future", charge_date: "2026-07-20", amount_sar: 10, label: "AFTER cutoff — MUST STILL APPEAR" },
+  ];
+  check(
+    "asOfDate does NOT gate charges: a charge dated after the cutoff still consumes",
+    consumingItems(futureTrips, gateProbeCharges, "2026-06-30").map((e) => e.id).sort(),
+    ["ch-future", "ch-past", "t1"],
+  );
+  // Same statement in money, because an id list would survive an amount bug:
+  // 1000 credits - 115 (t1) - 11.50 - 11.50 (both charges) = 862.
+  check(
+    "asOfDate does NOT gate charges: both charges are deducted from the balance",
+    derivedBalanceItems(futureTopups, futureTrips, gateProbeCharges, "2026-06-30"),
+    862,
   );
 }
 

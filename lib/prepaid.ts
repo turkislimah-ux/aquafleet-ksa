@@ -242,6 +242,10 @@ export type ConsumingCharge = {
   // resolve one (e.g. fall back to the invoice's period_end) before
   // constructing this type, exactly like ConsumingTrip.rate_sar being
   // resolved before construction. Never re-derived in here.
+  //
+  // ORDERING ONLY — it never decides MEMBERSHIP. A charge's invoice FK does
+  // that, and the caller has already applied it. consumingItems() does not
+  // filter charges by this date; see its header for what that filter cost.
   charge_date: string;
   // Pre-VAT, = price_sar * quantity, already computed by the caller — same
   // source-of-truth field lib/invoice.ts's chargesToVatItems already reads
@@ -285,12 +289,36 @@ function compareConsumedItems(a: ConsumedItem, b: ConsumedItem): number {
 /**
  * THE v3 shared "what consumes balance" function. Combines
  * deliveredTripsSorted()'s delivered/asOfDate-filtered trip list with the
- * given charges (asOfDate-filtered by charge_date; no other filtering — see
- * the "which invoices' charges consume" note above), maps both to
- * ConsumedItem (adding the VAT-inclusive consumedAmount), and returns ONE
- * date-ordered queue. derivedBalanceItems/buildStatementItems/
- * splitCoveredUnpaidItems all walk
- * this exact list.
+ * given charges (NOT date-filtered — see below), maps both to ConsumedItem
+ * (adding the VAT-inclusive consumedAmount), and returns ONE date-ordered
+ * queue. derivedBalanceItems/buildStatementItems/splitCoveredUnpaidItems all
+ * walk this exact list.
+ *
+ * asOfDate FILTERS TRIPS ONLY. A CHARGE IS INVOICE-BOUND, NOT DATE-SCOPED.
+ * Every special charge is FK-bound to exactly one invoice at creation, so its
+ * invoice — not its date — decides which document it belongs to, and the
+ * caller has already scoped the charge list by that FK. Its date is a label.
+ *
+ * This used to carry `charge_date <= asOfDate`, and with asOfDate = the
+ * invoice's periodEnd that made a FUTURE-DATED charge structurally
+ * un-coverable: it never entered this walk, so it could never land in
+ * splitCoveredUnpaidItems' covered side, so lib/invoice.ts tagged it
+ * `covered: false` — while the same function's chargeLines half, which never
+ * had the filter, displayed it anyway. Displayed, deducted from the balance,
+ * and permanently uncoverable. Measured live on 026-000017 (a 1,000.00 charge
+ * dated two days past periodEnd, uncovered against ~40,000 of remaining pool).
+ *
+ * The predicate was also one-SIDED — `<=` let PAST-dated charges through — so
+ * the same engine covered a charge dated before the period and refused one
+ * dated after it. Deleting it makes this walk agree with the two authorities
+ * that never had the filter: v_customer_prepaid_balance (charge_consumption_sar
+ * consumes every charge on every non-void invoice, no date predicate) and
+ * confirm_invoice()'s charge-divergence guard (payload must match the whole
+ * charge table, dates irrelevant).
+ *
+ * Ordering is unaffected in the direction that would matter: compareConsumedItems
+ * sorts by date, so a future-dated charge lands at the TAIL of the queue and
+ * cannot take pool from an earlier item — it can only consume what survives them.
  */
 export function consumingItems(
   trips: ConsumingTrip[],
@@ -308,17 +336,17 @@ export function consumingItems(
     water_type: e.water_type ?? null,
   }));
 
-  const chargeItems: ConsumedItem[] = charges
-    .filter((c) => asOfDate == null || c.charge_date <= asOfDate)
-    .map((c) => ({
-      id: c.id,
-      kind: "charge",
-      trip_date: c.charge_date,
-      delivered_at: null,
-      amount: round2(c.amount_sar),
-      consumedAmount: round2(c.amount_sar * (1 + VAT_RATE)),
-      label: c.label ?? null,
-    }));
+  // NO asOfDate gate — see the header. Charges are scoped by their invoice FK
+  // (the caller's job), never by date.
+  const chargeItems: ConsumedItem[] = charges.map((c) => ({
+    id: c.id,
+    kind: "charge",
+    trip_date: c.charge_date,
+    delivered_at: null,
+    amount: round2(c.amount_sar),
+    consumedAmount: round2(c.amount_sar * (1 + VAT_RATE)),
+    label: c.label ?? null,
+  }));
 
   return [...tripItems, ...chargeItems].sort(compareConsumedItems);
 }
@@ -340,8 +368,9 @@ export function consumingItems(
  * Removing the gate changes no current number and closes that.
  *
  * asOfDate STAYS on consumingItems() and is load-bearing there —
- * lib/invoice.ts:415 passes periodEnd to scope an invoice's consumption to its
- * period. Deleting the parameter would take that with it.
+ * lib/invoice.ts passes periodEnd to scope an invoice's TRIP consumption to its
+ * period. Deleting the parameter would take that with it. It no longer touches
+ * CHARGES: a charge is invoice-bound, not date-scoped (see consumingItems).
  *
  * `returns` (0142) defaults to `[]` — a caller with no refunds to report gets
  * byte-identical numbers to before. It is the LAST parameter for that reason:
@@ -571,8 +600,10 @@ export type CoveredUnpaidItemsResult = {
  * dated after periodEnd — both halves move together or the pool is not a net.
  *
  * asOfDate still scopes CONSUMPTION — consumingItems() below keeps filtering
- * trips and charges by date, so an invoice for a period still bills only that
- * period's work. The two duties are separable and only the pool side changed.
+ * TRIPS by date, so an invoice for a period still bills only that period's
+ * work. It does NOT filter charges: a charge belongs to its invoice by FK
+ * regardless of its date, and gating it there made a future-dated charge
+ * permanently uncoverable (see consumingItems' header).
  *
  * Invariant (enforced by the harness on every case): coveredTotal +
  * unpaidTotal === sum of every consumingItems() consumedAmount, and

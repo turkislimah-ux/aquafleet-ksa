@@ -100,8 +100,10 @@ type Totals = { subtotal: number; vat: number; total: number };
 // widened Amount Due to include uncovered special charges, so the two figures
 // are NOT equal on invoices confirmed after it, and this fallback is not a
 // general identity — it holds only for the frozen legacy rows it fires on. See
-// lib/invoice.ts's AMOUNT DUE header note. covered.total is its own
-// calculateVat() pass that reconciles to within a halala), but
+// lib/invoice.ts's AMOUNT DUE header note. covered.total is the FROZEN column
+// on every row this fallback can fire on, so what the live engine now does with
+// it — deriving it as grand − amountDue rather than running its own
+// calculateVat() pass — does not reach here), but
 // `balance`/`remaining` genuinely no
 // longer exist on disk — showing them as "0" is what caused the original
 // bug (a fabricated "-2,940 VAT" and a false "Running Balance: 0" next to 7
@@ -629,16 +631,48 @@ export default function InvoiceDetailModal({
   // lib/invoice.ts's POSTPAID note). Grand Total's "Special Charges (covered)"
   // row sums only the covered subset — same round-once convention as above.
   const prepaidChargeLines = view?.chargeLines ?? [];
-  // l.covered undefined = a pre-migration-0036 legacy charge snapshot (no
-  // per-charge coverage concept existed before v3 — every special charge was
-  // simply billed unconditionally on whatever invoice it was added to, see
-  // finance-invoice-spec.md §4/§7's "rolls forward... (v3)" framing). Treat
-  // undefined as covered (`!== false`), not as excluded — excluding it here
-  // while the frozen grand_total_sar/grand_vat_sar snapshot already counted
-  // it (computed by the old engine, at confirm time) is what produced the
-  // "Special Charges (covered) = 0 SAR but Total VAT/TOTAL include it anyway"
-  // inconsistency.
-  const prepaidCoveredChargesSubtotal = round2(
+
+  // GRAND TOTAL STACK — DERIVED FROM THE LINE SNAPSHOTS, NOT FROM THE COVERED
+  // SUBSET. Grand Total is the whole invoice: every trip this document lists,
+  // covered or unpaid, plus every special charge, covered or uncovered. So the
+  // rows sum the LINES the document is actually showing, which is the only
+  // source that cannot disagree with the tables printed above them.
+  //
+  // This replaces a `chargeLines.filter(l => l.covered !== false)` subtotal.
+  // That row was correct against the OLD covered-only Grand Total and is wrong
+  // against this one twice over: it dropped uncovered charges that grand now
+  // counts, and — since covered charges were already inside grand.vat/total —
+  // it left the block adding up only by coincidence of what was excluded.
+  const prepaidTripsSubtotal = round2(
+    [...(view?.coveredLines ?? []), ...(view?.unpaidLines ?? [])].reduce((s, l) => s + l.amount_sar, 0),
+  );
+  const prepaidChargesSubtotalAll = round2(prepaidChargeLines.reduce((s, l) => s + l.amount_sar, 0));
+
+  // ...EXCEPT ON AN INVOICE FROZEN UNDER THE OLD LAW, WHICH IS RENDERED AS
+  // ISSUED. Draft/review recompute live and always reconcile. Confirmed / paid
+  // / void render from frozen columns (0027), and the ones frozen by the
+  // covered-only engine hold a grand_total_sar that EXCLUDES lines they list —
+  // so line-derived rows would print a stack that visibly does not add up to
+  // its own total. Those get their stored money corrected separately; until
+  // then they render in the shape they were issued in, which at least agrees
+  // with itself.
+  //
+  // The test is arithmetic, not a status check, deliberately: an old invoice
+  // whose figures happen to obey the current law (no unpaid trips, no charges —
+  // the two totals coincide there) renders the new stack and is identical
+  // either way. Nothing keys off `status`, so nothing has to be re-keyed when
+  // the 8 divergent rows are corrected — they simply start reconciling.
+  const prepaidStackReconciles =
+    view != null &&
+    round2(prepaidTripsSubtotal + prepaidChargesSubtotalAll + view.grand.vat) === view.grand.total;
+
+  // The as-issued row, used ONLY when the check above fails. Covered charges
+  // only, `!== false` so a pre-0036 snapshot with no coverage flag counts as
+  // covered — which is what the old engine did when it froze the grand total
+  // this row has to keep adding up to. Reaching for this figure on a live
+  // invoice would double-count: the covered charges are already inside
+  // prepaidChargesSubtotalAll above.
+  const frozenCoveredChargesSubtotal = round2(
     prepaidChargeLines.filter((l) => l.covered !== false).reduce((s, l) => s + l.amount_sar, 0),
   );
 
@@ -928,15 +962,25 @@ export default function InvoiceDetailModal({
                       tone={view.amountDue.total > 0 ? "bad" : "ok"}
                     />
                   </div>
-                  {/* Grand Total — v3 §9, one stacked block: covered trips +
-                      covered charges only (unpaid trips excluded). No title
-                      (item 4). */}
+                  {/* Grand Total — the WHOLE invoice: every trip on it,
+                      covered or unpaid, plus every special charge. Rows come
+                      from the line snapshots so they cannot disagree with the
+                      tables above; the fallback renders an invoice frozen under
+                      the old covered-only law exactly as it was issued. See
+                      prepaidStackReconciles. */}
                   <GrandTotalStack
                     lang={lang}
-                    subtotalLabel={t("trips.invoiceSheet.subtotalCovered", lang)}
-                    subtotal={view.covered.subtotal}
-                    chargesLabel={t("trips.invoiceSheet.chargesCovered", lang)}
-                    chargesSubtotal={prepaidCoveredChargesSubtotal}
+                    rows={
+                      prepaidStackReconciles
+                        ? [
+                            { label: t("trips.invoiceSheet.subtotalTrips", lang), amount: prepaidTripsSubtotal },
+                            { label: t("trips.invoiceSheet.specialCharges", lang), amount: prepaidChargesSubtotalAll },
+                          ]
+                        : [
+                            { label: t("trips.invoiceSheet.subtotalCovered", lang), amount: view.covered.subtotal },
+                            { label: t("trips.invoiceSheet.chargesCovered", lang), amount: frozenCoveredChargesSubtotal },
+                          ]
+                    }
                     vat={view.grand.vat}
                     total={view.grand.total}
                   />
@@ -1020,10 +1064,10 @@ export default function InvoiceDetailModal({
                     Remaining (postpaid has no balance). No title (item 4). */}
                 <GrandTotalStack
                   lang={lang}
-                  subtotalLabel={t("trips.invoiceSheet.subtotalUnpaid", lang)}
-                  subtotal={postpaidUnpaidTripSubtotal}
-                  chargesLabel={t("trips.invoiceSheet.specialCharges", lang)}
-                  chargesSubtotal={postpaidChargesSubtotal}
+                  rows={[
+                    { label: t("trips.invoiceSheet.subtotalUnpaid", lang), amount: postpaidUnpaidTripSubtotal },
+                    { label: t("trips.invoiceSheet.specialCharges", lang), amount: postpaidChargesSubtotal },
+                  ]}
                   vat={view.grand.vat}
                   total={view.grand.total}
                 />
@@ -1153,8 +1197,17 @@ export default function InvoiceDetailModal({
               )}
               {/* Prepaid — Batch 1: no cash/bank choice, just a confirmation
                   showing settled balance draw-down. Numbers are display-only
-                  (settledBalance from the Finance tab row, view.grand.total
-                  already computed) — nothing recomputed here. */}
+                  (settledBalance from the Finance tab row, view.covered.total
+                  already computed) — nothing recomputed here.
+
+                  THE DRAW-DOWN IS covered.total, NOT grand.total. It read grand
+                  back when grand WAS the covered portion. Grand Total is now
+                  the whole invoice, so keeping it here would have shown the
+                  operator a pool paying for the unpaid trips and uncovered
+                  charges as well — the exact amounts the same document is
+                  asking the customer to settle in Amount Due. covered.total is
+                  what the pool spent, and it is what the balance note below
+                  has always described. */}
               {status === "confirmed" && payingOpen && isPrepaid && (
                 <div className="space-y-3 max-w-sm">
                   <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
@@ -1164,12 +1217,12 @@ export default function InvoiceDetailModal({
                     </div>
                     <div className="flex justify-between">
                       <span className="muted">{t("trips.invoiceSheet.thisInvoiceGrand", lang)}</span>
-                      <span className="tabular-nums">− {formatSar(view.grand.total)}</span>
+                      <span className="tabular-nums">− {formatSar(view.covered.total)}</span>
                     </div>
                     <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
                       <span>{t("trips.invoiceSheet.remainingSettled", lang)}</span>
-                      <span className={"tabular-nums " + (((settledBalance ?? 0) - view.grand.total) < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
-                        {formatSar((settledBalance ?? 0) - view.grand.total)}
+                      <span className={"tabular-nums " + (((settledBalance ?? 0) - view.covered.total) < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
+                        {formatSar((settledBalance ?? 0) - view.covered.total)}
                       </span>
                     </div>
                   </div>
@@ -1881,41 +1934,40 @@ function TotalCard({
   );
 }
 
-// v3 §9, generalized in v3.1 (items 2 & 4) — the stacked Grand Total block,
-// now shared by BOTH modes: Subtotal → Special Charges → VAT → Total. No
-// title (the block is self-evident — item 4); no Balance/Remaining rows ever
-// (postpaid has no balance concept — item 2). Prepaid feeds it covered
-// trips + covered charges only (unpaid trips excluded, unchanged v3 §9
-// behavior); postpaid feeds it the full unpaid-trips + charges period value
-// (its existing view.grand, untouched — see lib/invoice.ts's POSTPAID note).
+// The stacked Grand Total block, shared by BOTH modes: composition rows → VAT
+// → Total. No title (the block is self-evident); no Balance/Remaining rows ever
+// (postpaid has no balance concept).
+//
+// `rows` REPLACED a fixed subtotal/charges pair. The rows are no longer one
+// fixed shape: prepaid now lists every trip and every special charge (Grand
+// Total is the whole invoice), while an invoice frozen under the old
+// covered-only law still lists what it was issued with. Both are two rows
+// today; neither is guaranteed to stay two, and hard-coding the pair is what
+// made the old stack silently mis-describe its own total.
+//
+// The rows must sum, with `vat`, to `total`. That is the caller's job and the
+// caller checks it — see prepaidStackReconciles. This component does not
+// re-derive money, on purpose: a frozen document's figures are read verbatim.
 function GrandTotalStack({
   lang,
-  subtotalLabel,
-  subtotal,
-  chargesLabel,
-  chargesSubtotal,
+  rows,
   vat,
   total,
 }: {
   lang: Lang;
-  subtotalLabel: string;
-  subtotal: number;
-  chargesLabel: string;
-  chargesSubtotal: number;
+  rows: { label: string; amount: number }[];
   vat: number;
   total: number;
 }) {
   return (
     <section className="space-y-2 break-inside-avoid">
       <div className="card p-4 space-y-1.5 text-sm max-w-md sm:min-w-[26rem] ms-auto">
-        <div className="flex items-center justify-between">
-          <span className="muted">{subtotalLabel}</span>
-          <span className="tabular-nums">{formatSar(subtotal)}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="muted">{chargesLabel}</span>
-          <span className="tabular-nums">{formatSar(chargesSubtotal)}</span>
-        </div>
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-center justify-between">
+            <span className="muted">{r.label}</span>
+            <span className="tabular-nums">{formatSar(r.amount)}</span>
+          </div>
+        ))}
         <div className="flex items-center justify-between">
           <span className="muted">{t("trips.invoiceSheet.totalVat", lang)}</span>
           <span className="tabular-nums">{formatSar(vat)}</span>
