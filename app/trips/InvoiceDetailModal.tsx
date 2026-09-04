@@ -967,14 +967,6 @@ export default function InvoiceDetailModal({
                   lines={postpaidUnpaidTripLines}
                   totals={{ subtotal: postpaidUnpaidTripSubtotal, vat: postpaidUnpaidTripVat, total: postpaidUnpaidTripTotal }}
                   fallbackWaterType={view.projectWaterType}
-                  headerRight={
-                    <HideAmountDueToggle
-                      lang={lang}
-                      hidden={raw.hide_amount_due}
-                      busy={busy}
-                      onToggle={() => runAction(() => setHideAmountDue(invoiceId, !raw.hide_amount_due))}
-                    />
-                  }
                 />
 
                 {/* Special charges — own self-contained section (Finance
@@ -1012,10 +1004,16 @@ export default function InvoiceDetailModal({
                 {/* No Amount Due box for postpaid (layout fix) — postpaid has
                     no prepaid balance, so Amount Due is always numerically
                     identical to Grand Total below it (same figure twice,
-                    meaningless second card). The hide-amount-due toggle stays
-                    on the Unpaid trips table above (item 6) — it still
-                    governs whether the figure appears in print/PDF/email,
-                    independent of this on-screen removal. */}
+                    meaningless second card).
+
+                    And no hide-amount-due toggle either: the toggle exists to
+                    suppress a figure the customer has already paid against
+                    from a prepaid balance. Postpaid has no such balance, so
+                    hiding Amount Due would only hide the invoice's own total
+                    from the person being billed for it. PREPAID ONLY — the PDF
+                    template has always read `hideAmountDue` in its prepaid
+                    branch alone, so this removes the popup's odd one out
+                    rather than changing what any document renders. */}
 
                 {/* Grand Total (item 2) — same stacked structure as prepaid:
                     Subtotal → Special Charges → VAT → Total, no Balance/
@@ -1420,7 +1418,6 @@ function LineTable({
   lines,
   totals,
   fallbackWaterType,
-  headerRight,
 }: {
   lang: Lang;
   title: string;
@@ -1430,9 +1427,9 @@ function LineTable({
   // water_type, used when a line's own snapshot water_type is null (pre-
   // water_type-field invoice). Never mutates the frozen snapshot.
   fallbackWaterType?: WaterType | null;
-  // v3.1 (item 6) — lets the postpaid Unpaid table host the hide-amount-due
-  // toggle at its header, same row as the title. Undefined for Covered.
-  headerRight?: React.ReactNode;
+  // No `headerRight` here (unlike PrepaidTripTable) — this table is postpaid-
+  // only, and the sole control it ever hosted was the hide-amount-due toggle,
+  // which is prepaid-only. Nothing else has ever needed the slot.
 }) {
   // Trip lines only (special charges get their own section — see
   // SpecialChargesSection below). Presentation-only: collapse per-trip lines
@@ -1443,10 +1440,7 @@ function LineTable({
 
   return (
     <section className="space-y-2 break-inside-avoid">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wide muted">{title}</h3>
-        {headerRight}
-      </div>
+      <h3 className="text-xs font-semibold uppercase tracking-wide muted">{title}</h3>
       <div className="card p-0 overflow-hidden">
         <Table>
           <thead style={{ background: "rgba(0,0,0,0.02)" }}>
@@ -1938,7 +1932,15 @@ function GrandTotalStack({
 // v3.1 (item 6) — the Amount-Due hide toggle, moved out of the old Amount Due
 // section header and into the top of the Unpaid Trips table (same control,
 // same `invoices.hide_amount_due` column, same setHideAmountDue() action —
-// just relocated). Shared by both modes (item 5: Amount Due applies to both).
+// just relocated).
+//
+// PREPAID ONLY. It once rendered in both modes, on the theory that Amount Due
+// applies to both. It doesn't, in the sense that matters: the toggle suppresses
+// a figure the customer has already paid against from a prepaid balance, and
+// postpaid has no balance for it to be paid against — hiding it there would
+// hide the invoice's own total from the person being billed. The PDF template
+// already agreed, reading `hideAmountDue` in its prepaid branch only; the popup
+// was the outlier. One call site now, in the prepaid branch.
 function HideAmountDueToggle({
   lang,
   hidden,
