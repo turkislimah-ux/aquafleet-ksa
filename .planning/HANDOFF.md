@@ -2,8 +2,20 @@
 
 ## State
 
-- **DB is at migration 0183.** 181 files on disk, max `0183`. Five applied,
-  verified against the CATALOG and committed this session:
+- **DB is at migration 0184.** 182 files on disk, max `0184`. Measured against
+  the CATALOG this turn (2026-09-05), not read off any migration's own grid:
+  - **`0184_company_bank_accounts.sql`** (`caec5ef`) added
+    `company_settings.bank_accounts jsonb not null default '[]'::jsonb` and the
+    CHECK `company_settings_bank_accounts_shape`
+    (`jsonb_typeof = 'array' and jsonb_array_length <= 3`). Both read back from
+    `pg_attribute` / `pg_constraint`. **No ACL footer, and that is correct** — it
+    adds a COLUMN to an existing table, table-level grants already cover every
+    column, and §6's per-table anon revoke is a rule for new TABLES.
+  - Live today: **3 accounts stored, 3 ticked** — at the ceiling. That is DATA
+    and it drifts; re-measure before quoting. **Never SELECT the IBAN VALUES
+    into a note, a log or a commit message** — see the bank-accounts entry below.
+- **The five below were applied and verified against the catalog in the PREVIOUS
+  session** (2026-09-02), not this one:
   - **`0179_rls_initplan_auth_uid_subselect.sql`** (`688b6e2`) wrapped the bare
     `auth.uid()` in five policy predicates as `(select auth.uid())`, so Postgres
     hoists it into an InitPlan and evaluates it once per query instead of once
@@ -30,9 +42,9 @@
     capability, below.
   - **`0183_rename_delete_draft_invoice_to_discard_invoice.sql`** (`55e3ebe`) —
     the pure rename, below. One `alter function … rename to`, no footer.
-- **Origin carries through `6af117d` plus this handoff commit; working tree
-  clean.** **This is a pointer and it goes stale the moment anyone commits —
-  measure `git status -sb` before quoting it.**
+- **Origin carries through `caec5ef` plus this handoff commit; `main` and
+  `origin/main` level, working tree clean.** **This is a pointer and it goes
+  stale the moment anyone commits — measure `git status -sb` before quoting it.**
 - **MONEY FIX — `confirm_invoice` IS NOW AN AUDITOR, NOT A SCRIBE (`2477946`).**
   A confirmed invoice could freeze with NO special charges while the customer's
   prepaid balance had already been consumed by those same charges. **Two sources
@@ -68,6 +80,42 @@
   function owner-only and **the app loses confirm entirely** — caught in review
   before it ran, not after. Read back with `has_function_privilege` on all
   three roles plus `anon`, identified by `oid::regprocedure` (§6).
+- **COMPANY BANK ACCOUNTS — three rulings, all counter-intuitive, all guarded
+  (`caec5ef`).** These read like defects to a fresh pair of eyes. They are not.
+  **They belong in `SKILL.md` and are not there yet — see What's next item 6.**
+  - **The IBAN field validates almost NOTHING, on purpose.** It shipped with the
+    ISO 13616 mod-97 checksum and a length test; **both were removed the same
+    day, by Turki, after using it.** With no banking system behind the screen a
+    checksum cannot confirm an account exists — it only asserts a string obeys a
+    formula — so all it could ever do was reject an operator copying a real
+    number off a real statement, which is exactly what it did. A wrong IBAN is
+    caught where it always actually was: by the customer reading the invoice and
+    by the bank refusing the transfer. **`"nope"` is now a saveable IBAN**
+    (normalises to `NOPE`, reads as country code `NO`). That is the deal.
+  - **What IS kept is the part that helps rather than polices:** separators
+    stripped on the way in, groups of four on the way out, and `SA` supplied when
+    a value starts with a DIGIT. The prefix is a **DEFAULT, not a whitelist** —
+    foreign IBANs are allowed and keep their own code. The test is positional, so
+    `DE89…` is never turned into `SADE89…`, a number that is not any account
+    anywhere. **SA-only stood for exactly one turn before being amended; the two
+    foreign-IBAN cases in the harness are kept INVERTED rather than deleted so
+    the reversal is on the record.**
+  - **`show_on_invoice` FAILS CLOSED** — only an explicit `true` prints. The cost
+    of wrongly hiding is an operator ticking a box; the cost of wrongly showing
+    is a customer wiring money to an account we did not mean to publish.
+  - **The freeze law applies (0027).** Draft and review read LIVE settings so a
+    draft previews what it will freeze; confirmed/paid/void read the frozen
+    `seller_snapshot` with **no live fallback**, because `getInvoicePdf` caches
+    issued bytes — a live read would leave a cached PDF disagreeing with the
+    popup, and would graft today's accounts onto a document already in the
+    customer's hands. `assembleForCustomerPeriod` captures the seller with
+    `select("*")`, so the column landed in the snapshot with no assembly change.
+  - **`scripts/bank-accounts-check.ts` asserts the LOOSENING directly** — a
+    transposed digit and a foreign IBAN must both be ACCEPTED. Re-adding a
+    checksum, a length rule or a country whitelist fails there loudly instead of
+    quietly re-breaking the field. **Proven this turn by re-adding each: 8, 3 and
+    3 checks go red respectively**, reverted `diff -q` identical each time. This
+    is the memory rule — invert a dead invariant, never delete it.
 - **Security posture: the anon boundary is CLEAN.** The ~49 remaining
   `authenticated`-definer advisor warnings are **by design** — this is a
   single-tenant internal app and every staff user is `authenticated`. Do not
@@ -381,7 +429,29 @@
 
 ---
 
-## Closed this session
+## Closed — 2026-09-05 (this session)
+
+| # | Item | Commit |
+|---|---|---|
+| 1 | **Hide-amount-due toggle is prepaid-only.** The PDF template only ever read `hideAmountDue` in its prepaid branch, so the control on a postpaid invoice promised a suppression the document never performed. Popup now agrees with the printable, not the reverse. Drops `LineTable`'s `headerRight` with its last caller. 1 file | `6ac9719` |
+| 2 | **MONEY — two independent prepaid-only faults, both invisible to the suite** because every assertion pinned what the engine DID rather than what it had to ADD UP TO. (a) The grand total was composed from a NON-COVERING line set, so `covered + amountDue = grand` held only by accident — 8 of 24 live invoices did not add up, 38,709.00 SAR of delivered work outside a document's own total. Grand is now ONE document-level `calculateVat()` over every line shown; `amountDue` keeps its pool-exact rule; `covered` is the REMAINDER, so the identity holds by construction. (b) `consumingItems()` gated charges at `charge_date <= asOfDate`, so a future-dated charge was LISTED, DEDUCTED and REFUSED COVERAGE at once. Gate removed for charges, kept for trips. Guards inverted rather than deleted; negative control fails all six. 8 files, no migration | `1754140` |
+| 3 | **Aquaglass downloadable invoice** — one shared view-model (`lib/invoiceViewModel.ts`) both popup and PDF read from, so the 0%-deviation rule is STRUCTURAL: neither surface can invent its own data, grouping or wording, while the LOOK diverges on purpose. Carries three adjustments: the hide-toggle on confirmed invoices, an Arabic legibility pass (size/weight/line-height only — Arabic ran 7.6–8.5px against Latin at 9.6–10.5px), and **company bank accounts (`0184`)** as a Transfer Details block under the Grand Total. 14 files | `caec5ef` |
+
+**All three verified in-browser by Turki before commit, including the freeze law
+on row 3** — a confirmed invoice still shows the accounts it was issued with
+while a draft shows the live set. `tsc` clean, `test:money` 613 pass / 0 fail.
+
+**Row 2's rules are in a COMMIT MESSAGE and nowhere else** — see What's next
+item 7. Its charge-gate half also makes a paragraph of `SKILL.md` stale.
+
+---
+
+## Closed — 2026-09-02 (the previous session)
+
+**EVERY UNQUALIFIED "this session" BELOW MEANS 2026-09-02.** The prose in this
+table and in the sections after it was written that day and is left as written;
+only the heading is dated. A relative date in a handoff decays the moment a
+second session lands on top of it — do not read any of it as 2026-09-05.
 
 | # | Item | Commit |
 |---|---|---|
@@ -474,10 +544,16 @@ read this without re-measuring (§5).
 npm run test:money
 ```
 
-Ten harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green:
+Eleven harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green:
 `prepaid` · `covered-unpaid` · `amount-payable` · `invoice` · `vat` ·
 `commission` · `commission-rows` · `payslip-deduction` · `daily-trips` ·
-`frozen-split`.
+`frozen-split` · `bank-accounts`.
+
+- **`bank-accounts` is not money math and is wired anyway** (`caec5ef`). It
+  guards a LOOSENING rather than a calculation — see the bank-accounts block in
+  State. It sits in this chain because the thing it protects is a field on a
+  customer payment instruction, and the failure it prevents is the same class:
+  a future tightening that quietly makes the field unfillable again.
 
 - **`notification-format-check` is deliberately NOT in the list** — it is a
   presentation harness for the notification bell ("No DB, no React"), not money
@@ -685,10 +761,12 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-**No FEATURE is queued** — ask Turki for the next one rather than picking. **ONE
-piece of follow-through is outstanding — item 5 below** — and it is not a
-feature. (Items 1, 2, 3 and 4 are kept struck through as records, not as work. Do
-not resurrect a struck item because it still appears in this list.)
+**No FEATURE is queued** — ask Turki for the next one rather than picking.
+**THREE pieces of follow-through are outstanding — items 5, 6 and 7 below** —
+and none of them is a feature. 6 and 7 are the same shape: durable money rules
+currently living only in a commit message and in this file, which is the wrong
+place for both. (Items 1, 2, 3 and 4 are kept struck through as records, not as
+work. Do not resurrect a struck item because it still appears in this list.)
 
 1. ~~Run `178df21` scenarios 10–12~~ — **DONE, run and passed in-browser.**
    Payslip preview on an unissued month: the inline fine edit moved
@@ -718,14 +796,41 @@ not resurrect a struck item because it still appears in this list.)
 5. **Enable leaked-password protection in the Supabase dashboard.** Not a
    migration, not a code change — a console setting. It is the one open item on
    the security posture.
+6. **Promote the bank-accounts rulings into `SKILL.md`** (`caec5ef`). The State
+   block above is the source; move it, do not copy it. The load-bearing halves:
+   0184's CHECK enforces array-ness and max-3 and NOTHING ELSE, so
+   `parseBankAccounts` / `validateBankAccounts` are the other half of that
+   bargain and `bank_accounts: unknown` is what makes tsc enforce it;
+   `show_on_invoice` fails CLOSED; the IBAN field validates almost nothing ON
+   PURPOSE and `scripts/bank-accounts-check.ts` asserts the LOOSENING, so a
+   re-added checksum, length rule or country whitelist fails there. Every one of
+   those reads like a defect to a session that meets it cold — which is exactly
+   why it belongs next to the other counter-intuitive money rules rather than in
+   a handoff that gets rewritten.
+7. **Promote `1754140`'s two rules into `SKILL.md`, and fix the paragraph it
+   made stale.** They exist in a commit message and nowhere else:
+   - **`covered + amountDue = grand`, by CONSTRUCTION.** Grand is one
+     document-level `calculateVat()` over every line the invoice shows;
+     `amountDue` keeps the per-item pool-exact rule; **`covered` is derived
+     LAST, as the remainder.** The two rounding conventions differ by up to a
+     halala, and deriving covered last is what puts that halala in a settled
+     display figure instead of in what the customer is asked to pay. Recompose
+     the three independently and the identity goes back to holding by accident.
+   - **A CHARGE IS SCOPED BY ITS INVOICE FK, NEVER BY DATE.** This CONTRADICTS
+     the existing **"asOfDate scopes CONSUMPTION, never the POOL"** section,
+     which still says `asOfDate` is load-bearing in `lib/invoice.ts` — true for
+     TRIPS, no longer true for CHARGES. That paragraph must be amended in the
+     same pass, not left to be read as current.
 
 ~~Investigate draft-stage charge consumption~~ — **RULED this session**, see
 State. Reserve-at-draft is correct and the four `status <> 'void'` sites agree by
 construction. **Do not reopen it as a task.**
 
-~~Push the outstanding commits~~ — **DONE.** Origin carries through `6af117d`
-plus this handoff commit, tree clean. **Re-measure with `git status -sb` before
-quoting; this goes stale on the next commit.**
+~~Push the outstanding commits~~ — **DONE.** Origin carries through `caec5ef`;
+`main` and `origin/main` were level with a clean tree when this file was written,
+the handoff commit itself excepted. **Re-measure with `git status -sb` before
+quoting; this goes stale on the next commit** — it already had, naming `6af117d`
+three commits after the fact.
 
 **NOTIFICATIONS + SETTINGS IS BUILT AND LIVE — do NOT plan it.** Earlier
 revisions of this file listed it as the next feature with "`0154` pending,
