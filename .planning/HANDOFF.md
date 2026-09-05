@@ -593,10 +593,13 @@ read this without re-measuring (§5).
 npm run test:money
 ```
 
-Eleven harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green:
+Twelve harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green:
 `prepaid` · `covered-unpaid` · `amount-payable` · `invoice` · `vat` ·
 `commission` · `commission-rows` · `payslip-deduction` · `daily-trips` ·
-`frozen-split` · `bank-accounts`.
+`frozen-split` · `bank-accounts` · `invoice-render-parity`.
+
+**Read that list off `package.json`, not off this line.** It has been eleven for
+most of this file's life and the count is the first thing to rot.
 
 - **`bank-accounts` is not money math and is wired anyway** (`caec5ef`). It
   guards a LOOSENING rather than a calculation — see the bank-accounts block in
@@ -608,27 +611,36 @@ Eleven harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green:
   presentation harness for the notification bell ("No DB, no React"), not money
   math; its `sar`/`invoice` tokens are notification *text*. Its absence is a
   decision, not an oversight. Do not "fix" it.
-- **`invoice-render-parity-check` is NOT in the list either, and that is an OPEN
-  QUESTION rather than a settled one** (`0b17bc3`). Measured this turn: the
-  `test:money` script still names exactly the eleven above, so the count in this
-  section is current. The case for wiring it is that its case 4 asserts the
-  `covered + amountDue = grand` identity and that every trip AND charge line
-  sits inside the grand subtotal — the `1754140` money law, checked on rendered
-  output rather than on the engine. The case against is that its other six case
-  groups are render parity, and a money chain that fails because a stylesheet
-  changed teaches people to ignore it. **`bank-accounts` is the precedent for
-  wiring a non-money harness anyway.** Not decided; ask Turki. Run it directly
-  in the meantime:
-```sh
-  npx tsx scripts/invoice-render-parity-check.ts
-```
-  **It MUST run from the repo root** — `lib/invoicePdfTemplate.ts` inlines its
-  fonts with `readFileSync` off `process.cwd()`, so the PDF side of the
-  comparison throws from anywhere else.
+- **`invoice-render-parity` is wired, LAST in the chain, by Turki's ruling.**
+  The previous revision of this section left it out as an open question. It is
+  in, for `bank-accounts`' reason: its case 4 asserts the `covered + amountDue =
+  grand` identity and that every trip AND charge line sits inside the grand
+  subtotal — the `1754140` money law, checked on RENDERED OUTPUT rather than on
+  the engine, which is a place no other harness looks.
+  - **LAST on purpose.** It is the heaviest (ten full documents — print and PDF
+    across five fixtures) and the most downstream: a parity failure is only
+    meaningful once the engine harnesses ahead of it are green, and fail-fast
+    should surface a cheap engine fault before an expensive render diff. Whole
+    chain runs in **~9.6s**, so the cost is not the reason for the ordering.
+  - **The known objection stands, and is answered rather than dismissed:** six
+    of its seven case groups are render parity, so a stylesheet change CAN now
+    redden the money chain. That is accepted — a stray colour or a dropped QR on
+    a ZATCA document is a real defect, and case 7 exists to catch it. If this
+    ever starts crying wolf, split the script rather than unwiring it.
+  - **It MUST run from the repo root** — `lib/invoicePdfTemplate.ts` inlines its
+    fonts with `readFileSync` off `process.cwd()`, so the PDF side of the
+    comparison throws from anywhere else. `npm run test:money` satisfies this by
+    construction; a bare `npx tsx` from a subdirectory does not.
 - **Not wired into `next build` or `safe-build.sh`, on purpose.** Money checks
   are run deliberately, not on every build. No test framework was added.
 - Fail-fast was **proven, not assumed**: a `process.exit(1)` harness injected at
   position 3 of a mirror loop stopped the run there and exited 1.
+- **The twelfth entry was proven the same way, on the real chain.** Raising
+  `invoice-render-parity-check.ts`'s token floor from `100` to `100000` made the
+  chain print `[FAIL] every case yields > 100 text tokens (min 158)` / `1
+  FAILED.` and exit **1**; reverted, it exits **0**. A wired harness nobody has
+  watched fail is decoration — the entry is only worth its runtime because that
+  was witnessed in BOTH directions.
 - **Run it before any money commit.** That is why it exists.
 
 ---
@@ -827,11 +839,11 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-**No FEATURE is queued** — ask Turki for the next one rather than picking. **TWO
-pieces of follow-through are outstanding — items 5 and 8 below.** Neither is a
-feature: 5 is a console setting, 8 is a one-line decision about a test script.
-(Items 1, 2, 3, 4, 6 and 7 are kept struck through as records, not as work. Do
-not resurrect a struck item because it still appears in this list.)
+**No FEATURE is queued** — ask Turki for the next one rather than picking. **ONE
+piece of follow-through is outstanding — item 5 below** — and it is not a
+feature; it is a console setting. (Items 1, 2, 3, 4, 6, 7 and 8 are kept struck
+through as records, not as work. Do not resurrect a struck item because it still
+appears in this list.)
 
 **The money rules from `1754140` and `caec5ef` are no longer in this file's
 custody** — items 6 and 7 moved them into `SKILL.md`, which is what gets loaded
@@ -882,12 +894,10 @@ before money work. A handoff is rewritten every session; a skill is not.
    it described and says outright not to reintroduce the gate. The guard bullet
    there now also records that both fixtures turn on `ch-future` alone —
    `ch-past` passes either way, so dropping `ch-future` silently disarms it.
-8. **Decide whether `invoice-render-parity-check` joins `test:money`.** One line
-   in `package.json`. The argument both ways is in the money-harness section
-   above; `bank-accounts` is the precedent for wiring a non-money harness. Left
-   undecided ON PURPOSE rather than wired quietly during a docs pass. Until it
-   is settled, run it by hand from the repo root before any invoice-render
-   commit.
+8. ~~Decide whether `invoice-render-parity-check` joins `test:money`~~ —
+   **DONE, Turki ruled it IN.** Wired LAST in the chain; the ordering reasoning,
+   the answered objection and the two-direction proof are in the money-harness
+   section above. `test:money` is twelve harnesses now, ~9.6s end to end.
 
 **THE STATEMENT INHERITS `lib/plainDocStyles.ts` NEXT — that is a POINTER, not a
 queued feature.** The kit was built as a shared module for exactly this;
