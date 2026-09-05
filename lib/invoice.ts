@@ -285,9 +285,17 @@ export type InvoiceAssembly = {
   // charges stay merged into unpaidLines exactly as before.
   chargeLines: InvoiceLine[];
 
-  covered: InvoiceTableTotals; // trips only (pre-VAT covered-trips document total — feeds Grand Total)
-  amountDue: InvoiceTableTotals; // v3 prepaid: unpaid TRIPS only. postpaid: unchanged (trips + charges)
-  grand: InvoiceTableTotals; // v3 prepaid: covered trips + covered charges only. postpaid: unchanged (= amountDue)
+  // THE THREE DOCUMENT TOTALS. Only TWO are computed — see the GRAND TOTAL
+  // header note above, and the derivation at `const grandVat` below. All three
+  // one-liners here described the PRE-1754140 law until 2026-09-05; the law
+  // they described is the one that let `covered + amountDue` differ from
+  // `grand`.
+  /** grand − amountDue, component-wise. DERIVED LAST, never its own VAT pass. */
+  covered: InvoiceTableTotals;
+  /** The collectible: unpaid trips + UNCOVERED charges, per-item and pool-exact. */
+  amountDue: InvoiceTableTotals;
+  /** ONE document-level VAT pass over EVERY line shown (covered trips + unpaid trips + ALL charges). Postpaid: same call as amountDue, so identical. */
+  grand: InvoiceTableTotals;
   // v3, prepaid only: the stacked ledger figures for the Covered/Unpaid
   // trips tables. undefined for postpaid (no balance concept — see POSTPAID
   // note above).

@@ -82,7 +82,10 @@
   three roles plus `anon`, identified by `oid::regprocedure` (§6).
 - **COMPANY BANK ACCOUNTS — three rulings, all counter-intuitive, all guarded
   (`caec5ef`).** These read like defects to a fresh pair of eyes. They are not.
-  **They belong in `SKILL.md` and are not there yet — see What's next item 6.**
+  **They now live in `SKILL.md` under "Company bank accounts (0184) — every rule
+  here reads like a defect". READ THEM THERE.** The summary below is kept only
+  as this session's record; the skill is the authority and the one that gets
+  loaded before money work.
   - **The IBAN field validates almost NOTHING, on purpose.** It shipped with the
     ISO 13616 mod-97 checksum and a length test; **both were removed the same
     day, by Turki, after using it.** With no banking system behind the screen a
@@ -437,12 +440,21 @@
 | 2 | **MONEY — two independent prepaid-only faults, both invisible to the suite** because every assertion pinned what the engine DID rather than what it had to ADD UP TO. (a) The grand total was composed from a NON-COVERING line set, so `covered + amountDue = grand` held only by accident — 8 of 24 live invoices did not add up, 38,709.00 SAR of delivered work outside a document's own total. Grand is now ONE document-level `calculateVat()` over every line shown; `amountDue` keeps its pool-exact rule; `covered` is the REMAINDER, so the identity holds by construction. (b) `consumingItems()` gated charges at `charge_date <= asOfDate`, so a future-dated charge was LISTED, DEDUCTED and REFUSED COVERAGE at once. Gate removed for charges, kept for trips. Guards inverted rather than deleted; negative control fails all six. 8 files, no migration | `1754140` |
 | 3 | **Aquaglass downloadable invoice** — one shared view-model (`lib/invoiceViewModel.ts`) both popup and PDF read from, so the 0%-deviation rule is STRUCTURAL: neither surface can invent its own data, grouping or wording, while the LOOK diverges on purpose. Carries three adjustments: the hide-toggle on confirmed invoices, an Arabic legibility pass (size/weight/line-height only — Arabic ran 7.6–8.5px against Latin at 9.6–10.5px), and **company bank accounts (`0184`)** as a Transfer Details block under the Grand Total. 14 files | `caec5ef` |
 
-**All three verified in-browser by Turki before commit, including the freeze law
+| 4 | **Rows 2 and 3's rules promoted into `SKILL.md`** — two new sections (the `covered + amountDue = grand` identity; company bank accounts) plus a REWRITE of the "asOfDate scopes CONSUMPTION" section, which contradicted row 2 by still calling `asOfDate` load-bearing for charges. Docs only; no code, no migration. Closes What's next 6 and 7 | (docs) |
+
+**Rows 1–3 verified in-browser by Turki before commit, including the freeze law
 on row 3** — a confirmed invoice still shows the accounts it was issued with
 while a draft shows the live set. `tsc` clean, `test:money` 613 pass / 0 fail.
 
-**Row 2's rules are in a COMMIT MESSAGE and nowhere else** — see What's next
-item 7. Its charge-gate half also makes a paragraph of `SKILL.md` stale.
+**Row 4 found a live contradiction while writing itself** — the brief for it
+described the IBAN field as running the ISO 13616 mod-97 checksum "computed in
+chunks". It does not; row 3 removed the checksum entirely the same day. **The
+skill records the SHIPPED behaviour, not the brief.** Measured before writing:
+zero non-comment hits for `mod.?97|checksum|% *97` in `lib/bankAccounts.ts`, and
+`scripts/bank-accounts-check.ts:171` asserts a transposed digit is ACCEPTED —
+writing the brief's version in would have pointed the next session at a harness
+that fails on contact. §5's "X because Y" rule, caught on an instruction rather
+than on a note.
 
 ---
 
@@ -761,12 +773,15 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-**No FEATURE is queued** — ask Turki for the next one rather than picking.
-**THREE pieces of follow-through are outstanding — items 5, 6 and 7 below** —
-and none of them is a feature. 6 and 7 are the same shape: durable money rules
-currently living only in a commit message and in this file, which is the wrong
-place for both. (Items 1, 2, 3 and 4 are kept struck through as records, not as
-work. Do not resurrect a struck item because it still appears in this list.)
+**No FEATURE is queued** — ask Turki for the next one rather than picking. **ONE
+piece of follow-through is outstanding — item 5 below** — and it is not a
+feature; it is a console setting. (Items 1, 2, 3, 4, 6 and 7 are kept struck
+through as records, not as work. Do not resurrect a struck item because it still
+appears in this list.)
+
+**The money rules from `1754140` and `caec5ef` are no longer in this file's
+custody** — items 6 and 7 moved them into `SKILL.md`, which is what gets loaded
+before money work. A handoff is rewritten every session; a skill is not.
 
 1. ~~Run `178df21` scenarios 10–12~~ — **DONE, run and passed in-browser.**
    Payslip preview on an unissued month: the inline fine edit moved
@@ -796,31 +811,23 @@ work. Do not resurrect a struck item because it still appears in this list.)
 5. **Enable leaked-password protection in the Supabase dashboard.** Not a
    migration, not a code change — a console setting. It is the one open item on
    the security posture.
-6. **Promote the bank-accounts rulings into `SKILL.md`** (`caec5ef`). The State
-   block above is the source; move it, do not copy it. The load-bearing halves:
-   0184's CHECK enforces array-ness and max-3 and NOTHING ELSE, so
-   `parseBankAccounts` / `validateBankAccounts` are the other half of that
-   bargain and `bank_accounts: unknown` is what makes tsc enforce it;
-   `show_on_invoice` fails CLOSED; the IBAN field validates almost nothing ON
-   PURPOSE and `scripts/bank-accounts-check.ts` asserts the LOOSENING, so a
-   re-added checksum, length rule or country whitelist fails there. Every one of
-   those reads like a defect to a session that meets it cold — which is exactly
-   why it belongs next to the other counter-intuitive money rules rather than in
-   a handoff that gets rewritten.
-7. **Promote `1754140`'s two rules into `SKILL.md`, and fix the paragraph it
-   made stale.** They exist in a commit message and nowhere else:
-   - **`covered + amountDue = grand`, by CONSTRUCTION.** Grand is one
-     document-level `calculateVat()` over every line the invoice shows;
-     `amountDue` keeps the per-item pool-exact rule; **`covered` is derived
-     LAST, as the remainder.** The two rounding conventions differ by up to a
-     halala, and deriving covered last is what puts that halala in a settled
-     display figure instead of in what the customer is asked to pay. Recompose
-     the three independently and the identity goes back to holding by accident.
-   - **A CHARGE IS SCOPED BY ITS INVOICE FK, NEVER BY DATE.** This CONTRADICTS
-     the existing **"asOfDate scopes CONSUMPTION, never the POOL"** section,
-     which still says `asOfDate` is load-bearing in `lib/invoice.ts` — true for
-     TRIPS, no longer true for CHARGES. That paragraph must be amended in the
-     same pass, not left to be read as current.
+6. ~~Promote the bank-accounts rulings into `SKILL.md`~~ — **DONE.** Now a
+   section of its own, "Company bank accounts (0184) — every rule here reads
+   like a defect": the DB-validates-nothing bargain and why
+   `bank_accounts: unknown` is the enforcement mechanism, the IBAN field
+   validating almost nothing on purpose (with the removal reasoning quoted so it
+   is not re-added as a "missing feature"), SA-as-default-not-whitelist with the
+   one-turn reversal, `show_on_invoice` failing closed, the 0027 split with no
+   cross-fallback, the never-log rule, and the harness that asserts the
+   LOOSENING. **Do not restate any of it here.**
+7. ~~Promote `1754140`'s two rules into `SKILL.md`~~ — **DONE.** The identity got
+   its own section, "covered + amountDue = grand, BY CONSTRUCTION — only TWO of
+   the three are computed". The charge rule went where the contradiction was, as
+   a new subsection of the asOfDate section: **"It filters TRIPS ONLY — a CHARGE
+   is INVOICE-BOUND, not date-scoped"**, which names the old wording as the bug
+   it described and says outright not to reintroduce the gate. The guard bullet
+   there now also records that both fixtures turn on `ch-future` alone —
+   `ch-past` passes either way, so dropping `ch-future` silently disarms it.
 
 ~~Investigate draft-stage charge consumption~~ — **RULED this session**, see
 State. Reserve-at-draft is correct and the four `status <> 'void'` sites agree by

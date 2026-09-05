@@ -74,6 +74,60 @@ it mirrors the BALANCE.
 
 ---
 
+## covered + amountDue = grand, BY CONSTRUCTION — only TWO of the three are computed
+
+An invoice carries three document totals. **Compute all three independently and
+the identity holds only by accident.** It did not hold: before `1754140`, `grand`
+was composed from a NON-COVERING line set (covered trips + covered charges),
+`amountDue` from another (unpaid trips + uncovered charges) and `covered` from a
+standalone pass over its own lines, leaving a residue of
+`coveredCharges − unpaidTrips − uncoveredCharges` — zero only by coincidence.
+
+**The rule, in `lib/invoice.ts`:**
+
+1. **`grand` = ONE document-level `calculateVat()` pass over EVERY line the
+   invoice shows** — covered trips + unpaid trips + ALL special charges. One
+   pass, so the printed VAT is rounded once against the full taxable base, as
+   ZATCA requires (`lib/vat.ts`).
+2. **`amountDue` keeps its per-item, pool-exact rule, unchanged.**
+3. **`covered` = `grand − amountDue`, component-wise. DERIVED LAST, never its
+   own VAT pass.**
+
+**Deriving `covered` last is the whole point, and it is not stylistic.** The two
+rounding conventions — document-level for `grand`, pool-exact per-item for
+`amountDue` — can differ by up to **0.01 SAR**. Subtraction puts that halala in
+`covered`, an already-SETTLED display figure where it settles nothing, and keeps
+it out of `amountDue`, which is **what the customer is actually asked to pay**.
+Subtotals are exact sums either way, so only VAT can move.
+
+**Do NOT re-narrow `grand` to "what is settled."** The figure describing the
+whole document must cover the whole document. Postpaid always reconciled because
+`grand` and `amountDue` were literally the same `calculateVat()` call and
+`covered` was `{0,0,0}` — that is the shape prepaid now has too.
+
+- **Guarded by `reconciles()` in `scripts/invoice-check.ts`**, called on every
+  assembled case in BOTH payment modes. It asserts `covered + amountDue = grand`
+  on subtotal/VAT/total AND that the sum of every displayed line IS
+  `grand.subtotal`. **Never assert a total in that file without also calling
+  `reconciles()`** — the old suite's failure was exactly this: every assertion
+  pinned what the engine DID, none pinned what it had to ADD UP TO. Six
+  old-law assertions were rewritten rather than deleted.
+- **The Mark Paid modal draws the pool down by `covered.total`, not
+  `grand.total`.** Now that `grand` carries the whole invoice, deducting it would
+  charge the pool for the unpaid half as well.
+- **Issued documents do NOT change** (freeze law `0027`). Both surfaces pick
+  their total stack by ARITHMETIC, not by status: a frozen invoice whose stored
+  lines reconcile to its stored total takes the new stack; one that does not
+  renders exactly as issued, and heals on its own if the stored money is
+  corrected. Nothing keys off status.
+- **Dated measurement, 2026-09-05 — re-measure before quoting.** 8 of 24 live
+  invoices did not add up, 38,709.00 SAR of delivered work sitting outside a
+  document's own total; the as-issued branch fired on `026-000007`, `026-000009`,
+  `026-000014`, `026-000017` and no others. Repairing those four is separate work
+  under `0027`.
+
+---
+
 ## asOfDate scopes CONSUMPTION, never the POOL
 
 The prepaid pool is a **lifetime net** — `sum(all topups) − sum(all returns)`,
@@ -82,11 +136,35 @@ no date gate — at every site that computes one: `splitCoveredUnpaidItems`,
 and `v_customer_prepaid_balance` (which never gated). `9c287d6` moved the
 invoice engine; `dc29e26` moved the last two functions.
 
-**`asOfDate` is a CONSUMPTION filter and nothing else.** It is load-bearing
-there — `lib/invoice.ts` passes `periodEnd` to scope an invoice's consumption to
-its period. Never re-gate a credit side with it: a caller passing a date would
-get a balance contradicting the invoice engine, the view and the Finance KPI at
-once, silently, by exactly the value of the top-ups dated after that date.
+**`asOfDate` is a CONSUMPTION filter and nothing else.** Never re-gate a credit
+side with it: a caller passing a date would get a balance contradicting the
+invoice engine, the view and the Finance KPI at once, silently, by exactly the
+value of the top-ups dated after that date.
+
+### It filters TRIPS ONLY — a CHARGE is INVOICE-BOUND, not date-scoped
+
+`asOfDate` is load-bearing on the TRIP side: `lib/invoice.ts` passes `periodEnd`,
+and the period is what SELECTS an invoice's trips, so `deliveredTripsSorted`
+keeps its `trip_date <= asOfDate` gate. **`consumingItems` applies NO gate to
+charges, and must not.** A special charge is scoped by its **invoice FK**, set
+when it is attached — it belongs to that invoice whatever its `charge_date`
+says, and is included in `grand` AND eligible for pool coverage on that basis
+alone.
+
+**This paragraph used to say "load-bearing there" with no trip/charge split, and
+the code matched it: `consumingItems` carried `charge_date <= asOfDate` with
+`asOfDate = periodEnd`. That was a bug, removed in `1754140`.** It left a
+future-dated charge asked for and settled in different places at once —
+`chargeLines` LISTED it (ungated since `0181`), `v_customer_prepaid_balance`
+DEDUCTED it (that view never had a date predicate), and the FIFO walk REFUSED it
+coverage. The filter was one-sided, so only future-dated charges were stranded,
+which is why it went unseen. Live invoice `026-000017` is exactly this shape.
+
+Ordering is unaffected: `compareConsumedItems` sorts by date, so a late charge
+lands at the queue tail and cannot take pool from an earlier item.
+
+**Do not reintroduce the gate to "scope charges to the period."** The period does
+not select charges. The FK does.
 
 - **`buildStatementItems`' settlements filter is the one legitimate exception**
   and stays gated. A settlement is a record-only row, contributes nothing to the
@@ -97,7 +175,14 @@ once, silently, by exactly the value of the top-ups dated after that date.
   nobody**. A dormant option for a future report, never for a pool.
 - Guarded by `scripts/prepaid-check.ts` and `scripts/covered-unpaid-check.ts`.
   Both hold inverted cases that assert the gate's ABSENCE — they were rewritten
-  rather than deleted precisely so a re-gating fails loudly.
+  rather than deleted precisely so a re-gating fails loudly. **This now covers
+  BOTH gates:** the pool cut, and the charge cut removed in `1754140`.
+- **The charge cases turn on `ch-future` and only on `ch-future`.** Both files
+  pair a `ch-past` with a `ch-future` around the cutoff. The old filter was
+  one-sided (`<=`), so `ch-past` passes whether or not the gate exists and proves
+  nothing; **a fixture that drops `ch-future` silently disarms the guard.**
+  Re-adding the filter must fail these six checks — verified by negative control
+  when they were written.
 
 ---
 
@@ -378,6 +463,115 @@ Draft → Review → Confirmed → Paid
 - ZATCA VAT at 15%, document-level rounding (not per-line).
 - Bilingual AR/EN invoice PDF via PDFShift (behind `lib/pdf.ts`).
 - Gap-free yearly invoice numbering (counter-table pattern, see above).
+
+---
+
+## Company bank accounts (0184) — every rule here reads like a defect
+
+Printed on customer invoices as a Transfer Details block. Stored as a jsonb
+ARRAY on `company_settings.bank_accounts`. All four rulings below look like bugs
+to a session meeting them cold; each is deliberate and guarded.
+
+### 1. The DB validates almost nothing, and the app is the other half of the deal
+
+`company_settings_bank_accounts_shape` enforces exactly two things — the value is
+an array, and it holds at most 3 elements (`MAX_BANK_ACCOUNTS`). It deliberately
+does NOT enforce element shape: **a CHECK may not contain a subquery**, so
+`jsonb_array_elements` is unavailable, and the only route to per-element
+validation is an IMMUTABLE helper called from the constraint, a documented
+anti-pattern.
+
+**So the database WILL accept a malformed element, and nothing downstream may
+assume a well-formed one:**
+
+- **Every READ goes through `parseBankAccounts`** (`lib/bankAccounts.ts`), which
+  returns only elements it can fully account for and silently drops the rest.
+- **Every WRITE goes through `validateBankAccounts`** in the single server
+  action. Shape is enforced THERE.
+- **`CompanySettings.bank_accounts` is typed `unknown`** so `tsc` refuses to let
+  a reader skip the parse. That is not laziness in the types — it is the
+  enforcement mechanism. Do not "improve" it to a concrete type.
+
+### 2. The IBAN field validates almost NOTHING, on purpose
+
+`isAcceptableIban` is `/^[A-Z]{2}[0-9A-Z]+$/` against the normalised value. That
+is the WHOLE rule. Practically only an empty field can fail it — **`"nope"` is a
+saveable IBAN** (normalises to `NOPE`, reads as country code `NO`).
+
+**IT ONCE RAN THE ISO 13616 MOD-97 CHECKSUM AND A LENGTH TEST. BOTH WERE REMOVED
+BY TURKI ON 2026-09-05, THE SAME DAY, AFTER USING THE FIELD.** The reasoning is
+kept because a future session WILL read this as a missing feature:
+
+> We are not connected to any banking system. The checksum does not ask a bank
+> whether an account exists — it only asserts that a string obeys a formula. So
+> it can never confirm a correct IBAN; it can only reject an operator copying a
+> real number off a real bank statement in front of him. That is what it did in
+> practice: the field became nearly impossible to fill, and the failure was
+> opaque — "invalid", with nothing on his screen to correct.
+
+A wrong IBAN is caught where it always actually was: by the customer reading the
+invoice, and by the bank refusing the transfer. Neither was ever replaced by the
+checksum. **Do not re-add a checksum, a length rule, or a digits-only rule.**
+
+What IS kept is the part that serves the operator rather than policing him —
+`normalizeIban` (strip every separator, upper-case), `formatIban` (groups of 4,
+the way every bank prints it), and `ensureSaPrefix`.
+
+### 3. `SA` is a DEFAULT, never a whitelist — foreign accounts are allowed
+
+`ensureSaPrefix` supplies `SA` **only when the value starts with a DIGIT**. The
+test is POSITIONAL:
+
+- Starts with a digit → no country code at all, and the operator meant the Saudi
+  account. `SA` goes on, rather than sending a human back to type two letters.
+- Starts with LETTERS → already carries its code. Left exactly as typed.
+  Prepending would manufacture `SADE89…`, a number that is not any account
+  anywhere, silently, on a payment instruction.
+
+**`DE89…` and `MT84…` are accepted as typed. NO COUNTRY WHITELIST.** SA-only was
+asked for and stood for exactly ONE TURN on 2026-09-05 before being amended to
+SA-as-default; the harness keeps both foreign cases INVERTED rather than deleted
+so the reversal stays on the record.
+
+**Order matters on blur: prefix FIRST, then format.** Group first and the country
+code lands mid-group, so the spacing sits a character off from every other
+account on the invoice. Same on the write path — prefix, then test, so what gets
+tested is what will be stored.
+
+### 4. `show_on_invoice` FAILS CLOSED
+
+Only an explicit `true` renders. A malformed or missing flag hides the account.
+The cost of wrongly hiding is an operator ticking a box; the cost of wrongly
+showing is **a customer wiring money to an account we did not intend to
+publish.**
+
+### 5. Freeze law 0027 applies, with NO cross-fallback
+
+- **Draft / review → LIVE settings**, so a draft previews what it will freeze.
+- **Confirmed / paid / void → the frozen `seller_snapshot`, and nothing else.**
+  No live fallback, not even when the snapshot is empty.
+
+**The no-fallback half is load-bearing:** `getInvoicePdf` CACHES issued bytes, so
+a live read would leave a cached PDF disagreeing with the popup, and would graft
+today's accounts onto a document already in the customer's hands.
+`assembleForCustomerPeriod` captures the seller with `select("*")`, so the column
+landed in the snapshot with no assembly change.
+
+### Logging, and what these IBANs are
+
+They are the **COMPANY's OWN** accounts, printed on customer invoices by design —
+public information, not a secret, and not customer data. **They are still never
+logged, and never written into a note, a commit message or an error string.** An
+IBAN in a log line is an IBAN in a place nobody audits.
+
+### The guard
+
+**`scripts/bank-accounts-check.ts` (wired into `test:money`) asserts the
+LOOSENING, not a validation.** A transposed digit, an altered digit, a short
+value, a long value and two foreign IBANs must ALL be ACCEPTED. Those cases read
+like bugs on purpose: re-adding a checksum, a length rule or a country test fails
+there loudly instead of quietly re-breaking the field. Proven by negative control
+when written — re-adding each turns 8, 3 and 3 checks red respectively.
 
 ---
 
