@@ -17,6 +17,12 @@ import type { BalanceReturnLite, ConsumingTrip, TopupLite } from "@/lib/prepaid"
 import type { Invoice, CompanySettings, Customer, WaterType, PaymentMode } from "@/lib/db-types";
 import { generateInvoicePdf, PdfServiceNotConfiguredError } from "@/lib/pdf";
 import { buildInvoicePdfHtml, type PdfInvoiceData, type PdfIdentity } from "@/lib/invoicePdfTemplate";
+import {
+  MAX_BANK_ACCOUNTS,
+  parseBankAccounts,
+  validateBankAccounts,
+  type CompanyBankAccount,
+} from "@/lib/bankAccounts";
 import { round2 } from "@/lib/vat";
 
 export type ActionResult<T = undefined> = { error: string | null; data?: T };
@@ -818,6 +824,24 @@ export async function unpayInvoice(invoiceId: string, reason: string): Promise<A
 // ---------------------------------------------------------------------------
 export async function setHideAmountDue(invoiceId: string, hide: boolean): Promise<ActionResult> {
   const supabase = createClient();
+
+  // DROP THE CACHED PDF FIRST. getInvoicePdf() caches the rendered bytes for
+  // confirmed/paid/void invoices on the premise that an issued document cannot
+  // change (0027). This column is the ONE exception to that premise — it is a
+  // display preference, deliberately editable at any status (see the header
+  // above) — so without this the toggle moved the screen and the download kept
+  // serving the document it rendered the first time, forever. It is not a
+  // rendering bug; the renderer is never reached.
+  //
+  // ORDER IS DELIBERATE: clear, THEN write. If the clear fails we abort with
+  // the flag unchanged, so the screen and the file still agree. Writing first
+  // and clearing second would, on a failed clear, leave the preference flipped
+  // and the download stale under a success message — the exact failure being
+  // fixed. Losing a cache entry to a later failed write costs one regeneration
+  // of identical bytes; nothing is destroyed that is not derived.
+  const { error: cacheErr } = await supabase.storage.from(PDF_BUCKET).remove([`${invoiceId}.pdf`]);
+  if (cacheErr) return { error: cacheErr.message };
+
   const { error } = await supabase.from("invoices").update({ hide_amount_due: hide }).eq("id", invoiceId);
   if (error) return { error: error.message };
   revalidatePath("/trips");
@@ -905,6 +929,86 @@ export async function updateCompanySettings(input: CompanySettingsInput): Promis
 }
 
 // ---------------------------------------------------------------------------
+// Company bank accounts (migration 0184) — the invoice's Transfer Details.
+//
+// A SEPARATE PAIR, not extra fields on CompanySettingsInput above. Three
+// reasons, in order of weight:
+//
+//  1. The identity form saves one flat record; this saves an ARRAY with its own
+//     add/remove/reorder semantics and its own per-element validation. Folding
+//     them together would mean a failed IBAN checksum rejects an unrelated
+//     address edit, and vice versa.
+//  2. `updateCompanySettings` is the write path for values that are SNAPSHOTTED
+//     ONTO INVOICES at confirm. So is this one — see below — but the two have
+//     different failure modes and deserve to fail independently.
+//  3. The settings screen renders them as two cards with two Save buttons,
+//     because that is what an operator expects of two unrelated things.
+//
+// SNAPSHOT NOTE, and it is not incidental: `assembleForCustomerPeriod` captures
+// the seller with `select("*")`, so from the moment 0184 landed, EVERY newly
+// confirmed invoice freezes the bank_accounts array into its `seller_snapshot`
+// with no assembly change. That is the behaviour we want (see the view-model's
+// bank block for why an issued document reads its own frozen copy), but it does
+// mean this column is now invoice-facing history, not just a live setting.
+// Editing it never rewrites a snapshot — 0027 — it only changes what the NEXT
+// confirm freezes.
+//
+// IBANs are never logged here or anywhere downstream.
+// ---------------------------------------------------------------------------
+export async function getCompanyBankAccounts(): Promise<ActionResult<CompanyBankAccount[]>> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("company_settings")
+    .select("bank_accounts")
+    .eq("id", true)
+    .single();
+  if (error) return { error: error.message };
+  // Parsed, never cast: 0184's CHECK does not police element shape, so the
+  // column can legally hold something this type does not describe.
+  return { error: null, data: parseBankAccounts(data?.bank_accounts) };
+}
+
+export async function updateCompanyBankAccounts(
+  accounts: CompanyBankAccount[],
+): Promise<ActionResult> {
+  // Server-side shape enforcement — the half of 0184's bargain the database
+  // deliberately does not carry. The form validates first for a good message in
+  // the operator's own language; this is the gate that actually holds, because
+  // a server action is callable without the form.
+  const checked = validateBankAccounts(accounts);
+  if (!checked.ok) {
+    const e = checked.error;
+    // Plain English, matching updateCompanySettings' own literals above. The
+    // caller renders its localized copy from the same codes; this is the
+    // backstop nobody should normally see.
+    const message =
+      e.code === "too_many"
+        ? `Up to ${MAX_BANK_ACCOUNTS} bank accounts.`
+        : e.code === "bank_name_required"
+          ? `Account ${e.index + 1}: bank name is required.`
+          : e.code === "holder_name_required"
+            ? `Account ${e.index + 1}: account name is required.`
+            : // Never echo the value back — it is the one field here worth not
+              // repeating into an error string that may end up in a log.
+              `Account ${e.index + 1}: invalid IBAN.`;
+    return { error: message };
+  }
+
+  const supabase = createClient();
+  // WHOLE-ARRAY REPLACE, one atomic write. Not a per-element merge: display
+  // order is the array's order, so a partial update has no meaning here, and
+  // two concurrent edits should produce one of the two intended lists rather
+  // than an interleaving neither operator asked for.
+  const { error } = await supabase
+    .from("company_settings")
+    .update({ bank_accounts: checked.accounts, updated_at: new Date().toISOString() })
+    .eq("id", true);
+  if (error) return { error: error.message };
+  revalidatePath("/trips");
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
 // Invoice PDF export — Finance §7/§11. Draft/review is live (assembled
 // fresh, same as previewInvoice() above, never stored — content is still
 // mutable). Confirmed/paid/void is the frozen snapshot (same rule as
@@ -924,7 +1028,18 @@ export type InvoicePdfResult = { base64: string; filename: string };
 
 type SellerSnap = Pick<
   CompanySettings,
-  "legal_name" | "legal_name_ar" | "vat_number" | "cr_number" | "address" | "description" | "telephone" | "phone"
+  | "legal_name"
+  | "legal_name_ar"
+  | "vat_number"
+  | "cr_number"
+  | "address"
+  | "description"
+  | "telephone"
+  | "phone"
+  // 0184 — rides along on the same `select("*")` capture. `unknown` on
+  // CompanySettings, so it stays `unknown` here and reaches the view-model only
+  // through parseBankAccounts.
+  | "bank_accounts"
 > | null;
 type BuyerSnap = Pick<Customer, "name" | "name_ar" | "vat_number" | "cr_number" | "billing_address"> | null;
 
@@ -960,6 +1075,19 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
   const cacheable = inv.status === "confirmed" || inv.status === "paid" || inv.status === "void";
   const storagePath = `${invoiceId}.pdf`;
 
+  // ONE project read for BOTH of the things this function needs off it — the
+  // display-only water_type fallback and the pre-0037 payment_mode fallback.
+  // The mode fallback used to run its own query inside the frozen branch; two
+  // round trips to the same 1:1 row, and only one of them cached its result
+  // anywhere. Hoisted above the cache check would be wasteful, so it sits
+  // here: after the cache short-circuit, before either branch.
+  //
+  // water_type: an invoice line snapshot frozen before the field existed
+  // stores null, and this document has a Type column. Without the project's
+  // CURRENT type the download printed a dash where the sheet — which has had
+  // this fallback since Finance polish batch C — printed a real label. Same
+  // fallback, same source, display-only: the frozen snapshot is never touched.
+
   // Cache hit: reuse the previously-generated bytes, skip the provider call.
   if (cacheable) {
     const { data: cached } = await supabase.storage.from(PDF_BUCKET).download(storagePath);
@@ -968,6 +1096,13 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
       return { error: null, data: { base64: buf.toString("base64"), filename } };
     }
   }
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("water_type, payment_mode")
+    .eq("customer_id", inv.customer_id)
+    .maybeSingle();
+  const projectWaterType = (project?.water_type as WaterType | null | undefined) ?? null;
 
   let pdfData: PdfInvoiceData;
 
@@ -1002,6 +1137,11 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
         address: buyer?.billing_address ?? null,
       }),
       buyerEmail: assembly.customerEmail,
+      // RAW jsonb, straight off the seller row the assembly just read — the
+      // view-model parses and filters it. Draft/review reads LIVE company
+      // settings here, which is correct: nothing about this document is frozen
+      // yet, and a draft should preview the accounts it will actually freeze.
+      bankAccounts: seller?.bank_accounts ?? null,
       coveredLines: assembly.coveredLines,
       unpaidLines: assembly.unpaidLines,
       chargeLines: assembly.chargeLines,
@@ -1013,6 +1153,7 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
       paymentMethod: null,
       paidAt: null,
       voidReason: null,
+      projectWaterType,
       voidedAt: null,
     };
   } else {
@@ -1022,17 +1163,8 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
     // snapshot — fall back to the customer's CURRENT project.payment_mode.
     // Correct for every invoice confirmed before any mode switch (the
     // overwhelming majority); see migration 0037's header for the tradeoff.
-    let paymentMode: PaymentMode;
-    if (inv.payment_mode == null) {
-      const { data: proj } = await supabase
-        .from("projects")
-        .select("payment_mode")
-        .eq("customer_id", inv.customer_id)
-        .maybeSingle();
-      paymentMode = (proj?.payment_mode as PaymentMode | null | undefined) ?? "postpaid";
-    } else {
-      paymentMode = inv.payment_mode;
-    }
+    const paymentMode: PaymentMode =
+      inv.payment_mode ?? (project?.payment_mode as PaymentMode | null | undefined) ?? "postpaid";
     const isPrepaid = paymentMode === "prepaid";
     pdfData = {
       status: inv.status,
@@ -1064,6 +1196,25 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
       // has no email field) — omitted rather than re-fetched live, consistent
       // with "frozen means frozen".
       buyerEmail: null,
+      // THE FROZEN COPY, and no live fallback — deliberately.
+      //
+      // An invoice confirmed after 0184 carries its bank accounts in
+      // seller_snapshot (captured by the same `select("*")` as every other
+      // seller field), so it prints the instructions it was ISSUED with even
+      // after the company adds, removes or unticks an account. 0027, unchanged.
+      //
+      // One confirmed BEFORE 0184 has no such key and therefore prints NO
+      // Transfer Details at all. That is the honest outcome, not a gap to patch
+      // with today's accounts: those documents were issued without payment
+      // instructions and are already with the customer, and quietly grafting
+      // current details onto an old issued invoice would make the file disagree
+      // with the copy in the customer's hands.
+      //
+      // It also keeps the two surfaces in step. The popup reads the same frozen
+      // key, and the download's cached bytes can never drift from it — a live
+      // read here would leave every previously-cached PDF showing the old
+      // account while the sheet beside it showed the new one.
+      bankAccounts: seller?.bank_accounts ?? null,
       coveredLines: inv.covered_lines ?? [],
       // Prepaid (v3): unpaid_lines is trips-only already. Postpaid: unchanged
       // (trips + charges merged, exactly as frozen).
@@ -1072,6 +1223,13 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
       covered: { subtotal: inv.covered_subtotal_sar, vat: inv.covered_vat_sar, total: inv.covered_total_sar },
       amountDue: { subtotal: inv.amount_due_subtotal_sar, vat: inv.amount_due_vat_sar, total: inv.amount_due_sar },
       grand: { subtotal: inv.grand_subtotal_sar, vat: inv.grand_vat_sar, total: inv.grand_total_sar },
+      // Passed RAW: present when the row carries a 0036+ ledger snapshot,
+      // `undefined` otherwise. The pre-0036 legacy fallback (real subtotal off
+      // the frozen document totals, null balance/remaining so the document
+      // prints a dash rather than a fabricated 0) is NOT restated here — the
+      // view-model owns that single expression for both surfaces. `?? 0` below
+      // is type narrowing on a row whose non-null subtotals prove the snapshot
+      // exists, and it is the popup's own line, verbatim.
       ledger:
         isPrepaid && inv.covered_ledger_subtotal_sar != null && inv.unpaid_ledger_subtotal_sar != null
           ? {
@@ -1091,11 +1249,12 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
       paymentMethod: inv.payment_method,
       paidAt: inv.paid_at,
       voidReason: inv.void_reason,
+      projectWaterType,
       voidedAt: inv.voided_at,
     };
   }
 
-  const html = buildInvoicePdfHtml(pdfData);
+  const html = await buildInvoicePdfHtml(pdfData);
 
   let pdfBuffer: Buffer;
   try {

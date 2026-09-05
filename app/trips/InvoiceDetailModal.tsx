@@ -25,6 +25,7 @@ import { formatDate, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
 import { round2 } from "@/lib/vat";
 import { groupInvoiceLines } from "@/lib/invoiceDisplay";
+import { buildBankBlock, type VmBankBlock } from "@/lib/invoiceViewModel";
 import TripRefLink from "@/components/TripRefLink";
 import {
   type Invoice,
@@ -140,6 +141,13 @@ type View = {
     description: string | null;
     telephone: string | null;
     phone: string | null;
+    // bank_accounts added by migration 0184, same `select("*")` free ride.
+    //
+    // `unknown`, matching CompanySettings: 0184's CHECK guarantees an array of
+    // at most 3 and says nothing about what is IN it, so the only safe reader
+    // is lib/bankAccounts' parse — reached here through buildBankBlock, which
+    // is the same expression the downloadable PDF calls.
+    bank_accounts: unknown;
   } | null;
   // name_ar added Batch D — hand-built buyer snapshot, see invoiceActions.ts.
   buyerSnapshot: {
@@ -1074,6 +1082,20 @@ export default function InvoiceDetailModal({
               </>
             )}
 
+            {/* Transfer Details — LAST content block on the sheet, below Grand
+                Total in both payment modes, and PRINTED (no `no-print`): a
+                printed invoice needs its payment instruction more than the
+                screen does.
+
+                One expression with the download. `buildBankBlock` is the same
+                function lib/invoicePdfTemplate.ts renders from — it owns the
+                show_on_invoice filter, the order and the IBAN spacing, so this
+                popup cannot show a different set of accounts, in a different
+                order, spaced a different way, from the PDF the customer opens.
+                The LOOK diverges (sheet card here, Aquaglass strip there); the
+                DATA and WORDING cannot. */}
+            <TransferDetailsSection lang={lang} bank={buildBankBlock(view.sellerSnapshot?.bank_accounts)} />
+
             {/* Undelivered-trip blockers (item 2) — only at Review, mirrors
                 confirm_invoice()'s SQL guard exactly (migration 0032).
                 Highlight-on-click/clear-on-hover comes free from
@@ -1975,6 +1997,53 @@ function GrandTotalStack({
         <div className="flex items-center justify-between pt-2 mt-1 border-t border-app">
           <span className="font-semibold">{t("trips.invoiceSheet.grandTotal", lang)}</span>
           <span className="text-xl font-semibold tabular-nums text-brand-600 dark:text-brand-300">{formatSar(total)}</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// TRANSFER DETAILS — where to send the money. Renders nothing when the
+// view-model says `null` (no account ticked for the invoice), so the sheet ends
+// on Grand Total exactly as it did before 0184 for every customer whose
+// operator has not turned this on.
+//
+// The vm hands over BiLabels because the DOWNLOAD is bilingual. This surface is
+// not — the popup renders in the operator's one language, like every other
+// label on it — so each label is picked here, not upstream. Same words, one
+// column of them.
+function TransferDetailsSection({ lang, bank }: { lang: Lang; bank: VmBankBlock | null }) {
+  if (!bank) return null;
+  const pick = (l: { en: string; ar: string }) => (lang === "ar" ? l.ar : l.en);
+  return (
+    <section className="space-y-2 break-inside-avoid">
+      <h3 className="text-xs font-semibold uppercase tracking-wide muted">{pick(bank.heading)}</h3>
+      <div className="card p-4">
+        {/* Columns on a wide screen, a stack on a narrow one. Three accounts
+            are ALTERNATIVES — pick one and pay — and side-by-side says that
+            where a numbered vertical list would read as three steps. The
+            `divide-` carries its own colour (CLAUDE.md §6): without it the
+            rules stay at preflight #e5e7eb and go wrong in dark mode. */}
+        <div className="grid gap-3 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-[rgb(var(--border))]">
+          {bank.accounts.map((a, i) => (
+            <div key={a.id} className={i > 0 ? "pt-3 sm:pt-0 sm:ps-4" : ""}>
+              <div className="text-sm leading-snug break-words">
+                <span className="font-semibold">{a.bankName || "—"}</span>
+                {a.accountName && <span className="muted"> · {a.accountName}</span>}
+              </div>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide muted shrink-0">
+                  {pick(bank.ibanLabel)}
+                </span>
+                {/* The one string on this sheet that gets retyped into a
+                    banking app. Explicit LTR + tabular figures so it neither
+                    reorders inside the RTL sheet nor wobbles between glyphs. */}
+                <span dir="ltr" className="text-sm font-semibold tabular-nums tracking-tight break-all">
+                  {a.ibanDisplay || "—"}
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </section>

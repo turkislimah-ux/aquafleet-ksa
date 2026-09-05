@@ -807,6 +807,43 @@ export const dict = {
         en: "Used to turn a mechanic's per-day duty hours into monthly hours for Maintenance labor costing.",
         ar: "تُستخدم لتحويل ساعات دوام الفني اليومية إلى ساعات شهرية في احتساب تكلفة عمالة الصيانة.",
       },
+
+      // ── Bank accounts (migration 0184) ───────────────────────────────────
+      // Separate save from the identity form above, so these keys stand on
+      // their own. The hint names BOTH halves of the rule people get wrong:
+      // the ceiling, and that the tick — not merely existing — is what puts an
+      // account on a customer's invoice.
+      bankTitle: { en: "Bank accounts", ar: "الحسابات البنكية" },
+      bankHint: {
+        en: "Up to 3. Only ticked accounts appear on invoices, under Transfer Details.",
+        ar: "حتى 3 حسابات. تظهر على الفواتير الحسابات المحددة فقط، ضمن تفاصيل التحويل.",
+      },
+      bankNone: { en: "No bank accounts yet.", ar: "لا توجد حسابات بنكية بعد." },
+      fBankName: { en: "Bank name", ar: "اسم البنك" },
+      phBankName: { en: "e.g. Al Rajhi Bank", ar: "مثال: مصرف الراجحي" },
+      // Field label matches the INVOICE's own "Account Name" so the person
+      // filling it in knows exactly which line they are typing.
+      fAccountName: { en: "Account name", ar: "اسم الحساب" },
+      fIban: { en: "IBAN", ar: "رقم الآيبان" },
+      // Sample, not copy — an IBAN's shape is the same in every language, and
+      // the grouping is what tells the user spaces are fine to paste.
+      phIban: { en: "SA00 0000 0000 0000 0000 0000", ar: "SA00 0000 0000 0000 0000 0000" },
+      showOnInvoice: { en: "Show on invoice", ar: "إظهار على الفاتورة" },
+      addBankAccount: { en: "Add account", ar: "إضافة حساب" },
+      removeBankAccount: { en: "Remove account", ar: "إزالة الحساب" },
+      // Validation. Positional `{n}` is the 1-based row, so an error on the
+      // third card does not read as an error on the form.
+      errBankName: { en: "Account {n}: bank name is required.", ar: "الحساب {n}: اسم البنك مطلوب." },
+      errAccountName: { en: "Account {n}: account name is required.", ar: "الحساب {n}: اسم الحساب مطلوب." },
+      // Practically only an EMPTY field can now reach this — any country code
+      // is accepted, and a bare number gets SA supplied. It replaced a checksum
+      // message, which told an operator his correct number was wrong and gave
+      // him nothing to do about it.
+      errIban: {
+        en: "Account {n}: enter an IBAN.",
+        ar: "الحساب {n}: أدخل رقم الآيبان.",
+      },
+      errBankMax: { en: "Up to 3 bank accounts.", ar: "حتى 3 حسابات بنكية فقط." },
     },
 
     fields: {
@@ -7962,6 +7999,23 @@ export const dict = {
       fCrNo: { en: "CR No.", ar: "رقم السجل التجاري" },
       fTel: { en: "Tel", ar: "هاتف" },
       fMobile: { en: "Mobile", ar: "جوال" },
+      // LIFTED FROM THE PDF, not fresh: `invoicePdfTemplate`'s identity block
+      // already printed `label("Email", "البريد الإلكتروني")` hard-coded. The
+      // key exists so the download renderer stops carrying its own literals —
+      // the wording is unchanged, and matches `login.email` exactly.
+      fEmail: { en: "Email", ar: "البريد الإلكتروني" },
+      // LIFTED FROM THE PDF too — it printed `label("Address", "العنوان")`.
+      fAddress: { en: "Address", ar: "العنوان" },
+      // FRESH — the downloadable's masthead strip names the currency the
+      // document is denominated in (a ZATCA-expected field). The sheet has no
+      // such strip, so there is nothing on screen to lift.
+      fCurrency: { en: "Currency", ar: "العملة" },
+      // LIFTED FROM THE PDF: its <h1> has always read `Tax Invoice` / `فاتورة
+      // ضريبية` (see `headline` above). It stays the DOWNLOAD's title only —
+      // the on-screen headline keeps its own English wording, `Invoice #{n}`,
+      // byte for byte. Not a duplicate of `headline`: this one is the
+      // ZATCA-mandated document TITLE and carries no number.
+      fTaxInvoiceTitle: { en: "Tax Invoice", ar: "فاتورة ضريبية" },
       fInvoiceNo: { en: "Invoice No.", ar: "رقم الفاتورة" },
       // PDF: `Issue Date`. Same Arabic.
       fIssueDate: { en: "Issue date", ar: "تاريخ الإصدار" },
@@ -7969,6 +8023,46 @@ export const dict = {
       // The VALUE in the Invoice No. row before a number is assigned. Its
       // first word is the PDF's own draft status label.
       vDraftNotNumbered: { en: "Draft — not yet numbered", ar: "مسودة — لم تُرقَّم بعد" },
+      // FRESH — the caption under the downloadable's QR card. The sheet has no
+      // QR at all, so this has no on-screen counterpart to lift from. The code
+      // in the card is a PLACEHOLDER (invoice identity, offline-readable), NOT
+      // the ZATCA cryptographic TLV QR — so the caption must not claim ZATCA.
+      qrCaption: { en: "QR Code", ar: "رمز الاستجابة السريعة" },
+
+      // ── Downloadable footnotes ───────────────────────────────────────────
+      // All FRESH — the sheet is an internal working surface and carries no
+      // footnotes; a customer-facing document has to state its legal basis.
+      notesHeading: { en: "Notes", ar: "ملاحظات" },
+      noteVatBasis: {
+        en: "Issued under the KSA VAT Implementing Regulations. All amounts are in Saudi Riyal (SAR) and VAT is charged at 15%.",
+        ar: "صادرة بموجب اللائحة التنفيذية لضريبة القيمة المضافة في المملكة العربية السعودية. جميع المبالغ بالريال السعودي، والضريبة بنسبة ١٥٪.",
+      },
+      // Rendered ONLY when a charge on this document actually rolls forward —
+      // see buildInvoiceViewModel's notes list. Its wording has to name the
+      // pill it explains, so it reuses `badgeRollsForward`'s exact phrase.
+      noteRollsForward: {
+        en: "Charges marked “Rolls forward” are carried to the next invoice and are not billed on this one.",
+        ar: "الرسوم المؤشَّر عليها بـ«يُرحّل» تُرحَّل إلى الفاتورة القادمة ولا تُحتسب في هذه الفاتورة.",
+      },
+
+      // ── Transfer details (company bank accounts, migration 0184) ──────────
+      // Payment INSTRUCTIONS, not a tax field — see the block's own comment in
+      // lib/invoiceViewModel.ts. Rendered on BOTH surfaces from these keys, so
+      // a wording change lands on the sheet and the download together.
+      //
+      // `transferDetails` is the heading, deliberately not "Bank Details": what
+      // the customer needs from this block is where to send the money.
+      transferDetails: { en: "Transfer Details", ar: "تفاصيل التحويل" },
+      // NO per-field label for the bank or the account name. Both identify
+      // themselves in place; tagging them would buy a third line per account
+      // for two tags nobody reads. The IBAN is tagged because it does NOT
+      // identify itself — an untagged 24-character string could be an account
+      // number, and a customer who guesses wrong sends money nowhere.
+      //
+      // IBAN stays an acronym on both sides: Saudi banks print it in Latin
+      // letters on Arabic statements too. The Arabic names the FIELD; the
+      // number itself is never transliterated.
+      fIban: { en: "IBAN", ar: "رقم الآيبان" },
 
       // ── Sales Return banner (status === 'void') ──────────────────────────
       salesReturn: { en: "Sales Return", ar: "مرتجع مبيعات" },

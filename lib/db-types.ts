@@ -473,6 +473,17 @@ export type CompanySettings = {
   // standard_working_days_per_month). One global value, not per-staff —
   // deliberately not on `staff` (see that table's own comment).
   standard_working_days_per_month: number;
+  // Added by migration 0184 — up to 3 bank accounts for the invoice's Transfer
+  // Details block. `[]` by default, never null.
+  //
+  // TYPED `unknown` ON PURPOSE. 0184's CHECK enforces array-ness and the max-3
+  // ceiling and nothing else — per-element shape cannot be expressed in a CHECK
+  // (no subqueries, so no jsonb_array_elements). Declaring this
+  // `CompanyBankAccount[]` would state a guarantee the database does not make
+  // and hand every reader a false one. `unknown` makes tsc insist on
+  // lib/bankAccounts.ts's `parseBankAccounts` at every read site, which is the
+  // guarantee we actually have.
+  bank_accounts: unknown;
 };
 
 // invoice_special_charges row (0025, widened 0032) — mutable while the
