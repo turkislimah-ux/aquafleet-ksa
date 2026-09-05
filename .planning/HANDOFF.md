@@ -42,9 +42,12 @@
     capability, below.
   - **`0183_rename_delete_draft_invoice_to_discard_invoice.sql`** (`55e3ebe`) —
     the pure rename, below. One `alter function … rename to`, no footer.
-- **Origin carries through `caec5ef` plus this handoff commit; `main` and
-  `origin/main` level, working tree clean.** **This is a pointer and it goes
-  stale the moment anyone commits — measure `git status -sb` before quoting it.**
+- **Origin carries through `0b17bc3` plus this handoff commit; `main` and
+  `origin/main` level, working tree clean.** Measured with `git status -sb` and
+  `git log origin/main..HEAD` after a `git fetch`, 2026-09-05. **This is a
+  pointer and it goes stale the moment anyone commits — measure before quoting
+  it.** It already had once, naming `6af117d` three commits after the fact, and
+  again naming `caec5ef` one commit late.
 - **MONEY FIX — `confirm_invoice` IS NOW AN AUDITOR, NOT A SCRIBE (`2477946`).**
   A confirmed invoice could freeze with NO special charges while the customer's
   prepaid balance had already been consumed by those same charges. **Two sources
@@ -441,10 +444,44 @@
 | 3 | **Aquaglass downloadable invoice** — one shared view-model (`lib/invoiceViewModel.ts`) both popup and PDF read from, so the 0%-deviation rule is STRUCTURAL: neither surface can invent its own data, grouping or wording, while the LOOK diverges on purpose. Carries three adjustments: the hide-toggle on confirmed invoices, an Arabic legibility pass (size/weight/line-height only — Arabic ran 7.6–8.5px against Latin at 9.6–10.5px), and **company bank accounts (`0184`)** as a Transfer Details block under the Grand Total. 14 files | `caec5ef` |
 
 | 4 | **Rows 2 and 3's rules promoted into `SKILL.md`** — two new sections (the `covered + amountDue = grand` identity; company bank accounts) plus a REWRITE of the "asOfDate scopes CONSUMPTION" section, which contradicted row 2 by still calling `asOfDate` load-bearing for charges. Docs only; no code, no migration. Closes What's next 6 and 7 | (docs) |
+| 5 | **PRINT is its own plain document, no longer the popup on paper.** The old path `@media`-printed `InvoiceDetailModal`'s live React DOM — it agreed with the screen by BEING the screen, so it printed an application window: screen layout, screen number formats (whole riyals, not the tax document's halalas), and controls suppressed one at a time by hand-maintained `no-print` classes. Print is now a THIRD renderer off `lib/invoiceViewModel.ts`, the same source the download reads, rendered server-side into a hidden same-origin iframe. Adds `lib/plainDocStyles.ts` as a REUSABLE kit (the statement inherits it next), `lib/docPrimitives.ts` (shared `num2` — the printout and the PDF cannot disagree about a halala), and `scripts/invoice-render-parity-check.ts`. 10 files, no migration | `0b17bc3` |
 
 **Rows 1–3 verified in-browser by Turki before commit, including the freeze law
 on row 3** — a confirmed invoice still shows the accounts it was issued with
 while a draft shows the live set. `tsc` clean, `test:money` 613 pass / 0 fail.
+
+**Row 5 verified in-browser by Turki before commit** — prepaid and postpaid,
+Ctrl+P and the button emitting the identical document, `grand = covered + due`
+with charges INSIDE the total (not the superseded mockup's services-plus-charges
+structure), wording and grouping matching the popup, hide-toggle and Transfer
+Details honoured, correct status, nothing coloured, Arabic checked. `tsc` clean;
+the parity check green on all 21 assertions.
+
+**Row 5's three structural rulings, so they are not re-litigated:**
+
+- **ONE MECHANISM PER RULE.** `hiddenFromPrint` and its two `no-print` classes
+  are DELETED. hide-amount-due is honoured once, upstream, by `vm.amountDue`
+  going null — which every document reads. The markup used to carry a SECOND
+  expression of the same rule, and two mechanisms for one rule is how they
+  drift. **Do not re-add a print-media class for this toggle.**
+- **Ctrl/Cmd+P is intercepted, and it HAS to be.** `app/globals.css` opens its
+  print block with `body * { visibility: hidden }` and whitelists named
+  subtrees; the invoice is deliberately no longer on that list, so a raw browser
+  print with the modal open would emit a BLANK sheet — the worst failure
+  available, because it reads as the printer's fault. The `keydown` handler in
+  `InvoiceDetailModal` is load-bearing, not a convenience. **Deleting it
+  silently breaks Ctrl+P.**
+- **An IFRAME, not `window.open`, and off-screen, not `display:none`.** The HTML
+  arrives from an awaited server action, so the click chain is broken and a
+  popup would be blocked; and an undisplayed frame has no layout, which is what
+  the print engine renders. It awaits `fonts.ready` before `print()` — otherwise
+  a cold cache prints an Arabic tax invoice in substituted metrics.
+
+**Row 5 also closed a stale comment the earlier sweep MISSED** — `lib/i18n.ts`
+still named `#invoice-print` as a live id in a Batch 9 paragraph nobody had
+touched. Caught by grepping the STAGED BLOB (§5) rather than the working tree,
+after the first sweep had already been called complete. Four `invoice-print`
+hits remain in the repo; all four are epitaph comments, each read in context.
 
 **Row 4 found a live contradiction while writing itself** — the brief for it
 described the IBAN field as running the ISO 13616 mod-97 checksum "computed in
@@ -571,6 +608,23 @@ Eleven harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green:
   presentation harness for the notification bell ("No DB, no React"), not money
   math; its `sar`/`invoice` tokens are notification *text*. Its absence is a
   decision, not an oversight. Do not "fix" it.
+- **`invoice-render-parity-check` is NOT in the list either, and that is an OPEN
+  QUESTION rather than a settled one** (`0b17bc3`). Measured this turn: the
+  `test:money` script still names exactly the eleven above, so the count in this
+  section is current. The case for wiring it is that its case 4 asserts the
+  `covered + amountDue = grand` identity and that every trip AND charge line
+  sits inside the grand subtotal — the `1754140` money law, checked on rendered
+  output rather than on the engine. The case against is that its other six case
+  groups are render parity, and a money chain that fails because a stylesheet
+  changed teaches people to ignore it. **`bank-accounts` is the precedent for
+  wiring a non-money harness anyway.** Not decided; ask Turki. Run it directly
+  in the meantime:
+```sh
+  npx tsx scripts/invoice-render-parity-check.ts
+```
+  **It MUST run from the repo root** — `lib/invoicePdfTemplate.ts` inlines its
+  fonts with `readFileSync` off `process.cwd()`, so the PDF side of the
+  comparison throws from anywhere else.
 - **Not wired into `next build` or `safe-build.sh`, on purpose.** Money checks
   are run deliberately, not on every build. No test framework was added.
 - Fail-fast was **proven, not assumed**: a `process.exit(1)` harness injected at
@@ -773,11 +827,11 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 ## What's next
 
-**No FEATURE is queued** — ask Turki for the next one rather than picking. **ONE
-piece of follow-through is outstanding — item 5 below** — and it is not a
-feature; it is a console setting. (Items 1, 2, 3, 4, 6 and 7 are kept struck
-through as records, not as work. Do not resurrect a struck item because it still
-appears in this list.)
+**No FEATURE is queued** — ask Turki for the next one rather than picking. **TWO
+pieces of follow-through are outstanding — items 5 and 8 below.** Neither is a
+feature: 5 is a console setting, 8 is a one-line decision about a test script.
+(Items 1, 2, 3, 4, 6 and 7 are kept struck through as records, not as work. Do
+not resurrect a struck item because it still appears in this list.)
 
 **The money rules from `1754140` and `caec5ef` are no longer in this file's
 custody** — items 6 and 7 moved them into `SKILL.md`, which is what gets loaded
@@ -828,16 +882,39 @@ before money work. A handoff is rewritten every session; a skill is not.
    it described and says outright not to reintroduce the gate. The guard bullet
    there now also records that both fixtures turn on `ch-future` alone —
    `ch-past` passes either way, so dropping `ch-future` silently disarms it.
+8. **Decide whether `invoice-render-parity-check` joins `test:money`.** One line
+   in `package.json`. The argument both ways is in the money-harness section
+   above; `bank-accounts` is the precedent for wiring a non-money harness. Left
+   undecided ON PURPOSE rather than wired quietly during a docs pass. Until it
+   is settled, run it by hand from the repo root before any invoice-render
+   commit.
+
+**THE STATEMENT INHERITS `lib/plainDocStyles.ts` NEXT — that is a POINTER, not a
+queued feature.** The kit was built as a shared module for exactly this;
+`lib/i18n.ts:8548` records it at the StatementModal header. The statement still
+prints through the old `app/globals.css` portal (`#statement-print` /
+`body.printing-statement`, lines 627–628). **Do not start it without asking
+Turki** — the same rule as every other feature in this list.
+
+**The invoice leaving that stylesheet did NOT make it the last one out —
+measured, because an earlier draft of this very paragraph claimed it had.**
+`app/globals.css` still carries the portal/marker pattern for `#breakdown-print`,
+`#statement-print` and `#po-print`, plus a 12-id visibility whitelist at
+:407–425 (`history`, `permit`, `pnl`, `revenue`, `receivables`, `cost`, `ops`,
+`narrative`, `payslips`, `commission-review`, `custom`, `daily-trips`). The
+invoice was one of many, not the second-to-last. **`body * { visibility: hidden }`
+is therefore still the app's print model** — which is exactly why the Ctrl+P
+interception above is load-bearing.
 
 ~~Investigate draft-stage charge consumption~~ — **RULED this session**, see
 State. Reserve-at-draft is correct and the four `status <> 'void'` sites agree by
 construction. **Do not reopen it as a task.**
 
-~~Push the outstanding commits~~ — **DONE.** Origin carries through `caec5ef`;
+~~Push the outstanding commits~~ — **DONE.** Origin carries through `0b17bc3`;
 `main` and `origin/main` were level with a clean tree when this file was written,
 the handoff commit itself excepted. **Re-measure with `git status -sb` before
-quoting; this goes stale on the next commit** — it already had, naming `6af117d`
-three commits after the fact.
+quoting; this goes stale on the next commit** — it already had twice, naming
+`6af117d` three commits after the fact and `caec5ef` one commit after.
 
 **NOTIFICATIONS + SETTINGS IS BUILT AND LIVE — do NOT plan it.** Earlier
 revisions of this file listed it as the next feature with "`0154` pending,
