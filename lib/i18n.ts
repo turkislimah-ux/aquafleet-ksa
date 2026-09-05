@@ -7476,7 +7476,7 @@ export const dict = {
    * USED TO BE ABSENT NO LONGER IS.
    *
    * 1. THE INVOICE SHEET IS NOW TRANSLATED, and this paragraph used to say the
-   *    opposite. Batch 9 froze `#invoice-print` in English on the reasoning
+   *    opposite. Batch 9 froze the invoice sheet in English on the reasoning
    *    that a document is not a screen and that `lib/invoicePdfTemplate.ts` —
    *    bilingual since Batch D — was the artifact customers receive. Item 6
    *    overturned the first half of that and kept the second: the POPUP is a
@@ -7636,7 +7636,7 @@ export const dict = {
     /**
      * InvoiceDetailModal — CHROME. The workspace AROUND the sheet: the sticky
      * toolbar, the load/error states, and the email-type picker, which is a
-     * separate portal rendering outside `#invoice-print` entirely.
+     * separate portal rendering outside the sheet subtree entirely.
      *
      * THE SHEET ITSELF IS `trips.invoiceSheet`, one group below. This header
      * used to say the sheet was frozen in English and that this group was
@@ -7646,9 +7646,9 @@ export const dict = {
      * written for this app; the sheet's Arabic is copied from the PDF), not
      * because one of them is off limits.
      *
-     * THREE ERROR PARAGRAPHS STILL LIVE HERE rather than in the sheet group.
-     * `actionError`, `pdfError` and `periodError` render inside the
-     * `#invoice-print` element but on `no-print` nodes, and their literals are
+     * FOUR ERROR PARAGRAPHS STILL LIVE HERE rather than in the sheet group.
+     * `actionError`, `pdfError`, `printError` and `periodError` render inside
+     * the sheet subtree but on `no-print` nodes, and their literals are
      * SET in the handlers well above the sheet — they are operator feedback
      * that happens to be positioned there, not document content. A server
      * action's own `error:` string still passes through in English; only the
@@ -7700,6 +7700,10 @@ export const dict = {
         ar: "تعذّر تجميع معاينة الفاتورة.",
       },
       errPdf: { en: "Could not generate the PDF.", ar: "تعذّر إنشاء ملف PDF." },
+      // Print is a SEPARATE document from the download (a plain sheet, rendered
+      // by lib/invoicePrintTemplate.ts), so it fails separately and says so —
+      // one message covering both would send an operator to the wrong button.
+      errPrint: { en: "Could not prepare the invoice for printing.", ar: "تعذّر تجهيز الفاتورة للطباعة." },
       errAddCharge: { en: "Could not add the charge.", ar: "تعذّرت إضافة الرسوم." },
       // `{err}` is the upload action's own English message, spliced in
       // unchanged. The charge itself succeeded — the sentence has to keep
@@ -7711,7 +7715,7 @@ export const dict = {
       errViewImage: { en: "Could not open the attached image.", ar: "تعذّر فتح الصورة المرفقة." },
       errProof: { en: "Could not open proof of payment.", ar: "تعذّر فتح إثبات الدفع." },
 
-      // Email-type picker — its own portal, rendered outside `#invoice-print`.
+      // Email-type picker — its own portal, rendered outside the sheet subtree.
       emailPickerTitle: {
         en: "Email invoice — choose type",
         ar: "إرسال الفاتورة بالبريد — اختر النوع",
@@ -7916,8 +7920,15 @@ export const dict = {
     },
 
     /**
-     * InvoiceDetailModal — THE SHEET ITSELF. `#invoice-print`, the subtree the
-     * Print button puts on paper.
+     * InvoiceDetailModal — THE SHEET ITSELF. The on-screen invoice body.
+     *
+     * IT IS NO LONGER WHAT THE PRINT BUTTON PUTS ON PAPER, and this line used
+     * to say it was (naming the `#invoice-print` id, since removed). Print now
+     * renders `lib/invoicePrintTemplate.ts` from the shared view-model, the
+     * same way the PDF does. These are SCREEN strings — but they must still
+     * match the document word for word, because the popup and the printout
+     * saying different things about one invoice is the exact failure the
+     * shared view-model exists to prevent.
      *
      * THE ARABIC IN HERE IS NOT NEW PROSE. Wherever a label already exists in
      * `lib/invoicePdfTemplate.ts` — which has been bilingual since Batch D —
@@ -8529,10 +8540,14 @@ export const dict = {
     // StatementModal — the per-customer ledger drill-in, both arms.
     //
     // THIS PRINTS, AND IT STILL TRANSLATES. It is not the frozen surface: the
-    // ZATCA artifact is the invoice sheet (`#invoice-print`, and the official
-    // PDF in lib/invoicePdfTemplate.ts). A statement is an internal working
-    // document with no regulated layout, so a manager reading Arabic gets an
-    // Arabic statement on paper too.
+    // ZATCA artifact is the invoice — lib/invoicePrintTemplate.ts on paper and
+    // lib/invoicePdfTemplate.ts as a file, both off the shared view-model. A
+    // statement is an internal working document with no regulated layout, so a
+    // manager reading Arabic gets an Arabic statement on paper too.
+    //
+    // The statement is ALSO the next surface to inherit lib/plainDocStyles.ts,
+    // which is why that kit is a shared module rather than part of the invoice
+    // template. Until then it still prints through the globals.css portal.
     //
     // EVERY FIGURE ON IT IS READ-ONLY. buildStatementItems() and
     // consumingItems() are called with exactly the arguments they always were;

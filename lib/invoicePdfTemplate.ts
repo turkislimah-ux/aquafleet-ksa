@@ -54,6 +54,12 @@ import { readFileSync } from "fs";
 import path from "path";
 import QRCode from "qrcode";
 
+// esc / num2 / numPlain / bl / DASH used to be defined privately below. They
+// moved to lib/docPrimitives.ts when the plain PRINT sheet became a second
+// renderer: `num2` in particular is the tax document's 2-decimal format, and
+// the printout and the PDF disagreeing about a halala is exactly the class of
+// divergence the shared view-model exists to prevent.
+import { DASH, bl, esc, num2, numPlain } from "./docPrimitives";
 import {
   buildInvoiceViewModel,
   fillBi,
@@ -123,45 +129,6 @@ function getFontFaceCss(): string {
   `;
   return fontFaceCss;
 }
-
-// ---------------------------------------------------------------------------
-// Primitives
-// ---------------------------------------------------------------------------
-
-function esc(s: string | null | undefined): string {
-  if (s == null) return "";
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-// BARE 2-decimal money, no currency suffix — the column header carries "(SAR)"
-// and the Amount Due figure carries its own `.cur` chip, so repeating "SAR" on
-// every cell is noise in a table that is entirely one currency.
-//
-// TWO DECIMALS, deliberately diverging from the sheet's whole-riyal formatSar:
-// this is the tax document. A halala that the screen rounds away has to be
-// visible on the invoice the customer pays and the auditor reads. The
-// view-model therefore hands over RAW numbers and each surface formats for its
-// own medium — see its header.
-function num2(n: number): string {
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-/** Plain integer/qty rendering — no forced decimals. */
-function numPlain(n: number): string {
-  return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
-}
-
-// The one bilingual building block: English, then the Arabic underneath or
-// alongside depending on the class the caller picks. `unicode-bidi: isolate`
-// on `.ar` (see the stylesheet) is what stops an Arabic run from reordering
-// the Latin text next to it — without it a label like "Tel +966 11 …" renders
-// its number on the wrong side of the Arabic word.
-function bl(l: BiLabel, arClass = "ar"): string {
-  return `${esc(l.en)}<span class="${arClass}" dir="rtl">${esc(l.ar)}</span>`;
-}
-
-/** An EM DASH for a figure that genuinely does not exist. Never a zero. */
-const DASH = "—";
 
 // ---------------------------------------------------------------------------
 // Blocks

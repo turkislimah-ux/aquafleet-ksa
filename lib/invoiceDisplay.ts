@@ -38,7 +38,7 @@ export type GroupedRow = {
   firstTripId: string; // for the clickable range -> jumps to the first trip
   // THE ENUM VALUE, NOT A LABEL (item 6). This used to be a `typeLabel` string
   // resolved here through `WATER_TYPE_LABELS` — the last hardcoded English left
-  // inside `#invoice-print`, and unreachable from the sheet's own translation
+  // inside the invoice sheet, and unreachable from the sheet's own translation
   // because a grouping helper has no business knowing the UI language. The row
   // now carries what Postgres stores and the caller renders it through
   // `waterTypeLabel()` in lib/enum-labels.ts, same as every other enum in the

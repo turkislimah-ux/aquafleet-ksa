@@ -48,6 +48,7 @@ import {
   getProofSignedUrl,
   getCompanyEmail,
   getInvoicePdf,
+  getInvoicePrintHtml,
   updateDraftInvoicePeriod,
   getUndeliveredTripsForInvoice,
   uploadSpecialChargeImage,
@@ -163,6 +164,59 @@ type View = {
   projectWaterType: WaterType | null;
 };
 
+// Prints a standalone HTML document without navigating away from the app.
+//
+// AN IFRAME, NOT A POPUP WINDOW. `window.open` is blocked by default in most
+// browsers unless the click chain is unbroken — and this chain is broken, since
+// the HTML arrives from an awaited server action. A same-origin iframe needs no
+// permission and cannot be blocked.
+//
+// OFF-SCREEN, NOT `display:none` / zero-sized. An undisplayed frame has no
+// layout, and what the print engine renders is the layout.
+//
+// AWAITS THE FONTS. `print()` snapshots whatever is painted at that instant; on
+// a cold cache that is the fallback face, so an Arabic tax invoice prints in
+// substituted metrics. `fonts.ready` is the only honest signal that the faces
+// this document declares have actually loaded.
+//
+// The frame is removed on `afterprint`, with a long timer as a backstop for the
+// engines that never fire it. It is NOT removed straight after `print()`
+// returns: some browsers spool the document asynchronously, and tearing the
+// frame down first cancels the job.
+function printHtml(html: string) {
+  const frame = document.createElement("iframe");
+  frame.setAttribute("aria-hidden", "true");
+  frame.setAttribute("tabindex", "-1");
+  frame.style.cssText = "position:fixed;left:-10000px;top:0;width:210mm;height:297mm;border:0;";
+  frame.srcdoc = html;
+  frame.onload = () => {
+    const win = frame.contentWindow;
+    if (!win) {
+      frame.remove();
+      return;
+    }
+    let removed = false;
+    const drop = () => {
+      if (removed) return;
+      removed = true;
+      frame.remove();
+    };
+    win.addEventListener("afterprint", drop);
+    window.setTimeout(drop, 120_000);
+    const go = () => {
+      win.focus();
+      win.print();
+    };
+    // `document.fonts` is universally present in the browsers this app targets;
+    // the guard is for the frame being torn down under us mid-load, not for an
+    // engine lacking the API.
+    const fonts = win.document.fonts;
+    if (fonts) fonts.ready.then(go, go);
+    else go();
+  };
+  document.body.appendChild(frame);
+}
+
 export default function InvoiceDetailModal({
   open,
   invoiceId,
@@ -255,6 +309,14 @@ export default function InvoiceDetailModal({
   // is read-only and shouldn't disable the lifecycle buttons or vice versa.
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+
+  // Print. Its OWN pair, not the download's: the two now produce two different
+  // documents through two different paths (this one renders HTML and never
+  // touches the PDF provider), so sharing the error state would report a failed
+  // print in the download button's tooltip and send the operator to the wrong
+  // button.
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
 
   async function load() {
     if (!invoiceId) return;
@@ -370,6 +432,7 @@ export default function InvoiceDetailModal({
     setBlockers([]);
     setEmailPickerOpen(false);
     setPdfError(null);
+    setPrintError(null);
     load();
     getCompanyEmail().then((r) => setCompanyEmail(r.data?.email ?? null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -381,15 +444,57 @@ export default function InvoiceDetailModal({
     router.refresh();
   }
 
-  function handlePrint() {
-    document.body.classList.add("printing-invoice");
-    const cleanup = () => {
-      document.body.classList.remove("printing-invoice");
-      window.removeEventListener("afterprint", cleanup);
-    };
-    window.addEventListener("afterprint", cleanup);
-    window.print();
+  // PRINT — a document of its own, no longer this popup on paper.
+  //
+  // What this replaces: `document.body.classList.add("printing-invoice")` plus
+  // a globals.css `@media print` block that hid every element on the page
+  // except this modal, flattened the overlay, and printed the live React DOM.
+  // It agreed with the screen by BEING the screen — which meant it printed an
+  // application window: screen layout, screen number formats (whole riyals, not
+  // the tax document's halalas), and controls suppressed one by one with
+  // `no-print` classes that had to be maintained by hand forever.
+  //
+  // Now the server renders the same view-model the download renders
+  // (lib/invoicePrintTemplate.ts) and the browser prints THAT. Agreement with
+  // the screen is no longer a property of the markup; it is a property of the
+  // shared view-model, which is where it belongs.
+  async function handlePrint() {
+    if (!invoiceId || printing) return;
+    setPrinting(true);
+    setPrintError(null);
+    const r = await getInvoicePrintHtml(invoiceId);
+    setPrinting(false);
+    if (r.error || !r.data) {
+      setPrintError(r.error ?? t("trips.invoice.errPrint", lang));
+      return;
+    }
+    printHtml(r.data.html);
   }
+
+  // Ctrl/Cmd+P is intercepted, and it HAS to be.
+  //
+  // globals.css opens its print block with `body * { visibility: hidden }` and
+  // then whitelists specific report subtrees. The invoice used to be on that
+  // whitelist; it deliberately is not any more. So a raw browser print with
+  // this modal open would now resolve to a legally blank sheet — the worst
+  // possible failure, because it looks like the printer's fault.
+  //
+  // Routing the shortcut to handlePrint() also makes the keyboard and the
+  // button emit the same document, which is what anyone pressing Ctrl+P in
+  // front of an invoice means. Capture phase so nothing swallows it first.
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      void handlePrint();
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, invoiceId, printing, lang]);
 
   async function handleDownloadPdf() {
     if (!invoiceId || downloadingPdf) return;
@@ -693,14 +798,17 @@ export default function InvoiceDetailModal({
 
   return createPortal(
     <>
-    <div className="invoice-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+    {/* No `invoice-print-portal` class any more: globals.css had a rule that
+        flattened this overlay for print, and there is nothing left for it to
+        flatten. This subtree is a SCREEN surface only. */}
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <ScrollLock />
       <div
         // 1080px = this app's size:lg popup width (InventoryClient.tsx:130).
         // Widened from max-w-4xl: the trip tables are six columns and each row
         // carries a stacked pre-VAT+VAT figure, so the money column needs room
-        // that Date/Ref/Truck/Capacity/Type were taking. The PRINT sheet is
-        // unaffected — globals.css flattens this portal and sizes to the page.
+        // that Date/Ref/Truck/Capacity/Type were taking. Nothing here is
+        // width-constrained by paper: the printed sheet is its own document.
         className="card p-0 w-full max-w-[1080px] max-h-[90vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
@@ -712,9 +820,9 @@ export default function InvoiceDetailModal({
             </button>
             {/* TOOLBAR pill — chrome, so it translates. Keyed off `status`, the
                 ENUM VALUE, exactly as the map it replaces was; nothing reads the
-                label back. The SHEET's own Status line (:788, inside
-                `#invoice-print`) still renders INVOICE_STATUS_LABELS and stays
-                English, which is why that import is still here. */}
+                label back. The sheet's own Status line (:941) resolves through
+                the same `invoiceStatusLabel`, so the two agree by construction.
+                The PRINTED status comes from the view-model, not from either. */}
             {status && <StatusPill status={status} label={invoiceStatusLabel(status, lang)} />}
           </div>
           <div className="flex items-center gap-2">
@@ -727,9 +835,16 @@ export default function InvoiceDetailModal({
                 <Mail className="h-4 w-4" /> {t("trips.invoice.emailBtn", lang)}
               </Btn>
             </span>
-            <Btn variant="outline" onClick={handlePrint}>
-              <Printer className="h-4 w-4" /> {t("common.print", lang)}
-            </Btn>
+            <span title={printError ?? undefined}>
+              <Btn
+                variant="outline"
+                onClick={handlePrint}
+                className={printing ? "opacity-50 pointer-events-none" : ""}
+              >
+                <Printer className="h-4 w-4" />{" "}
+                {printing ? t("trips.invoice.generating", lang) : t("common.print", lang)}
+              </Btn>
+            </span>
             <span title={pdfError ?? undefined}>
               <Btn
                 variant="outline"
@@ -750,7 +865,11 @@ export default function InvoiceDetailModal({
         {error && <div className="p-10 text-center text-sm text-rose-600 dark:text-rose-400">{error}</div>}
 
         {!loading && !error && raw && view && (
-          <div id="invoice-print" className="p-6 space-y-6">
+          // Was `id="invoice-print"` — the hook globals.css used to whitelist
+          // this subtree for printing. The id is gone because keeping it would
+          // invite a second print path back in. Print renders from the
+          // view-model (lib/invoicePrintTemplate.ts), never from this DOM.
+          <div className="p-6 space-y-6">
             {/* Header — identity + document meta. */}
             <div className="flex items-start justify-between gap-6 flex-wrap">
               <div>
@@ -894,15 +1013,16 @@ export default function InvoiceDetailModal({
                   lines={view.unpaidLines}
                   ledger={view.ledger?.unpaid ?? { subtotal: view.amountDue.total, balance: null, remaining: null }}
                   fallbackWaterType={view.projectWaterType}
-                  // PRINT ONLY — the section stays on screen either way (§7:
-                  // this toggle "governs print/PDF/email only, always visible
-                  // on-screen"). Pairs with the PDF's own guard in
-                  // lib/invoicePdfTemplate.ts so the printed sheet and the
-                  // downloaded PDF suppress the same thing, and with the
-                  // Amount Due card below — the table and the figure it feeds
-                  // travel together or the customer gets a due total with no
-                  // rows behind it.
-                  hiddenFromPrint={raw.hide_amount_due}
+                  // No `hiddenFromPrint` here any more, and that is the point:
+                  // hide-amount-due is now honoured ONCE, upstream, by the
+                  // view-model (vm.amountDue goes null), which every printed
+                  // and downloaded document reads. This markup used to carry a
+                  // SECOND mechanism for the same rule — a `no-print` class on
+                  // the table and another on the Amount Due card — and two
+                  // mechanisms for one rule is how they drift apart. The
+                  // section stays on screen either way, unchanged (§7: this
+                  // toggle "governs print/PDF/email only, always visible
+                  // on-screen").
                   headerRight={
                     <HideAmountDueToggle
                       lang={lang}
@@ -954,15 +1074,13 @@ export default function InvoiceDetailModal({
                     Unpaid Trips table above (item 6) — the Amount Due card
                     itself is just the figure, no sentence, no toggle. */}
                 <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:justify-end break-inside-avoid">
-                  {/* Same print-only suppression as the Unpaid Trips table
-                      above, for the same reason: Amount Due IS the unpaid
-                      table's total, so hiding one and printing the other
-                      leaves the customer a figure with nothing behind it.
-                      Screen keeps both — the person choosing what the
+                  {/* This card used to drop out of the printout when the hide
+                      toggle was on. It no longer needs to: the modal is not a
+                      print surface, and the documents that are read
+                      hide-amount-due from the view-model. Screen keeps the
+                      card unconditionally — the person choosing what the
                       customer sees has to keep seeing it themselves. */}
-                  <div
-                    className={"sm:w-64 sm:flex-shrink-0" + (raw.hide_amount_due ? " no-print" : "")}
-                  >
+                  <div className="sm:w-64 sm:flex-shrink-0">
                     <TotalCard
                       lang={lang}
                       label={t("trips.invoiceSheet.amountDue", lang)}
@@ -1132,6 +1250,7 @@ export default function InvoiceDetailModal({
 
             {actionError && <p className="text-sm text-rose-600 dark:text-rose-400 no-print">{actionError}</p>}
             {pdfError && <p className="text-sm text-rose-600 dark:text-rose-400 no-print">{pdfError}</p>}
+            {printError && <p className="text-sm text-rose-600 dark:text-rose-400 no-print">{printError}</p>}
 
             {/* Actions — status-dependent, not printed, and absent entirely
                 on a read-only mount. */}
@@ -1459,7 +1578,7 @@ function IdentityBlock({
       {name !== undefined && (
         <div className="font-medium">{name ?? <span className="muted">{t("trips.invoiceSheet.notOnFile", lang)}</span>}</div>
       )}
-      {/* THE ONE INTENTIONAL CHANGE INSIDE `#invoice-print`, and it changes no
+      {/* THE ONE INTENTIONAL CHANGE INSIDE THE SHEET SUBTREE, and it changes no
           text. `dir="rtl"` used to sit on the block, which forced the whole
           line to lay out right-to-left regardless of the page's own direction —
           so on an English sheet this one line jumped to the right margin while
@@ -1601,7 +1720,6 @@ function PrepaidTripTable({
   ledger,
   fallbackWaterType,
   headerRight,
-  hiddenFromPrint = false,
 }: {
   lang: Lang;
   title: string;
@@ -1611,11 +1729,10 @@ function PrepaidTripTable({
   // v3.1 (item 6) — lets the Unpaid Trips table host the hide-amount-due
   // toggle at its header, same row as the title. Undefined for Covered.
   headerRight?: React.ReactNode;
-  // hide_amount_due, PRINT ONLY. §7's rule for this toggle is that it
-  // "governs print/PDF/email only — always visible on-screen", so this is a
-  // print-media class and MUST NOT become a conditional render: the person
-  // deciding what the customer sees has to keep seeing it themselves.
-  hiddenFromPrint?: boolean;
+  // There was a `hiddenFromPrint?: boolean` here that appended `no-print` when
+  // hide-amount-due was on. Removed with the DOM print path: the toggle is
+  // honoured in lib/invoiceViewModel.ts now, so every document obeys it and
+  // this component went back to being screen-only.
 }) {
   const rows = groupInvoiceLines(lines, fallbackWaterType);
   // v3.1 (item 3) — faded pre-VAT + VAT breakdown alongside the Subtotal
@@ -1628,7 +1745,7 @@ function PrepaidTripTable({
   const vatAmt = round2(ledger.subtotal - preVat);
 
   return (
-    <section className={"space-y-2 break-inside-avoid" + (hiddenFromPrint ? " no-print" : "")}>
+    <section className="space-y-2 break-inside-avoid">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wide muted">{title}</h3>
         {headerRight}

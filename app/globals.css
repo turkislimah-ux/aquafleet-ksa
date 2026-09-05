@@ -609,38 +609,21 @@ html[dir="rtl"] { --dock-dir: -1; }
      tables may still break across pages, but never mid-row. */
   #breakdown-print table tr { break-inside: avoid; }
 
-  /* Invoice document (Finance 5c) — same portal/paginate pattern as the
-     breakdown report above, just a second id/class/marker set so both can
-     coexist (only one is ever open at a time in practice, but this keeps
-     them independent rather than sharing a marker). */
-  #invoice-print, #invoice-print * { visibility: visible !important; }
-  body.printing-invoice > *:not(.invoice-print-portal) { display: none !important; }
+  /* THE INVOICE'S BLOCK IS GONE, AND ITS ABSENCE IS THE FEATURE.
+     It used to live here: `#invoice-print` + `body.printing-invoice`, the same
+     portal/paginate pattern as the breakdown above, hiding the whole page and
+     printing InvoiceDetailModal's live React DOM. The invoice now prints as its
+     own document — lib/invoicePrintTemplate.ts, rendered server-side from the
+     shared view-model into a hidden same-origin iframe, which the browser
+     prints on its own. Nothing in this stylesheet reaches inside that iframe,
+     which is the point: the printed invoice no longer inherits the app's
+     screen styling, and its layout can no longer be broken from here.
+     The statement below still uses the old pattern; it inherits the plain
+     document style next. */
 
-  .invoice-print-portal,
-  .invoice-print-portal > * {
-    position: static !important;
-    inset: auto !important;
-    max-width: none !important;
-    max-height: none !important;
-    overflow: visible !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    display: block !important;
-  }
-  #invoice-print {
-    position: static !important;
-    margin: 0;
-    padding: 1rem;
-    max-height: none !important;
-    overflow: visible !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-  #invoice-print table tr { break-inside: avoid; }
-
-  /* Statement (Finance polish batch A) — same portal/paginate pattern as
-     invoice/breakdown above, third independent id/class/marker set. */
+  /* Statement (Finance polish batch A) — same portal/paginate pattern as the
+     breakdown above, its own independent id/class/marker set. (It used to say
+     "invoice/breakdown"; the invoice left this stylesheet, see above.) */
   #statement-print, #statement-print * { visibility: visible !important; }
   body.printing-statement > *:not(.statement-print-portal) { display: none !important; }
 
@@ -680,7 +663,7 @@ html[dir="rtl"] { --dock-dir: -1; }
   #statement-print .statement-settlement-ink { color: inherit !important; }
 
   /* Purchase Order detail (Inventory Phase 4) — same portal/paginate
-     pattern as invoice/breakdown/statement above, fourth independent
+     pattern as breakdown/statement above, its own independent
      id/class/marker set. */
   #po-print, #po-print * { visibility: visible !important; }
   body.printing-po > *:not(.po-print-portal) { display: none !important; }
