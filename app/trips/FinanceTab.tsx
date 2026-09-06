@@ -612,6 +612,13 @@ export default function FinanceTab({
         history={activeTopupCustomer ? (topupsByCustomer.get(activeTopupCustomer.id) ?? []) : []}
       />
 
+      {/* `projectInitials={activeStatementRow?.project?.initials ?? null}` used
+          to sit in this prop list and is gone. Its ONLY consumer was the
+          statement header's sample-ref line, which rendered a synthetic example
+          of the project's reference FORMAT rather than any trip in the
+          statement; the header carries the statement PERIOD there now.
+          `projects.initials` is untouched and still feeds the real Ref column
+          via formatTripRef(). */}
       <StatementModal
         open={statementFor !== null}
         onClose={() => setStatementFor(null)}
@@ -626,7 +633,6 @@ export default function FinanceTab({
         // statement close on a figure the Balance column contradicts.
         returns={activeStatementRow?.customerReturns ?? []}
         projectWaterType={activeStatementRow?.project?.water_type ?? null}
-        projectInitials={activeStatementRow?.project?.initials ?? null}
         projectName={activeStatementRow?.project?.name ?? null}
         tripMetaById={tripMetaById}
         payments={activeStatementRow?.customerPaidInvoices ?? []}

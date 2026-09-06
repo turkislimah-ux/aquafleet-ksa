@@ -5,154 +5,178 @@
 // lib/invoiceDisplay.ts). Two modes:
 //   - prepaid: bank-statement-style chronological ledger — top-up credits +
 //     delivered-trip/special-charge VAT-inclusive debits, running balance.
-//     Built from lib/prepaid.ts's v3 buildStatementItems() (pure, tested by
-//     scripts/prepaid-check.ts), trips + charges combined FIFO.
 //   - postpaid: itemized delivered trips + Payment rows (paid invoices) — no
 //     balance/ledger concept (spec §8/§10: postpaid has no prepaid balance).
-//     Trip rows built from consumingItems() directly (trip entries only —
-//     postpaid passes no charges), the same pure/shared "what counts"
-//     function. Payment rows are a separate data source (paid invoices'
-//     payment_reference/payment_date/grand_total_sar), not engine output.
 //
-// Statement rebuild (Batch 3, finance-invoice-spec.md v3) — adds, on top of
-// the above, WITHOUT any lib/prepaid.ts change:
-//   - Truck plate/capacity columns (per trip row, both modes) — sourced from
-//     a caller-built tripMetaById map (app/trips/page.tsx's existing
-//     trips.truck_id -> trucks join, threaded through FinanceTab), never
-//     added to ConsumingTrip/ConsumedItem/StatementItemEntry themselves.
-//   - A period picker (date-range filter on the TABLE ROWS only). Footer
-//     figures (Running balance / Total payable) stay period-INDEPENDENT —
-//     always computed from the full, unfiltered data, same as a real bank
-//     statement's "current balance" not moving just because you scrolled to
-//     an old page.
-//   - Postpaid gains per-trip VAT + TOTAL columns. Both figures are already
-//     computed by consumingItems() (amount = pre-VAT, consumedAmount = VAT-
-//     inclusive) — VAT column is just their difference, TOTAL is
-//     consumedAmount directly. No new formula.
-//   - Postpaid's footer becomes "Total payable" — the VAT-inclusive total of
-//     every postpaid trip NOT YET on a paid invoice (tripMetaById's
-//     invoiceLocked flag, already computed in page.tsx for Settled Balance).
-//   - Prepaid's AMOUNT column shows the bold VAT-inclusive debit with a
-//     faded "pre-VAT + VAT" breakdown beside it — same treatment as
-//     InvoiceDetailModal's PrepaidTripTable/LineTable footers. The pre-VAT
-//     split isn't stored on StatementItemEntry, so it's read from a second,
-//     already-exported call to consumingItems() (trips+charges), keyed by
-//     kind+id — reusing the SAME pure function buildStatementItems() already
-//     calls internally, not new math.
-//   - Prepaid top-up rows show reference (not note) — note is only ever
-//     shown for trip/charge debit rows now.
+// THIS FILE NO LONGER DECIDES WHAT THE STATEMENT SAYS.
+// ----------------------------------------------------
+// Every column, every row, every Type label, every order and every figure now
+// comes from lib/statementViewModel.ts's buildStatementVm(). That module was
+// extracted OUT of this one — the engine calls, the settlement mapping, the
+// period-filter-after-the-full-walk ordering and the label keys below are the
+// expressions this file already had, moved verbatim. What stays here is the
+// LOOK: the popup's tints, its emerald/amber/rose ink, its truncation, the
+// portal and the print hooks.
 //
-// Paid-invoice trace (prepaid) — a "settlement" row per PAID prepaid invoice,
-// interleaved in true date order like every other event:
-//   Date = payment date · Type = "Invoice payable" · Ref = invoice number ·
-//   Note = "Balance" · Amount = the invoice grand total.
-// It is a RECORD, not a movement: the running balance holds FLAT across it,
-// because the trips and charges the invoice covers already consumed balance at
-// delivery — deducting the invoice too would double-count. The engine
-// (buildStatementItems' `settlements` parameter) skips these rows in its
-// running walk; the labels above are rendered here, so lib/prepaid.ts stays
-// pure math with no presentation strings.
+// The reason for the split is the downloadable statement (statementActions.ts
+// -> lib/statementPdfTemplate.ts). It renders from the SAME buildStatementVm()
+// call on the SAME inputs, so the file and the screen cannot disagree about a
+// figure, a column or a word — a change lands on both or on neither. That is
+// the 0%-deviation contract lib/invoiceViewModel.ts states for the invoice,
+// applied to the other document.
 //
-// Pre-VAT throughout for postpaid's raw AMOUNT column (VAT is broken out
-// separately) — the prepaid ledger's debit amounts are VAT-inclusive by
-// design (see StatementItemEntry's comment in lib/prepaid.ts).
+// NUMBERS ARRIVE RAW AND ARE FORMATTED HERE. The view-model hands over the
+// unrounded value; this screen prints whole riyals via formatSar/formatNum,
+// the document prints two decimals via num2. Neither surface re-signs,
+// re-rounds or re-bases anything — the sign and the VAT split are decided in
+// the view-model and only rendered here.
 //
-// Print reuses the existing portal pattern (InvoiceDetailModal/BreakdownReport):
-// createPortal + mounted guard + a `printing-statement` body class toggled
-// around window.print(), paired with #statement-print / .statement-print-portal
-// CSS in app/globals.css.
+// What the view-model does NOT own, and why:
+//   - The period picker's STATE (two date inputs) is UI state, so it lives
+//     here; its VALUES are passed into buildStatementVm, which applies them.
+//     Footer figures stay period-INDEPENDENT — always computed from the full,
+//     unfiltered data, same as a real bank statement's "current balance" not
+//     moving just because you scrolled to an old page. That rule is enforced
+//     in the view-model now, not in this render.
+//   - The Ref column's LINK. The view-model emits a `tripRef` cell carrying
+//     the trip id; this surface wraps it in TripRefLink, the document prints
+//     the same text plain. Same VALUE, different affordance.
+//
+// PRINT AND DOWNLOAD EMIT THE SAME DOCUMENT — see handlePrint below. Print no
+// longer prints this popup; it renders lib/statementPdfTemplate.ts from the
+// same `vm` and prints that in a hidden iframe. The `printing-statement` body
+// class, the #statement-print / .statement-print-portal CSS in app/globals.css,
+// and the colourless settlement marker classes that block hooked onto are all
+// gone together. The portal and mounted guard stay — those are how the modal
+// mounts, not how it printed.
+//
+// What still differs between the two: Download crosses the network to the PDF
+// provider and can fail on its own (see the toolbar's error line); Print is
+// local string building and cannot.
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Printer } from "lucide-react";
+import { X, Printer, Download } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { formatSar, formatNum } from "@/lib/utils";
+import type { BalanceReturnLite, ConsumingTrip, ConsumingCharge, TopupStatementInput } from "@/lib/prepaid";
+import { type WaterType } from "@/lib/db-types";
 import {
-  buildStatementItems,
-  consumingItems,
-  round2,
-  type BalanceReturnLite,
-  type ConsumedItem,
-  type ConsumingTrip,
-  type ConsumingCharge,
-  type SettlementStatementInput,
-  type TopupStatementInput,
-} from "@/lib/prepaid";
-import {
-  type WaterType,
-  type InvoicePaymentMethod,
-} from "@/lib/db-types";
-import { formatTripRef, sampleTripRef } from "@/lib/trip-ref";
+  buildStatementVm,
+  type StatementCell,
+  type StatementColumnKey,
+  type StatementPaymentInput,
+  type StatementRow,
+  type StatementTripMeta,
+} from "@/lib/statementViewModel";
 import TripRefLink from "@/components/TripRefLink";
+// The PRINTED statement is the same document the download is — same template,
+// same view-model instance. Not a second rendering of this DOM.
+import { buildStatementHtml } from "@/lib/statementPdfTemplate";
+import { printHtml } from "@/lib/printHtml";
 import ScrollLock from "@/components/ScrollLock";
 import { useApp } from "@/components/AppShell";
 import { t, fill } from "@/lib/i18n";
-// The Type / Reference / mode cells read the ENUM VALUE through these helpers.
-// db-types' own `_LABELS` maps are no longer imported here and were not edited.
-import { paymentMethodLabel, paymentModeLabel, waterTypeLabel } from "@/lib/enum-labels";
+import { getStatementPdf } from "./statementActions";
 
 const INPUT = "px-2.5 py-1.5 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-brand-500/30";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-// Settlement-row colour, ON SCREEN ONLY — the leading `statement-settlement-*`
-// class carries no colour itself, it is the hook app/globals.css's @media print
-// block reads to strip the tint and the green ink so a printed (or saved-as-PDF,
-// same dialog) statement renders the row like every other one. Two reasons the
-// suppression lives in that CSS block rather than in Tailwind `print:` variants:
-// #statement-print sets print-color-adjust:exact, so this WOULD otherwise reach
-// paper; and tailwind.config.ts declares no darkMode key, so `media` applies
-// dark:text-emerald-400 when printing from a dark-mode OS. Font weight is not
-// colour, so font-medium survives print deliberately.
-const SETTLEMENT_ROW_CLS = "statement-settlement-row bg-emerald-500/[0.07]";
-const SETTLEMENT_INK_CLS = "statement-settlement-ink text-emerald-700 dark:text-emerald-400 font-medium";
+// Settlement-row colour — SCREEN ONLY, and now screen only in the literal
+// sense: nothing prints this DOM any more.
+//
+// These two strings used to lead with `statement-settlement-row` /
+// `statement-settlement-ink`, colourless marker classes whose only job was to
+// give app/globals.css's @media print block something to hook onto so it could
+// strip the tint and the green ink off a printed page. That block is gone with
+// the print repoint, so the markers are gone with it — a hook with nothing on
+// the other end is worse than no hook, because the next reader assumes the
+// suppression still happens somewhere.
+//
+// Both printed surfaces are monochrome by construction now:
+// lib/statementPdfTemplate.ts carries a settlement in italic and a rule
+// rather than a tint, and print and download both render it.
+const SETTLEMENT_ROW_CLS = "bg-emerald-500/[0.07]";
+const SETTLEMENT_INK_CLS = "text-emerald-700 dark:text-emerald-400 font-medium";
 
 // Balance-return ink (0142). A refund is money LEAVING the pool, so it reads
 // as a debit like a trip or a charge — the distinction it needs is WHY, not
 // whether it subtracts, so only the Type label is coloured and the row itself
-// stays untinted. It reuses the settlement row's print hook deliberately: the
-// same @media print rule in app/globals.css that strips the settlement's green
-// ink also strips this, so a printed statement renders it in plain ink instead
-// of amber-on-paper. No new CSS.
-const RETURN_INK_CLS = "statement-settlement-ink text-amber-700 dark:text-amber-400 font-medium";
+// stays untinted. It used to reuse the settlement row's print hook so the same
+// @media print rule stripped its amber; with the print repoint there is no page
+// to strip it from — the printed statement is lib/statementPdfTemplate.ts,
+// which never had a colour to lose.
+const RETURN_INK_CLS = "text-amber-700 dark:text-amber-400 font-medium";
 
-// Statement rebuild (Batch 3) — per-trip display metadata (truck + paid-
-// lock), keyed by trip id. Built once in FinanceTab from the FULL trips
-// list (app/trips/page.tsx's existing truck join + invoiceLocked flag) —
-// deliberately kept OUTSIDE lib/prepaid.ts's ConsumingTrip/ConsumedItem
-// types, which stay untouched.
-export type TripMeta = { truckPlate: string | null; truckCapacityM3: number | null; invoiceLocked: boolean };
+const CREDIT_INK_CLS = "text-emerald-600 dark:text-emerald-400";
+
+// Per-trip display metadata (truck + paid-lock), keyed by trip id. Built once
+// in FinanceTab from the FULL trips list (app/trips/page.tsx's existing truck
+// join + invoiceLocked flag) — deliberately kept OUTSIDE lib/prepaid.ts's
+// ConsumingTrip/ConsumedItem types, which stay untouched.
+//
+// ALIASED, not re-declared: this used to be its own shape and the view-model
+// mirrored it, which is two places for one contract. FinanceTab still imports
+// `TripMeta` from here, so the name stays; the definition is now the
+// view-model's and cannot drift from what buildStatementVm actually reads.
+export type TripMeta = StatementTripMeta;
 
 // Paid-invoice row source — one row per paid invoice (app/trips/page.tsx
 // PaidInvoiceRow). Not engine output; a plain data pass-through.
-// BOTH MODES read it now: postpaid renders it as a Payment (a real credit
-// against what is owed), prepaid as a record-only "Invoice payable" row that
-// traces the document without moving the balance.
-export type StatementPayment = {
-  id: string;
-  invoice_number: string;
-  // Imported, not re-declared — see PaidInvoiceRow (app/trips/page.tsx), which
-  // this mirrors field-for-field. A hand-rolled two-value copy would have denied
-  // 0134's 'balance' at the type level while the column returns it.
-  payment_method: InvoicePaymentMethod | null;
-  payment_reference: string | null;
-  payment_date: string | null;
-  paid_at: string | null;
-  grand_total_sar: number;
-};
+// BOTH MODES read it: postpaid renders it as a Payment (a real credit against
+// what is owed), prepaid as a record-only "Invoice payable" row that traces
+// the document without moving the balance. Aliased for the same reason as
+// TripMeta above.
+export type StatementPayment = StatementPaymentInput;
 
-function truckCell(meta: TripMeta | undefined) {
-  return {
-    plate: meta?.truckPlate ?? null,
-    capacity: meta?.truckCapacityM3 ?? null,
-  };
+// ---------------------------------------------------------------------------
+// Look: the two class tables
+// ---------------------------------------------------------------------------
+// A column's own cell treatment — alignment, numerals, truncation. Identical
+// to what each <TD> carried before the extraction, keyed by column instead of
+// hand-written per row.
+function tdCls(colKey: StatementColumnKey): string {
+  switch (colKey) {
+    case "date":
+      return "tabular-nums";
+    // The Note cell is the only one that can hold free text long enough to
+    // wreck an eight-column table, so it is the only one that truncates.
+    case "note":
+      return "max-w-[10rem] truncate";
+    case "truck":
+    case "capacity":
+      return "muted";
+    case "amount":
+      return "tabular-nums";
+    case "vat":
+      return "tabular-nums muted";
+    case "total":
+    case "runningBalance":
+      return "tabular-nums font-medium";
+    case "type":
+    case "ref":
+      // Ink for these two is decided by the ROW, below — a Type cell is
+      // emerald on a top-up and amber on a return, so it cannot be a property
+      // of the column.
+      return "";
+  }
 }
 
-// payment_date is a plain date (user-entered); paid_at is a full timestamp
-// (server now()) — this fallback must trim it to date-only, same "recorded
-// vs actual" convention as SpecialChargeRow.charge_date falling back to
-// created_at.slice(0, 10) in FinanceTab.
-function paymentDateOf(p: StatementPayment): string {
-  return p.payment_date ?? (p.paid_at ? p.paid_at.slice(0, 10) : "");
+// A row's ink, applied to the cell CONTENT. Says what KIND of event the row
+// is, which is the one thing colour carries on this screen.
+function rowInk(kind: StatementRow["kind"]): string {
+  switch (kind) {
+    case "topup":
+    case "payment":
+      return `${CREDIT_INK_CLS} font-medium`;
+    case "settlement":
+      return SETTLEMENT_INK_CLS;
+    case "return":
+      return RETURN_INK_CLS;
+    case "trip":
+    case "charge":
+      return "muted";
+  }
 }
 
 export default function StatementModal({
@@ -165,7 +189,6 @@ export default function StatementModal({
   charges,
   returns,
   projectWaterType,
-  projectInitials,
   projectName,
   tripMetaById,
   payments,
@@ -187,112 +210,222 @@ export default function StatementModal({
   // water_type, used when an entry/trip's own water_type is null (pre-
   // water_type-field data). Never mutates any stored record.
   projectWaterType?: WaterType | null;
-  // Project's stable trip-ref prefix (projects.initials, 0033) — used only
-  // to render a sample/demo ref under the customer name, never a real trip.
-  projectInitials?: string | null;
-  // Statement rebuild (Batch 3) — project name shown next to the payment
-  // method/mode in the header.
+  // `projectInitials` REMOVED with the sample-ref line it fed. It was a
+  // demo/format string, never a real trip's number; the header carries the
+  // statement PERIOD in that slot now.
+  // Project name shown next to the payment method/mode in the header.
   projectName?: string | null;
-  // Statement rebuild (Batch 3) — truck plate/capacity + paid-lock per trip.
+  // Truck plate/capacity + paid-lock per trip.
   tripMetaById: Map<string, TripMeta>;
-  // Paid invoices for this customer. Postpaid renders them as Payment rows;
-  // prepaid renders them as record-only "Invoice payable" rows (prepaid's
-  // real credits are top-ups, already in `topups` — a paid prepaid invoice is
-  // NOT a credit and NOT a debit, see the settlement note in lib/prepaid.ts).
+  // Paid invoices for this customer (see StatementPayment above).
   payments: StatementPayment[];
 }) {
   const { lang } = useApp();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Period picker — filters TABLE ROWS only. Footer figures stay global (see
-  // file header). Defaults to all-time (both empty).
+
+  // Period picker — filters TABLE ROWS only (the view-model applies it).
+  // Defaults to all-time (both empty).
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const hasPeriodFilter = dateFrom !== "" || dateTo !== "";
-  function inPeriod(d: string) {
-    return (dateFrom === "" || d >= dateFrom) && (dateTo === "" || d <= dateTo);
-  }
+
+  const [downloading, setDownloading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  // CTRL/CMD+P IS INTERCEPTED, AND AFTER THE REPOINT IT HAS TO BE.
+  //
+  // app/globals.css opens its print block with `body * { visibility: hidden }`
+  // and then whitelists specific subtrees. The statement used to be on that
+  // whitelist; it deliberately is not any more, because printing the popup's
+  // React DOM is exactly the drift this change removes. So a raw browser print
+  // with this modal open would otherwise resolve to a blank sheet — the worst
+  // failure available, because it looks like the printer's fault.
+  //
+  // Routing the shortcut to handlePrint() also makes the keyboard and the
+  // button emit the SAME document, which is what anyone pressing Ctrl+P in
+  // front of a statement means. Capture phase so nothing swallows it first.
+  // Same treatment, same reasons, as InvoiceDetailModal.
+  //
+  // Declared ABOVE the `!open` early return because it is a hook, and BELOW the
+  // period state because its dep array reads it.
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      handlePrint();
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mounted, mode, dateFrom, dateTo, lang]);
 
   if (!open || !mounted) return null;
 
+  // THE SAME CALL THE DOCUMENT MAKES. Everything below renders off `vm`.
+  const vm = buildStatementVm({
+    customerName,
+    projectName: projectName ?? null,
+    mode,
+    topups,
+    trips,
+    charges,
+    returns: returns ?? [],
+    payments,
+    tripMetaById,
+    projectWaterType: projectWaterType ?? null,
+    dateFrom,
+    dateTo,
+  });
+
+  const hasPeriodFilter = vm.periodFrom !== null || vm.periodTo !== null;
+
+  // PRINT AND DOWNLOAD ARE NOW THE SAME DOCUMENT.
+  //
+  // This used to add a `printing-statement` body class and call
+  // window.print(), which printed THIS POPUP: screen layout, screen number
+  // formats (whole riyals, not the document's halalas), and every control
+  // suppressed by hand with `no-print` classes. It agreed with the screen by
+  // BEING the screen — and disagreed with the downloadable PDF, which is the
+  // one thing the customer actually receives.
+  //
+  // Now it renders `buildStatementHtml(vm)` — literally the same function, on
+  // literally the same `vm` object this render is drawing from — and prints
+  // that in a hidden iframe. Print/download agreement is no longer a property
+  // of two stylesheets kept in sync; it is one function called twice. The
+  // invoice was repointed the same way and for the same reason (see
+  // InvoiceDetailModal.handlePrint).
+  //
+  // NO SERVER ROUND-TRIP, unlike the invoice's. buildStatementHtml is pure
+  // string building with no fs and no `process` (its own header says so), and
+  // this component already holds the vm — so print works with the PDF provider
+  // down, or offline, and cannot fail separately from what is on screen.
   function handlePrint() {
-    document.body.classList.add("printing-statement");
-    const cleanup = () => {
-      document.body.classList.remove("printing-statement");
-      window.removeEventListener("afterprint", cleanup);
-    };
-    window.addEventListener("afterprint", cleanup);
-    window.print();
+    printHtml(buildStatementHtml(vm));
   }
 
-  const sampleRef = sampleTripRef(projectInitials);
+  async function handleDownload() {
+    if (downloading) return;
+    setDownloading(true);
+    setPdfError(null);
+    // The action re-runs buildStatementVm on exactly these inputs — the same
+    // object this render used, INCLUDING the period filter, so the file is a
+    // snapshot of the statement on screen rather than a second reading of the
+    // ledger taken a moment later. The Map travels as an array; see
+    // StatementPdfInput.
+    const r = await getStatementPdf({
+      customerName,
+      projectName: projectName ?? null,
+      mode,
+      topups,
+      trips,
+      charges,
+      returns: returns ?? [],
+      payments,
+      tripMeta: Array.from(tripMetaById, ([tripId, m]) => ({ tripId, ...m })),
+      projectWaterType: projectWaterType ?? null,
+      dateFrom,
+      dateTo,
+    });
+    setDownloading(false);
+    if (r.error || !r.data) {
+      setPdfError(r.error ?? t("trips.invoice.errPdf", lang));
+      return;
+    }
+    // Server Actions can't stream a Blob directly — bytes arrive as base64;
+    // decode to a Blob here and trigger a normal browser download via a
+    // throwaway <a download> (no navigation, works across browsers). Same
+    // pattern as InvoiceDetailModal's handleDownloadPdf.
+    const bytes = Uint8Array.from(atob(r.data.base64), (c) => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = r.data.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
 
-  // Paid invoices, BOTH modes (the old `mode === "postpaid" ? payments : []`
-  // gate is lifted — prepaid needs them for its record-only settlement rows).
-  // A row with neither payment_date nor paid_at has no place on a dated
-  // ledger, so it is dropped rather than sorted to the top under "".
-  const allPayments = payments.filter((p) => paymentDateOf(p) !== "");
+  // -------------------------------------------------------------------------
+  // Cell rendering — LOOK ONLY
+  // -------------------------------------------------------------------------
+  // Takes the cell the view-model decided on and dresses it. It never chooses
+  // a word, a sign or a figure; the only judgement here is which ink and
+  // whether the Ref column links.
+  function renderCell(cell: StatementCell, row: StatementRow, colKey: StatementColumnKey) {
+    switch (cell.kind) {
+      case "empty":
+        return <span className="muted">—</span>;
+      case "date":
+        return cell.value;
+      case "text":
+        return cell.value;
+      case "bi":
+        // Type and Note are the ink-carrying text cells; everything else
+        // renders in the table's own colour.
+        return colKey === "type" || colKey === "note" ? (
+          <span className={rowInk(row.kind)}>{cell.value[lang]}</span>
+        ) : (
+          cell.value[lang]
+        );
+      case "tripRef":
+        return <TripRefLink tripId={cell.tripId} label={cell.value} />;
+      case "num": {
+        const sign = cell.sign === "plus" ? "+" : cell.sign === "minus" ? "−" : "";
+        const figure = `${sign}${formatSar(cell.value)}`;
 
-  // ---- Prepaid ----------------------------------------------------------
-  // Record-only rows: a paid prepaid invoice is TRACED, never deducted — the
-  // trips and charges it covers already consumed balance at delivery.
-  const settlements: SettlementStatementInput[] =
-    mode === "prepaid"
-      ? allPayments.map((p) => ({
-          id: p.id,
-          date: paymentDateOf(p),
-          invoice_number: p.invoice_number,
-          amount: p.grand_total_sar,
-        }))
-      : [];
-  // Full (unfiltered) sequence — running balance must reflect true
-  // cumulative history even when the visible rows are period-filtered.
-  const allEntries =
-    mode === "prepaid" ? buildStatementItems(topups, trips, charges, undefined, settlements, returns ?? []) : [];
-  const entries = allEntries.filter((e) => inPeriod(e.date));
-  const balance = allEntries.length > 0 ? allEntries[allEntries.length - 1].runningBalance : 0;
-  // Pre-VAT/VAT breakdown for trip+charge debit rows — a second, already-
-  // exported call to the SAME pure function buildStatementItems() calls
-  // internally. No new math; consumingItems() already carries both the
-  // pre-VAT `amount` and VAT-inclusive `consumedAmount`.
-  const consumedById =
-    mode === "prepaid"
-      ? new Map(consumingItems(trips, charges).map((e) => [`${e.kind}:${e.id}`, e]))
-      : new Map<string, ConsumedItem>();
+        // The running balance is the only figure whose ink tracks its VALUE
+        // rather than its row kind — a negative balance is the thing a manager
+        // scans a statement for.
+        if (colKey === "runningBalance") {
+          return <span className={cell.negative ? "text-rose-600 dark:text-rose-400" : ""}>{figure}</span>;
+        }
 
-  // ---- Postpaid -----------------------------------------------------------
-  const allPostpaidTrips = mode === "postpaid" ? consumingItems(trips).filter((e) => e.kind === "trip") : [];
-  const postpaidTrips = allPostpaidTrips.filter((t) => inPeriod(t.trip_date));
-  // "Total payable" — VAT-inclusive total of every postpaid trip NOT yet on
-  // a paid invoice (tripMetaById's invoiceLocked, same flag Settled Balance
-  // already uses). Global — period-independent, same as prepaid's balance.
-  const totalPayable = round2(
-    allPostpaidTrips
-      .filter((t) => !tripMetaById.get(t.id)?.invoiceLocked)
-      .reduce((s, t) => s + t.consumedAmount, 0),
-  );
-  const paymentRows = mode === "postpaid" ? allPayments.filter((p) => inPeriod(paymentDateOf(p))) : [];
-  // Merge trip + payment rows chronologically for display (payments render
-  // like any other statement row, oldest first, same as top-ups above).
-  const postpaidRows: (
-    | { kind: "trip"; date: string; row: (typeof postpaidTrips)[number] }
-    | { kind: "payment"; date: string; row: StatementPayment }
-  )[] = [
-    ...postpaidTrips.map((t) => ({ kind: "trip" as const, date: t.trip_date, row: t })),
-    ...paymentRows.map((p) => ({ kind: "payment" as const, date: paymentDateOf(p), row: p })),
-  ].sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1));
+        // A prepaid debit stacks its VAT breakdown underneath — same treatment
+        // as InvoiceDetailModal's PrepaidTripTable/LineTable footers. BOTH
+        // figures are formatNum() over numbers the view-model already
+        // computed; the connector is the dictionary's, not this file's.
+        if (cell.split) {
+          return (
+            <span className="flex flex-col items-end">
+              <span className="tabular-nums font-medium">{figure}</span>
+              <span className="tabular-nums text-xs text-black/35 dark:text-white/35">
+                {fill(vm.vatSplitTemplate[lang], {
+                  net: formatNum(cell.split.net),
+                  vat: formatNum(cell.split.vat),
+                })}
+              </span>
+            </span>
+          );
+        }
 
-  const title = t(mode === "prepaid" ? "trips.statement.titlePrepaid" : "trips.statement.titlePostpaid", lang);
-  // Was an inline ternary on the same two literals PAYMENT_MODE_LABELS already
-  // holds. Routed through the enum helper so the mode names read from one place.
-  const modeLabel = paymentModeLabel(mode, lang);
+        // Postpaid's Amount/VAT/Total on a trip row carry no ink — they are
+        // the plain itemisation. Every other figure is coloured by its row.
+        if (row.kind === "trip" || row.kind === "charge") return figure;
+
+        // A TOP-UP'S FIGURE IS COLOURED BUT NOT BOLD, unlike its Type label
+        // and unlike every other coloured figure on the table. Deliberate, and
+        // preserved from before this render was rewritten: the debit beside it
+        // is plain weight, so bolding the credit would make a statement read as
+        // if the money coming in mattered more than the work going out.
+        const ink = row.kind === "topup" ? CREDIT_INK_CLS : rowInk(row.kind);
+        return <span className={ink}>{figure}</span>;
+      }
+    }
+  }
 
   return createPortal(
-    <div className="statement-print-portal fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={onClose}>
       <ScrollLock />
       <div
-        id="statement-print"
+        // `id="statement-print"` and `.statement-print-portal` REMOVED with the
+        // @media print block that was their only reader. Nothing prints this
+        // subtree any more, so an id promising otherwise is a trap.
         // 1080px is this app's size:lg popup width (InventoryClient.tsx:130,
         // PurchaseOrders.tsx, the maintenance and reports modals). Widened from
         // max-w-3xl because BOTH statement tables are EIGHT columns — the widest
@@ -303,14 +436,21 @@ export default function StatementModal({
       >
         <div className="flex items-start justify-between mb-1 gap-4">
           <div>
-            <h2 className="text-lg font-semibold tracking-wide">{title}</h2>
+            <h2 className="text-lg font-semibold tracking-wide">{vm.title[lang]}</h2>
             <p className="text-sm mt-0.5">
-              <span className="font-medium">{customerName}</span>
-              {projectName && <span className="muted"> · {projectName}</span>}
-              <span className="muted"> · {modeLabel}</span>
+              <span className="font-medium">{vm.customerName}</span>
+              {vm.projectName && <span className="muted"> · {vm.projectName}</span>}
+              <span className="muted"> · {vm.modeLabel[lang]}</span>
             </p>
           </div>
           <div className="no-print flex items-center gap-3 shrink-0">
+            {/* Two different documents, so two buttons: Print hands THIS popup
+                to the browser, Download fetches the A4 file. They fail
+                separately and say so separately. */}
+            <Btn variant="outline" onClick={handleDownload} disabled={downloading}>
+              <Download className="h-4 w-4" />{" "}
+              {downloading ? t("trips.invoice.generating", lang) : t("trips.statement.downloadPdf", lang)}
+            </Btn>
             <Btn variant="outline" onClick={handlePrint}>
               <Printer className="h-4 w-4" /> {t("common.print", lang)}
             </Btn>
@@ -319,10 +459,16 @@ export default function StatementModal({
             </button>
           </div>
         </div>
-        {sampleRef && <p className="text-sm muted mb-1">{fill(t("trips.statement.sampleRef", lang), { ref: sampleRef })}</p>}
-        <p className="text-sm muted mb-4">
-          {t(mode === "prepaid" ? "trips.statement.subPrepaid" : "trips.statement.subPostpaid", lang)}
-        </p>
+        {/* The sample-ref line stood here and is GONE. It rendered "Ref. K1-0001"
+            over sampleTripRef() — a synthetic EXAMPLE of the project's reference
+            FORMAT, not any trip in this statement — directly under the customer
+            name, where it read like a fact about this customer's account.
+            The screen's period is the picker below: those two date inputs carry
+            the same `from`/`to` labels the document's header line uses and hold
+            the same two values, so the document adds a rendering of the period,
+            not a second source of it. */}
+        <p className="text-sm muted mb-4">{vm.subtitle[lang]}</p>
+        {pdfError && <p className="no-print text-sm text-rose-600 dark:text-rose-400 mb-4">{pdfError}</p>}
 
         {/* Period picker — table rows only, footer figures stay global. */}
         <div className="no-print flex items-end gap-2 flex-wrap mb-4">
@@ -342,225 +488,61 @@ export default function StatementModal({
                 setDateTo("");
               }}
             >
-              {t("trips.statement.allTime", lang)}
+              {vm.allTimeLabel[lang]}
             </Btn>
           )}
         </div>
 
-        {mode === "prepaid" ? (
-          entries.length === 0 ? (
-            <div className="card p-10 text-center muted text-sm">
-              {t(hasPeriodFilter ? "trips.statement.emptyPeriod" : "trips.statement.emptyPrepaid", lang)}
-            </div>
-          ) : (
-            <div className="card p-0 overflow-hidden">
-              <Table>
-                <thead style={{ background: "rgba(0,0,0,0.02)" }}>
-                  <tr>
-                    <TH>{t("common.date", lang)}</TH>
-                    <TH>{t("common.type", lang)}</TH>
-                    <TH>{t("common.truck", lang)}</TH>
-                    <TH>{t("common.capacity", lang)}</TH>
-                    <TH>{t("trips.statement.colRef", lang)}</TH>
-                    <TH>{t("common.note", lang)}</TH>
-                    <TH>{t("common.amount", lang)}</TH>
-                    <TH>{t("trips.statement.colRunningBalance", lang)}</TH>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((e) => {
-                    const truck = e.kind === "trip" ? truckCell(tripMetaById.get(e.id)) : { plate: null, capacity: null };
-                    const consumed =
-                      e.kind === "trip" || e.kind === "charge" ? consumedById.get(`${e.kind}:${e.id}`) : undefined;
-                    return (
-                      <tr
-                        key={`${e.kind}-${e.id}`}
-                        // DISPLAY COLOUR ONLY — a settlement row is tinted so
-                        // management can pick the paid invoices out of a long
-                        // statement at a glance. It changes no figure: the row
-                        // still RECORDS rather than deducts, and the running
-                        // balance still holds flat across it (lib/prepaid.ts).
-                        // The tint is on the ROW while a top-up's green is on
-                        // its TEXT, deliberately — both are green-family, but
-                        // a top-up is money arriving and a settlement is not,
-                        // so they must not render identically.
-                        className={e.kind === "settlement" ? SETTLEMENT_ROW_CLS : ""}
-                      >
-                        <TD className="tabular-nums">{e.date}</TD>
-                        <TD>
-                          {e.kind === "topup" ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">{t("trips.finance.addBalance", lang)}</span>
-                          ) : e.kind === "settlement" ? (
-                            <span className={SETTLEMENT_INK_CLS}>{t("trips.statement.typeSettlement", lang)}</span>
-                          ) : e.kind === "return" ? (
-                            // Says WHY the balance dropped. Without this label
-                            // the row would fall through to the water-type
-                            // branch below and a refund would be presented as
-                            // a delivery.
-                            <span className={RETURN_INK_CLS}>{t("trips.statement.typeReturn", lang)}</span>
-                          ) : e.kind === "charge" ? (
-                            <span className="muted">{t("trips.statement.typeCharge", lang)}</span>
-                          ) : (
-                            <span className="muted">
-                              {(e.water_type ?? projectWaterType) ? waterTypeLabel((e.water_type ?? projectWaterType) as WaterType, lang) : "—"}
-                            </span>
-                          )}
-                        </TD>
-                        <TD className="muted">{truck.plate ?? "—"}</TD>
-                        <TD className="muted">{truck.capacity != null ? `${truck.capacity} m³` : "—"}</TD>
-                        <TD>
-                          {e.kind === "trip" ? (
-                            <TripRefLink tripId={e.id} label={formatTripRef(e.ref)} />
-                          ) : e.kind === "topup" || e.kind === "settlement" ? (
-                            e.reference || <span className="muted">—</span>
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </TD>
-                        <TD className="max-w-[10rem] truncate">
-                          {e.kind === "topup" ? (
-                            <span className="muted">—</span>
-                          ) : e.kind === "settlement" ? (
-                            <span className={SETTLEMENT_INK_CLS}>{t("trips.statement.noteBalance", lang)}</span>
-                          ) : (
-                            e.note || <span className="muted">—</span>
-                          )}
-                        </TD>
-                        <TD className="tabular-nums">
-                          {e.kind === "topup" ? (
-                            <span className="text-emerald-600 dark:text-emerald-400">+{formatSar(e.amount)}</span>
-                          ) : e.kind === "settlement" ? (
-                            // Neither a credit nor a debit — no sign, no VAT
-                            // split. The document's own total, for the record.
-                            <span className={SETTLEMENT_INK_CLS}>{formatSar(e.amount)}</span>
-                          ) : e.kind === "return" ? (
-                            // A real debit — signed, and the running balance
-                            // to the right moves with it. NO VAT SPLIT: a
-                            // refund of credit is a cash movement, not a
-                            // taxable supply (lib/prepaid.ts's returns note),
-                            // so the "+ VAT" sub-line the fallback branch
-                            // renders would be inventing a tax line here.
-                            <span className={RETURN_INK_CLS}>−{formatSar(Math.abs(e.amount))}</span>
-                          ) : (
-                            <span className="flex flex-col items-end">
-                              <span className="tabular-nums font-medium">−{formatSar(Math.abs(e.amount))}</span>
-                              {/* BOTH figures are the SAME two expressions they
-                                  always were — formatNum() output, passed
-                                  through `fill` as tokens. No re-round, no
-                                  re-sign, no new subtraction. */}
-                              <span className="tabular-nums text-xs text-black/35 dark:text-white/35">
-                                {fill(t("trips.statement.vatSplit", lang), {
-                                  net: formatNum(consumed?.amount ?? 0),
-                                  vat: formatNum(round2((consumed?.consumedAmount ?? 0) - (consumed?.amount ?? 0))),
-                                })}
-                              </span>
-                            </span>
-                          )}
-                        </TD>
-                        <TD className="tabular-nums font-medium">
-                          <span className={e.runningBalance < 0 ? "text-rose-600 dark:text-rose-400" : ""}>
-                            {formatSar(e.runningBalance)}
-                          </span>
-                        </TD>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </Table>
-            </div>
-          )
-        ) : postpaidRows.length === 0 ? (
-          <div className="card p-10 text-center muted text-sm">
-            {t(hasPeriodFilter ? "trips.statement.emptyPeriod" : "trips.statement.emptyPostpaid", lang)}
-          </div>
+        {vm.rows.length === 0 ? (
+          <div className="card p-10 text-center muted text-sm">{vm.emptyLabel?.[lang]}</div>
         ) : (
           <div className="card p-0 overflow-hidden">
             <Table>
               <thead style={{ background: "rgba(0,0,0,0.02)" }}>
                 <tr>
-                  <TH>{t("common.date", lang)}</TH>
-                  <TH>{t("trips.statement.colRef", lang)}</TH>
-                  <TH>{t("common.type", lang)}</TH>
-                  <TH>{t("common.truck", lang)}</TH>
-                  <TH>{t("common.capacity", lang)}</TH>
-                  <TH>{t("common.amount", lang)}</TH>
-                  <TH>{t("trips.statement.colVat", lang)}</TH>
-                  <TH>{t("common.total", lang)}</TH>
+                  {vm.columns.map((c) => (
+                    <TH key={c.key}>{c.label[lang]}</TH>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {postpaidRows.map((r) =>
-                  r.kind === "trip" ? (
-                    <tr key={`trip-${r.row.id}`}>
-                      <TD className="tabular-nums">{r.row.trip_date}</TD>
-                      <TD>
-                        <TripRefLink tripId={r.row.id} label={formatTripRef(r.row.ref)} />
+                {vm.rows.map((row) => (
+                  <tr
+                    key={row.key}
+                    // DISPLAY COLOUR ONLY — a settlement row is tinted so
+                    // management can pick the paid invoices out of a long
+                    // statement at a glance. It changes no figure: the row
+                    // still RECORDS rather than deducts, and the running
+                    // balance still holds flat across it (lib/prepaid.ts).
+                    // The tint is on the ROW while a top-up's green is on
+                    // its TEXT, deliberately — both are green-family, but
+                    // a top-up is money arriving and a settlement is not,
+                    // so they must not render identically.
+                    className={row.kind === "settlement" ? SETTLEMENT_ROW_CLS : ""}
+                  >
+                    {row.cells.map((cell, i) => (
+                      <TD key={vm.columns[i].key} className={tdCls(vm.columns[i].key)}>
+                        {renderCell(cell, row, vm.columns[i].key)}
                       </TD>
-                      <TD className="muted">
-                        {(r.row.water_type ?? projectWaterType) ? waterTypeLabel((r.row.water_type ?? projectWaterType) as WaterType, lang) : "—"}
-                      </TD>
-                      <TD className="muted">{tripMetaById.get(r.row.id)?.truckPlate ?? "—"}</TD>
-                      <TD className="muted">
-                        {tripMetaById.get(r.row.id)?.truckCapacityM3 != null ? `${tripMetaById.get(r.row.id)!.truckCapacityM3} m³` : "—"}
-                      </TD>
-                      <TD className="tabular-nums">{formatSar(r.row.amount)}</TD>
-                      <TD className="tabular-nums muted">{formatSar(round2(r.row.consumedAmount - r.row.amount))}</TD>
-                      <TD className="tabular-nums font-medium">{formatSar(r.row.consumedAmount)}</TD>
-                    </tr>
-                  ) : (
-                    <tr key={`payment-${r.row.id}`}>
-                      <TD className="tabular-nums">{paymentDateOf(r.row) || "—"}</TD>
-                      {/* The REFERENCE column. bank_transfer is the only method
-                          that carries one (0039 requires it), so it shows the
-                          reference; every other method names itself from the
-                          shared label map instead. Reading the branch the other
-                          way round — special-casing 'cash' and letting
-                          everything else fall through to the reference — is what
-                          made 0134's 'balance' render as a bare em dash: it has
-                          no reference either, and never will. */}
-                      <TD>
-                        {r.row.payment_method === "bank_transfer" ? (
-                          r.row.payment_reference || <span className="muted">—</span>
-                        ) : r.row.payment_method ? (
-                          paymentMethodLabel(r.row.payment_method, lang)
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </TD>
-                      <TD>
-                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">{t("trips.statement.typePayment", lang)}</span>
-                      </TD>
-                      <TD className="muted">—</TD>
-                      <TD className="muted">—</TD>
-                      <TD className="muted">—</TD>
-                      <TD className="muted">—</TD>
-                      <TD className="tabular-nums font-medium text-emerald-600 dark:text-emerald-400">
-                        +{formatSar(r.row.grand_total_sar)}
-                      </TD>
-                    </tr>
-                  ),
-                )}
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </Table>
           </div>
         )}
 
         <div className="flex items-center justify-between pt-4 mt-4 border-t border-app">
-          {mode === "prepaid" ? (
-            <div className="text-sm">
-              <span className="muted">{t("trips.statement.footRunningBalance", lang)} </span>
-              <span className={"font-semibold tabular-nums " + (balance < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
-                {formatSar(balance)}
-              </span>
-            </div>
-          ) : (
-            <div className="text-sm">
-              <span className="muted">{t("trips.statement.footTotalPayable", lang)} </span>
-              <span className={"font-semibold tabular-nums " + (totalPayable > 0 ? "text-rose-600 dark:text-rose-400" : "")}>
-                {formatSar(totalPayable)}
-              </span>
-            </div>
-          )}
+          <div className="text-sm">
+            <span className="muted">{vm.headline.label[lang]} </span>
+            <span
+              className={
+                "font-semibold tabular-nums " + (vm.headline.negative ? "text-rose-600 dark:text-rose-400" : "")
+              }
+            >
+              {formatSar(vm.headline.value)}
+            </span>
+          </div>
           <Btn variant="outline" onClick={onClose} className="no-print">
             {t("common.close", lang)}
           </Btn>

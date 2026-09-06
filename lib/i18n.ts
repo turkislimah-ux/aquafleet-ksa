@@ -8555,9 +8555,20 @@ export const dict = {
     statement: {
       titlePrepaid: { en: "PREPAID STATEMENT", ar: "كشف حساب الدفع المقدم" },
       titlePostpaid: { en: "POSTPAID STATEMENT", ar: "كشف حساب الدفع الآجل" },
-      // `{ref}` is sampleTripRef()'s output — a project's own reference format,
-      // Latin in both languages.
-      sampleRef: { en: "Ref. {ref}", ar: "المرجع {ref}" },
+      // `sampleRef` REMOVED here. It read "Ref. {ref}" over sampleTripRef()'s
+      // output — a synthetic EXAMPLE of the project's reference format, not any
+      // real trip's number — and sat in the statement header where it read like
+      // a field about this customer. Turki's ruling: the header carries the
+      // statement PERIOD instead. The Ref COLUMN is untouched; only the header
+      // line is gone. lib/trip-ref.ts still exports sampleTripRef(), now with
+      // no caller.
+      //
+      // The header's period field. Composed from `periodHeading` over the
+      // existing `from`/`to` below, so the two dates keep the words the period
+      // picker already uses rather than gaining a second vocabulary. Arabic
+      // reuses `كشف الحساب` from titlePrepaid/titlePostpaid and `فترة`, which
+      // the dictionary already carries throughout; no new terminology coined.
+      periodHeading: { en: "Statement Period", ar: "فترة كشف الحساب" },
       subPrepaid: {
         en: "Add Balance credits and delivered-trip/charge debits (VAT-inclusive), oldest first.",
         ar: "أرصدة مضافة وخصوم الرحلات المسلَّمة والرسوم (شاملة الضريبة)، الأقدم أولاً.",
@@ -8620,6 +8631,19 @@ export const dict = {
       // figure is a JSX literal at the call site, not part of the value.
       footRunningBalance: { en: "Running balance:", ar: "الرصيد الجاري:" },
       footTotalPayable: { en: "Total payable:", ar: "الإجمالي المستحق:" },
+      // The download button. Says "statement", not "PDF", because it sits
+      // beside a Print button in the same toolbar and the two produce
+      // different things — Print hands the popup to the browser, this fetches
+      // a rendered A4 document. The Arabic reuses `كشف الحساب` from
+      // titlePrepaid/titlePostpaid and `تنزيل` from `trips.invoice.downloadPdf`;
+      // no new terminology is coined here.
+      downloadPdf: { en: "Download statement", ar: "تنزيل كشف الحساب" },
+      // The in-flight label and the failure sentence are BORROWED, not
+      // duplicated: `trips.invoice.generating` ("Generating…") and
+      // `trips.invoice.errPdf` ("Could not generate the PDF.") already say
+      // exactly this about exactly this provider call, and a second pair of
+      // strings could only drift from them. Same cross-group reuse as
+      // `common.print` above.
     },
 
     // WaterStationsModal — the only CRUD surface over water_stations.

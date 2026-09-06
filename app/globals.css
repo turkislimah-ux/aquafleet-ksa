@@ -609,62 +609,37 @@ html[dir="rtl"] { --dock-dir: -1; }
      tables may still break across pages, but never mid-row. */
   #breakdown-print table tr { break-inside: avoid; }
 
-  /* THE INVOICE'S BLOCK IS GONE, AND ITS ABSENCE IS THE FEATURE.
-     It used to live here: `#invoice-print` + `body.printing-invoice`, the same
-     portal/paginate pattern as the breakdown above, hiding the whole page and
-     printing InvoiceDetailModal's live React DOM. The invoice now prints as its
-     own document — lib/invoicePrintTemplate.ts, rendered server-side from the
-     shared view-model into a hidden same-origin iframe, which the browser
-     prints on its own. Nothing in this stylesheet reaches inside that iframe,
-     which is the point: the printed invoice no longer inherits the app's
-     screen styling, and its layout can no longer be broken from here.
-     The statement below still uses the old pattern; it inherits the plain
-     document style next. */
+  /* THE INVOICE'S AND THE STATEMENT'S BLOCKS ARE BOTH GONE, AND THEIR ABSENCE
+     IS THE FEATURE.
+     They used to live here: `#invoice-print` + `body.printing-invoice`, then
+     `#statement-print` + `body.printing-statement` + `.statement-print-portal`,
+     both the same portal/paginate pattern as the breakdown above — hide the
+     whole page, un-hide one modal subtree, print the live React DOM. Each now
+     prints as its own DOCUMENT into a hidden same-origin iframe the browser
+     prints on its own: the invoice from lib/invoicePrintTemplate.ts, the
+     statement from lib/statementPdfTemplate.ts, both off the SAME shared
+     view-model their download path uses. Nothing in this stylesheet reaches
+     inside those iframes, which is the point — neither printed document
+     inherits the app's screen styling, and neither layout can be broken from
+     here.
 
-  /* Statement (Finance polish batch A) — same portal/paginate pattern as the
-     breakdown above, its own independent id/class/marker set. (It used to say
-     "invoice/breakdown"; the invoice left this stylesheet, see above.) */
-  #statement-print, #statement-print * { visibility: visible !important; }
-  body.printing-statement > *:not(.statement-print-portal) { display: none !important; }
+     Also gone with the statement's block: the two rules that stripped a
+     settlement row's green tint and ink at print time. They were only ever
+     needed because print re-used the SCREEN's markup, and the screen tints
+     settlement rows to make a long statement scannable. The document has no
+     tint to strip — it is B&W by construction.
 
-  .statement-print-portal,
-  .statement-print-portal > * {
-    position: static !important;
-    inset: auto !important;
-    max-width: none !important;
-    max-height: none !important;
-    overflow: visible !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    display: block !important;
-  }
-  #statement-print {
-    position: static !important;
-    margin: 0;
-    padding: 1rem;
-    max-height: none !important;
-    overflow: visible !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-  #statement-print table tr { break-inside: avoid; }
-
-  /* A settlement row's green is a SCREEN affordance for scanning a long
-     statement — on paper it reads as an annotation on a legal document, so
-     it comes off. #statement-print sets print-color-adjust:exact above, so
-     without these two rules the tint and the green ink WOULD reach the page.
-     Only colour is stripped: font-weight stays, and the Running Balance
-     cell keeps its rose because every other row keeps it too — the ask is
-     that the row print like its neighbours, not that it lose their
-     treatment. Downloading is Save-as-PDF through this same dialog, so
-     there is nothing separate to cover. */
-  #statement-print .statement-settlement-row { background-color: transparent !important; }
-  #statement-print .statement-settlement-ink { color: inherit !important; }
+     THE STATEMENT'S REMOVAL FROM THIS BLOCK IS WHY StatementModal INTERCEPTS
+     CTRL/CMD+P. This @media block opens with `body * { visibility: hidden }`
+     and un-hides by whitelist, so a subtree that leaves the whitelist without
+     an intercept prints a BLANK SHEET — a failure that reads like the
+     printer's fault. Do not delete a whitelist entry here without checking
+     what its owner does with the shortcut. */
 
   /* Purchase Order detail (Inventory Phase 4) — same portal/paginate
-     pattern as breakdown/statement above, its own independent
-     id/class/marker set. */
+     pattern as the breakdown above, its own independent id/class/marker set.
+     (This used to read "breakdown/statement"; the statement left this
+     stylesheet, see above. The breakdown is now the only remaining example.) */
   #po-print, #po-print * { visibility: visible !important; }
   body.printing-po > *:not(.po-print-portal) { display: none !important; }
 
