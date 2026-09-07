@@ -187,7 +187,7 @@ function reconciles(name: string, r: InvoiceAssembly) {
 // conventions are furthest apart at the smallest scale:
 //   grand:     ALL THREE trips, one document-level pass — subtotal 0.15,
 //              vat round2(0.0225) = 0.02, total 0.17
-//   amountDue: subtotal 0.10 (t2+t3), total = ledger.unpaid.subtotal 0.12
+//   amountDue: subtotal 0.10 (t2+t3), total = tripTotals.unpaid 0.12
 //              (per-item VAT-inclusive consumedAmount, 0.06+0.06), vat 0.02
 //   covered:   grand - amountDue = 0.05 / 0.00 / 0.05
 //
@@ -276,17 +276,19 @@ function reconciles(name: string, r: InvoiceAssembly) {
     vat: 75,
     total: 575,
   });
-  // The ledger is the Unpaid TRIPS table's own footer and must keep describing
-  // that table's rows — it stays at zero here even though Amount Due is 517.50.
-  // This inequality is the fix, not a bug: see lib/invoice.ts's AMOUNT DUE note.
-  check("stranded-charge: ledger.unpaid stays TRIPS-only (0), not widened", r.ledger?.unpaid.subtotal, 0);
+  // tripTotals.unpaid is the Unpaid TRIPS table's own foot and must keep
+  // describing that table's rows — it stays at zero here even though Amount Due
+  // is 517.50. This inequality is the fix, not a bug: see lib/invoice.ts's
+  // AMOUNT DUE note. (Was `ledger.unpaid.subtotal`, same VAT-inclusive figure;
+  // the ledger's balance/remaining terms are what died, not this sum.)
+  check("stranded-charge: tripTotals.unpaid stays TRIPS-only (0), not widened", r.tripTotals?.unpaid, 0);
   checkTrue(
-    "stranded-charge: amountDue.total is NO LONGER equal to ledger.unpaid.subtotal",
-    r.amountDue.total !== r.ledger?.unpaid.subtotal,
+    "stranded-charge: amountDue.total is NO LONGER equal to tripTotals.unpaid",
+    r.amountDue.total !== r.tripTotals?.unpaid,
   );
   check(
-    "stranded-charge: amountDue.total - ledger.unpaid.subtotal = the uncovered charge exactly",
-    Math.round((r.amountDue.total - (r.ledger?.unpaid.subtotal ?? 0)) * 100) / 100,
+    "stranded-charge: amountDue.total - tripTotals.unpaid = the uncovered charge exactly",
+    Math.round((r.amountDue.total - (r.tripTotals?.unpaid ?? 0)) * 100) / 100,
     517.5,
   );
   reconciles("stranded-charge", r);
@@ -296,7 +298,7 @@ function reconciles(name: string, r: InvoiceAssembly) {
 // Pool 600. Trip A 500 -> consumes 575, covered, 25 left. Trip B 200 ->
 // consumes 230, does not fit -> unpaid (and hitWall, so everything after is
 // unpaid too). Charge 100 -> consumes 115, uncovered.
-// amountDue = ledger.unpaid.subtotal (230, trips) + 115 (charge) = 345.
+// amountDue = tripTotals.unpaid (230, trips) + 115 (charge) = 345.
 // Pre-VAT subtotal = 200 + 100 = 300. VAT = 345 - 300 = 45.
 {
   const trips: ConsumingTrip[] = [
@@ -315,7 +317,7 @@ function reconciles(name: string, r: InvoiceAssembly) {
   });
   check("both halves: tA covered, tB unpaid", [r.coveredLines.map((l) => l.id), r.unpaidLines.map((l) => l.id)], [["tA"], ["tB"]]);
   check("both halves: charge uncovered", r.chargeLines.find((l) => l.id === "ch1")?.covered, false);
-  check("both halves: ledger.unpaid.subtotal is the TRIP half only (230)", r.ledger?.unpaid.subtotal, 230);
+  check("both halves: tripTotals.unpaid is the TRIP half only (230)", r.tripTotals?.unpaid, 230);
   check("both halves: amountDue = 230 (trips) + 115 (charge)", r.amountDue, { subtotal: 300, vat: 45, total: 345 });
   check("both halves: grand = tA 500 + tB 200 + charge 100, one VAT pass", r.grand, { subtotal: 800, vat: 120, total: 920 });
   check("both halves: covered = grand - amountDue = tA alone", r.covered, { subtotal: 500, vat: 75, total: 575 });

@@ -255,6 +255,13 @@ export const PLAIN_DOC_CSS = `
   tfoot tr.first td { border-top: 1.5px solid var(--ink); }
   tfoot .lbl { text-align: right; font-weight: 700; }
   tfoot .split { font-weight: 400; color: var(--ink-faint); font-size: 8.4px; margin-left: 6px; }
+  /* The balance row's unreadable arm, in the figure cell. Words, never a
+     number: italic and non-tabular, so it cannot be skimmed as an amount — a
+     faint numeral here would read as a balance of zero. Arabic above the
+     8.4px floor and above the Latin beside it. Mirrors the PDF. */
+  tfoot .na { font-style: italic; font-weight: 600; font-size: 8.4px; color: var(--ink-soft);
+              white-space: normal; line-height: 1.35; }
+  tfoot .na .ar { font-style: normal; font-weight: 400; font-size: 10px; color: var(--ink); }
   tfoot tr.grand td { border-top: 1px solid var(--rule); font-weight: 700; font-size: 11.5px; }
 
   /* ---------- pills ---------- */
@@ -301,6 +308,11 @@ export const PLAIN_DOC_CSS = `
                 margin-top: 1px; font-variant-numeric: tabular-nums; }
   .panel .amt .cur { font-size: 10.5px; font-weight: 400; color: var(--ink-faint); margin-left: 4px;
                      letter-spacing: .04em; }
+  /* A .panel .paidup block STOOD HERE — the balance, moved into the panel
+     under the hero amount. Reverted: the balance is read in the trips tables'
+     footers, where it always was, so the panel is the amount owed and nothing
+     else again. The footer's unreadable-arm styling is the tfoot .na rule
+     above. */
 
   /* ---------- transfer details ---------- */
   /* Full width, BELOW the settlement row. This is the last thing the reader

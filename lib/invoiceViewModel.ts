@@ -74,13 +74,20 @@ export type PdfLine = {
 
 export type PdfTotals = { subtotal: number; vat: number; total: number };
 
-// balance/remaining are NULLABLE, matching InvoiceDetailModal's
-// DisplayLedgerTotals rather than the engine's InvoiceLedgerTotals. A prepaid
-// invoice confirmed before migration 0036 has no frozen ledger columns on disk
-// and never will (frozen columns are not backfilled). The popup prints "—" for
-// those; the PDF used to coerce them to 0 and print a fabricated "0.00 SAR" on
-// a legal document. Null is the honest value and both surfaces now say so.
-export type PdfLedgerTotals = { subtotal: number; balance: number | null; remaining: number | null };
+/**
+ * The VAT-inclusive foot of the two prepaid trips tables. Mirrors the engine's
+ * `InvoiceTripTableTotals` (lib/invoice.ts) so a live assembly and a frozen row
+ * assign to it unchanged.
+ *
+ * A nullable `balance`/`remaining` pair stood here, mirroring a per-invoice
+ * chained running balance. Both are gone from every surface — see
+ * InvoiceTripTableTotals for why. With them went the whole pre-0036 "—" special
+ * case: the only figure left is a subtotal, and a subtotal is derivable on
+ * EVERY frozen row, including the legacy ones. Nothing on this document can
+ * print a dash where a number belongs any more, because nothing on it depends
+ * on a column that might not exist.
+ */
+export type PdfTripTotals = { covered: number; unpaid: number };
 
 export type PdfIdentity = {
   name: string | null; // legal_name (seller) or name (buyer)
@@ -114,7 +121,26 @@ export type PdfInvoiceData = {
   covered: PdfTotals;
   amountDue: PdfTotals;
   grand: PdfTotals;
-  ledger?: { covered: PdfLedgerTotals; unpaid: PdfLedgerTotals };
+  tripTotals?: PdfTripTotals;
+  /**
+   * PAID-UP BALANCE, in riyals — deposits − paid-invoice consumption − returns.
+   * `null` means "print nothing": postpaid always, since a postpaid customer has
+   * no pool to be paid up against.
+   *
+   * COMPUTED BY THE CALLER, ONCE, through lib/prepaid.ts's `paidUpBalance` —
+   * never here and never in a renderer. Which figure it is depends on the
+   * invoice's own status, and that decision belongs with the code that can read
+   * `paid_at` off the row (app/trips/invoiceActions.ts's `loadPaidUpBalance`):
+   *
+   *   draft / review / confirmed  →  CURRENT. Nothing about them is settled, so
+   *                                  the number moves as invoices get paid.
+   *   paid                        →  FROZEN at this invoice's `paid_at`.
+   *   void                        →  FROZEN at this invoice's `voided_at`.
+   *
+   * The VM's job is to LABEL it and hand it to every surface as one value, so
+   * the popup, the download and the printout cannot disagree.
+   */
+  paidUpBalanceSar: number | null;
   /**
    * RAW jsonb off the seller row — `company_settings.bank_accounts` for a
    * draft, `seller_snapshot.bank_accounts` for an issued invoice. `unknown`
@@ -165,14 +191,40 @@ export type VmChargeRow = {
 };
 
 /**
- * A trip table's footer. Two shapes, because the two payment modes genuinely
- * foot differently and always have:
- *  - "ledger"   (prepaid) — Subtotal / Running Balance / Remaining
+ * A trip table's footer. Two shapes, because the two payment modes foot
+ * differently and always have:
+ *  - "ledger"   (prepaid) — Subtotal / balance / Remaining, three stacked rows
  *  - "subtotal" (postpaid) — one Subtotal row with a faded net+VAT split
  * `preVat`/`vat` exist on both so the renderer never has to derive money.
+ *
+ * THE LAYOUT IS THE ORIGINAL ONE; THE BALANCE ROW'S VALUE IS NOT. The three
+ * rows used to be fed by a per-invoice CHAINED running balance — the covered
+ * table's Remaining seeded the unpaid table's balance — computed from frozen
+ * `*_ledger_balance_sar` columns. That mechanism produced a figure the
+ * statement, the Finance KPI and the over-balance banner all disagreed with,
+ * and it is NOT coming back. The rows are now fed by the PAID-UP BALANCE, the
+ * one shared expression (lib/prepaid.ts, reached through
+ * invoiceActions' `loadPaidUpBalance`), handed in as `PdfInvoiceData.
+ * paidUpBalanceSar`. Same three rows on the page, one honest number behind them.
+ *
+ * `balance` is a UNION, not a nullable number, for the same reason it is one
+ * upstream: "the read failed" and "the balance is zero" are different content
+ * and must not collapse into the same rendering. A renderer prints `amount` or
+ * prints `note`; it never decides what a missing figure looks like.
+ *
+ * `remaining` is `balance − subtotal` for THIS table, and null exactly when the
+ * balance is unreadable (nothing to subtract from). NOT chained across tables:
+ * both prepaid tables carry the same balance figure.
  */
 export type VmTableFoot =
-  | { style: "ledger"; preVat: number; vat: number; subtotal: number; balance: number | null; remaining: number | null }
+  | {
+      style: "ledger";
+      preVat: number;
+      vat: number;
+      subtotal: number;
+      balance: { amount: number } | { note: BiLabel };
+      remaining: number | null;
+    }
   | { style: "subtotal"; preVat: number; vat: number; total: number };
 
 export type VmTripSection = {
@@ -265,6 +317,12 @@ export type InvoiceVm = {
   totals: { rows: VmTotalRow[]; vat: number; total: number };
   /** null when postpaid (no such card on screen) or when the toggle hides it. */
   amountDue: { totals: PdfTotals } | null;
+  // A top-level `paidUp: { label, amount } | { label, note } | null` STOOD HERE
+  // and drove a balance block inside the settlement card, beneath the hero
+  // amount. That placement is reverted: the balance is read where it was always
+  // read, in the trips tables' footers, so the figure now travels inside
+  // `VmTableFoot`'s "ledger" arm instead of beside the totals. One balance
+  // decision either way — it just belongs to the table foot, not to the card.
   /** Labels the renderer needs that are not attached to a section. */
   labels: {
     taxInvoice: BiLabel;
@@ -293,7 +351,15 @@ export type InvoiceVm = {
     colAmount: BiLabel;
     colStatus: BiLabel;
     subtotal: BiLabel;
-    runningBalance: BiLabel;
+    /**
+     * The prepaid footer's balance row. `runningBalance` ("Running Balance")
+     * stood here and is deliberately NOT restored with the row it labelled: the
+     * row's position is the original one, but the figure in it is the PAID-UP
+     * BALANCE, not the chained per-invoice running balance that name described.
+     * Naming it "Running Balance" would put a wrong name on a legal document —
+     * the layout is restorable, the old caption is not.
+     */
+    paidUpBalance: BiLabel;
     remaining: BiLabel;
     /**
      * TEMPLATES, handed over UNFILLED (`{net}` / `{vat}` placeholders intact).
@@ -463,25 +529,41 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
 
   if (isPrepaid) {
     // --- PREPAID: Covered trips → Unpaid trips → Special charges ------------
-    // Ledger fallback matches the popup's exactly: no frozen ledger row (pre-
-    // 0036) means subtotal is still derivable from a real frozen column, but
-    // balance/remaining genuinely do not exist and stay null.
-    const coveredLedger = data.ledger?.covered ?? {
-      subtotal: data.covered.total,
-      balance: null,
-      remaining: null,
-    };
-    const unpaidLedger = data.ledger?.unpaid ?? {
-      subtotal: data.amountDue.total,
-      balance: null,
-      remaining: null,
-    };
+    // Fallback for a row frozen before migration 0036, which carries no trip-
+    // total columns and never will: both figures are still derivable from real
+    // frozen document totals. On such a row `amountDue.total` IS the unpaid
+    // trips total, because Amount Due was trips-only for the whole of that era
+    // (see InvoiceDetailModal's DisplayLedgerTotals note) — the fallback holds
+    // only for the legacy rows it fires on, it is not a general identity.
+    const coveredTripsTotal = data.tripTotals?.covered ?? data.covered.total;
+    const unpaidTripsTotal = data.tripTotals?.unpaid ?? data.amountDue.total;
 
-    // ledger.subtotal is VAT-INCLUSIVE, so it cannot be split on its own.
+    // These totals are VAT-INCLUSIVE, so they cannot be split on their own.
     // Derive pre-VAT from the same raw lines the engine summed, then back into
-    // VAT, so the two halves always foot to the subtotal shown beside them.
+    // VAT, so the two halves always foot to the total shown beside them.
     const coveredPreVat = round2(data.coveredLines.reduce((s, l) => s + l.amount_sar, 0));
     const unpaidPreVat = round2(data.unpaidLines.reduce((s, l) => s + l.amount_sar, 0));
+
+    // THE BALANCE ROW'S VALUE, decided ONCE for both tables. `paidUpBalanceSar`
+    // is already the right figure for this invoice's status — live on an
+    // unissued one, frozen at paid_at / voided_at once issued — because that
+    // choice was made upstream where the row's timestamps live. Nothing about
+    // the number is computed here.
+    //
+    // A prepaid invoice reaching this point with a null figure means the read
+    // FAILED (postpaid never enters this branch), so the slot carries the
+    // explicit note rather than a blank or a fabricated 0.
+    const balanceRow: { amount: number } | { note: BiLabel } =
+      data.paidUpBalanceSar != null
+        ? { amount: data.paidUpBalanceSar }
+        : { note: bi("trips.invoiceSheet.paidUpUnavailable") };
+    // Balance minus this table's own VAT-inclusive subtotal. Display arithmetic
+    // on two figures already decided — the same subtraction the pay-with-balance
+    // panel shows — and deliberately NOT chained: the unpaid table's balance is
+    // the same paid-up figure as the covered table's, never the covered table's
+    // remainder. Chaining is the deleted mechanism.
+    const remainingAfter = (subtotal: number) =>
+      data.paidUpBalanceSar == null ? null : round2(data.paidUpBalanceSar - subtotal);
 
     sections.push({
       kind: "trips",
@@ -491,10 +573,10 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
       foot: {
         style: "ledger",
         preVat: coveredPreVat,
-        vat: round2(coveredLedger.subtotal - coveredPreVat),
-        subtotal: coveredLedger.subtotal,
-        balance: coveredLedger.balance,
-        remaining: coveredLedger.remaining,
+        vat: round2(coveredTripsTotal - coveredPreVat),
+        subtotal: coveredTripsTotal,
+        balance: balanceRow,
+        remaining: remainingAfter(coveredTripsTotal),
       },
     });
 
@@ -512,10 +594,10 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
         foot: {
           style: "ledger",
           preVat: unpaidPreVat,
-          vat: round2(unpaidLedger.subtotal - unpaidPreVat),
-          subtotal: unpaidLedger.subtotal,
-          balance: unpaidLedger.balance,
-          remaining: unpaidLedger.remaining,
+          vat: round2(unpaidTripsTotal - unpaidPreVat),
+          subtotal: unpaidTripsTotal,
+          balance: balanceRow,
+          remaining: remainingAfter(unpaidTripsTotal),
         },
       });
     }
@@ -688,7 +770,7 @@ export function buildInvoiceViewModel(data: PdfInvoiceData): InvoiceVm {
       colAmount: bi("common.amount"),
       colStatus: bi("common.status"),
       subtotal: bi("trips.invoiceSheet.subtotal"),
-      runningBalance: bi("trips.invoiceSheet.runningBalance"),
+      paidUpBalance: bi("trips.invoiceSheet.paidUpBalance"),
       remaining: bi("trips.invoiceSheet.remaining"),
       // UNFILLED templates — see the type. `fillBi` substitutes downstream.
       vatSplit: bi("trips.invoiceSheet.vatSplit"),

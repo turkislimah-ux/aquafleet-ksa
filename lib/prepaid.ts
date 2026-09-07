@@ -109,19 +109,23 @@ export type BalanceReturnLite = {
 // returns differently — the same single-source-of-truth discipline
 // consumingItems() enforces for the consumption side.
 //
-// EXPORTED for exactly one outside caller: lib/invoice.ts recomputes the
-// starting pool locally (`startingPool`, to walk the covered ledger's entering
-// balance) instead of reading it off the split, so it has to net returns with
-// the SAME filter and the SAME rounding this uses. Importing the function is
-// how that stays true; restating the reduce over there is how it drifts.
+// EXPORTED still, though its one OUTSIDE caller is gone: lib/invoice.ts used to
+// recompute the starting pool locally (`startingPool`) to walk the per-invoice
+// covered-ledger entering balance, and that whole walk has been deleted — it was
+// the running-balance mechanism the invoice no longer shows. The export stays
+// because the harnesses assert against it directly.
 //
-// `asOfDate` IS NOW PASSED BY NOBODY, and it is kept rather than deleted on
-// purpose. Every one of the three call sites (derivedBalanceItems,
-// splitCoveredUnpaidItems, lib/invoice.ts's startingPool) sums returns over the
-// customer's whole life, because the pool is a lifetime net — so the parameter
-// is a dormant option, not a used one. It stays because "sum refunds as of a
-// date" is a coherent question a future REPORT could ask of this helper without
-// touching a pool; what must never come back is a POOL that asks it.
+// `asOfDate` HAS EXACTLY ONE CALLER, and it is not a pool: paidUpCore() below,
+// reached only through paidUpBalanceAsOf(). The three POOL call sites
+// (derivedBalanceItems, splitCoveredUnpaidItems and the invoice engine's split)
+// still sum returns over the customer's whole life, because a live pool is a
+// lifetime net — pass a date at any of those and the balance silently
+// contradicts every other one in the app.
+//
+// What makes that one use legitimate is that it gates ALL THREE terms —
+// deposits, consumption and returns — at the SAME instant, reconstructing a
+// historical figure rather than trimming one side of a live one. See its header.
+// The forbidden thing was never the date; it was the ASYMMETRY.
 export function returnedTotal(returns: BalanceReturnLite[], asOfDate?: string): number {
   return round2(
     returns
@@ -331,7 +335,7 @@ export function consumingItems(
     trip_date: e.trip_date,
     delivered_at: e.delivered_at,
     amount: e.amount,
-    consumedAmount: round2(e.amount * (1 + VAT_RATE)),
+    consumedAmount: inclVat(e.amount),
     ref: e.ref ?? null,
     water_type: e.water_type ?? null,
   }));
@@ -344,7 +348,7 @@ export function consumingItems(
     trip_date: c.charge_date,
     delivered_at: null,
     amount: round2(c.amount_sar),
-    consumedAmount: round2(c.amount_sar * (1 + VAT_RATE)),
+    consumedAmount: inclVat(c.amount_sar),
     label: c.label ?? null,
   }));
 
@@ -394,6 +398,146 @@ export function derivedBalanceItems(
   const debits = round2(consumingItems(trips, charges, asOfDate).reduce((s, e) => s + e.consumedAmount, 0));
   const returned = returnedTotal(returns);
   return round2(credits - debits - returned);
+}
+
+// ---------------------------------------------------------------------------
+// PAID-UP BALANCE — the invoice document's balance, and the Finance page's
+// column of the same name. THE ONE EXPRESSION; every surface reads its output.
+//
+// deposits − PAID-invoice consumption − returns.
+//
+// It is NOT the running balance and must never be confused with one. The
+// running balance (derivedBalanceItems / buildStatementItems, Model A) deducts
+// every DELIVERED trip and charge; this deducts only what a PAID invoice has
+// settled. The two therefore differ by exactly the Amount Payable column —
+// `paidUp = running − payable` — and a prepaid customer can legitimately show a
+// healthy paid-up balance while the pool behind it is overdrawn. That is why
+// the Finance row now prints BOTH, and why the invoice prints only this one:
+// a document is a statement of what has been settled, not of what is spendable.
+// The spendable figure lives on the STATEMENT (Plan A) and on the Finance row.
+//
+// WHY THIS GATES THE POOL WHEN NOTHING ELSE MAY.
+//
+// The house rule is "asOfDate scopes CONSUMPTION, never the POOL" — a live
+// balance whose credit side is cut at a date contradicts every other balance in
+// the app by the value of the top-ups after that date. That rule is about
+// ASYMMETRY, and it stands.
+//
+// `asOf` here is not a consumption filter bolted onto a live pool. It is a
+// COMPLETE RECONSTRUCTION of all three terms at ONE instant: the same moment
+// gates the deposits, the consumption and the returns together. Nothing is left
+// ungated to disagree with anything else. That is what a frozen figure on an
+// issued document has to be — a paid invoice states the balance as it stood
+// when it was paid, and it may never move again.
+//
+// Which is also why this is a function of its own instead of a new argument to
+// derivedBalanceItems. Passing a date THERE would gate consumption only, leave
+// the pool lifetime, and produce precisely the silent contradiction the rule
+// forbids. Two different questions, two different functions.
+// ---------------------------------------------------------------------------
+
+/**
+ * One item that a PAID invoice has settled — a trip or a special charge.
+ *
+ * `amount_sar` is PRE-VAT (the same figure `ConsumedItem.amount` carries); the
+ * pool's own unit is VAT-inclusive, so this is grossed up here through the same
+ * `inclVat` every other consumption site uses.
+ */
+export type PaidConsumedAmount = {
+  id: string;
+  amount_sar: number;
+};
+
+/**
+ * The same item, carrying the instant it was settled.
+ *
+ * `paid_at` is the OWNING INVOICE's payment timestamp, not the item's own date.
+ * An item consumes the paid-up balance at the moment its invoice was paid,
+ * which is the only ordering that makes the as-of walk well defined.
+ */
+export type PaidConsumedItem = PaidConsumedAmount & { paid_at: string };
+
+/**
+ * THE VAT gross-up. One expression for `consumingItems` and `paidUpBalance`
+ * alike, so the pool can never be drawn down at two different rates.
+ */
+export function inclVat(amountPreVat: number): number {
+  return round2(amountPreVat * (1 + VAT_RATE));
+}
+
+/**
+ * THE paid-up balance expression: deposits − paid-invoice consumption − returns.
+ * Private; reached through the two exports below.
+ *
+ * GRANULARITY IS NOT UNIFORM, and cannot be. `paid_at` is a timestamp;
+ * `topup_date` and `returned_on` are calendar DATES with no time on them. So
+ * the consumption side compares instants while the credit side compares the
+ * as-of DAY, which means a top-up or a refund recorded on the same day an
+ * invoice was paid counts as having happened BEFORE it. That is the same
+ * inclusive `<= day` convention every other date filter in this file uses
+ * (`trip_date <= asOfDate`, `returned_on <= asOfDate`); inventing a time for a
+ * dateless row would be a fabrication, and excluding the whole day would drop
+ * real money from the figure.
+ */
+function paidUpCore(
+  topups: TopupLite[],
+  paidItems: readonly (PaidConsumedAmount & { paid_at?: string })[],
+  returns: BalanceReturnLite[],
+  asOf: string | null,
+): number {
+  const asOfDay = asOf == null ? null : asOf.slice(0, 10);
+  const asOfMs = asOf == null ? null : Date.parse(asOf);
+
+  const credits = round2(
+    topups.filter((tu) => asOfDay == null || tu.topup_date <= asOfDay).reduce((s, tu) => s + tu.amount_sar, 0),
+  );
+  const debits = round2(
+    paidItems
+      .filter((it) => asOfMs == null || Date.parse(it.paid_at!) <= asOfMs)
+      .reduce((s, it) => s + inclVat(it.amount_sar), 0),
+  );
+  // The dormant `asOfDate` parameter's FIRST and ONLY caller — see returnedTotal's
+  // own note. Legitimate here for the reason spelled out above the type: this
+  // gates all three terms at one instant, so no side is left ungated to
+  // contradict another.
+  const returned = returnedTotal(returns, asOfDay ?? undefined);
+
+  return round2(credits - debits - returned);
+}
+
+/**
+ * CURRENT paid-up balance — live, and it moves every time an invoice is paid.
+ *
+ * What draft, review and confirmed-unpaid invoices show, and what the Finance
+ * row's column shows. Takes items WITHOUT timestamps on purpose: a caller that
+ * cannot say when each item was settled is structurally unable to ask the
+ * as-of question below, so it cannot accidentally produce a half-gated figure.
+ */
+export function paidUpBalance(input: {
+  topups: TopupLite[];
+  paidItems: PaidConsumedAmount[];
+  returns?: BalanceReturnLite[];
+}): number {
+  return paidUpCore(input.topups, input.paidItems, input.returns ?? [], null);
+}
+
+/**
+ * FROZEN paid-up balance — the figure as it stood at ONE instant, which may
+ * never move again.
+ *
+ * What a PAID invoice shows (`asOf` = its own `paid_at`) and what a VOID one
+ * shows (`asOf` = its `voided_at`). Every item must carry the moment its
+ * invoice was paid; that requirement is the type's, not a convention, because
+ * an as-of figure computed from undated items would silently be the current
+ * one wearing a frozen label.
+ */
+export function paidUpBalanceAsOf(input: {
+  topups: TopupLite[];
+  paidItems: PaidConsumedItem[];
+  returns?: BalanceReturnLite[];
+  asOf: string;
+}): number {
+  return paidUpCore(input.topups, input.paidItems, input.returns ?? [], input.asOf);
 }
 
 /**

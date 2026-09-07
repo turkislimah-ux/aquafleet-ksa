@@ -91,27 +91,15 @@ const INPUT = "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 foc
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
 type Totals = { subtotal: number; vat: number; total: number };
-// Display-layer ledger shape (money-bug fix, v3.1) — widens InvoiceLedgerTotals'
-// balance/remaining to `| null` for the ONE case the pure engine never has to
-// handle: a CONFIRMED invoice frozen before migration 0036 added the ledger
-// snapshot columns (covered_ledger_subtotal_sar etc, all null on that row
-// forever — frozen columns are never backfilled, see lib/db-types.ts). For
-// those legacy rows, `subtotal` is still derivable (view.covered.total /
-// view.amountDue.total already exist as real VAT-inclusive frozen figures —
-// on a pre-0036 row amountDue.total IS ledger.unpaid.subtotal, because Amount
-// Due was trips-only for the whole of that era; the stranded-charge fix later
-// widened Amount Due to include uncovered special charges, so the two figures
-// are NOT equal on invoices confirmed after it, and this fallback is not a
-// general identity — it holds only for the frozen legacy rows it fires on. See
-// lib/invoice.ts's AMOUNT DUE header note. covered.total is the FROZEN column
-// on every row this fallback can fire on, so what the live engine now does with
-// it — deriving it as grand − amountDue rather than running its own
-// calculateVat() pass — does not reach here), but
-// `balance`/`remaining` genuinely no
-// longer exist on disk — showing them as "0" is what caused the original
-// bug (a fabricated "-2,940 VAT" and a false "Running Balance: 0" next to 7
-// real covered trips). Rendered as "—" instead of a fabricated number.
-type DisplayLedgerTotals = { subtotal: number; balance: number | null; remaining: number | null };
+// DisplayLedgerTotals LIVED HERE and is not coming back, even though the three
+// footer rows it fed are. It widened the engine's ledger shape to
+// `balance: number | null` so a pre-0036 legacy invoice — frozen before the
+// ledger snapshot columns existed, never backfilled — could print "—" instead
+// of a fabricated 0 for a CHAINED running balance read off those columns.
+// Nothing reads those columns now: the balance row is fed by the paid-up
+// balance, which is available on every row regardless of when it froze, so the
+// legacy special case has nothing left to special-case. The subtotals come from
+// `tripTotals`; the balance rides in on `paidUpBalanceSar`.
 type View = {
   paymentMode: PaymentMode;
   coveredLines: InvoiceLineSnapshot[]; // trips only. Always [] for postpaid.
@@ -124,12 +112,20 @@ type View = {
   covered: Totals;
   amountDue: Totals;
   grand: Totals;
-  // v3, prepaid only — the Covered/Unpaid trips tables' stacked
-  // Subtotal/Balance/Remaining figures. undefined for postpaid. Always
+  // Prepaid only — the Covered/Unpaid trips tables' one foot figure each, the
+  // VAT-INCLUSIVE subtotal of that table. undefined for postpaid. Always
   // populated for prepaid (draft/review from the live engine, confirmed/paid
-  // either from the frozen snapshot columns or, for pre-0036 legacy rows,
-  // the derived DisplayLedgerTotals fallback built in refresh() below).
-  ledger?: { covered: DisplayLedgerTotals; unpaid: DisplayLedgerTotals };
+  // from the frozen snapshot columns, legacy pre-0036 rows from the frozen
+  // document totals — see refresh() below).
+  //
+  // NO BALANCE TERM HERE, and the footer's balance row is not an argument for
+  // adding one. A `balance`/`remaining` pair used to sit beside each of these
+  // and CHAIN a per-invoice running balance across the two tables — covered's
+  // remainder seeding unpaid's balance — off frozen `*_ledger_balance_sar`
+  // columns. That mechanism is deleted. The rows are still on the page, fed by
+  // the paid-up balance (`raw.paidUpBalanceSar`, one shared expression), which
+  // is why it does not travel with the subtotals: it is not a per-table figure.
+  tripTotals?: { covered: number; unpaid: number };
   // description/telephone/phone added Batch D (invoice header restructure),
   // legal_name_ar added Batch D follow-up #1 — all captured automatically via
   // company_settings' `select("*")` (see invoiceActions.ts's
@@ -172,7 +168,6 @@ export default function InvoiceDetailModal({
   open,
   invoiceId,
   customerEmail,
-  settledBalance,
   onClose,
   onBack,
   onMutated,
@@ -181,10 +176,12 @@ export default function InvoiceDetailModal({
   open: boolean;
   invoiceId: string | null;
   customerEmail: string | null;
-  // Prepaid customers only (Finance tab's per-row figure, §Batch-1 "Pay with
-  // Balance" confirmation) — display-only, never recomputed here. null for
-  // postpaid / not-yet-loaded.
-  settledBalance?: number | null;
+  // `settledBalance` REMOVED. It was the Finance tab's per-row figure, passed
+  // down the prop chain so the "Pay with Balance" panel could show a draw-down.
+  // The popup now reads the paid-up balance off its OWN getInvoice payload,
+  // which is the single shared expression — a prop carrying a second copy of a
+  // money figure through two components is exactly how the two ended up able to
+  // disagree. Do not reinstate it.
   onClose: () => void;
   onBack: () => void;
   onMutated: () => void;
@@ -205,7 +202,19 @@ export default function InvoiceDetailModal({
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [raw, setRaw] = useState<(Invoice & { projectWaterType: WaterType | null; projectPaymentMode: PaymentMode }) | null>(null);
+  // paidUpBalanceSar rides on `raw` because it comes from getInvoice, which is
+  // the ONE call site of lib/prepaid's paid-up expression in this path. The
+  // popup never computes a balance of its own — that is the entire point of the
+  // running-balance removal. null = postpaid, or a fetch that failed.
+  const [raw, setRaw] = useState<
+    | (Invoice & {
+        projectWaterType: WaterType | null;
+        projectPaymentMode: PaymentMode;
+        paidUpBalanceSar: number | null;
+        paidUpError: string | null;
+      })
+    | null
+  >(null);
   const [view, setView] = useState<View | null>(null);
 
   const [busy, setBusy] = useState(false);
@@ -305,7 +314,7 @@ export default function InvoiceDetailModal({
         covered: p.data.covered,
         amountDue: p.data.amountDue,
         grand: p.data.grand,
-        ledger: p.data.ledger,
+        tripTotals: p.data.tripTotals,
         sellerSnapshot: (p.data.sellerSnapshot as View["sellerSnapshot"]) ?? null,
         buyerSnapshot: (p.data.buyerSnapshot as View["buyerSnapshot"]) ?? null,
         projectWaterType: r.data.projectWaterType,
@@ -316,7 +325,12 @@ export default function InvoiceDetailModal({
       // (correct for every invoice confirmed before any mode switch; see
       // migration 0037's header and getInvoicePdf()'s identical fallback).
       const paymentMode = r.data.payment_mode ?? r.data.projectPaymentMode;
-      const hasLedgerSnapshot =
+      // The two `*_ledger_subtotal_sar` columns keep their 0036 names — they
+      // are stored money and renaming a column that holds frozen figures is a
+      // migration, not a refactor. Only the two balance/remaining pairs beside
+      // them went dead; future confirms write null into those (see
+      // invoiceActions.ts's confirm payload).
+      const hasTripTotalsSnapshot =
         r.data.covered_ledger_subtotal_sar != null && r.data.unpaid_ledger_subtotal_sar != null;
       setView({
         paymentMode,
@@ -326,30 +340,23 @@ export default function InvoiceDetailModal({
         covered: { subtotal: r.data.covered_subtotal_sar, vat: r.data.covered_vat_sar, total: r.data.covered_total_sar },
         amountDue: { subtotal: r.data.amount_due_subtotal_sar, vat: r.data.amount_due_vat_sar, total: r.data.amount_due_sar },
         grand: { subtotal: r.data.grand_subtotal_sar, vat: r.data.grand_vat_sar, total: r.data.grand_total_sar },
-        ledger:
+        tripTotals:
           paymentMode === "prepaid"
-            ? hasLedgerSnapshot
-              ? {
-                  covered: {
-                    subtotal: r.data.covered_ledger_subtotal_sar!,
-                    balance: r.data.covered_ledger_balance_sar ?? 0,
-                    remaining: r.data.covered_ledger_remaining_sar ?? 0,
-                  },
-                  unpaid: {
-                    subtotal: r.data.unpaid_ledger_subtotal_sar!,
-                    balance: r.data.unpaid_ledger_balance_sar ?? 0,
-                    remaining: r.data.unpaid_ledger_remaining_sar ?? 0,
-                  },
-                }
-              : // Pre-migration-0036 legacy invoice — no ledger snapshot was
-                // ever written. Subtotal is still real (derived from the
-                // frozen document totals that DO exist — see DisplayLedgerTotals
-                // comment above); balance/remaining genuinely don't exist for
-                // this row, so "—" instead of a fabricated 0.
-                {
-                  covered: { subtotal: r.data.covered_total_sar, balance: null, remaining: null },
-                  unpaid: { subtotal: r.data.amount_due_sar, balance: null, remaining: null },
-                }
+            ? hasTripTotalsSnapshot
+              ? { covered: r.data.covered_ledger_subtotal_sar!, unpaid: r.data.unpaid_ledger_subtotal_sar! }
+              : // Pre-migration-0036 legacy invoice — the snapshot columns did
+                // not exist when it froze and are never backfilled. Both
+                // subtotals are still REAL figures, read off the frozen
+                // document totals that do exist on the row.
+                //
+                // `amount_due_sar` IS the unpaid trips subtotal for the whole
+                // of that era, because Amount Due was trips-only then; the
+                // stranded-charge fix later widened it to include uncovered
+                // special charges, so the two are NOT equal on anything
+                // confirmed after that. This is not a general identity — it
+                // holds only for the legacy rows this arm can fire on. See
+                // lib/invoice.ts's AMOUNT DUE header note.
+                { covered: r.data.covered_total_sar, unpaid: r.data.amount_due_sar }
             : undefined,
         sellerSnapshot: r.data.seller_snapshot,
         buyerSnapshot: r.data.buyer_snapshot,
@@ -667,6 +674,39 @@ export default function InvoiceDetailModal({
 
   const isPrepaid = view?.paymentMode === "prepaid";
 
+  // THE paid-up balance, straight off the server payload. Server-side it is
+  // ONE expression (lib/prepaid's paidUpBalance / paidUpBalanceAsOf, reached
+  // only through loadPaidUpBalance in invoiceActions), so this screen, the PDF
+  // and the print document cannot disagree. A partial figure is never shown.
+  //
+  // THE TWO NULLS ARE NOT THE SAME NULL. `paidUpError` set means the read
+  // FAILED; `paidUp` null with no error means postpaid, where there is nothing
+  // to show. Collapsing them is what let a broken query render as a prepaid
+  // invoice with no balance line and no complaint.
+  const paidUp = raw?.paidUpBalanceSar ?? null;
+  const paidUpError = raw?.paidUpError ?? null;
+  // UNREADABLE = no figure, whatever the reason. Confirm on the pay-with-balance
+  // panel needs the FIGURE, not merely the absence of an error: a prepaid
+  // invoice whose balance came through null with no error reported is exactly
+  // the case that rendered a full prepaid layout with no balance in it.
+  const paidUpUnreadable = paidUpError != null || paidUp == null;
+  // What the trips tables' BALANCE ROW renders: the figure, or the reason there
+  // isn't one. Never blank, and never a fabricated 0 — the two are different
+  // content, so they are different shapes, decided here once for both tables.
+  //
+  // ONE value for BOTH tables, deliberately NOT chained. The rows this restores
+  // used to walk a balance across the two tables, covered's Remaining seeding
+  // unpaid's Balance; that walk is the deleted mechanism, and re-deriving it
+  // from the paid-up figure would rebuild it under a new name.
+  const balanceRow: { amount: number } | { note: string } = paidUpUnreadable
+    ? { note: t("trips.invoiceSheet.paidUpUnavailable", lang) }
+    : { amount: paidUp as number };
+  // Balance minus that table's own VAT-inclusive subtotal — the same
+  // subtraction the pay-with-balance panel already shows, on two figures
+  // already decided. null when the balance is unreadable: there is nothing to
+  // subtract from, and a lone "0" here would read as a real remainder.
+  const remainingAfter = (subtotal: number) => (paidUpUnreadable ? null : round2((paidUp as number) - subtotal));
+
   // --- POSTPAID (unchanged v2 shape — do not touch) ------------------------
   // Special-charges-only subtotal (item 3) — computed for DISPLAY only, same
   // round-once methodology as calculateVat() (lib/vat.ts), applied to the
@@ -947,22 +987,31 @@ export default function InvoiceDetailModal({
             {isPrepaid ? (
               <>
                 {/* v3 §9 — Covered/Unpaid TRIPS tables, ALWAYS shown (even at
-                    zero rows), each with its own stacked
-                    Subtotal/Balance/Remaining ledger footer. Pre-VAT rows —
-                    no per-row VAT column (VAT only ever appears in the
-                    Grand Total stack below). */}
+                    zero rows), each closing on the stacked Subtotal / balance /
+                    Remaining footer. Pre-VAT rows — no per-row VAT column (VAT
+                    only ever appears in the Grand Total stack below).
+
+                    The footer's POSITION and SHAPE are the original ones. Its
+                    balance row is NOT: it carries the paid-up balance, the same
+                    figure the documents print, not the chained per-invoice
+                    running balance these two tables used to walk between them.
+                    Both tables get the SAME balance — no chaining. */}
                 <PrepaidTripTable
                   lang={lang}
                   title={t("trips.invoiceSheet.tCoveredTrips", lang)}
                   lines={view.coveredLines}
-                  ledger={view.ledger?.covered ?? { subtotal: view.covered.total, balance: null, remaining: null }}
+                  subtotal={view.tripTotals?.covered ?? view.covered.total}
+                  balance={balanceRow}
+                  remaining={remainingAfter(view.tripTotals?.covered ?? view.covered.total)}
                   fallbackWaterType={view.projectWaterType}
                 />
                 <PrepaidTripTable
                   lang={lang}
                   title={t("trips.invoiceSheet.tUnpaidTrips", lang)}
                   lines={view.unpaidLines}
-                  ledger={view.ledger?.unpaid ?? { subtotal: view.amountDue.total, balance: null, remaining: null }}
+                  subtotal={view.tripTotals?.unpaid ?? view.amountDue.total}
+                  balance={balanceRow}
+                  remaining={remainingAfter(view.tripTotals?.unpaid ?? view.amountDue.total)}
                   fallbackWaterType={view.projectWaterType}
                   // No `hiddenFromPrint` here any more, and that is the point:
                   // hide-amount-due is now honoured ONCE, upstream, by the
@@ -1023,7 +1072,12 @@ export default function InvoiceDetailModal({
                     card; Grand Total is the wider stacked block — both
                     right-aligned as one visual pair. Hide toggle lives on the
                     Unpaid Trips table above (item 6) — the Amount Due card
-                    itself is just the figure, no sentence, no toggle. */}
+                    itself is just the figure, no sentence, no toggle.
+
+                    A third card LED THIS ROW for one iteration, carrying the
+                    balance at headline weight. Removed: the balance belongs in
+                    the trips-table footers, which is where it is read and where
+                    it now is. This row is the amounts owed, as it was. */}
                 <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:justify-end break-inside-avoid">
                   {/* This card used to drop out of the printout when the hide
                       toggle was on. It no longer needs to: the modal is not a
@@ -1288,36 +1342,51 @@ export default function InvoiceDetailModal({
                 </div>
               )}
               {/* Prepaid — Batch 1: no cash/bank choice, just a confirmation
-                  showing settled balance draw-down. Numbers are display-only
-                  (settledBalance from the Finance tab row, view.covered.total
-                  already computed) — nothing recomputed here.
+                  showing the PAID-UP balance draw-down. Both numbers are
+                  display-only: paidUpBalanceSar comes from getInvoice (the one
+                  shared expression), view.grand.total was already computed for
+                  the document. Nothing is recomputed here.
 
-                  THE DRAW-DOWN IS covered.total, NOT grand.total. It read grand
-                  back when grand WAS the covered portion. Grand Total is now
-                  the whole invoice, so keeping it here would have shown the
-                  operator a pool paying for the unpaid trips and uncovered
-                  charges as well — the exact amounts the same document is
-                  asking the customer to settle in Amount Due. covered.total is
-                  what the pool spent, and it is what the balance note below
-                  has always described. */}
+                  THE DRAW-DOWN IS grand.total. It read covered.total under a
+                  ruling that "the balance only ever paid the covered portion" —
+                  true of the POOL, which deducts at delivery, and false of the
+                  PAID-UP balance, which moves on Mark Paid and moves by
+                  everything the payment settles. Paying puts ALL of this
+                  invoice's lines on the paid side, so the honest draw-down is
+                  the whole VAT-inclusive total, and the third row below is
+                  exactly what paidUpBalance() returns a second later. Keeping
+                  covered.total made this panel a surface computing its own
+                  divergent figure. */}
               {status === "confirmed" && payingOpen && isPrepaid && (
                 <div className="space-y-3 max-w-sm">
-                  <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
-                    <div className="flex justify-between">
-                      <span className="muted">{t("trips.invoiceSheet.settledBalance", lang)}</span>
-                      <span className="tabular-nums">{formatSar(settledBalance ?? 0)}</span>
+                  {/* `paidUp ?? 0` USED TO STAND IN THE THREE ROWS BELOW, and a
+                      failed read therefore printed a full, confident draw-down
+                      off a balance of zero — a fabricated figure on the one
+                      screen in the app whose entire job is to state what a
+                      payment will consume. The panel now refuses instead: no
+                      arithmetic, and Confirm is not offered. */}
+                  {paidUpUnreadable ? (
+                    <div className="card p-3 text-sm text-amber-700 dark:text-amber-400" style={{ borderColor: "rgb(var(--border))" }}>
+                      {t("trips.invoiceSheet.paidUpUnavailable", lang)}
                     </div>
-                    <div className="flex justify-between">
-                      <span className="muted">{t("trips.invoiceSheet.thisInvoiceGrand", lang)}</span>
-                      <span className="tabular-nums">− {formatSar(view.covered.total)}</span>
+                  ) : (
+                    <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
+                      <div className="flex justify-between">
+                        <span className="muted">{t("trips.invoiceSheet.paidUpBalance", lang)}</span>
+                        <span className="tabular-nums">{formatSar(paidUp ?? 0)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="muted">{t("trips.invoiceSheet.thisInvoiceGrand", lang)}</span>
+                        <span className="tabular-nums">− {formatSar(view.grand.total)}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
+                        <span>{t("trips.invoiceSheet.remainingSettled", lang)}</span>
+                        <span className={"tabular-nums " + (((paidUp ?? 0) - view.grand.total) < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
+                          {formatSar((paidUp ?? 0) - view.grand.total)}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
-                      <span>{t("trips.invoiceSheet.remainingSettled", lang)}</span>
-                      <span className={"tabular-nums " + (((settledBalance ?? 0) - view.covered.total) < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
-                        {formatSar((settledBalance ?? 0) - view.covered.total)}
-                      </span>
-                    </div>
-                  </div>
+                  )}
                   <p className="text-xs muted">
                     {t("trips.invoiceSheet.balanceNote", lang)}
                   </p>
@@ -1325,9 +1394,11 @@ export default function InvoiceDetailModal({
                     <Btn type="button" variant="ghost" onClick={() => setPayingOpen(false)}>
                       {t("common.cancel", lang)}
                     </Btn>
-                    <Btn type="button" variant="primary" onClick={onMarkPaidBalance} className={busy ? "opacity-50 pointer-events-none" : ""}>
-                      {t(busy ? "common.recording" : "trips.invoiceSheet.confirmPayment", lang)}
-                    </Btn>
+                    {!paidUpUnreadable && (
+                      <Btn type="button" variant="primary" onClick={onMarkPaidBalance} className={busy ? "opacity-50 pointer-events-none" : ""}>
+                        {t(busy ? "common.recording" : "trips.invoiceSheet.confirmPayment", lang)}
+                      </Btn>
+                    )}
                   </div>
                 </div>
               )}
@@ -1660,22 +1731,37 @@ function LineTable({
 // v3 §9 — prepaid Covered/Unpaid TRIPS table. ALWAYS rendered (even with zero
 // rows — "always shown, even at zero" per spec), pre-VAT rows (no per-row
 // VAT column — VAT only ever shows in the Grand Total stack). Footer is the
-// stacked Subtotal/Balance/Remaining ledger figures (VAT-inclusive),
-// replacing LineTable's inline "Subtotal / VAT / Total" row — mirrors
-// lib/invoicePdfTemplate.ts's prepaidTripTable exactly (same three figures,
-// same source: view.ledger, never re-derived here).
+// stacked Subtotal / balance / Remaining rows, all three handed in whole and
+// never re-derived here. Mirrors lib/invoicePdfTemplate.ts and
+// lib/invoicePrintTemplate.ts, which close on the same three rows.
+//
+// THE COMPONENT TAKES NO CHAINED BALANCE AND CANNOT BUILD ONE. It receives one
+// already-decided balance and one already-decided remainder; it has no access
+// to the other table's figures, which is what makes the deleted mechanism —
+// covered's Remaining seeding unpaid's Balance, producing a per-invoice balance
+// the statement, the Finance KPI and the over-balance banner all disagreed with
+// — unreachable from here rather than merely unused.
 function PrepaidTripTable({
   lang,
   title,
   lines,
-  ledger,
+  subtotal,
+  balance,
+  remaining,
   fallbackWaterType,
   headerRight,
 }: {
   lang: Lang;
   title: string;
   lines: InvoiceLineSnapshot[];
-  ledger: DisplayLedgerTotals;
+  // VAT-INCLUSIVE subtotal of this table.
+  subtotal: number;
+  // The balance row's value: the paid-up figure, or the reason there isn't one.
+  // A union, not a nullable number — "unreadable" and "zero" are different
+  // content and the choice between them is not this component's to make.
+  balance: { amount: number } | { note: string };
+  // Balance minus this table's subtotal; null when the balance is unreadable.
+  remaining: number | null;
   fallbackWaterType?: WaterType | null;
   // v3.1 (item 6) — lets the Unpaid Trips table host the hide-amount-due
   // toggle at its header, same row as the title. Undefined for Covered.
@@ -1687,13 +1773,13 @@ function PrepaidTripTable({
 }) {
   const rows = groupInvoiceLines(lines, fallbackWaterType);
   // v3.1 (item 3) — faded pre-VAT + VAT breakdown alongside the Subtotal
-  // figure. ledger.subtotal is VAT-inclusive (file header) so it can't be
-  // decomposed on its own; derive pre-VAT from the SAME raw lines already
-  // passed in (sum of amount_sar, the one figure the VAT engine reads —
-  // lib/invoice.ts), then back into VAT so the two halves always foot
-  // exactly to ledger.subtotal. Display-only — no new consumption math.
+  // figure. `subtotal` is VAT-inclusive so it can't be decomposed on its own;
+  // derive pre-VAT from the SAME raw lines already passed in (sum of
+  // amount_sar, the one figure the VAT engine reads — lib/invoice.ts), then
+  // back into VAT so the two halves always foot exactly to `subtotal`.
+  // Display-only — no new consumption math.
   const preVat = round2(lines.reduce((s, l) => s + l.amount_sar, 0));
-  const vatAmt = round2(ledger.subtotal - preVat);
+  const vatAmt = round2(subtotal - preVat);
 
   return (
     <section className="space-y-2 break-inside-avoid">
@@ -1704,11 +1790,11 @@ function PrepaidTripTable({
       <div className="card p-0 overflow-hidden">
         {/* EMPTY STATE: no six-column header, no row of five blank cells. A
             skeleton table with nothing in it reads as a table that failed to
-            load; one quiet line reads as an answer. The ledger footer below
+            load; one quiet line reads as an answer. The subtotal footer below
             stays either way — "always shown, even at zero" is still the rule,
-            and Remaining is a real figure whether or not any trip sits above
-            it. This also brings the screen CLOSER to the PDF, whose own empty
-            state is a single colspan cell (invoicePdfTemplate.ts). */}
+            and a zero subtotal is a real answer. This also brings the screen
+            CLOSER to the PDF, whose own empty state is a single colspan cell
+            (invoicePdfTemplate.ts). */}
         {rows.length === 0 ? (
           <div className="px-4 py-3 text-sm muted">{t("trips.invoiceSheet.emptyTrips", lang)}</div>
         ) : (
@@ -1752,19 +1838,26 @@ function PrepaidTripTable({
               <span className="tabular-nums text-xs text-black/35 dark:text-white/35">
                 {fill(t("trips.invoiceSheet.vatSplit", lang), { net: formatNum(preVat), vat: formatNum(vatAmt) })}
               </span>
-              <span className="tabular-nums font-medium">{formatSar(ledger.subtotal)}</span>
+              <span className="tabular-nums font-medium">{formatSar(subtotal)}</span>
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="muted">{t("trips.invoiceSheet.runningBalance", lang)}</span>
-            {/* null = pre-migration-0036 legacy invoice, no frozen balance on
-                disk (see DisplayLedgerTotals) — "—", never a fabricated 0. */}
-            <span className="tabular-nums">{ledger.balance == null ? <span className="muted">—</span> : formatSar(ledger.balance)}</span>
+            <span className="muted">{t("trips.invoiceSheet.paidUpBalance", lang)}</span>
+            {/* The unreadable arm is set as WORDS — no tabular numerals — so it
+                cannot be skimmed as an amount. A dash stood here for the legacy
+                pre-0036 case the chained balance had; the paid-up balance has
+                no such case, so the only reason this cell holds no figure now
+                is a failed read, and it says so. */}
+            {"note" in balance ? (
+              <span className="text-xs italic text-amber-600 dark:text-amber-400">{balance.note}</span>
+            ) : (
+              <span className="tabular-nums">{formatSar(balance.amount)}</span>
+            )}
           </div>
           <div className="flex items-center justify-between">
             <span className="font-medium">{t("trips.invoiceSheet.remaining", lang)}</span>
-            <span className={"tabular-nums font-semibold " + (ledger.remaining != null && ledger.remaining < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
-              {ledger.remaining == null ? <span className="muted font-normal">—</span> : formatSar(ledger.remaining)}
+            <span className={"tabular-nums font-semibold " + (remaining != null && remaining < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
+              {remaining == null ? <span className="muted font-normal">—</span> : formatSar(remaining)}
             </span>
           </div>
         </div>
@@ -1997,6 +2090,12 @@ function SpecialChargesSection({
   );
 }
 
+// A `BalanceCard` STOOD HERE — the balance as its own tinted card leading the
+// totals row, with a headline-weight figure and an as-of caption. Removed with
+// that placement. The balance is read in the trips-table footers and that is
+// where it renders; see PrepaidTripTable's footer. Nothing on this screen shows
+// a balance outside those two rows and the pay-with-balance panel.
+
 function TotalCard({
   lang,
   label,
@@ -2020,6 +2119,9 @@ function TotalCard({
           vat: formatSar(totals.vat),
         })}
       </div>
+      {/* The paid-up balance was a caption HERE, under a hairline, for one
+          iteration. It is back in the trips-table footers where it is read.
+          This card is the amount owed and nothing else. */}
     </div>
   );
 }

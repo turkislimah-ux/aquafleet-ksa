@@ -14,6 +14,8 @@ import {
   consumingItems,
   derivedBalanceItems,
   buildStatementItems,
+  paidUpBalance,
+  paidUpBalanceAsOf,
   type BalanceReturnLite,
   type ConsumingTrip,
   type TopupLite,
@@ -473,6 +475,208 @@ check(
   ]);
   // 500 -> -115 (t1) -> -115 (ch1) -> -50 (refund) -> FLAT (settlement).
   check("return same-day: running balances", stmt.map((e) => e.runningBalance), [500, 385, 270, 220, 220]);
+}
+
+// ===========================================================================
+// PAID-UP BALANCE — deposits − PAID-invoice consumption − returns.
+//
+// THE THIRD MONEY NUMBER, and the one the invoice prints. It is NOT the pool:
+// the pool (derivedBalanceItems) deducts at DELIVERY, this deducts at MARK
+// PAID. A prepaid customer can hold pool credit and still be paid up to a
+// larger figure, or the reverse; both columns sit on the Finance row for
+// exactly that reason.
+//
+// Two exports over one private core, and the SPLIT IS THE GUARD:
+//   paidUpBalance      — CURRENT. Takes PaidConsumedAmount[] (NO timestamps).
+//   paidUpBalanceAsOf  — FROZEN at one instant. Every item must carry paid_at.
+// A caller that cannot say when each item settled is structurally unable to
+// ask the as-of question, so it cannot produce a half-gated figure. The cases
+// below pin both arms AND the inverted forms that prove the gates are real.
+// ===========================================================================
+
+// --- CURRENT: deposits − paid consumption − returns, VAT-inclusive ----------
+{
+  const topups: TopupLite[] = [
+    { id: "u1", amount_sar: 10000, topup_date: "2026-06-01" },
+    { id: "u2", amount_sar: 5000, topup_date: "2026-08-20" },
+  ];
+  // 1,000 pre-VAT consumes 1,150. 400 pre-VAT consumes 460. Total 1,610.
+  const paidItems = [
+    { id: "t1", amount_sar: 1000 },
+    { id: "ch1", amount_sar: 400 },
+  ];
+  check(
+    "paid-up current: 15,000 deposited − 1,610 settled = 13,390",
+    paidUpBalance({ topups, paidItems }),
+    13390,
+  );
+  check(
+    "paid-up current: a 2,000 refund is a DEBIT of the same class",
+    paidUpBalance({ topups, paidItems, returns: [{ id: "r1", amount_sar: 2000, returned_on: "2026-08-25" }] }),
+    11390,
+  );
+  check("paid-up current: nothing paid yet = the whole pool", paidUpBalance({ topups, paidItems: [] }), 15000);
+  // INVERTED — VAT is genuinely applied. A harness that summed the pre-VAT
+  // amounts would agree with the engine on zero and disagree on everything
+  // else, so pin the difference itself rather than only the total.
+  check(
+    "paid-up current: consumption is VAT-INCLUSIVE (1,610 not 1,400)",
+    paidUpBalance({ topups, paidItems: [] }) - paidUpBalance({ topups, paidItems }),
+    1610,
+  );
+}
+
+// --- THE IDENTITY the two Finance columns rest on: paidUp = pool + unsettled -
+// Same customer, one lens each. 10,000 deposited. Two delivered trips of 1,000
+// (1,150 each); ONE of them is on a paid invoice.
+//   pool   = 10,000 − 1,150 − 1,150 = 7,700   (deducts at DELIVERY)
+//   paidUp = 10,000 − 1,150         = 8,850   (deducts at MARK PAID)
+// The 1,150 gap is the delivered-but-unpaid work — Amount Payable, to the
+// halala. The columns disagreeing by exactly that is the model, not a bug.
+{
+  const topups: TopupLite[] = [{ id: "u1", amount_sar: 10000, topup_date: "2026-06-01" }];
+  const delivered: ConsumingTrip[] = [
+    { id: "t1", trip_date: "2026-06-05", delivered_at: "2026-06-05T08:00:00.000Z", rate_sar: 1000 },
+    { id: "t2", trip_date: "2026-06-06", delivered_at: "2026-06-06T08:00:00.000Z", rate_sar: 1000 },
+  ];
+  const pool = derivedBalanceItems(topups, delivered, []);
+  const paidUp = paidUpBalance({ topups, paidItems: [{ id: "t1", amount_sar: 1000 }] });
+  check("identity: pool deducts at delivery (7,700)", pool, 7700);
+  check("identity: paid-up deducts at mark-paid (8,850)", paidUp, 8850);
+  check("identity: paidUp − pool = the unsettled trip, VAT-inclusive", Math.round((paidUp - pool) * 100) / 100, 1150);
+}
+
+// --- AS-OF: all three terms gated at ONE instant ----------------------------
+// This is the ONLY legitimate date gate on a credit side in this file, and it
+// is legitimate precisely because it is not asymmetric: a `paid` invoice's
+// figure is a complete historical reconstruction of the customer at its
+// `paid_at`, not a pool trimmed on one side. See lib/prepaid.ts's asOf note
+// and the domain skill's "asOfDate scopes CONSUMPTION, never the POOL" — the
+// forbidden thing was the ASYMMETRY, never the date.
+{
+  const topups: TopupLite[] = [
+    { id: "u1", amount_sar: 10000, topup_date: "2026-06-01" },
+    { id: "u2", amount_sar: 5000, topup_date: "2026-08-20" }, // AFTER the as-of
+  ];
+  const paidItems = [
+    { id: "t1", amount_sar: 1000, paid_at: "2026-07-01T10:00:00.000Z" },
+    { id: "t2", amount_sar: 2000, paid_at: "2026-09-01T10:00:00.000Z" }, // AFTER
+  ];
+  const returns: BalanceReturnLite[] = [
+    { id: "r1", amount_sar: 500, returned_on: "2026-06-15" },
+    { id: "r2", amount_sar: 900, returned_on: "2026-08-25" }, // AFTER
+  ];
+  const asOf = "2026-08-01T00:00:00.000Z";
+  // 10,000 − 1,150 − 500 = 8,350. Everything dated after the instant is out,
+  // on ALL THREE sides.
+  check("paid-up as-of: all three terms gated at one instant", paidUpBalanceAsOf({ topups, paidItems, returns, asOf }), 8350);
+  // …and the CURRENT figure over the same inputs is a different number, so the
+  // gate is doing work rather than being a no-op on this fixture.
+  check(
+    "paid-up as-of: the ungated figure differs (15,000 − 3,450 − 1,400)",
+    paidUpBalance({ topups, paidItems, returns }),
+    10150,
+  );
+}
+
+// --- INVERTED, one term at a time: each side of the gate is real ------------
+// Three fixtures, each moving ONE input across the as-of instant. A gate that
+// silently dropped any single side would pass a total-only assertion on some
+// other fixture; this cannot.
+{
+  const asOf = "2026-08-01T00:00:00.000Z";
+  const base = {
+    topups: [{ id: "u1", amount_sar: 10000, topup_date: "2026-06-01" }] as TopupLite[],
+    paidItems: [{ id: "t1", amount_sar: 1000, paid_at: "2026-07-01T10:00:00.000Z" }],
+    returns: [{ id: "r1", amount_sar: 500, returned_on: "2026-06-15" }] as BalanceReturnLite[],
+    asOf,
+  };
+  check("gate baseline: 10,000 − 1,150 − 500", paidUpBalanceAsOf(base), 8350);
+  check(
+    "gate — a LATER top-up does not count",
+    paidUpBalanceAsOf({ ...base, topups: [...base.topups, { id: "u2", amount_sar: 7777, topup_date: "2026-09-09" }] }),
+    8350,
+  );
+  check(
+    "gate — a LATER payment does not count",
+    paidUpBalanceAsOf({ ...base, paidItems: [...base.paidItems, { id: "t9", amount_sar: 3333, paid_at: "2026-09-09T00:00:00.000Z" }] }),
+    8350,
+  );
+  check(
+    "gate — a LATER refund does not count",
+    paidUpBalanceAsOf({ ...base, returns: [...base.returns, { id: "r9", amount_sar: 2222, returned_on: "2026-09-09" }] }),
+    8350,
+  );
+  // The complement: move each one BEFORE the instant and it must land. Without
+  // these three, a gate stuck at "exclude everything" passes the three above.
+  check(
+    "gate — an EARLIER top-up counts",
+    paidUpBalanceAsOf({ ...base, topups: [...base.topups, { id: "u2", amount_sar: 1000, topup_date: "2026-07-09" }] }),
+    9350,
+  );
+  check(
+    "gate — an EARLIER payment counts (1,000 → 1,150)",
+    paidUpBalanceAsOf({ ...base, paidItems: [...base.paidItems, { id: "t9", amount_sar: 1000, paid_at: "2026-07-09T00:00:00.000Z" }] }),
+    7200,
+  );
+  check(
+    "gate — an EARLIER refund counts",
+    paidUpBalanceAsOf({ ...base, returns: [...base.returns, { id: "r9", amount_sar: 100, returned_on: "2026-07-09" }] }),
+    8250,
+  );
+}
+
+// --- Granularity is DELIBERATELY non-uniform, and this pins it --------------
+// `paid_at` is a TIMESTAMP; `topup_date` / `returned_on` are DATES. The
+// consumption filter compares instants, the credit filters compare the as-of
+// DAY, both inclusive (`<=`). So a top-up made on the SAME DAY as the payment
+// counts as already in the pool, no matter the clock time — which is what
+// every other date filter in lib/prepaid.ts does, and the alternative (a
+// same-day top-up vanishing because it has no time of day to compare) would be
+// a silent loss of real money from a frozen figure.
+{
+  const asOf = "2026-08-01T09:00:00.000Z"; // 9am
+  check(
+    "granularity: a same-DAY top-up counts, even though the payment was at 9am",
+    paidUpBalanceAsOf({
+      topups: [{ id: "u1", amount_sar: 1000, topup_date: "2026-08-01" }],
+      paidItems: [],
+      asOf,
+    }),
+    1000,
+  );
+  check(
+    "granularity: a payment at 10am — one hour LATER — does not",
+    paidUpBalanceAsOf({
+      topups: [{ id: "u1", amount_sar: 1000, topup_date: "2026-08-01" }],
+      paidItems: [{ id: "t1", amount_sar: 100, paid_at: "2026-08-01T10:00:00.000Z" }],
+      asOf,
+    }),
+    1000,
+  );
+  check(
+    "granularity: …and one at 8am does (100 → 115)",
+    paidUpBalanceAsOf({
+      topups: [{ id: "u1", amount_sar: 1000, topup_date: "2026-08-01" }],
+      paidItems: [{ id: "t1", amount_sar: 100, paid_at: "2026-08-01T08:00:00.000Z" }],
+      asOf,
+    }),
+    885,
+  );
+}
+
+// --- The CURRENT arm ignores paid_at even when it is there ------------------
+// paidUpBalance takes PaidConsumedAmount, but a caller can hand it objects that
+// happen to carry more. It must not start gating on a field it was not asked
+// to read — that would make the live figure silently depend on the clock.
+{
+  const topups: TopupLite[] = [{ id: "u1", amount_sar: 1000, topup_date: "2026-06-01" }];
+  const withStamps = [{ id: "t1", amount_sar: 100, paid_at: "2099-01-01T00:00:00.000Z" }];
+  check(
+    "current arm: a far-future paid_at changes nothing (885, not 1,000)",
+    paidUpBalance({ topups, paidItems: withStamps }),
+    885,
+  );
 }
 
 console.log("");

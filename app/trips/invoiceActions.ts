@@ -13,7 +13,14 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type SpecialChargeInput } from "@/lib/invoice";
-import type { BalanceReturnLite, ConsumingTrip, TopupLite } from "@/lib/prepaid";
+import {
+  paidUpBalance,
+  paidUpBalanceAsOf,
+  type BalanceReturnLite,
+  type ConsumingTrip,
+  type PaidConsumedItem,
+  type TopupLite,
+} from "@/lib/prepaid";
 import type { Invoice, CompanySettings, Customer, WaterType, PaymentMode } from "@/lib/db-types";
 import { generateInvoicePdf, PdfServiceNotConfiguredError } from "@/lib/pdf";
 import { buildInvoicePdfHtml, type PdfInvoiceData, type PdfIdentity } from "@/lib/invoicePdfTemplate";
@@ -30,6 +37,43 @@ export type ActionResult<T = undefined> = { error: string | null; data?: T };
 
 const PROOF_BUCKET = "invoice-proofs";
 const PDF_BUCKET = "invoice-pdfs";
+// THE CACHE KEY CARRIES A TEMPLATE VERSION, AND THAT IS THE ONLY INVALIDATION
+// A LAYOUT CHANGE CAN HAVE. getInvoicePdf() caches paid/void bytes on 0027's
+// premise that an issued document never changes — true of its DATA and false of
+// its TEMPLATE, and nothing in the codebase can go back and re-render bytes that
+// were already stored. The two `.remove()` sites below invalidate ONE invoice on
+// a data event (unpay, hide-toggle); neither fires when the renderer itself
+// changes, so every previously-cached PDF outlives it.
+//
+// That is not hypothetical: adding the paid-up balance is exactly such a change,
+// and four prepaid invoices were still serving blobs rendered BEFORE it —
+// documents with the running-balance rows already deleted and no paid-up line
+// yet, i.e. a prepaid invoice showing no balance at all, permanently, however
+// correct the renderer had since become. Bumping this orphans them in one move,
+// deletes nothing, and gives every future template change the same one-line fix.
+//
+// BUMP THIS whenever the invoice template's OUTPUT changes.
+//
+// v3: the paid-up balance was resized and gained an explicit "unavailable" arm,
+// so v2 bytes carry the old quiet treatment. The rule earned its keep on its
+// first outing — this is the second template change in two passes, and without
+// the bump a paid invoice downloaded between them would have kept serving the
+// superseded layout with nothing anywhere to say why.
+//
+// v4: the card treatment v3 rendered was REVERTED. The balance is back in the
+// original three inline rows under each trips table (Subtotal / balance /
+// Remaining) — same position and style as before the card existed, carrying the
+// corrected paid-up figure rather than the deleted chained walk. Third template
+// change in three passes, and the first REVERT among them, which is the case
+// this rule serves worst if skipped: v3 bytes are not merely older, they render
+// a layout that was rejected, so leaving them cached would keep serving the
+// rejected design from the one surface no re-render reaches.
+const PDF_CACHE_VERSION = 4;
+// All four cache sites go through here — a read, a write and two invalidations.
+// They shared a hand-written `${invoiceId}.pdf` in four places, so a versioned
+// key that any one of them missed would silently stop invalidating instead of
+// failing.
+const pdfCachePath = (invoiceId: string) => `${invoiceId}-v${PDF_CACHE_VERSION}.pdf`;
 const SPECIAL_CHARGE_IMAGE_BUCKET = "special-charge-images";
 
 // Note on runtime: this file has no `export const runtime` of its own —
@@ -488,6 +532,128 @@ export async function getSpecialChargeImageSignedUrl(chargeId: string): Promise<
   return { error: null, data: { url: data.signedUrl } };
 }
 
+// ---------------------------------------------------------------------------
+// PAID-UP BALANCE — the ONE figure any invoice surface shows for a prepaid
+// customer's pool. deposits − paid-invoice consumption − returns.
+//
+// This is the ONLY call site of lib/prepaid.ts's paidUpBalance /
+// paidUpBalanceAsOf in the invoice path. Every surface — the popup, the
+// downloaded PDF, the printed sheet — reads the single number this returns;
+// none of them computes a balance of its own, and the trips tables no longer
+// carry one at all.
+//
+// WHICH figure, by status (locked):
+//   draft / review / confirmed  -> CURRENT. Nothing is frozen yet, so the
+//                                  document tracks reality and drops as the
+//                                  customer settles other invoices.
+//   paid                        -> FROZEN at this invoice's own `paid_at`.
+//                                  A paid document states the balance as it
+//                                  stood when it was paid. It never moves again.
+//   void                        -> FROZEN at `voided_at`, the moment the
+//                                  document became terminal. `voided_at` is
+//                                  the timestamp used — a void invoice has no
+//                                  `paid_at` to freeze at, and its lines were
+//                                  released back to the pool at exactly that
+//                                  moment.
+//   postpaid, any status        -> null. There is no pool to report.
+//
+// A paid/void row missing its timestamp (impossible via the RPCs, but the
+// columns are nullable) falls back to CURRENT rather than to a fabricated
+// instant — a live figure is honest, an invented freeze point is not.
+//
+// THREE OUTCOMES, NOT TWO. `{ ok: true, amount: null }` means there is no pool
+// to report (postpaid) and every surface prints nothing. `{ ok: false }` means
+// a read FAILED, which is a different thing entirely and must never collapse
+// into the first: a single `number | null` made a broken query indistinguishable
+// from a postpaid customer, so one failed sub-query silently produced a prepaid
+// invoice with no balance line and no complaint anywhere. The popup shows the
+// failure; the document paths refuse to render at all (see toPdfInvoiceData) —
+// a customer-facing invoice quietly missing its balance is worse than a
+// download that says it could not be produced.
+//
+// The consumption slice mirrors FinanceTab's paid-only slice exactly: trips
+// DELIVERED and sitting on a status='paid' invoice, plus charges on one. Same
+// rate rule as everywhere else — the trip's own frozen `rate_sar`, falling
+// back to the project's current rate only where the row predates it.
+// ---------------------------------------------------------------------------
+export type PaidUpRead = { ok: true; amount: number | null } | { ok: false; error: string };
+
+const PAID_UP_UNAVAILABLE = "Could not read this customer's paid-up balance.";
+
+async function loadPaidUpBalance(
+  supabase: ReturnType<typeof createClient>,
+  inv: Pick<Invoice, "customer_id" | "status" | "paid_at" | "voided_at">,
+  paymentMode: PaymentMode,
+): Promise<PaidUpRead> {
+  if (paymentMode !== "prepaid") return { ok: true, amount: null };
+
+  const asOf = inv.status === "paid" ? inv.paid_at : inv.status === "void" ? inv.voided_at : null;
+
+  const [topupsRes, returnsRes, paidInvRes, projectRes] = await Promise.all([
+    supabase.from("customer_topups").select("id, amount_sar, topup_date").eq("customer_id", inv.customer_id),
+    supabase.from("customer_balance_returns").select("id, amount_sar, returned_on").eq("customer_id", inv.customer_id),
+    supabase.from("invoices").select("id, paid_at").eq("customer_id", inv.customer_id).eq("status", "paid"),
+    supabase.from("projects").select("rate_per_trip_sar").eq("customer_id", inv.customer_id).maybeSingle(),
+  ]);
+  // Fails LOUD rather than returning a partial figure: a paid-up balance
+  // assembled from a half-read pool is a wrong number wearing a confident
+  // label, and every surface would print it.
+  //
+  // projectRes IS IN THIS GATE, and was the one read left out of it. Its row
+  // supplies the per-trip rate that a trip predating frozen `rate_sar` falls
+  // back to, so a failed project read did not blank the line — it silently set
+  // that rate to 0, UNDERSTATING consumption and OVERSTATING the balance. A
+  // wrong number is the one outcome worse than no number, and it was the only
+  // failure mode here that produced one. `.maybeSingle()` also errors on a
+  // customer holding more than one project row (none does today), which is
+  // exactly a case that must stop rather than guess a rate.
+  if (topupsRes.error || returnsRes.error || paidInvRes.error || projectRes.error) {
+    return { ok: false, error: PAID_UP_UNAVAILABLE };
+  }
+
+  const topups: TopupLite[] = topupsRes.data ?? [];
+  const returns: BalanceReturnLite[] = returnsRes.data ?? [];
+  const paidAtByInvoice = new Map<string, string | null>((paidInvRes.data ?? []).map((i) => [i.id, i.paid_at]));
+  const paidInvoiceIds = [...paidAtByInvoice.keys()];
+
+  let items: { id: string; amount_sar: number; paid_at: string | null }[] = [];
+  if (paidInvoiceIds.length > 0) {
+    const projectRate = (projectRes.data?.rate_per_trip_sar as number | undefined) ?? 0;
+    const [tripsRes, chargesRes] = await Promise.all([
+      supabase
+        .from("trips")
+        .select("id, rate_sar, invoice_id")
+        .in("invoice_id", paidInvoiceIds)
+        .not("delivered_at", "is", null),
+      supabase.from("invoice_special_charges").select("id, amount_sar, invoice_id").in("invoice_id", paidInvoiceIds),
+    ]);
+    if (tripsRes.error || chargesRes.error) return { ok: false, error: PAID_UP_UNAVAILABLE };
+    items = [
+      ...(tripsRes.data ?? []).map((t) => ({
+        id: t.id as string,
+        amount_sar: (t.rate_sar as number | null) ?? projectRate,
+        paid_at: paidAtByInvoice.get(t.invoice_id as string) ?? null,
+      })),
+      ...(chargesRes.data ?? []).map((c) => ({
+        id: c.id as string,
+        amount_sar: c.amount_sar as number,
+        paid_at: paidAtByInvoice.get(c.invoice_id as string) ?? null,
+      })),
+    ];
+  }
+
+  if (asOf == null) return { ok: true, amount: paidUpBalance({ topups, paidItems: items, returns }) };
+  // An item on a paid invoice with no `paid_at` cannot be placed on the
+  // timeline, so it is DROPPED from the as-of walk rather than dated to the
+  // epoch or to now — both of which would move a frozen figure by a real
+  // amount. `paid_at` is set by pay_invoice() on every row it touches; this
+  // arm exists because the column is nullable, not because it fires.
+  const dated: PaidConsumedItem[] = items
+    .filter((it): it is typeof it & { paid_at: string } => it.paid_at != null)
+    .map((it) => ({ id: it.id, amount_sar: it.amount_sar, paid_at: it.paid_at }));
+  return { ok: true, amount: paidUpBalanceAsOf({ topups, paidItems: dated, returns, asOf }) };
+}
+
 // Live preview for the UI (5c) — draft AND review both stay live-recomputed,
 // never a stored snapshot, per the locked design.
 export async function previewInvoice(invoiceId: string): Promise<ActionResult<InvoiceAssembly>> {
@@ -501,9 +667,28 @@ export async function previewInvoice(invoiceId: string): Promise<ActionResult<In
 // only), this reads the frozen snapshot columns exactly as confirm_invoice()
 // wrote them, so a Confirmed invoice's displayed numbers never drift from
 // what was actually confirmed even if underlying trips change afterward.
+//
+// paidUpBalanceSar rides along for the SAME reason: the popup shows one balance
+// figure for prepaid customers and it is computed HERE, server-side, once, by
+// the shared expression. The modal renders it and never derives a balance of
+// its own — that is what the removed per-invoice running balance did.
 export async function getInvoice(
   invoiceId: string,
-): Promise<ActionResult<Invoice & { projectWaterType: WaterType | null; projectPaymentMode: PaymentMode }>> {
+): Promise<
+  ActionResult<
+    Invoice & {
+      projectWaterType: WaterType | null;
+      projectPaymentMode: PaymentMode;
+      paidUpBalanceSar: number | null;
+      // Set ONLY when the read failed. The popup is an internal screen and the
+      // operator is the person who can act on it, so unlike the documents this
+      // surface renders the failure in place of the figure rather than refusing
+      // to load — an invoice she cannot open is worse than one whose balance
+      // line says it is unavailable.
+      paidUpError: string | null;
+    }
+  >
+> {
   const supabase = createClient();
   const { data, error } = await supabase.from("invoices").select("*").eq("id", invoiceId).single();
   if (error || !data) return { error: error?.message ?? "Invoice not found." };
@@ -518,17 +703,41 @@ export async function getInvoice(
   // 0037's payment_mode snapshot (raw.payment_mode == null). See
   // getInvoicePdf()'s identical fallback for the rationale.
   const invoice = data as Invoice;
-  const { data: project } = await supabase
+  const { data: project, error: projectErr } = await supabase
     .from("projects")
     .select("water_type, payment_mode")
     .eq("customer_id", invoice.customer_id)
     .maybeSingle();
+  // THIS ERROR USED TO BE DISCARDED, AND DISCARDING IT SILENTLY TURNED A
+  // PREPAID CUSTOMER POSTPAID. `payment_mode` is null on every draft and review
+  // invoice — the column is a snapshot written at CONFIRM (0037) — so on an
+  // unissued invoice the project row is the ONLY source of the mode. Lose it
+  // and the chain below lands on "postpaid", loadPaidUpBalance returns
+  // { ok: true, amount: null }, and the popup renders a prepaid invoice with no
+  // balance line and no complaint, because "no line" is exactly what postpaid
+  // is supposed to look like. A failed read and a customer who has no pool
+  // produced identical output.
+  //
+  // Note what the mode is NOT allowed to fall back to any more: a missing
+  // project is a fact this function cannot supply, and guessing the safer-
+  // looking mode is what made the guess invisible.
+  const paymentMode: PaymentMode | null = projectErr
+    ? null
+    : (invoice.payment_mode ?? (project?.payment_mode as PaymentMode | null) ?? "postpaid");
+  // A null mode is a READ FAILURE, not a mode — hand loadPaidUpBalance nothing
+  // to be confidently wrong with.
+  const paidUp: PaidUpRead =
+    paymentMode == null
+      ? { ok: false, error: PAID_UP_UNAVAILABLE }
+      : await loadPaidUpBalance(supabase, invoice, paymentMode);
   return {
     error: null,
     data: {
       ...invoice,
       projectWaterType: (project?.water_type as WaterType | null) ?? null,
       projectPaymentMode: (project?.payment_mode as PaymentMode | null) ?? "postpaid",
+      paidUpBalanceSar: paidUp.ok ? paidUp.amount : null,
+      paidUpError: paidUp.ok ? null : paidUp.error,
     },
   };
 }
@@ -700,12 +909,22 @@ export async function confirmInvoice(invoiceId: string): Promise<ActionResult<{ 
     p_grand_subtotal: assembly.grand.subtotal,
     p_grand_vat: assembly.grand.vat,
     p_grand_total: assembly.grand.total,
-    p_covered_ledger_subtotal: assembly.ledger?.covered.subtotal ?? null,
-    p_covered_ledger_balance: assembly.ledger?.covered.balance ?? null,
-    p_covered_ledger_remaining: assembly.ledger?.covered.remaining ?? null,
-    p_unpaid_ledger_subtotal: assembly.ledger?.unpaid.subtotal ?? null,
-    p_unpaid_ledger_balance: assembly.ledger?.unpaid.balance ?? null,
-    p_unpaid_ledger_remaining: assembly.ledger?.unpaid.remaining ?? null,
+    // The two SUBTOTALS survive: they are the trips tables' one foot figure
+    // each, still displayed, still frozen at confirm. 0036's column names are
+    // kept as-is — renaming a column that holds stored money is a migration,
+    // not a refactor, and every already-issued invoice reads through them.
+    p_covered_ledger_subtotal: assembly.tripTotals?.covered ?? null,
+    p_unpaid_ledger_subtotal: assembly.tripTotals?.unpaid ?? null,
+    // EXPLICIT NULL, and it is the point. These four columns held the
+    // per-invoice running balance and its remainder — the deleted mechanism.
+    // Nothing computes them any more and nothing renders them, so a future
+    // confirm writes no figure rather than a figure no surface reads. Already
+    // stored values are LEFT UNTOUCHED (0027's freeze law); this changes what
+    // is written from here on, never what is on disk.
+    p_covered_ledger_balance: null,
+    p_covered_ledger_remaining: null,
+    p_unpaid_ledger_balance: null,
+    p_unpaid_ledger_remaining: null,
     p_payment_mode: assembly.paymentMode,
   });
   if (error) return { error: error.message };
@@ -810,6 +1029,22 @@ export async function unpayInvoice(invoiceId: string, reason: string): Promise<A
   const supabase = createClient();
   const { data: auth } = await supabase.auth.getUser();
   const by = auth?.user?.email ?? "unknown";
+
+  // DROP THE CACHED PDF FIRST, same order and same reasoning as
+  // setHideAmountDue: clear then write, so a failed clear aborts with the
+  // invoice still paid and the file still matching it.
+  //
+  // This is the OTHER direction across the cache boundary. paid is cacheable
+  // because its paid-up balance is frozen at `paid_at`; confirmed is not,
+  // because its balance is live. Un-paying moves a frozen document back to a
+  // live one, so its cached bytes — carrying the balance as of a payment that
+  // no longer exists — must not survive. Without this, unpay-then-repay would
+  // serve the FIRST payment's document forever: the second pay_invoice() writes
+  // a new `paid_at`, the status returns to a cacheable one, and the stale
+  // object is still sitting at the same path.
+  const { error: cacheErr } = await supabase.storage.from(PDF_BUCKET).remove([pdfCachePath(invoiceId)]);
+  if (cacheErr) return { error: cacheErr.message };
+
   const { error } = await supabase.rpc("unpay_invoice", { p_invoice_id: invoiceId, p_reason: reason, p_by: by });
   if (error) return { error: error.message };
   revalidatePath("/trips");
@@ -840,7 +1075,7 @@ export async function setHideAmountDue(invoiceId: string, hide: boolean): Promis
   // and the download stale under a success message — the exact failure being
   // fixed. Losing a cache entry to a later failed write costs one regeneration
   // of identical bytes; nothing is destroyed that is not derived.
-  const { error: cacheErr } = await supabase.storage.from(PDF_BUCKET).remove([`${invoiceId}.pdf`]);
+  const { error: cacheErr } = await supabase.storage.from(PDF_BUCKET).remove([pdfCachePath(invoiceId)]);
   if (cacheErr) return { error: cacheErr.message };
 
   const { error } = await supabase.from("invoices").update({ hide_amount_due: hide }).eq("id", invoiceId);
@@ -1104,6 +1339,14 @@ async function toPdfInvoiceData(
   if (inv.status === "draft" || inv.status === "review") {
     const { error: asmErr, assembly } = await assembleForInvoice(invoiceId);
     if (asmErr || !assembly) return { error: asmErr ?? "Could not assemble invoice for PDF." };
+    // A prepaid document whose balance could not be read is NOT produced. The
+    // renderers print the paid-up line whenever the figure is non-null and
+    // nothing else, so a failed read would emit a valid-looking invoice that is
+    // simply missing it — indistinguishable, to the customer holding it, from
+    // one that never had a balance. Refusing is the only honest outcome, and it
+    // is the operator who sees the message, not the customer.
+    const paidUp = await loadPaidUpBalance(supabase, inv, assembly.paymentMode);
+    if (!paidUp.ok) return { error: paidUp.error };
     const seller = assembly.sellerSnapshot as SellerSnap;
     const buyer = assembly.buyerSnapshot as BuyerSnap;
     pdfData = {
@@ -1143,7 +1386,10 @@ async function toPdfInvoiceData(
       covered: assembly.covered,
       amountDue: assembly.amountDue,
       grand: assembly.grand,
-      ledger: assembly.ledger,
+      tripTotals: assembly.tripTotals,
+      // Draft/review -> CURRENT. Nothing about this document is frozen yet, so
+      // its balance tracks reality (see loadPaidUpBalance's status table).
+      paidUpBalanceSar: paidUp.amount,
       hideAmountDue: inv.hide_amount_due,
       paymentMethod: null,
       paidAt: null,
@@ -1161,6 +1407,9 @@ async function toPdfInvoiceData(
     const paymentMode: PaymentMode =
       inv.payment_mode ?? (project?.payment_mode as PaymentMode | null | undefined) ?? "postpaid";
     const isPrepaid = paymentMode === "prepaid";
+    // Same refusal as the draft/review branch above, for the same reason.
+    const paidUp = await loadPaidUpBalance(supabase, inv, paymentMode);
+    if (!paidUp.ok) return { error: paidUp.error };
     pdfData = {
       status: inv.status,
       paymentMode,
@@ -1218,28 +1467,26 @@ async function toPdfInvoiceData(
       covered: { subtotal: inv.covered_subtotal_sar, vat: inv.covered_vat_sar, total: inv.covered_total_sar },
       amountDue: { subtotal: inv.amount_due_subtotal_sar, vat: inv.amount_due_vat_sar, total: inv.amount_due_sar },
       grand: { subtotal: inv.grand_subtotal_sar, vat: inv.grand_vat_sar, total: inv.grand_total_sar },
-      // Passed RAW: present when the row carries a 0036+ ledger snapshot,
-      // `undefined` otherwise. The pre-0036 legacy fallback (real subtotal off
-      // the frozen document totals, null balance/remaining so the document
-      // prints a dash rather than a fabricated 0) is NOT restated here — the
-      // view-model owns that single expression for both surfaces. `?? 0` below
-      // is type narrowing on a row whose non-null subtotals prove the snapshot
-      // exists, and it is the popup's own line, verbatim.
-      ledger:
+      // The two frozen trips-table subtotals, passed RAW: present when the row
+      // carries a 0036+ snapshot, `undefined` otherwise. The pre-0036 legacy
+      // fallback (both subtotals read off the frozen document totals that DO
+      // exist) is NOT restated here — the view-model owns that single
+      // expression for both surfaces.
+      //
+      // The balance/remaining columns beside these are NOT read. They hold the
+      // deleted running-balance mechanism; nothing renders them, and a future
+      // confirm writes null into them (see confirmInvoice's payload). Stored
+      // values stay on disk untouched — 0027's freeze law is about not
+      // REWRITING frozen money, and this reads less of it, not differently.
+      tripTotals:
         isPrepaid && inv.covered_ledger_subtotal_sar != null && inv.unpaid_ledger_subtotal_sar != null
-          ? {
-              covered: {
-                subtotal: inv.covered_ledger_subtotal_sar,
-                balance: inv.covered_ledger_balance_sar ?? 0,
-                remaining: inv.covered_ledger_remaining_sar ?? 0,
-              },
-              unpaid: {
-                subtotal: inv.unpaid_ledger_subtotal_sar,
-                balance: inv.unpaid_ledger_balance_sar ?? 0,
-                remaining: inv.unpaid_ledger_remaining_sar ?? 0,
-              },
-            }
+          ? { covered: inv.covered_ledger_subtotal_sar, unpaid: inv.unpaid_ledger_subtotal_sar }
           : undefined,
+      // paid -> frozen at `paid_at`; void -> frozen at `voided_at`; confirmed
+      // -> still CURRENT, because an unpaid invoice's balance is a live figure
+      // that must drop as the customer settles others. That last case is why
+      // `cacheable` below excludes confirmed.
+      paidUpBalanceSar: paidUp.amount,
       hideAmountDue: inv.hide_amount_due,
       paymentMethod: inv.payment_method,
       paidAt: inv.paid_at,
@@ -1263,8 +1510,19 @@ export async function getInvoicePdf(invoiceId: string): Promise<ActionResult<Inv
     ? `invoice-${inv.invoice_number}.pdf`
     : `invoice-draft-${invoiceId.slice(0, 8)}.pdf`;
 
-  const cacheable = inv.status === "confirmed" || inv.status === "paid" || inv.status === "void";
-  const storagePath = `${invoiceId}.pdf`;
+  // CACHEABLE = THE TWO TERMINAL STATUSES ONLY. `confirmed` used to be here
+  // and had to come out: a confirmed-unpaid invoice now prints a CURRENT
+  // paid-up balance, which moves every time the customer pays a different
+  // invoice or tops up. Bytes rendered once and served forever would freeze a
+  // live figure at whatever it happened to be the first time anyone clicked
+  // Download, and nothing would ever invalidate them — the invoice never
+  // changes status on its way to being wrong.
+  //
+  // Paid and void are genuinely frozen: their balance is an as-of figure that
+  // can never move again, so caching them is caching a constant. The cost of
+  // dropping confirmed is one provider call per download of an unpaid invoice.
+  const cacheable = inv.status === "paid" || inv.status === "void";
+  const storagePath = pdfCachePath(invoiceId);
 
   // Cache hit: reuse the previously-generated bytes, skip the provider call.
   if (cacheable) {

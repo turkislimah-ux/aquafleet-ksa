@@ -169,7 +169,6 @@
 import {
   splitCoveredUnpaidItems,
   consumingItems,
-  returnedTotal,
   VAT_RATE,
   round2,
   type BalanceReturnLite,
@@ -256,20 +255,32 @@ export type InvoiceTableTotals = {
   total: number; // subtotal + vat
 };
 
-// v3 §9 — the stacked Subtotal/Balance/Remaining figures shown beneath a
-// Covered or Unpaid TRIPS table. ALL THREE are VAT-inclusive (this is the
-// one place in the invoice that shows a VAT-inclusive running figure outside
-// document-level totals — it mirrors the balance ledger's own units, not the
-// invoice's per-row pre-VAT convention). subtotal = the table's own items,
-// summed VAT-inclusive (Σ consumedAmount, NOT calculateVat's document-level
-// round-once pass — see file header, "Amount Due" note). balance = the pool
-// available going into this table's items (the v3 FIFO walk, up to but not
-// including this table's own items). remaining = balance − subtotal
-// (negative on the Unpaid table when the pool falls short — expected).
-export type InvoiceLedgerTotals = {
-  subtotal: number;
-  balance: number;
-  remaining: number;
+// The VAT-inclusive foot of each prepaid TRIPS table — Covered and Unpaid.
+// Σ consumedAmount over that table's own items, NOT calculateVat's
+// document-level round-once pass (see file header, "Amount Due" note). This is
+// the one place in the invoice that shows a VAT-inclusive figure outside the
+// document totals, because it mirrors the balance ledger's units rather than
+// the invoice's per-row pre-VAT convention.
+//
+// A `balance` and a `remaining` stood beside these two subtotals until the
+// running-balance redesign, forming the "ledger" this type was named for:
+// `balance` walked the GLOBAL FIFO pool up to each table's first line and
+// `remaining` was balance − subtotal. THE WALK IS GONE, deliberately and
+// entirely. A per-invoice chained pool figure is a running balance computed by
+// a document that has no business computing one — it re-derived a customer-wide
+// ledger from whichever slice of history a single invoice happened to see, and
+// so contradicted the statement, the Finance row and the next invoice in the
+// same breath. The invoice now prints a PAID-UP BALANCE instead
+// (lib/prepaid.ts's paidUpBalance), which is a property of the CUSTOMER at an
+// instant, not of the document. The running balance has exactly one home: the
+// statement (Plan A) and the Finance row that mirrors it.
+//
+// Do not reintroduce a balance term here. scripts/invoice-check.ts asserts its
+// absence, and scripts/invoice-render-parity-check.ts asserts no renderer
+// prints one.
+export type InvoiceTripTableTotals = {
+  covered: number;
+  unpaid: number;
 };
 
 export type InvoiceAssembly = {
@@ -296,10 +307,9 @@ export type InvoiceAssembly = {
   amountDue: InvoiceTableTotals;
   /** ONE document-level VAT pass over EVERY line shown (covered trips + unpaid trips + ALL charges). Postpaid: same call as amountDue, so identical. */
   grand: InvoiceTableTotals;
-  // v3, prepaid only: the stacked ledger figures for the Covered/Unpaid
-  // trips tables. undefined for postpaid (no balance concept — see POSTPAID
-  // note above).
-  ledger?: { covered: InvoiceLedgerTotals; unpaid: InvoiceLedgerTotals };
+  // Prepaid only: the VAT-inclusive foot of each trips table. undefined for
+  // postpaid, whose tables foot with a plain document-level total instead.
+  tripTotals?: InvoiceTripTableTotals;
 
   // Passthrough identity, not computed — caller resolves these; kept here so
   // 5b's confirm step and 5c's display/mailto have one assembled object to
@@ -510,53 +520,17 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
       covered: coveredChargeIds.has(c.id),
     }));
 
-  // ---- Ledger (v3 §9): Subtotal/Balance/Remaining, both trips tables ----
-  // Balance entering the Covered table = pool value immediately before the
-  // first line THIS invoice actually shows, walked through the GLOBAL
-  // covered order (full customer history, not just this period — see
-  // PERIOD-MEMBERSHIP RULE). Balance entering the Unpaid table is simply the
-  // split's frozen remainingBalance: once the FIFO wall is hit the pool
-  // never moves again, so every unpaid item (this invoice's or another's)
-  // shares that same entering value.
-  // MUST match splitCoveredUnpaidItems' own starting pool exactly, because the
-  // walk below re-derives the entering balance from it. Refunds net out here
-  // for that reason and no other — same summation helper (returnedTotal,
-  // imported rather than restated), same rounding.
-  //
-  // NEITHER side is cut at periodEnd, matching the engine's lifetime net pool
-  // (Turki, locked — see splitCoveredUnpaidItems). This line previously
-  // restated both a `topup_date <= periodEnd` filter and a periodEnd-gated
-  // returnedTotal; the two sites have to move together or the entering-balance
-  // walk would start from a different number than the split it is walking.
-  const startingPool = round2(round2(topups.reduce((s, t) => s + t.amount_sar, 0)) - returnedTotal(returns));
-  const coveredLineIds = new Set(coveredTripEntries.map((e) => e.id));
-  let poolWalk = startingPool;
-  let coveredBalance = poolWalk;
-  let foundFirstCoveredLine = false;
-  for (const item of split.covered) {
-    if (!foundFirstCoveredLine && coveredLineIds.has(item.id)) {
-      coveredBalance = poolWalk;
-      foundFirstCoveredLine = true;
-    }
-    poolWalk = round2(poolWalk - item.consumedAmount);
-  }
-  if (!foundFirstCoveredLine) coveredBalance = poolWalk; // no covered lines this invoice — always-shown-at-zero case
+  // ---- Trips-table feet: one VAT-inclusive total each ----
+  // Σ consumedAmount over the lines each table actually prints. Nothing chains,
+  // nothing walks a pool: see InvoiceTripTableTotals above for what was deleted
+  // here and why. `unpaid` is still load-bearing beyond display — Amount Due
+  // reads it verbatim below rather than rounding the same trips a second time.
+  const coveredTripsInclVat = round2(coveredTripEntries.reduce((s, e) => s + e.consumedAmount, 0));
+  const unpaidTripsInclVat = round2(unpaidTripEntries.reduce((s, e) => s + e.consumedAmount, 0));
 
-  const coveredLedgerSubtotal = round2(coveredTripEntries.reduce((s, e) => s + e.consumedAmount, 0));
-  const unpaidLedgerSubtotal = round2(unpaidTripEntries.reduce((s, e) => s + e.consumedAmount, 0));
-  const unpaidBalance = split.remainingBalance;
-
-  const ledger = {
-    covered: {
-      subtotal: coveredLedgerSubtotal,
-      balance: coveredBalance,
-      remaining: round2(coveredBalance - coveredLedgerSubtotal),
-    },
-    unpaid: {
-      subtotal: unpaidLedgerSubtotal,
-      balance: unpaidBalance,
-      remaining: round2(unpaidBalance - unpaidLedgerSubtotal),
-    },
+  const tripTotals: InvoiceTripTableTotals = {
+    covered: coveredTripsInclVat,
+    unpaid: unpaidTripsInclVat,
   };
 
   // ---- covered / amountDue / grand (InvoiceTableTotals) ----
@@ -568,7 +542,7 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
   const coveredTripVatItems = toVatItems(coveredTripEntries);
 
   // Amount Due = unpaid TRIPS + UNCOVERED special charges, VAT-inclusive.
-  // The trips half is still taken verbatim from ledger.unpaid.subtotal (never
+  // The trips half is still taken verbatim from tripTotals.unpaid (never
   // independently rounded); the charges half is summed per-item at
   // round2(amount * 1.15), which is exactly ConsumedItem.consumedAmount — see
   // the AMOUNT DUE note in the file header for why both halves are built this
@@ -588,7 +562,7 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
 
   const unpaidTripPreVat = round2(unpaidTripEntries.reduce((s, e) => s + e.amount, 0));
   const amountDueSubtotal = round2(unpaidTripPreVat + uncoveredChargePreVat);
-  const amountDueTotal = round2(unpaidLedgerSubtotal + uncoveredChargeInclVat);
+  const amountDueTotal = round2(unpaidTripsInclVat + uncoveredChargeInclVat);
   const amountDue: InvoiceTableTotals = {
     subtotal: amountDueSubtotal,
     vat: round2(amountDueTotal - amountDueSubtotal),
@@ -637,7 +611,7 @@ export function assembleInvoice(input: AssembleInvoiceInput): InvoiceAssembly {
     covered,
     amountDue,
     grand,
-    ledger,
+    tripTotals,
     sellerSnapshot,
     buyerSnapshot,
     customerEmail,

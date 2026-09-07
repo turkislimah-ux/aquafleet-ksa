@@ -50,11 +50,12 @@ const ROW_UNFINALIZED_BG = "bg-amber-500/[0.06] dark:bg-amber-500/[0.10]";
 const ROW_UNFINALIZED_HOVER = "hover:bg-amber-500/[0.12] dark:hover:bg-amber-500/[0.16]";
 const ROW_PLAIN = "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]";
 
-// settledBalance: prepaid customers only (Finance tab's per-row figure,
-// already computed there — passed through unchanged so InvoiceDetailModal's
-// "Pay with Balance" confirmation can display it without recomputing.
-// undefined/null for postpaid (no balance concept).
-export type InvoiceCustomer = { id: string; name: string; email: string | null; settledBalance?: number | null };
+// `settledBalance` REMOVED from this type. It ferried the Finance tab's
+// per-row figure down to InvoiceDetailModal's "Pay with Balance" panel; the
+// popup now reads its paid-up balance off its own getInvoice payload, from the
+// one shared expression in lib/prepaid. A money figure travelling as a prop is
+// a second copy that can drift from the first. Do not reinstate it.
+export type InvoiceCustomer = { id: string; name: string; email: string | null };
 
 /**
  * The seed range for a NEW invoice: 1st of the current month → today.
@@ -381,7 +382,6 @@ export default function InvoicesModal({
         open={selectedInvoiceId !== null}
         invoiceId={selectedInvoiceId}
         customerEmail={customer.email}
-        settledBalance={customer.settledBalance ?? null}
         onClose={() => {
           setSelectedInvoiceId(null);
           onClose();

@@ -79,7 +79,7 @@ import {
 export type {
   PdfLine,
   PdfTotals,
-  PdfLedgerTotals,
+  PdfTripTotals,
   PdfIdentity,
   PdfInvoiceData,
 } from "./invoiceViewModel";
@@ -235,6 +235,12 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
   const split = (net: number, vat: number) =>
     `<span class="split">${bl(fillBi(labels.vatSplit, { net: num2(net), vat: num2(vat) }), "ar inline")}</span>`;
 
+  // Three stacked rows for a prepaid table, one for postpaid — the original
+  // footer, restored. What changed is the SOURCE of the middle row, not its
+  // position: it carries the paid-up balance the view-model decided, never the
+  // chained per-invoice running balance the row used to walk. The label moved
+  // with the value (`paidUpBalance`, not `runningBalance`) because a document
+  // may not put an old name on a new number. See VmTableFoot.
   const foot =
     s.foot.style === "ledger"
       ? `
@@ -243,8 +249,16 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
           <td class="num" colspan="2">${num2(s.foot.subtotal)}</td>
         </tr>
         <tr>
-          <td colspan="4" class="lbl">${bl(labels.runningBalance, "ar inline")}</td>
-          <td class="num" colspan="2">${s.foot.balance == null ? DASH : num2(s.foot.balance)}</td>
+          <td colspan="4" class="lbl">${bl(labels.paidUpBalance, "ar inline")}</td>
+          <td class="num" colspan="2">${
+            // The unreadable arm is set as WORDS, never as a figure — no
+            // tabular numerals, no LTR box — so it cannot be skimmed as an
+            // amount. A greyed-out number in this cell would read as a
+            // balance of zero, which is the one thing it must not say.
+            "note" in s.foot.balance
+              ? `<span class="na">${bl(s.foot.balance.note, "ar inline")}</span>`
+              : num2(s.foot.balance.amount)
+          }</td>
         </tr>
         <tr class="grand">
           <td colspan="4" class="lbl">${bl(labels.remaining, "ar inline")}</td>
@@ -578,6 +592,14 @@ export async function buildInvoicePdfHtml(data: PdfInvoiceData): Promise<string>
   tfoot .lbl { text-align: right; color: #3E6B84; font-weight: 700; }
   tfoot .lbl .ar { color: #4A7189; }
   tfoot .split { font-weight: 400; color: #7DA0B3; font-size: 8.2px; margin-left: 6px; }
+  /* The balance row's unreadable arm, in the figure cell. Set as words, never
+     as a number: italic, non-tabular, so the eye cannot skim it as an amount —
+     a greyed-out numeral here would read as a balance of zero. Its Arabic sits
+     ABOVE the 8.4px floor and above the Latin beside it, per the Arabic
+     typographic rule. */
+  tfoot .na { font-style: italic; font-weight: 600; font-size: 8.4px; color: #3E6B84;
+              white-space: normal; line-height: 1.35; }
+  tfoot .na .ar { font-style: normal; font-weight: 400; font-size: 10px; color: #2F5A73; }
   tfoot tr.grand td { background: linear-gradient(90deg,#0B7EEA,#12A578); color: #fff; font-weight: 700; font-size: 11px; }
   tfoot tr.grand .lbl { color: #fff; }
   tfoot tr.grand .lbl .ar, tfoot tr.grand .split { color: rgba(255,255,255,.93); }
@@ -627,6 +649,11 @@ export async function buildInvoicePdfHtml(data: PdfInvoiceData): Promise<string>
   .duecard .amt { font-size: 25px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; margin-top: 1px;
                   font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
   .duecard .amt .cur { font-size: 10.5px; font-weight: 400; color: rgba(255,255,255,.72); margin-left: 4px; letter-spacing: .04em; }
+  /* A .duecard .paidup block STOOD HERE — the balance, moved into the
+     settlement card under the hero amount. Reverted: the balance is read in the
+     trips tables' footers, where it always was, so the card is the amount owed
+     and nothing else again. The footer's own unreadable-arm styling is the
+     tfoot .na rule above, not here. */
 
   /* ---------- transfer details ---------- */
   /* Full width, BELOW the settlement row. This is the last thing the reader

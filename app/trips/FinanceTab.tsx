@@ -31,6 +31,7 @@ import { monthKeyOf } from "@/lib/commission";
 import { type PaymentMode } from "@/lib/db-types";
 import {
   derivedBalanceItems,
+  paidUpBalance,
   round2,
   VAT_RATE,
   type BalanceReturnLite,
@@ -81,7 +82,7 @@ type TripLite = {
   // (paid-invoice lock, `invoiceLocked = invoice_id set AND that invoice's
   // status = 'paid'`) and flows straight through boardProps.trips — just
   // wasn't declared on this narrower type until now. This is the "does this
-  // trip belong to a PAID invoice" signal settled balance filters on.
+  // trip belong to a PAID invoice" signal the paid-up balance filters on.
   invoiceLocked?: boolean;
   // Statement rebuild (Batch 3) — already computed in app/trips/page.tsx
   // (trips.truck_id -> trucks.plate/capacity_m3 join) and flows straight
@@ -243,16 +244,25 @@ export default function FinanceTab({
   //     of whether it's been invoiced/paid yet. This is the engine number —
   //     drives over-balance alerts, the invoice tables' own ledger, etc.
   //     UNCHANGED by this batch.
-  //   - `settledBalance` ("Settled Balance", NEW) — top-ups minus consumption
-  //     of ONLY the items sitting on a PAID invoice. Moves exclusively on
-  //     Mark Paid. Same derivedBalanceItems() call, just fed a pre-filtered
-  //     (paid-only) trips/charges slice — no second consumption formula.
+  //   - `paidUp` ("Paid-up balance", RENAMED from "Settled Balance") — top-ups
+  //     minus consumption of ONLY the items sitting on a PAID invoice, minus
+  //     returns. Moves exclusively on Mark Paid.
+  //
+  // THE PAID-UP FIGURE NO LONGER CALLS derivedBalanceItems WITH A FILTERED
+  // SLICE. It calls paidUpBalance() in lib/prepaid — the SAME expression the
+  // invoice popup, the PDF and the print document read through
+  // loadPaidUpBalance(). Two call shapes producing "the same" number is how
+  // this column came to contradict the invoice in the first place; there is now
+  // one expression and four readers of it.
+  //
+  // Identity worth holding on to, and the reason both columns can sit on one
+  // row without either being wrong: paidUp = balance − amountPayable.
   const rows = useMemo(() => {
     return customers.map((c) => {
       const project = projectByCustomer.get(c.id) ?? null;
       const mode = project?.payment_mode ?? null;
       let balance: number | null = null;
-      let settledBalance: number | null = null;
+      let paidUp: number | null = null;
       let consuming: ConsumingTrip[] = [];
       let customerTopups: TopupStatementInput[] = [];
       let customerCharges: ConsumingCharge[] = [];
@@ -286,25 +296,33 @@ export default function FinanceTab({
         }));
         balance = derivedBalanceItems(customerTopups, consuming, customerCharges, undefined, customerReturns);
 
-        // Settled balance: same engine call, paid-only slice. `invoiceLocked`
-        // (page.tsx) already means "this trip's invoice is status='paid'";
-        // `paid` (SpecialChargeRow, page.tsx) is the charge-side equivalent.
-        const consumingPaidOnly: ConsumingTrip[] = (tripsByProject.get(project.id) ?? [])
-          .filter((t) => t.invoiceLocked)
-          .map((t) => toConsumingTrip(t, project.rate_per_trip_sar));
-        const customerChargesPaidOnly: ConsumingCharge[] = (chargesByCustomer.get(c.id) ?? [])
+        // Paid-up balance: the paid-only slice, handed to the shared
+        // expression. `invoiceLocked` (page.tsx) already means "this trip's
+        // invoice is status='paid'"; `paid` (SpecialChargeRow, page.tsx) is the
+        // charge-side equivalent. `delivered_at != null` is restated rather
+        // than assumed — confirm blocks on undelivered trips, so the filter is
+        // a no-op today, but paidUpBalance() sums whatever it is given and
+        // derivedBalanceItems used to apply this filter itself.
+        //
+        // These are the CURRENT (live) figures, so they go through
+        // paidUpBalance, not paidUpBalanceAsOf: this screen holds no `paid_at`
+        // for a special charge (page.tsx's charges query carries only the
+        // invoice's customer_id and status), and the untimestamped item type is
+        // what makes an as-of call impossible to write here by accident.
+        const paidTripItems = (tripsByProject.get(project.id) ?? [])
+          .filter((t) => t.invoiceLocked && t.delivered_at != null)
+          .map((t) => ({ id: t.id, amount_sar: t.rate_sar ?? project.rate_per_trip_sar }));
+        const paidChargeItems = (chargesByCustomer.get(c.id) ?? [])
           .filter((ch) => ch.paid)
-          .map(toConsumingCharge);
+          .map((ch) => ({ id: ch.id, amount_sar: ch.amount_sar }));
         // Returns net here too: a refund is cash out of the pool whether or not
         // the work it once backed has been invoiced, so leaving it out would let
-        // Settled Balance keep reporting money the customer no longer holds.
-        settledBalance = derivedBalanceItems(
-          customerTopups,
-          consumingPaidOnly,
-          customerChargesPaidOnly,
-          undefined,
-          customerReturns,
-        );
+        // this column keep reporting money the customer no longer holds.
+        paidUp = paidUpBalance({
+          topups: customerTopups,
+          paidItems: [...paidTripItems, ...paidChargeItems],
+          returns: customerReturns,
+        });
       }
       // Paid invoices for this customer — read in BOTH modes now. Postpaid
       // renders them as Payment rows; prepaid renders them as record-only
@@ -317,7 +335,7 @@ export default function FinanceTab({
 
       // Batch A — "Unsettled Trips": delivered trips not yet on a PAID
       // invoice. Same notion as the statement's "Total payable" (postpaid)
-      // and Settled Balance's paid-filter above (invoiceLocked = invoice_id
+      // and the paid-up balance's paid-filter above (invoiceLocked = invoice_id
       // set AND that invoice's status='paid') — reused here, no new flag.
       const unsettledTripsCount = project
         ? (tripsByProject.get(project.id) ?? []).filter((t) => t.delivered_at != null && !t.invoiceLocked).length
@@ -340,7 +358,8 @@ export default function FinanceTab({
       // any more: a prepaid customer's pool FUNDS delivered work, it does not
       // SETTLE it, so only Mark Paid moves this figure. `balance` above is a
       // different number and stays one — it still drives the running-balance
-      // KPI, the over-balance banner, Settled Balance and the statement. The two
+      // KPI, the over-balance banner, the paid-up balance and the statement. It is
+      // also the Running Balance column beside this one. The two
       // decoupled on purpose; re-feeding one into the other would undo it.
       const amountPayable = computeAmountPayable({
         mode,
@@ -355,7 +374,7 @@ export default function FinanceTab({
         project,
         mode,
         balance,
-        settledBalance,
+        paidUp,
         consuming,
         customerTopups,
         customerReturns,
@@ -519,7 +538,23 @@ export default function FinanceTab({
                 <TH>{t("trips.finance.colMethod", lang)}</TH>
                 <TH>{t("common.rate", lang)}</TH>
                 <TH>{t("trips.finance.colUnsettledTrips", lang)}</TH>
-                <TH>{t("trips.finance.colSettledBalance", lang)}</TH>
+                {/* THE PAIR. Paid-up sits first because it is what the row
+                    already showed under its old name; Running Balance lands
+                    immediately beside it, so the number the over-balance banner
+                    names is finally on the row it names. Both carry a `title`
+                    definition for the same reason Amount Payable does — the
+                    difference between them is the whole point of showing two.
+                    Prepaid-only, both cells "—" otherwise. */}
+                <TH>
+                  <span title={t("trips.finance.colPaidUpBalanceHint", lang)}>
+                    {t("trips.invoiceSheet.paidUpBalance", lang)}
+                  </span>
+                </TH>
+                <TH>
+                  <span title={t("trips.finance.colRunningBalanceHint", lang)}>
+                    {t("trips.statement.colRunningBalance", lang)}
+                  </span>
+                </TH>
                 <TH>
                   {/* The definition lives on the header, not in a legend
                       nobody scrolls to. TH takes no title prop and this is
@@ -553,8 +588,22 @@ export default function FinanceTab({
                   </TD>
                   <TD className="tabular-nums">
                     {r.mode === "prepaid" ? (
-                      <span className={(r.settledBalance ?? 0) < 0 ? "text-rose-600 dark:text-rose-400 font-medium" : ""}>
-                        {formatSar(r.settledBalance ?? 0)}
+                      <span className={(r.paidUp ?? 0) < 0 ? "text-rose-600 dark:text-rose-400 font-medium" : ""}>
+                        {formatSar(r.paidUp ?? 0)}
+                      </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </TD>
+                  {/* Running Balance — the spendable pool, and the figure the
+                      over-balance banner above is computed from (`r.balance`,
+                      same field). Negative is the alarm state, so it takes the
+                      stronger red-plus-weight treatment the paid-up cell uses
+                      only as a tint. */}
+                  <TD className="tabular-nums">
+                    {r.mode === "prepaid" ? (
+                      <span className={(r.balance ?? 0) < 0 ? "text-rose-600 dark:text-rose-400 font-semibold" : "font-medium"}>
+                        {formatSar(r.balance ?? 0)}
                       </span>
                     ) : (
                       <span className="muted">—</span>
@@ -584,7 +633,7 @@ export default function FinanceTab({
                       {r.mode === "prepaid" || r.mode === "postpaid" ? (
                         <Btn
                           variant="outline"
-                          onClick={() => setInvoicesFor({ id: r.customer.id, name: r.customer.name, email: r.customer.email, settledBalance: r.settledBalance })}
+                          onClick={() => setInvoicesFor({ id: r.customer.id, name: r.customer.name, email: r.customer.email })}
                         >
                           {t("trips.finance.invoices", lang)}
                         </Btn>

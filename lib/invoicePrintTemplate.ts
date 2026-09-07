@@ -161,6 +161,12 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
 
   // `first` carries the heavy rule — the line where the itemisation ends and
   // the figure begins. `grand` carries the closing hairline and the weight.
+  //
+  // Three rows for prepaid, one for postpaid — the original footer, restored.
+  // The middle row's POSITION is the original; its VALUE is the paid-up balance
+  // the view-model decided, not the chained per-invoice running balance the row
+  // once walked, and its label moved with the value. Same shape as the PDF,
+  // because the two documents are one design. See VmTableFoot.
   const foot =
     s.foot.style === "ledger"
       ? `
@@ -169,8 +175,12 @@ function tripSection(s: VmTripSection, labels: InvoiceVm["labels"]): string {
           <td class="num" colspan="2">${num2(s.foot.subtotal)}</td>
         </tr>
         <tr>
-          <td colspan="4" class="lbl">${bl(labels.runningBalance, "ar inline")}</td>
-          <td class="num" colspan="2">${s.foot.balance == null ? DASH : num2(s.foot.balance)}</td>
+          <td colspan="4" class="lbl">${bl(labels.paidUpBalance, "ar inline")}</td>
+          <td class="num" colspan="2">${
+            "note" in s.foot.balance
+              ? `<span class="na">${bl(s.foot.balance.note, "ar inline")}</span>`
+              : num2(s.foot.balance.amount)
+          }</td>
         </tr>
         <tr class="grand">
           <td colspan="4" class="lbl">${bl(labels.remaining, "ar inline")}</td>

@@ -8131,10 +8131,42 @@ export const dict = {
       // header on VAT. Same shape as `trips.statement.vatSplit`. Both operands
       // arrive already formatted by `formatNum`, so both stay Latin.
       vatSplit: { en: "{net} + VAT {vat}", ar: "{net} + VAT {vat}" },
-      // PDF: `Balance` / `الرصيد`. The sheet's English says "Running Balance";
-      // the Arabic is the PDF's, so the two documents name the figure the same.
-      runningBalance: { en: "Running Balance", ar: "الرصيد" },
+      // THE INVOICE'S ONE BALANCE FIGURE, and the ONE key that names it —
+      // printed on the document, shown in the popup's totals stack, shown again
+      // in the pay-with-balance confirmation, and used verbatim as the Finance
+      // table's column header (app/trips/FinanceTab.tsx imports THIS key on
+      // purpose). One concept, one wording, every surface.
+      //
+      // "Paid-up", not "settled" and not "running": it counts only what PAID
+      // invoices have settled. It is NOT the spendable pool — that is the
+      // running balance, which lives on the statement and on the Finance row
+      // beside this one. See lib/prepaid.ts's paidUpBalance.
+      //
+      // `runningBalance` ("Running Balance") STOOD HERE and is NOT coming back
+      // even though the footer row it labelled has. That row now carries the
+      // paid-up balance, so it takes THIS key: an invoice printing a chained
+      // pool figure was the bug (see lib/invoice.ts's InvoiceTripTableTotals),
+      // and reusing its caption for a different number would reintroduce the
+      // claim without the arithmetic. `trips.statement.colRunningBalance` is a
+      // DIFFERENT key for a DIFFERENT figure and stays.
+      paidUpBalance: { en: "Paid-up balance", ar: "الرصيد المسدَّد" },
+      // The footer's third row: balance − this table's subtotal. Restored with
+      // the layout; the row is unchanged, only what feeds the balance above it.
       remaining: { en: "Remaining", ar: "المتبقي" },
+      // WHAT STANDS IN THE BALANCE'S PLACE WHEN THE BALANCE CANNOT BE READ.
+      // Every prepaid surface shows one or the other and never neither: the
+      // documents refuse to render at all when the read FAILS, but a prepaid
+      // invoice that reached a renderer without a figure prints this rather
+      // than an empty space, because an empty space is indistinguishable from a
+      // postpaid invoice, which is exactly how the missing balance hid. On
+      // screen the popup shows it in the figure's own place — the operator is
+      // the one who can act on it.
+      paidUpUnavailable: { en: "Unavailable — could not be read", ar: "غير متاح — تعذّرت قراءته" },
+      // A `paidUpNow` / `paidUpAtPaid` / `paidUpAtVoid` trio STOOD HERE, the
+      // balance card's sub-caption saying WHICH INSTANT the figure was. Gone
+      // with the card: the restored footer row is a table row with no room for
+      // a caption under it. The as-of rule itself is unchanged and still
+      // enforced upstream — see loadPaidUpBalance's asOf.
 
       // ── Special charges ──────────────────────────────────────────────────
       specialCharges: { en: "Special Charges", ar: "رسوم إضافية" },
@@ -8279,14 +8311,29 @@ export const dict = {
       confirmConfirm: { en: "Yes, confirm invoice", ar: "نعم، أكّد الفاتورة" },
       payWithBalance: { en: "Pay with Balance", ar: "السداد من الرصيد" },
       markPaid: { en: "Mark Paid", ar: "تحديد كمدفوعة" },
-      settledBalance: { en: "Settled balance", ar: "الرصيد المسوّى" },
-      // RENAMED from "This invoice (Grand Total)". The row is the balance
-      // DRAW-DOWN, and the balance only ever paid the covered portion. Grand
-      // Total now carries the unpaid trips and uncovered charges too — money
-      // the customer still owes — so labelling the draw-down with it would
-      // promise the pool settles a figure it does not.
-      thisInvoiceGrand: { en: "This invoice (covered by balance)", ar: "هذه الفاتورة (المغطّى بالرصيد)" },
-      remainingSettled: { en: "Remaining settled balance", ar: "الرصيد المسوّى المتبقي" },
+      // `settledBalance` stood here and is GONE. It named the same figure as
+      // `paidUpBalance` above, in different words, on an adjacent surface — the
+      // pay-with-balance panel — which is exactly how one number comes to read
+      // as two. The panel now uses `paidUpBalance` like everything else.
+      // RENAMED TWICE, and the second rename is a correction.
+      //
+      // It read "This invoice (Grand Total)", then "This invoice (covered by
+      // balance)" on the reasoning that the pool only ever paid the COVERED
+      // portion, so the draw-down row should show covered.total.
+      //
+      // That reasoning described the POOL — the running balance, which does
+      // deduct at delivery and only for covered work. The three rows in this
+      // panel are not the pool. They are the PAID-UP balance, which moves on
+      // Mark Paid and moves by everything the payment settles: covered trips,
+      // unpaid trips and charges alike, because paying this invoice puts ALL
+      // of its lines on the paid side. Showing covered.total made the panel's
+      // own subtraction disagree with the figure it would print a second
+      // later, which is the whole class of bug this batch removes.
+      thisInvoiceGrand: { en: "This invoice (settled by this payment)", ar: "هذه الفاتورة (تُسوّى بهذا السداد)" },
+      // Reworded off "settled" onto "paid-up" so the panel's three rows read as
+      // one arithmetic: paid-up balance − this invoice = remaining paid-up
+      // balance. It was the only row still using the retired vocabulary.
+      remainingSettled: { en: "Remaining paid-up balance", ar: "الرصيد المسدَّد المتبقي" },
       balanceNote: {
         en: "The balance already covered these trips/charges at delivery — this just records the settlement and locks them. No new money changes hands.",
         ar: "الرصيد غطّى هذه الرحلات/الرسوم عند التسليم — هذا يسجّل التسوية ويقفلها فقط. لا تنتقل أي أموال جديدة.",
@@ -8453,7 +8500,25 @@ export const dict = {
       empty: { en: "No customers in this view.", ar: "لا يوجد عملاء في هذا العرض." },
       colMethod: { en: "Method", ar: "الطريقة" },
       colUnsettledTrips: { en: "Unsettled Trips", ar: "رحلات غير مسددة" },
-      colSettledBalance: { en: "Settled Balance", ar: "الرصيد المسدد" },
+      // `colSettledBalance` stood here and is GONE, with its column. That header
+      // named the paid-up balance in a third set of words, and its column sat
+      // alone on the row while the SPENDABLE pool was a hidden KPI — so a
+      // customer 37,145 SAR overdrawn showed a cheerful +24,150 on the very row
+      // the red over-balance banner was naming. Both figures are on the row now,
+      // each under the same words the rest of the app uses for it:
+      //   paid-up balance  -> trips.invoiceSheet.paidUpBalance (the invoice's)
+      //   running balance  -> trips.statement.colRunningBalance (the statement's)
+      // Two keys, no third wording, and neither invented here.
+      // Hint text for the pair, so the difference is on the screen and not only
+      // in this file:
+      colPaidUpBalanceHint: {
+        en: "Deposits minus what PAID invoices have settled, minus refunds. Not the spendable pool.",
+        ar: "الإيداعات ناقص ما سدّدته الفواتير المدفوعة، ناقص المبالغ المستردة. ليس الرصيد القابل للإنفاق.",
+      },
+      colRunningBalanceHint: {
+        en: "The spendable pool: deposits minus every delivered trip and charge, minus refunds.",
+        ar: "الرصيد القابل للإنفاق: الإيداعات ناقص كل رحلة ورسم تم تسليمه، ناقص المبالغ المستردة.",
+      },
       colAmountPayable: { en: "Amount Payable", ar: "المبلغ الواجب السداد" },
       // The Amount Payable header's `title` tooltip — a DEFINITION, and the one
       // place the rule is written on screen. It is a native title attribute, so
