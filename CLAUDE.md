@@ -103,13 +103,18 @@ Loading every skill at once wastes context and has crashed sessions.
   REMOVAL — STRIP COMMENTS BEFORE TRUSTING THE COUNT.** The epitaph fails the
   very check that confirms the burial, and reads exactly like a failed fix. Seen
   on `amountPayable.ts`, on `StatementViews.tsx`, 4+ times in the prepaid
-  lifetime-net pass, and again on §6's own `divide-` regression grep. The fix:
+  lifetime-net pass, and again on §6's own `divide-` regression grep. The tool:
 ```sh
-  git show :<path> | grep -nF '<identifier>' | grep -vE '^\s*[0-9]+:\s*(\*|//|--|/\*)'
+  npx tsx scripts/code-grep.ts '<identifier>' [path...]
 ```
-  Empty = genuinely gone. **Use `grep -F` when the pattern holds parens** — an
-  unescaped `(` false-zeroes the count and reports a live call site as removed.
-  Read the surrounding lines, never the number alone.
+  Exit 0 = genuinely gone; exit 1 prints every live site. Reads the STAGED blob
+  (`--worktree` for disk), scans all tracked ts/tsx/css/sql when given no path.
+  **Do NOT hand-roll this with `grep`.** The chain that stood here dropped lines
+  that *begin* a comment — but a block comment's continuation lines carry no
+  marker, so it reported prose as code, most recently the JSX note announcing
+  `sampleTripRef`'s own removal. A comment's extent is not a property of one
+  line, so no line filter can fix it. The script lexes, and self-tests at import;
+  a broken stripper turns `test:money` red rather than reporting green.
 - **Quote dynamic-route paths:** `git add 'app/fleet/[id]/page.tsx'` — zsh globs
   `[id]` silently. **Avoid `!` in commit messages** (history expansion).
 - **HANDOFF files:** `.planning/HANDOFF.md` is ours and committed — read at session

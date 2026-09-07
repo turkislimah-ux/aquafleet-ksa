@@ -47,6 +47,7 @@ import {
 import { num2 } from "../lib/docPrimitives";
 import { formatSar } from "../lib/utils";
 import { buildStatementHtml } from "../lib/statementPdfTemplate";
+import { stripComments } from "./code-grep";
 import {
   buildStatementVm,
   type StatementPaymentInput,
@@ -560,26 +561,26 @@ check(
 // body. CLAUDE.md records the same failure on amountPayable.ts and
 // StatementViews.tsx; this is the fourth time.
 //
-// AND IT MUST BE A LINE FILTER, NOT A LOOKAHEAD. The first version of 11c was
+// AND IT MUST NOT BE A LOOKAHEAD. The first version of 11c was
 // `/^\s*(?!\/\/|\*|\/\*).*<pattern>/m` and FAILED on the honest tree, because
 // `\s*` backtracks to zero width: the lookahead then runs at column 0, sees a
 // SPACE rather than a slash, passes, and `.*` swallows the `//` it was there to
 // exclude. A negative lookahead placed after a variable-width match does not
-// mean what it reads like. Dropping whole comment lines cannot backtrack.
-function codeOnly(src: string): string {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
-    .split("\n")
-    .filter((l) => {
-      const s = l.trimStart();
-      return !s.startsWith("//") && !s.startsWith("*") && !s.startsWith("/*");
-    })
-    .join("\n");
+// mean what it reads like.
+//
+// The line-dropping filter that replaced it lived here and is GONE — it was a
+// second copy of a rule the repo applies after every removal, and it shared the
+// blind spot of CLAUDE.md's grep chain: a block comment's continuation lines
+// carry no marker, so prose was kept as code. scripts/code-grep.ts now owns the
+// one implementation, lexes rather than pattern-matches, and self-tests on
+// import. Note it BLANKS comments instead of deleting lines, so line numbers
+// survive — irrelevant to the substring scans below, load-bearing for the CLI.
+function codeOnly(src: string, mode: "ts" | "css" = "ts"): string {
+  return stripComments(src, mode);
 }
 
 const modalCode = codeOnly(modalSrc);
-const globalsCode = codeOnly(globalsSrc);
+const globalsCode = codeOnly(globalsSrc, "css");
 const OLD_PRINT = ["window.print()", "printing-statement", "statement-print-portal"];
 
 check(
