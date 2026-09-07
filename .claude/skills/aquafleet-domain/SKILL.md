@@ -222,11 +222,37 @@ because their identity fields match.
 **Do not re-investigate this as a live bug.** Widening the pool changed what a
 *re-derivation* of the covered/unpaid split returns, but not one stored figure.
 
-**Measured live 2026-08-31:** 8 already-issued prepaid invoices (5 paid,
-1 confirmed, 2 void) re-derive a split differing from their FROZEN split —
-13,524.00 SAR would move Unpaid → Covered, of which 7,831.50 is already
-collected. **2 of the 8 were already divergent BEFORE `9c287d6`**, so the pool
-change is not the sole cause and "revert it" would not close it.
+**TWO different divergences live here. Do not conflate them** — the first is
+cosmetic, the second was 517.50 SAR nobody could bill.
+
+**1. The covered/unpaid SPLIT.** Measured 2026-08-31: 8 already-issued prepaid
+invoices (5 paid, 1 confirmed, 2 void) re-derive a split differing from their
+FROZEN split — 13,524.00 SAR would move Unpaid → Covered, of which 7,831.50 is
+already collected. **2 of the 8 were already divergent BEFORE `9c287d6`**, so
+the pool change is not the sole cause and "revert it" would not close it. The
+split only decides which TABLE a line prints in; no figure moves.
+
+**2. The GRAND TOTAL — the stored `grand_total_sar` is SHORT of the lines the
+document itself lists.** Measured 2026-09-08: five issued invoices, 41,756.50
+SAR understated.
+
+| invoice | status | stored | true | short by |
+|---|---|---|---|---|
+| 026-000007 | paid | 1,414.50 | 1,886.00 | 471.50 |
+| 026-000009 | confirmed, unpaid | 0.00 | 4,761.00 | 4,761.00 |
+| 026-000014 | paid | 24,150.00 | 56,994.00 | 32,844.00 |
+| 026-000015 | paid | 540.50 | 3,070.50 | 2,530.00 |
+| 026-000017 | paid | 7,544.00 | 8,694.00 | 1,150.00 |
+
+The 32,844.00 and 471.50 are the v3 §9 victims `lib/invoice.ts:82` already
+names. **Void invoices (1/5/6/7) show NEGATIVE deltas because voiding RELEASED
+their lines** — that is the void working. Do not "fix" them, and do not read the
+sum without the per-invoice rows.
+
+**Cash was never wrong.** `grand_total_sar` drives no money — `pay_invoice` and
+the balance engine sum the lines. Verified 2026-09-08 on 026-000017: the paid-up
+balance moved by 8,694.00 while the column said 7,544.00. The column is
+display-and-reports only.
 
 **Why this is not a defect:** confirmed / paid / void invoices render and print
 from the frozen `covered_lines` / `unpaid_lines` jsonb and the stored total
@@ -235,12 +261,36 @@ columns (0027's freeze law) — `invoiceActions.ts` reads them verbatim (grep
 issued invoice. No document drifts. Only
 draft and review recompute live, which is the point of freezing at confirm.
 
-**Treatment: LEFT as-is** (Turki, 2026-08-31). The freeze rule is correct as
-issued; no data was touched. The one live item is `026-000009`, confirmed and
-unpaid at 4,243.50 SAR.
+**Treatment for the four PAID invoices: LEFT as-is** (Turki 2026-08-31,
+re-affirmed 2026-09-08 on a wider measurement). **Do not draft a backfill.**
+Three reasons, in order of weight:
+
+- It restates four ALREADY-ISSUED tax invoices whose customers may hold the
+  original PDFs. ZATCA practice corrects an issued invoice with a credit/debit
+  note, never a silent edit. The system records no "sent" flag, so nobody can
+  tell from the data which copies are out there.
+- It is not one column. `covered_* = grand − amountDue` (`lib/invoice.ts:67`),
+  so a correct backfill rewrites six columns or the stored identity breaks —
+  plus a `PDF_CACHE_VERSION` bump, or cached PDFs keep serving the old bytes.
+- `lib/invoice.ts:120-127` locks it: "fix forward, never rewrite applied
+  history." The engine has been correct since that fix; only legacy rows differ.
+
+**`026-000009` was the ONE exception, and it was not cosmetic.** Its charge
+"emergency hours" (450.00, 517.50 gross) sat excluded from Grand Total by being
+uncovered AND from Amount Due by being a charge — the stranded-charge dead end
+`lib/invoice.ts:98` describes. Measured: it appeared on no other invoice, and it
+COULD not, because a charge belongs to exactly one invoice at creation
+(`reservedElsewhereIds`). So the money was unbillable while that invoice stood.
+**Resolution: void + reissue**, which puts it through the current engine and
+leaves an audit trail instead of rewriting a frozen row. Voiding demonstrably
+releases the lines — invoices 1/5/6/7 re-derive to zero, which is the evidence.
+
+**The generalisable rule: a frozen understatement on a PAID invoice is a report
+problem; on an UNPAID one it is stranded revenue. Reissue the second, leave the
+first.**
 
 These counts are a dated measurement, not durable law — **re-measure before
-quoting them.** The durable part is the rule above it.
+quoting them.** The durable part is the rules above.
 
 **Re-measure with `npx tsx scripts/frozen-split-check.ts`**, which exists so this
 stops being rebuilt from a throwaway script. It PRINTS the count/SAR (never
