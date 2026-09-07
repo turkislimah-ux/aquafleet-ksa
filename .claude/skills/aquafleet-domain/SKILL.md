@@ -285,9 +285,10 @@ COULD not, because a charge belongs to exactly one invoice at creation
 leaves an audit trail instead of rewriting a frozen row. Voiding demonstrably
 releases the lines — invoices 1/5/6/7 re-derive to zero, which is the evidence.
 
-**The generalisable rule: a frozen understatement on a PAID invoice is a report
-problem; on an UNPAID one it is stranded revenue. Reissue the second, leave the
-first.**
+**The generalisable rule: on an UNPAID invoice a frozen understatement is
+stranded revenue — reissue it. On a PAID one it is a TAX-DOCUMENT discrepancy,
+not a reporting bug — escalate it, do not code around it.** See the next
+subsection for why the distinction decides what you are allowed to change.
 
 These counts are a dated measurement, not durable law — **re-measure before
 quoting them.** The durable part is the rules above.
@@ -300,6 +301,99 @@ if and only if it is issued.** Note it reports **10 / 28,474.00 SAR**, not the
 invoices too, whose lines were released back to the pool, so they re-derive to
 nothing and book their full stored `amount_due`. Neither figure changes the
 ruling. Read its per-invoice lines, never the total alone.
+
+### The `grand_total_sar` readers — which are correct, which are stuck, which are open
+
+**Do not "fix" the INVOICE-LIST screens to re-derive around the legacy rows.
+Investigated 2026-09-08; the answer there is no.** Measured: `collected` shows
+149,293.00 against a true 186,104.50, `billed` 149,293.00 against 190,865.50 —
+gaps of 36,811.50 and 41,572.50, about **20% of collected revenue**. Big enough
+that "it's only a rounding nit" is not the reason to leave it. The reason is
+structural — **and the structure only holds on those screens.** The Dashboard
+and Reports cash KPIs are a DIFFERENT surface with the opposite answer; see the
+sub-point below, and do not quote this ruling at them.
+
+Re-measured 2026-09-08 with `npx tsx scripts/code-grep.ts grand_total_sar
+--worktree`: **eight** sites in `app/` render or aggregate the column off the
+`invoices` table (an earlier note said seven and omitted one). They split into
+two kinds:
+
+- **Kind A — "this is the document's total"** (4). `InvoicesModal.tsx:313`,
+  `ArchiveCustomerTab.tsx:367` and `:877`, `BreakdownReport.tsx:738`. These are
+  lists OF DOCUMENTS. The frozen total is the correct value — it is what the
+  document says. (`InvoiceDetailModal.tsx:343` / `invoiceActions.ts:1513` render
+  the document itself and are correct by the 0027 freeze law; `page.tsx` hits are
+  selects and types.)
+- **Kind B — "this is money"** (4). `ArchiveCustomerTab.tsx:607` `collected` /
+  `:610` `billed` (whose own comment claims "what actually came in"), **`:301`
+  `paidTotal`, the per-customer card header** — the one the earlier count missed
+  — and `BreakdownReport.tsx:331` `monthPaymentsTotal`.
+
+**Every Kind-B aggregate here sits directly beneath Kind-A rows.**
+`monthPaymentsTotal` is the Total row of the table whose rows are
+`p.inv.grand_total_sar`; `collected` and `paidTotal` sum the invoices the list
+below them renders. So:
+
+- Fix the aggregate, leave the rows → **the column stops adding up.** A visible
+  contradiction on a finance screen is worse than a consistent understatement
+  with a documented cause.
+- Fix the rows too → the report contradicts the PDF the customer holds. A report
+  is not a document, but one claiming 026-000014 is 56,994.00 when the invoice
+  we sent says 24,150.00 is not an improvement.
+
+There is no third option that keeps THOSE screens coherent, which is why the
+answer is "change nothing" rather than "not worth the effort".
+
+**What it actually is:** on those four paid invoices the customer's POOL was
+drawn down by the true line total while their tax invoice states less —
+026-000014 took 56,994.00 out of the pool against a 24,150.00 document. Cash is
+right; the document under-states what we charged. That is a debit-note /
+reissue question for Turki and his accountant, **not** something report code may
+paper over. Raised 2026-09-08; 36,811.50 SAR across four documents.
+
+**The Dashboard and Reports cash KPIs are NOT covered by that argument — OPEN,
+not ruled.** Found 2026-09-08 while re-measuring the count above, after the
+"change nothing" call had already been made on the invoice lists. The same
+understatement reaches them through the DB, not through `app/`. **Two views, not
+one:**
+
+- `v_collections_monthly.collected_gross_sar` (0098:270) — sums
+  `i.grand_total_sar` by `paid_at` month. 0167 deliberately did NOT touch it
+  (see its header note at `:84`) and added a guard at `:995` asserting it keeps
+  `grand_total_sar` — so a fix must amend that guard, not trip it.
+- `v_revenue_invoices.gross_sar` (0167:434) — the BILLED side, feeding
+  `v_revenue_monthly` → `revenue_sar` → the P&L and `v_daily_operations`.
+
+Both matter at once: `cashCoverage(collected, revenue)` divides one by the
+other, so the ratio understates in the numerator AND the denominator and the
+error does not simply cancel. Measured, collections side, against the true
+per-item gross:
+
+| month | view shows | true | gap |
+|---|---|---|---|
+| 2026-07 | 30,532.50 | 30,820.00 | 287.50 |
+| 2026-08 | 109,020.00 | 141,864.00 | 32,844.00 |
+| 2026-09 | 9,740.50 | 13,420.50 | 3,680.00 |
+| **total** | **149,293.00** | **186,104.50** | **36,811.50** |
+
+August under-states by ~30%. It renders as a north-star KPI at
+`app/page.tsx:336` and `app/reports/OverviewTab.tsx:284`, feeds
+`cashCoverage(collected, revenue)` at `:234`, `StatementsTab.tsx:554` and
+`lib/report-builder.ts:312`. **None of those has a document list beneath it** —
+so "the column stops adding up" cannot happen, and the argument above does not
+transfer.
+
+0167:86 says the cash views are VAT-inclusive because they answer "what moved
+through the bank". **By that stated intent the view is wrong** — what moved
+through the bank IS the true gross: the pool was drawn by 186,104.50
+(`pay_invoice` sums the lines, see "Cash was never wrong" above), not by
+149,293.00. This is not a VAT question, which is all 0167 was deciding. **This needs Turki's call,
+and a fix is a DRAFTED migration (§5) — do not self-apply, and do not close this
+by citing the invoice-list ruling.**
+
+`app/maintenance/*` and `app/inventory/*` also match `grand_total_sar` — those
+are workshop payments and stock receipts, DIFFERENT tables, unaffected. Do not
+sweep them into this.
 
 ---
 
