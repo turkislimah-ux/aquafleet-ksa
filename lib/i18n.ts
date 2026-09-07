@@ -8560,8 +8560,8 @@ export const dict = {
       // real trip's number — and sat in the statement header where it read like
       // a field about this customer. Turki's ruling: the header carries the
       // statement PERIOD instead. The Ref COLUMN is untouched; only the header
-      // line is gone. lib/trip-ref.ts still exports sampleTripRef(), now with
-      // no caller.
+      // line is gone. The helper behind it, lib/trip-ref.ts's sampleTripRef(),
+      // has since been deleted too — this key was its last caller.
       //
       // The header's period field. Composed from `periodHeading` over the
       // existing `from`/`to` below, so the two dates keep the words the period

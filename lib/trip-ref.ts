@@ -23,20 +23,15 @@ export function tripRefRangeLabel(refs: (string | null | undefined)[]): string {
   return `${first} – ${last}`;
 }
 
-/**
- * Illustrative sample of a project's trip-ref FORMAT, e.g. "K1-026-0001" —
- * NOT a real trip's ref (no counter lookup, no DB round-trip). Demonstrates
- * the scheme new trips for this project will follow (0033):
- * <initials>-<yyy>-NNNN, where initials = projects.initials, yyy = last 3
- * digits of the year, NNNN = a per-project/per-year counter (always shown
- * as 0001 here — this is a demonstration, not a count). Returns null when
- * the project has no initials yet (e.g. legacy/pre-0033 data).
- */
-export function sampleTripRef(
-  initials: string | null | undefined,
-  year: number = new Date().getFullYear()
-): string | null {
-  if (!initials) return null;
-  const yyy = String(year % 1000).padStart(3, "0");
-  return `${initials}-${yyy}-0001`;
-}
+// sampleTripRef() stood here and is GONE. It built an illustrative sample of
+// a project's ref FORMAT — "K1-026-0001", always counter 0001, no lookup and
+// no DB round-trip — to show the scheme 0033 gives new trips. Its only caller
+// was the statement header's "Ref." line, which Turki replaced with the
+// statement PERIOD (c487a50), leaving the helper exported with nothing calling
+// it. A format demonstration is not a ref, and this file is for rendering real
+// ones; keeping it invited a future caller to print a fabricated number beside
+// genuine ones. If a screen ever needs to TEACH the format, it should say so in
+// words from lib/i18n.ts rather than mint a plausible-looking ref.
+//
+// The FORMAT itself is not documented only here: 0033 owns it, and the two
+// helpers above render the refs the database actually issues.

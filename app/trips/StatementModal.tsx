@@ -460,9 +460,11 @@ export default function StatementModal({
           </div>
         </div>
         {/* The sample-ref line stood here and is GONE. It rendered "Ref. K1-0001"
-            over sampleTripRef() — a synthetic EXAMPLE of the project's reference
-            FORMAT, not any trip in this statement — directly under the customer
-            name, where it read like a fact about this customer's account.
+            over a helper that MINTED that string — a synthetic EXAMPLE of the
+            project's reference FORMAT, not any trip in this statement — directly
+            under the customer name, where it read like a fact about this
+            customer's account. The helper (lib/trip-ref.ts's sampleTripRef) is
+            deleted; this line was its only caller.
             The screen's period is the picker below: those two date inputs carry
             the same `from`/`to` labels the document's header line uses and hold
             the same two values, so the document adds a rendering of the period,
