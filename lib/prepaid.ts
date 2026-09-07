@@ -466,6 +466,26 @@ export function inclVat(amountPreVat: number): number {
 }
 
 /**
+ * THE draw-down: what a set of settled items takes off the paid-up balance.
+ *
+ * Per-item gross, then summed — NOT the sum grossed up once. The two differ by
+ * halalas (three items of 0.03 gross to 0.09 item-wise and 0.10 in one step),
+ * and the item-wise figure is the one the balance actually moves by, because
+ * `paidUpCore`'s debit side below IS this function.
+ *
+ * That shared call is the point. The pay-with-balance panel previews
+ * `paidUp − settlementGross(this invoice's items)`, so previewing and settling
+ * are one expression evaluated twice rather than two expressions that have to
+ * be kept in step. A stored `grand_total_sar` cannot serve here: invoices frozen
+ * by the covered-only engine hold a total that EXCLUDES lines they list (live
+ * today on 026-000009 and 026-000017), so the panel promised one figure and the
+ * payment moved the balance by another.
+ */
+export function settlementGross(items: readonly { amount_sar: number }[]): number {
+  return round2(items.reduce((s, it) => s + inclVat(it.amount_sar), 0));
+}
+
+/**
  * THE paid-up balance expression: deposits − paid-invoice consumption − returns.
  * Private; reached through the two exports below.
  *
@@ -491,10 +511,8 @@ function paidUpCore(
   const credits = round2(
     topups.filter((tu) => asOfDay == null || tu.topup_date <= asOfDay).reduce((s, tu) => s + tu.amount_sar, 0),
   );
-  const debits = round2(
-    paidItems
-      .filter((it) => asOfMs == null || Date.parse(it.paid_at!) <= asOfMs)
-      .reduce((s, it) => s + inclVat(it.amount_sar), 0),
+  const debits = settlementGross(
+    paidItems.filter((it) => asOfMs == null || Date.parse(it.paid_at!) <= asOfMs),
   );
   // The dormant `asOfDate` parameter's FIRST and ONLY caller — see returnedTotal's
   // own note. Legitimate here for the reason spelled out above the type: this

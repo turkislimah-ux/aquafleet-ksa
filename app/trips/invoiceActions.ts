@@ -16,6 +16,7 @@ import { assembleInvoice, canEditSpecialCharges, type InvoiceAssembly, type Spec
 import {
   paidUpBalance,
   paidUpBalanceAsOf,
+  settlementGross,
   type BalanceReturnLite,
   type ConsumingTrip,
   type PaidConsumedItem,
@@ -575,17 +576,42 @@ export async function getSpecialChargeImageSignedUrl(chargeId: string): Promise<
 // DELIVERED and sitting on a status='paid' invoice, plus charges on one. Same
 // rate rule as everywhere else — the trip's own frozen `rate_sar`, falling
 // back to the project's current rate only where the row predates it.
+//
+// IT ALSO RETURNS THIS INVOICE'S OWN DRAW-DOWN, from the SAME read. The
+// pay-with-balance panel has to preview the balance a payment will leave, and
+// the only figure that cannot be wrong is the one the payment itself will
+// subtract. Reading `grand_total_sar` for it was: invoices frozen by the
+// covered-only engine hold a total that EXCLUDES lines they list, so the panel
+// previewed 7,544.00 on 026-000017 where the payment moves the balance by
+// 8,694.00, and 0.00 on 026-000009 against a real 4,761.00.
+//
+// So this invoice's id joins the `in (…)` list and its rows are partitioned
+// out. One query, one rate rule, one gross-up (`settlementGross`, which is
+// literally paidUpCore's debit side) — the preview and the settlement are the
+// same expression over the same rows, not two expressions kept in step. Adding
+// a second query here would reopen exactly the gap it closes.
 // ---------------------------------------------------------------------------
-export type PaidUpRead = { ok: true; amount: number | null } | { ok: false; error: string };
+export type PaidUpRead =
+  | {
+      ok: true;
+      amount: number | null;
+      /**
+       * VAT-inclusive total of THIS invoice's own settleable items — the exact
+       * amount `amount` will drop by when it is paid. null when postpaid, for
+       * the same reason `amount` is: there is no pool to draw down.
+       */
+      settlementSar: number | null;
+    }
+  | { ok: false; error: string };
 
 const PAID_UP_UNAVAILABLE = "Could not read this customer's paid-up balance.";
 
 async function loadPaidUpBalance(
   supabase: ReturnType<typeof createClient>,
-  inv: Pick<Invoice, "customer_id" | "status" | "paid_at" | "voided_at">,
+  inv: Pick<Invoice, "id" | "customer_id" | "status" | "paid_at" | "voided_at">,
   paymentMode: PaymentMode,
 ): Promise<PaidUpRead> {
-  if (paymentMode !== "prepaid") return { ok: true, amount: null };
+  if (paymentMode !== "prepaid") return { ok: true, amount: null, settlementSar: null };
 
   const asOf = inv.status === "paid" ? inv.paid_at : inv.status === "void" ? inv.voided_at : null;
 
@@ -616,33 +642,45 @@ async function loadPaidUpBalance(
   const paidAtByInvoice = new Map<string, string | null>((paidInvRes.data ?? []).map((i) => [i.id, i.paid_at]));
   const paidInvoiceIds = [...paidAtByInvoice.keys()];
 
-  let items: { id: string; amount_sar: number; paid_at: string | null }[] = [];
-  if (paidInvoiceIds.length > 0) {
-    const projectRate = (projectRes.data?.rate_per_trip_sar as number | undefined) ?? 0;
-    const [tripsRes, chargesRes] = await Promise.all([
-      supabase
-        .from("trips")
-        .select("id, rate_sar, invoice_id")
-        .in("invoice_id", paidInvoiceIds)
-        .not("delivered_at", "is", null),
-      supabase.from("invoice_special_charges").select("id, amount_sar, invoice_id").in("invoice_id", paidInvoiceIds),
-    ]);
-    if (tripsRes.error || chargesRes.error) return { ok: false, error: PAID_UP_UNAVAILABLE };
-    items = [
-      ...(tripsRes.data ?? []).map((t) => ({
-        id: t.id as string,
-        amount_sar: (t.rate_sar as number | null) ?? projectRate,
-        paid_at: paidAtByInvoice.get(t.invoice_id as string) ?? null,
-      })),
-      ...(chargesRes.data ?? []).map((c) => ({
-        id: c.id as string,
-        amount_sar: c.amount_sar as number,
-        paid_at: paidAtByInvoice.get(c.invoice_id as string) ?? null,
-      })),
-    ];
-  }
+  // Never empty — `inv.id` is always in it — so there is no "skip the read"
+  // arm any more. A customer with no paid invoices yet still has THIS invoice's
+  // draw-down to report, and the old length guard would have returned 0 for it.
+  const queryIds = paidAtByInvoice.has(inv.id) ? paidInvoiceIds : [...paidInvoiceIds, inv.id];
 
-  if (asOf == null) return { ok: true, amount: paidUpBalance({ topups, paidItems: items, returns }) };
+  const projectRate = (projectRes.data?.rate_per_trip_sar as number | undefined) ?? 0;
+  const [tripsRes, chargesRes] = await Promise.all([
+    supabase
+      .from("trips")
+      .select("id, rate_sar, invoice_id")
+      .in("invoice_id", queryIds)
+      .not("delivered_at", "is", null),
+    supabase.from("invoice_special_charges").select("id, amount_sar, invoice_id").in("invoice_id", queryIds),
+  ]);
+  if (tripsRes.error || chargesRes.error) return { ok: false, error: PAID_UP_UNAVAILABLE };
+  const rows: { id: string; amount_sar: number; invoice_id: string; paid_at: string | null }[] = [
+    ...(tripsRes.data ?? []).map((t) => ({
+      id: t.id as string,
+      amount_sar: (t.rate_sar as number | null) ?? projectRate,
+      invoice_id: t.invoice_id as string,
+      paid_at: paidAtByInvoice.get(t.invoice_id as string) ?? null,
+    })),
+    ...(chargesRes.data ?? []).map((c) => ({
+      id: c.id as string,
+      amount_sar: c.amount_sar as number,
+      invoice_id: c.invoice_id as string,
+      paid_at: paidAtByInvoice.get(c.invoice_id as string) ?? null,
+    })),
+  ];
+  // PARTITION, not a filter over two reads. The balance consumes PAID invoices
+  // only; the draw-down is this invoice's own rows, whatever its status. On an
+  // already-paid invoice both sets overlap, which is correct and unused — the
+  // panel that reads the draw-down renders on `confirmed` alone.
+  const items = rows.filter((r) => paidAtByInvoice.has(r.invoice_id));
+  const settlementSar = settlementGross(rows.filter((r) => r.invoice_id === inv.id));
+
+  if (asOf == null) {
+    return { ok: true, amount: paidUpBalance({ topups, paidItems: items, returns }), settlementSar };
+  }
   // An item on a paid invoice with no `paid_at` cannot be placed on the
   // timeline, so it is DROPPED from the as-of walk rather than dated to the
   // epoch or to now — both of which would move a frozen figure by a real
@@ -651,7 +689,7 @@ async function loadPaidUpBalance(
   const dated: PaidConsumedItem[] = items
     .filter((it): it is typeof it & { paid_at: string } => it.paid_at != null)
     .map((it) => ({ id: it.id, amount_sar: it.amount_sar, paid_at: it.paid_at }));
-  return { ok: true, amount: paidUpBalanceAsOf({ topups, paidItems: dated, returns, asOf }) };
+  return { ok: true, amount: paidUpBalanceAsOf({ topups, paidItems: dated, returns, asOf }), settlementSar };
 }
 
 // Live preview for the UI (5c) — draft AND review both stay live-recomputed,
@@ -680,6 +718,11 @@ export async function getInvoice(
       projectWaterType: WaterType | null;
       projectPaymentMode: PaymentMode;
       paidUpBalanceSar: number | null;
+      // What paying THIS invoice will take off that balance — the pay-with-
+      // balance panel's middle row, and the only figure it may subtract. Not
+      // `grand_total_sar`: see loadPaidUpBalance's header for the two live
+      // invoices where the two disagree.
+      settlementSar: number | null;
       // Set ONLY when the read failed. The popup is an internal screen and the
       // operator is the person who can act on it, so unlike the documents this
       // surface renders the failure in place of the figure rather than refusing
@@ -737,6 +780,7 @@ export async function getInvoice(
       projectWaterType: (project?.water_type as WaterType | null) ?? null,
       projectPaymentMode: (project?.payment_mode as PaymentMode | null) ?? "postpaid",
       paidUpBalanceSar: paidUp.ok ? paidUp.amount : null,
+      settlementSar: paidUp.ok ? paidUp.settlementSar : null,
       paidUpError: paidUp.ok ? null : paidUp.error,
     },
   };

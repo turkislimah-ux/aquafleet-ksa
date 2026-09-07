@@ -46,7 +46,7 @@ import { t } from "../lib/i18n";
 // The comment-aware lexer. NOT a hand-rolled grep — see CLAUDE.md §5 and case
 // 9's note. It self-tests at import, so a broken stripper turns this file red
 // rather than reporting a green all-clear.
-import { liveHits } from "./code-grep";
+import { liveHits, stripComments } from "./code-grep";
 
 let failures = 0;
 
@@ -580,6 +580,44 @@ async function main() {
       handRolled.map((h) => `:${h.line}: ${h.text}`).join("\n        "),
     );
     check("…and the one path expression carries the template version", liveHits(src, "PDF_CACHE_VERSION", "ts").length >= 2);
+  }
+
+  console.log("\n=== 11. PAY-WITH-BALANCE PANEL — previews the payment, not a frozen column ===");
+  // The panel promises the balance a payment will leave behind. It may only
+  // subtract the figure the payment itself subtracts — `settlementSar`, summed
+  // server-side by lib/prepaid's `settlementGross`, which IS paidUpCore's debit
+  // side. `view.grand.total` is the stored `grand_total_sar`, and on invoices
+  // frozen by the covered-only engine that column EXCLUDES lines the document
+  // lists: 026-000017 previewed 7,544.00 against a real 8,694.00 draw-down,
+  // 026-000009 previewed 0.00 against 4,761.00.
+  //
+  // SCOPED TO THE PANEL, deliberately. `grand.total` is correct and live
+  // elsewhere in this file — the Grand Total stack is literally that figure —
+  // so a whole-file scan would fail on right code, and a check that fails on
+  // right code gets widened until it guards nothing (see section 9).
+  {
+    const rel = "app/trips/InvoiceDetailModal.tsx";
+    const src = readFileSync(join(process.cwd(), rel), "utf8");
+    const open = liveHits(src, "payingOpen && isPrepaid", "ts");
+    const close = liveHits(src, "payingOpen && !isPrepaid", "ts");
+    check("the prepaid pay panel is locatable, exactly once", open.length === 1 && close.length === 1);
+    check("…and the postpaid form follows it", open.length === 1 && close.length === 1 && open[0].line < close[0].line);
+
+    if (open.length === 1 && close.length === 1 && open[0].line < close[0].line) {
+      // stripComments preserves line numbering (liveHits maps stripped lines
+      // back onto source lines), so slicing the stripped text by those line
+      // numbers yields the panel's CODE with its prose removed — which matters
+      // here, because the comment above the panel discusses `grand.total` by
+      // name to explain why it is not used.
+      const panel = stripComments(src, "ts").split("\n").slice(open[0].line - 1, close[0].line - 1).join("\n");
+      check("the panel does NOT read grand.total", !panel.includes("grand.total"));
+      check("…and DOES subtract the server-computed settlementSar", panel.includes("settlementSar"));
+    }
+
+    // INVERTED — a slice that always came back empty would pass the first check
+    // forever. Plant the old reading and the same test must reject it.
+    const planted = stripComments("<span>{formatSar(view.grand.total)}</span>", "ts");
+    check("the scan rejects a planted grand.total", planted.includes("grand.total"));
   }
 
   console.log(failures === 0 ? "\nAll parity checks passed." : `\n${failures} FAILED.`);

@@ -211,6 +211,7 @@ export default function InvoiceDetailModal({
         projectWaterType: WaterType | null;
         projectPaymentMode: PaymentMode;
         paidUpBalanceSar: number | null;
+        settlementSar: number | null;
         paidUpError: string | null;
       })
     | null
@@ -690,6 +691,18 @@ export default function InvoiceDetailModal({
   // invoice whose balance came through null with no error reported is exactly
   // the case that rendered a full prepaid layout with no balance in it.
   const paidUpUnreadable = paidUpError != null || paidUp == null;
+  // What paying this invoice will take off that balance, computed server-side
+  // by the SAME expression the payment itself will apply (lib/prepaid's
+  // settlementGross, which is paidUpCore's debit side). The panel below
+  // subtracts THIS, never `view.grand.total`: on an invoice frozen by the
+  // covered-only engine the stored grand total excludes lines the document
+  // lists, so it previewed a draw-down the payment then did not make.
+  const settlementSar = raw?.settlementSar ?? null;
+  // Same three-outcome discipline as the balance: a missing draw-down is a
+  // failed read, never a zero. Both figures come from one server read, so this
+  // only diverges from `paidUpUnreadable` on a postpaid row, where the panel
+  // does not render at all.
+  const payPreviewUnreadable = paidUpUnreadable || settlementSar == null;
   // What the trips tables' BALANCE ROW renders: the figure, or the reason there
   // isn't one. Never blank, and never a fabricated 0 — the two are different
   // content, so they are different shapes, decided here once for both tables.
@@ -1338,20 +1351,34 @@ export default function InvoiceDetailModal({
               )}
               {/* Prepaid — Batch 1: no cash/bank choice, just a confirmation
                   showing the PAID-UP balance draw-down. Both numbers are
-                  display-only: paidUpBalanceSar comes from getInvoice (the one
-                  shared expression), view.grand.total was already computed for
-                  the document. Nothing is recomputed here.
+                  display-only and BOTH come from getInvoice, computed
+                  server-side by the shared prepaid expressions. Nothing is
+                  recomputed here beyond the subtraction of the two.
 
-                  THE DRAW-DOWN IS grand.total. It read covered.total under a
-                  ruling that "the balance only ever paid the covered portion" —
-                  true of the POOL, which deducts at delivery, and false of the
-                  PAID-UP balance, which moves on Mark Paid and moves by
-                  everything the payment settles. Paying puts ALL of this
-                  invoice's lines on the paid side, so the honest draw-down is
-                  the whole VAT-inclusive total, and the third row below is
-                  exactly what paidUpBalance() returns a second later. Keeping
-                  covered.total made this panel a surface computing its own
-                  divergent figure. */}
+                  THE DRAW-DOWN IS THE PAYMENT'S OWN SUM OVER THIS INVOICE'S
+                  ITEMS — settlementSar — and it has been wrong twice for the
+                  same reason: the panel reached for a figure computed for
+                  something else.
+
+                  It read covered.total first, under a ruling that "the balance
+                  only ever paid the covered portion". True of the POOL, which
+                  deducts at delivery; false of the PAID-UP balance, which moves
+                  on Mark Paid and moves by everything the payment settles.
+
+                  It then read view.grand.total, which is right on every invoice
+                  frozen under the current law and wrong on the ones frozen by
+                  the covered-only engine: their stored grand total EXCLUDES
+                  lines the document itself lists. 026-000017 previewed 7,544.00
+                  against a real 8,694.00 draw-down; 026-000009 previewed 0.00
+                  against 4,761.00. The fault was never the RPC — it applies the
+                  same sum it always did — it was this panel reading a stale
+                  frozen column.
+
+                  So the figure is now the sum the RPC's own consumption walk
+                  will make: every delivered trip on this invoice plus every one
+                  of its special charges, grossed per item. The third row is
+                  therefore exactly what paidUpBalance() returns a second later,
+                  on a pre-fix invoice as much as a current one. */}
               {status === "confirmed" && payingOpen && isPrepaid && (
                 <div className="space-y-3 max-w-sm">
                   {/* `paidUp ?? 0` USED TO STAND IN THE THREE ROWS BELOW, and a
@@ -1360,7 +1387,7 @@ export default function InvoiceDetailModal({
                       screen in the app whose entire job is to state what a
                       payment will consume. The panel now refuses instead: no
                       arithmetic, and Confirm is not offered. */}
-                  {paidUpUnreadable ? (
+                  {payPreviewUnreadable ? (
                     <div className="card p-3 text-sm text-amber-700 dark:text-amber-400" style={{ borderColor: "rgb(var(--border))" }}>
                       {t("trips.invoiceSheet.paidUpUnavailable", lang)}
                     </div>
@@ -1368,16 +1395,16 @@ export default function InvoiceDetailModal({
                     <div className="card p-3 text-sm space-y-1.5" style={{ borderColor: "rgb(var(--border))" }}>
                       <div className="flex justify-between">
                         <span className="muted">{t("trips.invoiceSheet.paidUpBalance", lang)}</span>
-                        <span className="tabular-nums">{formatSar(paidUp ?? 0)}</span>
+                        <span className="tabular-nums">{formatSar(paidUp as number)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="muted">{t("trips.invoiceSheet.thisInvoiceGrand", lang)}</span>
-                        <span className="tabular-nums">− {formatSar(view.grand.total)}</span>
+                        <span className="tabular-nums">− {formatSar(settlementSar as number)}</span>
                       </div>
                       <div className="flex justify-between font-semibold pt-1.5 border-t" style={{ borderColor: "rgb(var(--border))" }}>
                         <span>{t("trips.invoiceSheet.remainingSettled", lang)}</span>
-                        <span className={"tabular-nums " + (((paidUp ?? 0) - view.grand.total) < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
-                          {formatSar((paidUp ?? 0) - view.grand.total)}
+                        <span className={"tabular-nums " + (round2((paidUp as number) - (settlementSar as number)) < 0 ? "text-rose-600 dark:text-rose-400" : "")}>
+                          {formatSar(round2((paidUp as number) - (settlementSar as number)))}
                         </span>
                       </div>
                     </div>
@@ -1389,7 +1416,7 @@ export default function InvoiceDetailModal({
                     <Btn type="button" variant="ghost" onClick={() => setPayingOpen(false)}>
                       {t("common.cancel", lang)}
                     </Btn>
-                    {!paidUpUnreadable && (
+                    {!payPreviewUnreadable && (
                       <Btn type="button" variant="primary" onClick={onMarkPaidBalance} className={busy ? "opacity-50 pointer-events-none" : ""}>
                         {t(busy ? "common.recording" : "trips.invoiceSheet.confirmPayment", lang)}
                       </Btn>

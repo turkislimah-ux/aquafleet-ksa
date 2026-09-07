@@ -10,12 +10,14 @@
 // consumption, one combined trips+charges FIFO queue — the ONLY consumption
 // engine left in the tree.
 
+import { round2 } from "../lib/vat";
 import {
   consumingItems,
   derivedBalanceItems,
   buildStatementItems,
   paidUpBalance,
   paidUpBalanceAsOf,
+  settlementGross,
   type BalanceReturnLite,
   type ConsumingTrip,
   type TopupLite,
@@ -677,6 +679,54 @@ check(
     paidUpBalance({ topups, paidItems: withStamps }),
     885,
   );
+}
+
+// --- settlementGross: the pay-with-balance draw-down ------------------------
+// The pay-with-balance panel previews `paidUp − settlementGross(this invoice's
+// items)`. That preview is a PROMISE about what Mark Paid will do, so the only
+// property worth asserting is that the promise holds — not that the function
+// returns some particular number in isolation.
+{
+  check("settlementGross: nothing settles nothing", settlementGross([]), 0);
+  // PER-ITEM, then summed. Three items of 0.03 gross to 0.03 each = 0.09; one
+  // gross-up of 0.09 is 0.1035 -> 0.10. The balance moves by the first, so the
+  // preview must too, and this is the case that tells the two apart.
+  check(
+    "settlementGross: per-item gross (0.09), not one gross-up of the sum (0.10)",
+    settlementGross([{ amount_sar: 0.03 }, { amount_sar: 0.03 }, { amount_sar: 0.03 }]),
+    0.09,
+  );
+}
+
+// --- THE PREVIEW IDENTITY ---------------------------------------------------
+// Shaped on live invoice 026-000017, which is what broke: 16 delivered trips at
+// 410.00 (7,544.00 gross) plus ONE uncovered special charge of 1,000.00
+// (1,150.00 gross). Its FROZEN grand_total_sar is 7,544.00 — the trips only —
+// because the covered-only engine wrote it, so a panel reading that column
+// promised a 7,544.00 draw-down against a payment that takes 8,694.00.
+{
+  const topups: TopupLite[] = [{ id: "u1", amount_sar: 30000, topup_date: "2026-01-01" }];
+  const alreadyPaid = [{ id: "old", amount_sar: 1000 }];
+  const mine = [
+    ...Array.from({ length: 16 }, (_, i) => ({ id: `t${i}`, amount_sar: 410 })),
+    { id: "c1", amount_sar: 1000 },
+  ];
+
+  const settlement = settlementGross(mine);
+  check("draw-down of the 026-000017 shape: 8,694.00, charge included", settlement, 8694);
+  check(
+    "…and NOT 7,544.00, the covered-only figure its frozen grand_total_sar holds",
+    settlement === 7544,
+    false,
+  );
+
+  const before = paidUpBalance({ topups, paidItems: alreadyPaid });
+  const after = paidUpBalance({ topups, paidItems: [...alreadyPaid, ...mine] });
+  check("the previewed balance-after IS the balance after paying", round2(before - settlement), after);
+  // INVERTED: the identity has to be capable of failing. Reading a frozen
+  // grand total that excludes the charge is exactly the old bug, and it must
+  // land somewhere other than the truth.
+  check("…and the old grand_total_sar reading does NOT satisfy it", round2(before - 7544) === after, false);
 }
 
 console.log("");
