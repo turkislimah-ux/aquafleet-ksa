@@ -649,11 +649,6 @@ export async function buildInvoicePdfHtml(data: PdfInvoiceData): Promise<string>
   .duecard .amt { font-size: 25px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; margin-top: 1px;
                   font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
   .duecard .amt .cur { font-size: 10.5px; font-weight: 400; color: rgba(255,255,255,.72); margin-left: 4px; letter-spacing: .04em; }
-  /* A .duecard .paidup block STOOD HERE — the balance, moved into the
-     settlement card under the hero amount. Reverted: the balance is read in the
-     trips tables' footers, where it always was, so the card is the amount owed
-     and nothing else again. The footer's own unreadable-arm styling is the
-     tfoot .na rule above, not here. */
 
   /* ---------- transfer details ---------- */
   /* Full width, BELOW the settlement row. This is the last thing the reader

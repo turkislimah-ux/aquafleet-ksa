@@ -308,11 +308,6 @@ export const PLAIN_DOC_CSS = `
                 margin-top: 1px; font-variant-numeric: tabular-nums; }
   .panel .amt .cur { font-size: 10.5px; font-weight: 400; color: var(--ink-faint); margin-left: 4px;
                      letter-spacing: .04em; }
-  /* A .panel .paidup block STOOD HERE — the balance, moved into the panel
-     under the hero amount. Reverted: the balance is read in the trips tables'
-     footers, where it always was, so the panel is the amount owed and nothing
-     else again. The footer's unreadable-arm styling is the tfoot .na rule
-     above. */
 
   /* ---------- transfer details ---------- */
   /* Full width, BELOW the settlement row. This is the last thing the reader

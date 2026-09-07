@@ -8162,11 +8162,6 @@ export const dict = {
       // screen the popup shows it in the figure's own place — the operator is
       // the one who can act on it.
       paidUpUnavailable: { en: "Unavailable — could not be read", ar: "غير متاح — تعذّرت قراءته" },
-      // A `paidUpNow` / `paidUpAtPaid` / `paidUpAtVoid` trio STOOD HERE, the
-      // balance card's sub-caption saying WHICH INSTANT the figure was. Gone
-      // with the card: the restored footer row is a table row with no room for
-      // a caption under it. The as-of rule itself is unchanged and still
-      // enforced upstream — see loadPaidUpBalance's asOf.
 
       // ── Special charges ──────────────────────────────────────────────────
       specialCharges: { en: "Special Charges", ar: "رسوم إضافية" },

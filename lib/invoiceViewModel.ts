@@ -317,12 +317,8 @@ export type InvoiceVm = {
   totals: { rows: VmTotalRow[]; vat: number; total: number };
   /** null when postpaid (no such card on screen) or when the toggle hides it. */
   amountDue: { totals: PdfTotals } | null;
-  // A top-level `paidUp: { label, amount } | { label, note } | null` STOOD HERE
-  // and drove a balance block inside the settlement card, beneath the hero
-  // amount. That placement is reverted: the balance is read where it was always
-  // read, in the trips tables' footers, so the figure now travels inside
-  // `VmTableFoot`'s "ledger" arm instead of beside the totals. One balance
-  // decision either way — it just belongs to the table foot, not to the card.
+  // NO top-level balance field, deliberately: the balance belongs to a table
+  // foot, so it travels inside `VmTableFoot`'s "ledger" arm and nowhere else.
   /** Labels the renderer needs that are not attached to a section. */
   labels: {
     taxInvoice: BiLabel;

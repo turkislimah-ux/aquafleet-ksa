@@ -1072,12 +1072,7 @@ export default function InvoiceDetailModal({
                     card; Grand Total is the wider stacked block — both
                     right-aligned as one visual pair. Hide toggle lives on the
                     Unpaid Trips table above (item 6) — the Amount Due card
-                    itself is just the figure, no sentence, no toggle.
-
-                    A third card LED THIS ROW for one iteration, carrying the
-                    balance at headline weight. Removed: the balance belongs in
-                    the trips-table footers, which is where it is read and where
-                    it now is. This row is the amounts owed, as it was. */}
+                    itself is just the figure, no sentence, no toggle. */}
                 <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:justify-end break-inside-avoid">
                   {/* This card used to drop out of the printout when the hide
                       toggle was on. It no longer needs to: the modal is not a
@@ -2090,12 +2085,6 @@ function SpecialChargesSection({
   );
 }
 
-// A `BalanceCard` STOOD HERE — the balance as its own tinted card leading the
-// totals row, with a headline-weight figure and an as-of caption. Removed with
-// that placement. The balance is read in the trips-table footers and that is
-// where it renders; see PrepaidTripTable's footer. Nothing on this screen shows
-// a balance outside those two rows and the pay-with-balance panel.
-
 function TotalCard({
   lang,
   label,
@@ -2119,9 +2108,6 @@ function TotalCard({
           vat: formatSar(totals.vat),
         })}
       </div>
-      {/* The paid-up balance was a caption HERE, under a hairline, for one
-          iteration. It is back in the trips-table footers where it is read.
-          This card is the amount owed and nothing else. */}
     </div>
   );
 }
