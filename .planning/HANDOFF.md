@@ -13,9 +13,11 @@
     migration 0184" while the database was already at 0186. `CLAUDE.md` §5's
     "THE DATABASE OUTRANKS THE NOTES" is not an abstraction here; it is the
     reason this bullet exists. Do NOT re-apply either one.
-  - **`CLAUDE.md` §7's state stub still says "DB at migration 0184" and is now
-    wrong.** Left untouched deliberately — that edit was outside the scope of the
-    turn that wrote this. Fix it, do not just note it again.
+  - **`CLAUDE.md` §7's state stub read "DB at migration 0184" and has been
+    corrected to 0186** (`dc590f1` recorded it stale; the fix landed right
+    after). One number, nothing else touched — §7 is a STUB and stays one.
+    **Both files carry this figure, so both go stale together.** Next time the
+    DB moves, change it in two places or leave the pair disagreeing.
 - **Everything below this line about 0184 and earlier was measured 2026-09-05
   and is left as written.** Measured against the CATALOG that turn, not read off
   any migration's own grid:
