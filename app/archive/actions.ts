@@ -701,10 +701,16 @@ export async function setPersonLinkedId(
 // ---------------------------------------------------------------------------
 // RESTORE a soft-deleted person — the exact inverse of termination.
 //
-// active = true, terminated_at = null. For a driver, termination_date is
-// cleared too: it is the effective last-working-day that accompanied the
+// For a driver: terminated_at = null, and termination_date cleared with it.
+// termination_date is the effective last-working-day that accompanied the
 // termination, and leaving it set on a restored driver would leave a "last
 // day" on someone who is back at work.
+//
+// This once cleared active = true as well. 0188 dropped drivers.active, so
+// terminated_at is now the whole of a driver's liveness. restoreStaff below
+// still writes active, because staff kept its copy of the column — the two
+// restores are no longer symmetric, and that asymmetry is the schema's, not
+// an oversight here.
 //
 // Deliberately NOT touching anything else. Termination is a soft-delete
 // (architecture lock: records persist), so nothing was destroyed to restore —

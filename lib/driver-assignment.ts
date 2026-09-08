@@ -61,10 +61,11 @@
 //   reuses that helper rather than re-reading the state map, so there is one
 //   date-range rule, not one rule and one view of it.
 //
-// · `drivers.status` / `drivers.active`. The reversible "deactivated" state was
-//   superseded by termination (0020) and nothing on this page reads either
-//   column for the lock. Gating on them here would invent a rule the UI does
-//   not have.
+// · `drivers.status`, and `drivers.active` while it existed. The reversible
+//   "deactivated" state was superseded by termination (0020), nothing on this
+//   page ever read either column for the lock, and 0188 has since dropped
+//   `active` outright. Gating on `status` here would invent a rule the UI does
+//   not have; gating on `active` is no longer possible at all.
 //
 // · A truck in maintenance, or a driver with trips in flight. Maintenance is a
 //   TRUCK state (lib/truck-status.ts), not a driver one, and an in-flight trip

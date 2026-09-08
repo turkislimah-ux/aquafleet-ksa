@@ -54,8 +54,9 @@ function parse(formData: FormData) {
     // read/write this same column rather than keeping a copy.
     license_number: nullable(formData.get("license_number")),
     license_expiry: nullable(formData.get("license_expiry")),
-    // status is dead (Commit 4): derived driver state (lib/driver-state.ts)
-    // reads drivers.active, not this column. No longer written from the form —
+    // status is dead (Commit 4): derived driver state (lib/driver-state.ts) is
+    // PURE and reads no driver column at all — it takes three resolved booleans
+    // (hasTruck, hasActiveProject, onLeave). No longer written from the form —
     // the DB column + NOT NULL DEFAULT 'active' stay untouched.
     // safety_score/hours_this_week (Commit B, 0023): form controls removed, no
     // longer written — columns stay in DB, dead. `rating` and `incidents_12mo`
@@ -76,8 +77,8 @@ function parse(formData: FormData) {
     health_insurance: boolOrNull(formData.get("health_insurance")),
     // active: dropped (Commit 2, termination sequence) — drivers.active no
     // longer written from the form; derived state's "deactivated" branch is
-    // gone, termination (0020, terminated_at) supersedes it. Column stays in
-    // DB (dead), deletion deferred.
+    // gone, termination (0020, terminated_at) supersedes it. The column itself
+    // is gone from the table too, dropped by 0188 once nothing read it.
   };
 }
 
