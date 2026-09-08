@@ -169,10 +169,12 @@ export default function MaintenanceCalendar({
   const todayKey = ymd(new Date());
   // Only the month NAME follows `lang`; the day number stays Latin digits in
   // both languages, as it did before and as every other monthName caller does.
-  // The separator below is an ASCII comma in BOTH languages — unchanged here,
-  // and a wording question rather than a formatting one if it is ever revisited.
+  // The separator before the year follows `lang`: Arabic gets ، (U+060C), as the
+  // Arabic copy in lib/i18n.ts already does. Ruled by Turki; it was a wording
+  // question, not a formatting one. The en dash between the two dates is shared.
   const monthFmt = (d: Date) => `${monthName(d.getMonth() + 1, lang)} ${d.getDate()}`;
-  const weekHeader = `${monthFmt(cells[0].date)} – ${monthFmt(cells[6].date)}, ${cells[0].date.getFullYear()}`;
+  const yearSep = lang === "ar" ? "،" : ",";
+  const weekHeader = `${monthFmt(cells[0].date)} – ${monthFmt(cells[6].date)}${yearSep} ${cells[0].date.getFullYear()}`;
 
   let cActive = 0, cPlanned = 0, cDelayed = 0;
   for (const c of cells) {
