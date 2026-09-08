@@ -29,7 +29,8 @@ import { cn, formatSar, formatNum } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
 import {
-  monthTick, monthLabel, priorMonth, rowFor, delta, deltaTone, cashCoverage, isCurrentMonth,
+  monthTick, monthLabel, priorMonth, rowFor, delta, deltaTone, withinMonthCollectionRate,
+  isCurrentMonth,
   formatPct, formatShare, compactSar, costBuckets, AGING_ORDER,
   type Delta, type PnlRow, type CollectionsRow, type RevenueMonthRow,
   type ReceivableRow, type AgingRow, type PayrollRow, type OperationsRow,
@@ -231,7 +232,15 @@ export default function OverviewTab({
 
   const buckets = costBuckets(p);
   const bucketMax = Math.max(...buckets.map((b) => b.value), 1);
-  const coverage = cashCoverage(col?.collected_gross_sar ?? 0, p.revenue_sar);
+  // BOTH OPERANDS OFF `p`, deliberately — the numerator is a filtered subset of
+  // the denominator inside v_revenue_monthly (0185), so the rate cannot exceed
+  // 100% and cannot pair two different months. `col` is NOT read here: it is
+  // the card's VALUE, on another basis (gross, by paid_at), and dividing it by
+  // revenue is the 215% this replaced.
+  const collectionRate = withinMonthCollectionRate(
+    p.settled_same_month_revenue_sar,
+    p.revenue_sar,
+  );
 
   return (
     <div className="space-y-5">
@@ -286,8 +295,12 @@ export default function OverviewTab({
           higherIsBetter
           prev={prev}
           lang={lang}
-          foot={coverage !== null
-            ? say("reports.overview.ofRevenue", { v: formatShare(coverage) })
+          // THE FOOT NAMES ITS OWN RATIO, because it is not this card's value
+          // over revenue and a bare "of revenue" would be read as exactly that.
+          // The card is gross settlement by paid_at; the foot is a net billing
+          // rate by confirmed_at. Same card, different question.
+          foot={collectionRate !== null
+            ? say("reports.overview.settledInMonth", { v: formatShare(collectionRate) })
             : undefined}
           note={tt("reports.overview.note.collections")}
         />

@@ -27,17 +27,19 @@
 // container instead of wrapping. The two-column entry grid below `xl` halves
 // the available width, so that rule is load-bearing here, not belt-and-braces.
 //
-// A NULL caveat renders NOTHING — no dash, no "N/A". 3 of the 30 rows have no
-// caveat (operating_profit, operations, os_cost); those metrics carry no
-// warning, which is a different claim from a warning we failed to load. Same
-// rule as the compliance pills: absent never renders as a value.
+// A NULL caveat renders NOTHING — no dash, no "N/A". Re-measured 2026-09-08:
+// 2 of the 30 rows have no caveat (operating_profit, os_cost) — this said 3
+// and named `operations`, which migration 0145 has since filled. Those metrics
+// carry no warning, which is a different claim from a warning we failed to
+// load. Same rule as the compliance pills: absent never renders as a value.
 //
 // EVERY METRIC ROW STAYS ENGLISH. label / meaning / formula / grain /
 // source_view / caveat / unit are COLUMNS of `report_metrics`, so translating
 // them is a MIGRATION, not a dictionary key, and this batch runs none. What is
-// keyed is this popup's own chrome and the four basis notes (reports.glossary.*)
-// plus the four basis NAMES (reports.basis.*, shared with the builder and the
-// generated report) — everything the app itself writes.
+// keyed is this popup's own chrome and the five basis notes (reports.glossary.*)
+// plus the five basis NAMES (reports.basis.*, shared with the builder and the
+// generated report) — everything the app itself writes. Five, not four, since
+// 0185/0186 added `settlement`.
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -49,8 +51,14 @@ import { basisLabel, type MetricDictionaryRow } from "@/lib/reports";
 import { Disclosure, EmptyNote } from "./OverviewTab";
 import ScrollLock from "@/components/ScrollLock";
 
-/** Reading order — money first, then position, then activity. */
-const BASIS_ORDER = ["accrual", "cash", "state", "operational"];
+/**
+ * Reading order — money first, then position, then activity.
+ *
+ * `settlement` (0185) sits directly after `cash` because that adjacency IS the
+ * point being made: the two look alike and are not. An unranked basis sorts
+ * last rather than vanishing, so this list is presentation, never a filter.
+ */
+const BASIS_ORDER = ["accrual", "cash", "settlement", "state", "operational"];
 
 /**
  * The group HEADING for a basis comes from basisLabel() in lib/reports — the
@@ -73,6 +81,7 @@ const BASIS_ORDER = ["accrual", "cash", "state", "operational"];
 const BASIS_NOTE: Record<string, TKey> = {
   accrual: "reports.glossary.basisNote.accrual",
   cash: "reports.glossary.basisNote.cash",
+  settlement: "reports.glossary.basisNote.settlement",
   state: "reports.glossary.basisNote.state",
   operational: "reports.glossary.basisNote.operational",
 };

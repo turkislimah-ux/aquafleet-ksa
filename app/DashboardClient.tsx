@@ -341,7 +341,19 @@ export default function DashboardClient({
                 h.hasData ? KPI_TEXT[h.tone] : "")}>
                 {h.hasData ? h.value : "—"}
               </div>
-              <div className="mt-0.5 text-[11px] muted truncate">{t(`dashboard.headline.${h.key}.sub`, lang)}</div>
+              {/* THE SUBLINE WRAPS — it must never `truncate`. It is a phrase,
+                  not a name: clipping it drops the words that say WHICH figure
+                  this is, and "invoices settled this mo…" is not a shorter way
+                  of saying the same thing, it is a different claim. Eight
+                  tiles across at `xl` leaves ~150px, which the longest sub
+                  (this one) overran the moment 0185/0186 replaced "cash in,
+                  this month". Grid items stretch, so a second line lifts the
+                  whole row evenly rather than leaving one tile taller.
+                  `text-balance` splits the two lines evenly instead of leaving
+                  one orphaned word. The LABEL above keeps `truncate` on
+                  purpose: it is a name, and a clipped name still points at the
+                  right tile. */}
+              <div className="mt-0.5 text-[11px] muted leading-snug text-balance">{t(`dashboard.headline.${h.key}.sub`, lang)}</div>
             </Link>
           ))}
         </div>

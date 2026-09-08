@@ -1287,9 +1287,13 @@ export const dict = {
         label: { en: "Net profit", ar: "صافي الربح" },
         sub: { en: "after manual expenses", ar: "بعد المصروفات اليدوية" },
       },
+      // NOT "cash in" (0185). Since prepaid, most of this figure is invoices
+      // settled from a balance topped up in an earlier month — no money moves
+      // on the day they are marked paid. The FIGURE is unchanged and correct;
+      // only the claim about what it is was wrong.
       collections: {
-        label: { en: "Collected", ar: "المحصّل" },
-        sub: { en: "cash in, this month", ar: "نقد وارد هذا الشهر" },
+        label: { en: "Settled", ar: "المسدَّد" },
+        sub: { en: "invoices settled this month", ar: "فواتير سُدِّدت هذا الشهر" },
       },
       receivables_outstanding: {
         label: { en: "Outstanding", ar: "مستحقات" },
@@ -3590,7 +3594,12 @@ export const dict = {
       netProfit: { en: "Net profit", ar: "صافي الربح" },
       otherExpenses: { en: "Other expenses", ar: "مصروفات أخرى" },
       operatingMargin: { en: "Operating margin", ar: "هامش التشغيل" },
-      collections: { en: "Collections", ar: "المتحصّلات" },
+      // ALSO THE REPORTS OVERVIEW CARD'S LABEL (OverviewTab reads this key for
+      // it), so it has to agree with the Dashboard's "Settled" — one figure
+      // must not carry two names on two screens. Spelled longer here because
+      // this is also a CSV measure name and a picker row, where a bare
+      // "Settled" would not say settled WHAT.
+      collections: { en: "Invoices settled", ar: "الفواتير المسدَّدة" },
       purchasingSpend: { en: "Purchasing spend", ar: "إنفاق المشتريات" },
       tripsDelivered: { en: "Trips delivered", ar: "الرحلات المسلَّمة" },
       invoices: { en: "Invoices", ar: "الفواتير" },
@@ -3614,11 +3623,16 @@ export const dict = {
     // ENGLISH IS BYTE-IDENTICAL TO THE COLUMN VALUE, lower-case, because every
     // one of those three sites renders the raw enum today and uppercases it in
     // CSS. The ENUM → key lookup is basisLabel() in lib/reports, one copy for
-    // all three, and a miss falls through to the raw string there — so a fifth
-    // basis added by a future migration still appears.
+    // all three, and a miss falls through to the raw string there — so a sixth
+    // basis added by a future migration still appears. `settlement` is the
+    // fifth, added by 0185; the fall-through is why nothing broke between the
+    // migration running and this entry existing.
     basis: {
       accrual: { en: "accrual", ar: "الاستحقاق" },
       cash: { en: "cash", ar: "النقدي" },
+      // The fifth (0185), and the reason the comment above says "four words"
+      // no longer holds. Byte-identical to the column value like the rest.
+      settlement: { en: "settlement", ar: "السداد" },
       state: { en: "state", ar: "المركز" },
       operational: { en: "operational", ar: "التشغيلي" },
     },
@@ -3753,9 +3767,12 @@ export const dict = {
           ar: "فواتير مؤكدة، بعد استبعاد الضريبة",
         },
         operatingProfit: { en: "Before other expenses", ar: "قبل المصروفات الأخرى" },
+        // "Cash received" was false (0185) — a prepaid invoice marked paid
+        // moves no money that day. VAT-inclusive stays: it is the value of the
+        // DOCUMENT that was settled, and that document includes VAT.
         collections: {
-          en: "Cash received, VAT included",
-          ar: "نقد محصَّل، شامل الضريبة",
+          en: "Invoices settled, VAT included",
+          ar: "فواتير مسدَّدة، شامل الضريبة",
         },
         receivables: {
           en: "As of today, not the picked period",
@@ -3795,7 +3812,20 @@ export const dict = {
 
       // {v} is a percentage, {n} a count — both already formatted, both Latin.
       marginFoot: { en: "Margin {v}", ar: "الهامش {v}" },
-      ofRevenue: { en: "{v} of revenue", ar: "{v} من الإيرادات" },
+      // REPLACES `ofRevenue`, which read "{v} of revenue" (0185). The card
+      // above it shows settlement VALUE; this foot is a RATE over billing, and
+      // the two do not divide into each other — so the foot has to say which
+      // question it answers or it is read as the card's own number over
+      // revenue. "Billed" is already this dictionary's word for confirmed
+      // revenue (dailyOps: "billed revenue stays in Reports"), and فُوتر /
+      // المفوتر is already its Arabic — so neither side mints a new term.
+      //
+      // Both say VALUE, not invoices: this is a share of riyals billed, and
+      // "{v} of this month's invoices" would read as a share of the COUNT.
+      settledInMonth: {
+        en: "{v} of this month's billed value settled in-month",
+        ar: "{v} من قيمة ما فُوتر هذا الشهر سُدِّد داخله",
+      },
       ofTotal: { en: "of {n} total", ar: "من {n} إجمالًا" },
       expensesNone: { en: "none recorded — add", ar: "لا شيء مسجَّل — أضف" },
       expensesManage: { en: "manage", ar: "إدارة" },
@@ -3887,9 +3917,13 @@ export const dict = {
         en: "This period outsourced spend is {o} against {p} of parts — a parts-only view would show roughly {s} of the real cost.",
         ar: "إنفاق الأعمال الخارجية هذه الفترة {o} مقابل {p} من قطع الغيار — والعرض المقتصر على القطع سيُظهر نحو {s} من التكلفة الحقيقية.",
       },
+      // "cash banked when it is paid" was false (0185): a prepaid invoice is
+      // settled from a balance banked in an earlier month. The two-bases point
+      // this note exists to make survives intact — it was never the word
+      // "cash" that made revenue and settlement unaddable, it was the timing.
       basesNote: {
-        en: "These are different bases on purpose. Revenue is earned when an invoice is confirmed and excludes VAT; collections are cash banked when it is paid and include VAT. They are never added together.",
-        ar: "هذان أساسان مختلفان عن قصد. يُكتسب الإيراد عند تأكيد الفاتورة ولا يشمل الضريبة؛ والمتحصّلات نقد يُودع عند السداد ويشمل الضريبة. ولا يُجمعان أبدًا.",
+        en: "These are different bases on purpose. Revenue is earned when an invoice is confirmed and excludes VAT; the settled figure is the value of invoices marked paid, includes VAT, and says nothing about when the money arrived — a prepaid invoice is settled from a balance topped up earlier. They are never added together.",
+        ar: "هذان أساسان مختلفان عن قصد. يُكتسب الإيراد عند تأكيد الفاتورة ولا يشمل الضريبة؛ أما رقم السداد فهو قيمة الفواتير المعلَّمة مسدَّدة، ويشمل الضريبة، ولا يقول شيئًا عن وقت وصول المال — فالفاتورة المدفوعة مقدمًا تُسدَّد من رصيد شُحن قبل ذلك. ولا يُجمعان أبدًا.",
       },
       topupsNote: {
         en: "Prepaid top-ups of {v} this month are cash in but are neither revenue nor an invoice payment, so they appear in neither line.",
@@ -5258,7 +5292,7 @@ export const dict = {
       sourceView: { en: "Source view", ar: "العرض المصدر" },
       // THE GROUP HEADINGS ARE THE `basis` ENUM — reports.basis.*, beside
       // `metric`, because the builder and the generated report print the same
-      // four words. Only the NOTES below are glossary-only.
+      // five words. Only the NOTES below are glossary-only.
       // What a basis MEANS — the distinction the report builder exists to
       // protect (0100): accrual and cash measure the same riyal at two
       // different moments, so adding them double-counts.
@@ -5270,6 +5304,12 @@ export const dict = {
         cash: {
           en: "Money that actually moved in the period. Never added to an accrual figure: a commission payout's base IS the trip commission the accrual side already counted.",
           ar: "مال تحرَّك فعليًا خلال الفترة. ولا يُضاف أبدًا إلى رقم على أساس الاستحقاق: فأساس صرف العمولة هو نفسه عمولة الرحلة التي احتسبها جانب الاستحقاق أصلًا.",
+        },
+        // The distinction 0185 exists to draw, and the one place it is spelled
+        // out in full. Collections sat under `cash` and was not cash.
+        settlement: {
+          en: "Invoices closed in the period, whatever closed them. Not cash: a prepaid invoice is settled from a balance topped up in an earlier month, and that money is counted once, there.",
+          ar: "فواتير أُغلقت خلال الفترة، أيًّا كان ما أغلقها. وليست نقدًا: فالفاتورة المدفوعة مقدمًا تُسدَّد من رصيد شُحن في شهر سابق، وذلك المال يُحتسب مرة واحدة، هناك.",
         },
         state: {
           en: "A position as of now, not a total for a period. A state figure does not belong in a period column.",

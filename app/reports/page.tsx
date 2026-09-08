@@ -267,6 +267,7 @@ export default async function ReportsPage() {
     operating_margin_pct: nOrNull(r.operating_margin_pct),
     filling_cost_sar: n(r.filling_cost_sar),
     filling_uncosted_trips: n(r.filling_uncosted_trips),
+    settled_same_month_revenue_sar: n(r.settled_same_month_revenue_sar),
   }));
 
   const collections: CollectionsRow[] = ((collectionsRes.data ?? []) as Row[]).map((r) => ({

@@ -64,7 +64,9 @@ export const GROUPING_TKEY: Record<Grouping, TKey> = {
   truck: "reports.builder.grouping.truck",
 };
 
-type MetricBasis = "accrual" | "cash" | "operational";
+// Mirrors report_metrics.basis, whose CHECK 0185 widened to five. `state` is
+// absent on purpose — no state metric is offerable as a period column.
+type MetricBasis = "accrual" | "cash" | "settlement" | "operational";
 type MetricUnit = "SAR" | "count" | "percent";
 
 /**
@@ -178,7 +180,11 @@ const BUILDER_METRICS: BuilderMetric[] = [
   { key: "operating_margin", labelKey: "reports.metric.operatingMargin", basis: "accrual", unit: "percent",
     groupings: ["period"], kind: "ratio",
     ratio: { numerator: "operatingProfit", denominator: "revenue" } },
-  { key: "collections", labelKey: "reports.metric.collections", basis: "cash", unit: "SAR",
+  // SETTLEMENT, not cash (0185), and it must match report_metrics.basis for
+  // this same key — the glossary popup groups by the DB column while this one
+  // feeds the picker and the generated column sub-heading. Two surfaces, one
+  // answer. An invoice settled from a prepaid balance moves no money that day.
+  { key: "collections", labelKey: "reports.metric.collections", basis: "settlement", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "collections" },
   { key: "purchasing_spend", labelKey: "reports.metric.purchasingSpend", basis: "cash", unit: "SAR",
     groupings: ["period"], kind: "sum", field: "purchasing" },

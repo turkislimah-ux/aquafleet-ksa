@@ -10,7 +10,9 @@
 // The test for anything added here: if the number could disagree with what the
 // same view returns, it does not belong in this file — it belongs in a
 // migration. Composing two defined metrics into a ratio is allowed (see
-// cashCoverage below); recomputing either side of that ratio is not.
+// withinMonthCollectionRate below); recomputing either side of that ratio is
+// not — which is why 0185 put its numerator in SQL, on the same row as its
+// denominator, rather than deriving it here.
 
 import { COST_COLOR } from "@/lib/cost-colors";
 import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
@@ -40,6 +42,14 @@ export type PnlRow = {
    * an unknown amount. Must be shown wherever the money is.
    */
   filling_uncosted_trips: number;
+  /**
+   * Net revenue billed in this month that was ALSO settled inside it (0185).
+   *
+   * A FILTERED SUBSET of `revenue_sar` on this same row, not a second measure —
+   * which is what makes withinMonthCollectionRate bounded at 100% by
+   * construction. NOT a P&L line: it enters no cost, profit or margin figure.
+   */
+  settled_same_month_revenue_sar: number;
 };
 
 export type CollectionsRow = {
@@ -424,6 +434,9 @@ export type MetricDictionaryRow = {
 const BASIS_TKEY: Record<string, TKey> = {
   accrual: "reports.basis.accrual",
   cash: "reports.basis.cash",
+  // The fifth this comment anticipated (0185). Collections was 'cash' and is
+  // not: a prepaid invoice marked paid moves no money that day.
+  settlement: "reports.basis.settlement",
   state: "reports.basis.state",
   operational: "reports.basis.operational",
 };
@@ -598,19 +611,29 @@ export function deltaTone(d: Delta, higherIsBetter: boolean): "ok" | "bad" | und
 }
 
 /**
- * Collections as a share of revenue for the same month.
+ * Of the revenue BILLED in a month, the share also SETTLED inside that month.
  *
- * COMPOSITION of two defined metrics, not a redefinition of either — neither
- * side is recomputed here. Note the two are on different bases by design
- * (collections are VAT-inclusive cash, revenue is net-of-VAT accrual), so this
- * is a cash-coverage indicator, NOT a "percent of invoices collected". It is
- * deliberately not called a collection rate in the UI for that reason.
+ * BOTH SIDES COME OFF ONE PnlRow, and the numerator is a `filter (...)` over
+ * the very rows the denominator sums (0185). That is not a stylistic
+ * preference: it is what makes the result <= 100% by construction, and what
+ * makes it impossible to pair one month's numerator with another's denominator.
  *
- * Worth promoting into the semantic layer as its own metric if it becomes
- * load-bearing — flagged rather than left as an undocumented TS-only number.
+ * REPLACED cashCoverage(), which divided v_collections_monthly's VAT-INCLUSIVE
+ * paid_at total by this net confirmed_at revenue. Three defects at once —
+ * gross over net, two different populations, and "cash" for a figure that is
+ * mostly prepaid-balance settlement. It was unbounded in practice: August 2026
+ * read 215%.
+ *
+ * NOT a share of the Collected card's own value. The card shows settlement
+ * VALUE (gross, by paid_at); this is a RATE over billing (net, by
+ * confirmed_at). The foot copy says which, because dividing the card's own
+ * number by revenue gives a different figure.
  */
-export function cashCoverage(collected: number, revenue: number): number | null {
-  return revenue > 0 ? (collected / revenue) * 100 : null;
+export function withinMonthCollectionRate(
+  settledSameMonth: number,
+  revenue: number,
+): number | null {
+  return revenue > 0 ? (settledSameMonth / revenue) * 100 : null;
 }
 
 // --- Formatting ------------------------------------------------------------
