@@ -501,16 +501,18 @@ console.log("\n=== 7. The ar-SA ban, mechanically ===");
 //
 // That is expected and permanent. The ban is on the APP rendering through
 // ar-SA; this is a test asserting what ar-SA does, which is the opposite thing.
-// Scope the check to app source and it is clean (205 files, measured
-// 2026-09-08 with the sweep staged):
+// Scope the check to app source and it is clean (206 files, measured
+// 2026-09-08):
 //
-//   npx tsx scripts/code-grep.ts 'ar-SA' $(git ls-files 'app/*.ts' 'app/*.tsx' \
-//     'lib/*.ts' 'lib/*.tsx' 'components/*.ts' 'components/*.tsx' | tr '\n' ' ')
+//   npx tsx scripts/code-grep.ts 'ar-SA' app lib components
 //
-// PASS THE FILES, NOT THE DIRECTORIES. code-grep takes literal paths and feeds
-// each to `git show :<path>`; a directory throws, is swallowed by its catch, and
-// the run reports "No live reference ... in 3 file(s)" with EXIT 0 having read
-// nothing. A false green that reads exactly like a real pass.
+// DIRECTORIES ARE FINE NOW; they were not, and the workaround this note used to
+// carry — a `git ls-files` expansion passed as literal paths — is retired.
+// Before `8dea137`, code-grep fed each argument straight to `git show :<path>`,
+// a directory threw, its catch swallowed that, and the run reported "No live
+// reference ... in 3 file(s)" with EXIT 0 having read nothing. A false green
+// that read exactly like a real pass. Paths are resolved before anything is
+// read now, and a run that reads zero files exits 2 instead of passing.
 //
 // The assertion itself: ar-SA renders the SAME call in Arabic-Indic digits.
 // Stating that here means this file documents WHY the ban exists rather than

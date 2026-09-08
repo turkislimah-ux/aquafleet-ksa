@@ -68,7 +68,7 @@
     capability, below.
   - **`0183_rename_delete_draft_invoice_to_discard_invoice.sql`** (`55e3ebe`) —
     the pure rename, below. One `alter function … rename to`, no footer.
-- **Origin carries through `04b2c4e` — the last WORK commit — plus the handoff
+- **Origin carries through `8dea137` — the last WORK commit — plus the handoff
   commits that carry this line; `main` and `origin/main` level.** Naming a bare
   hash here is what has made this bullet rot four times, and it cannot name its
   own commit's hash, so it names the last non-handoff commit instead and says so.
@@ -475,11 +475,11 @@
 
 ---
 
-## Closed — 2026-09-08 EVENING (this session, `0c7adf9` → `04b2c4e`)
+## Closed — 2026-09-08 EVENING (this session, `0c7adf9` → `8dea137`)
 
 **TWO SESSIONS RAN ON 2026-09-08 AND THE HEADINGS ARE THE ONLY THING THAT
-SEPARATES THEM.** This one is the evening run, three commits, `0c7adf9` through
-`04b2c4e`. The MORNING run (`d9fd6a3` → `8060e82`) has its own table immediately
+SEPARATES THEM.** This one is the evening run, four work commits, `0c7adf9`
+through `8dea137`. The MORNING run (`d9fd6a3` → `8060e82`) has its own table immediately
 below. **Every unqualified "this session" inside THAT table means the MORNING
 run, not this one** — same rule the 2026-09-05 section carries, now biting
 within a single date. Read the commit hash, not the date.
@@ -489,6 +489,7 @@ within a single date. Read the commit hash, not the date.
 | 1 | **The Metrics Dictionary's display copy leaves `report_metrics` and moves into `lib/i18n.ts` — closing PARKED item 10.** The popup read `label`, `meaning`, `formula`, `grain` and `caveat` straight off the table, so Arabic had nowhere to live. **An earlier draft of `0187` answered that with five nullable `_ar` columns and 30 translated rows; that draft was DROPPED** — a translation split across a dictionary and five DB columns has two edit paths, two review paths, no compiler, and is un-reviewable in a diff. The division of labour is now: **`report_metrics` says WHICH metrics exist and what SHAPE each is** (basis, unit, machine-value grain, `source_view`); **`lib/i18n.ts` says what each is CALLED and MEANS**, both languages; `metric_key` is the join. 21 label keys plus 12 that REUSE the existing `reports.metric.*` label whose English is byte-identical, rather than duplicating it. `metricText()` falls through reader's language → English key → the row's own column, so a metric registered before its copy is keyed renders English, never blank. `0187` also registers the three Finance balance terms; **`amount_payable` deliberately does NOT cite `v_customer_amount_payable`**, because for a prepaid customer that view returns the running balance and `return_customer_balance()` gates a real cash refund on exactly that divergence. Adds `scripts/metric-copy-check.ts`, wired as `npm run test:copy`. 7 files + `0187` | `0c7adf9` |
 | 2 | **Gregorian month names render in Arabic, with Latin digits, everywhere — closing PARKED item 9.** Thirteen independent "format a month" implementations in four spellings across three locales, which is how "Aug 2026", "August 2026" and "Sept 2026" all became the same label. One canonical pair (`monthName` / `monthLabel` in `lib/utils`) now owns the words, with `formatDateLang` / `formatDateTimeLang` / `formatDayKeyLang` and an en-GB adapter on top. Item 9 warned the fix "is not pass `lang`" and it was not: **nothing passes `ar-SA`** — its Latin digits under bare `"ar"` are a CLDR default, not an API guarantee, and `ar-SA` itself returns Arabic-Indic numerals and resolves to the Hijri calendar. Digits come off the app's own formatter, only the NAME comes from the dictionary. Adds `scripts/month-label-check.ts` to `test:copy`. 25 files + 1 new, no migration | `f42690d` |
 | 3 | **The `lib/invoice.ts` v3 §9 residual note gets its scope and its attribution — it was NEVER stale.** Re-raised as "says 4 invoices / 38,709.00, live disagrees". It does not disagree; **the earlier pass measured a different axis** (stored subtotal vs a re-derivation) and compared it to a figure describing the frozen-column identity `grand − (covered + amountDue)`. Comment-only, no data, no migration | `04b2c4e` |
+| 4 | **`scripts/code-grep.ts` stops false-greening on directory arguments — closing item 11, its own commit as the item required.** Path handling sat OUTSIDE the lexer and undid it: a directory went straight to `git show :<dir>`, threw, and the read loop's catch — there to skip untracked files — swallowed it, so the run reported "no live reference in 3 file(s)" having read ZERO, the 3 being the ARGUMENT count. Paths are now resolved first by **`resolvePaths`, a pure function with `git` and `stat` injected** so it can be fixtured: directories expand (filtered to the scan's own `*.ts *.tsx *.css *.sql`), an explicit tracked file is read whatever its extension, and every way of producing no evidence is **exit 2** — a path in neither the index nor the tree, a directory with nothing scannable, a read that fails mid-loop, and any run that ends up having read **zero files**. An untracked file is its own bucket: loud skip in staged mode, real read under `--worktree`. The report counts files ACTUALLY READ. **Eight path fixtures joined the twelve lexer ones in the module-load `selfTest`, and the guard was proven able to fail** — reverting only the directory branch in a scratch copy turned three red and exited 2. **The lexer was not touched.** 1 file, no migration — the retirement of the workaround in `scripts/month-label-check.ts`'s §7 header rides with this handoff commit instead, since it is a note correction, not the fix | `8dea137` |
 
 **ROW 3 IS THE ONE TO READ BEFORE RE-RAISING ANYTHING OUT OF THIS FILE.** The
 note was flagged stale, a session was spent proving it, and it was right all
@@ -552,24 +553,37 @@ differed by an INVISIBLE CHARACTER as well as the month. Fixed by replacing into
 construction. **Proven both directions** — reverted to the parts-join and the
 harness went red on exactly that one case.
 
-**`scripts/code-grep.ts` GIVES A FALSE GREEN ON DIRECTORY ARGUMENTS — STILL
-UNFIXED, and it is the tool `CLAUDE.md` §5 tells every session to trust.**
-`npx tsx scripts/code-grep.ts 'ar-SA' app lib components` prints
+**`scripts/code-grep.ts` GAVE A FALSE GREEN ON DIRECTORY ARGUMENTS — FIXED in
+`8dea137`, and it is the tool `CLAUDE.md` §5 tells every session to trust.**
+`npx tsx scripts/code-grep.ts 'ar-SA' app lib components` printed
 `fatal: path 'app' exists on disk, but not in the index` three times, then
-**"No live reference … in 3 file(s)" and EXITS 0 having read nothing.** Cause at
-`scripts/code-grep.ts:279-291`: `args.slice(1)` are literal paths fed to
-`git show :<path>`, a directory throws, `catch { continue; }` swallows it, and
-the report prints `files.length` — the ARGUMENT count, not a file count. **A
-false green that reads exactly like a real pass.** Workaround until it is fixed:
+**"No live reference … in 3 file(s)" and EXITED 0 having read nothing.** Cause:
+`args.slice(1)` were literal paths fed to `git show :<path>`, a directory threw,
+`catch { continue; }` swallowed it, and the report printed `files.length` — the
+ARGUMENT count, not a file count. **A false green that read exactly like a real
+pass**, which is worse than the false red the lexer was written to prevent.
 
-```sh
-npx tsx scripts/code-grep.ts 'ar-SA' $(git ls-files 'app/*.ts' 'app/*.tsx' \
-  'lib/*.ts' 'lib/*.tsx' 'components/*.ts' 'components/*.tsx' | tr '\n' ' ')
-```
-
-**PASS THE FILES, NOT THE DIRECTORIES.** Also documented in
-`scripts/month-label-check.ts`'s §7 header, which holds the repo's only
+**The fix, and what it means for how you invoke it.** Paths are now resolved
+before anything is read, by `resolvePaths` — a pure exported function with `git`
+and `stat` injected, which classifies instead of dropping. **Directories expand**
+(filtered to the same `*.ts *.tsx *.css *.sql` the no-argument scan covers), an
+explicitly named tracked file is read whatever its extension, **a path in neither
+the index nor the working tree is FATAL (exit 2)**, so is a real directory
+holding nothing scannable, and an untracked file is its own bucket — skipped
+loudly in the default staged mode, read from disk under `--worktree`. The report
+prints the files ACTUALLY READ, and **exit 2 if that count is zero**, because
+zero files is not evidence about anything. **So pass directories freely; the
+`git ls-files` workaround that stood here is retired**, and so is its copy in
+`scripts/month-label-check.ts`'s §7 header — which still holds the repo's only
 deliberate `ar-SA` occurrences and would otherwise read as a regression.
+
+**Eight path fixtures joined the twelve lexer ones in the module-load
+`selfTest`**, driven against a fake index; the first reproduces this bug by name.
+**Proven able to fail:** reverting only the directory branch in a scratch copy
+turned three of them red and exited 2. The comment-stripping lexer was not
+touched. Verified `tsc` clean, `test:money` exit 0 / 863 PASS, `test:copy`
+exit 0; the reproducer now reads **206** files — one more than the workaround's
+205, that one being `app/globals.css`, which the ts/tsx-only globs missed.
 
 **BSD grep in the C locale treats Arabic UTF-8 files as BINARY** — with
 `LANG`/`LC_ALL` unset it silently reports no match and exits 1, and `file -b`
@@ -1092,10 +1106,10 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 **No FEATURE is queued** — ask Turki for the next one rather than picking. **ONE
 piece of follow-through is outstanding — item 5 below** — and it is not a
 feature; it is a console setting. **THE PARKED LIST IS NOW EMPTY: items 9 and 10
-both SHIPPED in the 2026-09-08 evening session** (`f42690d` and `0c7adf9`). One
-TOOLING defect is open and is item 11. (Items 1, 2, 3, 4, 6, 7, 8, 9 and 10 are
-kept struck through as records, not as work. Do not resurrect a struck item
-because it still appears in this list.)
+both SHIPPED in the 2026-09-08 evening session** (`f42690d` and `0c7adf9`), and
+**item 11, the last tooling defect, shipped in `8dea137`.** Nothing else is open.
+(Items 1, 2, 3, 4, 6, 7, 8, 9, 10 and 11 are kept struck through as records, not
+as work. Do not resurrect a struck item because it still appears in this list.)
 
 **The money rules from `1754140` and `caec5ef` are no longer in this file's
 custody** — items 6 and 7 moved them into `SKILL.md`, which is what gets loaded
@@ -1190,15 +1204,18 @@ before money work. A handoff is rewritten every session; a skill is not.
       `reports.glossary.*` keys are still keys and still five. What died is the
       premise that the metric PROSE had to stay in the table.
 
-11. **OPEN — `scripts/code-grep.ts` FALSE-GREENS ON DIRECTORY ARGUMENTS.** Full
-    diagnosis, the reproducer and the `git ls-files` workaround are in the
-    2026-09-08 evening section above. **This matters more than a normal tooling
-    bug because `CLAUDE.md` §5 names this script as the tool that settles
-    "is the identifier gone", and the failure mode is a CLEAN PASS.** Fix is at
-    `scripts/code-grep.ts:279-291`: expand any argument that is a directory
-    through `git ls-files -- <dir>` before the `git show :<path>` loop, and print
-    a real file count rather than `files.length`. Small, self-contained, and it
-    should get its own commit — not folded into whatever unit next trips over it.
+11. ~~`scripts/code-grep.ts` false-greens on directory arguments~~ — **DONE
+    (`8dea137`, its own commit as required).** Full diagnosis and the shape of
+    the fix are in the 2026-09-08 evening section above. **It mattered more than
+    a normal tooling bug because `CLAUDE.md` §5 names this script as the tool
+    that settles "is the identifier gone", and the failure mode was a CLEAN
+    PASS.** What to carry forward, since it changes how the tool is called:
+    **directory arguments now work** — `code-grep 'x' app lib components` reads
+    206 files — **and the three ways a run can produce no evidence are all exit
+    2** (a path in neither the index nor the tree, a directory with nothing
+    scannable, and any run that ends up reading zero files). An untracked file is
+    a loud skip in staged mode and a real read under `--worktree`. **The `git
+    ls-files` workaround is retired; do not reintroduce it.**
 
 **THE STATEMENT INHERITS `lib/plainDocStyles.ts` NEXT — that is a POINTER, not a
 queued feature.** The kit was built as a shared module for exactly this;
