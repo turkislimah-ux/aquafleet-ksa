@@ -196,7 +196,11 @@ export type Driver = {
   // the display rule follows it (Yes green / No red / null a neutral dash, never
   // red). The DB column carries the same rule in a `comment on column`.
   health_insurance: boolean | null;
-  active: boolean;
+  // `active` used to sit here. A second liveness flag beside terminated_at,
+  // which §6 already names as THE soft-delete key; its only two readers were
+  // complete_work_order/complete_outsourced_job, whose restore guard tested
+  // both. Stripped here FIRST so `select("*")` (app/drivers/page.tsx) stops
+  // claiming a field the row will not carry. Do not re-add it; the drop is 0188.
   // Soft delete (0020): NULL = active; a timestamp = terminated. termination_date
   // is the effective last-working-day the manager picked (may be in the past).
   terminated_at: string | null;

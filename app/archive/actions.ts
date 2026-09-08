@@ -716,7 +716,7 @@ export async function restoreDriver(driverId: string): Promise<{ error: string |
   const supabase = createClient();
   const { error } = await supabase
     .from("drivers")
-    .update({ active: true, terminated_at: null, termination_date: null })
+    .update({ terminated_at: null, termination_date: null })
     .eq("id", driverId);
   if (error) return { error: error.message };
   revalidatePath("/archive");

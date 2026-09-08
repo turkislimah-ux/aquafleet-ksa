@@ -180,7 +180,7 @@ export default async function TripsPage() {
       // duty/roster pickers — filtered at the fetch.
       supabase
         .from("drivers")
-        .select("id, name, status, active")
+        .select("id, name, status")
         .is("terminated_at", null)
         .order("name", { ascending: true }),
       supabase.from("project_drivers").select("project_id, driver_id"),

@@ -36,7 +36,7 @@ export default async function ProjectsPage() {
       // Manage-drivers picker — filtered at the fetch.
       supabase
         .from("drivers")
-        .select("id, name, status, active")
+        .select("id, name, status")
         .is("terminated_at", null)
         .order("name", { ascending: true }),
       // Terminated trucks vanish from the roster pickers (0020); frees their
