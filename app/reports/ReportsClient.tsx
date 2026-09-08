@@ -208,7 +208,7 @@ export default function ReportsClient(props: ReportsClientProps) {
                       style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
                     >
                       {months.map((m) => (
-                        <option key={m} value={m}>{monthLabel(m)}</option>
+                        <option key={m} value={m}>{monthLabel(m, lang)}</option>
                       ))}
                     </select>
                   </label>

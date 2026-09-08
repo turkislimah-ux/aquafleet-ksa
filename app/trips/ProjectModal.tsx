@@ -51,7 +51,7 @@ import {
   type PaymentMode,
   type ProjectCommissionNowRow,
 } from "@/lib/db-types";
-import { formatSar, formatDayKey, todayKey } from "@/lib/utils";
+import { formatSar, formatDayKeyLang, todayKey } from "@/lib/utils";
 import {
   archiveProject,
   createProjectWithCustomer,
@@ -528,8 +528,10 @@ export default function ProjectModal({
     // THE FIGURES ARE THE RPC'S OWN. `a.value`, `a.bumpPct`, `a.effectiveFrom`
     // and `a.repriceableTrips` are what set_project_commission reported it
     // wrote; nothing here recomputes, re-rounds or re-formats them —
-    // formatSar() and formatDayKey() are the same calls that were inside the
-    // old template literals. Only the sentence around them moved.
+    // formatSar() and formatDayKeyLang() are the same calls that were inside
+    // the old template literals. Only the sentence around them moved. The Lang
+    // suffix translates the date's month NAME and nothing else — the day and
+    // year the RPC reported are figures and render Latin in both languages.
     //
     // The mode fragment is PRE-FILLED before it is spliced in. fill() makes a
     // single left-to-right pass over the ORIGINAL string, so a `{pct}` already
@@ -548,7 +550,7 @@ export default function ProjectModal({
           ? `${inForce} ${fill(t(`trips.project.repriceTrips.${plural(a.repriceableTrips)}`, lang), { n: a.repriceableTrips })}`
           : `${inForce} ${t("trips.project.noReprice", lang)}`
         : `${fill(t("trips.project.noteScheduled", lang), {
-            date: formatDayKey(a.effectiveFrom),
+            date: formatDayKeyLang(a.effectiveFrom, lang),
             v: formatSar(a.value),
             mode: modeTxt,
           })} ${t("trips.project.termsUnmoved", lang)}`,
@@ -573,7 +575,7 @@ export default function ProjectModal({
     }
     const c = res.cancelled;
     setCommissionNote(
-      `${fill(t("trips.project.noteWithdrew", lang), { date: formatDayKey(c.effectiveFrom) })} ${
+      `${fill(t("trips.project.noteWithdrew", lang), { date: formatDayKeyLang(c.effectiveFrom, lang) })} ${
         c.remainingScheduled === 0
           ? t("trips.project.nothingQueued", lang)
           : fill(t(`trips.project.otherQueued.${plural(c.remainingScheduled)}`, lang), {
@@ -767,7 +769,7 @@ export default function ProjectModal({
                     ? effectiveFrom === today
                       ? t("trips.project.dirtyToday", lang)
                       : fill(t("trips.project.dirtyScheduled", lang), {
-                          date: formatDayKey(effectiveFrom),
+                          date: formatDayKeyLang(effectiveFrom, lang),
                         })
                     : t("trips.project.notDirty", lang)}
                 </span>
@@ -861,7 +863,7 @@ export default function ProjectModal({
                       {effectiveFrom === today
                         ? t("trips.project.hEffectiveToday", lang)
                         : fill(t("trips.project.hEffectiveQueued", lang), {
-                            date: formatDayKey(effectiveFrom),
+                            date: formatDayKeyLang(effectiveFrom, lang),
                           })}
                     </span>
                   </label>
@@ -936,7 +938,7 @@ export default function ProjectModal({
                               })
                             : t("trips.project.fixedEveryTrip", lang)}
                           {t("trips.project.fromSep", lang)}
-                          {formatDayKey(commissionNow.next_effective_from)}
+                          {formatDayKeyLang(commissionNow.next_effective_from, lang)}
                         </div>
                         <button
                           type="button"

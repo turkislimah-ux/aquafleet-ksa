@@ -16,6 +16,9 @@
 
 import { COST_COLOR } from "@/lib/cost-colors";
 import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
+// Aliased on import because this file exports its own `monthLabel` — the
+// reports-route name for the same label, now implemented by the shared one.
+import { monthLabel as monthKeyLabel, monthName } from "@/lib/utils";
 
 // --- View row shapes -------------------------------------------------------
 // One type per view, columns verbatim. Names match the SQL exactly so a
@@ -186,6 +189,53 @@ export type ExpenseCategoryPeriodRow = {
   expenses_sar: number;
   entry_count: number;
 };
+
+/**
+ * THE PERIOD'S NAME, IN THE READER'S LANGUAGE — "Aug 2026" / "أغسطس 2026",
+ * "Q3 2026" / "الربع 3 2026", "2026".
+ *
+ * WHY THIS EXISTS AT ALL, WHEN THE ROW ALREADY CARRIES A `label`. Because that
+ * column is built in SQL: 0113's v_pnl_by_period writes
+ * `to_char(p.month, 'Mon YYYY')`, and a Postgres month name is whatever the
+ * SERVER's lc_time says it is. It is English today because the server is
+ * en_US.UTF-8; it is not English because anyone decided it should be, and no
+ * amount of app work can make it Arabic for one reader and English for the one
+ * beside them — a stored string has one value for everybody.
+ *
+ * NO MIGRATION WAS WRITTEN, AND THAT IS THE DELIBERATE CHOICE. The view keeps
+ * its `label` column exactly as it is. Replacing a label expression in SQL
+ * would still leave a server-locale-dependent string that cannot follow a
+ * toggle, so the migration would have bought nothing and cost a view
+ * replacement plus its security footer. The column is now an unread fallback:
+ * still correct, still English, still there for anything reading the view
+ * directly (psql, an export, a future report), and no longer the thing on
+ * screen.
+ *
+ * THE ENGLISH IS UNCHANGED AT EVERY GRAIN, and that was checked against the
+ * live view rather than against 0113's source:
+ *   month    to_char(month,'Mon YYYY')      "Aug 2026"  = monthLabel short
+ *   quarter  'Q'||to_char(...,'Q YYYY')     "Q3 2026"   = common.quarterLabel
+ *   year     to_char(...,'YYYY')            "2026"      = the first four chars
+ *
+ * TAKES THE ROW, NOT THREE ARGUMENTS. Both period row shapes carry
+ * `period_type` and `period_start`, so the structural parameter accepts either
+ * without a cast and a caller cannot pair a quarter's type with a month's
+ * start — the one mistake that would produce a confidently wrong label.
+ */
+export function periodLabel(
+  row: { period_type: PeriodType; period_start: string },
+  lang: Lang,
+): string {
+  const year = row.period_start.slice(0, 4);
+  if (row.period_type === "year") return year;
+  if (row.period_type === "quarter") {
+    return fill(t("common.quarterLabel", lang), {
+      q: Math.floor((Number(row.period_start.slice(5, 7)) - 1) / 3) + 1,
+      y: year,
+    });
+  }
+  return monthKeyLabel(row.period_start, lang);
+}
 
 /** Indicative Zakat rate. An ESTIMATING convention, not a ZATCA assessment. */
 const ZAKAT_RATE = 0.025;
@@ -671,18 +721,36 @@ export function monthsDesc(pnl: PnlRow[]): string[] {
   return [...pnl.map((r) => r.month)].sort().reverse();
 }
 
-/** Label a YYYY-MM-DD month key as "Aug 2026". */
-export function monthLabel(month: string): string {
-  const d = new Date(month + "T00:00:00");
-  return d.toLocaleString("en-US", { month: "short", year: "numeric" });
+/**
+ * Label a YYYY-MM-DD month key as "Aug 2026" / "أغسطس 2026".
+ *
+ * A THIN WRAPPER OVER lib/utils' monthLabel, kept for its NAME. Every reports
+ * caller says `monthLabel(m, lang)` and this file is where the reports route
+ * looks for its formatting; re-pointing 11 call sites at a utils import to save
+ * three lines would move the definition without moving where anyone looks for
+ * it. What it no longer holds is a second opinion about the twelve words.
+ *
+ * The Date construction went with the body. `new Date("2026-08-01T00:00:00")`
+ * parses on the LOCAL clock, which is right on a browser in Riyadh and a day
+ * early on one in São Paulo — for a label that is supposed to name a calendar
+ * month, not an instant. The shared helper slices the characters.
+ */
+export function monthLabel(month: string, lang: Lang): string {
+  return monthKeyLabel(month, lang);
 }
 
-/** Short axis label — "Aug", with the year only when January makes it useful. */
-export function monthTick(month: string): string {
-  const d = new Date(month + "T00:00:00");
-  return d.getMonth() === 0
-    ? d.toLocaleString("en-US", { month: "short", year: "2-digit" })
-    : d.toLocaleString("en-US", { month: "short" });
+/**
+ * Short axis label — "Aug" / "أغسطس", with the year only when January makes it
+ * useful ("Jan 26" / "يناير 26").
+ *
+ * The 2-digit year is SLICED, not formatted. `year: "2-digit"` on an Intl
+ * formatter is the only place the old body could have produced Arabic-Indic
+ * digits, and characters 2-3 of the key are the two digits it was asking for.
+ */
+export function monthTick(month: string, lang: Lang): string {
+  const name = monthName(Number(month.slice(5, 7)), lang);
+  if (!name) return month;
+  return month.slice(5, 7) === "01" ? `${name} ${month.slice(2, 4)}` : name;
 }
 
 /**
@@ -860,7 +928,7 @@ export function buildNarrative(args: {
   if (inProgress) {
     out.push({
       tone: "info",
-      text: say("reports.narrative.inProgress", { p: c.label }),
+      text: say("reports.narrative.inProgress", { p: periodLabel(c, lang) }),
     });
   }
 
@@ -869,7 +937,7 @@ export function buildNarrative(args: {
     out.push({
       tone: "warn",
       text: say("reports.narrative.noRevenue", {
-        p: c.label, c: sar(c.operating_cost_sar),
+        p: periodLabel(c, lang), c: sar(c.operating_cost_sar),
       }),
     });
   } else {
@@ -881,10 +949,10 @@ export function buildNarrative(args: {
             d.dir === "up" ? "reports.narrative.revenueUp"
               : d.dir === "down" ? "reports.narrative.revenueDown"
               : "reports.narrative.revenueFlat",
-            { v: sar(c.revenue_sar), d: formatPct(d.pct), p: p!.label },
+            { v: sar(c.revenue_sar), d: formatPct(d.pct), p: periodLabel(p!, lang) },
           )
         : p
-          ? say("reports.narrative.revenueVsNothing", { v: sar(c.revenue_sar), p: p.label })
+          ? say("reports.narrative.revenueVsNothing", { v: sar(c.revenue_sar), p: periodLabel(p, lang) })
           : say("reports.narrative.revenueBare", { v: sar(c.revenue_sar) }),
     });
   }

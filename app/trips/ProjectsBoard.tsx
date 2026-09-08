@@ -27,7 +27,7 @@ import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, type Lang } from "@/lib/i18n";
 import { tripStageLabel, waterTypeLabel } from "@/lib/enum-labels";
-import { cn, formatSar } from "@/lib/utils";
+import { cn, formatSar, formatDateLangLocale } from "@/lib/utils";
 import { stationBlockedForType, type StationOption, type WaterStationRow } from "@/lib/station-pricing";
 import {
   type Trip,
@@ -164,10 +164,15 @@ function projectDot(status: ProjectStatus) {
 // Compact phase stamp "25 Jun · 14:32" (mirrors the demo's fmtPhaseStamp). "—" when
 // the timestamp is absent. Full timestamptz values render exact; the date-only
 // trip_date fallback (a never-stamped scheduled trip) shows a midnight-ish time.
-function fmtPhaseStamp(iso: string | null): string {
+//
+// ONLY THE DATE HALF TAKES A LANGUAGE. The time half is four digits and a
+// colon with no month in it, so it has nothing to translate and keeps its
+// plain en-GB call — routing it through a Lang formatter would add a branch
+// that can only ever return the same string.
+function fmtPhaseStamp(iso: string | null, lang: Lang): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  const date = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  const date = formatDateLangLocale(d, lang, "en-GB", { day: "2-digit", month: "short" });
   const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
   return `${date} · ${time}`;
 }
@@ -304,7 +309,7 @@ function TripCard({
     phaseRows = (
       <div className="text-xs mt-1">
         <span className="muted">{t("trips.board.stampScheduled", lang)}</span>{" "}
-        <span className="tabular-nums">{fmtPhaseStamp(trip.scheduled_at ?? trip.trip_date)}</span>
+        <span className="tabular-nums">{fmtPhaseStamp(trip.scheduled_at ?? trip.trip_date, lang)}</span>
       </div>
     );
   } else if (trip.stage === "loading") {
@@ -317,7 +322,7 @@ function TripCard({
         <div className="text-xs mt-1">
           <span className="muted">{t("trips.board.stampLoadingSince", lang)}</span>{" "}
           <span className="tabular-nums">
-            {fmtPhaseStamp(trip.loading_at ?? trip.scheduled_at ?? trip.trip_date)}
+            {fmtPhaseStamp(trip.loading_at ?? trip.scheduled_at ?? trip.trip_date, lang)}
           </span>
         </div>
         {/* Left-accent-bar chip (pixel-matched to preview/app.css .kanban-station:
@@ -374,7 +379,7 @@ function TripCard({
       <div className="text-xs mt-1">
         <span className="muted">{t("trips.board.stampInTransitSince", lang)}</span>{" "}
         <span className="tabular-nums">
-          {fmtPhaseStamp(trip.in_transit_at ?? trip.loading_at ?? trip.trip_date)}
+          {fmtPhaseStamp(trip.in_transit_at ?? trip.loading_at ?? trip.trip_date, lang)}
         </span>
       </div>
     );
@@ -385,7 +390,7 @@ function TripCard({
       <>
         <div className="text-xs mt-1">
           <span className="muted">{t("trips.board.stampDelivered", lang)}</span>{" "}
-          <span className="tabular-nums">{fmtPhaseStamp(trip.delivered_at ?? trip.trip_date)}</span>
+          <span className="tabular-nums">{fmtPhaseStamp(trip.delivered_at ?? trip.trip_date, lang)}</span>
         </div>
         {stationName && (
           <div className="text-xs mt-1 flex items-center gap-1">

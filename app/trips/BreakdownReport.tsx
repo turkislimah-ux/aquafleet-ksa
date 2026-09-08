@@ -50,7 +50,13 @@ import {
   Legend,
 } from "recharts";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { currentMonthKey, formatDate, formatDayKey, formatSar, todayKey } from "@/lib/utils";
+// `monthLabel` is aliased because this file exports a wrapper under that name.
+// The three *Lang variants are the language-aware siblings of formatDate /
+// formatDayKey — same English output, Arabic month name in Arabic.
+import {
+  currentMonthKey, formatDateLang, formatDayKeyLang, formatSar, todayKey,
+  monthLabel as utilsMonthLabel, monthName,
+} from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import {
   type PaymentMode,
@@ -138,22 +144,25 @@ type ProjectLite = {
 // THE FOURTH COPY OF THE MONTH ARRAY IS GONE. It was a module-level const, so
 // it froze at import and could never have followed a language switch anyway.
 // The names now come from `common.monthShort`, the one place four files read.
-// Indexing a const tuple types the element as the union of its twelve members,
-// so `common.monthShort.${key}` is twelve real TKeys rather than `string`.
-const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
+//
+// THE LOCAL KEY TUPLE IS GONE TOO, one level further up. It re-derived the same
+// index → dictionary-key mapping that lib/utils.ts's monthName() already owns,
+// which made this a second IMPLEMENTATION of one string rather than a second
+// string. Both wrappers below keep their names and their exact output — only
+// the month-name lookup moved.
 
 // "2026-06" → "Jun 2026". The YEAR is a plain number and stays Latin.
 function monthLabel(key: string, lang: Lang): string {
-  const [y, m] = key.split("-");
-  const mk = MONTH_KEYS[Number(m) - 1];
-  return `${mk ? t(`common.monthShort.${mk}`, lang) : m} ${y}`;
+  return utilsMonthLabel(key, lang, "short");
 }
 
 // "2026-06" → "Jun 26" (compact axis tick for the 6-month trend).
+// Not monthLabel() with a slice: the two differ in the YEAR, so they are two
+// formats over one name, and only the name is shared.
 function shortMonthLabel(key: string, lang: Lang): string {
   const [y, m] = key.split("-");
-  const mk = MONTH_KEYS[Number(m) - 1];
-  return `${mk ? t(`common.monthShort.${mk}`, lang) : m} ${y.slice(2)}`;
+  const name = monthName(Number(m), lang);
+  return `${name || m} ${y.slice(2)}`;
 }
 
 const UNASSIGNED = "__unassigned__";
@@ -558,7 +567,12 @@ export default function BreakdownReport({
   // series rather than the language.
   const serRevenue = t("trips.breakdown.serRevenue", lang);
   const serTrips = t("trips.breakdown.serTrips", lang);
-  const generatedOn = formatDate(new Date(), {
+  // The "generated on" stamp at the foot of the printout. A DISPLAY render of
+  // `new Date()` — nothing stores it, nothing parses it back — so the month
+  // name follows the language while the day, year and separators come from the
+  // same en-US formatter English uses. English is byte-identical: formatDateLang
+  // delegates to formatDate() untouched when lang === "en".
+  const generatedOn = formatDateLang(new Date(), lang, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -665,7 +679,7 @@ export default function BreakdownReport({
               {commissionNow?.next_effective_from && (
                 <div className="text-[11px] text-amber-600 dark:text-amber-400">
                   {fill(t("trips.customers.changes", lang), {
-                    date: formatDayKey(commissionNow.next_effective_from),
+                    date: formatDayKeyLang(commissionNow.next_effective_from, lang),
                   })}
                 </div>
               )}

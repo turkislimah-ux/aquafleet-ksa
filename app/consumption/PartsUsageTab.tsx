@@ -143,15 +143,17 @@ export default function PartsUsageTab({
   // so an empty stretch stays on the axis instead of disappearing from it.
   const series = useMemo(() => {
     const keys = timelineKeys(trend, new Date());
-    return seriesOn(pool, trend, keys);
-  }, [pool, trend]);
+    // `lang` is a real dependency — the bucket labels are month NAMES now, so
+    // the axis has to rebuild when the toggle flips.
+    return seriesOn(pool, trend, keys, lang);
+  }, [pool, trend, lang]);
   const trendLine = useMemo(() => movingAverage(series), [series]);
 
   // The paired value/quantity chart is always MONTHLY over the last 12 months,
   // whatever the combined chart's own toggle is set to.
   const monthlySeries = useMemo(
-    () => seriesOn(pool, "month", timelineKeys("month", new Date())),
-    [pool],
+    () => seriesOn(pool, "month", timelineKeys("month", new Date()), lang),
+    [pool, lang],
   );
 
   // Outstanding is current state, never period-scoped.

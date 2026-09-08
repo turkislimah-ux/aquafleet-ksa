@@ -19,7 +19,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Ban, ImageIcon, Info, Pencil, Printer, X } from "lucide-react";
 import { Table, TH, TD, Btn } from "@/components/ui";
-import { cn, formatSar, formatSarExact, formatNum, todayKey } from "@/lib/utils";
+import { cn, formatSar, formatSarExact, formatNum, todayKey, monthLabel } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
 // WATER_TYPE_LABELS stays ENGLISH this batch, deliberately. It lives in
@@ -1561,10 +1561,19 @@ function BasisChip({ basis, settled, lang }: { basis: string; settled: boolean; 
   );
 }
 
-function monthLabelOf(iso: string) {
-  const [y, m] = iso.split("-");
-  return new Date(Number(y), Number(m) - 1, 1)
-    .toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+// "2026-08-01" -> "Aug 2026" / "أغسطس 2026". The shared label; this page no
+// longer formats one of its own.
+//
+// THE ENGLISH MOVES AT EXACTLY ONE MONTH, AND THAT IS THE POINT OF THE CHANGE.
+// The old body was the only "en-GB" month label in the reports route, and en-GB
+// abbreviates September as "Sept" where en-US and the dictionary both write
+// "Sep". So this page captioned September's payslip register "Sept 2026" while
+// the period picker on the next tab captioned the same month "Sep 2026". The
+// other eleven months were already identical. Dropping the odd locale is what
+// makes the two agree — a deliberate one-word correction, not a side effect,
+// and written down here because a byte-diff of the English will find it.
+function monthLabelOf(iso: string, lang: Lang) {
+  return monthLabel(iso, lang);
 }
 
 export function PayslipsStatement({
@@ -1666,7 +1675,7 @@ export function PayslipsStatement({
           : t("reports.payslips.statusNotIssued", lang);
         return [
           r.driver_name,
-          monthLabelOf(r.period_start),
+          monthLabelOf(r.period_start, lang),
           salary, comm, basisText, net, status,
         ];
       }),
@@ -1779,7 +1788,7 @@ export function PayslipsStatement({
                     className="cursor-pointer hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
                   >
                     <TD className="font-medium">{r.driver_name}</TD>
-                    <TD className="muted">{monthLabelOf(r.period_start)}</TD>
+                    <TD className="muted">{monthLabelOf(r.period_start, lang)}</TD>
                     <TD className="text-end tabular-nums">{formatSar(salary)}</TD>
                     <TD className="text-end tabular-nums">{formatSar(commission)}</TD>
                     <TD>
@@ -2348,10 +2357,12 @@ function PayslipDocument({
           // beside it is monospace data and is never translated.
           ? <>{t("reports.payslips.payslipWord", lang)} <b className="font-mono font-bold">{doc.payslip_number}</b></>
           : t("reports.payslips.payslipNotIssued", lang)}
-        // The driver's name is entity data with no `_ar` column, and
-        // monthLabelOf() writes a Latin month abbreviation in both languages —
-        // the same call every other date on this page makes.
-        period={`${row.driver_name} · ${monthLabelOf(row.period_start)}`}
+        // The driver's name is entity data with no `_ar` column, so it renders
+        // as stored in both languages. The month beside it does NOT: a month
+        // name is a label, and monthLabelOf() now writes it in the reader's
+        // language — the same call every other month on this page makes. The
+        // YEAR stays Latin, like every other figure here.
+        period={`${row.driver_name} · ${monthLabelOf(row.period_start, lang)}`}
       />
 
       {/* WHY THE ACTION IS UNAVAILABLE, said where the button is — a disabled
@@ -2388,7 +2399,7 @@ function PayslipDocument({
             {t("reports.payslips.confirmBefore", lang)}{" "}
             <b>{row.driver_name}</b>
             {t("reports.payslips.confirmAfterName", lang)}{" "}
-            <b>{monthLabelOf(row.period_start)}</b>{" "}
+            <b>{monthLabelOf(row.period_start, lang)}</b>{" "}
             {t("reports.payslips.confirmAfterMonth", lang)}{" "}
             <b className="tabular-nums">{formatSar(f.net)}</b>{" "}
             {t("reports.payslips.confirmTail", lang)}
@@ -2805,9 +2816,26 @@ function PayslipDocument({
             {fill(t(`reports.payslips.settledBy.${plural(payouts.length)}`, lang),
               { n: payouts.length })}
           </div>
+          {/* `period_label` STAYS ENGLISH here, and this site is stricter than
+              the one on the Commission History screen — it is frozen TWICE.
+              pay_commission wrote the caption into commission_payouts, and
+              issuing the payslip copied it into driver_payslips.snapshot, whose
+              whole contract is that the document keeps saying what it said the
+              day it was handed over.
+
+              There is also nothing to translate it FROM. Measured 2026-09-08:
+              the frozen payout entries carry exactly `id, paid_at,
+              period_label, base_sar, specials_sar, adjustments_sar, bonus_sar,
+              total_sar` — no monthKey. Joining `id` back to the live table
+              would both re-derive a frozen document from mutable data and, on
+              this data, recover nothing: every payout a payslip references is a
+              pre-0131 sweep whose own monthKey is null.
+
+              paid_at is left as a raw ISO slice for the same freeze reason and
+              is already digits-only. */}
           <ul className="space-y-0.5 muted">
             {payouts.map((p) => (
-              <li key={p.id} className="tabular-nums">
+              <li key={p.id} className="tabular-nums" dir="ltr">
                 {p.paid_at ? p.paid_at.slice(0, 10) : "—"} · {p.period_label ?? "—"} ·{" "}
                 {formatSar(p.total_sar)}
               </li>

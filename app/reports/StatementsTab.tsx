@@ -65,7 +65,7 @@ import { Btn } from "@/components/ui";
 import { cn, formatSar } from "@/lib/utils";
 import {
   periodsOf, priorPeriodStart, isPeriodInProgress, delta, formatPct, formatShare,
-  PERIOD_TYPES, monthsIn, sumOver, peakOver, buildNarrative,
+  PERIOD_TYPES, monthsIn, sumOver, peakOver, buildNarrative, periodLabel,
   type PeriodType, type PnlPeriodRow, type ExpenseCategoryPeriodRow, type Delta,
   type RevenueInvoiceRow, type SalesReturnRow, type ReceivableRow, type AgingRow,
   type InvoiceOutstandingLiveRow,
@@ -419,15 +419,15 @@ export default function StatementsTab({
     return {
       slug: "pnl",
       title: t("reports.pnl.title", lang),
-      period: current.label,
+      period: periodLabel(current, lang),
       columns: [
         t("reports.export.line", lang),
         t("reports.export.unit", lang),
-        current.label,
+        periodLabel(current, lang),
         // The em dash the <th> renders when there is no prior period, kept
         // rather than blanked: an empty heading over three empty columns reads
         // as a broken file, an em dash reads as "there was nothing to compare".
-        prior?.label ?? "—",
+        prior ? periodLabel(prior, lang) : "—",
         t("reports.th.variance", lang),
         t("reports.export.changePct", lang),
       ],
@@ -594,8 +594,12 @@ export default function StatementsTab({
           className="px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
           style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
         >
+          {/* periodLabel() rather than the view's own `label` column — that
+              string is baked by SQL to_char() and has one value for every
+              reader, so it cannot follow the language toggle. Same swap at
+              every other site that used to read `.label`. */}
           {periods.map((p) => (
-            <option key={p.period_start} value={p.period_start}>{p.label}</option>
+            <option key={p.period_start} value={p.period_start}>{periodLabel(p, lang)}</option>
           ))}
         </select>
 
@@ -634,11 +638,11 @@ export default function StatementsTab({
                 rendered a literal "Profit & Loss". */}
             <h2 className="text-lg font-semibold">{t("reports.pnl.title", lang)}</h2>
             <p className="text-sm muted">
-              {current.label}
+              {periodLabel(current, lang)}
               {/* The space after `<>` is on the same line as the tag, so JSX
                   keeps it — it is the separator between the two labels and it
                   is not part of the dictionary value. */}
-              {prior && <> {fill(t("reports.pnl.comparedWith", lang), { p: prior.label })}</>}
+              {prior && <> {fill(t("reports.pnl.comparedWith", lang), { p: periodLabel(prior, lang) })}</>}
             </p>
             {inProgress && (
               <p className="text-xs mt-1.5 text-amber-600 dark:text-amber-400">
@@ -651,8 +655,8 @@ export default function StatementsTab({
             <thead>
               <tr className="border-b" style={{ borderColor: "rgb(var(--border))" }}>
                 <th className="text-start font-medium muted pb-2">&nbsp;</th>
-                <th className="text-end font-medium muted pb-2 w-[150px]">{current.label}</th>
-                <th className="text-end font-medium muted pb-2 w-[150px]">{prior?.label ?? "—"}</th>
+                <th className="text-end font-medium muted pb-2 w-[150px]">{periodLabel(current, lang)}</th>
+                <th className="text-end font-medium muted pb-2 w-[150px]">{prior ? periodLabel(prior, lang) : "—"}</th>
                 <th className="text-end font-medium muted pb-2 w-[130px]">{t("reports.th.variance", lang)}</th>
                 {/* A bare symbol, left as one. "%" is not English. */}
                 <th className="text-end font-medium muted pb-2 w-[90px]">%</th>
@@ -797,7 +801,7 @@ export default function StatementsTab({
         <section className="card p-6">
           <div className="flex items-baseline gap-2 flex-wrap">
             <h3 className="text-base font-semibold">{t("reports.vat.title", lang)}</h3>
-            <span className="text-xs muted">{current.label}</span>
+            <span className="text-xs muted">{periodLabel(current, lang)}</span>
           </div>
           <p className="text-xs muted mt-1 mb-4">
             {t("reports.vat.intro", lang)}
@@ -913,7 +917,7 @@ export default function StatementsTab({
           invoices={invoices} returns={salesReturns}
           outstandingLive={outstandingLive}
           periodStart={current.period_start} periodEnd={current.period_end}
-          label={current.label}
+          label={periodLabel(current, lang)}
           registerCsv={registerCsv}
         />
       )}
@@ -928,7 +932,7 @@ export default function StatementsTab({
           commissions={commissions} commissionsPaid={commissionsPaid}
           filling={filling} fillingByStation={fillingByStation}
           periodStart={current.period_start} periodEnd={current.period_end}
-          label={current.label}
+          label={periodLabel(current, lang)}
           registerCsv={registerCsv}
         />
       )}
@@ -938,7 +942,7 @@ export default function StatementsTab({
           operations={operations}
           byDriver={opsByDriver}
           periodStart={current.period_start} periodEnd={current.period_end}
-          label={current.label} multiMonth={multiMonth}
+          label={periodLabel(current, lang)} multiMonth={multiMonth}
           registerCsv={registerCsv}
         />
       )}
@@ -957,7 +961,7 @@ export default function StatementsTab({
           basis={payslipBasis}
           issued={issuedPayslips}
           periodStart={current.period_start} periodEnd={current.period_end}
-          label={current.label}
+          label={periodLabel(current, lang)}
           today={today}
           selectedDriverId={payslipDriver}
           onSelectDriver={setPayslipDriver}
@@ -972,7 +976,7 @@ export default function StatementsTab({
       )}
 
       {statement === "narrative" && (
-        <NarrativeStatement bullets={narrative} label={current.label} pnl={current} />
+        <NarrativeStatement bullets={narrative} label={periodLabel(current, lang)} pnl={current} />
       )}
 
       {statement === "custom" && customSpec && customReport && (
@@ -1025,7 +1029,10 @@ function customTitle(spec: BuilderSelection, periods: PnlPeriodRow[], lang: Lang
     return fill(t(`reports.statements.customTitle.${spec.periodType}`, lang), { g });
   }
   const p = periods.find((x) => x.period_type === spec.periodType && x.period_start === spec.periodStart);
-  return fill(t("reports.statements.customTitle.forPeriod", lang), { g, p: p?.label ?? "—" });
+  return fill(t("reports.statements.customTitle.forPeriod", lang), {
+    g,
+    p: p ? periodLabel(p, lang) : "—",
+  });
 }
 
 // --- Rows ------------------------------------------------------------------

@@ -36,9 +36,10 @@ import type {
   ExitPermit, ExitPermitLine, WorkOrder, WorkOrderPart,
 } from "./db-types";
 // Display formatting only — every figure below is still a stamped FIFO cost,
-// unchanged. These pin the locale so the insight sentences and the period
-// labels read in Latin digits on an Arabic-locale device.
-import { formatDate, formatNum } from "./utils";
+// unchanged. These pin the DIGITS, so the insight sentences and the period
+// labels read in Latin numerals on an Arabic-locale device; the `*Lang` pair
+// translates the month NAME on top of that and nothing else.
+import { formatDateLang, formatNum, monthLabel, monthName } from "./utils";
 import { t, plural, type Lang, type TKey } from "./i18n";
 import { EXIT_PERMIT_DESTINATION_TKEY, EXIT_PERMIT_DESTINATION_INLINE_TKEY } from "./exit-permits";
 
@@ -272,15 +273,24 @@ function fmtRange(kind: PeriodKind, start: Date, lang: Lang): string {
   const y = start.getUTCFullYear();
   if (kind === "year") return String(y);
   if (kind === "quarter") {
-    return t("consumption.usage.rangeQuarter", lang)
+    return t("common.quarterLabel", lang)
       .replace("{q}", () => String(Math.floor(start.getUTCMonth() / 3) + 1))
       .replace("{y}", () => String(y));
   }
   if (kind === "month") {
-    return formatDate(start, { month: "long", year: "numeric", timeZone: "UTC" });
+    // The key is built from the UTC parts, not handed to monthLabel as a Date,
+    // because these windows are UTC by construction (see startOfWeek above) and
+    // a local-clock read of `start` would name the previous month for the first
+    // three hours of every month in Riyadh.
+    const key = `${y}-${String(start.getUTCMonth() + 1).padStart(2, "0")}`;
+    return monthLabel(key, lang, "long");
   }
+  // The week label was MIXED SCRIPT in Arabic — "أسبوع Aug 3", the wrapper
+  // translated and the date inside it not. formatDateLang leaves the English
+  // arm exactly as it was and swaps only the month name on the Arabic one.
   return t("consumption.usage.rangeWeek", lang)
-    .replace("{d}", () => formatDate(start, { month: "short", day: "numeric", timeZone: "UTC" }));
+    .replace("{d}", () =>
+      formatDateLang(start, lang, { month: "short", day: "numeric", timeZone: "UTC" }));
 }
 
 export function periodWindow(kind: PeriodKind, now: Date, lang: Lang): PeriodWindow {
@@ -345,12 +355,14 @@ function trendKey(kind: TrendKind, iso: string): string {
   return iso.slice(0, 7);
 }
 
-export function trendLabel(kind: TrendKind, key: string): string {
+export function trendLabel(kind: TrendKind, key: string, lang: Lang): string {
   if (kind === "year") return key;
   if (kind === "quarter") return key.replace("-", " ");
-  return formatDate(key + "-01T00:00:00Z", {
-    month: "short", year: "2-digit", timeZone: "UTC",
-  });
+  // "2026-08" -> "Aug 26" / "أغسطس 26". The 2-digit year is SLICED off the key
+  // rather than asked of a formatter: characters 2-3 are exactly the two digits
+  // `year: "2-digit"` was producing, and they cannot come back Arabic-Indic.
+  const name = monthName(Number(key.slice(5, 7)), lang);
+  return name ? `${name} ${key.slice(2, 4)}` : key;
 }
 
 /**
@@ -390,8 +402,8 @@ function prevTrendKey(kind: TrendKind, key: string): string {
  * dropped, and every key in the window is present even at zero — which is
  * what makes an empty month render as an empty month.
  */
-export function seriesOn(rows: UsageRow[], kind: TrendKind, keys: string[]): Bucket[] {
-  const m = new Map(keys.map((k) => [k, { key: k, label: trendLabel(kind, k), qty: 0, valueSar: 0 }]));
+export function seriesOn(rows: UsageRow[], kind: TrendKind, keys: string[], lang: Lang): Bucket[] {
+  const m = new Map(keys.map((k) => [k, { key: k, label: trendLabel(kind, k, lang), qty: 0, valueSar: 0 }]));
   for (const r of rows) {
     const b = m.get(trendKey(kind, r.occurredAt));
     if (!b) continue;

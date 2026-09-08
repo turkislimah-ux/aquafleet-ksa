@@ -243,6 +243,59 @@ export const dict = {
       "12": { en: "Dec", ar: "ديسمبر" },
     },
     /**
+     * FULL month names — the long half of the same twelve months.
+     *
+     * MOVED HERE FROM `fleet.months`, values byte-identical, on the same
+     * second-route test that promoted `monthShort` above it. `fleet.months` had
+     * exactly one caller (FleetClient's "Utilization is August 2026" note) and
+     * would have grown a second the moment anything else wanted a long month —
+     * lib/parts-usage.ts's month window renders "August 2026" and lib/dashboard's
+     * monthTitle renders "August 2026", and both were reaching for Intl instead
+     * because the only long set in the dictionary was namespaced to a route they
+     * are not in. A month name is not fleet vocabulary.
+     *
+     * ARABIC IS BYTE-IDENTICAL TO monthShort, DELIBERATELY, AND THAT IS NOT
+     * DUPLICATION TO CLEAN UP. Arabic has no month abbreviation — يناير is both
+     * the short form and the long one — so the two sets differ only in their
+     * `en` leaves. Collapsing them would force every Arabic caller to reason
+     * about a style that does not exist in the language, and the first English
+     * caller that wanted the other shape would have nowhere to get it.
+     * `monthLabel()` in lib/utils.ts is where the choice is made, once.
+     *
+     * Keys are QUOTED for monthShort's reason: a bare numeric key becomes a
+     * number in the object type and LeafPaths drops it.
+     */
+    monthLong: {
+      "1": { en: "January", ar: "يناير" },
+      "2": { en: "February", ar: "فبراير" },
+      "3": { en: "March", ar: "مارس" },
+      "4": { en: "April", ar: "أبريل" },
+      "5": { en: "May", ar: "مايو" },
+      "6": { en: "June", ar: "يونيو" },
+      "7": { en: "July", ar: "يوليو" },
+      "8": { en: "August", ar: "أغسطس" },
+      "9": { en: "September", ar: "سبتمبر" },
+      "10": { en: "October", ar: "أكتوبر" },
+      "11": { en: "November", ar: "نوفمبر" },
+      "12": { en: "December", ar: "ديسمبر" },
+    },
+    /**
+     * A QUARTER, the way both screens that name one already name it.
+     *
+     * MOVED HERE FROM `consumption.usage.rangeQuarter`, value byte-identical,
+     * because the reports route needed the same string and the alternative was
+     * two spellings of a quarter — "Q2 2026" from the Reports period picker and
+     * whatever a second author wrote for Consumption, in a language where the
+     * "Q" has to become a WORD ("الربع") rather than a letter. That is exactly
+     * the divergence `common` exists to prevent, and it is worse here than for
+     * a month: a wrong month name is recognisably the wrong month, while two
+     * quarter formats side by side read as two different things being counted.
+     *
+     * `{q}` and `{y}` are FIGURES and stay Latin in both languages. Only the
+     * word around them is translated — the same rule as the month sets above.
+     */
+    quarterLabel: { en: "Q{q} {y}", ar: "الربع {q} {y}" },
+    /**
      * The seven weekday abbreviations, keyed by `Date.getDay()` — so "0" is
      * Sunday and the keys are the raw getDay() numbers, not a 1-based count.
      * Quoted for the same reason `monthShort`'s are: a bare numeric key becomes
@@ -1910,24 +1963,13 @@ export const dict = {
       ar: "بدلاً من 0%، لأنه لا يوجد ما تُقاس عليه.",
     },
 
-    // ---- months, for the "Utilization is <Month> <Year>" label ------------
-    // LIFTED VERBATIM from MaintenanceCalendar's MONTHS_AR. Copied, not
-    // imported: that file is a different route's and is not touched here, and
-    // a shared constant would make this dictionary depend on a component.
-    months: {
-      "1": { en: "January", ar: "يناير" },
-      "2": { en: "February", ar: "فبراير" },
-      "3": { en: "March", ar: "مارس" },
-      "4": { en: "April", ar: "أبريل" },
-      "5": { en: "May", ar: "مايو" },
-      "6": { en: "June", ar: "يونيو" },
-      "7": { en: "July", ar: "يوليو" },
-      "8": { en: "August", ar: "أغسطس" },
-      "9": { en: "September", ar: "سبتمبر" },
-      "10": { en: "October", ar: "أكتوبر" },
-      "11": { en: "November", ar: "نوفمبر" },
-      "12": { en: "December", ar: "ديسمبر" },
-    },
+    // ---- months --------------------------------------------------------
+    // MOVED to `common.monthLong`, values unedited. They arrived here LIFTED
+    // VERBATIM from MaintenanceCalendar's MONTHS_AR, for the "Utilization is
+    // <Month> <Year>" note, and stayed route-scoped only because nothing else
+    // had asked yet. Three long-month callers later, they are `common`'s. The
+    // one caller (FleetClient's monthLabel) went with them — it now calls
+    // monthLabel() from lib/utils.ts, which reads the moved leaves.
 
     // ---- assign-driver modal ---------------------------------------------
     assign: {
@@ -2348,10 +2390,14 @@ export const dict = {
       periodMonth: { en: "Month to month", ar: "شهر مقابل شهر" },
       periodQuarter: { en: "Quarter to quarter", ar: "ربع مقابل ربع" },
       periodYear: { en: "Year to year", ar: "سنة مقابل سنة" },
-      // fmtRange(). `{d}` is a formatDate() result and `{y}`/`{q}` are Latin
-      // numerals — figures stay Latin in both languages, the standing rule.
+      // fmtRange(). `{d}` is a date string and the figures inside it are Latin
+      // numerals — figures stay Latin in both languages, the standing rule. The
+      // month NAME inside `{d}` is not a figure and does translate.
+      //
+      // `rangeQuarter` MOVED to `common.quarterLabel` when the reports period
+      // picker became its second reader. Value unedited; this file's fmtRange
+      // reads it there now. `rangeWeek` stayed — nothing else phrases a week.
       rangeWeek: { en: "Week of {d}", ar: "أسبوع {d}" },
-      rangeQuarter: { en: "Q{q} {y}", ar: "الربع {q} {y}" },
       trendMonth: { en: "Monthly", ar: "شهري" },
       trendQuarter: { en: "Quarterly", ar: "ربع سنوي" },
       trendYear: { en: "Yearly", ar: "سنوي" },
@@ -6021,9 +6067,11 @@ export const dict = {
 
     // Month abbreviations MOVED to `common.monthShort` in Phase 3 Batch 9 —
     // app/trips froze three more copies of the same twelve strings, which is
-    // the second-route test `common` exists for. `fleet.months.*` still cannot
-    // serve either caller: it carries FULL English names ("January"), and both
-    // of these render as "Aug 2026". Values were not edited in the move.
+    // the second-route test `common` exists for. Values were not edited in the
+    // move. The full names that used to sit in `fleet.months` are now
+    // `common.monthLong`, beside them, for the same reason; the two sets are
+    // the SHORT and LONG halves of one thing and `monthLabel()` in lib/utils.ts
+    // picks between them, so no caller reaches a namespace to get a shape.
 
     // The inline "+ Add custom …" lookup (LookupSelect), shared by the role,
     // leave-type and mechanic-commission-type pickers.

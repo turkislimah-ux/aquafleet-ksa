@@ -24,7 +24,7 @@ import { Eye, X, Printer, History as HistoryIcon } from "lucide-react";
 import { Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText, type Lang } from "@/lib/i18n";
-import { formatDateTime, formatSar } from "@/lib/utils";
+import { formatDateTimeLang, formatSar } from "@/lib/utils";
 import {
   buildHistoryRows,
   monthLabel,
@@ -36,11 +36,19 @@ import {
 } from "@/lib/commission-rows";
 import ScrollLock from "@/components/ScrollLock";
 
-function fmtDate(iso: string): string {
+function fmtDate(iso: string, lang: Lang): string {
   // Frozen paid_at is an ISO timestamptz. Show date + short time.
+  //
+  // FORMATTING A FROZEN VALUE IS NOT REWRITING IT. paid_at is a timestamp, not
+  // a caption: it is read from the row every render and has never had a stored
+  // string form, so rendering its month name in Arabic changes no record. That
+  // is the opposite of period_label two fields over, which IS a frozen string
+  // and is therefore printed exactly as the RPC wrote it — see the note at its
+  // render site. The digits and the 24h/AM-PM shape come from the same en-US
+  // formatter English uses; only the month word moves.
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return formatDateTime(d, {
+  return formatDateTimeLang(d, lang, {
     year: "numeric",
     month: "short",
     day: "2-digit",
@@ -213,7 +221,7 @@ export default function HistoryTab({
             )}
             {rows.map((r) => (
               <tr key={r.id} className="hover:bg-black/5 dark:hover:bg-white/5">
-                <TD className="whitespace-nowrap"><span dir="ltr">{fmtDate(r.paidAt)}</span></TD>
+                <TD className="whitespace-nowrap"><span dir="ltr">{fmtDate(r.paidAt, lang)}</span></TD>
                 <TD className="font-medium">{displayName(r.driverId)}</TD>
                 {/* Em dash for a pre-0131 sweep — it settled no single month, and
                     a month must never be back-derived from the run caption. */}
@@ -311,8 +319,26 @@ function PayoutDetail({
               ) : (
                 <div className="text-xs muted">{t("drivers.hist.sweptAll", lang)}</div>
               )}
-              <div className="text-xs muted uppercase tracking-wide">{payout.period_label}</div>
-              <div className="text-xs muted">{fill(t("drivers.hist.paidAt", lang), { when: fmtDate(payout.paid_at) })}</div>
+              {/* period_label STAYS ENGLISH, DELIBERATELY, and is the one label
+                  on this screen the Arabic month sweep left alone. Two reasons,
+                  either one sufficient:
+
+                  1. It is FROZEN TEXT. pay_commission wrote this exact string
+                     into the row at pay time; the column stores words, not a
+                     key. Re-rendering it in Arabic would mean either rewriting
+                     a money-adjacent record or translating a stored string back
+                     out of itself, and both are refused.
+                  2. IT IS NOT THE MONTH ABOVE IT. This is the payout RUN's
+                     caption; the line above is the month the run SETTLED, and
+                     the module header records that the two come apart. Deriving
+                     this from snap.monthKey would print the same fact twice and
+                     delete the one this line exists to show.
+
+                  It renders LTR-neutral already: the value is a Latin month
+                  abbreviation and a Latin year, which is exactly what a frozen
+                  caption should look like in either language. */}
+              <div className="text-xs muted uppercase tracking-wide" dir="ltr">{payout.period_label}</div>
+              <div className="text-xs muted">{fill(t("drivers.hist.paidAt", lang), { when: fmtDate(payout.paid_at, lang) })}</div>
               {payout.approved_by && (
                 <div className="text-xs muted">{fill(t("drivers.hist.approvedBy", lang), { who: payout.approved_by })}</div>
               )}

@@ -46,7 +46,7 @@ import type {
   RevenueInvoiceRow, RevenuePerTruckRow, MaintenancePerTruckRow,
   MetricDictionaryRow, PeriodType, InvoiceOutstandingLiveRow,
 } from "./reports";
-import { monthsIn, periodsOf, outstandingLiveIndex } from "./reports";
+import { monthsIn, periodsOf, outstandingLiveIndex, periodLabel } from "./reports";
 import { t, fill, type Lang, type TKey } from "./i18n";
 
 export type Grouping = "period" | "customer" | "truck";
@@ -321,13 +321,17 @@ export function buildReport(
       const ops = monthsIn(data.operations, p.period_start, p.period_end);
       b.tripsDelivered = ops.reduce((n, r) => n + r.trips_delivered, 0);
       b.tripsTotal = ops.reduce((n, r) => n + r.trips_total, 0);
-      rows.push({ label: p.label, bucket: b });
+      // periodLabel(), not p.label: the row label is rendered by
+      // StatementViews' CustomStatement (a <TD> and a CSV cell), so it has to
+      // follow the toggle like every other period label. The view's `label`
+      // column is baked by SQL and has one value for every reader.
+      rows.push({ label: periodLabel(p, lang), bucket: b });
     }
   } else {
     const period = data.pnlPeriods.find(
       (p) => p.period_type === selection.periodType && p.period_start === selection.periodStart);
     if (!period) return { columns, rows: [], notes: [t("reports.builder.note.noPeriod", lang)] };
-    notes.push(fill(t("reports.builder.note.rowsCover", lang), { p: period.label }));
+    notes.push(fill(t("reports.builder.note.rowsCover", lang), { p: periodLabel(period, lang) }));
 
     if (selection.grouping === "customer") {
       // 0137 — outstanding comes from v_invoice_outstanding_live, keyed by

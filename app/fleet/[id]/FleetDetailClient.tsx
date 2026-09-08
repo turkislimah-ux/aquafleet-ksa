@@ -26,7 +26,7 @@ import type { TruckRow, DriverLite } from "../page";
 import { type DriverState } from "@/lib/driver-state";
 import { assignDriver, unassignDriver, terminateTruck } from "../actions";
 import TruckFormModal from "../TruckFormModal";
-import { cn, formatDate, formatNum, formatSar, todayKey } from "@/lib/utils";
+import { cn, formatDate, formatDateLangLocale, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { ArrowLeft, Users, X, Activity, Pencil, Eye, Wrench, Package } from "lucide-react";
 import MtStatusPill, { type MtPillKind } from "@/app/maintenance/MtStatusPill";
 import {
@@ -163,11 +163,21 @@ function fmtDateOnly(iso: string | null): string {
   return formatDate(iso + "T00:00:00");
 }
 
-function lastServiceLabel(iso: string | null): string {
+// The en-GB pin is DELIBERATE and stays: this stamp is day-first ("05 Aug 2026")
+// and en-US would reorder it. formatDateLangLocale keeps that locale for every
+// part of the output — order, zero-padding, spacing, digits — and substitutes
+// only the month NAME when the language is Arabic. English is byte-identical by
+// construction: the Arabic branch is the only one that differs from this exact
+// Intl call. Same treatment as FleetClient's copy of this label.
+function lastServiceLabel(iso: string | null, lang: Lang): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  return formatDateLangLocale(d, lang, "en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function initials(name: string): string {
@@ -451,7 +461,7 @@ export default function FleetDetailClient({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat label={t("common.capacity", lang)} value={truck.capacity_m3 != null ? `${truck.capacity_m3} m³` : "—"} tone="info" />
         <Stat label={t("common.odometer", lang)} value={truck.odometer_km != null ? `${formatNum(truck.odometer_km)} km` : "—"} />
-        <Stat label={t("fleet.cols.lastService", lang)} value={lastServiceLabel(truck.last_service_date)} tone="ok" />
+        <Stat label={t("fleet.cols.lastService", lang)} value={lastServiceLabel(truck.last_service_date, lang)} tone="ok" />
         <UtilizationStat row={utilization} lang={lang} />
       </div>
 
@@ -493,7 +503,7 @@ export default function FleetDetailClient({
             href={`/archive?tab=truck&trucksub=documents&truck=${truck.id}`}
           />
           <InfoField label={t("fleet.form.registrationExpiry", lang)} value={fmtDateOnly(truck.registration_expiry)} />
-          <InfoField label={t("fleet.cols.lastService", lang)} value={lastServiceLabel(truck.last_service_date)} />
+          <InfoField label={t("fleet.cols.lastService", lang)} value={lastServiceLabel(truck.last_service_date, lang)} />
         </div>
       </Card>
 

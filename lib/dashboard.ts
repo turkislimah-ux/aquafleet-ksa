@@ -10,6 +10,7 @@
 
 import { COST_COLOR, type CostBucketKey } from "@/lib/cost-colors";
 import { t, type Lang } from "@/lib/i18n";
+import { monthLabel } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Action items — one entry per `kind` emitted by v_dashboard_action_items.
@@ -539,13 +540,21 @@ export function sortDriverOps(rows: DriverOps[]): DriverOps[] {
   );
 }
 
-/** "2026-08-01" -> "August 2026". Formatting only; the value is the view's. */
+/**
+ * "2026-08-01" -> "August 2026" / "أغسطس 2026". Formatting only; the value is
+ * the view's.
+ *
+ * SAME OUTPUT AS BEFORE, DIFFERENT GUARANTEE. The old body was
+ * `Intl.DateTimeFormat(lang, …)`, which returns "أغسطس 2026" in LATIN digits
+ * only because CLDR's default numbering system for the bare "ar" tag is `latn`
+ * — a table that ships with the runtime, not a promise of the API, and already
+ * `arab` one tag over at "ar-SA". This header renders on the Dashboard, so an
+ * ICU data change would have swapped the year to ٢٠٢٦ on the first screen
+ * anyone opens, with nothing in this repo having changed. The digits are now
+ * ours and the twelve words come from the dictionary the rest of the app reads.
+ */
 export function monthTitle(iso: string, lang: Lang): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat(lang, {
-    month: "long", year: "numeric", timeZone: "UTC",
-  }).format(d);
+  return monthLabel(iso, lang, "long");
 }
 
 /** "2026-08-07" -> "7". Day-of-month tick labels for the daily charts. */

@@ -39,7 +39,7 @@ import { Printer, Plus, Pencil, Trash2, X, Check, AlertTriangle } from "lucide-r
 import { Btn, PILL_TONE_CLS } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, type Lang } from "@/lib/i18n";
-import { cn, formatDayKey } from "@/lib/utils";
+import { cn, formatDayKeyLang } from "@/lib/utils";
 import {
   DAILY_PERIODS, periodRange, buildProjectTables, deferredTotals, validateDeferred,
   type DailyPeriod, type Totals, type DeferredRow,
@@ -183,10 +183,13 @@ export default function DailyTripsTab(
     [data],
   );
 
+  // formatDayKeyLang, not formatDayKey: the day number and the year are figures
+  // and stay Latin in both languages, but the month NAME is a word and follows
+  // the toggle. The em dash between the two ends is punctuation and does not.
   const periodLabel =
     range.from === range.to
-      ? formatDayKey(range.from)
-      : `${formatDayKey(range.from)} — ${formatDayKey(range.to)}`;
+      ? formatDayKeyLang(range.from, lang)
+      : `${formatDayKeyLang(range.from, lang)} — ${formatDayKeyLang(range.to, lang)}`;
 
   // ==========================================================================
   // THE CSV — PART 1 ONLY, AND THAT IS THE ISOLATION RULE, NOT AN OVERSIGHT
@@ -686,7 +689,7 @@ export default function DailyTripsTab(
                           {/* The date is shown per row because a widened period
                               mixes several days into one table. */}
                           {range.from !== range.to && (
-                            <span className="ms-1.5 text-[10px] muted">{formatDayKey(r.delivery_date)}</span>
+                            <span className="ms-1.5 text-[10px] muted">{formatDayKeyLang(r.delivery_date, lang)}</span>
                           )}
                         </td>
                         <td className="px-3 py-2 text-end tabular-nums">{r.trip_count}</td>

@@ -122,21 +122,23 @@ export default function OverviewTab({
   const trend = useMemo(
     () => pnl.map((r) => ({
       month: r.month,
-      label: monthTick(r.month),
+      label: monthTick(r.month, lang),
       revenue: r.revenue_sar,
       cost: r.operating_cost_sar,
       margin: r.operating_margin_pct,
     })),
-    [pnl],
+    // `lang` is a real dependency now — the axis labels are words, so the
+    // chart has to rebuild when the toggle flips.
+    [pnl, lang],
   );
 
   const cashTrend = useMemo(
     () => pnl.map((r) => ({
-      label: monthTick(r.month),
+      label: monthTick(r.month, lang),
       revenue: r.revenue_sar,
       collected: collections.find((c) => c.month === r.month)?.collected_gross_sar ?? 0,
     })),
-    [pnl, collections],
+    [pnl, collections, lang],
   );
 
   const agingRows = useMemo(
@@ -201,14 +203,14 @@ export default function OverviewTab({
     return {
       slug: "overview",
       title: tt("dashboard.overview"),
-      period: monthLabel(month),
+      period: monthLabel(month, lang),
       columns: [
         tt("reports.export.measure"),
         tt("reports.export.unit"),
-        monthLabel(month),
+        monthLabel(month, lang),
         // No prior month at the start of the spine — the column would be a
         // heading over nothing, so it is not written at all.
-        ...(prev ? [monthLabel(prev)] : []),
+        ...(prev ? [monthLabel(prev, lang)] : []),
       ],
       // Trim the prior cell off every row when there is no prior column, or
       // each row is one field longer than the header it sits under.
@@ -251,9 +253,9 @@ export default function OverviewTab({
         <div className="rounded-lg px-3 py-2.5 text-sm flex gap-2 bg-brand-500/10 text-brand-700 dark:text-brand-300">
           <Info className="h-4 w-4 shrink-0 mt-0.5" />
           <p>
-            <strong>{say("reports.overview.inProgress.strong", { p: monthLabel(month) })}</strong>{" "}
+            <strong>{say("reports.overview.inProgress.strong", { p: monthLabel(month, lang) })}</strong>{" "}
             {tt("reports.overview.inProgress.body")}
-            {prev && <>{" "}{say("reports.overview.inProgress.switch", { p: monthLabel(prev) })}</>}
+            {prev && <>{" "}{say("reports.overview.inProgress.switch", { p: monthLabel(prev, lang) })}</>}
           </p>
         </div>
       )}
@@ -390,7 +392,7 @@ export default function OverviewTab({
 
       {/* ---- Cost structure + cash ------------------------------------- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Section title={say("reports.overview.section.whereMoneyWent", { p: monthLabel(month) })}>
+        <Section title={say("reports.overview.section.whereMoneyWent", { p: monthLabel(month, lang) })}>
           <div className="space-y-3">
             {buckets.map((b) => {
               const share = p.operating_cost_sar > 0 ? (b.value / p.operating_cost_sar) * 100 : null;
@@ -474,7 +476,7 @@ export default function OverviewTab({
 
       {/* ---- Per-truck: what each truck earned, and what it cost -------- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Section title={say("reports.overview.section.revenueByTruck", { p: monthLabel(month) })}>
+        <Section title={say("reports.overview.section.revenueByTruck", { p: monthLabel(month, lang) })}>
           {trucksThisMonth.length === 0 ? (
             <EmptyNote>{tt("reports.overview.noTruckRevenue")}</EmptyNote>
           ) : (
@@ -506,7 +508,7 @@ export default function OverviewTab({
             number — "maintenance cost per truck" previously meant two
             different things on two different pages. Parts and outsourced are
             both shown because outsourced is the LARGER half. */}
-        <Section title={say("reports.overview.section.maintByTruck", { p: monthLabel(month) })}>
+        <Section title={say("reports.overview.section.maintByTruck", { p: monthLabel(month, lang) })}>
           {maintThisMonth.length === 0 ? (
             <EmptyNote>{tt("reports.overview.noTruckMaint")}</EmptyNote>
           ) : (
@@ -702,7 +704,7 @@ function DeltaLine({ d, tone, prev, lang }: {
       <Icon className="h-3.5 w-3.5 shrink-0" />
       <span>{d.pct === null ? `${d.abs >= 0 ? "+" : ""}${formatSar(d.abs)}` : formatPct(d.pct)}</span>
       <span className="muted font-normal">
-        {fill(t("reports.overview.vs", lang), { p: monthLabel(prev) })}
+        {fill(t("reports.overview.vs", lang), { p: monthLabel(prev, lang) })}
       </span>
     </div>
   );

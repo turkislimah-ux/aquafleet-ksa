@@ -24,7 +24,7 @@ import { createPortal } from "react-dom";
 import { X, Sparkles, Check, Info } from "lucide-react";
 import { Btn } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { PERIOD_TYPES, periodsOf, basisLabel, type MetricDictionaryRow, type PeriodType, type PnlPeriodRow } from "@/lib/reports";
+import { PERIOD_TYPES, periodsOf, basisLabel, periodLabel, type MetricDictionaryRow, type PeriodType, type PnlPeriodRow } from "@/lib/reports";
 import {
   availableMetrics, allowedGroupings, metricId, GROUPING_TKEY,
   type Grouping, type BuilderSelection,
@@ -243,8 +243,10 @@ export default function CustomReportModal({
                   className="px-3 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 disabled:opacity-40"
                   style={{ borderColor: "rgb(var(--border))", background: "rgb(var(--card))" }}
                 >
+                  {/* periodLabel(), not the view's `label` column — see the
+                      note on the same swap in StatementsTab. */}
                   {periods.map((p) => (
-                    <option key={p.period_start} value={p.period_start}>{p.label}</option>
+                    <option key={p.period_start} value={p.period_start}>{periodLabel(p, lang)}</option>
                   ))}
                 </select>
               </div>

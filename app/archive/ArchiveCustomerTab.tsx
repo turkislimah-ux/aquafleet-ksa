@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, Eye, X, Archive, Undo2, RotateCcw } from "lucide-react";
 import { Card, Btn, Table, TH, TD } from "@/components/ui";
-import { cn, formatDate, formatDayKey, formatSarExact, todayKey } from "@/lib/utils";
+import { cn, formatDate, formatDayKeyLang, formatSarExact, todayKey } from "@/lib/utils";
 import type { SubTabItem } from "./SubTabPicker";
 import type {
   ArchiveCustomerRow, ArchiveInvoiceRow, ArchiveProjectRow, CustomerAmountPayableRow,
@@ -817,9 +817,10 @@ function ArchivedCustomerDetail({
                     {t("archive.customer.secCommission", lang)}
                   </div>
                   <div className="text-[11px] muted">
-                    {/* formatDayKey's output is an app-formatted date and stays
-                        Latin in both languages — only the phrase moves. */}
-                    {fill(t("archive.customer.termsInForce", lang), { date: formatDayKey(asOf) })}
+                    {/* The date's FIGURES — day and year — stay Latin in both
+                        languages. Its month NAME is a word, so it moves with the
+                        phrase around it; that is what the Lang suffix buys. */}
+                    {fill(t("archive.customer.termsInForce", lang), { date: formatDayKeyLang(asOf, lang) })}
                   </div>
                 </div>
                 {terms.state === "loading" ? (

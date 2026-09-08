@@ -21,7 +21,10 @@ import { Btn, StatusPill, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, arText, type Lang, type TKey } from "@/lib/i18n";
 import { invoiceStatusLabel, paymentMethodLabel, waterTypeLabel } from "@/lib/enum-labels";
-import { formatDate, formatNum, formatSar, todayKey } from "@/lib/utils";
+// BOTH, deliberately. formatDateLang is the screen/print path; the plain
+// formatDate survives for buildMailtoFor's exported email body, which stays
+// English — see the note there.
+import { formatDate, formatDateLang, formatNum, formatSar, todayKey } from "@/lib/utils";
 import { canEditSpecialCharges } from "@/lib/invoice";
 import { round2 } from "@/lib/vat";
 import { groupInvoiceLines } from "@/lib/invoiceDisplay";
@@ -1533,8 +1536,15 @@ export default function InvoiceDetailModal({
 
             <div className="border-t border-app pt-3 text-[11px] muted flex items-center justify-between">
               <span>
+                {/* SAFE TO TRANSLATE, and checked rather than assumed: this is
+                    `new Date()` at render time — a "printed on" stamp. It is
+                    not stored on the invoice, not parsed back, not part of the
+                    ZATCA QR payload and not one of the frozen document fields.
+                    The surrounding sentence already translates (see the note
+                    below on what translate="no" fences off), so the date inside
+                    it moving with the language is the consistent outcome. */}
                 {fill(t("trips.invoiceSheet.generated", lang), {
-                  date: formatDate(new Date(), { year: "numeric", month: "short", day: "numeric" }),
+                  date: formatDateLang(new Date(), lang, { year: "numeric", month: "short", day: "numeric" }),
                 })}
               </span>
               {/* translate="no" on the SPAN, not the row — "Generated <date>"
@@ -2380,6 +2390,16 @@ function buildMailtoFor(
   const period = `${raw.period_start} to ${raw.period_end}`;
   const grand = formatSar(view.grand.total);
   const due = formatSar(view.amountDue.total);
+  // LEFT ENGLISH ON PURPOSE — the one date in this file the Arabic month sweep
+  // did not touch. This is not a screen render: it is spliced into a mailto:
+  // body that LEAVES THE BUILDING, and the paragraph below is the rule it obeys
+  // — every value except `{buyer}` and the `{date}` FALLBACK WORD is a single
+  // Latin string shared by both language blocks, so the two halves can never
+  // quote different facts. A translated `returnedOn` would put an Arabic month
+  // in the English paragraph too, since `valsAr` spreads `valsEn` and overrides
+  // only the fallback. Making it per-block is possible but is a change to
+  // exported customer correspondence, not a display tweak, so it is flagged
+  // rather than made here.
   const returnedOn = raw.voided_at
     ? formatDate(raw.voided_at, { year: "numeric", month: "long", day: "numeric" })
     : null;

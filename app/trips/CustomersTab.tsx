@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { type SelectableStation } from "@/lib/station-pricing";
 import { Btn, Stat, Table, TH, TD } from "@/components/ui";
-import { currentMonthKey, formatSar, formatDayKey } from "@/lib/utils";
+import { currentMonthKey, formatSar, formatDayKeyLang } from "@/lib/utils";
 import { monthKeyOf } from "@/lib/commission";
 import type { WaterType, PaymentMode, ProjectCommissionNowRow } from "@/lib/db-types";
 import { type DriverState } from "@/lib/driver-state";
@@ -388,7 +388,7 @@ export default function CustomersTab({
                           {comm.next_effective_from && (
                             <span className="text-[11px] text-amber-600 dark:text-amber-400">
                               {fill(t("trips.customers.changes", lang), {
-                                date: formatDayKey(comm.next_effective_from),
+                                date: formatDayKeyLang(comm.next_effective_from, lang),
                               })}
                             </span>
                           )}

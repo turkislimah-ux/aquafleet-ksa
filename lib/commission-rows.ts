@@ -57,8 +57,12 @@
 // currentMonthKey is the opposite question — which month the USER is in now, on
 // the local clock — and lives in lib/utils beside todayKey. Do not merge the two.
 import { monthKeyOf } from "./commission";
-import { t, type Lang } from "./i18n";
-import { currentMonthKey } from "./utils";
+// Type only, now. The one `t()` call this file made was monthLabel's body, and
+// that moved to utils — the dictionary is reached through utils from here on.
+import { type Lang } from "./i18n";
+// Aliased because this file re-exports a `monthLabel` of its own — see the note
+// on it below for why the name stays here while the body lives in utils.
+import { currentMonthKey, monthLabel as utilsMonthLabel } from "./utils";
 
 export type CommTrip = {
   driver_id: string | null;
@@ -171,10 +175,21 @@ export { currentMonthKey };
 // `common.monthShort` unchanged, when app/trips turned out to hold three more
 // hardcoded copies of the same array. The paragraph above is the reason the
 // move went that way rather than adding a fourth copy.
-const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
+//
+// The BODY has now moved too, to lib/utils.ts's monthLabel(), for that same
+// reason one level up: this file's copy read the very same `common.monthShort`
+// leaves through its own private MONTH_KEYS tuple, so it was a second
+// IMPLEMENTATION of one string rather than a second string. utils' version
+// takes a `style` argument that this caller does not want, hence the explicit
+// "short" — the default, pinned so a change to that default cannot silently
+// lengthen a caption the RPC froze in short form.
+//
+// THE NAME STAYS EXPORTED FROM HERE. Both tabs import `monthLabel` from
+// commission-rows and that is where a reader looks for it; only the definition
+// moved. Behaviour is unchanged in both languages — same leaves, same
+// `<name> <year>` shape, same fall-back to the raw key on an unparseable month.
 export function monthLabel(monthKey: string, lang: Lang): string {
-  const key = MONTH_KEYS[Number(monthKey.slice(5, 7)) - 1];
-  return key ? `${t(`common.monthShort.${key}`, lang)} ${monthKey.slice(0, 4)}` : monthKey;
+  return utilsMonthLabel(monthKey, lang, "short");
 }
 
 // `buildBaseLines` USED TO LIVE HERE and was deleted: zero call sites, in app

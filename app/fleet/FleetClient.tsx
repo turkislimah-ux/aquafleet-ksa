@@ -16,7 +16,10 @@ import { type TruckOpsState } from "@/lib/truck-status";
 import type { TruckRow, DriverLite } from "./page";
 import { assignDriver, unassignDriver } from "./actions";
 import TruckFormModal from "./TruckFormModal";
-import { cn, formatNum } from "@/lib/utils";
+// monthLabel is the shared one now — this page's own copy read `fleet.months`,
+// which moved to `common.monthLong` for the two other long-month callers. Same
+// twelve words, same "August 2026" output; `style: "long"` is what keeps it.
+import { cn, formatNum, monthLabel, formatDateLangLocale } from "@/lib/utils";
 import { pillColor } from "@/lib/project-colors";
 import {
   utilizationBand, utilizationBarWidth, formatUtilization, utilizationNaReason,
@@ -51,27 +54,18 @@ const STATUS_CHIPS: Array<"all" | TruckOpsState> = [
   "idle",
 ];
 
-function lastServiceLabel(iso: string | null): string {
+// "05 Aug 2026" / "05 أغسطس 2026". The en-GB day-first shape and the 2-digit
+// day are unchanged — formatDateLangLocale keeps the caller's locale and swaps
+// the month NAME only, so the English is the string this line printed before.
+function lastServiceLabel(iso: string | null, lang: Lang): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-/**
- * "2026-08-01" -> "August 2026" / "أغسطس 2026". Local formatting only; no date
- * math. The YEAR is an app-formatted figure and stays Latin in both languages,
- * as every other number on this page does.
- */
-const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
-
-function monthLabel(monthStart: string, lang: Lang): string {
-  const [y, m] = monthStart.split("-");
-  // Indexing a const tuple types `key` as the union of its twelve members, so
-  // `fleet.months.${key}` is twelve real TKeys rather than `string`.
-  const key = MONTH_KEYS[Number(m) - 1];
-  if (!key) return monthStart;
-  return `${t(`fleet.months.${key}`, lang)} ${y}`;
+  return formatDateLangLocale(d, lang, "en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 /**
@@ -513,7 +507,7 @@ export default function FleetClient({
                 <TD className="tabular-nums">
                   {tr.odometer_km != null ? `${formatNum(tr.odometer_km)} km` : "—"}
                 </TD>
-                <TD className="text-xs">{lastServiceLabel(tr.last_service_date)}</TD>
+                <TD className="text-xs">{lastServiceLabel(tr.last_service_date, lang)}</TD>
                 <TD>
                   <div className="flex items-center gap-1.5">
                     <button
@@ -551,7 +545,7 @@ export default function FleetClient({
             run reads `common.na`, the SAME key formatUtilization() prints, so
             this sentence cannot end up naming a token the cell does not show. */}
         <span>
-          <b>{t("fleet.utilNoteBold", lang).replace("{month}", () => monthLabel(utilizationMonth, lang))}</b>{" "}
+          <b>{t("fleet.utilNoteBold", lang).replace("{month}", () => monthLabel(utilizationMonth, lang, "long"))}</b>{" "}
           {t("fleet.utilNoteBody1", lang)} <b>{t("common.na", lang)}</b>{" "}
           {t("fleet.utilNoteBody2", lang)}
         </span>

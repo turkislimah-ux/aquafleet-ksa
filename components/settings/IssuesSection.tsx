@@ -38,7 +38,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Upload, X, Paperclip, Inbox, ChevronDown } from "lucide-react";
 import { Btn, PILL_TONE_CLS } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import { cn, formatDateLangLocale } from "@/lib/utils";
 import {
   fetchIssues, createIssue, updateIssue, fetchAttachmentUrl,
   type IssueQueue,
@@ -48,18 +48,25 @@ import {
   categoryLabel, statusMeta, statusRank, validateIssueDraft, validateAttachmentFile,
   type IssueRow,
 } from "@/lib/issues";
-import { t } from "@/lib/i18n";
+import { t, type Lang } from "@/lib/i18n";
 
 const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 const CARD_STYLE = { borderColor: "rgb(var(--border))" } as const;
 
-/** "24 Aug, 14:32" — short, local, and unambiguous inside one office. */
-function when(iso: string): string {
+/**
+ * "24 Aug, 14:32" — short, local, and unambiguous inside one office.
+ *
+ * The en-GB pin stays: it is what puts the day before the month and the comma
+ * between date and time, and en-US would reorder both. formatDateLangLocale
+ * keeps every part of that output and swaps only the month NAME in Arabic, so
+ * the English string is byte-identical to the call this replaced.
+ */
+function when(iso: string, lang: Lang): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-GB", {
+  return formatDateLangLocale(d, lang, "en-GB", {
     day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
   });
 }
@@ -485,7 +492,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                               : t("settings.issues.someoneElse", lang)}
                           </span>
                           <span aria-hidden>·</span>
-                          <span>{when(row.created_at)}</span>
+                          <span>{when(row.created_at, lang)}</span>
                           {row.page_route && (
                             <>
                               <span aria-hidden>·</span>
@@ -580,7 +587,7 @@ export default function IssuesSection({ open, lang }: { open: boolean; lang: "en
                                 spaces rather than adding {" "} here — see the
                                 note on those three keys in lib/i18n.ts. */}
                             {t("settings.issues.resolvedPrefix", lang)}
-                            {when(row.resolved_at)}
+                            {when(row.resolved_at, lang)}
                             {queue?.currentUserId != null && row.resolved_by === queue.currentUserId
                               ? t("settings.issues.byYou", lang)
                               : t("settings.issues.bySomeoneElse", lang)}
