@@ -68,7 +68,7 @@
     capability, below.
   - **`0183_rename_delete_draft_invoice_to_discard_invoice.sql`** (`55e3ebe`) —
     the pure rename, below. One `alter function … rename to`, no footer.
-- **Origin carries through `8dea137` — the last WORK commit — plus the handoff
+- **Origin carries through `5ffa9cb` — the last WORK commit — plus the handoff
   commits that carry this line; `main` and `origin/main` level.** Naming a bare
   hash here is what has made this bullet rot four times, and it cannot name its
   own commit's hash, so it names the last non-handoff commit instead and says so.
@@ -85,7 +85,8 @@
   It was the Arabic copy sheet Turki reviewed before `0c7adf9`, kept untracked,
   and **its own header — "Migration is DRAFTED, NOT APPLIED. Nothing is
   committed." — had gone FALSE**: 0187 is applied and committed. Deleted in the
-  cleanup sweep rather than left as a superseded artifact whose header lies.
+  cleanup sweep (`32d7c08`) rather than left as a superseded artifact whose
+  header lies.
   **Nothing was lost with it** — its copy is the copy that shipped, checked
   before deleting: all three balance-term labels and the `paidUpCore` formula
   prose are in `lib/i18n.ts`, under git, where the app actually reads them.
@@ -483,11 +484,11 @@
 
 ---
 
-## Closed — 2026-09-08 EVENING (this session, `0c7adf9` → `8dea137`)
+## Closed — 2026-09-08 EVENING (this session, `0c7adf9` → `5ffa9cb`)
 
 **TWO SESSIONS RAN ON 2026-09-08 AND THE HEADINGS ARE THE ONLY THING THAT
-SEPARATES THEM.** This one is the evening run, four work commits, `0c7adf9`
-through `8dea137`. The MORNING run (`d9fd6a3` → `8060e82`) has its own table immediately
+SEPARATES THEM.** This one is the evening run, seven work commits, `0c7adf9`
+through `5ffa9cb`. The MORNING run (`d9fd6a3` → `8060e82`) has its own table immediately
 below. **Every unqualified "this session" inside THAT table means the MORNING
 run, not this one** — same rule the 2026-09-05 section carries, now biting
 within a single date. Read the commit hash, not the date.
@@ -498,6 +499,20 @@ within a single date. Read the commit hash, not the date.
 | 2 | **Gregorian month names render in Arabic, with Latin digits, everywhere — closing PARKED item 9.** Thirteen independent "format a month" implementations in four spellings across three locales, which is how "Aug 2026", "August 2026" and "Sept 2026" all became the same label. One canonical pair (`monthName` / `monthLabel` in `lib/utils`) now owns the words, with `formatDateLang` / `formatDateTimeLang` / `formatDayKeyLang` and an en-GB adapter on top. Item 9 warned the fix "is not pass `lang`" and it was not: **nothing passes `ar-SA`** — its Latin digits under bare `"ar"` are a CLDR default, not an API guarantee, and `ar-SA` itself returns Arabic-Indic numerals and resolves to the Hijri calendar. Digits come off the app's own formatter, only the NAME comes from the dictionary. Adds `scripts/month-label-check.ts` to `test:copy`. 25 files + 1 new, no migration | `f42690d` |
 | 3 | **The `lib/invoice.ts` v3 §9 residual note gets its scope and its attribution — it was NEVER stale.** Re-raised as "says 4 invoices / 38,709.00, live disagrees". It does not disagree; **the earlier pass measured a different axis** (stored subtotal vs a re-derivation) and compared it to a figure describing the frozen-column identity `grand − (covered + amountDue)`. Comment-only, no data, no migration | `04b2c4e` |
 | 4 | **`scripts/code-grep.ts` stops false-greening on directory arguments — closing item 11, its own commit as the item required.** Path handling sat OUTSIDE the lexer and undid it: a directory went straight to `git show :<dir>`, threw, and the read loop's catch — there to skip untracked files — swallowed it, so the run reported "no live reference in 3 file(s)" having read ZERO, the 3 being the ARGUMENT count. Paths are now resolved first by **`resolvePaths`, a pure function with `git` and `stat` injected** so it can be fixtured: directories expand (filtered to the scan's own `*.ts *.tsx *.css *.sql`), an explicit tracked file is read whatever its extension, and every way of producing no evidence is **exit 2** — a path in neither the index nor the tree, a directory with nothing scannable, a read that fails mid-loop, and any run that ends up having read **zero files**. An untracked file is its own bucket: loud skip in staged mode, real read under `--worktree`. The report counts files ACTUALLY READ. **Eight path fixtures joined the twelve lexer ones in the module-load `selfTest`, and the guard was proven able to fail** — reverting only the directory branch in a scratch copy turned three red and exited 2. **The lexer was not touched.** 1 file, no migration — the retirement of the workaround in `scripts/month-label-check.ts`'s §7 header rides with this handoff commit instead, since it is a note correction, not the fix | `8dea137` |
+
+| 5 | **The Unit 1–3 residue sweep came back CLEAN — one wrong figure was the entire yield.** Swept for orphaned exports/imports, dead i18n keys and comments still describing the abandoned `_ar`-column approach as current. Nothing to remove: the only `_ar` metric-column mentions left are three notes recording the REJECTION (`MetricsGlossaryModal.tsx:57`, `lib/i18n.ts:3733`, `lib/reports.ts:470`) plus the immutable `0187` comment, and `dictText` exists nowhere — code-grep exit 0 across **418 files read** for `meaning_ar`, `caveat_ar`, `dictText`. The one real defect: `lib/reports.ts`'s `monthLabel` docblock claimed **11 call sites; the wrapper has 10** (nine OverviewTab, one ReportsClient). **The eleventh hit is `StatementViews.tsx:1576`, which imports `monthLabel` from `@/lib/utils` and never reaches the wrapper** — same name, different module. The measuring command the comment ships still PRINTS eleven, so the note now says why eleven is wrong rather than leaving the next reader to "correct" it back. Also deletes `.planning/0187-arabic-copy-review.md` (see State) with no `.gitignore` rule, deliberately. 2 files, no migration | `32d7c08` |
+| 6 | **Three zero-reference types in `lib/reports.ts` become file-internal.** `IndicativeZakat`, `MetricTextField` and `PayslipSnapshot` were exported and imported by nobody. All three dropped `export` cleanly — **tsc is the proof, and the proof was itself proven**: `noUnusedLocals` is on, and a throwaway `type __GuardProbe` produced `TS6196` before being removed, so a clean run genuinely establishes each is still used internally rather than dead. Two still describe exported shapes, so their STRUCTURE stays reachable (`IssuedPayslipRow["snapshot"]`, `ReturnType<typeof indicativeZakat>`); only naming them on import is gone, which nobody did. `tsconfig` sets no `declaration`, so a non-exported type inside an exported one raises no emit error. 1 file, no migration | `4172e4e` |
+| 7 | **Seven hand-built month labels consolidate onto `monthName` — and the OBVIOUS helper was the wrong one.** Five files each carried their own `MONTH_KEYS` tuple and interpolated `common.monthShort` inline; four copies plus `SalaryHistoryModal`'s local `monthName` wrapper are gone. **`formatDayKeyLang` was REJECTED at all six day-level sites despite building exactly their shape**: its English arm is an en-GB Intl formatter, and **en-GB abbreviates September as "Sept" where `common.monthShort` says "Sep"** — delegating would have restyled one month in twelve across six screens under cover of a refactor. `monthName` reads the same dictionary leaf those lines already read, so output is identical by construction. `SalaryHistoryModal.dateLabel` had a SECOND reason to stay hand-assembled: it splits without `Number()`, so its day is the padded `04` that `day:"numeric"` would print as `4`. **Verified empirically, not by argument** — old expression vs new, 12 months × 2 languages × single- and double-digit days: **264 comparisons, 0 mismatches**, with an INVERTED control asserting `formatDayKeyLang` DOES differ, which it did, on September alone. `WEEKDAY_KEYS` stays in both files that hold it — no canonical helper owns weekday names. 5 files, no migration | `5ffa9cb` |
+
+**ROW 7 IS WHY "USE THE CANONICAL HELPER" IS NOT AUTOMATICALLY THE ANSWER.** Two
+helpers can render the same SHAPE from different SOURCES — a dictionary leaf and
+an ICU locale — and agree on eleven months out of twelve. The disagreement is
+invisible to a reading of the code and to any test run outside September. **A
+consolidation onto a helper is a wording change until the output is compared
+character for character, in both languages, across the whole domain of the
+input.** The rule that generalises: when replacing a hand-rolled formatter,
+diff the old expression against the new for every value it can take, and carry
+an inverted case proving the comparison can fail.
 
 **ROW 3 IS THE ONE TO READ BEFORE RE-RAISING ANYTHING OUT OF THIS FILE.** The
 note was flagged stale, a session was spent proving it, and it was right all
@@ -1118,6 +1133,13 @@ both SHIPPED in the 2026-09-08 evening session** (`f42690d` and `0c7adf9`), and
 **item 11, the last tooling defect, shipped in `8dea137`.** Nothing else is open.
 (Items 1, 2, 3, 4, 6, 7, 8, 9, 10 and 11 are kept struck through as records, not
 as work. Do not resurrect a struck item because it still appears in this list.)
+
+**THE CLEANUP SWEEP'S TWO HELD-BACK ITEMS ARE BOTH CLOSED — there is no pending
+browser pass.** The sweep (row 5) deliberately did NOT fix two things it found,
+because each was a decision rather than cleanup: three zero-reference exports,
+and seven hand-built day-format sites whose output is user-visible. Turki ruled
+on both in the same session and they shipped as rows 6 and 7. **Nothing from
+that sweep is waiting on anyone.**
 
 **The money rules from `1754140` and `caec5ef` are no longer in this file's
 custody** — items 6 and 7 moved them into `SKILL.md`, which is what gets loaded
