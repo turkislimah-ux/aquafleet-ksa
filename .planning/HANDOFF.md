@@ -896,27 +896,34 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
   1054. Caught by running the grep above as part of the handoff write, not by
   anything automatic. It is now name-based ("grep `coveredLines:
   inv.covered_lines`").
-  **THE "ZERO HITS" CLAIM THAT STOOD HERE WAS FALSE, AND IS RETRACTED.** It read
-  "the grep above now returns NOTHING over `.claude/` — exit 1, zero hits."
-  **Re-measured 2026-09-08: TWELVE hits, all in `SKILL.md`** (lines 247, 272,
-  275, 281, 321, 322, 324, 327, 330, 380, 381, 382). They were added by the very
-  session that wrote the zero claim — the 2026-09-05 pass promoted three new
+  **AN EARLIER "ZERO HITS" CLAIM HERE WAS FALSE AND WAS RETRACTED** (`dc590f1`).
+  It read "the grep above now returns NOTHING over `.claude/` — exit 1, zero
+  hits." Re-measured 2026-09-08: **twelve hits, all in `SKILL.md`**, added by the
+  very session that wrote the zero claim — the 2026-09-05 pass promoted three new
   sections into the skill and cited `file:line` throughout them, then reported
   the tree clean without re-running the grep it had just been given. **A lock
   that says "re-grep after any pass" and is then contradicted by its own pass is
   the §5 trap on the strictest surface there is.**
-  **ONE OF THE TWELVE IS ALREADY DEAD, AND `d9fd6a3` KILLED IT.** `SKILL.md`
-  cites `cashCoverage(collected, revenue)` at `OverviewTab.tsx:234`. That
-  function **no longer exists in the app** — `npx tsx scripts/code-grep.ts
-  'cashCoverage'` returns exactly one live site, a quoted phrase inside
-  `scripts/collection-rate-check.ts` describing the OLD operands. The sentence
-  around it is load-bearing (it lists where the under-stating cash KPI renders,
-  for the 36,811.50 SAR legacy-invoice item), so it needs REWRITING, not
-  deleting. **Not fixed in `d9fd6a3` — that unit was released as exactly 11
-  files and `SKILL.md` was not among them.** Convert all twelve to symbol greps
-  in a docs-only unit; start with the `cashCoverage` one, which is wrong now
-  rather than merely fragile. The `.planning/review-*.md` docs hold six more,
-  unconverted on purpose — historical records, not live guidance.
+  **ALL OF THEM ARE NOW CONVERTED (`2ff6e0b`), AND THE GREP IS GENUINELY CLEAN —
+  re-measured on the STAGED BLOB before that commit, not the working tree: zero
+  `file:line` hits over `.claude/`.** Three corrections to the brief that unit
+  ran on, so the next reader does not inherit them:
+  - **Twelve was grep LINES, not citations. There were SEVENTEEN pointers** — one
+    line held three, three lines held two each. Count the pointers, not the
+    matches.
+  - **Sixteen were merely fragile — still correct at HEAD. Exactly one was
+    wrong**: `cashCoverage`, deleted by `d9fd6a3`.
+  - **A SECOND dead `cashCoverage` mention carried no `file:line`, so the grep
+    never flagged it** and the brief never named it. It claimed the collections
+    and revenue views still meet in one ratio; they do not. **A symbol can die
+    without leaving a `file:line` behind — the grep finds rotting POINTERS, not
+    rotting CLAIMS,** and only reading the surrounding paragraph finds those.
+  **Every replacement anchor was negative-controlled** — all 19 greps run and
+  confirmed non-empty, including a two-hit case asserted as two. **A citation
+  that matches nothing is worse than the line number it replaces**, and it is the
+  exact failure mode of the "check whose range matches nothing" lock above.
+  The `.planning/review-*.md` docs hold six more, unconverted on purpose —
+  historical records, not live guidance.
   **The lesson is the schedule, not the pointer:** "correct today, convert it
   later" survived exactly one commit, and the commit that broke it was ours.
 - Locks promoted into `CLAUDE.md` and living there now, not here: **measure a
