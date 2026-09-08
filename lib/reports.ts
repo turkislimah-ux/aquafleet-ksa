@@ -240,7 +240,7 @@ export function periodLabel(
 /** Indicative Zakat rate. An ESTIMATING convention, not a ZATCA assessment. */
 const ZAKAT_RATE = 0.025;
 
-export type IndicativeZakat = {
+type IndicativeZakat = {
   /** Echo of the input — the P&L's own net profit, under its Zakat name. */
   profitBeforeZakat: number;
   /** Clamped to 0 in a loss period: a negative Zakat credit does not exist. */
@@ -485,7 +485,7 @@ export type MetricDictionaryRow = {
  * `unit`, `basis`, `metric_key` and `source_view` are absent by design — the
  * first two are enums with their own key sets below, the last two are pointers.
  */
-export type MetricTextField = "label" | "meaning" | "formula" | "grain" | "caveat";
+type MetricTextField = "label" | "meaning" | "formula" | "grain" | "caveat";
 
 /**
  * One metric's prose, in the reader's language — THE ONLY way this app reads a
@@ -1253,7 +1253,7 @@ export type IssuedPayslipRow = {
   snapshot: PayslipSnapshot | null;
 };
 
-export type PayslipSnapshot = {
+type PayslipSnapshot = {
   driver_name?: string;
   salary_at_issue?: number;
   commission_basis?: string;
