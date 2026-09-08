@@ -2,8 +2,23 @@
 
 ## State
 
-- **DB is at migration 0184.** 182 files on disk, max `0184`. Measured against
-  the CATALOG this turn (2026-09-05), not read off any migration's own grid:
+- **DB is at migration 0186.** 184 files on disk, max `0186`, measured
+  2026-09-08 (`ls supabase/migrations/ | wc -l`).
+  - **`0185_within_month_collection_rate.sql`** and
+    **`0186_collections_settlement_basis.sql`** were **applied to production and
+    catalog-verified by the ARCHITECT through MCP**, not run from the SQL Editor
+    and not applied by Code. They are on disk and committed (`d9fd6a3`) — but
+    **an MCP-applied migration touches the DB and leaves NOTHING in the repo to
+    say it landed.** That is precisely why the line above this one read "DB is at
+    migration 0184" while the database was already at 0186. `CLAUDE.md` §5's
+    "THE DATABASE OUTRANKS THE NOTES" is not an abstraction here; it is the
+    reason this bullet exists. Do NOT re-apply either one.
+  - **`CLAUDE.md` §7's state stub still says "DB at migration 0184" and is now
+    wrong.** Left untouched deliberately — that edit was outside the scope of the
+    turn that wrote this. Fix it, do not just note it again.
+- **Everything below this line about 0184 and earlier was measured 2026-09-05
+  and is left as written.** Measured against the CATALOG that turn, not read off
+  any migration's own grid:
   - **`0184_company_bank_accounts.sql`** (`caec5ef`) added
     `company_settings.bank_accounts jsonb not null default '[]'::jsonb` and the
     CHECK `company_settings_bank_accounts_shape`
@@ -42,12 +57,15 @@
     capability, below.
   - **`0183_rename_delete_draft_invoice_to_discard_invoice.sql`** (`55e3ebe`) —
     the pure rename, below. One `alter function … rename to`, no footer.
-- **Origin carries through `0b17bc3` plus this handoff commit; `main` and
-  `origin/main` level, working tree clean.** Measured with `git status -sb` and
-  `git log origin/main..HEAD` after a `git fetch`, 2026-09-05. **This is a
-  pointer and it goes stale the moment anyone commits — measure before quoting
-  it.** It already had once, naming `6af117d` three commits after the fact, and
-  again naming `caec5ef` one commit late.
+- **Origin carries through `d9fd6a3`; `main` and `origin/main` level.** Measured
+  2026-09-08 from BOTH required sources: the BRANCH line of `git status -sb`
+  (`## main...origin/main`, no ahead/behind marker) and
+  `git rev-list --left-right --count origin/main...HEAD` → `0	0`. **Never read
+  sync off the TREE lines** — a dirty tree says nothing about ahead/behind, and
+  a clean one does not mean pushed. **This is a pointer and it goes stale the
+  moment anyone commits — measure before quoting it.** It already had three
+  times: naming `6af117d` three commits after the fact, `caec5ef` one commit
+  late, and `0b17bc3` one session late.
 - **MONEY FIX — `confirm_invoice` IS NOW AN AUDITOR, NOT A SCRIBE (`2477946`).**
   A confirmed invoice could freeze with NO special charges while the customer's
   prepaid balance had already been consumed by those same charges. **Two sources
@@ -435,7 +453,77 @@
 
 ---
 
-## Closed — 2026-09-05 (this session)
+## Closed — 2026-09-08 (this session)
+
+| # | Item | Commit |
+|---|---|---|
+| 1 | **The reports collection rate stops being a cash ratio and becomes a within-month NET SETTLEMENT rate — one unit, `0185` + `0186` + the app layer + a clip fix.** The old `cashCoverage` stacked three independent distortions: it divided a GROSS numerator by a NET denominator (~1.15× inflation), applied no `payment_method` filter, and ran a `paid_at` numerator over a `confirmed_at` denominator — unbounded, which is how **August printed 215%**. Replaced by a `filter (...)` computed **inside `v_revenue_monthly` over the very rows the denominator sums**, so `numerator <= denominator` holds BY CONSTRUCTION and not by a clamp. `0186` then moves the `collections` metric off `basis='cash'` onto `basis='settlement'` in `report_metrics` (unit, grain and `source_view` deliberately unchanged — the MEASURE did not move, only what it is filed under), and six EN+AR strings drop the cash wording. Adds `scripts/collection-rate-check.ts`, wired into `test:money`. 11 files | `d9fd6a3` |
+
+**The numerator is `v_revenue_monthly.settled_same_month_revenue_sar`** — grep
+that name, not a line number. `0185` **APPENDED** it (the only shape
+`create or replace view` allows, §6) and **restated the security footer**:
+`security_invoker = true`, `revoke all … from anon`, `grant select … to
+authenticated`. Its predicate is Riyadh-local on BOTH sides —
+`date_trunc('month', paid_at at time zone 'Asia/Riyadh') = date_trunc('month',
+confirmed_at at time zone 'Asia/Riyadh')` — so the "within-month" test cannot
+drift across a month boundary on UTC skew.
+
+**A prepaid invoice settled with `payment_method='balance'` moves NO cash on the
+day it is marked paid** — the cash arrived earlier, at top-up, and the `topups`
+metric already counts it. That is the whole ruling. **The Collected KPI's NUMBER
+is unchanged by it;** only the RATIO under it and the WORDS describing it moved.
+Anyone reading this as "collections were restated" has it backwards.
+Measured live 2026-08: **105,225.00 of 109,020.00 settled from balance.**
+
+**Verified in-browser by Turki before commit, from proof shots Code drove with
+Playwright** — Turki is non-technical and running the browser pass himself was
+the blocker, so the browser was driven for him against the dev server and the
+screenshots posted for reading. Confirmed on all six surfaces: dashboard tile
+9,741 SAR; the Reports "Invoices settled" card at Sep 9,741 / 100.0%, Aug
+109,020 / 100.0%, Jul 30,533 / 37.6%; the dictionary popup showing the
+**SETTLEMENT** heading with its one entry and the full caveat; then all three
+again in Arabic through the globe toggle. `tsc` clean; **`test:money` 853 pass /
+0 fail** — re-measured this turn, NOT the 613 the section below records, which
+was that day's count and is left as written.
+
+**`scripts/collection-rate-check.ts` case set B is INVERTED ON PURPOSE — it
+asserts the function does NOT self-bound.** The old `cashCoverage` operands
+still reproduce August's 215% through it, and a negative numerator passes
+through unfloored. **So a well-meaning `Math.min(100, …)` "hardening" fails the
+harness loudly**, which is the point: the bound is the view's subset guarantee,
+and a clamp in TypeScript would hide the day that guarantee breaks instead of
+reporting it. Same shape as the inverted guards in `1754140` (row 2 of the
+2026-09-05 table below, "Guards inverted rather than deleted; negative control
+fails all six") — **invert a dead invariant, never delete it.**
+
+**The dashboard clip fix is a CONTENT ruling, not a styling preference.**
+`DashboardClient.tsx`'s headline subline (grep `dashboard.headline.` in that
+file) traded `truncate` for `leading-snug text-balance`. The subline is a
+**phrase, not a name** — clipping it drops the words that say WHICH figure it
+is, so "invoices settled this mo…" is a DIFFERENT claim, not a shorter one.
+Eight tiles at `xl` leave ~150px, which the longest sub overran the moment
+0185/0186 replaced "cash in, this month". **The LABEL above it keeps `truncate`
+deliberately** — a clipped name still points at the right tile. Measured, not
+eyeballed: all 8 tiles at 1280 / 1500 / 1920 / 2560, zero clipped sublines, and
+AR clean at 1280; DOM read-back printed both approved strings end to end.
+**Turki's constraint was that the approved EN and AR wording could not change** —
+the fit had to give, not the words.
+
+**A pre-existing `CLIP` on the "Operating margin" LABEL at 1280 was found and
+deliberately NOT fixed** — outside this unit, and a clipped label is the case
+the `truncate` above is correct for. Recorded so the next session does not read
+it as damage from this pass.
+
+---
+
+## Closed — 2026-09-05 (the previous session)
+
+**EVERY UNQUALIFIED "this session" / "this turn" FROM HERE DOWN — and in the
+State section above, outside the 0185/0186 bullet — MEANS 2026-09-05 OR EARLIER,
+never 2026-09-08.** Same rule the 2026-09-02 table carries below, for the same
+reason: prose is left as written and only headings are dated, so a relative date
+decays the instant another session lands on top of it. The 2026-09-08 work is
+the section above this one and nothing else.
 
 | # | Item | Commit |
 |---|---|---|
@@ -805,11 +893,28 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
   now `name_ar: seller?.legal_name_ar ?? null,` while `coveredLines` sits at
   1054. Caught by running the grep above as part of the handoff write, not by
   anything automatic. It is now name-based ("grep `coveredLines:
-  inv.covered_lines`"), so **the grep above now returns NOTHING over `.claude/` —
-  exit 1, zero hits.** The dead pointers quoted in this lock are the only ones
-  left anywhere live, and they are in THIS file, as examples. The
-  `.planning/review-*.md` docs
-  hold six more, unconverted on purpose — historical records, not live guidance.
+  inv.covered_lines`").
+  **THE "ZERO HITS" CLAIM THAT STOOD HERE WAS FALSE, AND IS RETRACTED.** It read
+  "the grep above now returns NOTHING over `.claude/` — exit 1, zero hits."
+  **Re-measured 2026-09-08: TWELVE hits, all in `SKILL.md`** (lines 247, 272,
+  275, 281, 321, 322, 324, 327, 330, 380, 381, 382). They were added by the very
+  session that wrote the zero claim — the 2026-09-05 pass promoted three new
+  sections into the skill and cited `file:line` throughout them, then reported
+  the tree clean without re-running the grep it had just been given. **A lock
+  that says "re-grep after any pass" and is then contradicted by its own pass is
+  the §5 trap on the strictest surface there is.**
+  **ONE OF THE TWELVE IS ALREADY DEAD, AND `d9fd6a3` KILLED IT.** `SKILL.md`
+  cites `cashCoverage(collected, revenue)` at `OverviewTab.tsx:234`. That
+  function **no longer exists in the app** — `npx tsx scripts/code-grep.ts
+  'cashCoverage'` returns exactly one live site, a quoted phrase inside
+  `scripts/collection-rate-check.ts` describing the OLD operands. The sentence
+  around it is load-bearing (it lists where the under-stating cash KPI renders,
+  for the 36,811.50 SAR legacy-invoice item), so it needs REWRITING, not
+  deleting. **Not fixed in `d9fd6a3` — that unit was released as exactly 11
+  files and `SKILL.md` was not among them.** Convert all twelve to symbol greps
+  in a docs-only unit; start with the `cashCoverage` one, which is wrong now
+  rather than merely fragile. The `.planning/review-*.md` docs hold six more,
+  unconverted on purpose — historical records, not live guidance.
   **The lesson is the schedule, not the pointer:** "correct today, convert it
   later" survived exactly one commit, and the commit that broke it was ours.
 - Locks promoted into `CLAUDE.md` and living there now, not here: **measure a
@@ -841,9 +946,11 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 **No FEATURE is queued** — ask Turki for the next one rather than picking. **ONE
 piece of follow-through is outstanding — item 5 below** — and it is not a
-feature; it is a console setting. (Items 1, 2, 3, 4, 6, 7 and 8 are kept struck
-through as records, not as work. Do not resurrect a struck item because it still
-appears in this list.)
+feature; it is a console setting. **Two further items are PARKED (items 9 and
+10)** — parked is not queued and not open: both were seen, both were ruled out of
+the unit that found them, and neither starts without Turki. (Items 1, 2, 3, 4, 6,
+7 and 8 are kept struck through as records, not as work. Do not resurrect a
+struck item because it still appears in this list.)
 
 **The money rules from `1754140` and `caec5ef` are no longer in this file's
 custody** — items 6 and 7 moved them into `SKILL.md`, which is what gets loaded
@@ -898,6 +1005,42 @@ before money work. A handoff is rewritten every session; a skill is not.
    **DONE, Turki ruled it IN.** Wired LAST in the chain; the ordering reasoning,
    the answered objection and the two-direction proof are in the money-harness
    section above. `test:money` is twelve harnesses now, ~9.6s end to end.
+
+9. **PARKED — `monthLabel` hardcodes `"en-US"`, so Arabic reads a Latin month
+   name.** Grep `monthLabel` in `lib/reports.ts`; the two neighbours right below
+   it (`toLocaleString("en-US", { month: "short", year: "2-digit" })` and the
+   bare `{ month: "short" }`) do the same thing, so this is **three call sites,
+   not one**. Surfaced by `d9fd6a3` in the Arabic delta line under the Invoices
+   settled card, and **pre-existing — verified at HEAD before that unit, it is
+   not damage from it.**
+   - **PARKED WITH THE DATE-FORMAT DECISION, deliberately.** The fix is not
+     "pass `lang`": Arabic here can mean `ar` (Arabic-Indic digits and Arabic
+     month names), `ar-SA` (which resolves to the HIJRI calendar by default and
+     would print a different month entirely), or Latin digits with Arabic names.
+     **That is a product ruling for Turki, not a code change**, and it lands
+     everywhere at once. There IS already a standing digit ruling to sit beside,
+     but it is **NOT next to `monthLabel`** — it is in `buildNarrative`'s header
+     comment in the same file ("Every FIGURE still comes in through `sar()` /
+     `formatPct()` / `formatShare()` — Latin digits, en-US, unchanged"), and it
+     governs NUMBERS, not month NAMES. Read it before deciding; do not assume it
+     already settles this. Do not "fix" one call site in passing either — that
+     forks the format.
+10. **PARKED — the metric rows in the Arabic dictionary render in English.**
+    `report_metrics`' `label`, `meaning`, `formula`, `grain`, `source_view`,
+    `caveat` and `unit` are **DB COLUMNS, not i18n keys**, so translating them is
+    **a migration, not an edit** — it needs an `_ar` column per field plus a
+    resolver in `MetricsGlossaryModal`, i.e. its own unit with its own schema
+    decision, over **30 rows**. **The ruling is written in the code, not only
+    here** — grep `EVERY METRIC ROW STAYS ENGLISH` in
+    `app/reports/MetricsGlossaryModal.tsx`, which also records what IS keyed
+    (the popup's chrome, the five `reports.glossary.*` basis notes and the five
+    `reports.basis.*` basis NAMES — five, not four, since `0185`/`0186` added
+    `settlement`). **Update BOTH if this is ever taken up**, or they drift.
+    `0186` deliberately did NOT smuggle that in; it changed the `collections`
+    row's English copy and its `basis`, nothing more. **The Arabic dictionary is
+    therefore correct-but-untranslated, not broken** — the headings and chrome
+    ARE Arabic (`قاموس المقاييس`, the SETTLEMENT group), and Turki confirmed the
+    surface in-browser in that state.
 
 **THE STATEMENT INHERITS `lib/plainDocStyles.ts` NEXT — that is a POINTER, not a
 queued feature.** The kit was built as a shared module for exactly this;
