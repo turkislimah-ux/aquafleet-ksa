@@ -1,1301 +1,391 @@
 # SESSION HANDOFF
 
-## State
+**Rewritten fresh 2026-09-08 (evening close-out), every figure re-measured this
+turn.** The previous revision had grown to 1301 lines of accumulated session
+history. **Nothing was lost: it is `e93baec:.planning/HANDOFF.md`, and every
+unit's reasoning lives in its own commit message**, which is where `CLAUDE.md`
+§5 says detail belongs. This file is STATE — what is true now, what is open, and
+what comes next. Rules are in `CLAUDE.md`; domain law is in
+`.claude/skills/aquafleet-domain/SKILL.md`.
 
-- **DB is at migration 0187.** 185 files on disk, max `0187`, measured
-  2026-09-08 evening (`ls supabase/migrations/ | wc -l`).
-  - **`0187_report_metrics_balance_terms.sql`** (in `0c7adf9`) registers the
-    three Finance-tab balance terms — `paid_up_balance`, `running_balance`,
-    `amount_payable`, all settlement basis. **Confirmed APPLIED against the
-    catalog, not read off `schema_migrations`** (which never records an
-    MCP/SQL-Editor run — see §7 of `CLAUDE.md`): `report_metrics` holds **33
-    rows, 3 of them those keys, 4 on `basis='settlement'`**. Do NOT re-apply it.
-  - **`CLAUDE.md` §7's stub said 0186 and has been corrected to 0187 in the same
-    pass.** The bullet below already warned that both files carry this figure and
-    go stale together; that is exactly what happened, one migration later.
-  - **`0185_within_month_collection_rate.sql`** and
-    **`0186_collections_settlement_basis.sql`** were **applied to production and
-    catalog-verified by the ARCHITECT through MCP**, not run from the SQL Editor
-    and not applied by Code. They are on disk and committed (`d9fd6a3`) — but
-    **an MCP-applied migration touches the DB and leaves NOTHING in the repo to
-    say it landed.** That is precisely why the line above this one read "DB is at
-    migration 0184" while the database was already at 0186. `CLAUDE.md` §5's
-    "THE DATABASE OUTRANKS THE NOTES" is not an abstraction here; it is the
-    reason this bullet exists. Do NOT re-apply either one.
-  - **`CLAUDE.md` §7's state stub read "DB at migration 0184" and has been
-    corrected to 0186** (`dc590f1` recorded it stale; the fix landed right
-    after). One number, nothing else touched — §7 is a STUB and stays one.
-    **Both files carry this figure, so both go stale together.** Next time the
-    DB moves, change it in two places or leave the pair disagreeing.
-- **Everything below this line about 0184 and earlier was measured 2026-09-05
-  and is left as written.** Measured against the CATALOG that turn, not read off
-  any migration's own grid:
-  - **`0184_company_bank_accounts.sql`** (`caec5ef`) added
-    `company_settings.bank_accounts jsonb not null default '[]'::jsonb` and the
-    CHECK `company_settings_bank_accounts_shape`
-    (`jsonb_typeof = 'array' and jsonb_array_length <= 3`). Both read back from
-    `pg_attribute` / `pg_constraint`. **No ACL footer, and that is correct** — it
-    adds a COLUMN to an existing table, table-level grants already cover every
-    column, and §6's per-table anon revoke is a rule for new TABLES.
-  - Live today: **3 accounts stored, 3 ticked** — at the ceiling. That is DATA
-    and it drifts; re-measure before quoting. **Never SELECT the IBAN VALUES
-    into a note, a log or a commit message** — see the bank-accounts entry below.
-- **The five below were applied and verified against the catalog in the PREVIOUS
-  session** (2026-09-02), not this one:
-  - **`0179_rls_initplan_auth_uid_subselect.sql`** (`688b6e2`) wrapped the bare
-    `auth.uid()` in five policy predicates as `(select auth.uid())`, so Postgres
-    hoists it into an InitPlan and evaluates it once per query instead of once
-    per row. Verified both directions: `pg_policies` shows all five wrapped
-    (`issue_reports_insert_own` in `with_check`; `own_notification_dismissals`,
-    `own_notification_prefs`, `own_notification_thresholds_user`,
-    `own_user_profiles` in both `qual` and `with_check`), predicates otherwise
-    unchanged, and the advisor returns **zero `auth_rls_initplan` entries**.
-    **Earlier revisions of this file named it `0179_rls_initplan_fix.sql` —
-    WRONG, and corrected here.** A filename taken from memory is exactly the
-    §5 trap; the file on disk is the record.
-  - **`0180_pin_function_search_path.sql`** (`9a2e6aa`) pinned
-    `search_path = public, pg_temp` on the 8 functions the security advisor
-    flagged `function_search_path_mutable`. `public` stays FIRST so every
-    unqualified reference resolves as before — deliberately non-breaking.
-    `ALTER FUNCTION … SET` touches only `proconfig`; bodies and ACLs are
-    untouched, so §6's re-revoke rule does not apply. Verified: all 8 carry the
-    setting; 7 are `anon_exec = f`, and `set_updated_at()` is `anon_exec = t`
-    but `returns trigger` — §6's accepted class, unreachable via PostgREST, NOT
-    a regression and not introduced by 0180.
-  - **`0181_confirm_invoice_special_charges_guard.sql`** (in `2477946`) — the
-    money fix, below.
-  - **`0182_discard_draft_or_review_invoice.sql`** (in `46b0158`) — the discard
-    capability, below.
-  - **`0183_rename_delete_draft_invoice_to_discard_invoice.sql`** (`55e3ebe`) —
-    the pure rename, below. One `alter function … rename to`, no footer.
-- **Origin carries through `5ffa9cb` — the last WORK commit — plus the handoff
-  commits that carry this line; `main` and `origin/main` level.** Naming a bare
-  hash here is what has made this bullet rot four times, and it cannot name its
-  own commit's hash, so it names the last non-handoff commit instead and says so.
-  Measured 2026-09-08 evening from BOTH required sources: the BRANCH line of
-  `git status -sb` (`## main...origin/main`, no ahead/behind marker) and
-  `git rev-list --left-right --count origin/main...HEAD` → `0	0`, with
-  `git rev-parse HEAD origin/main` printing the same SHA twice. **Never read
-  sync off the TREE lines** — a dirty tree says nothing about ahead/behind, and
-  a clean one does not mean pushed. **This is a pointer and it goes stale the
-  moment anyone commits — measure before quoting it.** It has gone stale FOUR
-  times now: naming `6af117d` three commits after the fact, `caec5ef` one commit
-  late, `0b17bc3` one session late, and `d9fd6a3` three commits late.
-- **`.planning/0187-arabic-copy-review.md` is DELETED and the tree is clean.**
-  It was the Arabic copy sheet Turki reviewed before `0c7adf9`, kept untracked,
-  and **its own header — "Migration is DRAFTED, NOT APPLIED. Nothing is
-  committed." — had gone FALSE**: 0187 is applied and committed. Deleted in the
-  cleanup sweep (`32d7c08`) rather than left as a superseded artifact whose
-  header lies.
-  **Nothing was lost with it** — its copy is the copy that shipped, checked
-  before deleting: all three balance-term labels and the `paidUpCore` formula
-  prose are in `lib/i18n.ts`, under git, where the app actually reads them.
-  **No `.gitignore` rule was added for review artifacts, deliberately.**
-  `.planning/` already TRACKS seven of them (`review-dictionary-0123-0124.md`,
-  `review-payment-mode-0121.md` and five more), so the convention here is that a
-  review sheet is kept in git, not hidden from it. A pattern rule would fight
-  that convention and would silently swallow the next one somebody meant to
-  commit. The lesson this file earns is about the HEADER, not the tracking:
-  a review artifact states the state it was written in, and that state expires.
-- **MONEY FIX — `confirm_invoice` IS NOW AN AUDITOR, NOT A SCRIBE (`2477946`).**
-  A confirmed invoice could freeze with NO special charges while the customer's
-  prepaid balance had already been consumed by those same charges. **Two sources
-  of truth for one amount of money:** `lib/invoice.ts` period-filtered special
-  charges by `charge_date`, while `v_customer_prepaid_balance` counts every
-  charge on a non-void invoice with **no date filter at all**. Measured on
-  `026-000015` — snapshot empty, grand total 540.50, balance consumed 2,530.00.
-  - **Server (`0181`):** `confirm_invoice` derives the authoritative charge set
-    from `invoice_special_charges` — the SAME rows the balance view consumes —
-    and **RAISES unless the client payload matches by id AND amount**, before
-    `next_invoice_number()` is claimed, so a rejected confirm burns no number.
-  - **It AUDITS, it does NOT recompute.** The covered/uncovered split stays
-    client-side: it comes from the FIFO walk in `lib/prepaid.ts` over the
-    customer's full history, and the per-line `covered` boolean exists nowhere
-    in the DB. Reimplementing that in plpgsql would fork the money math, which
-    the money-core boundary forbids. **Do not "finish the job" by moving the
-    split into SQL.**
-  - **It compares BASE `amount_sar`, not gross** — both sides then use identical
-    Postgres numeric arithmetic on identical 2dp inputs. Comparing gross would
-    pit JS `round2(x * 1.15)` against PG `round(x * 1.15, 2)`, which diverge on
-    exact-half halalas and would reject CORRECT invoices.
-  - **Client:** `lib/invoice.ts` no longer period-filters special charges, in
-    either arm. Charges are FK-bound to exactly one invoice at creation, so
-    `notReservedElsewhere` already scopes them; the date filter only ever
-    dropped money. Trip period filters are untouched, and `chargesForEngine`
-    never had the filter — so the two halves of that function now agree.
-- **`confirm_invoice`'s ACL — THE GRANT IN `0181`'s FOOTER IS NOT A LEAK.**
-  `0181` is `drop` + `create`, which **wipes the explicit grants**. The live
-  `proacl` is `{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}`
-  — **no PUBLIC entry**; `authenticated` and `service_role` are explicit, not
-  inherited. So the footer must `revoke execute … from public, anon` **AND**
-  `grant execute … to authenticated, service_role`. Revoking alone leaves the
-  function owner-only and **the app loses confirm entirely** — caught in review
-  before it ran, not after. Read back with `has_function_privilege` on all
-  three roles plus `anon`, identified by `oid::regprocedure` (§6).
-- **COMPANY BANK ACCOUNTS — three rulings, all counter-intuitive, all guarded
-  (`caec5ef`).** These read like defects to a fresh pair of eyes. They are not.
-  **They now live in `SKILL.md` under "Company bank accounts (0184) — every rule
-  here reads like a defect". READ THEM THERE.** The summary below is kept only
-  as this session's record; the skill is the authority and the one that gets
-  loaded before money work.
-  - **The IBAN field validates almost NOTHING, on purpose.** It shipped with the
-    ISO 13616 mod-97 checksum and a length test; **both were removed the same
-    day, by Turki, after using it.** With no banking system behind the screen a
-    checksum cannot confirm an account exists — it only asserts a string obeys a
-    formula — so all it could ever do was reject an operator copying a real
-    number off a real statement, which is exactly what it did. A wrong IBAN is
-    caught where it always actually was: by the customer reading the invoice and
-    by the bank refusing the transfer. **`"nope"` is now a saveable IBAN**
-    (normalises to `NOPE`, reads as country code `NO`). That is the deal.
-  - **What IS kept is the part that helps rather than polices:** separators
-    stripped on the way in, groups of four on the way out, and `SA` supplied when
-    a value starts with a DIGIT. The prefix is a **DEFAULT, not a whitelist** —
-    foreign IBANs are allowed and keep their own code. The test is positional, so
-    `DE89…` is never turned into `SADE89…`, a number that is not any account
-    anywhere. **SA-only stood for exactly one turn before being amended; the two
-    foreign-IBAN cases in the harness are kept INVERTED rather than deleted so
-    the reversal is on the record.**
-  - **`show_on_invoice` FAILS CLOSED** — only an explicit `true` prints. The cost
-    of wrongly hiding is an operator ticking a box; the cost of wrongly showing
-    is a customer wiring money to an account we did not mean to publish.
-  - **The freeze law applies (0027).** Draft and review read LIVE settings so a
-    draft previews what it will freeze; confirmed/paid/void read the frozen
-    `seller_snapshot` with **no live fallback**, because `getInvoicePdf` caches
-    issued bytes — a live read would leave a cached PDF disagreeing with the
-    popup, and would graft today's accounts onto a document already in the
-    customer's hands. `assembleForCustomerPeriod` captures the seller with
-    `select("*")`, so the column landed in the snapshot with no assembly change.
-  - **`scripts/bank-accounts-check.ts` asserts the LOOSENING directly** — a
-    transposed digit and a foreign IBAN must both be ACCEPTED. Re-adding a
-    checksum, a length rule or a country whitelist fails there loudly instead of
-    quietly re-breaking the field. **Proven this turn by re-adding each: 8, 3 and
-    3 checks go red respectively**, reverted `diff -q` identical each time. This
-    is the memory rule — invert a dead invariant, never delete it.
-- **Security posture: the anon boundary is CLEAN.** The ~49 remaining
-  `authenticated`-definer advisor warnings are **by design** — this is a
-  single-tenant internal app and every staff user is `authenticated`. Do not
-  triage them as findings. **One real item is outstanding and it is not in the
-  repo: leaked-password protection is still OFF and must be enabled in the
-  Supabase dashboard.** No migration can do it.
-- **Deploy target: Vercel Pro, function region `fra1`** — next to the
-  `eu-central-1` database. Region choice is latency, not preference; moving
-  functions away from the DB re-introduces a round-trip per query.
-- **RULED, NOT OPEN — draft-stage charge consumption is RESERVE-AT-DRAFT, and it
-  is CORRECT. Do not restrict it.** The investigation ran this session and
-  closed. `v_customer_prepaid_balance` counts special charges on **any non-void
-  invoice, including `draft` and `review`** — no date filter, `status <> 'void'`
-  is the only status filter. That is not an oversight sitting next to a
-  trips-only reservation model; **a charge reserves balance exactly as a draft
-  invoice reserves trips**, and the user-visible number already behaves that way.
-  - **Nothing in TypeScript reads the view.** `v_customer_prepaid_balance` has 7
-    repo hits and **all 7 are comments**; `charge_consumption_sar` has **zero**
-    hits repo-wide. Consumption reaches the app only DB-side, through three
-    dependent views: `v_customer_amount_payable` (Archive),
-    `v_invoice_outstanding_live` (Reports), and `v_active_alerts` (the bell, via
-    `v_my_notifications`).
-  - **Two money GATES depend on it transitively**, both through
-    `v_customer_amount_payable`: `archive_project_guarded` (refuses to archive
-    while the customer is negative) and `return_customer_balance` (gates a cash
-    refund on `amount_payable_sar > 0`). Restricting the view silently moves both.
-  - **`v_active_alerts` reads `balance_sar` directly** — `prepaid_overdrawn` on
-    `balance_sar < 0`, `prepaid_low_runway` on
-    `balance_sar >= 0 and balance_sar < low_runway_trips * top_rate`.
-  - **The number the user sees ALREADY drops at draft, and it does NOT come from
-    the view.** Finance's Running Balance is computed client-side in
-    `FinanceTab.tsx` over raw `invoice_special_charges` rows fetched in
-    `app/trips/page.tsx` scoped `status !== "void"` — the SAME scope the view
-    uses, reached independently.
-  - **THIS IS WHY IT MUST NOT BE "FIXED" IN ONE PLACE.** The identical
-    `status <> 'void'` scope exists in FOUR sites — the view, the Trips-page
-    fetch, `nonVoidInvoiceIds` in `invoiceActions.ts`, and the alert view. They
-    agree by construction today. Narrowing the view alone would leave the SQL and
-    the TS engine reporting different money for the same customer — **the exact
-    two-sources-of-truth shape closed in `2477946`.** All four move together or
-    none do, and none is the current ruling.
-- **DISCARD SHIPPED — an unfinalised invoice now has a way out (`46b0158`).**
-  Reserve-at-draft being correct is precisely what made the missing exit a real
-  problem: a draft or review invoice HOLDS its reserved trips and its charges'
-  balance, and `discard_invoice` — then still named `delete_draft_invoice` —
-  rejected everything that was not `'draft'`, so a stale review invoice was
-  unclearable and quietly kept both.
-  - **`0182` widened the EXISTING function in place — it did not add a second
-    one.** `0019` shipped `archive_project`, `0139` added
-    `archive_project_guarded`, `0140` had to DROP the unguarded one because the
-    second path was the back door around the first. One call site, one signature,
-    nothing to keep in sync, and the migration needs no TypeScript to land with
-    it. **Do not add a SECOND discard path alongside it.** The honest name was
-    all that was ever owed, and `0183` paid it by renaming this same function —
-    not by adding one next to it.
-  - **Measured live after the fact, not read off the migration (§5):** the gate
-    is `if v_status not in ('draft', 'review')`; `proacl` is
-    `{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}` —
-    **identical to the pre-migration ACL**, so the drop+create footer's revoke AND
-    grant both did their job; `anon_exec` false, `auth`/`service_role` true; and
-    the §6 invariant still measures **0 anon-executable non-trigger functions**.
-  - **The release works through the FKs, measured from `pg_constraint`:**
-    `invoice_special_charges.invoice_id -> c` (CASCADE — deleting the rows is what
-    frees the held balance, on BOTH sides at once) and `trips.invoice_id -> n`
-    (SET NULL). Nothing else references `invoices`, so the delete leaves no orphan.
-  - **`confirmed` / `paid` / `void` are still rejected, and the errors name the
-    right door** — an issued document keeps its number and leaves by
-    `void_invoice`; `paid` goes through `unpay_invoice` first.
-  - **THE RENAME IS DONE — `0183` / `55e3ebe`, and it is not open.** The old name
-    claimed draft-only, which stopped being true at `0182`. Shipped as the pure
-    unit it needed to be: migration + the single call site + five comments in ONE
-    commit, so no window existed where the app and the database disagreed.
-    - **`alter function public.delete_draft_invoice(uuid) rename to
-      discard_invoice;`** — one statement, bare, **no ACL footer, deliberately.**
-      A rename touches `pg_proc.proname` only: same OID, therefore the same row,
-      therefore the same `proacl`, `prosecdef` and `proconfig`. §6's re-revoke
-      rule applies to `create or replace` and `drop`+`create`, which reset the
-      ACL — **this is why a rename was used instead of drop+create.** A footer
-      here would have implied a repair that was never needed.
-    - **Measured live after the fact, not read off the migration (§5):** ONE row
-      for `proname in ('delete_draft_invoice','discard_invoice')` — `oid` still
-      **21415**, `fn` now `discard_invoice(uuid)`, `prosecdef` true, `proconfig`
-      `{search_path=public}`, `anon_exec` false, `auth`/`service_role` true.
-      **Same OID under the new name is the proof** that nothing but the label
-      moved. Turki then discarded a draft and a review invoice in dev: rows gone,
-      trips freed, charges off the balance.
-    - **`supabase.rpc()` IS UNTYPED IN THIS REPO — tsc CANNOT catch RPC-name
-      drift.** `lib/db-types.ts` is hand-written row shapes with no generated
-      `Functions` map, and both clients are built without a `<Database>` generic.
-      Proven, not assumed: `tsc` exits **0** on
-      `rpc("this_function_does_not_exist_anywhere")`. So the regression test for
-      any future RPC rename is **grep + the catalog + a click**, never `tsc`.
-      There is exactly one call site (`invoiceActions.ts`,
-      `supabase.rpc("discard_invoice", …)`).
-    - **`0030` and `0182` still say `delete_draft_invoice` and MUST stay that
-      way.** They record what was true when they ran, and a fresh `db reset`
-      replays 0030 creates → 0182 replaces the body → 0183 renames. "Fixing"
-      them would falsify history and break the replay.
-  - **`InvoiceDetailModal`'s gate WAS widened to match — DONE (`bcad04f`), do not
-    re-raise it.** It was left at `status === "draft"` when `46b0158` shipped, so
-    the sheet was briefly narrower than its own backend; it now reads a named
-    `canDiscard`, mirroring `isUnfinalized` in `InvoicesModal`. Both screens and
-    the RPC agree on which statuses are discardable. The sheet also stopped
-    carrying its own copy for the act: it reads `trips.invoices.discard` /
-    `guardDiscard` / `confirmDiscard`, and the three orphaned
-    `trips.invoiceSheet` keys were deleted. **One irreversible act, one
-    description** — the same reason `GuardBox` is exported rather than copied.
-- **Invoice `026-000015` is frozen understated and is being LEFT that way.**
-  540.50 stored against 2,530.00 consumed. It is dummy data, and the freeze law
-  of `0027` means issued invoices render from frozen columns and do not
-  recompute — so it will not self-correct and that is correct behaviour. Not a
-  defect to chase; not evidence the fix failed.
-- **The skeleton loading-state sweep SHIPPED — 12 `loading.tsx`, one per
-  server-fetching route segment.** Commits `d9541f9`, `7b9f3af`, `1f40d42`,
-  `a8c39c2`, `693ce46`. The `.skel*` primitives and four tokens
-  (`--ease`, `--dur-3`, `--r-3`, `--r-4`) were ported from `preview/app.css`.
-  **`loading.tsx` per segment ONLY — no `<Suspense>` restructuring and no fetch,
-  query or server-action change anywhere in the sweep.** Every page awaits at the
-  top level of the page component, so per-section Suspense would have meant
-  rewriting the fetch; the segment file streams the shell without touching it.
-  - **The primitives are preview's; the GRID CLASSES ARE EACH PAGE'S OWN.**
-    Preview ships a fixed 4-up `.skel-grid` because its demo used one skeleton
-    for every route. Reusing it would reflow Fleet's 5-up strip, Drivers' 6-col
-    row, Inventory's 5-up and Reports' two dissimilar bands the moment data
-    landed — the exact shift the skeleton exists to prevent.
-  - **Spacing mechanism is per-page and must be COPIED, not assumed.** Drivers
-    and Trips space their blocks with `mb-*` and carry `border-b mb-4` on the tab
-    bar; Inventory, Consumption, Reports and Archive wrap in `space-y-5`, so
-    their tab bars carry NO `mb-4` — adding one doubles the gap.
-  - **`/iot`, `/predictive`, `/routes` and `/login` correctly have none.** All
-    four import `supabase/server` zero times. `/login` does await, but inside its
-    submit handler, so there is nothing to stream. **Their absence is measured,
-    not an omission — do not "complete" the sweep by adding them.**
-- **Two accepted trade-offs on record — both are rulings, not open defects.**
-  1. **`/reports`' `BigStat` tile keeps a small residual shift.** Its delta, foot
-     and note rows are conditional on the data, so the tile's final height is not
-     knowable from a static skeleton. Reserving all three would hold a permanent
-     gap the page usually does not fill; reserving none shifts more. Turki saw the
-     residual and accepted it.
-  2. **Every skeleton mirrors its page's DEFAULT tab only.** Non-default tabs are
-     reached through `useTabParam` client state and mount *after* hydration, so
-     they never see a `loading.tsx` at all. A skeleton drawn for them would be
-     dead markup.
-- **The traffic-violation notice photo shipped** — schema + bucket `7dcdaaf`,
-  app layer `5ea0001`, verified in-browser before both. The durable rule (the
-  storage key, the display-only boundary, the freeze/edit gate, the signed-URL
-  read, and the `window.open`/`noopener` lock) is in the domain skill under
-  **Traffic Violations → "The notice photo (0178)"** — do not restate it here.
-- **A cleanup pass over the whole violations feature then landed (`178df21`) —
-  audit first, fix second, no migration.** It found and closed a real race: all
-  four violation mutators carried `.is("voided_at", null)` and none of them
-  looked at whether the predicate had fired, so a fine voided in another tab
-  between an action's read and its write returned `{ error: null }` having
-  changed nothing. `removeDriverViolationImage` was the one with damage — it
-  went on to delete the storage object while the row still pointed at it. All
-  four now read back with `.select("id").maybeSingle()`.
-- **`178df21`'s checklist HAS NOW BEEN RUN — 11 of 16 scenarios pass, 5 remain.**
-  Passed at the row and the bucket: **1, 3, 4, 5, 6, 7, 8, 9, 15, 16**, plus the
-  size half of **2**. The two that carry the commit are the two-tab races:
-  **15** refused a pending amount edit against a fine voided in the other tab
-  (message exact, `amount_sar` still `88.00` — not a silent success), and **16**
-  refused the photo removal *and left the object in the bucket*, proving the
-  null-row check runs above the storage delete. **9** rendered rose, not amber.
-  **10, 11, 12 were left unrun in that sitting** (payslip preview on an unissued
-  month — inline edit moves Deductions+Net, photo View/Replace/Remove,
-  six-column print) — stopped for time, not for a problem — and have **SINCE BEEN
-  RUN AND PASSED**; Closed row 24, with the note under that table on which parts
-  the catalog can corroborate. **13, 14 were declined on purpose** (see below).
-  The `.txt` half of **2** was skipped for want of a file and closed in code
-  instead: `validateViolationImage` runs server-side in `uploadDriverViolationImage`
-  *before* `createClient()`, so a crafted request is refused — which is the only
-  thing standing there, since the bucket itself has `file_size_limit: null` and
-  `allowed_mime_types: null`.
-- **THE DOCUMENTED VERIFICATION CONVENTION CANNOT REACH THIS FEATURE.** The repo's
-  convention (`playwright.config.ts`) is a throwaway diagnostic route plus a
-  temporary middleware auth bypass. `driver_violations`, `drivers` and
-  `violation_types` are all `has_table_privilege('anon', …, 'select') = false`,
-  so a bypassed session renders an EMPTY SCREEN, not the feature — measured, not
-  assumed. What worked instead: **Turki clicks each scenario, Claude verifies the
-  row and the storage object over MCP after every one**, holding
-  `dangling`/`orphans` at 0/0 throughout as the instrument.
-  **A SCREENSHOT CANNOT FALSIFY THE BUG THIS COMMIT FIXED** — a zero-row write
-  looks identical to a successful one on screen. Only the read-back separates them.
-  Scenario 7 proved the method earns its cost: it was reported working, but
-  `updated_at` had not moved anywhere in the table, and since `applyPhotoChanges`
-  runs *after* the row write that bumps it, the submit had never happened at all.
-  A redo passed. **A green report is a claim about the screen, not about the row.**
-- **The repo-wide sweep for that same zero-row shape RAN, and closed the three
-  sites it found (`9e4ca3b`).** 203 files, 107 write chains: 13 guarded chains
-  read back, 22 guarded ones do not, 72 carry no guard beyond a key. The 22 were
-  triaged one by one and **none is a defect** — 11 filter on a UNIQUE column so
-  the "guard" is really an identity lookup (`key` on all six lookup tables;
-  `commission_periods_driver_month_idx` on the pair), 9 are bulk writes where
-  zero rows is the correct outcome, 2 (`updateExitPermitLineQty` /
-  `removeExitPermitLine`) run `assertDraft` first and only scope by parent id.
-  **Do not re-triage them from the raw count.**
-  The three that were real: `setSpecialStatus` and `setAdjustmentStatus`
-  (`.is("payout_id", null)` is the payment freeze — a miss told a manager his
-  deny landed on money already paid out) and `updateDraftInvoicePeriod`
-  (`.eq("status","draft")`, and the only guarded invoice write in its file that
-  did not read back).
-- **`9e4ca3b`'S MANUAL VERIFICATION IS DROPPED — NOT PENDING. Do not carry it
-  forward as "unverified" and do not re-raise it.** The fix itself shipped and
-  stands; what was dropped is the hand-staged two-tab collision that would
-  demonstrate it.
-  - **Why dropped:** reaching the miss path means holding one tab mid-action
-    while a second tab pays the payout or moves the invoice out of Draft — a
-    setup that has to be built by hand for each of the three sites, against live
-    money rows, and torn down after. **At 3–4 users the collision it guards is
-    rare; the fixture costs more than the assertion.** Same call, same reasoning
-    as `178df21` scenarios 13–14.
-  - **What stands in its place, and it is not nothing:** the bails are proven
-    *reachable* against live data (10 paid specials, 6 paid adjustments, 26
-    non-draft invoices) and the error strings are proven to reach a screen
-    (`run()` in `CommissionsTab.tsx`, `DenyModal`'s confirm in the same file,
-    `InvoiceDetailModal`'s `setPeriodError`). The change is also a strict
-    improvement by construction: before it, a filtered-out write returned
-    `{ error: null }`; after it, the same write reports. **A read-back cannot
-    make the success path worse** — it adds a `.select("id")` to a write that
-    already ran.
-  - **Reachable and wired is still not the same as seen** — that stays true, and
-    it is the honest cost of this decision, not an argument against it. If a
-    manager ever reports a deny that "worked" on a paid line, or a period edit
-    that silently didn't take, run the two-tab setup then.
-- **`CLAUDE.md` is at 14,901 bytes — 459 under the 15,360 (§7) tripwire.** The
-  §5/§6 compression pass ran this session (`067635a`) and bought that room. Done
-  as an audit, not a trim, per §5: it found two stale claims (below). Next pass,
-  same method — re-verify every claim; all three so far found a stale fact.
-- **NEVER RUN `npm run build` WHILE `next dev` IS UP — THEY SHARE `.next/`, AND
-  THE BUILD WINS.** Cost a full debugging cycle this session. `next build` wipes
-  and rewrites `.next/`, so the running dev server's in-memory manifests point at
-  dev assets the production build deleted: `/_next/static/css/app/layout.css` and
-  `/_next/static/chunks/main-app.js` both return **404 serving the HTML 404
-  page**, and the app renders as raw unstyled HTML with all its data present and
-  no hydration. **It looks exactly like a CSS/PostCSS compile error and it is
-  not** — there is no error in the dev log, `tsc` is 0 and `globals.css` is
-  untouched. Tell them apart by fetching the stylesheet directly; a hard refresh
-  cannot help, the 404 is server-side. The fix is `pkill -f "next dev"`, then
-  `rm -rf .next` **with nothing running**, then restart. Use
-  `npx tsc --noEmit` + `npm run test:money` for verification while dev is up, and
-  save the production build for a moment when it is not.
-- **MCP-applied migrations write NO `schema_migrations` ledger row.** Neither do
-  SQL Editor runs. The migration FILE is the record. The ledger's max version
-  lags reality and always will — **the objects in the catalog are the truth, the
-  ledger is not.** Do not "discover" a missing migration from a ledger query and
-  do not re-apply one on that basis. Check `pg_proc` / `pg_index` first.
-- **No open decisions, NO open investigations, no known defects.** O-1 and O-2
-  were both ruled and closed; nothing was reopened. Draft-stage charge
-  consumption — the single investigation this file used to carry — was **RULED
-  this session** (above): reserve-at-draft is correct, do not restrict it.
-  **NO open VERIFICATION remains.** `178df21` scenarios 10–12 were RUN and
-  PASSED in-browser — Closed row 24, which also records what the catalog can and
-  cannot corroborate about them. (13–14 are DECLINED and `9e4ca3b`'s two-tab run
-  is DROPPED; neither is pending, both are above. An earlier revision of this
-  line said "10–14", which contradicted the 13–14 ruling two bullets down, and
-  an earlier one still carried `9e4ca3b`; the one before this said 10–12 were
-  still open.) Unverified is not the same as defective, and it is not the same as
-  clean either. Every change here was verified in-browser before it was
-  committed: the money fix (`2477946`); the discard unit (`46b0158`) — a review
-  invoice holding trips and charges deleted, trips freed, charges off the
-  balance, with confirmed/paid/void rows showing neither the wash nor the delete
-  control; the rename (`55e3ebe`) — discard re-tested on both draft and review
-  after `0183` applied; and the period default (`6af117d`).
-- **13 and 14 ARE DECLINED, NOT PENDING — do not re-raise them as a gap.** They
-  assert that an *issued* payslip shows no Pencil and no Ban but still shows the
-  photo icon. No issued payslip exists for a driver with photographed fines, and
-  the only way to make one is to issue a real gap-free numbered money document
-  that cannot be cleanly un-issued. **The fixture costs more than the assertion.**
-  Both branches were closed by reading `StatementViews.tsx` instead: `buildDocFines`
-  takes the issued branch from `doc.snapshot.violations.items` with `locked: true`
-  hard-coded, so the controls cannot render, and `imagePath` is the one field read
-  live in both branches, so the icon must. If an issued payslip with a photographed
-  fine ever appears in the normal course of business, run them then — do not
-  manufacture one.
-- **Two voided test fines remain on driver `13823f47`** (`123123123` @ 88.00 and
-  `TEST-016` @ 55.00, both created and voided during the checklist run). Left
-  voided rather than hard-deleted — §6 locks soft-delete for operational records,
-  and `app/drivers/page.tsx` filters voided rows out of the list, so they are
-  already invisible. TEST-016's photo is still in the bucket and still correctly
-  pointed at — re-measured today, it is one of the 3 in the 3↔3 count below.
-  **Not litter to clean up.**
-- **The violations photo invariant read 5 objects ↔ 5 rows, dangling 0, orphans 0**
-  at the end of the `178df21` run — same shape as the 4↔4 baseline taken before
-  the first click. This is the standing check for the feature:
-```sql
-  with objs as (select name from storage.objects where bucket_id = 'violation-images'),
-       rows_with_path as (select image_path from driver_violations where image_path is not null)
-  select (select count(*) from objs) as objects,
-         (select count(*) from rows_with_path) as rows_with_path,
-         (select count(*) from rows_with_path r
-            where not exists (select 1 from objs o where o.name = r.image_path)) as dangling,
-         (select count(*) from objs o
-            where not exists (select 1 from rows_with_path r where r.image_path = o.name)) as orphans;
-```
-  **`dangling` and `orphans` are different bugs** — a dangling row is a broken
-  photo the user sees, an orphan is a file nobody points at and nobody will ever
-  delete. Scenario 9 was staged by appending `.MISSING` to one `image_path` to
-  force a dangling row, then restored from the value recorded before the edit;
-  the 0/0 above is the post-restore reading.
-- **RE-MEASURED 2026-09-02, AFTER SCENARIOS 10–12 — THE LIVE READING IS NOW
-  `3 objects ↔ 3 rows, dangling 0, orphans 0`. 5↔5 above is history, 3↔3 is the
-  baseline.** It fell by two because scenario 11's **Remove** ran on Khalid 3's
-  `28301830` and `6384902`: both rows carry today's `updated_at`, both now have
-  `image_path` null, and **the object count fell in lockstep**, which is the part
-  that matters — Remove deleted the file as well as the pointer, so it left
-  neither a dangling row nor an orphan. The 3 survivors are `TEST-016`
-  (mohammed 2, voided), `274729091` (Khalid 2) and `36483000` (mohammed 3), all
-  last touched 2026-08-31. **A session that reads 5↔5 as live sees two photos
-  "missing" and chases a catastrophe that never happened** — the §5 failure mode,
-  in our own notes.
+**Every number below is a POINTER, not evidence. Re-measure before quoting it.**
+The commands are given inline so re-measuring is cheaper than trusting.
 
 ---
 
-## Closed — 2026-09-08 EVENING (this session, `0c7adf9` → `5ffa9cb`)
+## Current state
 
-**TWO SESSIONS RAN ON 2026-09-08 AND THE HEADINGS ARE THE ONLY THING THAT
-SEPARATES THEM.** This one is the evening run, seven work commits, `0c7adf9`
-through `5ffa9cb`. The MORNING run (`d9fd6a3` → `8060e82`) has its own table immediately
-below. **Every unqualified "this session" inside THAT table means the MORNING
-run, not this one** — same rule the 2026-09-05 section carries, now biting
-within a single date. Read the commit hash, not the date.
+### Git
 
-| # | Item | Commit |
-|---|---|---|
-| 1 | **The Metrics Dictionary's display copy leaves `report_metrics` and moves into `lib/i18n.ts` — closing PARKED item 10.** The popup read `label`, `meaning`, `formula`, `grain` and `caveat` straight off the table, so Arabic had nowhere to live. **An earlier draft of `0187` answered that with five nullable `_ar` columns and 30 translated rows; that draft was DROPPED** — a translation split across a dictionary and five DB columns has two edit paths, two review paths, no compiler, and is un-reviewable in a diff. The division of labour is now: **`report_metrics` says WHICH metrics exist and what SHAPE each is** (basis, unit, machine-value grain, `source_view`); **`lib/i18n.ts` says what each is CALLED and MEANS**, both languages; `metric_key` is the join. 21 label keys plus 12 that REUSE the existing `reports.metric.*` label whose English is byte-identical, rather than duplicating it. `metricText()` falls through reader's language → English key → the row's own column, so a metric registered before its copy is keyed renders English, never blank. `0187` also registers the three Finance balance terms; **`amount_payable` deliberately does NOT cite `v_customer_amount_payable`**, because for a prepaid customer that view returns the running balance and `return_customer_balance()` gates a real cash refund on exactly that divergence. Adds `scripts/metric-copy-check.ts`, wired as `npm run test:copy`. 7 files + `0187` | `0c7adf9` |
-| 2 | **Gregorian month names render in Arabic, with Latin digits, everywhere — closing PARKED item 9.** Thirteen independent "format a month" implementations in four spellings across three locales, which is how "Aug 2026", "August 2026" and "Sept 2026" all became the same label. One canonical pair (`monthName` / `monthLabel` in `lib/utils`) now owns the words, with `formatDateLang` / `formatDateTimeLang` / `formatDayKeyLang` and an en-GB adapter on top. Item 9 warned the fix "is not pass `lang`" and it was not: **nothing passes `ar-SA`** — its Latin digits under bare `"ar"` are a CLDR default, not an API guarantee, and `ar-SA` itself returns Arabic-Indic numerals and resolves to the Hijri calendar. Digits come off the app's own formatter, only the NAME comes from the dictionary. Adds `scripts/month-label-check.ts` to `test:copy`. 25 files + 1 new, no migration | `f42690d` |
-| 3 | **The `lib/invoice.ts` v3 §9 residual note gets its scope and its attribution — it was NEVER stale.** Re-raised as "says 4 invoices / 38,709.00, live disagrees". It does not disagree; **the earlier pass measured a different axis** (stored subtotal vs a re-derivation) and compared it to a figure describing the frozen-column identity `grand − (covered + amountDue)`. Comment-only, no data, no migration | `04b2c4e` |
-| 4 | **`scripts/code-grep.ts` stops false-greening on directory arguments — closing item 11, its own commit as the item required.** Path handling sat OUTSIDE the lexer and undid it: a directory went straight to `git show :<dir>`, threw, and the read loop's catch — there to skip untracked files — swallowed it, so the run reported "no live reference in 3 file(s)" having read ZERO, the 3 being the ARGUMENT count. Paths are now resolved first by **`resolvePaths`, a pure function with `git` and `stat` injected** so it can be fixtured: directories expand (filtered to the scan's own `*.ts *.tsx *.css *.sql`), an explicit tracked file is read whatever its extension, and every way of producing no evidence is **exit 2** — a path in neither the index nor the tree, a directory with nothing scannable, a read that fails mid-loop, and any run that ends up having read **zero files**. An untracked file is its own bucket: loud skip in staged mode, real read under `--worktree`. The report counts files ACTUALLY READ. **Eight path fixtures joined the twelve lexer ones in the module-load `selfTest`, and the guard was proven able to fail** — reverting only the directory branch in a scratch copy turned three red and exited 2. **The lexer was not touched.** 1 file, no migration — the retirement of the workaround in `scripts/month-label-check.ts`'s §7 header rides with this handoff commit instead, since it is a note correction, not the fix | `8dea137` |
+- **`main` is at `e93baec`.** Measured with `git rev-parse HEAD`.
+- **Level with origin, measured BOTH required ways**: the BRANCH line of
+  `git status -sb` reads `## main...origin/main` with no ahead/behind marker,
+  and `git rev-list --left-right --count origin/main...HEAD` returns `0	0`.
+  **Never read sync off the TREE lines** — a dirty tree says nothing about
+  ahead/behind, and a clean one does not mean pushed.
+- **This bullet cannot name its own commit's hash and goes stale the moment
+  anyone commits.** It has rotted five times by naming a hash late. Measure.
 
-| 5 | **The Unit 1–3 residue sweep came back CLEAN — one wrong figure was the entire yield.** Swept for orphaned exports/imports, dead i18n keys and comments still describing the abandoned `_ar`-column approach as current. Nothing to remove: the only `_ar` metric-column mentions left are three notes recording the REJECTION (`MetricsGlossaryModal.tsx:57`, `lib/i18n.ts:3733`, `lib/reports.ts:470`) plus the immutable `0187` comment, and `dictText` exists nowhere — code-grep exit 0 across **418 files read** for `meaning_ar`, `caveat_ar`, `dictText`. The one real defect: `lib/reports.ts`'s `monthLabel` docblock claimed **11 call sites; the wrapper has 10** (nine OverviewTab, one ReportsClient). **The eleventh hit is `StatementViews.tsx:1576`, which imports `monthLabel` from `@/lib/utils` and never reaches the wrapper** — same name, different module. The measuring command the comment ships still PRINTS eleven, so the note now says why eleven is wrong rather than leaving the next reader to "correct" it back. Also deletes `.planning/0187-arabic-copy-review.md` (see State) with no `.gitignore` rule, deliberately. 2 files, no migration | `32d7c08` |
-| 6 | **Three zero-reference types in `lib/reports.ts` become file-internal.** `IndicativeZakat`, `MetricTextField` and `PayslipSnapshot` were exported and imported by nobody. All three dropped `export` cleanly — **tsc is the proof, and the proof was itself proven**: `noUnusedLocals` is on, and a throwaway `type __GuardProbe` produced `TS6196` before being removed, so a clean run genuinely establishes each is still used internally rather than dead. Two still describe exported shapes, so their STRUCTURE stays reachable (`IssuedPayslipRow["snapshot"]`, `ReturnType<typeof indicativeZakat>`); only naming them on import is gone, which nobody did. `tsconfig` sets no `declaration`, so a non-exported type inside an exported one raises no emit error. 1 file, no migration | `4172e4e` |
-| 7 | **Seven hand-built month labels consolidate onto `monthName` — and the OBVIOUS helper was the wrong one.** Five files each carried their own `MONTH_KEYS` tuple and interpolated `common.monthShort` inline; four copies plus `SalaryHistoryModal`'s local `monthName` wrapper are gone. **`formatDayKeyLang` was REJECTED at all six day-level sites despite building exactly their shape**: its English arm is an en-GB Intl formatter, and **en-GB abbreviates September as "Sept" where `common.monthShort` says "Sep"** — delegating would have restyled one month in twelve across six screens under cover of a refactor. `monthName` reads the same dictionary leaf those lines already read, so output is identical by construction. `SalaryHistoryModal.dateLabel` had a SECOND reason to stay hand-assembled: it splits without `Number()`, so its day is the padded `04` that `day:"numeric"` would print as `4`. **Verified empirically, not by argument** — old expression vs new, 12 months × 2 languages × single- and double-digit days: **264 comparisons, 0 mismatches**, with an INVERTED control asserting `formatDayKeyLang` DOES differ, which it did, on September alone. `WEEKDAY_KEYS` stays in both files that hold it — no canonical helper owns weekday names. 5 files, no migration | `5ffa9cb` |
+### Database
 
-**ROW 7 IS WHY "USE THE CANONICAL HELPER" IS NOT AUTOMATICALLY THE ANSWER.** Two
-helpers can render the same SHAPE from different SOURCES — a dictionary leaf and
-an ICU locale — and agree on eleven months out of twelve. The disagreement is
-invisible to a reading of the code and to any test run outside September. **A
-consolidation onto a helper is a wording change until the output is compared
-character for character, in both languages, across the whole domain of the
-input.** The rule that generalises: when replacing a hand-rolled formatter,
-diff the old expression against the new for every value it can take, and carry
-an inverted case proving the comparison can fail.
+- **Files on disk run through `0187`; 185 `.sql` files** (`ls
+  supabase/migrations/*.sql | wc -l`). The gap between 185 and 187 is historical
+  numbering, not a missing file.
+- **`0185`, `0186` and `0187` were applied through MCP or the SQL Editor, and
+  NEITHER PATH WRITES A `schema_migrations` LEDGER ROW.** The ledger's max
+  version lags permanently and always will — see `CLAUDE.md` §7. **Do not read
+  the migration level out of `schema_migrations`.** The record is the files on
+  disk plus the objects in the catalog. All three re-verified against the
+  catalog this turn:
+  - **`0185_within_month_collection_rate.sql`** — `settled_same_month_revenue_sar`
+    is present on **both** `v_revenue_monthly` and `v_pnl_monthly`
+    (`information_schema.columns`). Applied.
+  - **`0186_collections_settlement_basis.sql`** — `report_metrics.basis` exists;
+    **4 rows carry `basis = 'settlement'`**. Applied.
+  - **`0187_report_metrics_balance_terms.sql`** — `report_metrics` holds **33
+    rows**, **3** of them `paid_up_balance` / `running_balance` /
+    `amount_payable`. Applied. **Do not re-apply any of the three.**
+- **View security footer holds: 50 views, 50 `security_invoker=true`, 0 readable
+  by `anon`.** `CLAUDE.md` §6's counts MATCHING is the check, not the number.
+- **`CLAUDE.md` §7's stub carries the migration number too, so the two files go
+  stale together.** When the DB moves, change it in both places or leave the
+  pair openly disagreeing — never silently.
 
-**ROW 3 IS THE ONE TO READ BEFORE RE-RAISING ANYTHING OUT OF THIS FILE.** The
-note was flagged stale, a session was spent proving it, and it was right all
-along. Re-measured live this session, all exact:
+### The security advisor is not clean, and that is EXPECTED — read this before reacting
 
-| | |
-|---|---|
-| scope (the part that was missing) | **24 = issued AND non-postpaid.** Not 36 rows, not 25 issued, not 21 issued-non-void |
-| nonzero residual | **8** |
-| negative | **4 invoices / 38,709.00 SAR** |
-| positive | **4 invoices / 48,875.00 SAR** |
+Re-run today. Three findings, and **only one of them is work**:
 
-**Postpaid stores `covered = 0` and `due = grand`, so its residual is ZERO BY
-CONSTRUCTION** — that is why it is excluded, and excluding it is what makes the
-denominator 24. Drafts and reviews carry no frozen columns at all. **Pick any
-other denominator and the note stops reproducing, which is exactly what
-happened.** The comment now states the scope and ships the query that settles
-it.
+1. **`auth_leaked_password_protection` — DISABLED.** Genuinely open. It is a
+   console setting, not a migration. See Open items.
+2. **`anon_security_definer_function_executable` — count 3.**
+   `record_project_commission_change()`, `record_salary_change()` and
+   `trips_station_offers_water_type()`. **ALL THREE RETURN `trigger`**, measured
+   with `pg_get_function_result(p.oid)`, not inferred from their names. Trigger
+   functions are unreachable through PostgREST — `CLAUDE.md` §6's accepted
+   class. **`CLAUDE.md` §6's invariant HOLDS: zero NON-TRIGGER functions are
+   anon-executable.** Verified by ordering the query so a non-trigger function
+   would sort FIRST; the only four anon-executable functions in `public` are
+   those three plus `set_updated_at()`, and all four return `trigger`.
+   ```sql
+   select p.oid::regprocedure::text as fn, pg_get_function_result(p.oid) as returns
+   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname='public' and has_function_privilege('anon', p.oid, 'execute')
+   order by (pg_get_function_result(p.oid) = 'trigger'), fn;
+   ```
+   **A future session WILL open the advisor, see three red SECURITY DEFINER
+   entries and read them as the 0115/0118 regression returning. They are not.**
+   That is why this paragraph exists.
+3. **`authenticated_security_definer_function_executable` — count 49.** This is
+   the app's own RPC surface, granted to `authenticated` on purpose. Not a
+   finding, and revoking any of it breaks the app.
 
-**The 1,150.00 gap that went unreconciled in the earlier pass is named:
-`026-000017`.** The negative 38,709.00 is **three invoices via the TRIPS half**
-(`026-000014` 32,844.00 + `026-000009` 4,243.50 + `026-000007` 471.50 =
-37,559.00) **plus ONE via the CHARGES half** (`026-000017`, 1,150.00 — the
-second of the two charges stranded at the top of that file). The old wording
-called all four trips-side. It also implied all four were paid: **`026-000009`
-is CONFIRMED, not paid**, so the invoice_id-reserved argument covers `026-000014`
-and `026-000007` only.
+### Copy and formatting
 
-**`026-000009` re-derives to 4,761.00 against its stored 4,243.50 and that is
-NOT a defect** — its snapshot froze BEFORE Amount Due widened to carry uncovered
-charges, so its stored due omits its own 517.50. One document, two laws. Every
-other invoice in the set re-derives exactly. **This is recorded IN the comment**
-precisely so the next reader does not restart this investigation on the 517.50.
+- **The metrics dictionary is bilingual.** The 33 × 5 display strings live in
+  `lib/i18n.ts` under **`reports.metricDef`** (`:3786`), joined on `metric_key`;
+  they are no longer DB columns. **The old in-code ruling `EVERY METRIC ROW
+  STAYS ENGLISH` is GONE, correctly — do not go looking for it.** `0187` only
+  registers the three Finance balance terms as ROWS; their prose is in i18n like
+  everything else.
+- **Arabic months, Latin digits, Gregorian calendar — and `"Sep"`, never en-GB's
+  `"Sept"`.** `ar-SA` is refused outright (Hijri by default, Arabic-Indic
+  numerals). The digit ruling in `lib/reports.ts` is separate and still stands:
+  `en-US` at the `sar()` `Intl.NumberFormat` is CORRECT and governs NUMBERS.
+- **`lib/utils.ts` owns month formatting**: `monthName(month1Based, lang)` and
+  `monthLabel(monthKey, lang)` both read `common.monthShort`;
+  `formatDayKeyLang` is an **en-GB Intl formatter** and renders September as
+  `"Sept"`. **The two agree on eleven months out of twelve.** That near-miss is
+  this session's most transferable finding — see Completed, `5ffa9cb`.
 
-**`unpaid_ledger_subtotal_sar` IS ALREADY VAT-INCLUSIVE.** Multiplying it by 1.15
-reproduces nothing and was the second thing that made the note look wrong.
+### Harnesses
 
-**THE 8 CANNOT GROW.** Frozen snapshot columns on issued invoices, and the law
-that produced them is gone, so no new invoice joins the set — only the
-denominator moves. That is why the figures were KEPT rather than replaced with a
-figure-free description: this one does not re-derive, so it cannot rot the way
-the frozen-split counts in `SKILL.md` do.
+- **`npm run test:money` — GREEN, 14 harnesses, ~10.5s end to end.** It is a
+  shell `for` loop, so counting `&&` returns 1 and is wrong. Read the list:
+  ```sh
+  node -e "console.log(require('./package.json').scripts['test:money'])"
+  ```
+- **`npm run test:copy` — GREEN, 3 checks**: `metric-copy-check`,
+  `month-label-check`, `i18n-lookup-single-source-check`.
+- **`scripts/code-grep.ts` is the tool that settles "is the identifier gone"**
+  (`CLAUDE.md` §5). Directory arguments work since `8dea137`; exit 2 means the
+  run produced no evidence and is never a pass.
 
-**Rows 1 and 2 close BOTH parked items — the parked list is now empty.** See
-"What's next", where 9 and 10 are struck.
+### Printing — two models, and which surfaces are on which
 
-**`test:copy` EXISTS NOW AND IS A SECOND HARNESS CHAIN, separate from
-`test:money`.** Three scripts: `metric-copy-check.ts` (row 1),
-`month-label-check.ts` (row 2), `i18n-lookup-single-source-check.mjs`.
-Re-measured at close: **`test:money` exit 0, 863 PASS; `test:copy` exit 0, 408
-PASS, 0 FAIL** across both logs. `tsc --noEmit` exit 0.
-
-**`month-label-check.ts` EARNED ITS KEEP ON ITS FIRST RUN — it found a real
-defect that no amount of looking at the screen would have caught.**
-`swapMonthName` rebuilt the string from `formatToParts()`, but
-**`Intl.DateTimeFormat.format()` NORMALISES U+202F → U+0020 before a day period
-while `formatToParts()` returns the raw U+202F** (node v24.15.0 / ICU 78.2). The
-Arabic and English renders of the drivers History `paid_at` stamp therefore
-differed by an INVISIBLE CHARACTER as well as the month. Fixed by replacing into
-`format()`'s own output, which makes "differs by exactly the month name" true by
-construction. **Proven both directions** — reverted to the parts-join and the
-harness went red on exactly that one case.
-
-**`scripts/code-grep.ts` GAVE A FALSE GREEN ON DIRECTORY ARGUMENTS — FIXED in
-`8dea137`, and it is the tool `CLAUDE.md` §5 tells every session to trust.**
-`npx tsx scripts/code-grep.ts 'ar-SA' app lib components` printed
-`fatal: path 'app' exists on disk, but not in the index` three times, then
-**"No live reference … in 3 file(s)" and EXITED 0 having read nothing.** Cause:
-`args.slice(1)` were literal paths fed to `git show :<path>`, a directory threw,
-`catch { continue; }` swallowed it, and the report printed `files.length` — the
-ARGUMENT count, not a file count. **A false green that read exactly like a real
-pass**, which is worse than the false red the lexer was written to prevent.
-
-**The fix, and what it means for how you invoke it.** Paths are now resolved
-before anything is read, by `resolvePaths` — a pure exported function with `git`
-and `stat` injected, which classifies instead of dropping. **Directories expand**
-(filtered to the same `*.ts *.tsx *.css *.sql` the no-argument scan covers), an
-explicitly named tracked file is read whatever its extension, **a path in neither
-the index nor the working tree is FATAL (exit 2)**, so is a real directory
-holding nothing scannable, and an untracked file is its own bucket — skipped
-loudly in the default staged mode, read from disk under `--worktree`. The report
-prints the files ACTUALLY READ, and **exit 2 if that count is zero**, because
-zero files is not evidence about anything. **So pass directories freely; the
-`git ls-files` workaround that stood here is retired**, and so is its copy in
-`scripts/month-label-check.ts`'s §7 header — which still holds the repo's only
-deliberate `ar-SA` occurrences and would otherwise read as a regression.
-
-**Eight path fixtures joined the twelve lexer ones in the module-load
-`selfTest`**, driven against a fake index; the first reproduces this bug by name.
-**Proven able to fail:** reverting only the directory branch in a scratch copy
-turned three of them red and exited 2. The comment-stripping lexer was not
-touched. Verified `tsc` clean, `test:money` exit 0 / 863 PASS, `test:copy`
-exit 0; the reproducer now reads **206** files — one more than the workaround's
-205, that one being `app/globals.css`, which the ts/tsx-only globs missed.
-
-**BSD grep in the C locale treats Arabic UTF-8 files as BINARY** — with
-`LANG`/`LC_ALL` unset it silently reports no match and exits 1, and `file -b`
-calls such a file "data". **Use `grep -a`, or set `LC_ALL`, on anything that may
-carry Arabic.** This silently corrupted a staged-blob verification mid-session
-before it was caught.
+- **The DOCUMENT model** (own stylesheet, hidden same-origin iframe, no app CSS
+  reaches inside): **invoice** (`lib/invoicePrintTemplate.ts`) and **statement**
+  (`lib/statementPdfTemplate.ts`), both off `lib/plainDocStyles.ts`'s
+  `plainDocShell`, both sharing their download path's view-model.
+- **The SCREEN-DOM model** (`app/globals.css`, `body * { visibility: hidden }`
+  plus an un-hide whitelist): everything else. **Measured today the whitelist
+  carries 13 ids**, not the 12 an earlier revision claimed: `history`,
+  `breakdown`, `permit`, `pnl`, `revenue`, `receivables`, `cost`, `ops`,
+  `narrative`, `payslips`, `commission-review`, `custom`, `daily-trips`. Two
+  portal/marker pairs remain, `#breakdown-print` and `#po-print`.
+- **A subtree that leaves the whitelist without an intercept prints a BLANK
+  SHEET**, which reads like the printer's fault. That is why `StatementModal`
+  intercepts Ctrl/Cmd+P. Do not delete a whitelist entry without checking what
+  its owner does with the shortcut.
 
 ---
 
-## Closed — 2026-09-08 MORNING (the earlier session, `d9fd6a3` → `8060e82`)
+## Completed this session (2026-09-08, `0c7adf9` → `e93baec`)
 
-**Every unqualified "this session" / "this turn" from here down means the MORNING
-run or earlier — never the evening one above.**
+Seven work commits and one handoff commit. One line each; **the reasoning is in
+the commit messages, and they are the record.**
 
-| # | Item | Commit |
-|---|---|---|
-| 1 | **The reports collection rate stops being a cash ratio and becomes a within-month NET SETTLEMENT rate — one unit, `0185` + `0186` + the app layer + a clip fix.** The old `cashCoverage` stacked three independent distortions: it divided a GROSS numerator by a NET denominator (~1.15× inflation), applied no `payment_method` filter, and ran a `paid_at` numerator over a `confirmed_at` denominator — unbounded, which is how **August printed 215%**. Replaced by a `filter (...)` computed **inside `v_revenue_monthly` over the very rows the denominator sums**, so `numerator <= denominator` holds BY CONSTRUCTION and not by a clamp. `0186` then moves the `collections` metric off `basis='cash'` onto `basis='settlement'` in `report_metrics` (unit, grain and `source_view` deliberately unchanged — the MEASURE did not move, only what it is filed under), and six EN+AR strings drop the cash wording. Adds `scripts/collection-rate-check.ts`, wired into `test:money`. 11 files | `d9fd6a3` |
+| Hash | What |
+| --- | --- |
+| `0c7adf9` | Moved the Metrics Dictionary's display copy out of `report_metrics` and into `lib/i18n.ts`; `0187` registers the three balance terms as rows. |
+| `f42690d` | Gregorian month names in Arabic with Latin digits throughout — thirteen implementations across the app, not the three the parked item predicted. |
+| `04b2c4e` | Docs: scoped and attributed the invoice v3 §9 residual figures correctly. |
+| `8dea137` | `scripts/code-grep.ts` now resolves path arguments before reading, so a directory can no longer report a false green. |
+| `32d7c08` | Cleanup sweep: corrected one stale call-site figure, deleted the superseded review artifact. |
+| `4172e4e` | Made three zero-reference report types file-internal (`MetricTextField`, `IndicativeZakat`, `PayslipSnapshot`). |
+| `5ffa9cb` | Consolidated seven hand-built month labels onto `lib/utils`' `monthName`, byte-identical in both languages. |
+| `e93baec` | Handoff rows for the last three of the above. |
 
-**The numerator is `v_revenue_monthly.settled_same_month_revenue_sar`** — grep
-that name, not a line number. `0185` **APPENDED** it (the only shape
-`create or replace view` allows, §6) and **restated the security footer**:
-`security_invoker = true`, `revoke all … from anon`, `grant select … to
-authenticated`. Its predicate is Riyadh-local on BOTH sides —
-`date_trunc('month', paid_at at time zone 'Asia/Riyadh') = date_trunc('month',
-confirmed_at at time zone 'Asia/Riyadh')` — so the "within-month" test cannot
-drift across a month boundary on UTC skew.
+**`5ffa9cb` IS THE ONE TO READ, because the lesson generalises past this
+change.** The obvious canonical helper was `formatDayKeyLang`. Using it would
+have been wrong: **two helpers can render the same SHAPE from different SOURCES
+and agree on eleven months out of twelve.** `common.monthShort` says `"Sep"`;
+en-GB says `"Sept"`. Routing six user-facing screens through the "canonical"
+helper would have silently restyled one month, and no test run outside September
+would have caught it. **A consolidation onto a shared helper is a WORDING change
+until the output is compared character-for-character across the whole input
+domain** — here 264 comparisons, 12 months × 2 languages × padded and unpadded
+days, plus an inverted control asserting that `formatDayKeyLang` DOES differ. It
+did, on September alone. **Pick the helper that matches the SOURCE, not the one
+that matches the name.**
 
-**A prepaid invoice settled with `payment_method='balance'` moves NO cash on the
-day it is marked paid** — the cash arrived earlier, at top-up, and the `topups`
-metric already counts it. That is the whole ruling. **The Collected KPI's NUMBER
-is unchanged by it;** only the RATIO under it and the WORDS describing it moved.
-Anyone reading this as "collections were restated" has it backwards.
-Measured live 2026-08: **105,225.00 of 109,020.00 settled from balance.**
-
-**Verified in-browser by Turki before commit, from proof shots Code drove with
-Playwright** — Turki is non-technical and running the browser pass himself was
-the blocker, so the browser was driven for him against the dev server and the
-screenshots posted for reading. Confirmed on all six surfaces: dashboard tile
-9,741 SAR; the Reports "Invoices settled" card at Sep 9,741 / 100.0%, Aug
-109,020 / 100.0%, Jul 30,533 / 37.6%; the dictionary popup showing the
-**SETTLEMENT** heading with its one entry and the full caveat; then all three
-again in Arabic through the globe toggle. `tsc` clean; **`test:money` 853 pass /
-0 fail** — re-measured this turn, NOT the 613 the section below records, which
-was that day's count and is left as written.
-
-**`scripts/collection-rate-check.ts` case set B is INVERTED ON PURPOSE — it
-asserts the function does NOT self-bound.** The old `cashCoverage` operands
-still reproduce August's 215% through it, and a negative numerator passes
-through unfloored. **So a well-meaning `Math.min(100, …)` "hardening" fails the
-harness loudly**, which is the point: the bound is the view's subset guarantee,
-and a clamp in TypeScript would hide the day that guarantee breaks instead of
-reporting it. Same shape as the inverted guards in `1754140` (row 2 of the
-2026-09-05 table below, "Guards inverted rather than deleted; negative control
-fails all six") — **invert a dead invariant, never delete it.**
-
-**The dashboard clip fix is a CONTENT ruling, not a styling preference.**
-`DashboardClient.tsx`'s headline subline (grep `dashboard.headline.` in that
-file) traded `truncate` for `leading-snug text-balance`. The subline is a
-**phrase, not a name** — clipping it drops the words that say WHICH figure it
-is, so "invoices settled this mo…" is a DIFFERENT claim, not a shorter one.
-Eight tiles at `xl` leave ~150px, which the longest sub overran the moment
-0185/0186 replaced "cash in, this month". **The LABEL above it keeps `truncate`
-deliberately** — a clipped name still points at the right tile. Measured, not
-eyeballed: all 8 tiles at 1280 / 1500 / 1920 / 2560, zero clipped sublines, and
-AR clean at 1280; DOM read-back printed both approved strings end to end.
-**Turki's constraint was that the approved EN and AR wording could not change** —
-the fit had to give, not the words.
-
-**A pre-existing `CLIP` on the "Operating margin" LABEL at 1280 was found and
-deliberately NOT fixed** — outside this unit, and a clipped label is the case
-the `truncate` above is correct for. Recorded so the next session does not read
-it as damage from this pass.
+`4172e4e` carries the smaller companion lesson: `noUnusedLocals` was proven able
+to flag an unused type alias (a throwaway `type __GuardProbe` producing
+`TS6196`) BEFORE its green was trusted. **A guard must be shown capable of
+failing before its pass means anything.**
 
 ---
 
-## Closed — 2026-09-05 (the previous session)
+## Open items
 
-**EVERY UNQUALIFIED "this session" / "this turn" FROM HERE DOWN — and in the
-State section above, outside the 0185/0186 bullet — MEANS 2026-09-05 OR EARLIER,
-never 2026-09-08.** Same rule the 2026-09-02 table carries below, for the same
-reason: prose is left as written and only headings are dated, so a relative date
-decays the instant another session lands on top of it. The 2026-09-08 work is
-the section above this one and nothing else.
+**A COMPLETE scan was run this turn** — `TODO`/`FIXME`/`HACK`/`XXX` across all
+tracked `ts/tsx/sql/css/json` (**zero hits**), plus `deferred`, `parked`, `out of
+scope`, `as-is`, `for now`, `not built yet`, `RBAC`, the previous handoff's open
+section, and `SKILL.md`'s deferred list. **Every candidate below was re-verified
+against live code or the live database. Candidates that measurement showed were
+already CLOSED were dropped, not carried** — see the closing subsection for the
+ones that died, so they are not resurrected.
 
-| # | Item | Commit |
-|---|---|---|
-| 1 | **Hide-amount-due toggle is prepaid-only.** The PDF template only ever read `hideAmountDue` in its prepaid branch, so the control on a postpaid invoice promised a suppression the document never performed. Popup now agrees with the printable, not the reverse. Drops `LineTable`'s `headerRight` with its last caller. 1 file | `6ac9719` |
-| 2 | **MONEY — two independent prepaid-only faults, both invisible to the suite** because every assertion pinned what the engine DID rather than what it had to ADD UP TO. (a) The grand total was composed from a NON-COVERING line set, so `covered + amountDue = grand` held only by accident — 8 of 24 live invoices did not add up, 38,709.00 SAR of delivered work outside a document's own total. Grand is now ONE document-level `calculateVat()` over every line shown; `amountDue` keeps its pool-exact rule; `covered` is the REMAINDER, so the identity holds by construction. (b) `consumingItems()` gated charges at `charge_date <= asOfDate`, so a future-dated charge was LISTED, DEDUCTED and REFUSED COVERAGE at once. Gate removed for charges, kept for trips. Guards inverted rather than deleted; negative control fails all six. 8 files, no migration | `1754140` |
-| 3 | **Aquaglass downloadable invoice** — one shared view-model (`lib/invoiceViewModel.ts`) both popup and PDF read from, so the 0%-deviation rule is STRUCTURAL: neither surface can invent its own data, grouping or wording, while the LOOK diverges on purpose. Carries three adjustments: the hide-toggle on confirmed invoices, an Arabic legibility pass (size/weight/line-height only — Arabic ran 7.6–8.5px against Latin at 9.6–10.5px), and **company bank accounts (`0184`)** as a Transfer Details block under the Grand Total. 14 files | `caec5ef` |
+### (a) DECISION for Turki — do not "fix" these, they are choices
 
-| 4 | **Rows 2 and 3's rules promoted into `SKILL.md`** — two new sections (the `covered + amountDue = grand` identity; company bank accounts) plus a REWRITE of the "asOfDate scopes CONSUMPTION" section, which contradicted row 2 by still calling `asOfDate` load-bearing for charges. Docs only; no code, no migration. Closes What's next 6 and 7 | (docs) |
-| 5 | **PRINT is its own plain document, no longer the popup on paper.** The old path `@media`-printed `InvoiceDetailModal`'s live React DOM — it agreed with the screen by BEING the screen, so it printed an application window: screen layout, screen number formats (whole riyals, not the tax document's halalas), and controls suppressed one at a time by hand-maintained `no-print` classes. Print is now a THIRD renderer off `lib/invoiceViewModel.ts`, the same source the download reads, rendered server-side into a hidden same-origin iframe. Adds `lib/plainDocStyles.ts` as a REUSABLE kit (the statement inherits it next), `lib/docPrimitives.ts` (shared `num2` — the printout and the PDF cannot disagree about a halala), and `scripts/invoice-render-parity-check.ts`. 10 files, no migration | `0b17bc3` |
+1. **The Maintenance week-header separator is an ASCII comma in Arabic.**
+   `app/maintenance/MaintenanceCalendar.tsx:175` builds
+   `"Sep 4 – Sep 10, 2026"`, and the `,` is ASCII in BOTH languages where an
+   Arabic reader would normally expect `،` (U+060C). The in-code comment at
+   `:172-173` flags it. **This is a wording question, not a formatting bug** —
+   changing it changes what an Arabic user reads.
+2. **The Saudi map's city labels stay English.** `lib/i18n.ts:917-919` records
+   why: they are `CITIES` **data**, not copy. Giving them Arabic names is a
+   content decision. The map's corner disclaimer IS translated, deliberately —
+   an Arabic reader must also be told the geometry is approximate.
+3. **Four Inventory modal sizes are unresolved pending explicit sign-off.**
+   `app/inventory/InventoryClient.tsx:124`: Create Warehouse, New supplier,
+   Update market price, Adjust stock were never named in Turki's screenshots, so
+   the preview-fidelity pass left them alone rather than guessing. A UI decision.
+4. **`drivers.active` is a dead column and its deletion is deferred.**
+   `app/drivers/actions.ts:77-80`. **Measured live: the column exists and NOT ONE
+   row is anything other than `true`** — nothing reads it, nothing writes it,
+   termination (`0020`, `terminated_at`) superseded it. Dropping it is a
+   migration, therefore Turki's call, not cleanup.
+5. **`.planning/` review artifacts are TRACKED, and no `.gitignore` rule was
+   added — deliberately.** **Re-measured: 6 files named `review-*.md` are
+   tracked** (an earlier revision said seven; it was counting
+   `finance-invoice-spec.md` too). A pattern rule would fight the convention and
+   would silently swallow the next artifact someone meant to commit. **The open
+   question is whether that convention gets written down as a rule or stays
+   custom.** The lesson the deleted `0187-arabic-copy-review.md` earned is about
+   the HEADER, not the tracking: a review sheet states the state it was written
+   in, and that state expires.
+6. **Leaked-password protection is DISABLED in Supabase Auth.** Re-measured off
+   the advisor today, not carried from the note. Console setting — not a
+   migration, not a code change. **This is the only genuinely open item on the
+   security posture**, and it is Turki's to click.
 
-**Rows 1–3 verified in-browser by Turki before commit, including the freeze law
-on row 3** — a confirmed invoice still shows the accounts it was issued with
-while a draft shows the live set. `tsc` clean, `test:money` 613 pass / 0 fail.
+### (b) Doable FIX — cleanup, mechanical, but NOT part of this handoff commit
 
-**Row 5 verified in-browser by Turki before commit** — prepaid and postpaid,
-Ctrl+P and the button emitting the identical document, `grand = covered + due`
-with charges INSIDE the total (not the superseded mockup's services-plus-charges
-structure), wording and grouping matching the popup, hide-toggle and Transfer
-Details honoured, correct status, nothing coloured, Arabic checked. `tsc` clean;
-the parity check green on all 21 assertions.
+**Each is its own commit.** This session's scan was READ-ONLY by instruction.
 
-**Row 5's three structural rulings, so they are not re-litigated:**
+7. **`app/inventory/actions.ts:358-362` is STALE and says the opposite of the
+   truth.** It reads *"`consume_from_lots` … has no caller here — nothing in
+   this app consumes parts yet (that's PO-receiving/work-order phases); it lights
+   up when one of those lands."* **The work-order phase LANDED.** Proven end to
+   end this turn: `app/maintenance/actions.ts:265` calls the `start_work_order`
+   RPC → `0061:177` `perform deduct_work_order_parts` → `0065:228`
+   `perform public.consume_from_lots(...)`. Parts are consumed in this app today.
+8. **`app/inventory/InventoryClient.tsx:76-78` carries the same claim, worded
+   more strongly** — *"NO caller anywhere in this app yet"*. Same proof, same
+   fix. **Note the trap:** `code-grep 'consume_from_lots' app lib components`
+   exits 0, because the app never names the function — it calls the RPC that
+   calls it. **A clean code-grep here is evidence about the TS layer only; the
+   call chain is in SQL.** Do not let the green exit re-confirm the stale
+   comment.
+9. **`app/inventory/InventoryClient.tsx:81-84`'s "NOT built (flagged…)" list is
+   at least partly stale.** It names Purchase Orders, the Approvals tab, the
+   Financial Analysis tab, AI-suggest-PO, receipt invoice-photo upload, the
+   per-part Financial Report and two buttons as unbuilt. `PurchaseOrders.tsx`
+   plainly exists, and `receive_loose_parts` hard-requires a non-empty `p_files`.
+   **Re-measure the list ITEM BY ITEM before rewriting it — do not bulk-delete
+   it.** Some entries are probably still true, and deleting a true "not built"
+   note is how a gap becomes invisible.
+10. **`lib/actions/search.ts:12` points at "HANDOFF.md §6", which does not
+    exist** and never will — this file has no numbered sections. A dangling
+    pointer. The thing it means is real (RBAC, item 11 below); only the address
+    is wrong.
 
-- **ONE MECHANISM PER RULE.** `hiddenFromPrint` and its two `no-print` classes
-  are DELETED. hide-amount-due is honoured once, upstream, by `vm.amountDue`
-  going null — which every document reads. The markup used to carry a SECOND
-  expression of the same rule, and two mechanisms for one rule is how they
-  drift. **Do not re-add a print-media class for this toggle.**
-- **Ctrl/Cmd+P is intercepted, and it HAS to be.** `app/globals.css` opens its
-  print block with `body * { visibility: hidden }` and whitelists named
-  subtrees; the invoice is deliberately no longer on that list, so a raw browser
-  print with the modal open would emit a BLANK sheet — the worst failure
-  available, because it reads as the printer's fault. The `keydown` handler in
-  `InvoiceDetailModal` is load-bearing, not a convenience. **Deleting it
-  silently breaks Ctrl+P.**
-- **An IFRAME, not `window.open`, and off-screen, not `display:none`.** The HTML
-  arrives from an awaited server action, so the click chain is broken and a
-  popup would be blocked; and an undisplayed frame has no layout, which is what
-  the print engine renders. It awaits `fonts.ready` before `print()` — otherwise
-  a cold cache prints an Arabic tax invoice in substituted metrics.
+### (c) FORWARD-ONLY — nothing to do, no owner, not defects
 
-**Row 5 also closed a stale comment the earlier sweep MISSED** — `lib/i18n.ts`
-still named `#invoice-print` as a live id in a Batch 9 paragraph nobody had
-touched. Caught by grepping the STAGED BLOB (§5) rather than the working tree,
-after the first sweep had already been called complete. Four `invoice-print`
-hits remain in the repo; all four are epitaph comments, each read in context.
+11. **There is NO role gate anywhere in the app.** Three live sites say so:
+    `app/trips/actions.ts:1444`, `app/archive/actions.ts:809` (*"With no role
+    gate yet this is attribution, not authorisation"*), and
+    `components/settings/ProfileSection.tsx:41` (leave-history display deferred
+    to RBAC). `SKILL.md`'s locked decision 4 adds *"RBAC on add-a-type:
+    deferred — any authenticated user can add one today."* **Every `actor` /
+    `entered_by` / `created_by` column in this app is an AUDIT TRAIL, not a
+    permission check.** Do not mistake one for the other.
+12. **The Coming-Soon trio is fenced off on purpose**: `/routes`, `/predictive`,
+    `/iot` (`lib/nav.ts:77-79`, rendered under a labelled `<nav>` in
+    `components/AppShell.tsx:495`). `FleetDetailClient.tsx:511` and `:586` render
+    two honest-empty cards against the same two. Route Optimization has a
+    `preview/map.js` spec waiting.
+13. **The payslip's commission-period caption stays English, and there is
+    nothing to translate it FROM.** `app/reports/StatementViews.tsx:2819-2833`.
+    `pay_commission` wrote the caption into `commission_payouts`, issuing the
+    payslip copied it into `driver_payslips.snapshot`, and **the frozen entries
+    carry no `monthKey`** — measured: `id, paid_at, period_label, base_sar,
+    specials_sar, adjustments_sar, bonus_sar, total_sar`. Joining `id` back to
+    the live table would both re-derive a frozen document from mutable data and,
+    on this data, recover nothing. **Forward-only by DATA, not by preference.**
 
-**Row 4 found a live contradiction while writing itself** — the brief for it
-described the IBAN field as running the ISO 13616 mod-97 checksum "computed in
-chunks". It does not; row 3 removed the checksum entirely the same day. **The
-skill records the SHIPPED behaviour, not the brief.** Measured before writing:
-zero non-comment hits for `mod.?97|checksum|% *97` in `lib/bankAccounts.ts`, and
-`scripts/bank-accounts-check.ts:171` asserts a transposed digit is ACCEPTED —
-writing the brief's version in would have pointed the next session at a harness
-that fails on contact. §5's "X because Y" rule, caught on an instruction rather
-than on a note.
+### Decided exceptions — recorded so they are not reopened as bugs
 
----
+14. **`app/drivers/HistoryTab.tsx:322-334` — `period_label` stays English,
+    DELIBERATELY.** Two independent sufficient reasons, both in-code: it is
+    FROZEN TEXT written at pay time (the column stores words, not a key), and
+    **it is not the month above it** — the line above is the month the run
+    SETTLED, this is the payout RUN's caption, and the two legitimately come
+    apart. Deriving it from `snap.monthKey` would print one fact twice and
+    delete the one this line exists to show. **This is the one label the Arabic
+    month sweep left alone on purpose. Do not reopen it.**
 
-## Closed — 2026-09-02 (the previous session)
+### Closed BY MEASUREMENT during this scan — do not relist as open
 
-**EVERY UNQUALIFIED "this session" BELOW MEANS 2026-09-02.** The prose in this
-table and in the sections after it was written that day and is left as written;
-only the heading is dated. A relative date in a handoff decays the moment a
-second session lands on top of it — do not read any of it as 2026-09-05.
-
-| # | Item | Commit |
-|---|---|---|
-| 1 | Notice photo: `image_path` + private `violation-images` bucket — `0178` | `7dcdaaf` |
-| 2 | Notice photo app layer: staff upload/view/replace/remove; payslip view on issued + edit/void/photo on unissued; `noopener` pop-up fix | `5ea0001` |
-| 3 | Notice photo recorded as a durable domain rule | `1bdc9d6` |
-| 4 | Violations cleanup: photo state machine + save tail deduped into `usePhotoDraft`/`applyPhotoChanges`; zero-row read-back on all four mutators; rose-vs-amber split on the staff screen; 4 exports dropped, 2 dead i18n keys deleted, 3 stale `file:line` pointers made name-based | `178df21` |
-| 5 | Handoff updated with that pass and the two traps it exposed | `36d6c66` |
-| 6 | Repo-wide zero-row sweep, then its three findings closed: read-back on `setSpecialStatus`, `setAdjustmentStatus` (shared `ITEM_PAID_MSG`) and `updateDraftInvoicePeriod` | `9e4ca3b` |
-| 7 | Sweep + the rotted `invoiceActions.ts:1035` pointer recorded; that pointer converted to a symbol grep | `2efd4bb` |
-| 8 | The zero-row rule promoted into `SKILL.md` — including the three classes that are NOT findings | `97964b7` |
-| 9 | `178df21` verified in-browser: 11 of 16 scenarios pass including both two-tab races; 10–12 left unrun (**since RUN — row 24**), 13–14 declined with reason | (docs only) |
-| 10 | RLS `auth.uid()` initplan fix on 5 policies — `0179`; applied live, advisor's 5 `auth_rls_initplan` WARNs cleared | `688b6e2` |
-| 11 | Skeleton loading states, batch 1 — `.skel*` primitives + `--ease`/`--dur-3`/`--r-3`/`--r-4` ported from `preview/app.css`, first routes | `d9541f9` |
-| 12 | Skeleton loading states, batch 2 | `7b9f3af` |
-| 13 | Skeleton loading states, batch 3 — `/drivers`, `/trips` | `1f40d42` |
-| 14 | Skeleton loading states, batch 4 — `/customers`, `/projects`, `/maintenance` | `a8c39c2` |
-| 15 | Skeleton loading states, batch 5 — `/inventory`, `/consumption`, `/reports`, `/archive` | `693ce46` |
-| 16 | **MONEY:** special charges must match the balance source or confirm is rejected — `0181` makes `confirm_invoice` an auditor; `lib/invoice.ts` stops period-filtering charges. Applied, 4 scenarios verified in-browser, `test:money` 10/10 | `2477946` |
-| 17 | `search_path` pinned on 8 advisor-flagged functions — `0180`; applied and verified against `pg_proc` | `9a2e6aa` |
-| 18 | Draft-stage charge consumption INVESTIGATED and ruled: reserve-at-draft is correct, the four `status <> 'void'` sites agree by construction, restricting one would fork the money | (docs only) |
-| 19 | **Discard an unfinalised invoice** — `0182` widens `delete_draft_invoice` (renamed `discard_invoice` at `0183`, row 21) in place to draft OR review (trips SET NULL, charges CASCADE, confirmed/paid/void still rejected, ACL footer restated); UI adds the amber wash on draft/review rows and a per-row permanent delete behind the shared `GuardBox`; stale draft-only comment on `deleteDraftInvoice` corrected. Applied, ACL and gate re-measured against `pg_proc`, verified in-browser | `46b0158` |
-| 20 | `InvoiceDetailModal`'s own delete gate widened to match — named `canDiscard`, Delete added to the Review action row, sheet repointed at the list's `discard`/`guardDiscard`/`confirmDiscard` strings and the 3 orphaned `trips.invoiceSheet` keys deleted. Verified in-browser | `bcad04f` |
-| 21 | **`delete_draft_invoice` → `discard_invoice`** — `0183`, one `alter function … rename to`, no ACL footer (rename keeps the OID, so ACL/definer/`search_path` come through untouched). Migration + the one call site + 5 comments in ONE commit, so no window where app and DB disagreed. Applied; re-measured from `pg_proc`: same **OID 21415**, `anon_exec` false. Discard re-tested on draft and review in dev | `55e3ebe` |
-| 22 | **New-invoice period default** — both bounds seeded to `todayKey()`, so the default range was a single day and assembled no trips (the period SELECTS the trips). Now month-to-date via a shared `defaultPeriod()` used by BOTH the `useState` initials and the open-effect re-seed; reuses `monthStartKey`. Inputs and the `start > end` check untouched. Verified in-browser | `6af117d` |
-| 23 | `9e4ca3b`'s two-tab manual verification **DROPPED, not pending** — fixture costs more than the assertion at 3–4 users; the read-back fix itself stands and is reachable-and-wired against live data | (docs only) |
-| 24 | **`178df21` scenarios 10–12 RUN and PASSED in-browser** — payslip preview on an unissued month: inline fine edit moves Deductions+Net (10), photo View/Replace/Remove in the edit panel (11), print preview renders six columns with no controls (12). **Turki's in-browser run is the authority for all three. The catalog corroborates 10 (a two-point delta) and 11's Remove; View, Replace and 12 leave no trace by construction** — see the note below the table before quoting any figure out of it. Last verification on this page, nothing carried forward | (docs only) |
-
-### What the catalog could and could not corroborate for row 24
-
-Measured 2026-09-02, around and after the run — scenario 10's first point was
-taken BEFORE its edit and cannot be taken again. **Recorded because "verified"
-and "verifiable from here" are not the same thing,** and the next session will
-read this without re-measuring (§5).
-
-- **Scenario 10 — PASSED. Browser-verified by Turki, corroborated by a two-point
-  catalog delta.** Deductions and Net moved on screen; the view was read at both
-  ends of the same edit on Khalid 3 / `2026-08-01`:
-
-  | fine `6384902` | `deductions_sar` | `net_sar` |
-  |---|---|---|
-  | pre-edit `200.00` | `1550.00` | `67.02` |
-  | post-edit `100.00` | `1450.00` | `167.02` |
-
-  **The direction is 200 → 100, not 100 → 200.** The fixture had already drifted
-  to 200 before the session opened, so the architect flipped the test direction;
-  `100.00` with today's `updated_at` is the INTENDED end state, **not a
-  reversion**. An earlier revision of this note called it one — wrong, and the
-  correction is the point of this paragraph.
-  **ONLY THE POST-EDIT ROW IS STILL RE-MEASURABLE** — the fine is at 100 now, so
-  the 1550/67.02 point cannot be taken again. It was measured this session,
-  before the edit; that is the evidence, and it is not repeatable.
-  **Do not quote `1450.00 / 167.02` ON ITS OWN as proof of propagation.** Single
-  point, no delta: the view is the exact sum of Khalid 3's three unvoided August
-  fines (250 + 1100 + 100 = 1450), so it reads that whether or not any edit
-  happened. The **pair** is the proof — 100 off the fine, 100 off Deductions,
-  100 onto Net.
-- **Scenario 11 — Remove is corroborated, View and Replace are not observable.**
-  Remove is provable and proved: the invariant fell 5↔5 → 3↔3 with
-  `dangling`/`orphans` still 0/0, on two rows carrying today's `updated_at` (see
-  State). **View leaves no trace at all** — it mints a signed URL client-side.
-  **Replace cannot be separated from Remove after the fact**, since a replaced
-  object that is later removed is simply gone; no photo object in the bucket was
-  created today. Absence here is not evidence of failure, it is the limit of the
-  instrument.
-- **Scenario 12 — no catalog trace exists, by construction.** Print rendering
-  touches nothing. It is browser-only and always will be; do not open it as a
-  gap because MCP cannot see it.
+- **The statement's migration onto `lib/plainDocStyles.ts` is DONE.** The
+  previous handoff carried it as a forward pointer ("THE STATEMENT INHERITS
+  `lib/plainDocStyles.ts` NEXT") and claimed `app/globals.css` still held
+  `#statement-print`. **Both are false today**: `lib/statementPdfTemplate.ts:35`
+  imports `plainDocShell`, and `app/globals.css:612-637` is a comment recording
+  the removal of `#statement-print` / `body.printing-statement` /
+  `.statement-print-portal`. Only `#breakdown-print` and `#po-print` remain on
+  the portal pattern.
+- **The three anon-executable SECURITY DEFINER advisor warnings** — all trigger
+  functions, invariant holds. See Current state.
+- **`scripts/code-grep.ts`'s directory false-pass** — fixed in `8dea137`.
+- **The understated-docs / debit-note item** — Turki ruled it test data.
+- **The cleanup sweep's two held-back items** — both ruled and shipped the same
+  session as `4172e4e` and `5ffa9cb`. **No browser pass is owed on either.**
 
 ---
 
-## Closed in the previous session
+## Forward agenda, in order
 
-| # | Item | Commit |
-|---|---|---|
-| 1 | Prepaid balance/statement pool made lifetime-net (the O-2 ruling) | `dc29e26` |
-| 2 | Violations model moved into the domain skill; frozen-split annotation | `90c5a9e` |
-| 3 | `scripts/frozen-split-check.ts` + the duplicate-customer rule | `20b847c` |
-| 4 | `npm run test:money` — all ten money harnesses, fail-fast | `46bccf3` |
-| 5 | Handoff rewrite, then two corrections it did not survive (below) | `5847cc8`, `c30aaf0`, `c06f3e0` |
-| 6 | `CLAUDE.md` §5: measure a justification before writing it down | `708e7da` |
-| 7 | Session wrap; the customer count scoped to live rows | `773d2cb` |
-| 8 | `CLAUDE.md` §5/§6 compression pass + the audit behind it | `067635a` |
+### 0. Clear the open-items inventory first — leave nothing parked
 
----
+**This is the point of the list above.** Work items 1–10 to a ruling or a commit
+before starting anything new. The (b) fixes are small and independent; the (a)
+decisions need Turki and nothing else. **Do not start agenda item 2 or 3 on top
+of an unresolved parked list** — that is how a 1301-line handoff happens.
 
-## THERE IS NOW A MONEY-HARNESS SUITE — USE IT
+### 1. The flagged items
 
-```sh
-npm run test:money
-```
+The six (a) DECISION items. Each needs one answer from Turki, not analysis:
+the Arabic comma, the map's city names, the four modal sizes, whether
+`drivers.active` gets dropped, whether the review-artifact convention becomes a
+written rule, and the Auth console toggle.
 
-**Fourteen** harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green —
-re-measured off `package.json` 2026-09-08 evening:
-`prepaid` · `covered-unpaid` · `amount-payable` · `invoice` · `vat` ·
-`commission` · `commission-rows` · `payslip-deduction` · `daily-trips` ·
-`frozen-split` · `bank-accounts` · `invoice-render-parity` · `statement-parity` ·
-`collection-rate`. **863 PASS, exit 0, ~11.7s.**
+### 2. Analysis — Paid-up Balance vs Amount Payable
 
-**Read that list off `package.json`, not off this line.** It has been eleven,
-then twelve, and this line said "Twelve" while the chain held fourteen — **the
-count is the first thing in this file to rot, and it has now rotted twice.**
+**Now that the Invoice tab has been improved, the two balance figures beside
+each other need explaining, and possibly improving.** This is ANALYSIS FIRST,
+not a change. **Ground it in the two files that already own this math and do NOT
+reinvent either:**
 
-**THERE IS A SECOND CHAIN — `npm run test:copy`** (added 2026-09-08), and it is
-NOT money: `metric-copy-check.ts` · `month-label-check.ts` ·
-`i18n-lookup-single-source-check.mjs`. **408 PASS, 0 FAIL, exit 0.** It guards
-COPY — dictionary coverage, month-name equivalence, single-source lookup labels.
-Run both before any commit that touches money or user-facing strings.
+- **`app/trips/amountPayable.ts`** (190 lines). `computeAmountPayable` at `:163`
+  returns `derivedBalanceItems([], unsettledTrips, unsettledCharges)` — the
+  **credits side is EMPTY by construction**, which is what makes "adding balance
+  does not reduce it" true structurally rather than by discipline. `:145-146`
+  hold the single settled predicate (`isUnsettledTrip` / `isUnsettledCharge`);
+  **never restate that predicate anywhere else.** `:180-187` explain why there
+  is no returns term: a refund moves the POOL, not the WORK, so netting it here
+  would shrink a debt because we handed money back.
+- **`lib/prepaid.ts`** (804 lines). `paidUpCore` is `round2(credits − debits −
+  returned)` over topups, settled items and balance returns; `paidUpBalance`
+  (`:534`) is the LIVE figure that draft/review/confirmed-unpaid invoices show,
+  and `paidUpBalanceAsOf` (`:552`) is the FROZEN one a paid or void invoice
+  shows. **The undated input type is the enforcement mechanism** — a caller that
+  cannot say when each item settled is structurally unable to ask the as-of
+  question, so it cannot produce a half-gated figure.
 
-- **`bank-accounts` is not money math and is wired anyway** (`caec5ef`). It
-  guards a LOOSENING rather than a calculation — see the bank-accounts block in
-  State. It sits in this chain because the thing it protects is a field on a
-  customer payment instruction, and the failure it prevents is the same class:
-  a future tightening that quietly makes the field unfillable again.
+**READ `SKILL.md`'s "Amount Payable ≠ the prepaid BALANCE — and the view ≠ the
+column" BEFORE touching anything.** Three numbers here look like one and two are
+deliberately allowed to disagree. In particular
+`v_customer_amount_payable.amount_payable_sar` is the **running balance** for
+prepaid, NOT the column's rule, and **that divergence is load-bearing**:
+`return_customer_balance()` gates a real cash refund on it. Flip the view to the
+column's rule and the RPC pays a customer their own debt. **The analysis may
+recommend changes to the COLUMN or the UI; it must not "reconcile" the view.**
+Changing either rule means changing `scripts/amount-payable-check.ts` first.
 
-- **`notification-format-check` is deliberately NOT in the list** — it is a
-  presentation harness for the notification bell ("No DB, no React"), not money
-  math; its `sar`/`invoice` tokens are notification *text*. Its absence is a
-  decision, not an oversight. Do not "fix" it.
-- **`invoice-render-parity` is wired, LAST in the chain, by Turki's ruling.**
-  The previous revision of this section left it out as an open question. It is
-  in, for `bank-accounts`' reason: its case 4 asserts the `covered + amountDue =
-  grand` identity and that every trip AND charge line sits inside the grand
-  subtotal — the `1754140` money law, checked on RENDERED OUTPUT rather than on
-  the engine, which is a place no other harness looks.
-  - **LAST on purpose.** It is the heaviest (ten full documents — print and PDF
-    across five fixtures) and the most downstream: a parity failure is only
-    meaningful once the engine harnesses ahead of it are green, and fail-fast
-    should surface a cheap engine fault before an expensive render diff. Whole
-    chain runs in **~9.6s**, so the cost is not the reason for the ordering.
-  - **The known objection stands, and is answered rather than dismissed:** six
-    of its seven case groups are render parity, so a stylesheet change CAN now
-    redden the money chain. That is accepted — a stray colour or a dropped QR on
-    a ZATCA document is a real defect, and case 7 exists to catch it. If this
-    ever starts crying wolf, split the script rather than unwiring it.
-  - **It MUST run from the repo root** — `lib/invoicePdfTemplate.ts` inlines its
-    fonts with `readFileSync` off `process.cwd()`, so the PDF side of the
-    comparison throws from anywhere else. `npm run test:money` satisfies this by
-    construction; a bare `npx tsx` from a subdirectory does not.
-- **Not wired into `next build` or `safe-build.sh`, on purpose.** Money checks
-  are run deliberately, not on every build. No test framework was added.
-- Fail-fast was **proven, not assumed**: a `process.exit(1)` harness injected at
-  position 3 of a mirror loop stopped the run there and exited 1.
-- **The twelfth entry was proven the same way, on the real chain.** Raising
-  `invoice-render-parity-check.ts`'s token floor from `100` to `100000` made the
-  chain print `[FAIL] every case yields > 100 text tokens (min 158)` / `1
-  FAILED.` and exit **1**; reverted, it exits **0**. A wired harness nobody has
-  watched fail is decoration — the entry is only worth its runtime because that
-  was witnessed in BOTH directions.
-- **Run it before any money commit.** That is why it exists.
+### 3. Printable-report quality for everything still pending
+
+**Invoices and statements are DONE** — both print as their own documents through
+`lib/plainDocStyles.ts`, off the same view-model their download path uses.
+**Everything else still prints the live React DOM through
+`app/globals.css`'s visibility whitelist**, which inherits screen styling and is
+where the clipped-column and blank-sheet failures came from. The pending set,
+measured today:
+
+- **Every Reports-page report** — `revenue`, `receivables`, `cost`, `ops`,
+  `narrative`, `custom`, `payslips`, `commission-review` (all in
+  `app/reports/StatementViews.tsx`), `pnl` (`StatementsTab.tsx:634`, the one
+  print id that wraps TWO cards) and `daily-trips` (`DailyTripsTab.tsx:331`).
+- **Inventory Purchase Orders** — `#po-print` (`PurchaseOrders.tsx:1335`), still
+  on the portal/marker pattern with its own independent id/class/marker set.
+- **Consumption Exit Permits** — `#permit-print`
+  (`app/consumption/ExitPermitModals.tsx:1214`).
+- **Part details — a NEW clean print, mirroring its view.** There is no print
+  surface for it at all today: `app/inventory/` contains no `*-print` id outside
+  `PurchaseOrders.tsx`. This one is a build, not a migration.
+- Also still on the old model, not named in the request but adjacent:
+  `#breakdown-print` (`app/trips/BreakdownReport.tsx:624`) and `#history-print`
+  (`app/drivers/HistoryTab.tsx:307`).
+
+**Before removing any id from the whitelist, check what its owner does with
+Ctrl/Cmd+P** — a subtree that leaves the whitelist without an intercept prints a
+blank sheet, and that failure reads like the printer's fault.
 
 ---
 
-## The frozen-split guard, and the number that changed
+## Standing rules — pointers only, do not restate them here
 
-`scripts/frozen-split-check.ts` makes the "frozen vs re-derived split" ruling
-self-verifying — it had been rebuilt from a throwaway script twice.
-
-**It ASSERTS the freeze boundary: an invoice carries a frozen split if and only
-if it is ISSUED (confirmed/paid/void).** Re-measured this session, exact both
-ways — **24 issued (3 confirmed + 17 paid + 4 void) all frozen; 6 unfinalised
-(3 draft + 3 review) none frozen.** Falsifiable both ways: issued-but-unfrozen
-prints a zeroed document; frozen-but-draft means freeze-at-confirm fired where
-it must not. A negative control drives the predicate with a row broken each way.
-**An earlier revision of this line read "17 issued, the 1 review not" — those
-counts are DATA and they drift** (the discard work alone deleted a review
-invoice). It is the two-way agreement that is the invariant, never the number;
-re-measure before quoting it (§5).
-
-**It PRINTS, and never asserts, the count and SAR.** Those drift with the data;
-hardcoding them would be a brittle test, not a guard.
-
-**The invariant as first specified was WRONG, and the failing run found it.**
-"Every divergence sits on an issued invoice" fails, because every draft/review
-invoice has `covered_lines` NULL, `unpaid_lines` NULL and zero totals — there is
-no stored split on it to diverge *from*. Comparing one is a category error, not a
-finding. The population is scoped to frozen rows, and assertion 1 is what earns
-that filter rather than assuming it.
-
-**The harness prints 10 / 28,474.00 SAR; SKILL.md's dated annotation says
-8 / 13,524.00. That is METHOD, not data — do NOT chase it.** The harness
-re-derives void invoices too, and a void's lines were released back to the pool
-and re-picked by later invoices, so it re-derives to nearly nothing and books its
-whole stored `amount_due` as "moved". Invoices `1` (void, 11,500.00),
-`026-000006` and `2` account for the 14,950.00 gap. Neither figure disturbs the
-LEAVE ruling. Both are recorded in both places on purpose. **Read the per-invoice
-lines, never the total alone.**
-
----
-
-## Domain rules added to the skill this session
-
-Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
-
-- **Duplicate customer info is ALLOWED.** Two customer records may legitimately
-  share name, VAT and CR when they serve different projects; each holds its OWN
-  prepaid pool and its own invoices. **Do NOT add a VAT/CR uniqueness constraint
-  or a dedupe/merge guard** — it would block a valid case, and merging would pool
-  two balances that must stay apart. **VAT/CR carries no identity signal:**
-  re-measured 2026-08-31, `123456789012345` / `1234567890` is an unfilled
-  placeholder on **5 of 7 LIVE** customers, so a uniqueness constraint would fail
-  on five existing rows today. The two "Seder Facility mang./Mang. Co." records
-  are separate by ruling, not because their identity fields match.
-  **If you recount and get 5 of 8, you have counted the archived row** — the
-  table holds 8 and `Turki 1` has `archived_at` set. Scope to
-  `archived_at is null`. The figure is right; the bare `count(*)` is not.
-- The traffic-violations money model (0175–0177) — moved out of this file last
-  session so the two cannot drift. The notice photo (0178) went straight there
-  for the same reason.
-
----
-
-## Closed in earlier sessions (detail is in the commit messages)
-
-| # | Item | Commit(s) |
-|---|---|---|
-| 1 | Fleet Health column removed (plus its dead i18n keys) | `4982c71` |
-| 2 | Inventory approval-vote wedge fixed; 5 legacy POs backfilled — `0172` | `19f6466` |
-| 3 | Prepaid balance is a **lifetime NET pool** — topups AND returns | `9c287d6` |
-| 4 | Trip-ref **gap-fill allocator** — `0173` + `0174` | `3223df5`, `0869576` |
-| 5 | **Prepaid Amount Payable redefined** = unpaid delivered work | `d4c3d3e` |
-| 6 | Traffic Violations, three stages — `0175`–`0177` | `4fdf30a`, `5a7c0e6`, `ef899cd` |
-
----
-
-## Still true, still load-bearing
-
-- **The THREE prepaid numbers are deliberately different and two of them are
-  allowed to disagree. Do NOT "reconcile" them.** Reasoning — including why
-  `v_customer_amount_payable` stays balance-based (flipping it makes
-  `return_customer_balance()` pay a debtor their own debt) — is in SKILL.md
-  §"Amount Payable ≠ the prepaid BALANCE". Consequence to expect, not to fix:
-  **the Archive tab shows a different number than the Trips tab for the same
-  prepaid customer, by design.**
-- **Frozen invoice splits diverging from a re-derivation is EXPECTED** — issued
-  invoices render and print from frozen columns (0027), so no document drifts.
-  One live item: `026-000009`, confirmed and unpaid at 4,243.50 SAR.
-- `trips` has check constraint **`trips_project_or_customer`**: a trip needs
-  `project_id` **OR** `customer_id`. A fully bare `(null, null)` trip is
-  rejected, so the `WT-` fallback series is reached by **bare-CUSTOMER** trips —
-  customer set, no project — not by empty trips.
-
----
-
-## Workflow locks
-
-- **NEVER run `preview_start` while a dev server is up.** It launches a *second*
-  `next dev` that ignores `NEXT_DIST_DIR` and writes to the shared `.next`,
-  clobbering the running server's build. `safe-build.sh`'s port guard does **not**
-  catch a second dev server — it guards ports, not processes. Hygiene check:
-  `pgrep -fl "next dev"` must return **exactly one** line.
-- **Bash `cwd` resets to `$HOME` between calls.** `npx tsc` from `$HOME` gives
-  BOTH a false failure (no local typescript) AND a false green (finds no project,
-  exits 0). Always `cd` to the repo root **and** use
-  `./node_modules/.bin/tsc --noEmit --project tsconfig.json`. Pinning the
-  tsconfig alone is NOT enough — the binary resolution is the other half.
-- **A MIGRATION'S FILENAME IS NOT ITS OBJECT NAME.** This is now the *method*
-  under `CLAUDE.md` §5's general rule ("measure Y before writing X because Y") —
-  kept here, not duplicated there, because the procedure is what makes it
-  actionable. Probing the catalog for a
-  table named after the file reports a healthy migration as MISSING, and a false
-  catastrophe reads exactly like a real one (§6). `0177_payslip_violation_
-  deductions.sql` creates `driver_payslip_violations`, not
-  `payslip_violation_deductions`. Read the `create table` line out of the file
-  first, then query for THAT name.
-- **A cleanup line placed after `exit 1` never runs.** Proving a guard can fail
-  by injecting a temp failing script leaves that temp file behind, because the
-  loop exits before the `rm`. Re-check the tree; do not trust the `rm` you wrote.
-- **A CHECK WHOSE RANGE MATCHES NOTHING PRINTS A CLEAN PASS.** Sibling of §5's
-  comment-epitaph trap and just as convincing. Caught live in `178df21`:
-  `awk '/^      viol: \{/,/^      \},/'` over `lib/i18n.ts` used a six-space
-  indent against a four-space block, matched zero lines, and reported both
-  deleted keys as confirmed gone. The extractor had found nothing at all.
-  **Every extract-then-grep needs a negative control on the EXTRACT step** — one
-  count proving the range is non-empty (`grep -c` for anything at all in it)
-  before the absence inside it means anything. Same run: a
-  `grep -F 'viol.recent' lib/i18n.ts` is **vacuously 0 in every possible state**,
-  because the dictionary nests and that dotted string never appears there. The
-  load-bearing check was the dotted-key sweep across the whole tree.
-- **A CODE SCANNER YOU WROTE THIS TURN NEEDS A KNOWN-ANSWER CONTROL BEFORE ANY
-  OF ITS OUTPUT MEANS ANYTHING.** The zero-row sweep's scanner shipped two
-  parser bugs, one after the other, and **both printed a clean, plausible,
-  well-formatted report**. (1) A chain inside `Promise.all([…])` never reaches a
-  `;` of its own, so the statement-walker overran and glued siblings together —
-  it reported three `.select()` READS as one guarded write and hid a real chain.
-  (2) Fixing that by ending on a depth-0 `,` moved the failure: prose inside
-  mid-chain comments carries commas, which truncated a chain immediately before
-  its `.select("id").maybeSingle()` and reported a read-back **added two commits
-  earlier** as missing. Apostrophes in comments opened phantom string literals
-  the same way. **Blank comments before scanning, never after** — and the only
-  reason either bug was caught is that the file under test had a known answer
-  (four `driver_violations` writes, all read back). Point every new scanner at
-  something you already know the answer to, in both directions: a site it must
-  find and a site it must not. Same failure family, seen again on the commit
-  checks for `9e4ca3b`: `grep -Fc 'payout_id\", null'` inside single quotes
-  greps for a literal backslash and returns a confident **0**, and a
-  `grep -B6 … | grep -c` window undercounts multi-line chains. Both looked like
-  results.
-- **`file:line` POINTERS IN `SKILL.md` ROT SILENTLY, AND NOTHING GUARDS THEM.**
-  Three were stale in one pass: `TrafficViolationsSection.tsx:134` (already
-  wrong at HEAD by 10 lines), `actions.ts:1682` and `actions.ts:1592` (both
-  correct at HEAD, both moved by that same pass). All three are now name-based —
-  "grep for this symbol in this file" — so they stop rotting. **Do not add new
-  `file:line` citations to a skill or a note; cite the symbol.** After any pass
-  that shifts lines in a cited file, re-grep:
-  `grep -rnE '\.tsx?:[0-9]+' --include='*.md' .claude/`
-  **THE LAST SURVIVING CITATION HAS NOW ROTTED AND BEEN CONVERTED, ON SCHEDULE.**
-  `SKILL.md`'s `invoiceActions.ts:1035` was re-measured correct one session ago
-  and left standing with the note "convert it the next time anything edits that
-  file". `9e4ca3b` edited that file — 19 lines added above it — and line 1035 is
-  now `name_ar: seller?.legal_name_ar ?? null,` while `coveredLines` sits at
-  1054. Caught by running the grep above as part of the handoff write, not by
-  anything automatic. It is now name-based ("grep `coveredLines:
-  inv.covered_lines`").
-  **AN EARLIER "ZERO HITS" CLAIM HERE WAS FALSE AND WAS RETRACTED** (`dc590f1`).
-  It read "the grep above now returns NOTHING over `.claude/` — exit 1, zero
-  hits." Re-measured 2026-09-08: **twelve hits, all in `SKILL.md`**, added by the
-  very session that wrote the zero claim — the 2026-09-05 pass promoted three new
-  sections into the skill and cited `file:line` throughout them, then reported
-  the tree clean without re-running the grep it had just been given. **A lock
-  that says "re-grep after any pass" and is then contradicted by its own pass is
-  the §5 trap on the strictest surface there is.**
-  **ALL OF THEM ARE NOW CONVERTED (`2ff6e0b`), AND THE GREP IS GENUINELY CLEAN —
-  re-measured on the STAGED BLOB before that commit, not the working tree: zero
-  `file:line` hits over `.claude/`.** Three corrections to the brief that unit
-  ran on, so the next reader does not inherit them:
-  - **Twelve was grep LINES, not citations. There were SEVENTEEN pointers** — one
-    line held three, three lines held two each. Count the pointers, not the
-    matches.
-  - **Sixteen were merely fragile — still correct at HEAD. Exactly one was
-    wrong**: `cashCoverage`, deleted by `d9fd6a3`.
-  - **A SECOND dead `cashCoverage` mention carried no `file:line`, so the grep
-    never flagged it** and the brief never named it. It claimed the collections
-    and revenue views still meet in one ratio; they do not. **A symbol can die
-    without leaving a `file:line` behind — the grep finds rotting POINTERS, not
-    rotting CLAIMS,** and only reading the surrounding paragraph finds those.
-  **Every replacement anchor was negative-controlled** — all 19 greps run and
-  confirmed non-empty, including a two-hit case asserted as two. **A citation
-  that matches nothing is worse than the line number it replaces**, and it is the
-  exact failure mode of the "check whose range matches nothing" lock above.
-  The `.planning/review-*.md` docs hold six more, unconverted on purpose —
-  historical records, not live guidance.
-  **The lesson is the schedule, not the pointer:** "correct today, convert it
-  later" survived exactly one commit, and the commit that broke it was ours.
-- Locks promoted into `CLAUDE.md` and living there now, not here: **measure a
-  justification before recording it** (§5, new this session — a count, a cause,
-  a "matches/proves" is never written from memory or off a filename); the `grep -c`
-  comment-epitaph trap with its fix (§5 — strip comment lines, use `grep -F` on
-  patterns with parens); migrations are BARE STATEMENTS with no
-  `begin;`/`commit;` **from 0173 on — 147 of the 175 files up to 0172 still
-  carry them, and they are NOT broken; do not "fix" them** (§5); identify a
-  function by `oid::regprocedure::text`,
-  never `pg_get_function_identity_arguments()` which returns argument NAMES on
-  PG15+ (§6); a migration's own result-grid is not proof it applied (§5).
-
----
-
-## Rules carried forward
-
-- `CLAUDE.md` is the rules file — read it, don't append to it.
-- Domain rules in `.claude/skills/aquafleet-domain/SKILL.md`.
-- Money gate: salary / rates / commission / invoice / balance → draft, STOP, the
-  architect reviews. **And run `npm run test:money`.**
-- Migration gate: Code drafts → STOPS → the architect reviews and applies.
-- Explicit-path `git add`; inspect the staged blob with `git show :<path>`.
-- **Re-measure any figure in this file before relying on it.** A number here is a
-  pointer, not evidence.
-- Session cap: 15 turns max. Compact once = wrap up.
-
-## What's next
-
-**No FEATURE is queued** — ask Turki for the next one rather than picking. **ONE
-piece of follow-through is outstanding — item 5 below** — and it is not a
-feature; it is a console setting. **THE PARKED LIST IS NOW EMPTY: items 9 and 10
-both SHIPPED in the 2026-09-08 evening session** (`f42690d` and `0c7adf9`), and
-**item 11, the last tooling defect, shipped in `8dea137`.** Nothing else is open.
-(Items 1, 2, 3, 4, 6, 7, 8, 9, 10 and 11 are kept struck through as records, not
-as work. Do not resurrect a struck item because it still appears in this list.)
-
-**THE CLEANUP SWEEP'S TWO HELD-BACK ITEMS ARE BOTH CLOSED — there is no pending
-browser pass.** The sweep (row 5) deliberately did NOT fix two things it found,
-because each was a decision rather than cleanup: three zero-reference exports,
-and seven hand-built day-format sites whose output is user-visible. Turki ruled
-on both in the same session and they shipped as rows 6 and 7. **Nothing from
-that sweep is waiting on anyone.**
-
-**The money rules from `1754140` and `caec5ef` are no longer in this file's
-custody** — items 6 and 7 moved them into `SKILL.md`, which is what gets loaded
-before money work. A handoff is rewritten every session; a skill is not.
-
-1. ~~Run `178df21` scenarios 10–12~~ — **DONE, run and passed in-browser.**
-   Payslip preview on an unissued month: the inline fine edit moved
-   Deductions+Net, photo View/Replace/Remove worked in the edit panel (View opens
-   a NEW TAB here, unlike the drivers screen), and the print preview still
-   renders six columns with no controls. Closed row 24 — **read the note under
-   that table before quoting a figure out of it.** `9e4ca3b`'s two-tab run was
-   DROPPED, not deferred — see State; do not add it back here. **There is no
-   outstanding verification left on this project.**
-2. ~~Promote the PostgREST zero-row rule into `SKILL.md`~~ — **DONE (`97964b7`).**
-   It lives under **"A GUARDED WRITE MUST READ BACK"**, next to RPC Conventions:
-   the two honest read-back shapes, the bail-above-destroy ordering, the three
-   classes that are NOT findings (UNIQUE-column identity lookups, bulk writes,
-   scoping filters behind a prior check), and how to re-sweep. **Do not restate
-   any of it here** — same reason the violations money model and the notice photo
-   moved out of this file.
-3. ~~Parked papercut: `InvoicesModal`'s period default~~ — **DONE (`6af117d`).**
-   Both bounds seeded to `todayKey()`, which made the default range a single day
-   and — since the period SELECTS the trips — assembled nothing on a normal day.
-   Now month-to-date, seeded from one `defaultPeriod()` in both the `useState`
-   initials and the open-effect. Closed row 22.
-4. ~~Rename `delete_draft_invoice` → `discard_invoice`~~ — **DONE (`0183` /
-   `55e3ebe`).** Shipped as the pure-rename unit it had to be, migration + call
-   site in one commit. Closed row 21; the ACL reasoning is in State. (The other
-   tidy-up this item used to carry — `InvoiceDetailModal`'s draft-only gate — was
-   **DONE in `bcad04f`**.)
-5. **Enable leaked-password protection in the Supabase dashboard.** Not a
-   migration, not a code change — a console setting. It is the one open item on
-   the security posture.
-6. ~~Promote the bank-accounts rulings into `SKILL.md`~~ — **DONE.** Now a
-   section of its own, "Company bank accounts (0184) — every rule here reads
-   like a defect": the DB-validates-nothing bargain and why
-   `bank_accounts: unknown` is the enforcement mechanism, the IBAN field
-   validating almost nothing on purpose (with the removal reasoning quoted so it
-   is not re-added as a "missing feature"), SA-as-default-not-whitelist with the
-   one-turn reversal, `show_on_invoice` failing closed, the 0027 split with no
-   cross-fallback, the never-log rule, and the harness that asserts the
-   LOOSENING. **Do not restate any of it here.**
-7. ~~Promote `1754140`'s two rules into `SKILL.md`~~ — **DONE.** The identity got
-   its own section, "covered + amountDue = grand, BY CONSTRUCTION — only TWO of
-   the three are computed". The charge rule went where the contradiction was, as
-   a new subsection of the asOfDate section: **"It filters TRIPS ONLY — a CHARGE
-   is INVOICE-BOUND, not date-scoped"**, which names the old wording as the bug
-   it described and says outright not to reintroduce the gate. The guard bullet
-   there now also records that both fixtures turn on `ch-future` alone —
-   `ch-past` passes either way, so dropping `ch-future` silently disarms it.
-8. ~~Decide whether `invoice-render-parity-check` joins `test:money`~~ —
-   **DONE, Turki ruled it IN.** Wired LAST in the chain; the ordering reasoning,
-   the answered objection and the two-direction proof are in the money-harness
-   section above. **This line said "twelve harnesses, ~9.6s" and both figures had
-   drifted** — re-measured 2026-09-08 evening off `package.json`'s own list:
-   **fourteen harnesses, ~11.7s end to end**, `statement-parity` and
-   `collection-rate` having joined since. Re-measure it, do not quote it:
-   `node -e "console.log(require('./package.json').scripts['test:money'])"`.
-
-9. ~~PARKED — `monthLabel` hardcodes `"en-US"`~~ — **DONE (`f42690d`).** It was
-   never three call sites; it was **thirteen implementations across the app**.
-   Turki made the product ruling this item was waiting on: **Arabic month NAMES,
-   LATIN digits, Gregorian calendar — and "Sep", not en-GB's "Sept".** `ar-SA` is
-   refused outright (Hijri by default, Arabic-Indic numerals). `lib/reports.ts`
-   still carries `en-US` at two places and **both are correct**: the `sar()`
-   `Intl.NumberFormat` and the `buildNarrative` comment governing it. That is the
-   standing digit ruling this item told the next session to read first — it
-   governs NUMBERS, and the month ruling now sits beside it rather than
-   overriding it.
-10. ~~PARKED — the metric rows in the Arabic dictionary render in English~~ —
-    **DONE (`0c7adf9`), but NOT the way this item predicted.** It said the fix
-    "needs an `_ar` column per field plus a resolver", i.e. a migration over 30
-    rows. **That draft was built and then DROPPED.** The copy moved OUT of
-    `report_metrics` and into `lib/i18n.ts` instead, joined on `metric_key`;
-    `0187` only registers the three Finance balance terms. **So the in-code
-    ruling this item told you to grep — `EVERY METRIC ROW STAYS ENGLISH` in
-    `MetricsGlossaryModal.tsx` — is GONE, correctly.** Do not go looking for it.
-    The superseded text of this item follows, kept only so the reasoning that was
-    rejected is on the record:
-    - *(superseded)* `report_metrics`' `label`, `meaning`, `formula`, `grain`,
-      `source_view`, `caveat` and `unit` are DB COLUMNS, not i18n keys, so
-      translating them is a migration, not an edit — an `_ar` column per field
-      plus a resolver in `MetricsGlossaryModal`, its own unit with its own
-      schema decision, over 30 rows. The ruling is written in the code: grep
-      `EVERY METRIC ROW STAYS ENGLISH` in
-      `app/reports/MetricsGlossaryModal.tsx`, which also records what IS keyed
-      (the popup's chrome, the five `reports.glossary.*` basis notes and the
-      five `reports.basis.*` basis NAMES — five, not four, since `0185`/`0186`
-      added `settlement`). `0186` deliberately did NOT smuggle that in. The
-      Arabic dictionary is correct-but-untranslated, not broken.
-    - **WHAT SURVIVES OF THAT:** the five `reports.basis.*` and five
-      `reports.glossary.*` keys are still keys and still five. What died is the
-      premise that the metric PROSE had to stay in the table.
-
-11. ~~`scripts/code-grep.ts` false-greens on directory arguments~~ — **DONE
-    (`8dea137`, its own commit as required).** Full diagnosis and the shape of
-    the fix are in the 2026-09-08 evening section above. **It mattered more than
-    a normal tooling bug because `CLAUDE.md` §5 names this script as the tool
-    that settles "is the identifier gone", and the failure mode was a CLEAN
-    PASS.** What to carry forward, since it changes how the tool is called:
-    **directory arguments now work** — `code-grep 'x' app lib components` reads
-    206 files — **and the three ways a run can produce no evidence are all exit
-    2** (a path in neither the index nor the tree, a directory with nothing
-    scannable, and any run that ends up reading zero files). An untracked file is
-    a loud skip in staged mode and a real read under `--worktree`. **The `git
-    ls-files` workaround is retired; do not reintroduce it.**
-
-**THE STATEMENT INHERITS `lib/plainDocStyles.ts` NEXT — that is a POINTER, not a
-queued feature.** The kit was built as a shared module for exactly this;
-`lib/i18n.ts:8548` records it at the StatementModal header. The statement still
-prints through the old `app/globals.css` portal (`#statement-print` /
-`body.printing-statement`, lines 627–628). **Do not start it without asking
-Turki** — the same rule as every other feature in this list.
-
-**The invoice leaving that stylesheet did NOT make it the last one out —
-measured, because an earlier draft of this very paragraph claimed it had.**
-`app/globals.css` still carries the portal/marker pattern for `#breakdown-print`,
-`#statement-print` and `#po-print`, plus a 12-id visibility whitelist at
-:407–425 (`history`, `permit`, `pnl`, `revenue`, `receivables`, `cost`, `ops`,
-`narrative`, `payslips`, `commission-review`, `custom`, `daily-trips`). The
-invoice was one of many, not the second-to-last. **`body * { visibility: hidden }`
-is therefore still the app's print model** — which is exactly why the Ctrl+P
-interception above is load-bearing.
-
-~~Investigate draft-stage charge consumption~~ — **RULED this session**, see
-State. Reserve-at-draft is correct and the four `status <> 'void'` sites agree by
-construction. **Do not reopen it as a task.**
-
-~~Push the outstanding commits~~ — **DONE.** Origin carries through `0b17bc3`;
-`main` and `origin/main` were level with a clean tree when this file was written,
-the handoff commit itself excepted. **Re-measure with `git status -sb` before
-quoting; this goes stale on the next commit** — it already had twice, naming
-`6af117d` three commits after the fact and `caec5ef` one commit after.
-
-**NOTIFICATIONS + SETTINGS IS BUILT AND LIVE — do NOT plan it.** Earlier
-revisions of this file listed it as the next feature with "`0154` pending,
-renumber, that slot is long past". Wrong twice: `0154` is applied and on disk as
-`0154_notifications_data_layer.sql`, and the slot is taken by **this very
-feature**. Re-measured 2026-08-31:
-
-- Migrations `0154` (data layer), `0155` (blue event branches), `0158` (per-user
-  thresholds), `0160` (drop `notification_events`); settings via `0029`, `0042`,
-  `0171`.
-- Tables `notification_prefs`, `notification_thresholds`,
-  `notification_thresholds_user`, `notification_dismissals`, `company_settings`,
-  plus view `v_my_notifications`.
-- `components/settings/{SettingsModal,NotificationsSection,CompanySettingsSection}.tsx`,
-  `lib/actions/{notifications,notification-settings}.ts`,
-  `lib/notification-{format,thresholds}.ts` — all mounted from
-  `components/AppShell.tsx`. Settings is a MODAL, not a route; there is no
-  `app/settings/`, and its absence is not a gap.
-- Guarded by `scripts/notification-format-check.ts`, whose fixtures are real
-  `v_my_notifications` rows.
-
-**This is the "never re-raise an item because a note still lists it open" rule
-(`CLAUDE.md` §5) catching a live case.** The contradicting evidence sat in the
-harness header the whole time and was read without being noticed.
-
-Read `.claude/skills/aquafleet-domain/SKILL.md` for domain constraints.
+- **`CLAUDE.md`** is the rules file. Read it first, every session. Do not append
+  to it; if a state-looking line appears there, it is a bug.
+- **`.claude/skills/aquafleet-domain/SKILL.md`** holds the domain law: the
+  money-core boundary, Amount Payable vs the balance vs the view, `asOfDate`
+  scopes consumption never the pool, the FIFO invariant, the guarded-write
+  read-back rule, counter-table numbering, bank accounts, violations.
+  **Read it before any migration, RPC or server-action work.**
+- **Money gate:** salary / rates / commission / invoice / balance → draft, STOP,
+  the architect reviews. And run `npm run test:money`.
+- **Migration gate:** Code drafts → STOPS → the architect reviews and applies.
+- **Explicit-path `git add`; inspect the STAGED blob with `git show :<path>`.**
+- **Turki verifies in-browser before every commit.**
+- **No feature is queued. Ask Turki for the next one rather than picking.**
