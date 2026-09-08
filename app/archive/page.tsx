@@ -102,7 +102,7 @@ export default async function ArchivePage() {
     supabase
       .from("drivers")
       .select(
-        "id, name, name_ar, iqama_number, license_number, iqama_expiry, license_expiry, phone, hire_date, home_station, duty_hours, salary_sar, status, active, terminated_at, termination_date",
+        "id, name, name_ar, iqama_number, license_number, iqama_expiry, license_expiry, phone, hire_date, home_station, duty_hours, salary_sar, status, terminated_at, termination_date",
       )
       .order("name", { ascending: true }),
     supabase

@@ -1351,7 +1351,6 @@ export type ArchiveDriverRow = {
   duty_hours: number;
   salary_sar: number | null;
   status: DriverStatus;
-  active: boolean;
   terminated_at: string | null;
   termination_date: string | null;
 };

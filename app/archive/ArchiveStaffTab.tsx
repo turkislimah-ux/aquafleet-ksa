@@ -174,13 +174,17 @@ export default function ArchiveStaffTab({
   >(null);
 
   // ACTIVE = the app-wide soft-delete convention (0011/0020): terminated_at
-  // NULL and active true. Terminated people are a PRE-FILTER, never a state —
-  // they drop out of the matrix entirely and reappear under Soft-deleted,
-  // rather than rendering as a row with some "terminated" status.
+  // NULL. Terminated people are a PRE-FILTER, never a state — they drop out of
+  // the matrix entirely and reappear under Soft-deleted, rather than rendering
+  // as a row with some "terminated" status.
+  //
+  // The two populations no longer test the same columns. 0188 dropped
+  // drivers.active as a redundant second liveness flag, so a driver's liveness
+  // is terminated_at alone; staff.active still exists and is still tested below.
   const activeDrivers = useMemo<Person[]>(
     () =>
       drivers
-        .filter((d) => d.active && !d.terminated_at)
+        .filter((d) => !d.terminated_at)
         .map((d) => ({
           id: d.id,
           name: d.name,
@@ -212,7 +216,7 @@ export default function ArchiveStaffTab({
   );
 
   const terminatedDrivers = useMemo(
-    () => drivers.filter((d) => d.terminated_at || !d.active),
+    () => drivers.filter((d) => d.terminated_at),
     [drivers],
   );
   const terminatedStaff = useMemo(
