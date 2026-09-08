@@ -9,7 +9,8 @@
 // function runs under the CALLER's RLS policies. This path cannot surface a
 // row the user could not already read. Do not "optimise" this by moving to a
 // service-role client — that would silently turn search into a data leak the
-// moment RBAC lands (parked in HANDOFF.md §6).
+// moment RBAC lands. RBAC is still parked: there is no role gate anywhere in
+// this app today, so RLS is the only thing scoping this result set.
 //
 // The action returns entity + id and nothing routable; the href is resolved
 // in lib/search-routes.ts. The database does not know about URLs.

@@ -357,9 +357,12 @@ export async function getPartMovements(
 // priceTiers/openPriceLot. add_price_lot is the ONLY writer — mirrors
 // receiveStock/adjustStock above, never a plain insert into price_lots or a
 // direct update of parts.qty_on_hand/unit_cost_sar. consume_from_lots (also
-// in 0046) has no caller here — nothing in this app consumes parts yet
-// (that's PO-receiving/work-order phases); it lights up when one of those
-// lands.
+// in 0046) IS consumed today, but never from TypeScript — four RPCs reach it
+// inside the database: start_work_order and complete_work_order via
+// deduct_work_order_parts -> consume_work_order_line, edit_work_order via
+// consume_work_order_line directly, and confirm_exit_permit via
+// consume_exit_permit_line. A clean code-grep for the name is therefore
+// evidence about the TS layer only, never about whether parts are consumed.
 // ---------------------------------------------------------------------------
 
 export async function getPriceLots(

@@ -73,15 +73,18 @@
 // receiving flow. It's now "Add Parts" instead, opening ReceivePartsModal
 // prefilled with this part (see ViewPartModal's onReceiveMore) — same RPC
 // path (receive_loose_parts -> add_price_lot per line) every other receipt
-// uses. consume_from_lots (also in 0046) has NO caller anywhere in this
-// app yet — there's no consumption event to drive it until a work-order-
-// parts-usage phase exists. It's live in the DB, just unused until then.
+// uses. consume_from_lots (also in 0046) is reached from SQL only, never
+// from TypeScript: work orders (start / complete / edit) and confirmed exit
+// permits both deduct through it today. The four entry points are listed in
+// app/inventory/actions.ts' price-lots header.
 //
-// NOT built (flagged, needs new tables/functions — confirm before drafting a
-// migration, not created here): Purchase Orders, Approvals tab, Financial
-// Analysis tab, AI-suggest-PO, receipt invoice-photo upload, per-part
-// Financial Report + AI insight, row's "Financial report"/"Create PO"
-// buttons, drawer's conditional "Create PO" footer button.
+// A "NOT built" list stood here naming Purchase Orders, the Approvals and
+// Financial Analysis tabs, AI-suggest-PO, receipt invoice-photo upload, the
+// per-part Financial Report and its row/drawer buttons. Measured entry by
+// entry: every one of them is built and live (PurchaseOrders.tsx and
+// ReceivePOModal, InvTab's three tabs, aiPurchaseSuggestion,
+// receive_loose_parts' mandatory p_files, PartFinanceModal). The list is
+// deleted rather than rewritten — nothing on it is still outstanding.
 //
 // Stock-tier coloring mirrors preview/'s INV.stockCell exactly: critical
 // (qty <= reorder) / low (qty <= 1.5x reorder) / ok. Parts with no
@@ -1839,10 +1842,11 @@ function ViewPartModal({
 // Phase 3 (full-demo build-out) — the full loose "Add Parts" / receive flow
 // (migration 0047, LIVE). REPLACES the old single-part ReceiveStockModal
 // entirely. Mirrors preview/'s INV.openReceive / INV._renderReceiveModal /
-// INV.confirmReceipt manual-mode path (pages-2.js ~2461-2765) — PO lookup/PO
-// mode is a separate, later phase (Purchase Orders aren't built), so this is
-// manual-mode only: supplier picker (+ inline New-Supplier modal, the
-// existing NewSupplierModal above, mounted here for the first time),
+// INV.confirmReceipt manual-mode path (pages-2.js ~2461-2765) — this modal
+// stays manual-mode only; receiving AGAINST a PO is ReceivePOModal's job
+// (PurchaseOrders.tsx, receive_purchase_order/0051): supplier picker (+
+// inline New-Supplier modal, the existing NewSupplierModal above, mounted
+// here for the first time),
 // warehouse picker, a multi-line part/qty/price builder, and a MANDATORY
 // multi-file invoice upload — all funneled through receive_loose_parts()
 // (0047), which itself calls add_price_lot() (0046) once per line. This

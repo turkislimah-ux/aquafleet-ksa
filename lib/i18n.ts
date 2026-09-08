@@ -914,9 +914,9 @@ export const dict = {
     // DISCLAIMER, not decoration — it has to survive translation or an Arabic
     // reader is the only one not told the geometry is approximate.
     //
-    // The city labels inside the SVG stay English for now: they are `CITIES`
-    // data, not copy, and giving them Arabic names is a wording decision
-    // rather than a defect fix.
+    // The city labels inside the SVG stay English — ruled, not pending. They
+    // are `CITIES` coordinate data rather than copy, so naming them in Arabic
+    // is a content decision and not a translation gap to be closed.
     map: {
       approximate: { en: "Saudi Arabia · approximate", ar: "المملكة العربية السعودية · تقريبي" },
     },
