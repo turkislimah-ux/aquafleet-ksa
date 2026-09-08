@@ -68,8 +68,11 @@
     capability, below.
   - **`0183_rename_delete_draft_invoice_to_discard_invoice.sql`** (`55e3ebe`) —
     the pure rename, below. One `alter function … rename to`, no footer.
-- **Origin carries through `04b2c4e`; `main` and `origin/main` level.** Measured
-  2026-09-08 evening from BOTH required sources: the BRANCH line of
+- **Origin carries through `04b2c4e` — the last WORK commit — plus the handoff
+  commits that carry this line; `main` and `origin/main` level.** Naming a bare
+  hash here is what has made this bullet rot four times, and it cannot name its
+  own commit's hash, so it names the last non-handoff commit instead and says so.
+  Measured 2026-09-08 evening from BOTH required sources: the BRANCH line of
   `git status -sb` (`## main...origin/main`, no ahead/behind marker) and
   `git rev-list --left-right --count origin/main...HEAD` → `0	0`, with
   `git rev-parse HEAD origin/main` printing the same SHA twice. **Never read
