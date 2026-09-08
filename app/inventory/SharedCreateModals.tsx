@@ -547,7 +547,7 @@ export function NewSupplierModal({
   return (
     <ModalOverlay onClick={close}>
       <div
-        className="card p-6 w-full max-w-md max-h-[85vh] overflow-y-auto scrollbar-thin"
+        className="card p-6 w-full max-w-[880px] max-h-[85vh] overflow-y-auto scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         <form onSubmit={submit}>
