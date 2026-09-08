@@ -81,13 +81,21 @@
   moment anyone commits — measure before quoting it.** It has gone stale FOUR
   times now: naming `6af117d` three commits after the fact, `caec5ef` one commit
   late, `0b17bc3` one session late, and `d9fd6a3` three commits late.
-- **The tree is NOT clean: `.planning/0187-arabic-copy-review.md` is untracked
-  and stays that way.** It is the Arabic copy sheet Turki reviewed before
-  `0c7adf9`, and **its own header — "Migration is DRAFTED, NOT APPLIED. Nothing
-  is committed." — is now FALSE**: 0187 is applied and committed. It is a
-  superseded review artifact kept for the record, deliberately never staged.
-  Delete it or fix its header before quoting anything out of it; do not read it
-  as current state.
+- **`.planning/0187-arabic-copy-review.md` is DELETED and the tree is clean.**
+  It was the Arabic copy sheet Turki reviewed before `0c7adf9`, kept untracked,
+  and **its own header — "Migration is DRAFTED, NOT APPLIED. Nothing is
+  committed." — had gone FALSE**: 0187 is applied and committed. Deleted in the
+  cleanup sweep rather than left as a superseded artifact whose header lies.
+  **Nothing was lost with it** — its copy is the copy that shipped, checked
+  before deleting: all three balance-term labels and the `paidUpCore` formula
+  prose are in `lib/i18n.ts`, under git, where the app actually reads them.
+  **No `.gitignore` rule was added for review artifacts, deliberately.**
+  `.planning/` already TRACKS seven of them (`review-dictionary-0123-0124.md`,
+  `review-payment-mode-0121.md` and five more), so the convention here is that a
+  review sheet is kept in git, not hidden from it. A pattern rule would fight
+  that convention and would silently swallow the next one somebody meant to
+  commit. The lesson this file earns is about the HEADER, not the tracking:
+  a review artifact states the state it was written in, and that state expires.
 - **MONEY FIX — `confirm_invoice` IS NOW AN AUDITOR, NOT A SCRIBE (`2477946`).**
   A confirmed invoice could freeze with NO special charges while the customer's
   prepaid balance had already been consumed by those same charges. **Two sources

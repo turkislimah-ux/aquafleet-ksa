@@ -726,9 +726,20 @@ export function monthsDesc(pnl: PnlRow[]): string[] {
  *
  * A THIN WRAPPER OVER lib/utils' monthLabel, kept for its NAME. Every reports
  * caller says `monthLabel(m, lang)` and this file is where the reports route
- * looks for its formatting; re-pointing 11 call sites at a utils import to save
+ * looks for its formatting; re-pointing its call sites at a utils import to save
  * three lines would move the definition without moving where anyone looks for
  * it. What it no longer holds is a second opinion about the twelve words.
+ *
+ * Ten call sites, re-counted 2026-09-08 — nine in OverviewTab, one in
+ * ReportsClient — where this said eleven.
+ *
+ *   npx tsx scripts/code-grep.ts 'monthLabel(' app/reports
+ *
+ * That prints ELEVEN, and eleven is the wrong answer: StatementViews:1576
+ * imports `monthLabel` from `@/lib/utils` directly, so it calls the canonical
+ * pair and never reaches this wrapper. Read the import line before counting a
+ * hit — the name is shared, the module is not. Use the command anyway rather
+ * than a bare grep, which additionally counts the sentence you are reading.
  *
  * The Date construction went with the body. `new Date("2026-08-01T00:00:00")`
  * parses on the LOCAL clock, which is right on a browser in Riyadh and a day
