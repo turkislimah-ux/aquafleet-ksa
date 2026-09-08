@@ -2,8 +2,17 @@
 
 ## State
 
-- **DB is at migration 0186.** 184 files on disk, max `0186`, measured
-  2026-09-08 (`ls supabase/migrations/ | wc -l`).
+- **DB is at migration 0187.** 185 files on disk, max `0187`, measured
+  2026-09-08 evening (`ls supabase/migrations/ | wc -l`).
+  - **`0187_report_metrics_balance_terms.sql`** (in `0c7adf9`) registers the
+    three Finance-tab balance terms — `paid_up_balance`, `running_balance`,
+    `amount_payable`, all settlement basis. **Confirmed APPLIED against the
+    catalog, not read off `schema_migrations`** (which never records an
+    MCP/SQL-Editor run — see §7 of `CLAUDE.md`): `report_metrics` holds **33
+    rows, 3 of them those keys, 4 on `basis='settlement'`**. Do NOT re-apply it.
+  - **`CLAUDE.md` §7's stub said 0186 and has been corrected to 0187 in the same
+    pass.** The bullet below already warned that both files carry this figure and
+    go stale together; that is exactly what happened, one migration later.
   - **`0185_within_month_collection_rate.sql`** and
     **`0186_collections_settlement_basis.sql`** were **applied to production and
     catalog-verified by the ARCHITECT through MCP**, not run from the SQL Editor
@@ -59,15 +68,23 @@
     capability, below.
   - **`0183_rename_delete_draft_invoice_to_discard_invoice.sql`** (`55e3ebe`) —
     the pure rename, below. One `alter function … rename to`, no footer.
-- **Origin carries through `d9fd6a3`; `main` and `origin/main` level.** Measured
-  2026-09-08 from BOTH required sources: the BRANCH line of `git status -sb`
-  (`## main...origin/main`, no ahead/behind marker) and
-  `git rev-list --left-right --count origin/main...HEAD` → `0	0`. **Never read
+- **Origin carries through `04b2c4e`; `main` and `origin/main` level.** Measured
+  2026-09-08 evening from BOTH required sources: the BRANCH line of
+  `git status -sb` (`## main...origin/main`, no ahead/behind marker) and
+  `git rev-list --left-right --count origin/main...HEAD` → `0	0`, with
+  `git rev-parse HEAD origin/main` printing the same SHA twice. **Never read
   sync off the TREE lines** — a dirty tree says nothing about ahead/behind, and
   a clean one does not mean pushed. **This is a pointer and it goes stale the
-  moment anyone commits — measure before quoting it.** It already had three
-  times: naming `6af117d` three commits after the fact, `caec5ef` one commit
-  late, and `0b17bc3` one session late.
+  moment anyone commits — measure before quoting it.** It has gone stale FOUR
+  times now: naming `6af117d` three commits after the fact, `caec5ef` one commit
+  late, `0b17bc3` one session late, and `d9fd6a3` three commits late.
+- **The tree is NOT clean: `.planning/0187-arabic-copy-review.md` is untracked
+  and stays that way.** It is the Arabic copy sheet Turki reviewed before
+  `0c7adf9`, and **its own header — "Migration is DRAFTED, NOT APPLIED. Nothing
+  is committed." — is now FALSE**: 0187 is applied and committed. It is a
+  superseded review artifact kept for the record, deliberately never staged.
+  Delete it or fix its header before quoting anything out of it; do not read it
+  as current state.
 - **MONEY FIX — `confirm_invoice` IS NOW AN AUDITOR, NOT A SCRIBE (`2477946`).**
   A confirmed invoice could freeze with NO special charges while the customer's
   prepaid balance had already been consumed by those same charges. **Two sources
@@ -455,7 +472,114 @@
 
 ---
 
-## Closed — 2026-09-08 (this session)
+## Closed — 2026-09-08 EVENING (this session, `0c7adf9` → `04b2c4e`)
+
+**TWO SESSIONS RAN ON 2026-09-08 AND THE HEADINGS ARE THE ONLY THING THAT
+SEPARATES THEM.** This one is the evening run, three commits, `0c7adf9` through
+`04b2c4e`. The MORNING run (`d9fd6a3` → `8060e82`) has its own table immediately
+below. **Every unqualified "this session" inside THAT table means the MORNING
+run, not this one** — same rule the 2026-09-05 section carries, now biting
+within a single date. Read the commit hash, not the date.
+
+| # | Item | Commit |
+|---|---|---|
+| 1 | **The Metrics Dictionary's display copy leaves `report_metrics` and moves into `lib/i18n.ts` — closing PARKED item 10.** The popup read `label`, `meaning`, `formula`, `grain` and `caveat` straight off the table, so Arabic had nowhere to live. **An earlier draft of `0187` answered that with five nullable `_ar` columns and 30 translated rows; that draft was DROPPED** — a translation split across a dictionary and five DB columns has two edit paths, two review paths, no compiler, and is un-reviewable in a diff. The division of labour is now: **`report_metrics` says WHICH metrics exist and what SHAPE each is** (basis, unit, machine-value grain, `source_view`); **`lib/i18n.ts` says what each is CALLED and MEANS**, both languages; `metric_key` is the join. 21 label keys plus 12 that REUSE the existing `reports.metric.*` label whose English is byte-identical, rather than duplicating it. `metricText()` falls through reader's language → English key → the row's own column, so a metric registered before its copy is keyed renders English, never blank. `0187` also registers the three Finance balance terms; **`amount_payable` deliberately does NOT cite `v_customer_amount_payable`**, because for a prepaid customer that view returns the running balance and `return_customer_balance()` gates a real cash refund on exactly that divergence. Adds `scripts/metric-copy-check.ts`, wired as `npm run test:copy`. 7 files + `0187` | `0c7adf9` |
+| 2 | **Gregorian month names render in Arabic, with Latin digits, everywhere — closing PARKED item 9.** Thirteen independent "format a month" implementations in four spellings across three locales, which is how "Aug 2026", "August 2026" and "Sept 2026" all became the same label. One canonical pair (`monthName` / `monthLabel` in `lib/utils`) now owns the words, with `formatDateLang` / `formatDateTimeLang` / `formatDayKeyLang` and an en-GB adapter on top. Item 9 warned the fix "is not pass `lang`" and it was not: **nothing passes `ar-SA`** — its Latin digits under bare `"ar"` are a CLDR default, not an API guarantee, and `ar-SA` itself returns Arabic-Indic numerals and resolves to the Hijri calendar. Digits come off the app's own formatter, only the NAME comes from the dictionary. Adds `scripts/month-label-check.ts` to `test:copy`. 25 files + 1 new, no migration | `f42690d` |
+| 3 | **The `lib/invoice.ts` v3 §9 residual note gets its scope and its attribution — it was NEVER stale.** Re-raised as "says 4 invoices / 38,709.00, live disagrees". It does not disagree; **the earlier pass measured a different axis** (stored subtotal vs a re-derivation) and compared it to a figure describing the frozen-column identity `grand − (covered + amountDue)`. Comment-only, no data, no migration | `04b2c4e` |
+
+**ROW 3 IS THE ONE TO READ BEFORE RE-RAISING ANYTHING OUT OF THIS FILE.** The
+note was flagged stale, a session was spent proving it, and it was right all
+along. Re-measured live this session, all exact:
+
+| | |
+|---|---|
+| scope (the part that was missing) | **24 = issued AND non-postpaid.** Not 36 rows, not 25 issued, not 21 issued-non-void |
+| nonzero residual | **8** |
+| negative | **4 invoices / 38,709.00 SAR** |
+| positive | **4 invoices / 48,875.00 SAR** |
+
+**Postpaid stores `covered = 0` and `due = grand`, so its residual is ZERO BY
+CONSTRUCTION** — that is why it is excluded, and excluding it is what makes the
+denominator 24. Drafts and reviews carry no frozen columns at all. **Pick any
+other denominator and the note stops reproducing, which is exactly what
+happened.** The comment now states the scope and ships the query that settles
+it.
+
+**The 1,150.00 gap that went unreconciled in the earlier pass is named:
+`026-000017`.** The negative 38,709.00 is **three invoices via the TRIPS half**
+(`026-000014` 32,844.00 + `026-000009` 4,243.50 + `026-000007` 471.50 =
+37,559.00) **plus ONE via the CHARGES half** (`026-000017`, 1,150.00 — the
+second of the two charges stranded at the top of that file). The old wording
+called all four trips-side. It also implied all four were paid: **`026-000009`
+is CONFIRMED, not paid**, so the invoice_id-reserved argument covers `026-000014`
+and `026-000007` only.
+
+**`026-000009` re-derives to 4,761.00 against its stored 4,243.50 and that is
+NOT a defect** — its snapshot froze BEFORE Amount Due widened to carry uncovered
+charges, so its stored due omits its own 517.50. One document, two laws. Every
+other invoice in the set re-derives exactly. **This is recorded IN the comment**
+precisely so the next reader does not restart this investigation on the 517.50.
+
+**`unpaid_ledger_subtotal_sar` IS ALREADY VAT-INCLUSIVE.** Multiplying it by 1.15
+reproduces nothing and was the second thing that made the note look wrong.
+
+**THE 8 CANNOT GROW.** Frozen snapshot columns on issued invoices, and the law
+that produced them is gone, so no new invoice joins the set — only the
+denominator moves. That is why the figures were KEPT rather than replaced with a
+figure-free description: this one does not re-derive, so it cannot rot the way
+the frozen-split counts in `SKILL.md` do.
+
+**Rows 1 and 2 close BOTH parked items — the parked list is now empty.** See
+"What's next", where 9 and 10 are struck.
+
+**`test:copy` EXISTS NOW AND IS A SECOND HARNESS CHAIN, separate from
+`test:money`.** Three scripts: `metric-copy-check.ts` (row 1),
+`month-label-check.ts` (row 2), `i18n-lookup-single-source-check.mjs`.
+Re-measured at close: **`test:money` exit 0, 863 PASS; `test:copy` exit 0, 408
+PASS, 0 FAIL** across both logs. `tsc --noEmit` exit 0.
+
+**`month-label-check.ts` EARNED ITS KEEP ON ITS FIRST RUN — it found a real
+defect that no amount of looking at the screen would have caught.**
+`swapMonthName` rebuilt the string from `formatToParts()`, but
+**`Intl.DateTimeFormat.format()` NORMALISES U+202F → U+0020 before a day period
+while `formatToParts()` returns the raw U+202F** (node v24.15.0 / ICU 78.2). The
+Arabic and English renders of the drivers History `paid_at` stamp therefore
+differed by an INVISIBLE CHARACTER as well as the month. Fixed by replacing into
+`format()`'s own output, which makes "differs by exactly the month name" true by
+construction. **Proven both directions** — reverted to the parts-join and the
+harness went red on exactly that one case.
+
+**`scripts/code-grep.ts` GIVES A FALSE GREEN ON DIRECTORY ARGUMENTS — STILL
+UNFIXED, and it is the tool `CLAUDE.md` §5 tells every session to trust.**
+`npx tsx scripts/code-grep.ts 'ar-SA' app lib components` prints
+`fatal: path 'app' exists on disk, but not in the index` three times, then
+**"No live reference … in 3 file(s)" and EXITS 0 having read nothing.** Cause at
+`scripts/code-grep.ts:279-291`: `args.slice(1)` are literal paths fed to
+`git show :<path>`, a directory throws, `catch { continue; }` swallows it, and
+the report prints `files.length` — the ARGUMENT count, not a file count. **A
+false green that reads exactly like a real pass.** Workaround until it is fixed:
+
+```sh
+npx tsx scripts/code-grep.ts 'ar-SA' $(git ls-files 'app/*.ts' 'app/*.tsx' \
+  'lib/*.ts' 'lib/*.tsx' 'components/*.ts' 'components/*.tsx' | tr '\n' ' ')
+```
+
+**PASS THE FILES, NOT THE DIRECTORIES.** Also documented in
+`scripts/month-label-check.ts`'s §7 header, which holds the repo's only
+deliberate `ar-SA` occurrences and would otherwise read as a regression.
+
+**BSD grep in the C locale treats Arabic UTF-8 files as BINARY** — with
+`LANG`/`LC_ALL` unset it silently reports no match and exits 1, and `file -b`
+calls such a file "data". **Use `grep -a`, or set `LC_ALL`, on anything that may
+carry Arabic.** This silently corrupted a staged-blob verification mid-session
+before it was caught.
+
+---
+
+## Closed — 2026-09-08 MORNING (the earlier session, `d9fd6a3` → `8060e82`)
+
+**Every unqualified "this session" / "this turn" from here down means the MORNING
+run or earlier — never the evening one above.**
 
 | # | Item | Commit |
 |---|---|---|
@@ -683,13 +807,22 @@ read this without re-measuring (§5).
 npm run test:money
 ```
 
-Twelve harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green:
+**Fourteen** harnesses in sequence, fail-fast (`|| exit 1`), exit 0 = all green —
+re-measured off `package.json` 2026-09-08 evening:
 `prepaid` · `covered-unpaid` · `amount-payable` · `invoice` · `vat` ·
 `commission` · `commission-rows` · `payslip-deduction` · `daily-trips` ·
-`frozen-split` · `bank-accounts` · `invoice-render-parity`.
+`frozen-split` · `bank-accounts` · `invoice-render-parity` · `statement-parity` ·
+`collection-rate`. **863 PASS, exit 0, ~11.7s.**
 
-**Read that list off `package.json`, not off this line.** It has been eleven for
-most of this file's life and the count is the first thing to rot.
+**Read that list off `package.json`, not off this line.** It has been eleven,
+then twelve, and this line said "Twelve" while the chain held fourteen — **the
+count is the first thing in this file to rot, and it has now rotted twice.**
+
+**THERE IS A SECOND CHAIN — `npm run test:copy`** (added 2026-09-08), and it is
+NOT money: `metric-copy-check.ts` · `month-label-check.ts` ·
+`i18n-lookup-single-source-check.mjs`. **408 PASS, 0 FAIL, exit 0.** It guards
+COPY — dictionary coverage, month-name equivalence, single-source lookup labels.
+Run both before any commit that touches money or user-facing strings.
 
 - **`bank-accounts` is not money math and is wired anyway** (`caec5ef`). It
   guards a LOOSENING rather than a calculation — see the bank-accounts block in
@@ -955,11 +1088,11 @@ Both live in `.claude/skills/aquafleet-domain/SKILL.md` — their one home.
 
 **No FEATURE is queued** — ask Turki for the next one rather than picking. **ONE
 piece of follow-through is outstanding — item 5 below** — and it is not a
-feature; it is a console setting. **Two further items are PARKED (items 9 and
-10)** — parked is not queued and not open: both were seen, both were ruled out of
-the unit that found them, and neither starts without Turki. (Items 1, 2, 3, 4, 6,
-7 and 8 are kept struck through as records, not as work. Do not resurrect a
-struck item because it still appears in this list.)
+feature; it is a console setting. **THE PARKED LIST IS NOW EMPTY: items 9 and 10
+both SHIPPED in the 2026-09-08 evening session** (`f42690d` and `0c7adf9`). One
+TOOLING defect is open and is item 11. (Items 1, 2, 3, 4, 6, 7, 8, 9 and 10 are
+kept struck through as records, not as work. Do not resurrect a struck item
+because it still appears in this list.)
 
 **The money rules from `1754140` and `caec5ef` are no longer in this file's
 custody** — items 6 and 7 moved them into `SKILL.md`, which is what gets loaded
@@ -1013,43 +1146,56 @@ before money work. A handoff is rewritten every session; a skill is not.
 8. ~~Decide whether `invoice-render-parity-check` joins `test:money`~~ —
    **DONE, Turki ruled it IN.** Wired LAST in the chain; the ordering reasoning,
    the answered objection and the two-direction proof are in the money-harness
-   section above. `test:money` is twelve harnesses now, ~9.6s end to end.
+   section above. **This line said "twelve harnesses, ~9.6s" and both figures had
+   drifted** — re-measured 2026-09-08 evening off `package.json`'s own list:
+   **fourteen harnesses, ~11.7s end to end**, `statement-parity` and
+   `collection-rate` having joined since. Re-measure it, do not quote it:
+   `node -e "console.log(require('./package.json').scripts['test:money'])"`.
 
-9. **PARKED — `monthLabel` hardcodes `"en-US"`, so Arabic reads a Latin month
-   name.** Grep `monthLabel` in `lib/reports.ts`; the two neighbours right below
-   it (`toLocaleString("en-US", { month: "short", year: "2-digit" })` and the
-   bare `{ month: "short" }`) do the same thing, so this is **three call sites,
-   not one**. Surfaced by `d9fd6a3` in the Arabic delta line under the Invoices
-   settled card, and **pre-existing — verified at HEAD before that unit, it is
-   not damage from it.**
-   - **PARKED WITH THE DATE-FORMAT DECISION, deliberately.** The fix is not
-     "pass `lang`": Arabic here can mean `ar` (Arabic-Indic digits and Arabic
-     month names), `ar-SA` (which resolves to the HIJRI calendar by default and
-     would print a different month entirely), or Latin digits with Arabic names.
-     **That is a product ruling for Turki, not a code change**, and it lands
-     everywhere at once. There IS already a standing digit ruling to sit beside,
-     but it is **NOT next to `monthLabel`** — it is in `buildNarrative`'s header
-     comment in the same file ("Every FIGURE still comes in through `sar()` /
-     `formatPct()` / `formatShare()` — Latin digits, en-US, unchanged"), and it
-     governs NUMBERS, not month NAMES. Read it before deciding; do not assume it
-     already settles this. Do not "fix" one call site in passing either — that
-     forks the format.
-10. **PARKED — the metric rows in the Arabic dictionary render in English.**
-    `report_metrics`' `label`, `meaning`, `formula`, `grain`, `source_view`,
-    `caveat` and `unit` are **DB COLUMNS, not i18n keys**, so translating them is
-    **a migration, not an edit** — it needs an `_ar` column per field plus a
-    resolver in `MetricsGlossaryModal`, i.e. its own unit with its own schema
-    decision, over **30 rows**. **The ruling is written in the code, not only
-    here** — grep `EVERY METRIC ROW STAYS ENGLISH` in
-    `app/reports/MetricsGlossaryModal.tsx`, which also records what IS keyed
-    (the popup's chrome, the five `reports.glossary.*` basis notes and the five
-    `reports.basis.*` basis NAMES — five, not four, since `0185`/`0186` added
-    `settlement`). **Update BOTH if this is ever taken up**, or they drift.
-    `0186` deliberately did NOT smuggle that in; it changed the `collections`
-    row's English copy and its `basis`, nothing more. **The Arabic dictionary is
-    therefore correct-but-untranslated, not broken** — the headings and chrome
-    ARE Arabic (`قاموس المقاييس`, the SETTLEMENT group), and Turki confirmed the
-    surface in-browser in that state.
+9. ~~PARKED — `monthLabel` hardcodes `"en-US"`~~ — **DONE (`f42690d`).** It was
+   never three call sites; it was **thirteen implementations across the app**.
+   Turki made the product ruling this item was waiting on: **Arabic month NAMES,
+   LATIN digits, Gregorian calendar — and "Sep", not en-GB's "Sept".** `ar-SA` is
+   refused outright (Hijri by default, Arabic-Indic numerals). `lib/reports.ts`
+   still carries `en-US` at two places and **both are correct**: the `sar()`
+   `Intl.NumberFormat` and the `buildNarrative` comment governing it. That is the
+   standing digit ruling this item told the next session to read first — it
+   governs NUMBERS, and the month ruling now sits beside it rather than
+   overriding it.
+10. ~~PARKED — the metric rows in the Arabic dictionary render in English~~ —
+    **DONE (`0c7adf9`), but NOT the way this item predicted.** It said the fix
+    "needs an `_ar` column per field plus a resolver", i.e. a migration over 30
+    rows. **That draft was built and then DROPPED.** The copy moved OUT of
+    `report_metrics` and into `lib/i18n.ts` instead, joined on `metric_key`;
+    `0187` only registers the three Finance balance terms. **So the in-code
+    ruling this item told you to grep — `EVERY METRIC ROW STAYS ENGLISH` in
+    `MetricsGlossaryModal.tsx` — is GONE, correctly.** Do not go looking for it.
+    The superseded text of this item follows, kept only so the reasoning that was
+    rejected is on the record:
+    - *(superseded)* `report_metrics`' `label`, `meaning`, `formula`, `grain`,
+      `source_view`, `caveat` and `unit` are DB COLUMNS, not i18n keys, so
+      translating them is a migration, not an edit — an `_ar` column per field
+      plus a resolver in `MetricsGlossaryModal`, its own unit with its own
+      schema decision, over 30 rows. The ruling is written in the code: grep
+      `EVERY METRIC ROW STAYS ENGLISH` in
+      `app/reports/MetricsGlossaryModal.tsx`, which also records what IS keyed
+      (the popup's chrome, the five `reports.glossary.*` basis notes and the
+      five `reports.basis.*` basis NAMES — five, not four, since `0185`/`0186`
+      added `settlement`). `0186` deliberately did NOT smuggle that in. The
+      Arabic dictionary is correct-but-untranslated, not broken.
+    - **WHAT SURVIVES OF THAT:** the five `reports.basis.*` and five
+      `reports.glossary.*` keys are still keys and still five. What died is the
+      premise that the metric PROSE had to stay in the table.
+
+11. **OPEN — `scripts/code-grep.ts` FALSE-GREENS ON DIRECTORY ARGUMENTS.** Full
+    diagnosis, the reproducer and the `git ls-files` workaround are in the
+    2026-09-08 evening section above. **This matters more than a normal tooling
+    bug because `CLAUDE.md` §5 names this script as the tool that settles
+    "is the identifier gone", and the failure mode is a CLEAN PASS.** Fix is at
+    `scripts/code-grep.ts:279-291`: expand any argument that is a directory
+    through `git ls-files -- <dir>` before the `git show :<path>` loop, and print
+    a real file count rather than `files.length`. Small, self-contained, and it
+    should get its own commit — not folded into whatever unit next trips over it.
 
 **THE STATEMENT INHERITS `lib/plainDocStyles.ts` NEXT — that is a POINTER, not a
 queued feature.** The kit was built as a shared module for exactly this;
