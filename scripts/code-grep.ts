@@ -27,13 +27,25 @@
 // its true location. The older helper dropped whole lines and could only ever
 // report a count.
 //
-// SELF-TESTING ON EVERY RUN. The fixtures below execute before any file is
+// SELF-TESTING ON EVERY RUN. Both fixture sets below execute before any file is
 // read, and a failure aborts instead of reporting. A verification tool that
 // might itself be broken is worse than none, and a --self-test flag nobody
 // passes rots. It costs well under a millisecond.
+//
+// READING ZERO FILES IS NOT A PASS. The lexer above was right and the tool still
+// reported a false green, because path handling sat outside it: a directory
+// argument (`code-grep 'ar-SA' app lib components`) was passed straight to
+// `git show :app`, which fails, and the read loop's catch — there to skip
+// untracked files — swallowed it. Three arguments, zero files read, and a
+// report reading "no live reference in 3 file(s)", the 3 being the ARGUMENT
+// count. A false GREEN is worse than the false red this file was written to
+// prevent: it is indistinguishable from a real pass. So paths are now RESOLVED
+// before anything is read (resolvePaths), directories expand, a path that is
+// neither in the index nor on disk is fatal, and the count reported is the
+// number of files ACTUALLY read — which, if it is zero, is itself fatal.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 type Mode = "ts" | "css" | "sql";
@@ -187,6 +199,86 @@ export function liveHits(src: string, needle: string, mode: Mode = "ts") {
 }
 
 // ---------------------------------------------------------------------------
+// Path resolution
+// ---------------------------------------------------------------------------
+
+/** The extensions the no-argument scan covers, and the filter a directory gets. */
+const SCAN_GLOBS = ["*.ts", "*.tsx", "*.css", "*.sql"];
+const SCAN_EXTS = SCAN_GLOBS.map((g) => g.slice(1));
+
+export type PathKind = "file" | "dir" | "missing";
+
+export type ResolvedPaths = {
+  /** Tracked files to read, in argument order, deduped. */
+  files: string[];
+  /** On disk but not in the index — no staged blob to read. */
+  untracked: string[];
+  /** In neither the index nor the working tree. Fatal: the caller typed it wrong. */
+  missing: string[];
+  /** A real directory holding nothing this tool scans. Fatal: it can only produce a false green. */
+  emptyDirs: string[];
+};
+
+/**
+ * Turns CLI path arguments into a file list, CLASSIFYING everything it cannot
+ * read rather than dropping it. Pure: `git` and `stat` are injected so the
+ * fixtures below can drive it against a fake index.
+ *
+ * Never exits — every failure mode comes back as a bucket, and main() decides.
+ * That is what makes it testable, and testing it is the whole point.
+ */
+export function resolvePaths(
+  paths: string[],
+  git: (a: string[]) => string,
+  stat: (p: string) => PathKind,
+): ResolvedPaths {
+  const lines = (s: string) => s.split("\n").filter(Boolean);
+
+  if (paths.length === 0) {
+    return { files: lines(git(["ls-files", ...SCAN_GLOBS])), untracked: [], missing: [], emptyDirs: [] };
+  }
+
+  const files: string[] = [];
+  const untracked: string[] = [];
+  const missing: string[] = [];
+  const emptyDirs: string[] = [];
+  const seen = new Set<string>();
+  const keep = (f: string) => {
+    if (seen.has(f)) return; // a file named twice — directly and inside a directory — is read once
+    seen.add(f);
+    files.push(f);
+  };
+
+  for (const p of paths) {
+    const tracked = lines(git(["ls-files", "--", p]));
+
+    // Exactly itself: a tracked file, read whatever its extension — an explicit
+    // argument is an instruction, not a suggestion.
+    if (tracked.length === 1 && tracked[0] === p) {
+      keep(p);
+      continue;
+    }
+
+    // Anything else that matched is a directory (or a glob) standing in for its
+    // contents. Filter to the same extensions the no-argument scan uses.
+    if (tracked.length > 0) {
+      const scannable = tracked.filter((f) => SCAN_EXTS.some((e) => f.endsWith(e)));
+      if (scannable.length === 0) emptyDirs.push(p);
+      else scannable.forEach(keep);
+      continue;
+    }
+
+    // Matched nothing in the index. Which of the three reasons decides the exit code.
+    const kind = stat(p);
+    if (kind === "dir") emptyDirs.push(p);
+    else if (kind === "file") untracked.push(p);
+    else missing.push(p);
+  }
+
+  return { files, untracked, missing, emptyDirs };
+}
+
+// ---------------------------------------------------------------------------
 // Fixtures. Run on every invocation — see the header.
 //
 // Each is a MINIMAL reproduction of a way this has actually gone wrong, or
@@ -241,11 +333,110 @@ const FIXTURES: { name: string; src: string; needle: string; mode: Mode; live: b
   { name: "sql -- comment", src: "-- drop_thing()\nselect 1;", needle: "drop_thing", mode: "sql", live: false },
 ];
 
+// A fake index, so path resolution is pinned without touching the repo. `git`
+// answers the two ls-files shapes resolvePaths issues; `stat` answers from the
+// same list plus any untracked-on-disk extras.
+function fakeGit(index: string[]) {
+  const matches = (spec: string, f: string) =>
+    spec.startsWith("*.") ? f.endsWith(spec.slice(1)) : f === spec || f.startsWith(spec.replace(/\/+$/, "") + "/");
+  return (a: string[]) => {
+    if (a[0] !== "ls-files") throw new Error(`fixture git got an unexpected call: ${a.join(" ")}`);
+    const specs = a.slice(1).filter((s) => s !== "--");
+    return index.filter((f) => specs.some((s) => matches(s, f))).join("\n");
+  };
+}
+
+function fakeStat(index: string[], disk: string[]) {
+  const all = [...index, ...disk];
+  return (p: string): PathKind => {
+    if (all.includes(p)) return "file";
+    if (all.some((f) => f.startsWith(p.replace(/\/+$/, "") + "/"))) return "dir";
+    return "missing";
+  };
+}
+
+const PATH_FIXTURES: {
+  name: string;
+  args: string[];
+  index: string[];
+  disk?: string[];
+  expect: { files: string[]; untracked?: string[]; missing?: string[]; emptyDirs?: string[] };
+}[] = [
+  {
+    name: "THE FALSE GREEN: a directory argument EXPANDS — it is not silently skipped",
+    args: ["app", "lib"],
+    index: ["app/page.tsx", "app/trips/page.tsx", "app/logo.svg", "lib/invoice.ts", "components/x.tsx"],
+    expect: { files: ["app/page.tsx", "app/trips/page.tsx", "lib/invoice.ts"] },
+  },
+  {
+    name: "a directory expands to the SCANNED extensions only",
+    args: ["docs"],
+    index: ["docs/notes.md", "docs/schema.sql"],
+    expect: { files: ["docs/schema.sql"] },
+  },
+  {
+    name: "a directory holding nothing scannable is an ERROR, never an empty pass",
+    args: ["docs"],
+    index: ["docs/notes.md"],
+    expect: { files: [], emptyDirs: ["docs"] },
+  },
+  {
+    name: "an explicitly named tracked file is read whatever its extension",
+    args: ["lib/invoice.ts", "README.md"],
+    index: ["lib/invoice.ts", "README.md"],
+    expect: { files: ["lib/invoice.ts", "README.md"] },
+  },
+  {
+    name: "a path in neither the index nor the working tree is FATAL, not a skip",
+    args: ["lib/gone.ts"],
+    index: ["lib/invoice.ts"],
+    expect: { files: [], missing: ["lib/gone.ts"] },
+  },
+  {
+    name: "an untracked file is its own bucket — not confused with a bogus path",
+    args: ["lib/new.ts"],
+    index: ["lib/invoice.ts"],
+    disk: ["lib/new.ts"],
+    expect: { files: [], untracked: ["lib/new.ts"] },
+  },
+  {
+    name: "a file reached twice, directly and via its directory, is read once",
+    args: ["lib", "lib/invoice.ts"],
+    index: ["lib/invoice.ts"],
+    expect: { files: ["lib/invoice.ts"] },
+  },
+  {
+    name: "no arguments still means every tracked ts/tsx/css/sql file",
+    args: [],
+    index: ["app/page.tsx", "lib/invoice.ts", "app/globals.css", "supabase/migrations/0001_x.sql", "README.md"],
+    expect: { files: ["app/page.tsx", "lib/invoice.ts", "app/globals.css", "supabase/migrations/0001_x.sql"] },
+  },
+];
+
+function pathFailures(): string[] {
+  const fails: string[] = [];
+  for (const f of PATH_FIXTURES) {
+    const got = resolvePaths(f.args, fakeGit(f.index), fakeStat(f.index, f.disk ?? []));
+    const want: ResolvedPaths = {
+      files: f.expect.files,
+      untracked: f.expect.untracked ?? [],
+      missing: f.expect.missing ?? [],
+      emptyDirs: f.expect.emptyDirs ?? [],
+    };
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      fails.push(`${f.name}\n      expected ${JSON.stringify(want)}\n      got      ${JSON.stringify(got)}`);
+    }
+  }
+  return fails;
+}
+
 function selfTest() {
   const failed = FIXTURES.filter((f) => (liveHits(f.src, f.needle, f.mode).length > 0) !== f.live);
-  if (failed.length > 0) {
+  const pathFailed = pathFailures();
+  if (failed.length > 0 || pathFailed.length > 0) {
     console.error("code-grep SELF-TEST FAILED — refusing to report results.");
     for (const f of failed) console.error(`  expected ${f.live ? "LIVE" : "comment-only"}: ${f.name}`);
+    for (const m of pathFailed) console.error(`  path resolution: ${m}`);
     process.exit(2);
   }
 }
@@ -275,25 +466,57 @@ function main() {
   }
 
   const git = (a: string[]) => execFileSync("git", a, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const stat = (p: string): PathKind => {
+    try {
+      return statSync(p).isDirectory() ? "dir" : "file";
+    } catch {
+      return "missing";
+    }
+  };
 
-  let files = args.slice(1);
-  if (files.length === 0) {
-    files = git(["ls-files", "*.ts", "*.tsx", "*.css", "*.sql"]).split("\n").filter(Boolean);
+  const { files, untracked, missing, emptyDirs } = resolvePaths(args.slice(1), git, stat);
+
+  // An argument that resolved to nothing is fatal. Scanning the rest and
+  // reporting green would answer a question narrower than the one asked.
+  if (missing.length > 0 || emptyDirs.length > 0) {
+    console.error(`code-grep: refusing to report — ${missing.length + emptyDirs.length} argument(s) resolved to no file.`);
+    for (const p of missing) console.error(`  no such path, in neither the index nor the working tree: ${p}`);
+    for (const p of emptyDirs) console.error(`  no tracked ${SCAN_GLOBS.join(" ")} files under: ${p}`);
+    process.exit(2);
+  }
+
+  // An untracked file HAS no staged blob, so the default mode has nothing to
+  // read — a real skip, but a loud one. --worktree reads disk, so it can.
+  const targets = [...files];
+  for (const p of untracked) {
+    if (worktree) targets.push(p);
+    else console.error(`code-grep: skipping ${p} — untracked, so it has no staged blob. Re-run with --worktree to read it from disk.`);
   }
 
   const found: { file: string; line: number; text: string }[] = [];
-  for (const f of files) {
+  let read = 0;
+  for (const f of targets) {
     let src: string;
     try {
       src = worktree ? readFileSync(f, "utf8") : git(["show", `:${f}`]);
-    } catch {
-      continue; // untracked, or tracked but not staged
+    } catch (e) {
+      // resolvePaths already proved this path exists. Failing here means
+      // something changed underneath us — silence would be the false green again.
+      console.error(`code-grep: cannot read ${f} — ${String((e as Error).message).split("\n")[0]}`);
+      process.exit(2);
     }
+    read++;
     for (const h of liveHits(src, needle, modeFor(f))) found.push({ file: f, ...h });
   }
 
+  // Zero files read proves nothing about the needle, whatever the argument count said.
+  if (read === 0) {
+    console.error(`code-grep: read 0 files — that is not evidence about "${needle}".`);
+    process.exit(2);
+  }
+
   if (found.length === 0) {
-    console.log(`No live reference to "${needle}" in ${files.length} file(s) — comments only, if anything.`);
+    console.log(`No live reference to "${needle}" in ${read} file(s) read — comments only, if anything.`);
     process.exit(0);
   }
   console.log(`"${needle}" is still referenced in code:`);
