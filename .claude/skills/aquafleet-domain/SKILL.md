@@ -244,9 +244,10 @@ SAR understated.
 | 026-000015 | paid | 540.50 | 3,070.50 | 2,530.00 |
 | 026-000017 | paid | 7,544.00 | 8,694.00 | 1,150.00 |
 
-The 32,844.00 and 471.50 are the v3 §9 victims `lib/invoice.ts:82` already
-names. **Void invoices (1/5/6/7) show NEGATIVE deltas because voiding RELEASED
-their lines** — that is the void working. Do not "fix" them, and do not read the
+The 32,844.00 and 471.50 are the v3 §9 victims `lib/invoice.ts` already names —
+grep `38,709.00 SAR across four invoices` there. **Void invoices (1/5/6/7) show
+NEGATIVE deltas because voiding RELEASED their lines** — that is the void
+working. Do not "fix" them, and do not read the
 sum without the per-invoice rows.
 
 **Cash was never wrong.** `grand_total_sar` drives no money — `pay_invoice` and
@@ -269,16 +270,19 @@ Three reasons, in order of weight:
   original PDFs. ZATCA practice corrects an issued invoice with a credit/debit
   note, never a silent edit. The system records no "sent" flag, so nobody can
   tell from the data which copies are out there.
-- It is not one column. `covered_* = grand − amountDue` (`lib/invoice.ts:67`),
-  so a correct backfill rewrites six columns or the stored identity breaks —
-  plus a `PDF_CACHE_VERSION` bump, or cached PDFs keep serving the old bytes.
-- `lib/invoice.ts:120-127` locks it: "fix forward, never rewrite applied
-  history." The engine has been correct since that fix; only legacy rows differ.
+- It is not one column. `covered_* = grand − amountDue` — grep
+  `DERIVED, never its own VAT` in `lib/invoice.ts` — so a correct backfill
+  rewrites six columns or the stored identity breaks, plus a
+  `PDF_CACHE_VERSION` bump, or cached PDFs keep serving the old bytes.
+- `lib/invoice.ts` locks it — grep
+  `fix forward, never rewrite applied history`. The engine has been correct
+  since that fix; only legacy rows differ.
 
 **`026-000009` was the ONE exception, and it was not cosmetic.** Its charge
 "emergency hours" (450.00, 517.50 gross) sat excluded from Grand Total by being
 uncovered AND from Amount Due by being a charge — the stranded-charge dead end
-`lib/invoice.ts:98` describes. Measured: it appeared on no other invoice, and it
+`lib/invoice.ts` describes, grep `IT USED TO BE TRIPS-ONLY`. Measured: it
+appeared on no other invoice, and it
 COULD not, because a charge belongs to exactly one invoice at creation
 (`reservedElsewhereIds`). So the money was unbillable while that invoice stood.
 **Resolution: void + reissue**, which puts it through the current engine and
@@ -318,16 +322,19 @@ Re-measured 2026-09-08 with `npx tsx scripts/code-grep.ts grand_total_sar
 `invoices` table (an earlier note said seven and omitted one). They split into
 two kinds:
 
-- **Kind A — "this is the document's total"** (4). `InvoicesModal.tsx:313`,
-  `ArchiveCustomerTab.tsx:367` and `:877`, `BreakdownReport.tsx:738`. These are
+- **Kind A — "this is the document's total"** (4). Grep
+  `formatSar(inv.grand_total_sar)` in `InvoicesModal.tsx`, BOTH hits of
+  `money(Number(inv.grand_total_sar))` in `archive/ArchiveCustomerTab.tsx`, and
+  `formatSar(p.inv.grand_total_sar)` in `trips/BreakdownReport.tsx`. These are
   lists OF DOCUMENTS. The frozen total is the correct value — it is what the
-  document says. (`InvoiceDetailModal.tsx:343` / `invoiceActions.ts:1513` render
-  the document itself and are correct by the 0027 freeze law; `page.tsx` hits are
-  selects and types.)
-- **Kind B — "this is money"** (4). `ArchiveCustomerTab.tsx:607` `collected` /
-  `:610` `billed` (whose own comment claims "what actually came in"), **`:301`
-  `paidTotal`, the per-customer card header** — the one the earlier count missed
-  — and `BreakdownReport.tsx:331` `monthPaymentsTotal`.
+  document says. (`InvoiceDetailModal.tsx` and `invoiceActions.ts` render the
+  document itself — grep `grand: { subtotal:`, one hit each — and are correct by
+  the 0027 freeze law; `page.tsx` hits are selects and types.)
+- **Kind B — "this is money"** (4). All in `app/archive/ArchiveCustomerTab.tsx`
+  except the last: grep `const collected = paid.reduce`, `const billed =`
+  (whose own comment claims "what actually came in"), and **`const paidTotal =`,
+  the per-customer card header** — the one the earlier count missed — plus
+  `const monthPaymentsTotal` in `app/trips/BreakdownReport.tsx`.
 
 **Every Kind-B aggregate here sits directly beneath Kind-A rows.**
 `monthPaymentsTotal` is the Total row of the table whose rows are
@@ -364,10 +371,12 @@ one:**
 - `v_revenue_invoices.gross_sar` (0167:434) — the BILLED side, feeding
   `v_revenue_monthly` → `revenue_sar` → the P&L and `v_daily_operations`.
 
-Both matter at once: `cashCoverage(collected, revenue)` divides one by the
-other, so the ratio understates in the numerator AND the denominator and the
-error does not simply cancel. Measured, collections side, against the true
-per-item gross:
+**These two views USED to meet in one ratio and no longer do.** `cashCoverage`
+divided the collections view by the revenue view; `d9fd6a3` (`0185`) deleted it,
+and `npx tsx scripts/code-grep.ts 'cashCoverage'` now returns a single hit, a
+quoted phrase in `scripts/collection-rate-check.ts` describing the OLD operands.
+**Both views still matter, but for separate reasons** — see the render list
+below. Measured, collections side, against the true per-item gross:
 
 | month | view shows | true | gap |
 |---|---|---|---|
@@ -376,12 +385,43 @@ per-item gross:
 | 2026-09 | 9,740.50 | 13,420.50 | 3,680.00 |
 | **total** | **149,293.00** | **186,104.50** | **36,811.50** |
 
-August under-states by ~30%. It renders as a north-star KPI at
-`app/page.tsx:336` and `app/reports/OverviewTab.tsx:284`, feeds
-`cashCoverage(collected, revenue)` at `:234`, `StatementsTab.tsx:554` and
-`lib/report-builder.ts:312`. **None of those has a document list beneath it** —
-so "the column stops adding up" cannot happen, and the argument above does not
-transfer.
+August under-states by ~30%. **Re-measured 2026-09-08, after `d9fd6a3`** — grep
+`collected_gross_sar`, which lands on every reader. It renders as a north-star
+KPI on the Dashboard (`app/page.tsx`, grep `formatSar(num(collectionsRow?`) and
+as the Collected card in `app/reports/OverviewTab.tsx` (grep
+`label={tt("reports.metric.collections")}`), and is aggregated by
+`StatementsTab.tsx` (grep `collected: sumOver`) and `lib/report-builder.ts`
+(grep `b.collections = monthsIn`). **None of those has a document list beneath
+it** — so "the column stops adding up" cannot happen, and the argument above
+does not transfer.
+
+**THE CARD'S FOOT IS NO LONGER THIS FIGURE OVER REVENUE, AND THAT MATTERS TO
+THIS FINDING.** It now reads
+`withinMonthCollectionRate(settled_same_month_revenue_sar, revenue_sar)` — grep
+`withinMonthCollectionRate` — **both operands off `v_revenue_monthly`, so
+`collected_gross_sar` is not an operand of any ratio anywhere.** The card's
+VALUE and its FOOT are deliberately two different measures on one card; the
+component says so itself (grep `THE FOOT NAMES ITS OWN RATIO`). **Do not read
+the value and the foot as numerator and denominator** — that was the 215% bug.
+
+**The understatement still reaches the foot, by a different route.** Measured
+2026-09-08 against the FROZEN LINE JSONB: `grand_subtotal_sar` — which
+`v_revenue_invoices` exposes as `revenue_sar`, feeding both operands — is short
+on the same rows, by **410.00 on `026-000007`, 3,690.00 on `026-000009` and
+28,560.00 on `026-000014`** (ex-VAT), and 0.00 on `026-000015` / `026-000017`.
+Since the numerator is a filtered SUBSET of the denominator's rows, a shortfall
+on an invoice settled in-month hits both sides while one settled later hits only
+the denominator — **so it neither cancels nor moves the ratio in a predictable
+direction.**
+
+**THAT IS A DIFFERENT METHOD FROM THE TABLE ABOVE AND THE FIGURES ARE MEANT TO
+DIFFER — do not reconcile them.** Summing the frozen `covered_lines` +
+`unpaid_lines` sees only what was frozen; the "true" column in the earlier table
+also counts special charges that never reached the snapshot, which is the whole
+`confirm_invoice` fault `0181` closed. Hence 0.00 here against 2,530.00 and
+1,150.00 there on `026-000015` / `026-000017`, and 4,243.50 against 4,761.00 on
+`026-000009` — the 517.50 gap being the stranded "emergency hours" charge.
+**Neither number is wrong; quoting one as the other is.**
 
 0167:86 says the cash views are VAT-inclusive because they answer "what moved
 through the bank". **By that stated intent the view is wrong** — what moved
