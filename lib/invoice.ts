@@ -78,15 +78,46 @@
 //
 //   grand − (covered + amountDue) = coveredCharges − unpaidTrips − uncoveredCharges
 //
-// Nothing forced that to zero, and it was not zero on 8 of 24 invoices. The
-// negative side cost money: 026-000014's grand total came out 32,844.00 SAR
-// short of its own delivered work and 026-000007's 471.50 short, and since
-// those trips stay invoice_id-reserved on a PAID invoice they were billable
-// nowhere else — the dead end the stranded-charge note above describes,
-// reached by the TRIPS half instead. 38,709.00 SAR across four invoices. The
-// positive side (covered charges inside grand but missing from
-// covered_subtotal) moved no cash but proved the fault was structural: one
-// object, two behaviours, decided by nothing but which set it landed in.
+// Nothing forced that to zero, and it was not zero on 8 of 24 invoices.
+//
+// SCOPE, BECAUSE LOSING IT MAKES THIS NOTE READ AS STALE WHEN IT IS NOT: 24 is
+// the ISSUED, NON-POSTPAID set. Postpaid stores covered = 0 and amountDue =
+// grand, so its residual is zero by construction; drafts and reviews carry no
+// frozen columns at all. Count all 36 invoice rows, or all 25 issued, and the
+// figures below stop reproducing — which is exactly how this note got re-raised
+// as stale once already. Re-measure on the right axis:
+//
+//   select count(*) filter (where grand_total_sar
+//            - (covered_total_sar + amount_due_sar) <> 0) as nonzero, count(*)
+//   from invoices
+//   where invoice_number is not null and payment_mode is distinct from 'postpaid';
+//
+// THE 8 CANNOT GROW — these are frozen snapshot columns on issued invoices and
+// the law that produced them is gone, so no new invoice joins the set. Only the
+// denominator moves.
+//
+// The negative side cost money: 38,709.00 SAR across FOUR invoices, and the
+// split matters because the two halves arrive by different routes. THREE are
+// the TRIPS half, 37,559.00 together — 026-000014's grand total came out
+// 32,844.00 SAR short of its own delivered work, 026-000009's 4,243.50 short
+// and 026-000007's 471.50 short. For 026-000014 and 026-000007, which are PAID,
+// those trips stay invoice_id-reserved and were billable nowhere else — the
+// dead end the stranded-charge note above describes, reached by the TRIPS half
+// instead. 026-000009 is CONFIRMED, not paid; do not describe it as a paid
+// invoice. The FOURTH, 026-000017 at 1,150.00, is the CHARGES half: the second
+// of the two charges stranded above, reaching the same dead end from the other
+// side. 37,559.00 + 1,150.00 = 38,709.00.
+//
+// Re-deriving 026-000009 through the identity above yields 4,761.00, not
+// 4,243.50, and that is NOT a discrepancy: its snapshot froze BEFORE Amount Due
+// widened to carry uncovered charges, so its stored due omits its own 517.50 —
+// one of the two stranded charges named above. One document, two laws. Every
+// other invoice in the set re-derives to its stored residual exactly.
+//
+// The positive side — 48,875.00 across the other four, covered charges inside
+// grand but missing from covered_subtotal — moved no cash but proved the fault
+// was structural: one object, two behaviours, decided by nothing but which set
+// it landed in.
 //
 // Do NOT re-narrow grand to "what is settled". The figure describing the
 // settled portion is `covered`, which now genuinely holds it, charges included.
