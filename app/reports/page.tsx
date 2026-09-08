@@ -504,7 +504,15 @@ export default async function ReportsPage() {
     grain: String(r.grain),
     source_view: String(r.source_view),
     basis: String(r.basis),
+    // NULL-PRESERVING on `caveat`, and that is load-bearing: two metrics have
+    // none, and "" would make no-warning look like a warning we failed to read.
     caveat: r.caveat ? String(r.caveat) : null,
+    // NO `_ar` FIELDS HERE, and 0187 creates no `_ar` columns for them to read —
+    // an earlier draft of that migration did, and was replaced. The dictionary's
+    // Arabic is app copy: it lives in lib/i18n under
+    // `reports.metricDef.<metric_key>` and is read by metricText() in
+    // lib/reports, which falls through to the English coerced above only for a
+    // metric registered before its copy was keyed.
   }));
 
   const opsByDriver: OperationsByDriverRow[] = ((opsByDriverRes.data ?? []) as Row[]).map((r) => ({

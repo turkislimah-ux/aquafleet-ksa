@@ -3507,7 +3507,11 @@ export const dict = {
   //     formatters, which are pinned to en-US;
   //   · period labels ("Aug 2026", "Q3 2026") are produced by the VIEW
   //     (to_char in 0100), not by this app;
-  //   · report_metrics prose is database content (0098).
+  //   · report_metrics' POINTER columns — metric_key and source_view — which are
+  //     addresses, not sentences. Its PROSE is no longer database content: the
+  //     dictionary's 33 × 5 strings moved into `reports.metricDef` below (0187),
+  //     and the English columns stayed behind only as that block's last
+  //     fall-through.
   reports: {
     // --- the page shell ----------------------------------------------------
     // The page TITLE and the second tab both say "Reports" and both point at
@@ -3635,6 +3639,322 @@ export const dict = {
       settlement: { en: "settlement", ar: "السداد" },
       state: { en: "state", ar: "المركز" },
       operational: { en: "operational", ar: "التشغيلي" },
+    },
+
+    // --- the `unit` enum, in words (0187) -----------------------------------
+    // WHAT A METRIC IS COUNTED IN — the small tag at the top-right of every
+    // dictionary block. It sat there as the RAW COLUMN VALUE, uppercased in
+    // CSS, which meant the Arabic dictionary printed "SAR" / "COUNT" /
+    // "PERCENT" over Arabic prose.
+    //
+    // FIVE KEYS, NOT THIRTY-THREE, and that is the difference from `metricDef`
+    // below rather than an inconsistency with it. label/meaning/formula/grain/
+    // caveat are PER-METRIC prose, so they are keyed per metric; `unit` is a
+    // closed enum — report_metrics_unit_check admits exactly these five — so it
+    // is keyed once per VALUE. Keying it per metric would store the same five
+    // translations thirty-three times and let two rows disagree about "SAR".
+    //
+    // ALL FIVE, not the three that are live (SAR, count, percent measured
+    // 2026-09-08). The CHECK is the contract, so `ratio` and `days` are keyed
+    // in advance — the migration that first uses one must not also be the
+    // migration that puts an English word on the Arabic screen. The ENUM → key
+    // lookup is unitLabel() in lib/reports, and a miss falls through to the raw
+    // string there, exactly as basisLabel does.
+    //
+    // ENGLISH IS BYTE-IDENTICAL TO THE COLUMN VALUE, same rule as `basis`
+    // above: the tag is uppercased in CSS, so `SAR` and `count` are how the
+    // database spells them, not how the tag looks.
+    //
+    // `ر.س` is the same abbreviation formatSar prints, so the unit tag and
+    // every figure beneath it agree. Not `ريال سعودي`, which no number on this
+    // route is labelled with.
+    unit: {
+      sar: { en: "SAR", ar: "ر.س" },
+      count: { en: "count", ar: "عدد" },
+      percent: { en: "percent", ar: "نسبة مئوية" },
+      ratio: { en: "ratio", ar: "نسبة" },
+      days: { en: "days", ar: "أيام" },
+    },
+
+    // --- the METRIC DICTIONARY's own prose (0187) ---------------------------
+    // THE COPY LIVES HERE; report_metrics IS THE REGISTRY. The dictionary popup
+    // renders label / meaning / formula / grain / caveat for 33 metrics, and all
+    // 33 × 5 strings are keyed below in both languages. The table keeps what only
+    // a table can hold — WHICH METRICS EXIST (metric_key) and their structure
+    // (basis, unit, grain-as-a-machine-value, source_view) — and `metric_key` is
+    // the join between a registry row and its copy here.
+    //
+    // WHY NOT `label_ar` / `meaning_ar` / … COLUMNS, which an earlier draft of
+    // 0187 added: the app's words live in this file. A translation split across a
+    // dictionary and five database columns has two edit paths, two review paths
+    // and no compiler — a missing key stops at `tsc`, a missing column value does
+    // not stop anywhere. It also made the Arabic un-reviewable in a diff.
+    //
+    // TWENTY-ONE LABELS, NOT THIRTY-THREE. Twelve metric_keys already have a name
+    // in `reports.metric` above, byte-identical in English to the label the
+    // database carries — collections, commissions_cost, expenses, filling_cost,
+    // net_profit, operating_cost, operating_margin, operating_profit,
+    // parts_cost_at_consumption, payroll_cost, purchasing_spend, revenue. Those
+    // read that key through METRIC_LABEL_TKEY in lib/reports and are deliberately
+    // absent here: a second entry is how one metric ends up with two names.
+    //
+    // The five that are NOT reused despite having a near neighbour there are not
+    // an oversight — the two strings genuinely differ, because `reports.metric` is
+    // a COLUMN HEADING and this is the metric's FULL NAME:
+    // maintenance_cost_per_truck ("Maintenance parts cost per truck" vs
+    // "Maintenance parts"), total_maintenance_per_truck, os_payments_per_truck,
+    // os_cost ("Outsourced repair cost" vs "Outsourced cost") and `operations`
+    // ("Operational activity" vs "Trips delivered"). Same for the three balance
+    // terms, whose words also sit under `trips.invoiceSheet.paidUpBalance`,
+    // `trips.statement.colRunningBalance` and `trips.finance.colAmountPayable`:
+    // those are three component-scoped table headings on another route, and
+    // pointing a dictionary entry at one would let a Finance-tab column rename
+    // silently rewrite a definition.
+    //
+    // CAVEAT IS ABSENT ON EXACTLY TWO, IN BOTH LANGUAGES — operating_profit and
+    // os_cost carry no warning, and "no warning" must not become "warning we
+    // failed to load". A key present in one language only would print the other
+    // language's sentence under a heading that promises a caution; a key absent
+    // from both renders nothing at all, which is the honest state. Asserted by
+    // scripts/metric-copy-check.ts, which is the only thing standing between an
+    // absent caveat and a mistyped one.
+    //
+    // NOT HERE, DELIBERATELY: `metric_key` and `source_view`. Their values are
+    // POINTERS — `v_pnl_by_period.payroll_sar`, `lib/prepaid.ts: paidUpBalance()`
+    // — and a translated address does not resolve. `basis` and `unit` are not
+    // here either: they are closed enums with their own key sets above, so five
+    // words are stored once rather than thirty-three times.
+    //
+    // FOUR FORMULAS ARE BYTE-IDENTICAL ACROSS en AND ar, and that IS the
+    // translation rather than a gap: net_profit, operating_cost, operating_profit
+    // and total_maintenance_per_truck spell their formula entirely in metric
+    // names and operators (`revenue - operating_cost.`), with no word in them.
+    //
+    // English is byte-identical to the report_metrics column it came from — md5
+    // of the whole 30-row corpus, DB side and this side,
+    // bd3d2ac5d0a96dff7fe2be59beabcd5d (measured 2026-09-08). That matters
+    // because the DB column is the LAST fall-through: metricText() in lib/reports
+    // tries the reader's language, then the English side here, then the row's own
+    // column, so a metric a future migration registers before its copy is keyed
+    // renders its English rather than a blank.
+    metricDef: {
+      amount_payable: {
+        label: { en: "Amount Payable", ar: "المبلغ الواجب السداد" },
+        meaning: { en: "What the customer still owes for work already provided: delivered trips and special charges not yet on a PAID invoice.", ar: "ما يزال العميل مدينًا به مقابل عمل تم تنفيذه بالفعل: الرحلات المسلَّمة والرسوم الخاصة التي لم تُدرَج بعد في فاتورة مدفوعة." },
+        formula: { en: "computeAmountPayable in app/trips/amountPayable.ts: derivedBalanceItems run with an EMPTY credits side over the delivered trips and non-void special charges that are not on a paid invoice, VAT-inclusive at the project rate. Negative means owed to us, zero means settled; <= 0 by construction.", ar: "الدالة computeAmountPayable في app/trips/amountPayable.ts: تشغيل derivedBalanceItems بجانب دائن فارغ على الرحلات المسلَّمة والرسوم الخاصة غير الملغاة التي ليست على فاتورة مدفوعة، شاملة الضريبة بسعر المشروع. والسالب يعني مستحقًا لنا، والصفر يعني مسدَّدًا؛ وهو ≤ 0 بحكم تكوينه." },
+        grain: { en: "one customer, at an instant", ar: "عميل واحد، في لحظة بعينها" },
+        caveat: { en: "One rule for BOTH payment modes. Only marking an invoice PAID reduces it — a prepaid top-up does not, because a deposit funds the work rather than settling it. That is true by construction: the credits side is passed empty. paid-up = running - payable, so a customer can hold pool credit and owe here at the same time; that is the model, not a discrepancy. DO NOT read this from v_customer_amount_payable: for a prepaid customer that view returns the RUNNING BALANCE, not this column, and the divergence is deliberate because return_customer_balance() gates a real cash refund on it. Not a period measure and not a view.", ar: "قاعدة واحدة لطريقتَي الدفع كلتيهما. ولا يقلّ هذا المبلغ إلا بتحديد الفاتورة كمدفوعة — أما إضافة رصيد مقدم فلا تقلّله، لأن الإيداع يموّل العمل ولا يسدده. وذلك صحيح بحكم التكوين: فالجانب الدائن يُمرَّر فارغًا. والمعادلة: الرصيد المسدَّد = الرصيد الجاري - المبلغ الواجب السداد، فقد يحمل العميل رصيدًا في الحوض ويكون مدينًا هنا في الوقت نفسه؛ وذلك هو النموذج لا تعارضًا فيه. ولا يُقرأ هذا الرقم من v_customer_amount_payable: فذلك العرض يُرجع لعميل الدفع المقدم الرصيد الجاري لا هذا العمود، والاختلاف مقصود لأن return_customer_balance() تعتمد عليه في ضبط استرداد نقدي حقيقي. وهو ليس مقياس فترة ولا عرضًا." },
+      },
+      collections: {
+        meaning: { en: "Value of invoices settled in the month — marked paid, whatever settled them.", ar: "قيمة الفواتير التي سُدِّدت خلال الشهر — أي حُدِّدت مدفوعة، أيًّا كان ما سدَّدها." },
+        formula: { en: "Sum of grand_total_sar over invoices whose paid_at falls in the month. VAT-inclusive, because it is the value of the document that was settled.", ar: "مجموع grand_total_sar للفواتير التي يقع paid_at الخاص بها في الشهر. شامل الضريبة، لأنه قيمة المستند الذي سُدِّد." },
+        grain: { en: "one month", ar: "شهر واحد" },
+        caveat: { en: "NOT cash, and not revenue. Since prepaid, an invoice settled with payment_method='balance' moves no money on the day it is marked paid — the cash arrived earlier, at top-up, and is counted there by `topups`. Measured 2026-08: 105,225.00 of 109,020.00 settled from balance. Deliberately never added to revenue either: an invoice earns revenue when confirmed and is settled when paid, often in different months.", ar: "ليس نقدًا ولا إيرادًا. فمنذ الدفع المقدم، الفاتورة التي تُسدَّد بـ payment_method='balance' لا تحرّك مالًا يوم تحديدها مدفوعة — فالنقد وصل قبل ذلك عند الشحن، وهو محتسَب هناك بـ topups. قياس 2026-08: 105,225.00 من 109,020.00 سُدِّدت من الرصيد. ولا تُضاف إلى الإيراد أبدًا عن قصد كذلك: فالفاتورة تكسب إيرادها عند التأكيد وتُسدَّد عند الدفع، وكثيرًا ما يقع ذلك في شهرين مختلفين." },
+      },
+      commissions_cost: {
+        meaning: { en: "Driver commission earned in the month.", ar: "عمولة السائقين المستحقة خلال الشهر." },
+        formula: { en: "Trip commission on delivered trips by trip_date, plus approved specials, adjustments and bonuses by month_key.", ar: "عمولة الرحلات المسلَّمة حسب trip_date، زائد المكافآت الخاصة والتسويات والحوافز المعتمدة حسب month_key." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+        caveat: { en: "Earned, not paid. commission_payouts drives the separate cash view; adding both would double-count, since a payout's base is the same trip commission. Adjustments are signed and are often negative deductions, which correctly reduce the total.", ar: "مستحقة لا مدفوعة. فجدول commission_payouts يغذّي العرض النقدي المنفصل؛ وجمع الاثنين يحتسب المبلغ مرتين، لأن أساس الصرف هو عمولة الرحلة نفسها. والتسويات ذات إشارة وكثيرًا ما تكون خصومًا سالبة، وهي تخفّض الإجمالي عن حق." },
+      },
+      commissions_paid: {
+        label: { en: "Commissions paid", ar: "العمولات المدفوعة" },
+        meaning: { en: "Commission actually paid out in the month.", ar: "العمولة المصروفة فعليًا خلال الشهر." },
+        formula: { en: "Sum of commission_payouts.total_sar by paid_at month.", ar: "مجموع commission_payouts.total_sar حسب شهر paid_at." },
+        grain: { en: "one month", ar: "شهر واحد" },
+        caveat: { en: "The cash counterpart to commissions_cost. Never add the two together.", ar: "النظير النقدي لـ commissions_cost. ولا يُجمع الاثنان أبدًا." },
+      },
+      daily_direct_cost: {
+        label: { en: "Direct cost (daily)", ar: "التكلفة المباشرة (يومي)" },
+        meaning: { en: "The part of operating cost that can honestly be attributed to a single day.", ar: "الجزء من تكلفة التشغيل الذي يمكن نسبته بصدق إلى يوم واحد." },
+        formula: { en: "Parts consumed at FIFO cost (v_parts_consumption_daily) + outsourced workshop payments by coalesce(invoice_date, created_at) + commission earned on trips delivered that day.", ar: "القطع المستهلكة بتكلفة FIFO (v_parts_consumption_daily) + مدفوعات الورش الخارجية حسب coalesce(invoice_date, created_at) + العمولة المستحقة على الرحلات المسلَّمة في ذلك اليوم." },
+        grain: { en: "one day", ar: "يوم واحد" },
+        caveat: { en: "NOT the same measure as operating_cost. It EXCLUDES payroll and commission specials/adjustments/bonus, which have no daily source at all — payroll alone was 67-99% of operating cost in every month measured. Never present this as \"cost\" without showing monthly_only_cost beside it.", ar: "ليست المقياس نفسه الذي يقيسه operating_cost. فهي تستثني الرواتب والمكافآت الخاصة والتسويات والحوافز، إذ لا مصدر يومي لأيٍّ منها إطلاقًا — والرواتب وحدها شكّلت 67-99% من تكلفة التشغيل في كل شهر جرى قياسه. ولا تُعرض هذه القيمة أبدًا بوصفها «التكلفة» دون إظهار monthly_only_cost إلى جانبها." },
+      },
+      daily_direct_margin: {
+        label: { en: "Direct margin (daily)", ar: "الهامش المباشر (يومي)" },
+        meaning: { en: "Daily revenue minus the cost that has a daily source. A contribution figure, not profit.", ar: "الإيراد اليومي ناقص التكلفة التي لها مصدر يومي. رقم مساهمة لا ربح." },
+        formula: { en: "daily_revenue - daily_direct_cost, computed per day in SQL.", ar: "daily_revenue - daily_direct_cost، تُحسب لكل يوم داخل SQL." },
+        grain: { en: "one day", ar: "يوم واحد" },
+        caveat: { en: "NOT profit and never to be labelled as such: it is measured before payroll, non-trip commission and manual expenses. It will look far healthier than the real operating margin, because most cost is missing from it by construction.", ar: "ليست ربحًا ولا يجوز تسميتها كذلك أبدًا: فهي تُقاس قبل الرواتب والعمولات غير المرتبطة بالرحلات والمصروفات اليدوية. وستبدو أفضل حالًا بكثير من هامش التشغيل الحقيقي، لأن معظم التكلفة غائب عنها بحكم تكوينها." },
+      },
+      daily_revenue: {
+        label: { en: "Revenue (daily)", ar: "الإيرادات (يومي)" },
+        meaning: { en: "Revenue for a single day — the same measure as monthly revenue, on a finer calendar.", ar: "إيراد يوم واحد — المقياس نفسه المستخدم في الإيراد الشهري، على تقويم أدق." },
+        formula: { en: "Sum of grand_subtotal_sar over confirmed, non-voided invoices, bucketed by the DAY confirmed_at falls on. Read from v_revenue_invoices, so it is the same rows as v_revenue_monthly and sums back to it exactly.", ar: "مجموع grand_subtotal_sar للفواتير المؤكَّدة غير الملغاة، موزَّعة حسب اليوم الذي يقع فيه confirmed_at. تُقرأ من v_revenue_invoices، فهي الصفوف نفسها التي يقرأها v_revenue_monthly وتُجمَع لتساويه تمامًا." },
+        grain: { en: "one day", ar: "يوم واحد" },
+        caveat: { en: "This is INVOICING day, not work day. Revenue lands on the day an invoice was confirmed, not across the days its trips ran, so the daily series is lumpy by nature — live, one invoice puts 40,800 SAR on a single day. Days with no invoicing read 0 and that is correct, not missing data.", ar: "هذا يوم إصدار الفاتورة لا يوم العمل. فالإيراد يقع في يوم تأكيد الفاتورة، لا موزَّعًا على أيام تنفيذ رحلاتها، ولذلك فالسلسلة اليومية متقطّعة بطبيعتها — وعلى البيانات الحية وضعت فاتورة واحدة 40,800 ر.س في يوم واحد. والأيام التي لم يصدر فيها فاتورة تقرأ 0، وذلك صحيح لا بيانات ناقصة." },
+      },
+      delivered_revenue_daily: {
+        label: { en: "Delivered revenue (daily)", ar: "إيراد العمل المسلَّم (يومي)" },
+        meaning: { en: "What the day's delivered work was worth, whether or not it has been invoiced yet.", ar: "قيمة العمل المسلَّم في اليوم، سواء صدرت به فاتورة أم لم تصدر بعد." },
+        formula: { en: "For each trip with stage = delivered, its project's rate_per_trip_sar, summed by trips.trip_date — the day the trip ran. A delivered trip with no project contributes 0 and is counted separately as unpriced.", ar: "لكل رحلة مرحلتها delivered، سعر رحلة مشروعها rate_per_trip_sar، مجموعًا حسب trips.trip_date — يوم تنفيذ الرحلة. والرحلة المسلَّمة بلا مشروع تساهم بصفر وتُعدّ منفصلة بوصفها غير مسعَّرة." },
+        grain: { en: "one day", ar: "يوم واحد" },
+        caveat: { en: "EARNED, NOT BILLED, and DASHBOARD-ONLY — Reports, v_pnl_monthly and every margin still use billed revenue, and this metric is never mixed into them. It differs from billed revenue two ways: TIMING (work is delivered before it is invoiced, so a month can show delivered revenue with zero billed) and COVERAGE (delivered work not invoiced at all). Billed can also EXCEED delivered, because an invoice may cover earlier periods and special charges. Never add the two together. Bucketed by trip_date (the operational day, and the same bucket the Kanban board and v_delivery_output_daily use), NOT by delivered_at — that column records when the stage button was pressed, and this fleet advances trips in bulk, which put 310 trips on a single day and left the rest of the month empty (0109).", ar: "مُكتسَب لا مفوتَر، ومقصور على لوحة المعلومات — فالتقارير وv_pnl_monthly وكل هامش لا تزال تستخدم الإيراد المفوتَر، وهذا المقياس لا يُخلط بها أبدًا. ويختلف عن الإيراد المفوتَر من وجهين: التوقيت (فالعمل يُسلَّم قبل أن يُفوتَر، فقد يُظهر شهر إيرادًا مسلَّمًا وإيرادًا مفوترًا صفرًا) والتغطية (عمل مسلَّم لم يُفوتَر أصلًا). وقد يتجاوز المفوتَر المسلَّمَ أيضًا، لأن الفاتورة قد تغطي فترات سابقة ورسومًا خاصة. ولا يُجمع الرقمان أبدًا. والتوزيع حسب trip_date (اليوم التشغيلي، وهو التوزيع نفسه الذي تستخدمه لوحة كانبان وv_delivery_output_daily)، لا حسب delivered_at — فذلك العمود يسجّل وقت الضغط على زر المرحلة، وهذا الأسطول ينقل الرحلات دفعةً واحدة، ما وضع 310 رحلات في يوم واحد وترك بقية الشهر فارغة (0109)." },
+      },
+      delivery_output: {
+        label: { en: "Delivery output", ar: "الناتج التسليمي" },
+        meaning: { en: "How much hauling capacity went out on deliveries in a day, alongside how many trips it took.", ar: "مقدار السعة الناقلة التي خرجت في التسليمات خلال اليوم، إلى جانب عدد الرحلات التي لزمت لذلك." },
+        formula: { en: "capacity_m3: sum of trucks.capacity_m3 over trips with stage = delivered on that trip_date, joined through trips.truck_id. trips_delivered: read directly from v_daily_operations, not recounted.", ar: "capacity_m3: مجموع trucks.capacity_m3 للرحلات التي مرحلتها delivered في ذلك trip_date، مربوطة عبر trips.truck_id. وtrips_delivered: تُقرأ مباشرة من v_daily_operations ولا يُعاد عدّها." },
+        grain: { en: "one day", ar: "يوم واحد" },
+        caveat: { en: "capacity_m3 is a PROXY FOR VOLUME, not a measurement. trips.tank_size_m3 — the column that would hold real delivered volume — is unpopulated on all 203 trips, so this counts the full capacity of the truck that ran, whether or not it ran full. Read it as capacity dispatched. It also EXCLUDES delivered trips with no truck_id (2 of 154 live); those still count as trips, so trips_delivered can exceed what capacity_m3 accounts for — trips_delivered_no_truck reports exactly how many. Trucks are joined without a terminated_at filter on purpose: a since-terminated truck still hauled its historical loads.", ar: "capacity_m3 مؤشّر تقريبي للحجم لا قياس له. فعمود trips.tank_size_m3 — وهو ما كان سيحمل الحجم المسلَّم الحقيقي — غير مُعبّأ في الرحلات الـ203 كلها، ولذلك يحتسب هذا الرقم كامل سعة الشاحنة التي عملت، سواء عملت ممتلئة أم لا. فاقرأه بوصفه سعة مُرسَلة. وهو يستثني كذلك الرحلات المسلَّمة بلا truck_id (2 من 154 على البيانات الحية)؛ وتلك تظل تُعدّ رحلات، فقد يتجاوز trips_delivered ما يغطيه capacity_m3 — وtrips_delivered_no_truck يبيّن عددها بالضبط. والشاحنات مربوطة دون تصفية terminated_at عن قصد: فالشاحنة التي أُوقفت لاحقًا نقلت حمولاتها التاريخية فعلًا." },
+      },
+      expenses: {
+        meaning: { en: "Costs recorded by hand that the app does not otherwise model.", ar: "تكاليف تُسجَّل يدويًا لا يمثّلها التطبيق بطريقة أخرى." },
+        formula: { en: "Sum of expenses.amount_sar by expense_date month.", ar: "مجموع expenses.amount_sar حسب شهر expense_date." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+        caveat: { en: "Measured separately and never merged into the operational buckets. The P&L shows operating profit before these and net profit after, so their effect is always visible.", ar: "تُقاس منفصلة ولا تُدمج أبدًا في بنود التشغيل. وقائمة الدخل تعرض ربح التشغيل قبلها وصافي الربح بعدها، فيظل أثرها ظاهرًا دائمًا." },
+      },
+      filling_cost: {
+        meaning: { en: "What water stations charged us to fill the trucks.", ar: "ما تقاضته محطات المياه مقابل تعبئة الشاحنات." },
+        formula: { en: "Sum of trips.filling_cost_sar — the price frozen onto each trip at capture — for trips that have reached loading, in_transit or delivered, by trip month.", ar: "مجموع trips.filling_cost_sar — السعر المثبَّت على كل رحلة عند تسجيلها — للرحلات التي بلغت loading أو in_transit أو delivered، حسب شهر الرحلة." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+        caveat: { en: "THE TOTAL EXCLUDES UNPRICED TRIPS AND IS SHORT BY AN UNKNOWN AMOUNT. filling_cost_sar covers only trips that carried a filling price; a trip whose station did not price its water type — grandfathered rows predating per-type pricing — contributes nothing and is counted separately as uncosted_trips. Live: 10 uncosted in June, 3 in July, 0 in August. Anyone reconciling this cost against a trip count must read the uncosted figure beside it. Since 0114 no NEW uncosted trip can be created, so the count is historical and fixed — but the historical total stays short. A SCHEDULED trip has not filled yet and is excluded entirely, so summing trips.filling_cost_sar raw will EXCEED this view.", ar: "الإجمالي يستثني الرحلات غير المسعَّرة وهو ناقص بمقدار غير معلوم. فعمود filling_cost_sar لا يغطي إلا الرحلات التي حملت سعر تعبئة؛ أما الرحلة التي لم تسعّر محطتها نوع مياهها — وهي صفوف قديمة سابقة للتسعير حسب النوع — فلا تساهم بشيء وتُعدّ منفصلة بوصفها uncosted_trips. وعلى البيانات الحية: 10 غير مسعَّرة في يونيو، و3 في يوليو، و0 في أغسطس. وعلى كل من يطابق هذه التكلفة مع عدد الرحلات أن يقرأ رقم غير المسعَّرة إلى جانبها. ومنذ 0114 لا يمكن إنشاء رحلة غير مسعَّرة جديدة، فالعدد تاريخي وثابت — لكن الإجمالي التاريخي يبقى ناقصًا. والرحلة المجدولة لم تُعبَّأ بعد وتُستثنى كليًا، فجمع trips.filling_cost_sar خامًا سيتجاوز هذا العرض." },
+      },
+      maintenance_cost_per_truck: {
+        label: { en: "Maintenance parts cost per truck", ar: "تكلفة قطع الصيانة لكل شاحنة" },
+        meaning: { en: "FIFO cost of parts consumed by work orders on each truck. Parts only.", ar: "تكلفة FIFO للقطع التي استهلكتها أوامر العمل على كل شاحنة. القطع فقط." },
+        formula: { en: "v_parts_consumption filtered to maintenance with a truck, grouped by truck and month.", ar: "v_parts_consumption مصفّى على الصيانة المرتبطة بشاحنة، مجمَّعًا حسب الشاحنة والشهر." },
+        grain: { en: "one truck in one month", ar: "شاحنة واحدة في شهر واحد" },
+        caveat: { en: "Parts only — outsourced repair spend for the same truck is os_payments_per_truck, and the two together are total_maintenance_per_truck. Labour is not costed anywhere in this schema. This parts-only measure is what the Consumption page's top-costly-trucks shows today.", ar: "القطع فقط — أما إنفاق الإصلاح الخارجي للشاحنة نفسها فهو os_payments_per_truck، والاثنان معًا هما total_maintenance_per_truck. والعمالة غير مُكلَّفة في أي موضع من هذا المخطط. وهذا المقياس المقصور على القطع هو ما تعرضه صفحة الاستهلاك اليوم في أعلى الشاحنات تكلفة." },
+      },
+      monthly_only_cost: {
+        label: { en: "Cost with no daily source", ar: "تكلفة بلا مصدر يومي" },
+        meaning: { en: "How much cost a daily view cannot see, for the month.", ar: "مقدار التكلفة التي لا يراها أي عرض يومي، عن الشهر." },
+        formula: { en: "Payroll (staff.monthly_salary_sar + drivers.salary_sar over the employment window) + approved commission specials, adjustments and bonus, all of which are monthly by source.", ar: "الرواتب (staff.monthly_salary_sar + drivers.salary_sar خلال فترة التوظيف) + المكافآت الخاصة والتسويات والحوافز المعتمدة، وكلها شهرية المصدر." },
+        grain: { en: "one month", ar: "شهر واحد" },
+        caveat: { en: "Exists so a daily chart can state its own blind spot as a number instead of a disclaimer. Never divide it across days — no row in this database supports a per-day split. Payroll also carries 0098 limitation A: the amount is each person's CURRENT salary, only the employment window is historical.", ar: "وُجد ليتيح لرسم بياني يومي أن يصرّح بنقطته العمياء رقمًا بدل تنويه. ولا يُقسَّم أبدًا على الأيام — فلا صف في قاعدة البيانات يسند تقسيمًا يوميًا. والرواتب تحمل كذلك القيد A من 0098: المبلغ هو الراتب الحالي لكل شخص، والتاريخي هو فترة التوظيف وحدها." },
+      },
+      net_profit: {
+        meaning: { en: "Operating profit after manually recorded expenses.", ar: "ربح التشغيل بعد المصروفات المسجَّلة يدويًا." },
+        formula: { en: "operating_profit - expenses.", ar: "operating_profit - expenses." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+        caveat: { en: "Only as complete as what has been entered by hand. If no expenses are recorded, this equals operating profit.", ar: "لا يكتمل إلا بقدر ما أُدخل يدويًا. فإن لم تُسجَّل مصروفات، ساوى ربح التشغيل." },
+      },
+      operating_cost: {
+        meaning: { en: "The four operational cost buckets added together.", ar: "بنود تكلفة التشغيل الأربعة مجموعة معًا." },
+        formula: { en: "parts_cost_at_consumption + os_cost + payroll_cost + commissions_cost.", ar: "parts_cost_at_consumption + os_cost + payroll_cost + commissions_cost." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+        caveat: { en: "Excludes manually recorded expenses by design — those sit in their own section.", ar: "تستثني المصروفات المسجَّلة يدويًا عن قصد — فتلك في قسمها الخاص." },
+      },
+      operating_margin: {
+        meaning: { en: "What share of revenue survives the operational costs.", ar: "أي نسبة من الإيراد تبقى بعد تكاليف التشغيل." },
+        formula: { en: "operating_profit / revenue x 100, null when revenue is zero.", ar: "operating_profit / revenue × 100، وفارغ حين يكون الإيراد صفرًا." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+        caveat: { en: "Null rather than zero in a month with no revenue — a margin on nothing is not a number. RATIOS DO NOT ADD OR AVERAGE ACROSS PERIODS: a quarter's margin must be recomputed from that quarter's own totals, which is what v_pnl_by_period does. Averaging the three monthly margins for Q3-to-date gives +20.5% where the correct figure is -38.7% — it flips the sign, not just the value.", ar: "فارغ لا صفر في شهر بلا إيراد — فالهامش على لا شيء ليس رقمًا. والنسب لا تُجمع ولا يُؤخذ متوسطها عبر الفترات: هامش الربع يجب أن يُعاد حسابه من إجماليات ذلك الربع نفسه، وهو ما يفعله v_pnl_by_period. فمتوسط هوامش الأشهر الثلاثة للربع الثالث حتى تاريخه يعطي +20.5% حيث الرقم الصحيح -38.7% — أي أنه يقلب الإشارة لا القيمة وحدها." },
+      },
+      operating_profit: {
+        meaning: { en: "Revenue minus the four operational cost buckets, before manual expenses.", ar: "الإيراد ناقص بنود تكلفة التشغيل الأربعة، قبل المصروفات اليدوية." },
+        formula: { en: "revenue - operating_cost.", ar: "revenue - operating_cost." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+      },
+      operations: {
+        label: { en: "Operational activity", ar: "النشاط التشغيلي" },
+        meaning: { en: "Non-money activity: trips, active trucks, and maintenance frequency.", ar: "نشاط غير مالي: الرحلات، والشاحنات العاملة، وتواتر الصيانة." },
+        formula: { en: "Counts per month of trips, delivered trips, distinct trucks used, work orders, outsourced jobs and exit permits.", ar: "أعداد شهرية للرحلات، والرحلات المسلَّمة، والشاحنات المتمايزة المستخدمة، وأوامر العمل، والأعمال الخارجية، وتصاريح الخروج." },
+        grain: { en: "one month", ar: "شهر واحد" },
+        caveat: { en: "Trips, delivered trips, work orders, outsourced jobs and exit permits are event counts and add across months. Trucks active does NOT: it is a distinct count of the trucks that moved within a single month, so adding months together double-counts any truck that worked in more than one. A period covering several months therefore reports the busiest single month rather than a total, and the Operations statement labels that figure \"most in any one month\" and calls it \"Trucks that moved\". A true whole-period distinct count cannot be derived from monthly figures at all.", ar: "الرحلات والرحلات المسلَّمة وأوامر العمل والأعمال الخارجية وتصاريح الخروج أعداد أحداث وتُجمع عبر الأشهر. أما الشاحنات العاملة فلا: فهي عدّ متمايز للشاحنات التي تحركت داخل شهر واحد، وجمع الأشهر يحتسب مرتين أي شاحنة عملت في أكثر من شهر. ولذلك تعرض الفترة الممتدة على عدة أشهر أكثر شهر انفرادًا لا إجماليًا، وكشف العمليات يسمّي ذلك الرقم «الأكثر في أي شهر واحد» ويسميه «الشاحنات التي تحركت». أما العدّ المتمايز الحقيقي للفترة كلها فلا يمكن اشتقاقه من الأرقام الشهرية إطلاقًا." },
+      },
+      operations_by_driver: {
+        label: { en: "Delivery performance by driver", ar: "أداء التسليم حسب السائق" },
+        meaning: { en: "Each driver's trip workload and delivery completion in the month; the truck they drove is shown for context only.", ar: "عبء رحلات كل سائق وإنجازه التسليمي خلال الشهر؛ والشاحنة التي قادها تُعرض للسياق فقط." },
+        formula: { en: "Trips grouped by driver and month: scheduled = all trips, delivered = stage delivered, completion rate = delivered / scheduled x 100 from that driver's own totals.", ar: "الرحلات مجمَّعة حسب السائق والشهر: المجدولة = كل الرحلات، والمسلَّمة = ما مرحلتها delivered، ونسبة الإنجاز = المسلَّمة / المجدولة × 100 من إجماليات ذلك السائق نفسه." },
+        grain: { en: "one driver in one month", ar: "سائق واحد في شهر واحد" },
+        caveat: { en: "The driver is the measured unit; the truck (primary_plate) is display-only context, and trucks_used flags when a driver drove more than one. Trips with no driver fall into an Unassigned bucket in the UI so the columns still foot to the period total. Completion rate is per driver from own totals, never averaged across drivers.", ar: "السائق هو الوحدة المقيسة؛ أما الشاحنة (primary_plate) فسياق للعرض فقط، وtrucks_used يشير إلى أن السائق قاد أكثر من شاحنة. والرحلات بلا سائق تقع في بند «غير مُسنَدة» في الواجهة كي تظل الأعمدة موافقة لإجمالي الفترة. ونسبة الإنجاز لكل سائق من إجمالياته هو، ولا يؤخذ متوسطها عبر السائقين أبدًا." },
+      },
+      os_cost: {
+        label: { en: "Outsourced repair cost", ar: "تكلفة الإصلاح الخارجي" },
+        meaning: { en: "What outside workshops were paid for repairs.", ar: "ما دُفع للورش الخارجية مقابل الإصلاحات." },
+        formula: { en: "Sum of workshop_payments.grand_total_sar by invoice_date month.", ar: "مجموع workshop_payments.grand_total_sar حسب شهر invoice_date." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+      },
+      os_payments_per_truck: {
+        label: { en: "Outsourced payments per truck", ar: "المدفوعات الخارجية لكل شاحنة" },
+        meaning: { en: "What outside workshops were paid for repairs on each truck.", ar: "ما دُفع للورش الخارجية مقابل إصلاحات كل شاحنة." },
+        formula: { en: "workshop_payments joined to outsourced_jobs, taking the job's truck_id, grouped by truck and month.", ar: "workshop_payments مربوطًا بـ outsourced_jobs، مع أخذ truck_id من العمل، مجمَّعًا حسب الشاحنة والشهر." },
+        grain: { en: "one truck in one month", ar: "شاحنة واحدة في شهر واحد" },
+        caveat: { en: "Every payment traces to a truck through its job. A truck-month can have outsourced spend with no parts at all — those rows exist and are not errors.", ar: "كل دفعة تعود إلى شاحنة عبر عملها. وقد يكون لشهر شاحنةٍ إنفاق خارجي بلا أي قطع — وتلك صفوف قائمة وليست أخطاء." },
+      },
+      paid_up_balance: {
+        label: { en: "Paid-up balance", ar: "الرصيد المسدَّد" },
+        meaning: { en: "A prepaid customer's deposits minus what PAID invoices have settled, minus refunds. Not the spendable pool.", ar: "إيداعات عميل الدفع المقدم ناقص ما سدّدته الفواتير المدفوعة، ناقص المبالغ المستردة. وليس الرصيد القابل للإنفاق." },
+        formula: { en: "paidUpCore in lib/prepaid.ts: sum of customer_topups, minus the consumption settled by invoices whose status is paid, minus customer_balance_returns. Deducts at PAYMENT, not at delivery.", ar: "الدالة paidUpCore في lib/prepaid.ts: مجموع customer_topups، ناقص الاستهلاك الذي سدّدته الفواتير التي حالتها مدفوعة، ناقص customer_balance_returns. تُخصم عند الدفع لا عند التسليم." },
+        grain: { en: "one customer, at an instant", ar: "عميل واحد، في لحظة بعينها" },
+        caveat: { en: "Not a period measure and not a view: it is computed in the app, per customer, for the instant you are looking at. paid-up = running - payable, so this is the running balance with the not-yet-settled work added back. A customer can hold pool credit and still owe on Amount Payable at the same time; that is the model, not a discrepancy. Prepaid only — a postpaid customer has no pool. Never place it in a period column or on a monthly trend line.", ar: "ليس مقياس فترة ولا عرضًا: فهو يُحسب داخل التطبيق، لكل عميل، للحظة التي تنظر فيها. والمعادلة: الرصيد المسدَّد = الرصيد الجاري - المبلغ الواجب السداد، أي أنه الرصيد الجاري مضافًا إليه العمل الذي لم يُسدَّد بعد. وقد يحمل العميل رصيدًا في الحوض ويكون مدينًا بالمبلغ الواجب السداد في الوقت نفسه؛ وذلك هو النموذج لا تعارضًا فيه. وهو مقصور على الدفع المقدم — فعميل الدفع الآجل بلا حوض رصيد. ولا يوضع أبدًا في عمود فترة ولا على خط اتجاه شهري." },
+      },
+      parts_cost_at_consumption: {
+        meaning: { en: "The FIFO cost of parts that actually left stock — maintenance draws plus non-maintenance exits.", ar: "تكلفة FIFO للقطع التي خرجت فعليًا من المخزون — مسحوبات الصيانة زائد الخروج لغير الصيانة." },
+        formula: { en: "Net of returns from both per-lot ledgers (consume minus return), plus a fallback of work_order_parts.qty x unit_price_sar for work orders deducted before the ledger existed.", ar: "صافي المرتجعات من سجلَّي الدفعات كليهما (استهلاك ناقص إرجاع)، زائد بديل احتياطي هو work_order_parts.qty × unit_price_sar لأوامر العمل التي خُصمت قبل وجود السجل." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+        caveat: { en: "Purchases are NOT a cost here — a purchase is inventory until consumed, and expensing both would double-count. Live, receipts over the same window are roughly 57x the consumption figure. The pre-ledger fallback is the same stamped price from the other end of the same write, not a recomputation.", ar: "المشتريات ليست تكلفة هنا — فالشراء مخزون حتى يُستهلك، وتحميل الاثنين يحتسب المبلغ مرتين. وعلى البيانات الحية، بلغت المستلمات خلال المدة نفسها نحو 57 ضعف رقم الاستهلاك. والبديل الاحتياطي السابق للسجل هو السعر المثبَّت نفسه من الطرف الآخر للعملية نفسها، لا إعادة حساب." },
+      },
+      payroll_cost: {
+        meaning: { en: "Monthly salaries of staff and drivers employed during the month.", ar: "الرواتب الشهرية للموظفين والسائقين العاملين خلال الشهر." },
+        formula: { en: "Sum of staff.monthly_salary_sar and drivers.salary_sar for people whose employment window overlaps the month.", ar: "مجموع staff.monthly_salary_sar وdrivers.salary_sar لمن تتداخل فترة توظيفهم مع الشهر." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+        caveat: { en: "IMPORTANT: salaries have no history in this schema. The amount is each person's CURRENT salary, so a raise retroactively changes every past month. Only the employment window is historical. people_missing_salary counts those with no salary recorded, who contribute zero.", ar: "مهم: لا تاريخ للرواتب في هذا المخطط. فالمبلغ هو الراتب الحالي لكل شخص، ومن ثَمّ فإن أي زيادة تغيّر بأثر رجعي كل شهر مضى. والتاريخي هو فترة التوظيف وحدها. وpeople_missing_salary يعدّ من لا راتب مسجَّلًا لهم، وهم يساهمون بصفر." },
+      },
+      pnl_by_period: {
+        label: { en: "P&L by period", ar: "قائمة الدخل حسب الفترة" },
+        meaning: { en: "The monthly P&L rolled up to month, quarter or year — one shape, three grains.", ar: "قائمة الدخل الشهرية مجمَّعة إلى شهر أو ربع أو سنة — شكل واحد وثلاثة مستويات تفصيل." },
+        formula: { en: "Sums of the monthly P&L columns per period; operating margin recomputed from the period's own totals (operating_profit / revenue x 100), null when the period has no revenue.", ar: "مجاميع أعمدة قائمة الدخل الشهرية لكل فترة؛ ويُعاد حساب هامش التشغيل من إجماليات الفترة نفسها (operating_profit / revenue × 100)، وهو فارغ حين لا إيراد للفترة." },
+        grain: { en: "one period (month, quarter or year)", ar: "فترة واحدة (شهر أو ربع أو سنة)" },
+        caveat: { en: "Amounts add across months; RATIOS do not. The margin here is always recomputed from the period's own totals — averaging monthly margins would be wrong (a quarter can be loss-making while its only revenue month shows a positive margin).", ar: "المبالغ تُجمع عبر الأشهر؛ أما النسب فلا. والهامش هنا يُعاد حسابه دائمًا من إجماليات الفترة نفسها — ومتوسط الهوامش الشهرية سيكون خطأ (فقد يكون الربع خاسرًا بينما يُظهر شهر الإيراد الوحيد فيه هامشًا موجبًا)." },
+      },
+      purchasing_spend: {
+        meaning: { en: "Value of stock received into the warehouses.", ar: "قيمة المخزون المستلَم في المستودعات." },
+        formula: { en: "Sum of stock_receipts.grand_total_sar by received_on month.", ar: "مجموع stock_receipts.grand_total_sar حسب شهر received_on." },
+        grain: { en: "one month", ar: "شهر واحد" },
+        caveat: { en: "A procurement/cash view ONLY. It is deliberately not a P&L line — that cost reaches the P&L later, as parts_cost_at_consumption, when the stock is actually used.", ar: "عرض للمشتريات والنقد فقط. وهو عن قصد ليس بندًا في قائمة الدخل — فتلك التكلفة تبلغ القائمة لاحقًا، بوصفها parts_cost_at_consumption، حين يُستهلك المخزون فعلًا." },
+      },
+      receivables_aging: {
+        label: { en: "Receivables aging", ar: "أعمار الذمم المدينة" },
+        meaning: { en: "How long outstanding invoices have been waiting, in 30-day bands.", ar: "منذ متى تنتظر الفواتير غير المسدَّدة، في شرائح من 30 يومًا." },
+        formula: { en: "v_receivables_open bucketed by days since confirmed_at into 0-30, 31-60, 61-90 and 90+.", ar: "v_receivables_open موزَّعًا حسب الأيام منذ confirmed_at إلى شرائح 0-30 و31-60 و61-90 و90+." },
+        grain: { en: "one aging band", ar: "شريحة عمرية واحدة" },
+        caveat: { en: "Ages from confirmation, because that is when the invoice became a claim. There are no payment-terms columns in this schema to age from a due date.", ar: "يُحسب العمر من التأكيد، لأن ذلك هو وقت نشوء المطالبة. ولا توجد أعمدة لشروط السداد في هذا المخطط ليُحسب العمر من تاريخ استحقاق." },
+      },
+      receivables_outstanding: {
+        label: { en: "Outstanding receivables", ar: "الذمم المدينة القائمة" },
+        meaning: { en: "Money invoiced and confirmed but not yet paid, as of right now.", ar: "أموال فوترت وأُكِّدت ولم تُدفع بعد، كما هي الآن." },
+        formula: { en: "Sum of amount_due_sar over invoices confirmed, unpaid, not voided, with amount_due_sar > 0.", ar: "مجموع amount_due_sar للفواتير المؤكَّدة غير المدفوعة وغير الملغاة التي amount_due_sar فيها > 0." },
+        grain: { en: "current state", ar: "المركز الحالي" },
+        caveat: { en: "A statement about today, not about a period. It does not belong on a monthly trend line.", ar: "تصريح عن اليوم لا عن فترة. ولا مكان له على خط اتجاه شهري." },
+      },
+      revenue: {
+        meaning: { en: "What the business earned by invoicing customers, excluding VAT.", ar: "ما كسبته الشركة بإصدار فواتير على العملاء، دون الضريبة." },
+        formula: { en: "Sum of grand_subtotal_sar over invoices that have been confirmed (confirmed_at is set) and not voided, bucketed by the month they were confirmed.", ar: "مجموع grand_subtotal_sar للفواتير المؤكَّدة (confirmed_at مضبوط) وغير الملغاة، موزَّعة حسب شهر التأكيد." },
+        grain: { en: "one month, quarter or year", ar: "شهر أو ربع أو سنة واحدة" },
+        caveat: { en: "Excludes VAT, which is a collected liability rather than income. A paid invoice still counts — it was confirmed first. Voided invoices (shown in the UI as Sales Returns) are excluded and appear in v_revenue_sales_returns instead.", ar: "يستثني الضريبة، فهي التزام محصَّل لا دخل. والفاتورة المدفوعة تُحتسب أيضًا — فقد أُكِّدت أولًا. أما الفواتير الملغاة (وتظهر في الواجهة بوصفها مرتجعات مبيعات) فمستثناة وتظهر في v_revenue_sales_returns بدلًا من ذلك." },
+      },
+      revenue_per_truck: {
+        label: { en: "Revenue per truck", ar: "الإيراد لكل شاحنة" },
+        meaning: { en: "Invoiced revenue attributed to each truck.", ar: "الإيراد المفوتَر المنسوب إلى كل شاحنة." },
+        formula: { en: "Each invoice's revenue split EQUALLY across the trips linked to it; each trip carries its share to its truck.", ar: "إيراد كل فاتورة يُقسَّم بالتساوي على الرحلات المرتبطة بها؛ وكل رحلة تحمل حصتها إلى شاحنتها." },
+        grain: { en: "one truck in one month", ar: "شاحنة واحدة في شهر واحد" },
+        caveat: { en: "An ALLOCATION, not a measurement. trips.rate_sar is empty throughout this schema, so a trip carries no revenue of its own. Invoices with no linked trips allocate nothing.", ar: "توزيع لا قياس. فعمود trips.rate_sar فارغ في هذا المخطط كله، ولذلك لا تحمل الرحلة إيرادًا خاصًا بها. والفواتير التي لا رحلات مرتبطة بها لا توزّع شيئًا." },
+      },
+      running_balance: {
+        label: { en: "Running Balance", ar: "الرصيد الجاري" },
+        meaning: { en: "The spendable pool: a prepaid customer's deposits minus every delivered trip and charge, minus refunds.", ar: "الرصيد القابل للإنفاق: إيداعات عميل الدفع المقدم ناقص كل رحلة ورسم تم تسليمه، ناقص المبالغ المستردة." },
+        formula: { en: "derivedBalanceItems in lib/prepaid.ts: credits (all top-ups) minus debits (delivered trips and non-void special charges, VAT-inclusive at the project rate) minus balance returns. Model A — deducted at DELIVERY, not at invoice and not at payment. The credit side carries no date gate; asOfDate scopes consumption only.", ar: "الدالة derivedBalanceItems في lib/prepaid.ts: الجانب الدائن (كل عمليات الشحن) ناقص الجانب المدين (الرحلات المسلَّمة والرسوم الخاصة غير الملغاة، شاملة الضريبة بسعر المشروع) ناقص المبالغ المستردة. النموذج A — يُخصم عند التسليم، لا عند الفاتورة ولا عند الدفع. والجانب الدائن بلا قيد تاريخي؛ وasOfDate يحدّ الاستهلاك وحده." },
+        grain: { en: "one customer, at an instant", ar: "عميل واحد، في لحظة بعينها" },
+        caveat: { en: "Not a period measure and not a view: it is computed in the app, per customer, for the instant you are looking at. paid-up = running - payable. It moves the moment a trip is DELIVERED, before any invoice exists, so it can and does differ from what the invoice documents say. A customer can hold pool credit here and still owe on Amount Payable at the same time. Prepaid only — a postpaid customer has no pool. The pool is a lifetime net: no date gate is ever applied to top-ups or returns.", ar: "ليس مقياس فترة ولا عرضًا: فهو يُحسب داخل التطبيق، لكل عميل، للحظة التي تنظر فيها. والمعادلة: الرصيد المسدَّد = الرصيد الجاري - المبلغ الواجب السداد. وهو يتحرك لحظة تسليم الرحلة، قبل وجود أي فاتورة، فقد يختلف فعلًا عمّا تقوله مستندات الفواتير. وقد يحمل العميل رصيدًا هنا ويكون مدينًا بالمبلغ الواجب السداد في الوقت نفسه. وهو مقصور على الدفع المقدم — فعميل الدفع الآجل بلا حوض رصيد. والحوض صافٍ على مدى العمر: لا يُطبَّق أي قيد تاريخي على الشحن ولا على المبالغ المستردة." },
+      },
+      topups: {
+        label: { en: "Prepaid top-ups", ar: "شحن الأرصدة المقدمة" },
+        meaning: { en: "Money prepaid customers put on account, before any invoice consumes it.", ar: "أموال يودعها عملاء الدفع المقدم في حساباتهم، قبل أن تستهلكها أي فاتورة." },
+        formula: { en: "Sum of customer_topups.amount_sar by topup_date month.", ar: "مجموع customer_topups.amount_sar حسب شهر topup_date." },
+        grain: { en: "one month", ar: "شهر واحد" },
+        caveat: { en: "Cash in, but neither revenue nor an invoice payment. Kept separate so it cannot be mistaken for either.", ar: "نقد داخل، لكنه ليس إيرادًا ولا سداد فاتورة. ويُحفظ منفصلًا كي لا يُخلط بأيٍّ منهما." },
+      },
+      total_maintenance_per_truck: {
+        label: { en: "Total maintenance cost per truck", ar: "إجمالي تكلفة الصيانة لكل شاحنة" },
+        meaning: { en: "Everything maintenance cost for the truck in the month: consumed parts plus outsourced payments.", ar: "كل ما كلّفته صيانة الشاحنة خلال الشهر: القطع المستهلكة زائد المدفوعات الخارجية." },
+        formula: { en: "maintenance_parts_sar + os_payments_sar.", ar: "maintenance_parts_sar + os_payments_sar." },
+        grain: { en: "one truck in one month", ar: "شاحنة واحدة في شهر واحد" },
+        caveat: { en: "The complete per-truck maintenance figure. The parts-only and outsourced measures remain available separately so no surface has to blend or unblend them.", ar: "الرقم الكامل لصيانة الشاحنة. ويبقى المقياسان — القطع وحدها والخارجي وحده — متاحين منفصلين، فلا تُضطر أي واجهة إلى دمجهما أو فصلهما." },
+      },
     },
 
     // --- ONE WORD PER COLUMN, for every table on the route ------------------

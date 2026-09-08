@@ -417,7 +417,117 @@ export type MetricDictionaryRow = {
   source_view: string;
   basis: string;
   caveat: string | null;
+  // THERE IS NO `label_ar` / `meaning_ar` / … AND THERE MUST NOT BE (0187). The
+  // dictionary's prose is app copy, so it lives in lib/i18n under
+  // `reports.metricDef.<metric_key>` and is read through metricText() below.
+  // These five English columns stay on the row because they are that lookup's
+  // LAST fall-through, not because anything renders them directly.
+  //
+  // `metric_key` and `source_view` are rendered raw, in both languages: their
+  // values are POINTERS (`v_pnl_by_period.payroll_sar`, `lib/prepaid.ts:
+  // paidUpBalance()`) and a translated address does not resolve. `unit` and
+  // `basis` are closed enums and go through unitLabel() / basisLabel().
 };
+
+/**
+ * The dictionary fields that carry PROSE, and therefore have an i18n key.
+ *
+ * `unit`, `basis`, `metric_key` and `source_view` are absent by design — the
+ * first two are enums with their own key sets below, the last two are pointers.
+ */
+export type MetricTextField = "label" | "meaning" | "formula" | "grain" | "caveat";
+
+/**
+ * One metric's prose, in the reader's language — THE ONLY way this app reads a
+ * dictionary sentence.
+ *
+ * THREE STEPS, AND EACH ONE EXISTS FOR A DIFFERENT FAILURE:
+ *   1. `reports.metricDef.<metric_key>.<field>` in the reader's language. The
+ *      normal path; all 33 registered metrics are keyed in both languages.
+ *   2. the SAME key in English. Covers a key that has one language only — which
+ *      `tsc` cannot catch, because `dict` is data and a leaf is `{ en, ar }` by
+ *      convention rather than by constraint.
+ *   3. the row's own English COLUMN. Covers the case types cannot see at all: a
+ *      migration registers a metric and this file has not been edited yet. The
+ *      registry is the source of the metric LIST, so a row can appear here
+ *      without a key existing, and it must render its English rather than a
+ *      hole.
+ *
+ * A BLANK IS INDISTINGUISHABLE FROM A FAILED READ — that is the whole argument,
+ * and the popup already has a separate, honest message for a failed read.
+ *
+ * `t()` returns the PATH on a miss, which is what makes step 1 → 2 → 3
+ * detectable at all. Walking the exported `dict` by hand would answer the same
+ * question, but it would be a SECOND lookup implementation beside `t()` — one
+ * that could disagree with the renderer about what counts as present. The
+ * sentinel is `t()` answering about itself. The trim() is what stops a key
+ * translated to "  " from satisfying a truthiness check and rendering an empty
+ * block.
+ *
+ * `caveat` returns "" when the metric has none — operating_profit and os_cost —
+ * and the caller's `{caveat && …}` gate is what turns that into "no warning
+ * rendered". A MISTYPED caveat key therefore looks the same as an absent one,
+ * which is the one thing this shape gives up; scripts/metric-copy-check.ts
+ * asserts the count both ways so the difference is caught before it ships.
+ */
+export function metricText(
+  m: MetricDictionaryRow,
+  field: MetricTextField,
+  lang: Lang,
+): string {
+  const key = `reports.metricDef.${m.metric_key}.${field}` as TKey;
+  const hit = t(key, lang);
+  if (hit !== key && hit.trim()) return hit;
+  const en = t(key, "en");
+  if (en !== key && en.trim()) return en;
+  return (m[field] ?? "") as string;
+}
+
+/**
+ * The metric's NAME — metricText's `label`, except where `reports.metric`
+ * already holds that exact name.
+ *
+ * TWELVE METRICS REUSE A KEY THAT EXISTS, and the test was byte-equality of the
+ * English against the database's own `label` — not similarity. `reports.metric`
+ * is the semantic layer's one-name-per-metric block, read by the builder's
+ * picker and the Overview's stat cards; a second entry saying the same words is
+ * how one metric ends up with two names on two screens.
+ *
+ * FIVE NEAR-MISSES ARE DELIBERATELY NOT HERE, because the two strings differ:
+ * `reports.metric.maintTotal` is the column heading "Total maintenance" while
+ * the dictionary names the metric "Total maintenance cost per truck", and
+ * `reports.metric.tripsDelivered` ("Trips delivered") is one FIELD of the
+ * `operations` metric ("Operational activity"), not its name. Pointing at them
+ * would silently change the rendered English, which is the opposite of reuse.
+ *
+ * An unlisted metric falls to metricText, which ends at the row's own column —
+ * so a metric a future migration registers still shows a name.
+ *
+ * EXPORTED FOR scripts/metric-copy-check.ts ONLY. Nothing renders through the
+ * map directly; metricLabel() below is the one caller. The script needs it to
+ * assert the rule in BOTH directions — every target resolves, and none of these
+ * twelve ALSO carries a `reports.metricDef.<key>.label`, which is the duplicate
+ * this map exists to prevent.
+ */
+export const METRIC_LABEL_TKEY: Record<string, TKey> = {
+  collections: "reports.metric.collections",
+  commissions_cost: "reports.metric.commissions",
+  expenses: "reports.metric.otherExpenses",
+  filling_cost: "reports.metric.fillingCost",
+  net_profit: "reports.metric.netProfit",
+  operating_cost: "reports.metric.operatingCost",
+  operating_margin: "reports.metric.operatingMargin",
+  operating_profit: "reports.metric.operatingProfit",
+  parts_cost_at_consumption: "reports.metric.partsCost",
+  payroll_cost: "reports.metric.payroll",
+  purchasing_spend: "reports.metric.purchasingSpend",
+  revenue: "reports.metric.revenue",
+};
+
+export const metricLabel = (m: MetricDictionaryRow, lang: Lang): string =>
+  METRIC_LABEL_TKEY[m.metric_key]
+    ? t(METRIC_LABEL_TKEY[m.metric_key], lang)
+    : metricText(m, "label", lang);
 
 /**
  * The `basis` enum in words — ONE expression, read by all three surfaces that
@@ -443,6 +553,33 @@ const BASIS_TKEY: Record<string, TKey> = {
 
 export const basisLabel = (basis: string, lang: Lang): string =>
   BASIS_TKEY[basis] ? t(BASIS_TKEY[basis], lang) : basis;
+
+/**
+ * `unit` in words — the SAME treatment as `basis`, and for the same reason.
+ *
+ * KEYED PER VALUE, NOT PER METRIC (0187), which is the difference from
+ * metricText above rather than an inconsistency with it. label / meaning /
+ * formula / grain / caveat are per-metric prose and are keyed per metric.
+ * `unit` is a closed ENUM — report_metrics_unit_check admits exactly five
+ * values — so keying it per metric would store the same five translations
+ * thirty-three times and let two rows disagree about what "SAR" is called.
+ *
+ * ALL FIVE ARE KEYED, not the three that are live. The CHECK is the contract; a
+ * future migration using `ratio` or `days` must not print an untranslated word
+ * on the Arabic screen the day it lands. A miss still falls through to the raw
+ * string, exactly as above, so widening the CHECK degrades to untranslated
+ * rather than to blank.
+ */
+const UNIT_TKEY: Record<string, TKey> = {
+  SAR: "reports.unit.sar",
+  count: "reports.unit.count",
+  percent: "reports.unit.percent",
+  ratio: "reports.unit.ratio",
+  days: "reports.unit.days",
+};
+
+export const unitLabel = (unit: string, lang: Lang): string =>
+  UNIT_TKEY[unit] ? t(UNIT_TKEY[unit], lang) : unit;
 
 /**
  * Per-driver operations (migration 0101).

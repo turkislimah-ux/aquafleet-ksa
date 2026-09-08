@@ -3,13 +3,21 @@
 // Reports — the METRICS DICTIONARY, as a popup.
 //
 // THE SEMANTIC LAYER, READ RATHER THAN COUNTED. Every figure on the Overview
-// tab comes from a view whose meaning is defined once, in SQL (report_metrics,
-// migration 0098, extended by 0123/0124). This modal renders that table — it
-// computes nothing, and it is the only place in the app where the DESCRIPTION
-// columns (meaning / formula / grain / source_view / basis / caveat) are shown
-// at all. They were fetched and threaded through two components for a year and
+// tab comes from a metric that is REGISTERED once, in SQL (report_metrics,
+// migration 0098, extended by 0123/0124/0187). This modal renders that registry
+// — it computes nothing — and it is the only screen in the app that shows a
+// metric's meaning / formula / grain / source_view / basis / caveat at all.
+// Those were fetched and threaded through two components for a year and
 // rendered nowhere, which is the exact failure mode CLAUDE.md §7 records for
-// DailyOps.revenue: a column nothing displays is a column nobody can check.
+// DailyOps.revenue: a field nothing displays is a field nobody can check.
+//
+// THE ROWS COME FROM THE TABLE; THE WORDS COME FROM lib/i18n (0187). The table
+// answers WHICH METRICS EXIST and what shape each one is — metric_key, basis,
+// unit, grain-as-a-machine-value, source_view. The prose a reader actually
+// reads — label, meaning, formula, grain, caveat, in both languages — is app
+// copy and lives in `reports.metricDef.<metric_key>`, reached through
+// metricLabel() / metricText() in lib/reports. So this file reads a row for its
+// STRUCTURE and a key for its WORDS, and `metric_key` is the join.
 //
 // IT SHIPPED AS A SECTION AT THE BOTTOM OF OVERVIEW AND WAS MOVED HERE
 // (Turki's call). Recorded so the next reader does not "restore" it inline:
@@ -17,29 +25,67 @@
 // past the whole tab to reach a reference you consult mid-thought. A popup is
 // reachable from the header at any scroll position and costs the tab no space.
 //
-// LAYOUT IS STACKED, NOT A GRID TABLE, and that is a measurement not a taste:
-// live max lengths are caveat 785 chars, formula 208, source_view 169, meaning
-// 113. Six columns of that in one row would either overflow or shrink every
-// cell to a sliver. Each metric is its own block; the label/value pairs use
+// LAYOUT IS STACKED, NOT A GRID TABLE, and that is a measurement not a taste.
+// Re-measured 2026-09-08 across BOTH languages, off the metricDef keys and the
+// live table, since 0187 nearly doubles the prose this screen carries. Longest
+// value per field, en / ar: caveat 785 / 700 (delivered_revenue_daily), formula
+// 317 / 318 (running_balance — was 208 before 0187), meaning 118 / 122
+// (amount_payable), grain 35 / 30, label 32 / 30. source_view is 169 and has no
+// Arabic side — it is a pointer. Six columns of that in one row would either
+// overflow or shrink every cell to a sliver. Each metric is its own block; the
+// label/value pairs use
 // `minmax(0,1fr)` on the value track — a plain `1fr` refuses to shrink below
 // its content, which is what lets a long unbroken pointer like
 // "v_payroll_monthly (…) · v_pnl_by_period.payroll_sar (…)" push past its
 // container instead of wrapping. The two-column entry grid below `xl` halves
 // the available width, so that rule is load-bearing here, not belt-and-braces.
 //
-// A NULL caveat renders NOTHING — no dash, no "N/A". Re-measured 2026-09-08:
-// 2 of the 30 rows have no caveat (operating_profit, os_cost) — this said 3
+// AN ABSENT caveat RENDERS NOTHING — no dash, no "N/A". Re-measured 2026-09-08:
+// 2 of the 33 metrics carry no caveat (operating_profit, os_cost) — this said 3
 // and named `operations`, which migration 0145 has since filled. Those metrics
 // carry no warning, which is a different claim from a warning we failed to
 // load. Same rule as the compliance pills: absent never renders as a value.
+// Under 0187 "absent" means NO `caveat` KEY IN EITHER LANGUAGE, not an empty
+// string: metricText() returns "" only when all three of its steps miss, and the
+// gate below is that same expression, so a metric with no caveat and a metric
+// whose caveat key is mistyped look alike here BY DESIGN — which is why
+// scripts/metric-copy-check.ts asserts the key set rather than trusting the eye.
 //
-// EVERY METRIC ROW STAYS ENGLISH. label / meaning / formula / grain /
-// source_view / caveat / unit are COLUMNS of `report_metrics`, so translating
-// them is a MIGRATION, not a dictionary key, and this batch runs none. What is
-// keyed is this popup's own chrome and the five basis notes (reports.glossary.*)
-// plus the five basis NAMES (reports.basis.*, shared with the builder and the
-// generated report) — everything the app itself writes. Five, not four, since
-// 0185/0186 added `settlement`.
+// EVERY METRIC ROW IS BILINGUAL, AND IT DID NOT TAKE THE MIGRATION THIS COMMENT
+// PREDICTED. The paragraph here used to say translating these rows was "a
+// MIGRATION, not a dictionary key" — an earlier draft of 0187 duly added
+// label_ar / meaning_ar / formula_ar / grain_ar / caveat_ar columns. That draft
+// was REPLACED. The app's words live in lib/i18n, and copy split across a
+// dictionary and five database columns has two edit paths, two review paths and
+// no compiler: `tsc` stops a missing key, nothing stops a missing column value.
+//
+// SO THERE ARE THREE MECHANISMS ON THIS SCREEN, AND WHICH ONE A FIELD GETS IS
+// DECIDED BY WHAT THE FIELD *IS*:
+//   · FREE PROSE → a PER-METRIC i18n KEY. label, meaning, formula, grain,
+//     caveat are thirty-three metrics' worth of sentences, keyed under
+//     `reports.metricDef.<metric_key>` and read through metricText(), which
+//     falls through reader's-language → English → the row's own English column,
+//     so a metric a future migration registers before its copy is keyed renders
+//     English rather than nothing.
+//   · A CLOSED ENUM → a PER-VALUE i18n KEY. `basis` (five values) via
+//     basisLabel, `unit` (five values, per report_metrics_unit_check) via
+//     unitLabel. Keying these per metric would store the same five words
+//     thirty-three times and let two rows disagree.
+//   · A POINTER → NEITHER. metric_key and source_view stay Latin in both
+//     languages. `v_pnl_by_period.payroll_sar` is an address, and a translated
+//     address does not resolve.
+// Everything else on the popup — chrome, the five basis notes, the three <dt>
+// labels — is the app's own words and was already keyed.
+//
+// FOUR FORMULAS ARE BYTE-IDENTICAL ACROSS en AND ar and that is the translation,
+// not a gap: net_profit, operating_cost, operating_profit and
+// total_maintenance_per_truck have formulas made entirely of metric names and
+// operators (`revenue - operating_cost.`), with no word in them to translate.
+//
+// TWELVE LABELS ARE NOT KEYED HERE AT ALL — metricLabel() routes them to the
+// `reports.metric.*` name the report builder already ships, because one metric
+// must not end up with two names on two screens. That map lives in lib/reports;
+// this file only ever calls metricLabel().
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -47,7 +93,9 @@ import { X } from "lucide-react";
 import { formatNum } from "@/lib/utils";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
-import { basisLabel, type MetricDictionaryRow } from "@/lib/reports";
+import {
+  basisLabel, metricLabel, metricText, unitLabel, type MetricDictionaryRow,
+} from "@/lib/reports";
 import { Disclosure, EmptyNote } from "./OverviewTab";
 import ScrollLock from "@/components/ScrollLock";
 
@@ -111,11 +159,39 @@ export default function MetricsGlossaryModal({
   // Grouped by basis. An unrecognised basis still renders — it sorts after the
   // four known ones rather than being dropped, so a metric added by a future
   // migration appears here without this file being touched.
+  //
+  // THE NEEDLE SEARCHES WHAT IS ON THE SCREEN, PLUS THE POINTERS. It used to
+  // concatenate eight DATABASE columns — four English and four Arabic — which
+  // was the right shape only while the Arabic lived in columns. It now reads the
+  // four prose fields through metricText() in the RENDERED language, because
+  // those are the only words the reader can actually see to search for: on the
+  // Arabic screen, matching against English prose returns rows whose match is
+  // invisible, and on the English screen the reverse. metric_key and source_view
+  // are appended raw and unconditionally — they are Latin pointers in BOTH
+  // languages (see the header), so an Arabic reader pasting `v_pnl_by_period`
+  // must still get a hit. Cost is four key lookups and one concat per row per
+  // keystroke, on 33 rows.
+  //
+  // caveat IS IN THE NEEDLE THOUGH IT IS BEHIND A DISCLOSURE. It is the longest
+  // field on the block (785 chars) and the one carrying the warnings worth
+  // finding; a filter that skipped it would report "no match" for a sentence the
+  // dictionary demonstrably contains, one click away. metricText returns "" for
+  // the two metrics that carry none, which concatenates harmlessly.
+  //
+  // SORTING IS BY THE RENDERED LABEL, WITH THE RENDERED LOCALE. It used to be
+  // `a.label.localeCompare(b.label)` — the ENGLISH label, unconditionally, which
+  // on the Arabic screen orders a list by keys the reader cannot see. That is an
+  // English leak in behaviour rather than in text, and the only kind this pass
+  // could have shipped without noticing. metricLabel() is the same helper the
+  // entry renders, so the order always matches the words.
   const groups = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const matched = needle
       ? metrics.filter((m) =>
-          `${m.label} ${m.metric_key} ${m.meaning} ${m.source_view}`.toLowerCase().includes(needle))
+          [metricLabel(m, lang), metricText(m, "meaning", lang),
+           metricText(m, "formula", lang), metricText(m, "caveat", lang),
+           m.metric_key, m.source_view]
+            .filter(Boolean).join(" ").toLowerCase().includes(needle))
       : metrics;
 
     const by = new Map<string, MetricDictionaryRow[]>();
@@ -131,10 +207,11 @@ export default function MetricsGlossaryModal({
     return Array.from(by.entries())
       .map(([basis, rows]) => ({
         basis,
-        rows: rows.slice().sort((a, b) => a.label.localeCompare(b.label)),
+        rows: rows.slice().sort((a, b) =>
+          metricLabel(a, lang).localeCompare(metricLabel(b, lang), lang)),
       }))
       .sort((a, b) => rank(a.basis) - rank(b.basis) || a.basis.localeCompare(b.basis));
-  }, [metrics, q]);
+  }, [metrics, q, lang]);
 
   const shown = groups.reduce((n, g) => n + g.rows.length, 0);
 
@@ -230,34 +307,75 @@ export default function MetricsGlossaryModal({
 }
 
 // `lang` arrives as a PROP rather than through useApp(): this renders once per
-// metric, up to 30 times per open, and the three <dt> labels are the only thing
+// metric, up to 33 times per open, and the three <dt> labels are the only thing
 // on the block that is not database content.
+//
+// FIVE FIELDS GO THROUGH THE i18n LOOKUP, TWO DELIBERATELY DO NOT. label /
+// meaning / formula / grain / caveat resolve through metricLabel/metricText,
+// which fall through to English so a metric a future migration registers before
+// its copy is keyed renders English rather than a hole — a blank is
+// indistinguishable from a failed read, and this popup already has a separate
+// honest message for that case. The two left alone are metric_key and
+// source_view: pointers, Latin in both languages, rendered straight off the row.
+// `unit` is neither — a five-value enum, so it goes through the key set.
 function MetricEntry({ m, lang }: { m: MetricDictionaryRow; lang: Lang }) {
+  // Resolved once, above the JSX, so the caveat's presence test and the caveat's
+  // text are the SAME expression. A separate gate — reading `m.caveat` off the
+  // row while rendering the keyed string — would show a warning header over a
+  // metric whose copy never arrived, and hide a keyed warning on a metric whose
+  // column is null. metricText returns "" when every step misses, so falsy stays
+  // falsy and nothing renders.
+  const caveat = metricText(m, "caveat", lang);
+
+  // MONO IS FOR CODE, AND FOUR FORMULAS STILL *ARE* CODE. The four
+  // identifier-only formulas (net_profit, operating_cost, operating_profit,
+  // total_maintenance_per_truck) translate to themselves, so they keep the
+  // mono face on the Arabic screen — they are still `revenue - operating_cost.`
+  // The other 29 are Arabic sentences with identifiers embedded, and a mono
+  // stack has no Arabic face: the browser falls back per-glyph, which is how a
+  // paragraph ends up in a different typeface from every other paragraph on the
+  // block. Test the RENDERED string, not the language, so this stays right for
+  // whatever a future key or migration puts there.
+  const formula = metricText(m, "formula", lang);
+  const formulaIsCode = !/[؀-ۿ]/.test(formula);
+
   return (
     <div className="py-3 border-t" style={{ borderColor: "rgb(var(--border))" }}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="text-sm font-medium">{m.label}</span>
-        <code className="font-mono text-[11px] muted break-all">{m.metric_key}</code>
-        <span className="ms-auto text-[11px] muted uppercase tracking-wide shrink-0">{m.unit}</span>
+        <span dir="auto" className="text-sm font-medium">{metricLabel(m, lang)}</span>
+        {/* dir="auto" on every Latin pointer. Under `dir=rtl` a bidi run that
+            ENDS in punctuation gets that punctuation pushed to the left edge —
+            `revenue - operating_cost.` renders as `.revenue - operating_cost`,
+            which reads as a typo in a field whose whole job is to be copied
+            exactly. "auto" takes the base direction from the first strong
+            character, so an ASCII value stays LTR inside an RTL page. */}
+        <code dir="auto" className="font-mono text-[11px] muted break-all">{m.metric_key}</code>
+        <span className="ms-auto text-[11px] muted uppercase tracking-wide shrink-0">
+          {unitLabel(m.unit, lang)}
+        </span>
       </div>
 
-      <p className="mt-1 text-sm leading-relaxed">{m.meaning}</p>
+      <p dir="auto" className="mt-1 text-sm leading-relaxed">{metricText(m, "meaning", lang)}</p>
 
       {/* `minmax(0,1fr)` on the value track — see the note above; a bare `1fr`
           is what lets a long source_view pointer overflow instead of wrap. */}
       <dl className="mt-2 grid gap-x-4 gap-y-1 text-[11px] sm:grid-cols-[6.5rem_minmax(0,1fr)]">
         <dt className="muted uppercase tracking-wide">{t("reports.glossary.formula", lang)}</dt>
-        <dd className="min-w-0 break-words font-mono">{m.formula}</dd>
+        <dd dir="auto" className={`min-w-0 break-words ${formulaIsCode ? "font-mono" : "leading-relaxed"}`}>
+          {formula}
+        </dd>
 
         <dt className="muted uppercase tracking-wide">{t("reports.glossary.grain", lang)}</dt>
-        <dd className="min-w-0 break-words">{m.grain}</dd>
+        <dd dir="auto" className="min-w-0 break-words">{metricText(m, "grain", lang)}</dd>
 
         <dt className="muted uppercase tracking-wide">{t("reports.glossary.sourceView", lang)}</dt>
-        <dd className="min-w-0 break-words font-mono">{m.source_view}</dd>
+        <dd dir="auto" className="min-w-0 break-words font-mono">{m.source_view}</dd>
       </dl>
 
-      {/* No caveat means no warning — never a dash, never "N/A". */}
-      {m.caveat && <Disclosure>{m.caveat}</Disclosure>}
+      {/* No caveat means no warning — never a dash, never "N/A". The span is
+          the dir="auto" carrier: Disclosure takes children only, and widening
+          its signature for one caller is the wrong trade. */}
+      {caveat && <Disclosure><span dir="auto">{caveat}</span></Disclosure>}
     </div>
   );
 }
