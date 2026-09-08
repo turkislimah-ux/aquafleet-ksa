@@ -27,7 +27,7 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import { t, arText } from "@/lib/i18n";
-import { cn, todayKey as todayKeyUtil } from "@/lib/utils";
+import { cn, todayKey as todayKeyUtil, monthName } from "@/lib/utils";
 import type { Truck, WorkOrder, OutsourcedJob } from "@/lib/db-types";
 
 // EXPORTED — MaintenanceClient's own day-filter (Phase-5 fix) must bucket
@@ -72,19 +72,12 @@ type CalItem =
 // twenty-four values were byte-identical to that leaf set, so nothing rendered
 // changes; only the source moved.
 //
-// Indexing MONTH_KEYS rather than casting is the established shape (seven files
-// do it) and it is what keeps the interpolation type-safe: the array is `as
-// const`, so `MONTH_KEYS[n]` is the union "1"|…|"12" and
-// `common.monthShort.${…}` resolves to twelve real TKeys instead of a
-// `${string}` the compiler has to reject. The keys are 1-based because the
-// dictionary's are — `getMonth()` is 0-based, hence the offset lives in this
-// array's ordering rather than in arithmetic at the call site.
+// The local MONTH_KEYS tuple that used to sit here is gone. Its note argued a
+// duplicated key array was harmless because it holds index keys, not words —
+// true, and no longer the point: lib/utils' `monthName` now owns both the tuple
+// and the lookup, so there is nothing left to duplicate. The 0-based-to-1-based
+// offset that lived in the array's ordering is now a `+ 1` at the call site.
 //
-// A duplicated MONTH_KEYS is not the duplication that rule is about: it holds
-// index keys, not words. A key array cannot drift in MEANING, which is the
-// whole risk that moved the names into the dictionary.
-const MONTH_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"] as const;
-
 // The weekdays followed the months out of this file, but a step later and for a
 // different reason. The names themselves were never the problem — the two sets
 // DISAGREED. This calendar wrote the Arabic as three-letter truncations (اثن،
@@ -95,8 +88,8 @@ const MONTH_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12
 // and the English is untouched.
 //
 // Indexed by Date.getDay(), same as before, so "0" is Sunday — the keys ARE the
-// getDay() numbers rather than a 1-based count, which is the one way this array
-// differs in shape from MONTH_KEYS above.
+// getDay() numbers rather than a 1-based count. That is why no `+ 1` appears at
+// its call site where the month lookup above now needs one.
 const WEEKDAY_KEYS = ["0", "1", "2", "3", "4", "5", "6"] as const;
 
 export default function MaintenanceCalendar({
@@ -175,8 +168,10 @@ export default function MaintenanceCalendar({
 
   const todayKey = ymd(new Date());
   // Only the month NAME follows `lang`; the day number stays Latin digits in
-  // both languages, as it did before and as every other monthShort caller does.
-  const monthFmt = (d: Date) => `${t(`common.monthShort.${MONTH_KEYS[d.getMonth()]}`, lang)} ${d.getDate()}`;
+  // both languages, as it did before and as every other monthName caller does.
+  // The separator below is an ASCII comma in BOTH languages — unchanged here,
+  // and a wording question rather than a formatting one if it is ever revisited.
+  const monthFmt = (d: Date) => `${monthName(d.getMonth() + 1, lang)} ${d.getDate()}`;
   const weekHeader = `${monthFmt(cells[0].date)} – ${monthFmt(cells[6].date)}, ${cells[0].date.getFullYear()}`;
 
   let cActive = 0, cPlanned = 0, cDelayed = 0;

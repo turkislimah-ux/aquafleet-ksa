@@ -15,6 +15,7 @@ import { Table, TH, TD, StatusPill } from "@/components/ui";
 import { type DriverState } from "@/lib/driver-state";
 import { useApp } from "@/components/AppShell";
 import { t, type Lang } from "@/lib/i18n";
+import { monthName } from "@/lib/utils";
 
 type Driver = { id: string; name: string; status?: string };
 type TruckLite = {
@@ -31,14 +32,22 @@ type TruckLite = {
 // "YYYY-MM-DD" (Postgres date) → "DD Mon YYYY". Null/blank → null.
 // ONLY the month NAME is translated. The day and the year stay Latin digits in
 // both languages, because they are app-formatted numbers, not labels.
-const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
+//
+// `monthName` is lib/utils' — the same `common.monthShort` lookup this held
+// inline, so the rendered string is unchanged. It returns "" for a month
+// outside 1–12, which is the case the local key-tuple lookup returned undefined
+// for; the empty test below keeps this function's `null` contract intact.
+//
+// NOT `formatDayKeyLang`, even though it builds this exact shape: its English
+// arm is en-GB, which writes "Sept" for September where the dictionary writes
+// "Sep". That is a wording change, not a refactor.
 function fmtServiceDate(key: string | null, lang: Lang): string | null {
   if (!key) return null;
   const [y, m, d] = key.split("-").map(Number);
   if (!y || !m || !d) return null;
-  const mk = MONTH_KEYS[m - 1];
-  if (!mk) return null;
-  return `${d} ${t(`common.monthShort.${mk}`, lang)} ${y}`;
+  const name = monthName(m, lang);
+  if (!name) return null;
+  return `${d} ${name} ${y}`;
 }
 
 export default function DriverRosterTable({

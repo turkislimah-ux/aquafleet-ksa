@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import { cn, monthName } from "@/lib/utils";
 import {
   type WaterType,
   WATER_TYPE_LABELS,
@@ -46,16 +46,22 @@ type Kind = "project" | "customer";
 
 // The twelve abbreviations were a module-level `const MONTH_SHORT`, frozen at
 // import — copy two of three in this route (DriverRosterTable and ProjectsBoard
-// held the others). They now come from `common.monthShort`, which is why this
-// takes `lang`.
+// held the others). They now come from `common.monthShort` via lib/utils'
+// `monthName`, which is why this takes `lang`.
 //
 // ISO timestamp → "DD Mon YYYY" in LOCAL time (matches the app's delivered-day basis).
 // ONLY the month NAME is translated; the day and the year are app-formatted
 // numbers and stay Latin digits in both languages.
-const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
+//
+// NOT `formatDayKeyLang`, deliberately. That helper's English arm is an en-GB
+// Intl formatter, and en-GB abbreviates September as "Sept" where
+// `common.monthShort` says "Sep" — so routing this through it would change one
+// month in twelve on screen. `monthName` reads the same dictionary leaf this
+// line already read, so the output is identical by construction. The `+ 1` is
+// because getMonth() is 0-based and the dictionary keys are 1-based.
 function fmtDeliveredLocal(iso: string, lang: Lang): string {
   const d = new Date(iso);
-  return `${d.getDate()} ${t(`common.monthShort.${MONTH_KEYS[d.getMonth()]}`, lang)} ${d.getFullYear()}`;
+  return `${d.getDate()} ${monthName(d.getMonth() + 1, lang)} ${d.getFullYear()}`;
 }
 
 const INPUT =

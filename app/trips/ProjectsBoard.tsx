@@ -27,7 +27,7 @@ import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, type Lang } from "@/lib/i18n";
 import { tripStageLabel, waterTypeLabel } from "@/lib/enum-labels";
-import { cn, formatSar, formatDateLangLocale } from "@/lib/utils";
+import { cn, formatSar, formatDateLangLocale, monthName } from "@/lib/utils";
 import { stationBlockedForType, type StationOption, type WaterStationRow } from "@/lib/station-pricing";
 import {
   type Trip,
@@ -185,15 +185,17 @@ function fmtPhaseStamp(iso: string | null, lang: Lang): string {
 // cannot follow the language, so what stays at module scope is the INDEX → key
 // mapping (which is fixed data, the same in both languages) and the words are
 // looked up at render with the caller's `lang`. WEEKDAY_KEYS is indexed by
-// Date.getDay() and MONTH_KEYS by Date.getMonth(), exactly as before — the
-// order and the arity are unchanged, so every existing index still lands on the
-// same word.
+// Date.getDay(), exactly as before — the order and the arity are unchanged, so
+// every existing index still lands on the same word.
 //
-// Both key sets now resolve against `common`: the weekday names left
+// The MONTH key tuple that stood beside this one is gone: all four of its
+// readers call lib/utils' `monthName` now, which owns the same tuple and does
+// the same lookup. WEEKDAY_KEYS has no such helper and stays.
+//
+// This key set resolves against `common`: the weekday names left
 // `trips.board.weekday` once the maintenance calendar became a second reader.
 // Nothing about this array changes — only the namespace the words come from.
 const WEEKDAY_KEYS = ["0", "1", "2", "3", "4", "5", "6"] as const;
-const MONTH_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"] as const;
 
 function dayKey(d: Date): string {
   const y = d.getFullYear();
@@ -229,10 +231,14 @@ function initials(name: string): string {
 }
 // "30 Jun 2026" from a local YYYY-MM-DD key (parseKey keeps it local, no TZ shift).
 // The day number and the year are DIGITS and stay Latin in both languages — only
-// the month word follows `lang`, through `common.monthShort`.
+// the month word follows `lang`, through `common.monthShort` via `monthName`.
+//
+// NOT `formatDayKeyLang`, which produces this same shape but through an en-GB
+// Intl formatter — and en-GB writes September as "Sept" where the dictionary
+// writes "Sep". Delegating there would silently restyle one month in twelve.
 function fmtDayKey(key: string, lang: Lang): string {
   const d = parseKey(key);
-  return `${d.getDate()} ${t(`common.monthShort.${MONTH_KEYS[d.getMonth()]}`, lang)} ${d.getFullYear()}`;
+  return `${d.getDate()} ${monthName(d.getMonth() + 1, lang)} ${d.getFullYear()}`;
 }
 
 const ACTION_BTN =
@@ -1536,7 +1542,7 @@ export default function ProjectsBoard({
     if (selectedDay === addDays(todayKey, -1)) return t("trips.board.yesterday", lang);
     if (selectedDay === addDays(todayKey, 1)) return t("trips.board.tomorrow", lang);
     const d = parseKey(selectedDay);
-    return `${t(`common.monthShort.${MONTH_KEYS[d.getMonth()]}`, lang)} ${d.getDate()}`;
+    return `${monthName(d.getMonth() + 1, lang)} ${d.getDate()}`;
   }, [selectedDay, todayKey, lang]);
 
   // The 7 visible day cells (Sun→Sat) for the current week.
@@ -1556,8 +1562,8 @@ export default function ProjectsBoard({
     const first = weekDays[0];
     const last = weekDays[6];
     const y = parseKey(last.key).getFullYear();
-    const firstMonth = t(`common.monthShort.${MONTH_KEYS[first.month]}`, lang);
-    const lastMonth = t(`common.monthShort.${MONTH_KEYS[last.month]}`, lang);
+    const firstMonth = monthName(first.month + 1, lang);
+    const lastMonth = monthName(last.month + 1, lang);
     const span =
       first.month === last.month
         ? `${first.dayNum} – ${last.dayNum} ${lastMonth}`

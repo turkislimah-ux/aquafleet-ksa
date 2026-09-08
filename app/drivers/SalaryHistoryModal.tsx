@@ -45,7 +45,12 @@ import { X, Plus, Trash2, Lock, TriangleAlert } from "lucide-react";
 import { Btn, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, type Lang } from "@/lib/i18n";
-import { formatSar, todayKey } from "@/lib/utils";
+import {
+  formatSar,
+  todayKey,
+  monthName,
+  monthLabel as monthKeyLabel,
+} from "@/lib/utils";
 import {
   fetchSalaryHistory,
   addSalaryChange,
@@ -59,28 +64,31 @@ const INPUT =
   "px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-brand-500/30 w-full";
 const INPUT_STYLE = { borderColor: "rgb(var(--border))", background: "rgb(var(--card))" } as const;
 
-// Indexing a const tuple types the element as the union of its twelve members,
-// so `common.monthShort.${key}` is twelve real TKeys rather than `string`. Same
-// device as app/fleet/FleetClient.tsx's own monthLabel.
-//
-// The leaves moved from `drivers.months` to `common.monthShort` in Phase 3
+// The local twelve-key tuple and the `monthName` wrapper over it are gone: both
+// are lib/utils' now, reading the same `common.monthShort` leaves. The leaves
+// themselves moved from `drivers.months` to `common.monthShort` in Phase 3
 // Batch 9 (unchanged values) once app/trips turned out to hold three more
 // hardcoded copies of the same array.
-const MONTH_KEYS = ["1","2","3","4","5","6","7","8","9","10","11","12"] as const;
-
-function monthName(m: string, lang: Lang): string | null {
-  const key = MONTH_KEYS[Number(m) - 1];
-  return key ? t(`common.monthShort.${key}`, lang) : null;
-}
-
+//
+// `monthLabel` is the canonical one, imported under an alias because the local
+// name is what this file's two call sites read. It slices the key rather than
+// splitting it, which is the same answer for a "YYYY-MM-DD" — and it falls back
+// to the whole key where this fell back to a bare month, a case a Postgres date
+// column cannot produce.
 /** "2026-03-14" → "Mar 2026". Pure string work — no Date, no timezone. */
 function monthLabel(iso: string, lang: Lang): string {
-  const [y, m] = iso.split("-");
-  return `${monthName(m, lang) ?? m} ${y}`;
+  return monthKeyLabel(iso, lang);
 }
+
+// STILL HAND-ASSEMBLED, and not `formatDayKeyLang`, for two independent
+// reasons. That helper's English arm is an en-GB Intl formatter: en-GB writes
+// September as "Sept" where `common.monthShort` writes "Sep", and its
+// `day: "numeric"` drops a leading zero where this keeps the padded string
+// Postgres gave it — so "04 Sep 2026" would become "4 Sept 2026". Both are
+// wording/format changes, not refactors.
 function dateLabel(iso: string, lang: Lang): string {
   const [y, m, d] = iso.split("-");
-  return `${d} ${monthName(m, lang) ?? m} ${y}`;
+  return `${d} ${monthName(Number(m), lang) || m} ${y}`;
 }
 
 export default function SalaryHistoryModal({
