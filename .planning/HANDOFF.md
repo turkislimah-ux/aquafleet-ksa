@@ -19,11 +19,14 @@ caught it (`32a515d`, `e4dbd3e`). **A commit closing a parked item is not
 evidence the item is finished** — the sweep that found this ran only because it
 was asked for, and `tsc` had been green the whole time.
 
-**THE DEPLOY BLOCKER IS DATA, NOT CODE.** A read-only audit ran the whole gate —
-types, a production build, both suites, the view footer, the function ACLs, RLS,
-the env surface — and every code-side check is green. What is not ready is the
-live database: it is a sandbox, and test rows are woven into records that are
-already PAID. **Do not read "audit passed" as "ship it".** See Deploy readiness.
+**NO DEPLOY BLOCKER IS CODE — BOTH ARE THINGS TURKI DOES.** A read-only audit ran
+the whole gate — types, a production build, both suites, the view footer, the
+function ACLs, RLS, the env surface — and every code-side check is green. Two
+things are not ready. **The live database is a sandbox**, with test rows woven
+into records that are already PAID. **And public signup is OPEN**, measured
+2026-09-09 off GoTrue's public settings endpoint: with no role gate anywhere in
+the app, anyone who registers gets everything. **Do not read "audit passed" as
+"ship it".** See Deploy readiness.
 
 **Every number below is a POINTER, not evidence. Re-measure before quoting it.**
 The commands are given inline so re-measuring is cheaper than trusting.
@@ -34,7 +37,7 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Git
 
-- **`main` is at `ffef697`.** Measured with `git rev-parse HEAD`.
+- **`main` is at `e2a0c01`.** Measured with `git rev-parse HEAD`.
 - **Level with origin, measured BOTH required ways**: the BRANCH line of
   `git status -sb` reads `## main...origin/main` with no ahead/behind marker,
   and `git rev-list --left-right --count origin/main...HEAD` returns `0	0`.
@@ -175,11 +178,63 @@ woven into records that are already PAID, so they cannot simply be deleted — t
 understated dummy invoices and the "testing 111" charge are the known examples.
 **This is the deploy blocker and it is Turki's call, not a code fix.**
 
-**The largest UNVERIFIED risk is public signup.** With no role gate anywhere in
-the app (see (c)3), an open signup would expose the 49 SECURITY DEFINER money
-RPCs that are granted to `authenticated` on purpose. **It was not tested, because
-testing it means creating an account.** Someone must check the Supabase Auth
-console setting directly.
+**PUBLIC SIGNUP IS OPEN. MEASURED 2026-09-09, NOT ASSUMED.** The earlier audit
+filed this as the largest UNVERIFIED risk and said testing it meant creating an
+account. **It does not.** GoTrue exposes a public, read-only settings endpoint
+that answers it outright — no account, no write, no secret printed (the anon key
+already ships in the client bundle):
+
+```sh
+set -a && . ./.env.local && set +a
+curl -s "$NEXT_PUBLIC_SUPABASE_URL/auth/v1/settings" -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY"
+```
+
+Returned `"disable_signup": false`, `"external": {"email": true}`,
+`"mailer_autoconfirm": false`. **Anyone can register.** Email confirmation is a
+speed bump, not a gate — any working mailbox clears it.
+
+**What that JWT reaches, re-measured the same turn against the catalog:**
+
+| Measure | Value |
+|---|---|
+| public tables | 87 |
+| RLS enabled | **87 of 87** |
+| policies total | 89 |
+| policies that are blanket `qual = true` for `authenticated` | **85** |
+| non-trigger functions executable by `authenticated` | 58 |
+| …of which SECURITY DEFINER | **45** |
+
+**RLS being on everywhere gates almost nothing.** It separates `anon` from
+logged-in, not staff from stranger. The only 5 policies that reference the
+caller are personalization — `notification_prefs`, `notification_dismissals`,
+`notification_thresholds_user`, `user_profiles`, and `issue_reports` INSERT. No
+role column, no staff check, no authorization tier anywhere in the app. So the
+audit's worst case is CONFIRMED REAL, not theoretical: open signup + no role
+gate + 45 reachable definer money RPCs = full fleet and finance access to
+anyone who registers.
+
+**45 here and 49 in (c)3 are BOTH RIGHT — do not "fix" either to match.** The
+advisor's 49 counts every definer function `authenticated` may execute; 4 of
+them return `trigger` and are unreachable through PostgREST. 45 + 4 = 49,
+measured, not reasoned:
+
+```sql
+select count(*) filter (where pg_get_function_result(p.oid) <> 'trigger') as reachable,
+       count(*) filter (where pg_get_function_result(p.oid)  = 'trigger') as trigger_only
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname='public' and p.prosecdef
+  and has_function_privilege('authenticated', p.oid, 'execute');
+```
+
+**The fix is Turki's, not code.** Supabase console → Authentication → Sign In /
+Providers → Email → turn OFF "Allow new users to sign up", then invite the real
+users under Authentication → Users. Re-run the curl above; it must read
+`"disable_signup": true`.
+
+**Closing signup is a tourniquet, not the cure.** The missing role gate survives
+it — every authenticated user still sees everything. That is a design decision
+Turki has not been asked for yet, and it is not on the deploy path today only
+because shutting signup makes the user set a closed one.
 
 **THE EDGE-RUNTIME WARNING IS SETTLED — DO NOT RE-RAISE IT.** The build warns
 that `@supabase/supabase-js` touches `process.version`, traced through
@@ -223,12 +278,16 @@ before running any build while dev is up.
 
 ---
 
-## Completed this session (2026-09-09, deploy-prep, `e4dbd3e` → `ffef697`)
+## Completed this session (2026-09-09, deploy-prep, `e4dbd3e` → `e2a0c01`)
 
-**Two read-only investigations that produced NO commits, then six commits.** The
-audit and the Edge-runtime trace were both explicitly measure-only; their findings
-are in Deploy readiness above, and neither was allowed to turn into a fix in the
-same pass.
+**Three read-only investigations that produced NO code commits, then seven
+commits.** The audit, the Edge-runtime trace and the signup check were all
+measure-only; their findings are in Deploy readiness above, and none was allowed
+to turn into a fix in the same pass. **The signup check is the one that changed a
+verdict** — it converted the audit's largest UNVERIFIED risk into a measured
+fact, and it did so without the account creation the audit had assumed was
+required. **When something is filed unverified because verifying it looks
+prohibited, look for the read-only endpoint before accepting that.**
 
 | Hash | What |
 | --- | --- |
@@ -238,6 +297,7 @@ same pass.
 | `58c1589` | Added the constructed `leave_return` fixture, closing that harness at 11 of 11 alert kinds. 22 assertions to 26. |
 | `eaba090` | This file: recorded the session, and corrected three claims it measured as stale. |
 | `ffef697` | Aligned `@types/node` to `24.13.3` with the `24.x` engines pin, and reconciled `package-lock.json`, which `4e3eca0` had left behind. |
+| `e2a0c01` | This file: closed the `@types/node` item that `eaba090` had described in the present tense one commit before it stopped being true. |
 
 **`61cc581` IS THE ONE TO READ, because the pointers were not mis-numbered — they
 addressed content that HAS NEVER EXISTED.** The instinct on a bad `§N` is to
@@ -390,8 +450,8 @@ commits that day came from a separate, explicitly scoped pass.
 ### (a) DECISION for Turki — do not "fix" these, they are choices
 
 **Four of the original six closed in the parked-items session.** They are listed under "Closed
-BY MEASUREMENT" below with their hashes, so they are not resurrected. Two remain,
-and **neither is code** — both are Turki clicking something.
+BY MEASUREMENT" below with their hashes, so they are not resurrected. Three
+remain, and **none is code** — all three are Turki clicking something.
 
 1. **`.planning/` review artifacts are TRACKED, and no `.gitignore` rule was
    added — deliberately.** **Re-measured: 6 files named `review-*.md` are
@@ -404,8 +464,15 @@ and **neither is code** — both are Turki clicking something.
    in, and that state expires.
 2. **Leaked-password protection is DISABLED in Supabase Auth.** Re-measured off
    the advisor, not carried from the note. Console setting — not a migration, not
-   a code change. **This is the only genuinely open item on the security
-   posture**, and it is Turki's to click.
+   a code change, and Turki's to click.
+3. **PUBLIC SIGNUP IS OPEN — the more serious of the two auth settings, and the
+   one that actually gates a deploy.** Measured 2026-09-09:
+   `"disable_signup": false`. Anyone who registers gets an `authenticated` JWT,
+   and 85 of 89 RLS policies are blanket `qual = true` for that role, so the JWT
+   is the whole authorization model. Full measurement, the exact read-only curl,
+   and the console path to close it are in Deploy readiness. **Item 2 used to
+   claim it was the only open security item; it was not, it was the only one
+   anybody had measured.**
 
 ### (b) Doable FIX — EMPTY again
 
@@ -536,8 +603,8 @@ For the record, what they were and what measurement showed:
 
 **DEPLOY GATES OUTRANK EVERYTHING NUMBERED BELOW, and they are not code.** The
 ordered MUST list lives in Deploy readiness: decide what happens to the sandbox
-data woven into paid records, confirm whether public signup is open, and turn on
-leaked-password protection. **Every code-side gate is already green**, so nothing
+data woven into paid records, **CLOSE PUBLIC SIGNUP — measured open 2026-09-09,
+no longer a question**, and turn on leaked-password protection. **Every code-side gate is already green**, so nothing
 in items 1–3 blocks a deploy and none of them unblocks one either. Do not start
 item 2 or 3 expecting it to move the deploy date.
 
@@ -559,16 +626,18 @@ and returns 16 rows, 11 live and 5 terminated — but nobody has watched it rend
 It was fully broken before, so the change can only improve it; **verify it once
 before treating this line as closed.**
 
-### 1. The two remaining (a) items — Turki only, no analysis owed
+### 1. The three remaining (a) items — Turki only, no analysis owed
 
-Whether the `.planning/review-*.md` convention becomes a written rule, and the
-Supabase Auth leaked-password toggle. **Neither is code.** The `CLAUDE.md` chore
+Whether the `.planning/review-*.md` convention becomes a written rule, the
+Supabase Auth leaked-password toggle, and **closing public signup**. **None is
+code.** The `CLAUDE.md` chore
 that used to sit beside them is DONE — `CLAUDE.md:251` reads `0188`, matching the
 DB; re-measured, see Database above.
 
 **The leaked-password toggle is now on the deploy path, not just the open list.**
-It is one of two console settings a deploy waits on; the other is whether public
-signup is open. See Deploy readiness.
+It is one of two console settings a deploy waits on; the other is public signup,
+**which was measured OPEN on 2026-09-09 and must be closed**. See Deploy
+readiness.
 
 ### 2. Analysis — Paid-up Balance vs Amount Payable
 
