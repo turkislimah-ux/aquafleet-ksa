@@ -6,7 +6,7 @@ const nextConfig = {
   // unchanged — but without it, scripts/safe-build.sh's --dist-dir escape
   // hatch would silently build into .next anyway and clobber the running dev
   // server, which is the exact failure that script exists to prevent.
-  // See HANDOFF.md section 4.
+  // The rule, and the failure it prevents, are stated in that script's header.
   distDir: process.env.NEXT_DIST_DIR || ".next",
 };
 

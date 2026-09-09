@@ -10,9 +10,10 @@
 # as "someone ran a build"; the first time it happened it was misdiagnosed as a
 # UI regression and cost a session.
 #
-# HANDOFF.md §4 states the rule. A stated rule was not enough: the guard that
-# preceded this script PRINTED a warning and let the build run anyway, which is
-# worse than no guard at all — the transcript reads as if it was protected.
+# The paragraph above IS the statement of the rule — this script is where it
+# lives. Stating it was not enough: the guard that preceded this script PRINTED
+# a warning and let the build run anyway, which is worse than no guard at all —
+# the transcript reads as if it was protected.
 #
 # So this EXITS. Non-zero, before touching .next.
 #
@@ -36,7 +37,7 @@ if [[ -z "$DIST" ]]; then
 REFUSING TO BUILD — next dev is live on port $PORT.
 
 A production build would overwrite .next underneath it and every asset would
-404 until dev is restarted. See HANDOFF.md section 4.
+404 until dev is restarted. The header of this script explains why.
 
 Do one of:
   1. Stop dev, then build:      pkill -f "next dev" && ./scripts/safe-build.sh
