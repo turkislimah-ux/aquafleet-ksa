@@ -1,30 +1,34 @@
 # SESSION HANDOFF
 
-**Updated 2026-09-09 (SECOND session that day — deploy-prep; the parked-items
-close-out earlier the same day is the section below it), every figure re-measured
-this turn.** Rewritten fresh at `2318055` on 2026-09-08 from a 1301-line predecessor;
-**nothing was lost, it is `e93baec:.planning/HANDOFF.md`, and every unit's
-reasoning lives in its own commit message**, which is where `CLAUDE.md` §5 says
-detail belongs. This file is STATE — what is true now, what is open, and what
-comes next. Rules are in `CLAUDE.md`; domain law is in
-`.claude/skills/aquafleet-domain/SKILL.md`.
+**Updated 2026-09-09 (THIRD session that day — timezone correctness and error
+boundaries; the deploy-prep and parked-items sessions earlier the same day are
+the sections below it), every figure re-measured this turn.** Rewritten fresh at
+`2318055` on 2026-09-08 from a 1301-line predecessor; **nothing was lost, it is
+`e93baec:.planning/HANDOFF.md`, and every unit's reasoning lives in its own commit
+message**, which is where `CLAUDE.md` §5 says detail belongs. This file is
+STATE — what is true now, what is open, and what comes next. Rules are in
+`CLAUDE.md`; domain law is in `.claude/skills/aquafleet-domain/SKILL.md`.
 
-**The parked list is now CLEAR.** All four numbered items ran to a commit this
-session, and the six (a) DECISION entries are down to two, both of which are
-Turki's to click rather than anyone's to code. See Open items.
+**THE APP AND THE DATABASE NOW AGREE ON WHAT DAY IT IS.** Both halves landed this
+session: `0189` moved every day/month/year bucket in the DB off bare
+`current_date` (which is UTC here), and `00cfb9e` moved the app's formatters off
+the host clock. **Neither half was sufficient alone** — the DB is authoritative
+for stored dates, the app for displayed ones, and before this they could name
+different days for the same instant. See Completed this session.
 
-**One of the four did not land cleanly.** Item 3's `drivers.active` drop missed a
-seventh file and took the Archive page down with `42703` until a follow-up sweep
-caught it (`32a515d`, `e4dbd3e`). **A commit closing a parked item is not
-evidence the item is finished** — the sweep that found this ran only because it
-was asked for, and `tsc` had been green the whole time.
+**The parked list is still CLEAR** — nothing was parked this session either.
+
+**A COMMIT CLOSING AN ITEM IS NOT EVIDENCE THE ITEM IS FINISHED.** Standing lesson
+from the `drivers.active` drop two sessions ago: it missed a seventh file and took
+the Archive page down with `42703` until a follow-up sweep caught it (`32a515d`,
+`e4dbd3e`), with `tsc` green the whole time.
 
 **NO DEPLOY BLOCKER IS CODE — BOTH ARE THINGS TURKI DOES.** A read-only audit ran
 the whole gate — types, a production build, both suites, the view footer, the
 function ACLs, RLS, the env surface — and every code-side check is green. Two
 things are not ready. **The live database is a sandbox**, with test rows woven
-into records that are already PAID. **And public signup is OPEN**, measured
-2026-09-09 off GoTrue's public settings endpoint: with no role gate anywhere in
+into records that are already PAID. **And public signup is OPEN — RE-MEASURED
+THIS SESSION, still `"disable_signup": false`**: with no role gate anywhere in
 the app, anyone who registers gets everything. **Do not read "audit passed" as
 "ship it".** See Deploy readiness.
 
@@ -37,7 +41,8 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Git
 
-- **`main` is at `e2a0c01`.** Measured with `git rev-parse HEAD`.
+- **`main` was at `876bc0b` when this line was written, and the commit carrying
+  this file is its child.** Measured with `git rev-parse HEAD`.
 - **Level with origin, measured BOTH required ways**: the BRANCH line of
   `git status -sb` reads `## main...origin/main` with no ahead/behind marker,
   and `git rev-list --left-right --count origin/main...HEAD` returns `0	0`.
@@ -48,20 +53,27 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Database
 
-- **Files on disk run through `0188`; 186 `.sql` files** (`ls
-  supabase/migrations/*.sql | wc -l`). The gap between 186 and 188 is historical
+- **Files on disk run through `0189`; 187 `.sql` files** (`ls
+  supabase/migrations/*.sql | wc -l`). The gap between 187 and 189 is historical
   numbering, not a missing file.
-- **The two files AGREE again: `CLAUDE.md:251` now reads "DB at migration
-  0188".** Re-measured with `grep -n "DB at migration" CLAUDE.md`, not carried
-  from the note — the previous revision of this bullet said the stub was one
-  behind at `0187`, and that had already been fixed by the time it was read. The
-  bullet was the stale thing, not the stub. **This is the pairing rule working as
-  intended: it was recorded openly, so the next reader checked it.**
-- **`0185`–`0188` were applied through MCP or the SQL Editor, and NEITHER PATH
+- **The two files AGREE: `CLAUDE.md`'s stub reads `0189`, matching the DB and the
+  files.** It read `0188` for part of 2026-09-09 and was bumped in `876bc0b`,
+  after re-measuring the catalog rather than trusting this note. **Find that line
+  by grep, never by address** — it has moved twice (`:251` → `:239`):
+  `npx tsx scripts/code-grep.ts 'DB at migration' CLAUDE.md --worktree`.
+- **THE RULE THAT GAP TAUGHT, kept because the gap will recur.** `0189` was
+  applied through MCP, which touches the database and leaves NOTHING in git — so
+  no diff, no failing check and no review signals that the stub just aged. **§7
+  does not say what to do when the pair splits** (checked: its only rule under
+  that line is "do not read this number out of `schema_migrations`"), so the
+  handling is stated HERE: **a stub either moves with the DB or disagrees in
+  writing.** Silence is the failure mode, because the stub is what the next
+  session reads first and it reads as current.
+- **`0185`–`0189` were applied through MCP or the SQL Editor, and NEITHER PATH
   WRITES A `schema_migrations` LEDGER ROW.** The ledger's max version lags
   permanently and always will — see `CLAUDE.md` §7. **Do not read the migration
   level out of `schema_migrations`.** The record is the files on disk plus the
-  objects in the catalog. All four re-verified against the catalog this turn:
+  objects in the catalog. All five re-verified against the catalog this turn:
   - **`0185_within_month_collection_rate.sql`** — `settled_same_month_revenue_sar`
     is present on **both** `v_revenue_monthly` and `v_pnl_monthly`
     (`information_schema.columns`). Applied.
@@ -85,9 +97,35 @@ The commands are given inline so re-measuring is cheaper than trusting.
     down**, not merely its Staff tab. Fixed in **`32a515d`**; the comments left
     behind were corrected in **`e4dbd3e`**. Treat "0188 applied cleanly" as
     false: the DDL was fine, the code sweep was not.
-  - **Do not re-apply any of the four.**
+  - **`0189_riyadh_date_buckets.sql`** — applied and catalog-verified by the
+    architect, then committed as `e147373`. **The file is the record of a change
+    already in place.** Re-measured this turn: **8 of 8** redefined functions
+    carry no bare `current_date` anywhere in `pg_get_functiondef`, DO contain the
+    Riyadh expression, and are NOT anon-executable; **0** column defaults in
+    `public` still name `current_date` and **6** now name `Asia/Riyadh`; the month
+    spine reaches the current Riyadh month (`true`). **Verification reads
+    `pg_get_functiondef`, NOT `prosrc`** — `prosrc` omits PARAMETER DEFAULTS, and
+    `add_price_lot` and `record_exit_permit_return` each carry the date in their
+    signature as well as their body, so a `prosrc` check calls them clean while
+    half the object is still on UTC. **"8" IS THE SET `0189` REDEFINED, NOT A
+    TOTAL — a broad count of plpgsql/sql functions naming `Asia/Riyadh` returns
+    `13`, and that is not a contradiction.** The other five —
+    `set_project_commission`, `cancel_project_commission`,
+    `record_project_commission_change`, `record_salary_change`,
+    `issue_driver_payslip` — **already named Riyadh before `0189`, which is
+    exactly why it did not touch them**; the first four hold
+    `v_today date := (now() at time zone 'Asia/Riyadh')::date`, the payslip holds
+    four `date_trunc('month', … at time zone 'Asia/Riyadh')` sites. Listed by
+    name because a bare `8` vs `13` reads like drift. **Do not "reconcile" them.**
+  - **Do not re-apply any of the five.**
 - **View security footer holds: 50 views, 50 `security_invoker=true`, 0 readable
   by `anon`.** `CLAUDE.md` §6's counts MATCHING is the check, not the number.
+  **Re-measured AFTER `0189` replaced three of those views** (`v_report_months`,
+  `v_receivables_open`, `v_truck_day_state`) — which is the case the rule exists
+  for, since `create or replace view` silently drops `reloptions`. The companion
+  function check is green too: **0 non-trigger functions anon-executable**, after
+  eight `create or replace function` statements reset eight ACLs to
+  EXECUTE-TO-PUBLIC and the migration's footers took them back.
 - **`CLAUDE.md` §7's stub carries the migration number too, so the two files go
   stale together.** When the DB moves, change it in both places or leave the
   pair openly disagreeing — never silently.
@@ -137,6 +175,20 @@ Re-run today. Three findings, and **only one of them is work**:
   `formatDayKeyLang` is an **en-GB Intl formatter** and renders September as
   `"Sept"`. **The two agree on eleven months out of twelve.** That near-miss is
   the 2026-09-08 session's most transferable finding — see Completed, `5ffa9cb`.
+- **`00cfb9e` rewrote this file and did NOT disturb either ruling — re-measured
+  after the fact, not assumed:** `formatDayKeyLang` still passes `"en-GB"`
+  (`lib/utils.ts:574`) and `sar()` still builds its `Intl.NumberFormat` on
+  `"en-US"` (`lib/reports.ts:895`). What it ADDED is the third axis: **`RIYADH_TZ`
+  and `withRiyadh()`, so LOCALE and TIME ZONE are now set independently.** A
+  formatter here names its zone; it does not read the host's. **Its spread order
+  is `{ timeZone: RIYADH_TZ, ...opts }` — CALLER-WINS, zone included**
+  (`lib/utils.ts:165-167`), so Riyadh is the DEFAULT, not a lock. **That override
+  is USED, and flipping the spread to force the zone would break both users:**
+  `DAY_KEY_OPTS` (`:551-556`) and `lib/parts-usage.ts:293` both pass
+  `timeZone: "UTC"` on purpose — **a calendar KEY is a date with no instant in
+  it, so placing it in a zone is what MOVES it a day.** The formatters that take
+  an INSTANT get Riyadh; the ones that take a KEY must not. Measured this turn:
+  those two are the only `timeZone` overrides in `app`/`lib`/`components`.
 
 ### Harnesses
 
@@ -278,7 +330,80 @@ before running any build while dev is up.
 
 ---
 
-## Completed this session (2026-09-09, deploy-prep, `e4dbd3e` → `e2a0c01`)
+## Completed this session (2026-09-09, timezone + error boundaries, `e2a0c01` → `876bc0b`)
+
+| Hash | What |
+| --- | --- |
+| `7629086` | This file: recorded that public signup is measured OPEN, not assumed. |
+| `4e64204` | Re-verified every `CLAUDE.md` claim and corrected three that were false. |
+| `9add0d6` | Moved §6's verbatim SQL out of `CLAUDE.md` into the domain skill, leaving the RULES behind. |
+| `7eed1f7` | Routed session-end state to this file rather than `CLAUDE.md` §7. |
+| `6433572` | This file: recorded RBAC options as an owed task, fixed a drifted archive reference. |
+| `eb655c5` | Error boundaries (`app/error.tsx`, `app/global-error.tsx`, `app/not-found.tsx`) plus a missing-env configuration screen — 10 files, 626 insertions. |
+| `e147373` | **Migration `0189`** — every day/month/year bucket in the DB off bare `current_date`. Applied and catalog-verified BEFORE the commit; the file is the record. |
+| `00cfb9e` | **The app half** — `lib/utils.ts` and 7 callers name `Asia/Riyadh` in the formatter instead of reading the host clock. 8 files, 239/72. |
+| `876bc0b` | **The stub the first two left stale** — `CLAUDE.md` §7 `0188` → `0189`, catalog re-measured before the one-character edit. |
+
+**`e147373` IS THE ONE TO READ, and the lesson is that THE FILES ARE NOT THE FIX
+SET.** A first enumeration built from migration files listed ~10 `current_date`
+sites and named `0053` as the PO-numbering site. `scripts/code-grep.ts` measured
+**53** hits, and the LIVE `create_purchase_order` turned out to carry `0056`'s
+nine-argument signature — `0053` had been superseded. The file-derived list was
+discarded whole and the fix set rebuilt from `pg_proc` / `pg_attrdef` /
+`pg_class`. **A migration file is a record of an INTENTION that may since have
+been replaced; the catalog is what is running** (`CLAUDE.md` §5). The files were
+used afterwards for one narrow purpose only: recovering house formatting for view
+bodies already verified against `pg_get_viewdef`.
+
+**THE SIX `greatest(current_date, riyadh)` SITES WERE LEFT ALONE, AND NOT
+EDITING THEM WAS THE HARDER CALL.** A sweep would have "fixed" all six. They are
+inert: `pg_timezone_names` gives `Asia/Riyadh` a fixed `03:00:00` offset with
+`is_dst false`, so the Riyadh date is **never behind** the UTC one and `GREATEST`
+already returns Riyadh. Proven, not argued — a frozen-clock probe on the live DB
+returned `greatest_of_both` = `2026-10-01` and `2027-01-01` on the two edge
+instants, with a control row at `20:59+00` agreeing on both to show the probe
+isolates the three-hour window. **Editing a correct expression so a grep reads
+cleanly is not a fix**, and `v_truck_day_state` deliberately keeps one such site,
+which is why `0189`'s view verification asserts occurrence COUNTS rather than
+zero.
+
+**What the probe made concrete, and why this was not cosmetic:** at
+`2026-12-31 22:00:00+00` the UTC year is **2026** and the Riyadh year is **2027**.
+A purchase order raised in that window drew the previous year's counter and
+printed `PO-2026-NNNN` — a gap-free numbering key AND a printed document, neither
+quietly renumberable afterwards. The `last_service_date` case is worse than wrong:
+`greatest()` **absorbs** a UTC-yesterday stamp, so the column keeps its old value
+and the service silently never registers.
+
+**`00cfb9e` carries the `ar-SA` trap, which is `CLAUDE.md` §5's comment rule
+firing on a real commit.** The staged `lib/utils.ts` blob greps **5** hits for
+`ar-SA` — the exact regression the change exists to prevent. All five are
+COMMENTS explaining why it is never passed; `npx tsx scripts/code-grep.ts 'ar-SA'
+lib/utils.ts` exits 0. **The prose documenting a prohibition matches a grep for
+the thing prohibited.** Locale stays `en-US`/`en-GB` and only `timeZone` is
+added, via a `{ timeZone: RIYADH_TZ, ...opts }` spread whose CALLER-WINS order is
+what preserves `lib/parts-usage.ts`'s deliberate UTC subsystem untouched.
+
+**An ENOENT on `/inventory` mid-session was environment, and was proven so rather
+than assumed.** `.next/server/middleware-manifest.json` was missing because a
+`TZ=UTC` verification build and earlier cleanups had partially removed the build
+dir out from under a running dev server. Stopping it, `rm -rf .next .next-verify`
+and restarting gave `Ready in 1301ms` with no ENOENT — **but then an
+`Invalid hook call … Cannot read properties of null (reading 'useState')` fired
+at `AppShell`, which looks exactly like a real regression.** It was not: the log
+order shows a clean `GET /inventory 200` first, then a **500** on
+`_next/static/webpack/<hash>.hot-update.json` — a chunk belonging to the DELETED
+build — then the hook errors, then Fast Refresh's full reload. `AppShell.tsx` has
+`"use client"` on line 1, is not one of the 8 changed files, and React resolves to
+a single `18.3.1`. **Control: six requests with no browser attached reproduced
+nothing.** A stale client bundle in an open tab desyncs from a fresh server and
+nulls the React dispatcher. **A hook error is not always a hook bug — check
+whether the client and server are running the same build before reading the
+stack.**
+
+---
+
+## Completed earlier the same day (2026-09-09, deploy-prep, `e4dbd3e` → `e2a0c01`)
 
 **Three read-only investigations that produced NO code commits, then seven
 commits.** The audit, the Edge-runtime trace and the signup check were all
@@ -443,15 +568,21 @@ deploy-prep audit** — `TODO`/`FIXME`/`HACK`/`XXX` across all tracked
 live DB rather than carried forward. **An earlier revision of this paragraph
 warned that the list's completeness was a day old; that caveat is spent.**
 
-**It is now as fresh as `58c1589` and no fresher.** The audit was READ-ONLY by
-instruction, so it re-derived and classified but changed nothing — the four
-commits that day came from a separate, explicitly scoped pass.
+**The SWEEP is as fresh as `58c1589` and no fresher — 11 commits have landed
+since.** The audit was READ-ONLY by instruction, so it re-derived and classified
+but changed nothing; the four commits that day came from a separate, explicitly
+scoped pass. **The entries BELOW are individually newer than the sweep** — (b)1
+was opened by `0189` on 2026-09-09 and never went through it. **A re-derivation
+is a floor on this list's completeness, not a timestamp on its contents.**
 
 ### (a) DECISION for Turki — do not "fix" these, they are choices
 
 **Four of the original six closed in the parked-items session.** They are listed under "Closed
 BY MEASUREMENT" below with their hashes, so they are not resurrected. Three
-remain, and **none is code** — all three are Turki clicking something.
+remain, and **none is code.** Two are Turki clicking a console setting; the third
+is whether a convention gets written down. **An earlier revision said "all three
+are Turki clicking something" — item 1 is not a click, and reading it as one is
+how it stays unanswered.**
 
 1. **`.planning/` review artifacts are TRACKED, and no `.gitignore` rule was
    added — deliberately.** **Re-measured: 6 files named `review-*.md` are
@@ -474,9 +605,18 @@ remain, and **none is code** — all three are Turki clicking something.
    claim it was the only open security item; it was not, it was the only one
    anybody had measured.**
 
-### (b) Doable FIX — EMPTY again
+### (b) Doable FIX — EMPTY again, both 2026-09-09 entries closed
 
-**The one entry filed on 2026-09-09 closed the same day as `ffef697`.**
+**The `CLAUDE.md` stub entry opened and closed the same day.** `0189` was applied
+through MCP and committed as `e147373`, leaving §7 reading `0188`; the pair was
+left disagreeing **in writing** while the ask was scoped to HANDOFF, then bumped
+in **`876bc0b`** — catalog re-measured first, not taken off this note. The
+durable half is in Database above: an MCP-applied migration leaves nothing in git
+to signal the stub aged, so the split has to be written down or it is invisible.
+**Cite that line by grep, never by address** — it has moved twice (`:251` →
+`:239`): `npx tsx scripts/code-grep.ts 'DB at migration' CLAUDE.md --worktree`.
+
+**The OTHER entry, filed earlier the same day, closed as `ffef697`.**
 `@types/node` was pinned at `20.14.10` while `engines` pinned Node `24.x`, so the
 code typechecked against a Node 20 surface and ran on 24. Now `24.13.3`, exact,
 matching how `typescript` and the react types are already pinned. **Not the
@@ -553,7 +693,7 @@ For the record, what they were and what measurement showed:
 **Closed 2026-09-09 — the four parked items. Each has a commit; do not reopen:**
 
 - **The Arabic week-header comma** — `70725bc`. It was ruled a change, not left
-  as a choice: `MaintenanceCalendar.tsx:176` now sets the separator from `lang`,
+  as a choice: `MaintenanceCalendar.tsx:195` now sets the separator from `lang`,
   `،` (U+060C) in Arabic and `,` in English. **English is byte-identical.**
 - **The four Inventory modal sizes** — `3519f3a`, and only ONE of the four was a
   real divergence. New Supplier went `max-w-md` → `max-w-[880px]`, the literal
@@ -611,14 +751,20 @@ item 2, 3 or 4 expecting it to move the deploy date.
 ### 0. DONE — the parked inventory is clear
 
 **Nothing is parked.** The four items ran to commits on 2026-09-09, a follow-up
-sweep closed the one that had leaked a live defect (`32a515d`, `e4dbd3e`), and
-the two survivors in (a) are console clicks, not work. **Agenda 2 and 3 are now
-unblocked** — the reason this section used to say "do not start on top of an
-unresolved parked list" was to avoid another 1301-line handoff, and that risk is
-spent.
+sweep closed the one that had leaked a live defect (`32a515d`, `e4dbd3e`), and of
+the three survivors in (a), two are console clicks and the third is a convention
+to write down or not — none is work. **Agenda 2 and 3 are now unblocked** — the
+reason this section used to say "do not start on top of an unresolved parked
+list" was to avoid another 1301-line handoff, and that risk is spent.
 
-**The deploy-prep pass opened one small (b) item and closed it the same day**
-(`ffef697`, the `@types/node` / `engines` alignment). (b) is empty again.
+**THE TIMEZONE WORK IS DONE IN ALL THREE PARTS, and none is on this list any
+more.** `e147373` applied+verified `0189` in the DB, `00cfb9e` moved the app off
+the host clock, `876bc0b` bumped the `CLAUDE.md` stub the first two left stale.
+**Nothing about dates is owed.**
+
+**Both 2026-09-09 (b) entries opened and closed the same day** — `ffef697` (the
+`@types/node` / `engines` alignment) and `876bc0b` (the stub). **(b) is empty
+again**, and this time the sentence is measured rather than inherited.
 
 **`/archive` has not been confirmed in-browser since `32a515d`.** The page is
 auth-gated, so the fix was proven at the query layer — the corrected select runs
@@ -630,9 +776,10 @@ before treating this line as closed.**
 
 Whether the `.planning/review-*.md` convention becomes a written rule, the
 Supabase Auth leaked-password toggle, and **closing public signup**. **None is
-code.** The `CLAUDE.md` chore
-that used to sit beside them is DONE — `CLAUDE.md:251` reads `0188`, matching the
-DB; re-measured, see Database above.
+code.** The `CLAUDE.md` stub chore that used to sit beside them **reopened when
+`0189` landed and closed the same day as `876bc0b`** — it never belonged here
+anyway, since nobody had to decide anything; see (b). Do not count it as a fourth
+(a) item, and do not re-open it from a note that predates the bump.
 
 **The leaked-password toggle is now on the deploy path, not just the open list.**
 It is one of two console settings a deploy waits on; the other is public signup,
@@ -693,8 +840,14 @@ measured today:
   surface for it at all today: `app/inventory/` contains no `*-print` id outside
   `PurchaseOrders.tsx`. This one is a build, not a migration.
 - Also still on the old model, not named in the request but adjacent:
-  `#breakdown-print` (`app/trips/BreakdownReport.tsx:624`) and `#history-print`
+  `#breakdown-print` (`app/trips/BreakdownReport.tsx:632`) and `#history-print`
   (`app/drivers/HistoryTab.tsx:307`).
+
+**Two line numbers in this section and one below it MOVED on 2026-09-09** —
+`00cfb9e` edited `BreakdownReport.tsx`, so `#breakdown-print` went `:624` → `:632`
+(re-measured this turn). **A commit that touches none of the print surfaces still
+invalidates every line number in a file it touches.** Grep the id, not the
+address.
 
 **Before removing any id from the whitelist, check what its owner does with
 Ctrl/Cmd+P** — a subtree that leaves the whitelist without an intercept prints a
