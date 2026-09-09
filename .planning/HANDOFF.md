@@ -1,12 +1,22 @@
 # SESSION HANDOFF
 
-**Rewritten fresh 2026-09-08 (evening close-out), every figure re-measured this
-turn.** The previous revision had grown to 1301 lines of accumulated session
-history. **Nothing was lost: it is `e93baec:.planning/HANDOFF.md`, and every
-unit's reasoning lives in its own commit message**, which is where `CLAUDE.md`
-§5 says detail belongs. This file is STATE — what is true now, what is open, and
-what comes next. Rules are in `CLAUDE.md`; domain law is in
+**Updated 2026-09-09 (parked-items close-out), every figure re-measured this
+turn.** Rewritten fresh at `2318055` on 2026-09-08 from a 1301-line predecessor;
+**nothing was lost, it is `e93baec:.planning/HANDOFF.md`, and every unit's
+reasoning lives in its own commit message**, which is where `CLAUDE.md` §5 says
+detail belongs. This file is STATE — what is true now, what is open, and what
+comes next. Rules are in `CLAUDE.md`; domain law is in
 `.claude/skills/aquafleet-domain/SKILL.md`.
+
+**The parked list is now CLEAR.** All four numbered items ran to a commit this
+session, and the six (a) DECISION entries are down to two, both of which are
+Turki's to click rather than anyone's to code. See Open items.
+
+**One of the four did not land cleanly.** Item 3's `drivers.active` drop missed a
+seventh file and took the Archive page down with `42703` until a follow-up sweep
+caught it (`32a515d`, `e4dbd3e`). **A commit closing a parked item is not
+evidence the item is finished** — the sweep that found this ran only because it
+was asked for, and `tsc` had been green the whole time.
 
 **Every number below is a POINTER, not evidence. Re-measure before quoting it.**
 The commands are given inline so re-measuring is cheaper than trusting.
@@ -17,7 +27,7 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Git
 
-- **`main` is at `e93baec`.** Measured with `git rev-parse HEAD`.
+- **`main` is at `e4dbd3e`.** Measured with `git rev-parse HEAD`.
 - **Level with origin, measured BOTH required ways**: the BRANCH line of
   `git status -sb` reads `## main...origin/main` with no ahead/behind marker,
   and `git rev-list --left-right --count origin/main...HEAD` returns `0	0`.
@@ -28,15 +38,18 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Database
 
-- **Files on disk run through `0187`; 185 `.sql` files** (`ls
-  supabase/migrations/*.sql | wc -l`). The gap between 185 and 187 is historical
+- **Files on disk run through `0188`; 186 `.sql` files** (`ls
+  supabase/migrations/*.sql | wc -l`). The gap between 186 and 188 is historical
   numbering, not a missing file.
-- **`0185`, `0186` and `0187` were applied through MCP or the SQL Editor, and
-  NEITHER PATH WRITES A `schema_migrations` LEDGER ROW.** The ledger's max
-  version lags permanently and always will — see `CLAUDE.md` §7. **Do not read
-  the migration level out of `schema_migrations`.** The record is the files on
-  disk plus the objects in the catalog. All three re-verified against the
-  catalog this turn:
+- **`CLAUDE.md` §7's stub still reads "DB at migration 0187" and is now one
+  behind this file.** Recorded openly rather than silently, per the pairing rule
+  below. Fixing it is a one-number edit to `CLAUDE.md:251` and nobody has made it
+  yet.
+- **`0185`–`0188` were applied through MCP or the SQL Editor, and NEITHER PATH
+  WRITES A `schema_migrations` LEDGER ROW.** The ledger's max version lags
+  permanently and always will — see `CLAUDE.md` §7. **Do not read the migration
+  level out of `schema_migrations`.** The record is the files on disk plus the
+  objects in the catalog. All four re-verified against the catalog this turn:
   - **`0185_within_month_collection_rate.sql`** — `settled_same_month_revenue_sar`
     is present on **both** `v_revenue_monthly` and `v_pnl_monthly`
     (`information_schema.columns`). Applied.
@@ -44,7 +57,23 @@ The commands are given inline so re-measuring is cheaper than trusting.
     **4 rows carry `basis = 'settlement'`**. Applied.
   - **`0187_report_metrics_balance_terms.sql`** — `report_metrics` holds **33
     rows**, **3** of them `paid_up_balance` / `running_balance` /
-    `amount_payable`. Applied. **Do not re-apply any of the three.**
+    `amount_payable`. Applied.
+  - **`0188_drop_drivers_active.sql`** — `drivers.active` is GONE from
+    `pg_attribute`, and the two RPCs it redefined read
+    `authenticated=true, service_role=true, anon=false, PUBLIC=false` on
+    `has_function_privilege`. Applied. **Its grant block restates BOTH
+    `authenticated` and `service_role`** — `create or replace` had reset the ACL,
+    and granting only `authenticated` would have silently revoked service_role.
+  - **`0188` WAS NOT A CLEAN DROP — it needed a follow-up, and the gap was live
+    in production for a day.** The migration and its TS half (`7c45ac8`) updated
+    six files and **missed a seventh, `app/archive/page.tsx`**, whose narrow
+    driver select still named `active`. PostgREST answers a dropped column with
+    **`42703: column "active" does not exist`**, and because that page folds
+    every query error into one page-level `error`, **the whole Archive page was
+    down**, not merely its Staff tab. Fixed in **`32a515d`**; the comments left
+    behind were corrected in **`e4dbd3e`**. Treat "0188 applied cleanly" as
+    false: the DDL was fine, the code sweep was not.
+  - **Do not re-apply any of the four.**
 - **View security footer holds: 50 views, 50 `security_invoker=true`, 0 readable
   by `anon`.** `CLAUDE.md` §6's counts MATCHING is the check, not the number.
 - **`CLAUDE.md` §7's stub carries the migration number too, so the two files go
@@ -129,7 +158,57 @@ Re-run today. Three findings, and **only one of them is work**:
 
 ---
 
-## Completed this session (2026-09-08, `0c7adf9` → `e93baec`)
+## Completed this session (2026-09-09, `2318055` → `e4dbd3e`)
+
+**The four parked items, one commit each, then a cleanup sweep that caught what
+item 3 had missed.** Each was measured against the live database or current code
+first; **no claim below was carried over from a prior note.**
+
+| Hash | Item | What |
+| --- | --- | --- |
+| `c17b7f8` | 2 | Corrected four stale comments. `consume_from_lots` is NOT callerless — four RPCs reach it inside the DB; the "NOT built" list was deleted after every entry proved built; `search.ts`'s dangling "HANDOFF.md §6" pointer now states the fact it meant; the map-cities note now reads as the ruling it received. |
+| `7c45ac8` | 3 | Dropped `drivers.active` — migration `0188`, a four-case SQL harness, and six of the SEVEN TS readers. **It missed `app/archive/page.tsx`; see `32a515d`.** |
+| `3519f3a` | 4 | Widened the New Supplier modal to `preview/app.css`'s 880px. The other three modals in the same note were measured and correctly left alone. |
+| `70725bc` | 1 | The Arabic maintenance week header now uses `،` (U+060C) before the year; English byte-identical. |
+| `32a515d` | — | **The seventh reader.** `app/archive/page.tsx` still selected the dropped `active`, so `/archive` answered `42703` and rendered its error state. Select corrected, `ArchiveDriverRow.active` removed, two `ArchiveStaffTab` filters reduced to `terminated_at`. |
+| `e4dbd3e` | — | Four comments that outlived the column: `restoreDriver` no longer claims to set `active = true`, `drivers/actions.ts` no longer claims `driver-state.ts` reads the column (it is pure and reads none) or that deletion is "deferred", and `driver-assignment.ts` no longer offers it as a live gate. |
+
+**`70725bc` IS THE ONE TO READ, and the lesson is about VERIFICATION, not
+Arabic.** The fix was correct on disk from the first attempt, yet it was reported
+as still broken twice. Reasoning about what the code *produces* settled nothing
+both times. What settled it was a chain of bytes: `hexdump` of the file on disk
+(`d8 8c`), then the same bytes inside the compiled chunk, then **the same bytes
+in the chunk fetched over HTTP from the port the browser was actually on**, then
+the codepoint read out of the live DOM. **A rendering complaint is a claim about
+four artifacts — source, bundle, transport, DOM — and only the last one is what
+the user sees.** Two stale `next dev` servers were found and stopped along the
+way; neither turned out to be the cause, but neither could be ruled out by
+argument. **When a fix "does not take", stop explaining and start dumping bytes
+at each hop.**
+
+`7c45ac8` carries the security companion: **`create or replace function` resets
+the ACL, so the redefinition must restate the WHOLE measured grant set.** The
+first draft granted `authenticated` only. That reads like a faithful restoration
+and is in fact a silent revoke of `service_role`. Measure `proacl` before
+drafting, and read the result back through `has_function_privilege` — **never
+through `aclexplode`, which reports "no PUBLIC entry" for a NULL `proacl`, i.e.
+exactly the state where PUBLIC *has* execute.**
+
+**`32a515d` is the one that should not have been necessary, and its lesson is
+that TSC CANNOT SEE A DROPPED COLUMN.** A Supabase select is a plain STRING and
+its result is a CAST — `.select("… active …")` then `as ArchiveDriverRow[]`.
+Nothing in the type system connects the two, so `tsc --noEmit` stayed green with
+a page that could not load. The row type was the accomplice: it still declared
+`active: boolean`, which is what let the two consumers compile against a field
+the row would never carry. **When a column is dropped, the sweep is a grep of
+every `.from("<table>")` select STRING, not a typecheck** — and the row type must
+lose the field in the same commit, so the compiler starts flagging the readers
+instead of blessing them. Fifteen `.from("drivers")` sites existed; fourteen were
+already right, and the type system had no opinion about the fifteenth.
+
+---
+
+## Completed the previous session (2026-09-08, `0c7adf9` → `e93baec`)
 
 Seven work commits and one handoff commit. One line each; **the reasoning is in
 the commit messages, and they are the record.**
@@ -167,36 +246,21 @@ failing before its pass means anything.**
 
 ## Open items
 
-**A COMPLETE scan was run this turn** — `TODO`/`FIXME`/`HACK`/`XXX` across all
-tracked `ts/tsx/sql/css/json` (**zero hits**), plus `deferred`, `parked`, `out of
-scope`, `as-is`, `for now`, `not built yet`, `RBAC`, the previous handoff's open
-section, and `SKILL.md`'s deferred list. **Every candidate below was re-verified
-against live code or the live database. Candidates that measurement showed were
-already CLOSED were dropped, not carried** — see the closing subsection for the
-ones that died, so they are not resurrected.
+**The COMPLETE scan that produced this list ran 2026-09-08 and was NOT re-run
+today** — `TODO`/`FIXME`/`HACK`/`XXX` across all tracked `ts/tsx/sql/css/json`
+(**zero hits**), plus `deferred`, `parked`, `out of scope`, `as-is`, `for now`,
+`not built yet`, `RBAC`, the previous handoff's open section, and `SKILL.md`'s
+deferred list. **What 2026-09-09 did was execute that list, not re-derive it.**
+So the two survivors below are measured, but **the list's COMPLETENESS is a day
+old — re-scan before treating "nothing is parked" as a green field.**
 
 ### (a) DECISION for Turki — do not "fix" these, they are choices
 
-1. **The Maintenance week-header separator is an ASCII comma in Arabic.**
-   `app/maintenance/MaintenanceCalendar.tsx:175` builds
-   `"Sep 4 – Sep 10, 2026"`, and the `,` is ASCII in BOTH languages where an
-   Arabic reader would normally expect `،` (U+060C). The in-code comment at
-   `:172-173` flags it. **This is a wording question, not a formatting bug** —
-   changing it changes what an Arabic user reads.
-2. **The Saudi map's city labels stay English.** `lib/i18n.ts:917-919` records
-   why: they are `CITIES` **data**, not copy. Giving them Arabic names is a
-   content decision. The map's corner disclaimer IS translated, deliberately —
-   an Arabic reader must also be told the geometry is approximate.
-3. **Four Inventory modal sizes are unresolved pending explicit sign-off.**
-   `app/inventory/InventoryClient.tsx:124`: Create Warehouse, New supplier,
-   Update market price, Adjust stock were never named in Turki's screenshots, so
-   the preview-fidelity pass left them alone rather than guessing. A UI decision.
-4. **`drivers.active` is a dead column and its deletion is deferred.**
-   `app/drivers/actions.ts:77-80`. **Measured live: the column exists and NOT ONE
-   row is anything other than `true`** — nothing reads it, nothing writes it,
-   termination (`0020`, `terminated_at`) superseded it. Dropping it is a
-   migration, therefore Turki's call, not cleanup.
-5. **`.planning/` review artifacts are TRACKED, and no `.gitignore` rule was
+**Four of the original six closed this session.** They are listed under "Closed
+BY MEASUREMENT" below with their hashes, so they are not resurrected. Two remain,
+and **neither is code** — both are Turki clicking something.
+
+1. **`.planning/` review artifacts are TRACKED, and no `.gitignore` rule was
    added — deliberately.** **Re-measured: 6 files named `review-*.md` are
    tracked** (an earlier revision said seven; it was counting
    `finance-invoice-spec.md` too). A pattern rule would fight the convention and
@@ -205,45 +269,38 @@ ones that died, so they are not resurrected.
    custom.** The lesson the deleted `0187-arabic-copy-review.md` earned is about
    the HEADER, not the tracking: a review sheet states the state it was written
    in, and that state expires.
-6. **Leaked-password protection is DISABLED in Supabase Auth.** Re-measured off
-   the advisor today, not carried from the note. Console setting — not a
-   migration, not a code change. **This is the only genuinely open item on the
-   security posture**, and it is Turki's to click.
+2. **Leaked-password protection is DISABLED in Supabase Auth.** Re-measured off
+   the advisor, not carried from the note. Console setting — not a migration, not
+   a code change. **This is the only genuinely open item on the security
+   posture**, and it is Turki's to click.
 
-### (b) Doable FIX — cleanup, mechanical, but NOT part of this handoff commit
+### (b) Doable FIX — EMPTY
 
-**Each is its own commit.** This session's scan was READ-ONLY by instruction.
+**All four entries closed this session as `c17b7f8`.** Kept as a heading so the
+next scan has somewhere to file its findings, not because anything is pending.
+For the record, what they were and what measurement showed:
 
-7. **`app/inventory/actions.ts:358-362` is STALE and says the opposite of the
-   truth.** It reads *"`consume_from_lots` … has no caller here — nothing in
-   this app consumes parts yet (that's PO-receiving/work-order phases); it lights
-   up when one of those lands."* **The work-order phase LANDED.** Proven end to
-   end this turn: `app/maintenance/actions.ts:265` calls the `start_work_order`
-   RPC → `0061:177` `perform deduct_work_order_parts` → `0065:228`
-   `perform public.consume_from_lots(...)`. Parts are consumed in this app today.
-8. **`app/inventory/InventoryClient.tsx:76-78` carries the same claim, worded
-   more strongly** — *"NO caller anywhere in this app yet"*. Same proof, same
-   fix. **Note the trap:** `code-grep 'consume_from_lots' app lib components`
-   exits 0, because the app never names the function — it calls the RPC that
-   calls it. **A clean code-grep here is evidence about the TS layer only; the
-   call chain is in SQL.** Do not let the green exit re-confirm the stale
-   comment.
-9. **`app/inventory/InventoryClient.tsx:81-84`'s "NOT built (flagged…)" list is
-   at least partly stale.** It names Purchase Orders, the Approvals tab, the
-   Financial Analysis tab, AI-suggest-PO, receipt invoice-photo upload, the
-   per-part Financial Report and two buttons as unbuilt. `PurchaseOrders.tsx`
-   plainly exists, and `receive_loose_parts` hard-requires a non-empty `p_files`.
-   **Re-measure the list ITEM BY ITEM before rewriting it — do not bulk-delete
-   it.** Some entries are probably still true, and deleting a true "not built"
-   note is how a gap becomes invisible.
-10. **`lib/actions/search.ts:12` points at "HANDOFF.md §6", which does not
-    exist** and never will — this file has no numbered sections. A dangling
-    pointer. The thing it means is real (RBAC, item 11 below); only the address
-    is wrong.
+- **Two comments called `consume_from_lots` callerless.** Both were wrong. **Four
+  RPCs reach it inside the database** — `start_work_order` and
+  `complete_work_order` via `deduct_work_order_parts`, `edit_work_order` via
+  `consume_work_order_line`, `confirm_exit_permit` via `consume_exit_permit_line`.
+  **The trap that let the claim survive:** `code-grep 'consume_from_lots' app lib
+  components` exits 0, because the TS layer never names the function — it calls
+  an RPC that calls it. **A clean code-grep there is evidence about the TS layer
+  only; the call chain is in SQL.** Both comments now name the chain and say so.
+- **The "NOT built (flagged…)" list was DELETED, not rewritten.** Checked entry
+  by entry as the note demanded: every feature on it — Purchase Orders, the
+  Approvals tab, Financial Analysis, AI-suggest-PO, receipt photo upload, the
+  per-part Financial Report — is built and live. **Deleting a TRUE "not built"
+  note is how a gap goes invisible, so the item-by-item check was the whole
+  job**; it just happened to come back all-built.
+- **`lib/actions/search.ts:12` pointed at "HANDOFF.md §6", which does not exist**
+  and never will — this file has no numbered sections. It now states the fact it
+  meant: no role gate exists, so RLS alone scopes the result set.
 
 ### (c) FORWARD-ONLY — nothing to do, no owner, not defects
 
-11. **There is NO role gate anywhere in the app.** Three live sites say so:
+3. **There is NO role gate anywhere in the app.** Three live sites say so:
     `app/trips/actions.ts:1444`, `app/archive/actions.ts:809` (*"With no role
     gate yet this is attribution, not authorisation"*), and
     `components/settings/ProfileSection.tsx:41` (leave-history display deferred
@@ -251,12 +308,12 @@ ones that died, so they are not resurrected.
     deferred — any authenticated user can add one today."* **Every `actor` /
     `entered_by` / `created_by` column in this app is an AUDIT TRAIL, not a
     permission check.** Do not mistake one for the other.
-12. **The Coming-Soon trio is fenced off on purpose**: `/routes`, `/predictive`,
+4. **The Coming-Soon trio is fenced off on purpose**: `/routes`, `/predictive`,
     `/iot` (`lib/nav.ts:77-79`, rendered under a labelled `<nav>` in
     `components/AppShell.tsx:495`). `FleetDetailClient.tsx:511` and `:586` render
     two honest-empty cards against the same two. Route Optimization has a
     `preview/map.js` spec waiting.
-13. **The payslip's commission-period caption stays English, and there is
+5. **The payslip's commission-period caption stays English, and there is
     nothing to translate it FROM.** `app/reports/StatementViews.tsx:2819-2833`.
     `pay_commission` wrote the caption into `commission_payouts`, issuing the
     payslip copied it into `driver_payslips.snapshot`, and **the frozen entries
@@ -267,7 +324,7 @@ ones that died, so they are not resurrected.
 
 ### Decided exceptions — recorded so they are not reopened as bugs
 
-14. **`app/drivers/HistoryTab.tsx:322-334` — `period_label` stays English,
+6. **`app/drivers/HistoryTab.tsx:322-334` — `period_label` stays English,
     DELIBERATELY.** Two independent sufficient reasons, both in-code: it is
     FROZEN TEXT written at pay time (the column stores words, not a key), and
     **it is not the month above it** — the line above is the month the run
@@ -277,6 +334,38 @@ ones that died, so they are not resurrected.
     month sweep left alone on purpose. Do not reopen it.**
 
 ### Closed BY MEASUREMENT during this scan — do not relist as open
+
+**Closed 2026-09-09 — the four parked items. Each has a commit; do not reopen:**
+
+- **The Arabic week-header comma** — `70725bc`. It was ruled a change, not left
+  as a choice: `MaintenanceCalendar.tsx:176` now sets the separator from `lang`,
+  `،` (U+060C) in Arabic and `,` in English. **English is byte-identical.**
+- **The four Inventory modal sizes** — `3519f3a`, and only ONE of the four was a
+  real divergence. New Supplier went `max-w-md` → `max-w-[880px]`, the literal
+  pulled from `preview/app.css`'s `.modal-shell`. **The other three were not
+  skipped, they were measured and found not to exist as divergences:** Create
+  Warehouse is not here at all (that form is Settings' `WarehousesSection`),
+  there is no update-market-price surface in this app, and Adjust Stock has no
+  `preview/` counterpart to match. **A parked note can name surfaces that do not
+  exist — check the surface before checking its width.**
+- **`drivers.active` dropped** — `7c45ac8` + migration `0188`, **completed by
+  `32a515d` and `e4dbd3e`.** All 16 rows were `active = true`, so **no live row
+  could distinguish `active` from `terminated_at`** — which is exactly why the
+  harness (`scripts/drivers-active-restore-check.sql`) carries two NEGATIVE
+  CONTROLS asserting a terminated driver is still refused restore. Without them a
+  green run proves the block executed, not that it still discriminates.
+  **Closed, but NOT clean:** the TS sweep missed `app/archive/page.tsx`, so
+  `/archive` returned `42703` and rendered its error state until `32a515d`. The
+  harness was green throughout and was right to be — it tests the RPC restore
+  guard, which never broke. **A passing harness scopes to what it exercises; it
+  said nothing about the read path, and nothing about it should have been read as
+  saying the drop was complete.**
+- **The four stale comments** — `c17b7f8`. See the (b) record above.
+- **The map's English city labels** — ruled, not pending. `lib/i18n.ts` now reads
+  as the ruling rather than as an open question. They are `CITIES` **data**, not
+  copy. The corner disclaimer stays translated, deliberately.
+
+**Closed earlier:**
 
 - **The statement's migration onto `lib/plainDocStyles.ts` is DONE.** The
   previous handoff carried it as a forward pointer ("THE STATEMENT INHERITS
@@ -297,19 +386,27 @@ ones that died, so they are not resurrected.
 
 ## Forward agenda, in order
 
-### 0. Clear the open-items inventory first — leave nothing parked
+### 0. DONE — the parked inventory is clear
 
-**This is the point of the list above.** Work items 1–10 to a ruling or a commit
-before starting anything new. The (b) fixes are small and independent; the (a)
-decisions need Turki and nothing else. **Do not start agenda item 2 or 3 on top
-of an unresolved parked list** — that is how a 1301-line handoff happens.
+**Nothing is parked.** The four items ran to commits on 2026-09-09, a follow-up
+sweep closed the one that had leaked a live defect (`32a515d`, `e4dbd3e`), and
+the two survivors in (a) are console clicks, not work. **Agenda 2 and 3 are now
+unblocked** — the reason this section used to say "do not start on top of an
+unresolved parked list" was to avoid another 1301-line handoff, and that risk is
+spent.
 
-### 1. The flagged items
+**`/archive` has not been confirmed in-browser since `32a515d`.** The page is
+auth-gated, so the fix was proven at the query layer — the corrected select runs
+and returns 16 rows, 11 live and 5 terminated — but nobody has watched it render.
+It was fully broken before, so the change can only improve it; **verify it once
+before treating this line as closed.**
 
-The six (a) DECISION items. Each needs one answer from Turki, not analysis:
-the Arabic comma, the map's city names, the four modal sizes, whether
-`drivers.active` gets dropped, whether the review-artifact convention becomes a
-written rule, and the Auth console toggle.
+### 1. The two remaining (a) items — Turki only, no analysis owed
+
+Whether the `.planning/review-*.md` convention becomes a written rule, and the
+Supabase Auth leaked-password toggle. **Neither is code.** One `CLAUDE.md` chore
+sits beside them: **§7's stub still reads "DB at migration 0187" while the DB is
+at `0188`** (`CLAUDE.md:251`, one number).
 
 ### 2. Analysis — Paid-up Balance vs Amount Payable
 
