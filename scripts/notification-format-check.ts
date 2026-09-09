@@ -8,6 +8,13 @@
 // these prove it agrees with what the view actually emits, which is the thing
 // that can drift.
 //
+// The fixtures below cover every alert kind v_active_alerts emitted when its
+// definition was last read out of pg_views — eleven. The kind list is asserted
+// explicitly further down, so dropping or renaming a fixture turns this red.
+// What it CANNOT notice is the view growing a TWELFTH branch: this file holds no
+// DB connection by design, so a new kind is caught by the formatter's default
+// arm rendering label-only in the browser, not here.
+//
 // What this CANNOT check is covered elsewhere: whether a row should be visible
 // at all is the view's job (severity prefs + dismiss window), and it is checked
 // in SQL by 0154-0156's verification blocks, not here.
@@ -89,7 +96,30 @@ const BLUE: NotificationRow[] = [
     source: "state", occurred_at: null, dismissed_at: null },
 ];
 
-const ALL = [...ROWS, ...BLUE];
+// The ONE branch v_active_alerts emits that no captured row covers. Built the
+// same way as the BLUE trio above — transcribed from the view's own SELECT list
+// rather than assumed — because leave_return only fires inside a three-day
+// window (end_date > today and end_date <= today + 3), and nothing was inside it
+// on the capture day or on the day this row was added. The view emits:
+//   identity  leave_return:<driver|staff>:<entity_id>:<leave_period_id>
+//   severity  yellow      category  people
+//   value_num (end_date - today)::numeric      value_date  end_date
+//   payload   { leave_type, end_date, days_until_return }
+//
+// DATE-STABLE ON PURPOSE: days_until_return is present, and detailLine prefers
+// it over daysFromToday(value_date), so this renders identically forever — no
+// assertion here can go red merely because the date rolled. value_num and
+// value_date are still filled to the view's formula (2 = end_date - capture
+// day) so the fixture stays internally consistent rather than half-populated.
+const LEAVE: NotificationRow[] = [
+  { alert_identity: "leave_return:driver:9c2f77a1:lp1", severity: "yellow", category: "people",
+    entity_type: "driver", entity_id: "9c2f77a1", entity_label: "Nasser 3",
+    value_num: 2, value_date: "2026-08-25",
+    payload: { leave_type: "annual", end_date: "2026-08-25", days_until_return: 2 },
+    source: "state", occurred_at: null, dismissed_at: null },
+];
+
+const ALL = [...ROWS, ...BLUE, ...LEAVE];
 
 // --- Rendered output, for eyeballing alongside the assertions ---------------
 console.log("--- panel order (severity rank), EN ---");
@@ -101,8 +131,8 @@ for (const r of ALL.slice(0, 4)) console.log(`  ${r.severity.padEnd(6)} ${detail
 console.log("");
 
 // --- THE BADGE RULE: the product's "not annoying" guarantee ----------------
-check("badge counts red + yellow only", actionableCount(ALL), 8);
-check("badge ignores all three blue rows", actionableCount(ALL), actionableCount(ROWS));
+check("badge counts red + yellow only", actionableCount(ALL), 9);
+check("badge ignores all three blue rows", actionableCount(ALL), actionableCount([...ROWS, ...LEAVE]));
 check("blue-only list produces a zero badge", actionableCount(BLUE), 0);
 check("blue-only list produces no badge tone", badgeTone(BLUE), null);
 check("badge tone is the worst present: red wins over yellow", badgeTone(ALL), "bad");
@@ -114,6 +144,18 @@ check("empty list: no count, no tone", [actionableCount([]), badgeTone([])], [0,
 check("every row renders a detail line (en)", ALL.filter((r) => detailLine(r, "en") === null).length, 0);
 check("every row renders a detail line (ar)", ALL.filter((r) => detailLine(r, "ar") === null).length, 0);
 
+// --- leave_return specifically, because it is the newest and least exercised -
+// detailLine's default arm returns null for any kind it has not learned, so a
+// NON-NULL result for a row whose kind is leave_return cannot have come from
+// anywhere but the leave_return case itself. That is the proof the branch runs;
+// the text it produces is deliberately not asserted, so this stays date-stable.
+check("leave_return parses to its own kind", alertKind(LEAVE[0].alert_identity), "leave_return");
+check("leave_return renders a detail line rather than falling through (en)",
+  detailLine(LEAVE[0], "en") !== null, true);
+check("leave_return renders a detail line rather than falling through (ar)",
+  detailLine(LEAVE[0], "ar") !== null, true);
+check("leave_return is yellow, so it reaches the badge", actionableCount(LEAVE), 1);
+
 // --- Deep links -----------------------------------------------------------
 check("every live entity_type resolves to a route",
   ALL.filter((r) => routeEntity(r.entity_type) === null).map((r) => r.entity_type), []);
@@ -123,8 +165,9 @@ check("an unknown entity_type does not route (renders as text)", routeEntity("no
 // --- Identity / tone plumbing ---------------------------------------------
 check("kind is parsed from the identity prefix",
   [...new Set(ALL.map((r) => alertKind(r.alert_identity)))].sort(),
-  ["doc_expiry", "employee_returned", "invoice_overdue", "part_reorder", "permit_overdue",
-   "prepaid_low_runway", "prepaid_overdrawn", "truck_in", "truck_out", "wo_stuck"]);
+  ["doc_expiry", "employee_returned", "invoice_overdue", "leave_return", "part_reorder",
+   "permit_overdue", "prepaid_low_runway", "prepaid_overdrawn", "truck_in", "truck_out",
+   "wo_stuck"]);
 check("identities are unique (one dismissal cannot silence two rows)",
   new Set(ALL.map((r) => r.alert_identity)).size, ALL.length);
 check("every severity maps to an existing app tone",
