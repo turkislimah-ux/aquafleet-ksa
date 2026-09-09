@@ -1014,8 +1014,10 @@ those wrong turns reports — both make a healthy function look like a breach.
 
 ## Session Hygiene
 
-- Update `CLAUDE.md` section 7 (or equivalent state section) at the end of any session
-  that changes what's built or what's next.
+- **Session state goes to `.planning/HANDOFF.md`** — read it at session start,
+  write it at session end. **`CLAUDE.md` is RULES ONLY**; its §7 is a routing
+  stub, and a state-looking line there is a bug. Touch §7 only when a RULE
+  changes, or to correct the one-line State stub (migration number, phase).
 - **OUR handoff file is `.planning/AQUAFLEET-HANDOFF.json`, and it IS committed**
   (Turki's call, 2026-08-07). Write it by hand, stage it by explicit path, commit.
   No special ceremony — the ceremony that used to live here existed only because
