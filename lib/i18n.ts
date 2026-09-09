@@ -999,6 +999,62 @@ export const dict = {
     signingIn: { en: "Signing in…", ar: "جارٍ تسجيل الدخول…" },
   },
 
+  // ── The four full-page failure surfaces ───────────────────────────────────
+  //
+  // Their own namespace rather than `common`, because every string here is
+  // written for a reader who is stuck: it says what happened, whether their work
+  // survived, and what to do next, in that order. That is a different register
+  // from a button label, and mixing the two invites someone to reuse "Something
+  // went wrong" as a toast.
+  //
+  // NO STRING HERE NAMES A TECHNICAL CAUSE. The audience is Turki and the office
+  // staff, not the person who will read the server log. `config.body` says the
+  // deployment is missing settings and an administrator must set them; it does
+  // not say "environment variable", and it never carries a value — the NAMES of
+  // the absent vars are rendered separately, from lib/env.ts, which cannot
+  // return the name of a var that has one.
+  //
+  // "Nothing was saved" IN route.body IS A FACTUAL CLAIM, and it is true for the
+  // surface it appears on: `app/error.tsx` catches a failure during RENDER, and
+  // every write in this app goes through a Server Action that has either already
+  // returned or already failed with its own message before a render can throw.
+  // If a boundary is ever added around a form submission, this string must not
+  // travel with it.
+  errors: {
+    config: {
+      title: { en: "Configuration error", ar: "خطأ في الإعداد" },
+      body: {
+        en: "This deployment is missing settings it needs to reach the database, so no page can load. Your data is not affected. An administrator has to add the settings below and deploy again.",
+        ar: "تنقص هذه النسخة إعدادات يحتاجها التطبيق للاتصال بقاعدة البيانات، لذلك لا يمكن تحميل أي صفحة. بياناتك لم تتأثر. يجب على المسؤول إضافة الإعدادات أدناه وإعادة النشر.",
+      },
+      detailLabel: { en: "Missing settings", ar: "الإعدادات الناقصة" },
+    },
+    route: {
+      title: { en: "Something went wrong", ar: "حدث خطأ ما" },
+      body: {
+        en: "This page could not finish loading. Nothing was saved. Try again — if it keeps happening, pass the reference below to whoever maintains the app.",
+        ar: "تعذّر إكمال تحميل هذه الصفحة. لم يتم حفظ أي شيء. أعد المحاولة — وإذا تكرر الأمر، أرسل المرجع أدناه إلى المسؤول عن التطبيق.",
+      },
+    },
+    fatal: {
+      title: { en: "The app could not start", ar: "تعذّر تشغيل التطبيق" },
+      body: {
+        en: "A problem outside this page stopped the app from loading. Reloading usually clears it. If it does not, pass the reference below to whoever maintains the app.",
+        ar: "منع خطأ خارج هذه الصفحة التطبيق من التحميل. عادةً ما تحل إعادة التحميل المشكلة. وإذا لم تُحل، أرسل المرجع أدناه إلى المسؤول عن التطبيق.",
+      },
+      reload: { en: "Reload", ar: "إعادة التحميل" },
+    },
+    notFound: {
+      title: { en: "Page not found", ar: "الصفحة غير موجودة" },
+      body: {
+        en: "This address does not match any page in Bousla. It may have been renamed, or the link may be out of date.",
+        ar: "لا يطابق هذا العنوان أي صفحة في بوصلة. ربما تغيّر اسمها، أو أن الرابط قديم.",
+      },
+    },
+    referenceLabel: { en: "Reference", ar: "المرجع" },
+    backToDashboard: { en: "Back to dashboard", ar: "العودة إلى لوحة التحكم" },
+  },
+
   // ── Phase 3 Batch 2b — the Settings dialog's five panels ──────────────────
   //
   // NOTHING HERE WAS TRANSLATED. Every `ar` value below was already written, by

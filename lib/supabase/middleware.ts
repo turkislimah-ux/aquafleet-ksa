@@ -6,12 +6,32 @@ import { NextResponse, type NextRequest } from "next/server";
 // the icon library into the EDGE bundle. Measured, not assumed: routing this
 // import through nav.ts put lucide in middleware.js.
 import { resolveLandingRoute } from "@/lib/routes";
+import { isConfigured } from "@/lib/env";
 
 // Refreshes the auth session on every request and gates access:
 //  - not logged in + not on /login  -> redirect to /login
 //  - logged in + on /login          -> redirect to / (dashboard)
 // Returns the response carrying any refreshed Supabase auth cookies.
 export async function updateSession(request: NextRequest) {
+  // MIDDLEWARE RUNS BEFORE EVERYTHING, WHICH MAKES IT THE FIRST THING A MISSING
+  // ENV VAR KILLS — and killing it here is worse than killing a page, because
+  // an edge exception never reaches the App Router at all. `app/layout.tsx`'s
+  // configuration screen would be unreachable and the operator would get Next's
+  // own 500, on every route, with no name of the thing that is missing.
+  //
+  // So on a misconfigured deployment this passes the request straight through
+  // and lets the layout render the configuration screen instead.
+  //
+  // THIS IS NOT A HOLE IN THE AUTH GATE. What is skipped is a session check that
+  // could not have run: without a URL and a key there is no client to construct,
+  // no session to validate and no row to fetch — createServerClient below throws
+  // on `undefined` rather than returning an unauthenticated client. And nothing
+  // protected renders behind it, because the layout short-circuits to the
+  // configuration screen before `children` are reached. The condition is the
+  // exact one the layout tests (lib/env.ts is the single list), so the two
+  // cannot disagree about whether the app is configured.
+  if (!isConfigured()) return NextResponse.next({ request });
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
