@@ -4,12 +4,13 @@
 **Current state — what is built, what is in flight, what is open — lives in
 `.planning/HANDOFF.md`.** Read that second, then recent `git log`.
 
-This file holds no state and no build history. §7 holds durable money and schema
-RULES, not a status report. If a state-looking line appears here, it is a bug.
+This file holds no state and no build history — §7 is a routing table, one State
+line and the rule under it. If a state-looking line appears here, it is a bug.
 
 **`.planning/HANDOFF.json` (no prefix) is NOT ours** — gsd plugin's, gitignored,
-rewritten from an empty template after tool calls. Never read it for state, never
-stage it. Ours is `.planning/HANDOFF.md` (+ `AQUAFLEET-HANDOFF.json`). See §5.
+rewritten from an empty template after tool calls. Same for
+`preview/.planning/HANDOFF.json`. Never read either for state, never stage it.
+Ours is `.planning/HANDOFF.md` (+ `AQUAFLEET-HANDOFF.json`).
 
 ---
 
@@ -22,8 +23,8 @@ staff, trips, projects, commissions, leave, stations, finance/invoicing.
 
 **Those two figures describe the BUSINESS, not the database,** and the live rows —
 a partial working set — have never matched them. Do NOT "correct" them from a
-`count(*)`: they are Turki's confirmed facts about his own fleet, and the one
-number here that re-measuring cannot settle. The gap is expected; do not re-raise.
+`count(*)`: they are Turki's confirmed facts about his own fleet, and the only
+figures here that re-measuring cannot settle. The gap is expected; do not re-raise.
 
 - **Stack:** Next.js (App Router) + Supabase (Postgres) + Tailwind. TypeScript.
 - **Repo:** `~/aquafleet-ksa`, GitHub `turkislimah-ux/aquafleet-ksa`, branch `main`.
@@ -42,7 +43,7 @@ number here that re-measuring cannot settle. The gap is expected; do not re-rais
   Hard rule.
 - **Claude Code** (executing instance): **ALL file edits, ALL design decisions.**
   Builds from `preview/` as the spec. Reads the relevant skills.
-- **Turki** directs, and verifies every change in-browser before it is committed.
+- **Turki** directs, and verifies every change in-browser (the gate is in §5).
 
 ---
 
@@ -84,8 +85,8 @@ Loading every skill at once wastes context and has crashed sessions.
   report how it fits the existing workflow (preview/-as-spec, §5's commit
   discipline, the handoff file) so it is adopted deliberately.
   - **Borrowing gsd's SCHEMA is not giving gsd the PATH — conflating them cost
-    three blanked files.** Its PostToolUse checkpoint overwrites
-    `.planning/HANDOFF.json` unconditionally. Ours lives elsewhere for that reason.
+    three blanked files**, which is why ours lives elsewhere. Mechanism in the
+    header; full post-mortem in `.planning/gsd-handoff-clobber-note.md`.
 
 ---
 
@@ -102,8 +103,7 @@ Loading every skill at once wastes context and has crashed sessions.
 - **A `grep -c` FOR A REMOVED IDENTIFIER HITS THE COMMENT DOCUMENTING THE
   REMOVAL — STRIP COMMENTS BEFORE TRUSTING THE COUNT.** The epitaph fails the
   very check that confirms the burial, and reads exactly like a failed fix. Seen
-  on `amountPayable.ts`, on `StatementViews.tsx`, 4+ times in the prepaid
-  lifetime-net pass, and again on §6's own `divide-` regression grep. The tool:
+  7+ times, most recently on §6's own `divide-` regression grep. The tool:
 ```sh
   npx tsx scripts/code-grep.ts '<identifier>' [path...]
 ```
@@ -117,9 +117,8 @@ Loading every skill at once wastes context and has crashed sessions.
   a broken stripper turns `test:money` red rather than reporting green.
 - **Quote dynamic-route paths:** `git add 'app/fleet/[id]/page.tsx'` — zsh globs
   `[id]` silently. **Avoid `!` in commit messages** (history expansion).
-- **HANDOFF files:** `.planning/HANDOFF.md` is ours and committed — read at session
-  start, write at session end; state lives THERE, not here. Both `HANDOFF.json`s
-  (`.planning/` and `preview/.planning/`) are gsd's — see the header.
+- **`.planning/HANDOFF.md` is ours and committed** — read it at session start,
+  write it at session end. The `HANDOFF.json`s are gsd's; see the header.
 - **Migrations:** sequential `00NN_name.sql`, **DRAFTED to disk and never
   self-applied by Claude Code** — draft, stop, let Turki/the architect run it.
   **Verify the file exists on disk** (`ls supabase/migrations/ | tail -3`) before
@@ -131,7 +130,7 @@ Loading every skill at once wastes context and has crashed sessions.
   `begin;` warns and is ignored, then the trailing `commit;` ends the EDITOR's
   transaction. Grids print, the run reads green, **nothing was created** — 0173
   v1 did exactly this. **0173 is the boundary: 0173+ are bare, while 147 of the
-  175 files up to 0172 still carry `begin;`/`commit;`.** Those predate the rule
+  170 files up to 0172 still carry `begin;`/`commit;`.** Those predate the rule
   and went in by another path — do NOT "fix" them; 147 false hits is a false
   catastrophe (§6). That editor transaction is also what satisfies §6's
   "re-revoke in the same transaction".
@@ -148,18 +147,18 @@ Loading every skill at once wastes context and has crashed sessions.
   still lists it open. Not hypothetical: one corrected trip was re-raised across
   several sessions, and the note was wrong about both its paid status and its count.
 - **Re-measure a number before quoting it, including numbers in our own files.**
-  A figure in a handoff is a pointer, not evidence.
+  A figure in a handoff is a pointer, not evidence. **A figure that dates itself
+  gets CUT, not updated** — a customer count and a file count both rotted here.
 - **"X because Y" is only as strong as Y — measure Y THIS turn, before the note
   is written.** A count, a cause, a "matches/proves" never comes from memory or
-  off a filename. Both self-caught this session: a VAT/CR "match" counted on 2
-  rows instead of the table (placeholder on 5 of 7 live customers), and a table
-  name taken from its migration's filename, which reports a healthy migration as
-  MISSING (§6). Notes earn the strictest check — the next session trusts them
-  without re-measuring.
-- **No build history in this file.** Rules only; state goes to HANDOFF.md. §7's
-  15KB cap is the trigger — this line read "past 20KB" and contradicted it.
-  **Compress by re-verifying every claim, never by trimming prose blind.** All
-  three passes so far found a stale fact. The audit is the payoff, bytes the pretext.
+  off a filename. Two self-caught: a VAT/CR "match" counted on 2 rows instead of
+  the table, and a table name taken from its migration's filename, which reports
+  a healthy migration as MISSING (§6). Notes earn the strictest check — the next
+  session trusts them without re-measuring.
+- **No build history in this file.** §7's 15KB cap is the trigger — this line
+  read "past 20KB" and contradicted it. **Compress by re-verifying every claim,
+  never by trimming prose blind.** All four passes so far found a stale fact; the
+  audit is the payoff, bytes the pretext.
 
 ---
 
@@ -196,8 +195,8 @@ The next three rules are one lesson in three places.
   revoke all on public.X from anon;
   grant select on public.X to authenticated;
 ```
-  Re-measure after every view change — the counts MATCHING is the check, not the
-  number (50 / 50 / 0 today):
+  Re-measure after every view change. **`views` == `security_invoker` and
+  `anon_readable` == 0 is the check; the absolute count is not:**
 ```sql
   select count(*) as views,
          count(*) filter (where c.reloptions::text[] @> array['security_invoker=true']) as security_invoker,
@@ -232,8 +231,8 @@ The next three rules are one lesson in three places.
   replaced it without re-revoking, leaving a definer money RPC callable by anyone
   holding the anon key — bypassing RLS *and* 0161's table revoke, since a definer
   runs as its owner. Closed in **0163**; **0164** locked the guarded RPCs.
-  Invariant: **zero NON-TRIGGER functions anon-executable** — measured 0 today
-  (trigger functions are unreachable via PostgREST; several legitimately remain).
+  Invariant: **zero NON-TRIGGER functions anon-executable.** Trigger functions
+  are unreachable via PostgREST; several legitimately remain.
 - **New tables in `public` still end with `revoke all on public.X from anon`,**
   even though 0161 revoked anon everywhere. Default privileges only affect tables
   created AFTER it, so on a fresh `db reset` every earlier migration runs first —
@@ -249,8 +248,9 @@ The next three rules are one lesson in three places.
 - If this file exceeds 15KB, Code is appending. Cut back to this stub.
 
 **State:** DB at migration 0188. All pages built+verified. Arabic phase complete (copy fixes land as they surface).
-Read `.planning/HANDOFF.md` for current work.
 
-**Do not read this number out of `schema_migrations`** — neither an MCP-applied
-migration nor a SQL Editor run writes a ledger row, so the ledger's max version
-lags permanently. The files on disk and the objects in the catalog are the record.
+**Do not read this number out of `schema_migrations`** — its versions are
+timestamps, not our `00NN`, and it carries far fewer rows than we have files: a
+SQL Editor run writes none. MCP-applied migrations DO appear, so it is neither
+complete nor empty, and either way it cannot answer "what number are we on".
+The files on disk and the objects in the catalog are the record.
