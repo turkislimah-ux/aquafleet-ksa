@@ -954,6 +954,51 @@ Guarded by `scripts/payslip-deduction-check.ts`.
 
 ---
 
+## View & function security footers — the exact SQL
+
+**The RULES live in `CLAUDE.md` §6 and are not restated here.** This section is
+the verbatim SQL those rules refer to, moved out of `CLAUDE.md` on 2026-09-09 to
+keep that file under its 15KB cap. **Do not reword these blocks** — they are
+reference text for money and security work, and a "tidied" revoke is a hole.
+
+### Every view replacement restates its security footer
+
+`create or replace view` silently drops reloptions. Every replacement ends with:
+
+```sql
+  alter view public.X set (security_invoker = true);
+  revoke all on public.X from anon;
+  grant select on public.X to authenticated;
+```
+
+Then re-measure. `views` == `security_invoker` and `anon_readable` == 0 is the
+check; the absolute count is not:
+
+```sql
+  select count(*) as views,
+         count(*) filter (where c.reloptions::text[] @> array['security_invoker=true']) as security_invoker,
+         count(*) filter (where has_table_privilege('anon', c.oid, 'select')) as anon_readable
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where c.relkind = 'v' and n.nspname = 'public';
+```
+
+### Every redefined SECURITY DEFINER or money RPC re-revokes
+
+`create or replace function` and `drop`+`create` both reset the ACL to
+`EXECUTE TO PUBLIC`, which `anon` inherits. Re-revoke in the SAME transaction,
+naming BOTH grantees:
+
+```sql
+  revoke execute on function public.X(<exact identity args>) from public, anon;
+```
+
+Read the privilege back with `has_function_privilege`, never by matching
+`proacl`, and identify the function by `oid::regprocedure::text`, never by
+`pg_get_function_identity_arguments()`. `CLAUDE.md` §6 explains what each of
+those wrong turns reports — both make a healthy function look like a breach.
+
+---
+
 ## Migration Discipline (beyond what CLAUDE.md covers)
 
 - **Verify on disk before running:** `ls supabase/migrations/ | tail -5` then

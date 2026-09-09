@@ -189,21 +189,11 @@ The next three rules are one lesson in three places.
 
 - **EVERY VIEW REPLACEMENT RESTATES ITS SECURITY FOOTER.** `create or replace
   view` silently drops reloptions, and it does NOT refresh the view's comment
-  (same OID), so a stale comment outlives the branch it described.
-```sql
-  alter view public.X set (security_invoker = true);
-  revoke all on public.X from anon;
-  grant select on public.X to authenticated;
-```
-  Re-measure after every view change. **`views` == `security_invoker` and
-  `anon_readable` == 0 is the check; the absolute count is not:**
-```sql
-  select count(*) as views,
-         count(*) filter (where c.reloptions::text[] @> array['security_invoker=true']) as security_invoker,
-         count(*) filter (where has_table_privilege('anon', c.oid, 'select')) as anon_readable
-  from pg_class c join pg_namespace n on n.oid = c.relnamespace
-  where c.relkind = 'v' and n.nspname = 'public';
-```
+  (same OID), so a stale comment outlives the branch it described. The footer is
+  `security_invoker`, `revoke` from anon, `grant select` to authenticated. **Then
+  re-measure: `views` == `security_invoker` and `anon_readable` == 0 is the
+  check; the absolute count is not.** Exact SQL for both — the footer and the
+  count query — is in the domain skill, "View & function security footers".
 - **`create or replace view` can only APPEND a column** (42P16) — cannot insert,
   reorder, rename or retype. Arithmetic retypes too (bare `numeric` vs
   `numeric(12,2)`); fix with an explicit cast, `(case … end)::numeric(12,2)`.
@@ -214,11 +204,10 @@ The next three rules are one lesson in three places.
   ACL to the Postgres default, `EXECUTE TO PUBLIC`; `anon` inherits PUBLIC, and
   the anon key ships in the client bundle. **No default-privileges equivalent
   exists for functions** (0161's covers TABLES only) — nothing makes this stick.
-  Every SECURITY DEFINER function and every money or guarded RPC ends with:
-```sql
-  revoke execute on function public.X(<exact identity args>) from public, anon;
-```
-  **BOTH grantees.** The offender is the PUBLIC entry (EMPTY grantee,
+  Every SECURITY DEFINER function and every money or guarded RPC ends with a
+  `revoke execute` naming **BOTH `public` and `anon`** — exact statement in the
+  domain skill, "View & function security footers".
+  The offender is the PUBLIC entry (EMPTY grantee,
   `=X/postgres`); revoking `anon` alone changes nothing. Read back with
   `has_function_privilege('anon', …, 'execute')` = false — **never via `proacl`
   matching**, since `'%=X/%'` also matches `postgres=X/postgres` and reports
