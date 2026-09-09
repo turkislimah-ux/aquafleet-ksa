@@ -1,7 +1,8 @@
 # SESSION HANDOFF
 
-**Updated 2026-09-09 (parked-items close-out), every figure re-measured this
-turn.** Rewritten fresh at `2318055` on 2026-09-08 from a 1301-line predecessor;
+**Updated 2026-09-09 (SECOND session that day — deploy-prep; the parked-items
+close-out earlier the same day is the section below it), every figure re-measured
+this turn.** Rewritten fresh at `2318055` on 2026-09-08 from a 1301-line predecessor;
 **nothing was lost, it is `e93baec:.planning/HANDOFF.md`, and every unit's
 reasoning lives in its own commit message**, which is where `CLAUDE.md` §5 says
 detail belongs. This file is STATE — what is true now, what is open, and what
@@ -18,6 +19,12 @@ caught it (`32a515d`, `e4dbd3e`). **A commit closing a parked item is not
 evidence the item is finished** — the sweep that found this ran only because it
 was asked for, and `tsc` had been green the whole time.
 
+**THE DEPLOY BLOCKER IS DATA, NOT CODE.** A read-only audit ran the whole gate —
+types, a production build, both suites, the view footer, the function ACLs, RLS,
+the env surface — and every code-side check is green. What is not ready is the
+live database: it is a sandbox, and test rows are woven into records that are
+already PAID. **Do not read "audit passed" as "ship it".** See Deploy readiness.
+
 **Every number below is a POINTER, not evidence. Re-measure before quoting it.**
 The commands are given inline so re-measuring is cheaper than trusting.
 
@@ -27,7 +34,7 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Git
 
-- **`main` is at `e4dbd3e`.** Measured with `git rev-parse HEAD`.
+- **`main` is at `58c1589`.** Measured with `git rev-parse HEAD`.
 - **Level with origin, measured BOTH required ways**: the BRANCH line of
   `git status -sb` reads `## main...origin/main` with no ahead/behind marker,
   and `git rev-list --left-right --count origin/main...HEAD` returns `0	0`.
@@ -41,10 +48,12 @@ The commands are given inline so re-measuring is cheaper than trusting.
 - **Files on disk run through `0188`; 186 `.sql` files** (`ls
   supabase/migrations/*.sql | wc -l`). The gap between 186 and 188 is historical
   numbering, not a missing file.
-- **`CLAUDE.md` §7's stub still reads "DB at migration 0187" and is now one
-  behind this file.** Recorded openly rather than silently, per the pairing rule
-  below. Fixing it is a one-number edit to `CLAUDE.md:251` and nobody has made it
-  yet.
+- **The two files AGREE again: `CLAUDE.md:251` now reads "DB at migration
+  0188".** Re-measured with `grep -n "DB at migration" CLAUDE.md`, not carried
+  from the note — the previous revision of this bullet said the stub was one
+  behind at `0187`, and that had already been fixed by the time it was read. The
+  bullet was the stale thing, not the stub. **This is the pairing rule working as
+  intended: it was recorded openly, so the next reader checked it.**
 - **`0185`–`0188` were applied through MCP or the SQL Editor, and NEITHER PATH
   WRITES A `schema_migrations` LEDGER ROW.** The ledger's max version lags
   permanently and always will — see `CLAUDE.md` §7. **Do not read the migration
@@ -124,7 +133,7 @@ Re-run today. Three findings, and **only one of them is work**:
   `monthLabel(monthKey, lang)` both read `common.monthShort`;
   `formatDayKeyLang` is an **en-GB Intl formatter** and renders September as
   `"Sept"`. **The two agree on eleven months out of twelve.** That near-miss is
-  this session's most transferable finding — see Completed, `5ffa9cb`.
+  the 2026-09-08 session's most transferable finding — see Completed, `5ffa9cb`.
 
 ### Harnesses
 
@@ -133,11 +142,67 @@ Re-run today. Three findings, and **only one of them is work**:
   ```sh
   node -e "console.log(require('./package.json').scripts['test:money'])"
   ```
-- **`npm run test:copy` — GREEN, 3 checks**: `metric-copy-check`,
-  `month-label-check`, `i18n-lookup-single-source-check`.
+- **`npm run test:copy` — GREEN, 4 checks**: `metric-copy-check`,
+  `month-label-check`, `i18n-lookup-single-source-check`, and — new on
+  2026-09-09 — **`notification-format-check`**, which ran in NO suite until
+  `9b99a98` wired it in. **A harness nothing executes is not a harness.** It now
+  carries **26 assertions** (was 22 before `58c1589` added the `leave_return`
+  fixture); read the count, do not trust this number:
+  ```sh
+  npx tsx scripts/notification-format-check.ts | grep -cE '^\[(PASS|FAIL)\]'
+  ```
+- **`scripts/notification-format-check.ts` covers all ELEVEN alert kinds
+  `v_active_alerts` emits.** Its fixtures are real rows captured 2026-08-23,
+  plus four CONSTRUCTED rows for branches that were not firing then — the three
+  blue ones and `leave_return`, which only fires while `end_date` sits inside
+  `(today, today + 3]`. **It holds no DB connection by design, so it cannot
+  notice the view growing a TWELFTH branch**; that degrades to a label-only row
+  in the browser via `detailLine`'s default arm, not to a red test.
 - **`scripts/code-grep.ts` is the tool that settles "is the identifier gone"**
   (`CLAUDE.md` §5). Directory arguments work since `8dea137`; exit 2 means the
   run produced no evidence and is never a pass.
+
+### Deploy readiness — code side GREEN, data side NOT
+
+A read-only audit ran 2026-09-09 and measured, not assumed, every gate:
+`tsc --noEmit` clean; a real **production** build clean; `test:money` 14
+harnesses green; `test:copy` green; **50 views / 50 `security_invoker` / 0
+anon-readable**; **0 non-trigger functions anon-executable**; RLS on every table
+holding data; no `service_role` key in client code; no hardcoded secrets.
+
+**What is NOT ready is the DATA.** The live database is a sandbox. Test rows are
+woven into records that are already PAID, so they cannot simply be deleted — the
+understated dummy invoices and the "testing 111" charge are the known examples.
+**This is the deploy blocker and it is Turki's call, not a code fix.**
+
+**The largest UNVERIFIED risk is public signup.** With no role gate anywhere in
+the app (see (c)3), an open signup would expose the 49 SECURITY DEFINER money
+RPCs that are granted to `authenticated` on purpose. **It was not tested, because
+testing it means creating an account.** Someone must check the Supabase Auth
+console setting directly.
+
+**THE EDGE-RUNTIME WARNING IS SETTLED — DO NOT RE-RAISE IT.** The build warns
+that `@supabase/supabase-js` touches `process.version`, traced through
+`lib/supabase/middleware.ts`, and a middleware that throws on Edge would be a
+total login lockout. **It does not throw.** The reference is at
+`@supabase/supabase-js/dist/index.mjs:27`, module-level, so it IS reachable at
+import time — but it is double-guarded (`typeof process !== "undefined"` plus an
+optional chain on `.version`) and it feeds one cosmetic thing, the
+`X-Client-Info` header.
+
+**Proven by execution, not by reading the guards.** The exact minified expression
+was pulled out of the built edge bundle (`.next-verify/server/middleware.js`, one
+occurrence) and run inside Next's own `EdgeRuntime` VM
+(`next/dist/compiled/edge-runtime`, the same one
+`next/dist/server/web/sandbox/context.js` constructs) — bare, and again with
+Next's injected `process.env` shim. Neither throws. Corroborated live: dev serves
+middleware through that same sandbox and answers `/archive` and `/` with 307 to
+`/login`, and `/login` with 200. **Only consequence is a mislabelled header
+(`runtime=node`, no version).** Nothing to fix.
+
+**Building to check this did not disturb dev**, because it went through
+`./scripts/safe-build.sh --dist-dir .next-verify`. Read that script's header
+before running any build while dev is up.
 
 ### Printing — two models, and which surfaces are on which
 
@@ -158,7 +223,69 @@ Re-run today. Three findings, and **only one of them is work**:
 
 ---
 
-## Completed this session (2026-09-09, `2318055` → `e4dbd3e`)
+## Completed this session (2026-09-09, deploy-prep, `e4dbd3e` → `58c1589`)
+
+**Two read-only investigations that produced NO commits, then four commits.** The
+audit and the Edge-runtime trace were both explicitly measure-only; their findings
+are in Deploy readiness above, and neither was allowed to turn into a fix in the
+same pass.
+
+| Hash | What |
+| --- | --- |
+| `61cc581` | Repointed the three dangling `"HANDOFF.md §N"` references — `next.config.js:9` and `scripts/safe-build.sh` twice. |
+| `4e3eca0` | Pinned `engines.node` to `"24.x"`. There was no `engines` field at all, so Vercel would have taken whatever the project setting happened to be, invisibly from the repo. |
+| `9b99a98` | Wired `scripts/notification-format-check.ts` into `test:copy`. It ran in no suite. |
+| `58c1589` | Added the constructed `leave_return` fixture, closing that harness at 11 of 11 alert kinds. 22 assertions to 26. |
+
+**`61cc581` IS THE ONE TO READ, because the pointers were not mis-numbered — they
+addressed content that HAS NEVER EXISTED.** The instinct on a bad `§N` is to
+work out which section was meant. Grepping this file for every term in the rule
+they cited (`safe-build`, `dist-dir`, `clobber`, `404`, `next build`, `dev
+server`) returned **nothing**: the build-clobbers-dev-server rule was never
+written here, it lives in `scripts/safe-build.sh`'s own header. **A dangling
+cross-reference is a claim that some other file says something — check that it
+does before renumbering it.** Each reference now DESCRIBES the thing instead of
+citing an address, so it cannot dangle again.
+`supabase/migrations/0102_global_search.sql:17` keeps its `§6` deliberately: it
+is applied history, not a live pointer.
+
+**`4e3eca0`'s reasoning was measured against Vercel's docs, not recalled.**
+Vercel currently offers **24.x (its default), 22.x and 20.x**, and **20.x is
+deprecated on 2026-10-01** — picking it would have shipped a version with three
+weeks left. `24.x` was chosen because three independent things converge on it:
+it matches the local major (`v24.15.0`), it is Vercel's default and an active
+LTS, and it is the version this session's passing production build actually ran
+under. Next 14.2.5 declares `>=18.17.0` with no upper bound. **Not changed, noted
+for later:** `@types/node` is pinned at `20.14.10`, a subset of 24's surface —
+harmless, and separable from this.
+
+**`9b99a98` and `58c1589` are one lesson applied twice: A GUARD WAS PROVEN ABLE
+TO FAIL BEFORE ITS GREEN WAS BELIEVED** (`CLAUDE.md` §5's rule, and the same
+discipline `4172e4e` used on `noUnusedLocals`). For `9b99a98`, inverting one
+expected value made `npm run test:copy` exit 1 and name the failing case, which
+proved the `&&` chain propagates rather than swallowing a non-zero exit. For
+`58c1589` the break was stronger and deliberately so: **the BEHAVIOUR was
+disabled, not an expected value edited** — renaming `case "leave_return"` in
+`lib/notification-format.ts` turned four assertions red, which is what proves the
+new assertions guard that branch and not merely themselves. Both breaks were
+restored and both files verified byte-identical to `HEAD` with `git diff --stat`
+before staging.
+
+**Why the `leave_return` row is CONSTRUCTED and that is not a shortcut.** The
+kind fires only while `end_date` sits inside `(today, today + 3]`; nothing was in
+that window on the 2026-08-23 capture day or on 2026-09-09, so no live row
+existed to copy. It was transcribed from `v_active_alerts`' own `SELECT` list
+read out of `pg_views` — identity shape, `yellow`, category `people`, `value_num`
+as `end_date - today`, payload of `leave_type` / `end_date` /
+`days_until_return`. **It is date-stable by construction**: `days_until_return`
+is present and `detailLine` prefers it over `daysFromToday(value_date)`, so no
+assertion there can redden because a date rolled. The rendered TEXT is never
+asserted, only that it is non-null — and since `detailLine`'s default arm returns
+`null` for unlearned kinds, **non-null IS the proof the branch ran.**
+
+---
+
+## Completed earlier the same day (2026-09-09, parked-items close-out, `2318055` → `e4dbd3e`)
 
 **The four parked items, one commit each, then a cleanup sweep that caught what
 item 3 had missed.** Each was measured against the live database or current code
@@ -246,17 +373,21 @@ failing before its pass means anything.**
 
 ## Open items
 
-**The COMPLETE scan that produced this list ran 2026-09-08 and was NOT re-run
-today** — `TODO`/`FIXME`/`HACK`/`XXX` across all tracked `ts/tsx/sql/css/json`
-(**zero hits**), plus `deferred`, `parked`, `out of scope`, `as-is`, `for now`,
-`not built yet`, `RBAC`, the previous handoff's open section, and `SKILL.md`'s
-deferred list. **What 2026-09-09 did was execute that list, not re-derive it.**
-So the two survivors below are measured, but **the list's COMPLETENESS is a day
-old — re-scan before treating "nothing is parked" as a green field.**
+**This list was first derived 2026-09-08 and RE-DERIVED 2026-09-09 by the
+deploy-prep audit** — `TODO`/`FIXME`/`HACK`/`XXX` across all tracked
+`ts/tsx/sql/css/json` (**zero hits**), plus `deferred`, `parked`, `out of scope`,
+`as-is`, `for now`, `not built yet`, `RBAC`, this file's own open section, and
+`SKILL.md`'s deferred list, each survivor re-measured against live code and the
+live DB rather than carried forward. **An earlier revision of this paragraph
+warned that the list's completeness was a day old; that caveat is spent.**
+
+**It is now as fresh as `58c1589` and no fresher.** The audit was READ-ONLY by
+instruction, so it re-derived and classified but changed nothing — the four
+commits that day came from a separate, explicitly scoped pass.
 
 ### (a) DECISION for Turki — do not "fix" these, they are choices
 
-**Four of the original six closed this session.** They are listed under "Closed
+**Four of the original six closed in the parked-items session.** They are listed under "Closed
 BY MEASUREMENT" below with their hashes, so they are not resurrected. Two remain,
 and **neither is code** — both are Turki clicking something.
 
@@ -274,10 +405,14 @@ and **neither is code** — both are Turki clicking something.
    a code change. **This is the only genuinely open item on the security
    posture**, and it is Turki's to click.
 
-### (b) Doable FIX — EMPTY
+### (b) Doable FIX — ONE, small and optional
 
-**All four entries closed this session as `c17b7f8`.** Kept as a heading so the
-next scan has somewhere to file its findings, not because anything is pending.
+1. **`@types/node` is pinned at `20.14.10` while the runtime is now pinned at
+   Node `24.x`** (`4e3eca0`). Types for 20 are a SUBSET of 24's, so nothing
+   breaks and `tsc` is green — this is alignment, not a defect. Deliberately left
+   out of `4e3eca0` so the engines pin stayed one logical unit.
+
+**The four ORIGINAL entries closed in the parked-items session as `c17b7f8`.**
 For the record, what they were and what measurement showed:
 
 - **Two comments called `consume_from_lots` callerless.** Both were wrong. **Four
@@ -386,6 +521,13 @@ For the record, what they were and what measurement showed:
 
 ## Forward agenda, in order
 
+**DEPLOY GATES OUTRANK EVERYTHING NUMBERED BELOW, and they are not code.** The
+ordered MUST list lives in Deploy readiness: decide what happens to the sandbox
+data woven into paid records, confirm whether public signup is open, and turn on
+leaked-password protection. **Every code-side gate is already green**, so nothing
+in items 1–3 blocks a deploy and none of them unblocks one either. Do not start
+item 2 or 3 expecting it to move the deploy date.
+
 ### 0. DONE — the parked inventory is clear
 
 **Nothing is parked.** The four items ran to commits on 2026-09-09, a follow-up
@@ -394,6 +536,10 @@ the two survivors in (a) are console clicks, not work. **Agenda 2 and 3 are now
 unblocked** — the reason this section used to say "do not start on top of an
 unresolved parked list" was to avoid another 1301-line handoff, and that risk is
 spent.
+
+**The deploy-prep pass added one small (b) item** — the `@types/node` / `engines`
+alignment. It is optional polish, not a park, and it does not re-close this
+section.
 
 **`/archive` has not been confirmed in-browser since `32a515d`.** The page is
 auth-gated, so the fix was proven at the query layer — the corrected select runs
@@ -404,9 +550,13 @@ before treating this line as closed.**
 ### 1. The two remaining (a) items — Turki only, no analysis owed
 
 Whether the `.planning/review-*.md` convention becomes a written rule, and the
-Supabase Auth leaked-password toggle. **Neither is code.** One `CLAUDE.md` chore
-sits beside them: **§7's stub still reads "DB at migration 0187" while the DB is
-at `0188`** (`CLAUDE.md:251`, one number).
+Supabase Auth leaked-password toggle. **Neither is code.** The `CLAUDE.md` chore
+that used to sit beside them is DONE — `CLAUDE.md:251` reads `0188`, matching the
+DB; re-measured, see Database above.
+
+**The leaked-password toggle is now on the deploy path, not just the open list.**
+It is one of two console settings a deploy waits on; the other is whether public
+signup is open. See Deploy readiness.
 
 ### 2. Analysis — Paid-up Balance vs Amount Payable
 
