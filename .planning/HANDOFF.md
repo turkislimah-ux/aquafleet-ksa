@@ -516,7 +516,7 @@ For the record, what they were and what measurement showed:
 ### (c) FORWARD-ONLY — nothing to do, no owner, not defects
 
 3. **There is NO role gate anywhere in the app.** Three live sites say so:
-    `app/trips/actions.ts:1444`, `app/archive/actions.ts:809` (*"With no role
+    `app/trips/actions.ts:1444`, `app/archive/actions.ts:815` (*"With no role
     gate yet this is attribution, not authorisation"*), and
     `components/settings/ProfileSection.tsx:41` (leave-history display deferred
     to RBAC). `SKILL.md`'s locked decision 4 adds *"RBAC on add-a-type:
@@ -605,8 +605,8 @@ For the record, what they were and what measurement showed:
 ordered MUST list lives in Deploy readiness: decide what happens to the sandbox
 data woven into paid records, **CLOSE PUBLIC SIGNUP — measured open 2026-09-09,
 no longer a question**, and turn on leaked-password protection. **Every code-side gate is already green**, so nothing
-in items 1–3 blocks a deploy and none of them unblocks one either. Do not start
-item 2 or 3 expecting it to move the deploy date.
+in items 1–4 blocks a deploy and none of them unblocks one either. Do not start
+item 2, 3 or 4 expecting it to move the deploy date.
 
 ### 0. DONE — the parked inventory is clear
 
@@ -699,6 +699,16 @@ measured today:
 **Before removing any id from the whitelist, check what its owner does with
 Ctrl/Cmd+P** — a subtree that leaves the whitelist without an intercept prints a
 blank sheet, and that failure reads like the printer's fault.
+
+### 4. RBAC / role-gate OPTIONS — requested, and nothing exists to review
+
+**Turki asked (2026-09-09) for role-gate options to be worked up after the
+deploy-prep and data work.** Producing them IS the task: **no design exists —
+nothing proposed, nothing compared, nothing chosen, and nothing on disk.**
+`grep -rl "RBAC\|role gate" .planning/` returns this file only, and what it
+holds is (c)3's record of the ABSENCE, not a candidate scheme. Deliver options
+to choose between, not a built gate; the choice is Turki's. Read (c)3 first for
+the state being designed against, and do not restate it here.
 
 ---
 
