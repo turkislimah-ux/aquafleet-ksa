@@ -34,7 +34,7 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Git
 
-- **`main` is at `58c1589`.** Measured with `git rev-parse HEAD`.
+- **`main` is at `ffef697`.** Measured with `git rev-parse HEAD`.
 - **Level with origin, measured BOTH required ways**: the BRANCH line of
   `git status -sb` reads `## main...origin/main` with no ahead/behind marker,
   and `git rev-list --left-right --count origin/main...HEAD` returns `0	0`.
@@ -223,9 +223,9 @@ before running any build while dev is up.
 
 ---
 
-## Completed this session (2026-09-09, deploy-prep, `e4dbd3e` → `58c1589`)
+## Completed this session (2026-09-09, deploy-prep, `e4dbd3e` → `ffef697`)
 
-**Two read-only investigations that produced NO commits, then four commits.** The
+**Two read-only investigations that produced NO commits, then six commits.** The
 audit and the Edge-runtime trace were both explicitly measure-only; their findings
 are in Deploy readiness above, and neither was allowed to turn into a fix in the
 same pass.
@@ -236,6 +236,8 @@ same pass.
 | `4e3eca0` | Pinned `engines.node` to `"24.x"`. There was no `engines` field at all, so Vercel would have taken whatever the project setting happened to be, invisibly from the repo. |
 | `9b99a98` | Wired `scripts/notification-format-check.ts` into `test:copy`. It ran in no suite. |
 | `58c1589` | Added the constructed `leave_return` fixture, closing that harness at 11 of 11 alert kinds. 22 assertions to 26. |
+| `eaba090` | This file: recorded the session, and corrected three claims it measured as stale. |
+| `ffef697` | Aligned `@types/node` to `24.13.3` with the `24.x` engines pin, and reconciled `package-lock.json`, which `4e3eca0` had left behind. |
 
 **`61cc581` IS THE ONE TO READ, because the pointers were not mis-numbered — they
 addressed content that HAS NEVER EXISTED.** The instinct on a bad `§N` is to
@@ -255,9 +257,9 @@ deprecated on 2026-10-01** — picking it would have shipped a version with thre
 weeks left. `24.x` was chosen because three independent things converge on it:
 it matches the local major (`v24.15.0`), it is Vercel's default and an active
 LTS, and it is the version this session's passing production build actually ran
-under. Next 14.2.5 declares `>=18.17.0` with no upper bound. **Not changed, noted
-for later:** `@types/node` is pinned at `20.14.10`, a subset of 24's surface —
-harmless, and separable from this.
+under. Next 14.2.5 declares `>=18.17.0` with no upper bound. **It left
+`@types/node` at `20.14.10` on purpose, to keep the engines pin one logical
+unit** — filed as a (b) item and closed later the same day in `ffef697`.
 
 **`9b99a98` and `58c1589` are one lesson applied twice: A GUARD WAS PROVEN ABLE
 TO FAIL BEFORE ITS GREEN WAS BELIEVED** (`CLAUDE.md` §5's rule, and the same
@@ -405,12 +407,23 @@ and **neither is code** — both are Turki clicking something.
    a code change. **This is the only genuinely open item on the security
    posture**, and it is Turki's to click.
 
-### (b) Doable FIX — ONE, small and optional
+### (b) Doable FIX — EMPTY again
 
-1. **`@types/node` is pinned at `20.14.10` while the runtime is now pinned at
-   Node `24.x`** (`4e3eca0`). Types for 20 are a SUBSET of 24's, so nothing
-   breaks and `tsc` is green — this is alignment, not a defect. Deliberately left
-   out of `4e3eca0` so the engines pin stayed one logical unit.
+**The one entry filed on 2026-09-09 closed the same day as `ffef697`.**
+`@types/node` was pinned at `20.14.10` while `engines` pinned Node `24.x`, so the
+code typechecked against a Node 20 surface and ran on 24. Now `24.13.3`, exact,
+matching how `typescript` and the react types are already pinned. **Not the
+absolute latest, `26.5.0`** — that types Node 26 and would recreate the same
+mismatch pointing the other way. **The types major tracks the RUNTIME major, not
+npm's `latest` tag.** `package-lock.json` picked up the `engines` block in the
+same commit: `4e3eca0` had edited `package.json` without regenerating the lock,
+so the two had been out of step in between.
+
+**A types bump can break the compiler that consumes it, so it was verified, not
+assumed:** `tsc --noEmit` clean under the existing `typescript` `5.5.3`, both
+suites exit 0, and a real production build exits 0 — run through
+`./scripts/safe-build.sh --dist-dir` because `next dev` was live on 3002, with
+`tsconfig.json` restored by the script's trap and `git diff` on it empty.
 
 **The four ORIGINAL entries closed in the parked-items session as `c17b7f8`.**
 For the record, what they were and what measurement showed:
@@ -537,9 +550,8 @@ unblocked** — the reason this section used to say "do not start on top of an
 unresolved parked list" was to avoid another 1301-line handoff, and that risk is
 spent.
 
-**The deploy-prep pass added one small (b) item** — the `@types/node` / `engines`
-alignment. It is optional polish, not a park, and it does not re-close this
-section.
+**The deploy-prep pass opened one small (b) item and closed it the same day**
+(`ffef697`, the `@types/node` / `engines` alignment). (b) is empty again.
 
 **`/archive` has not been confirmed in-browser since `32a515d`.** The page is
 auth-gated, so the fix was proven at the query layer — the corrected select runs
