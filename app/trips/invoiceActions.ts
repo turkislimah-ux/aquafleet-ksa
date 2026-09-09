@@ -238,6 +238,24 @@ async function assembleForCustomerPeriod(params: {
 
   const { data: seller } = await supabase.from("company_settings").select("*").eq("id", true).single();
 
+  // The ONE input assembleInvoice THROWS on instead of returning (lib/invoice.ts:429).
+  // A throw escapes the ActionResult convention every other failure in this
+  // function follows (:130, :139, :155, :173) and reaches the client as an
+  // unhandled server-action rejection — a blank screen where "pick a payment
+  // mode" belongs. Convert it here, at the only call site that can hit it with
+  // unvalidated data.
+  //
+  // THE THROW STAYS. It is the money-core's own invariant: an invoice has no
+  // meaning until prepaid or postpaid is chosen, and lib/invoice.ts must keep
+  // failing loudly for any caller that has NOT checked. This guard makes the
+  // one known caller polite; it does not make the engine permissive.
+  if (project.payment_mode == null) {
+    return {
+      error:
+        "This customer's project has no payment mode set. Open the project and choose Prepaid or Postpaid, then build the invoice.",
+    };
+  }
+
   const assembly = assembleInvoice({
     customerId,
     paymentMode: project.payment_mode,
