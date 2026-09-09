@@ -714,8 +714,9 @@ warned that the list's completeness was a day old; that caveat is spent.**
 since.** The audit was READ-ONLY by instruction, so it re-derived and classified
 but changed nothing; the four commits that day came from a separate, explicitly
 scoped pass. **The entries BELOW are individually newer than the sweep** — (b)1
-was opened by `0189` on 2026-09-09 and never went through it. **A re-derivation
-is a floor on this list's completeness, not a timestamp on its contents.**
+was opened 2026-09-10 by a migration replay onto an empty project, an exercise
+nobody had run when the sweep went out. **A re-derivation is a floor on this
+list's completeness, not a timestamp on its contents.**
 
 ### (a) DECISION for Turki — do not "fix" these, they are choices
 
@@ -747,7 +748,44 @@ how it stays unanswered.**
    claim it was the only open security item; it was not, it was the only one
    anybody had measured.**
 
-### (b) Doable FIX — EMPTY again, both 2026-09-09 entries closed
+### (b) Doable FIX — ONE entry, POST-DEPLOY, opened 2026-09-10
+
+**This section read "EMPTY again" from 2026-09-09 until the entry below opened
+it.** That entry is deferred by an owner's decision, not parked for want of a
+fix — the fix is known and stated.
+
+1. **POST-DEPLOY — THE MIGRATION SET IS NOT SELF-REBUILDABLE.** A fresh replay of
+   `0001..0191` onto an empty project fails at
+   `0111_backfill_trip_filling_cost.sql:83`, on `validate constraint
+   water_stations_offers_at_least_one_type`. `0110` adds that constraint
+   `not valid`, its own comment saying a later migration validates it *"once the
+   UI has been used"* — so **`0111` depends on station prices an operator typed
+   through the UI between the two migrations.** A clean rebuild has NULL-price
+   seed stations, which violate it.
+
+   **Measured 2026-09-10** on the throwaway `aquafleet-test` project (ref
+   `vlyxazfinmlanjdttavg`; production was never touched): 110 of 189 applied,
+   ledger `max = '0110'`, `0111` wrote nothing — the failure is atomic and the
+   push is safe to resume. All 3 seeded stations (`manfuhah_station`,
+   `olaya_filling_point`, `umm_al_hamam_station`) carry both
+   `fill_cost_potable_sar` and `fill_cost_non_potable_sar` NULL, so 3 of 3 rows
+   violate: `SQLSTATE 23514`. **A pre-identified risk died here too — the
+   `begin;`/`commit;` in the 147 pre-0173 files did NOT choke `db push`;** 110
+   files carrying them applied cleanly.
+
+   **NOT a deploy or wipe blocker.** Production's schema is already built, and a
+   data wipe deletes ROWS while keeping the schema, so nothing re-runs `0111`.
+   What it costs is **disaster recovery and any new environment** — including the
+   DB-connected money harness (Batch K), which is blocked on exactly this today.
+
+   **Proper fix:** move embedded business-seed data (the stations, plus an audit
+   of any other operator-data dependency in the chain) out of the migrations into
+   a seed step, so the set replays clean. **Check for further instances beyond
+   `0111`** — the replay stops at the FIRST one, so it cannot have found the
+   later ones, and "it got past 0111" is not evidence there are none.
+   **Deferred by Turki 2026-09-10.**
+
+**Both 2026-09-09 entries are CLOSED. Kept below so they are not reopened.**
 
 **The `CLAUDE.md` stub entry opened and closed the same day.** `0189` was applied
 through MCP and committed as `e147373`, leaving §7 reading `0188`; the pair was
