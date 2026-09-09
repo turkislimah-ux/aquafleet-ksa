@@ -32,7 +32,7 @@ import { PageHeader, Card, Btn, Table, TH, TD } from "@/components/ui";
 import MtStatusPill, { MtPriorityPill, type MtPillKind } from "./MtStatusPill";
 import { useApp } from "@/components/AppShell";
 import { t, arText } from "@/lib/i18n";
-import { cn, formatDate, formatSar } from "@/lib/utils";
+import { addDaysToKey, cn, currentMonthKey, formatDate, formatSar, riyadhDayKey, todayKey } from "@/lib/utils";
 import type {
   Truck,
   Staff,
@@ -114,12 +114,14 @@ const URGENT_ROW_TONE: Record<Exclude<Section, "all">, string> = {
 // not exported/shared, since it's two one-line functions, not worth an
 // import-cycle risk for.
 function isOsOverdue(j: OutsourcedJob): boolean {
-  return j.status !== "completed" && j.estimated_finish < todayKeyLocal();
+  return j.status !== "completed" && j.estimated_finish < todayKey();
 }
-function todayKeyLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+// todayKeyLocal() stood here: a hand-rolled copy of lib/utils.todayKey() that
+// read the HOST clock. It compared against `estimated_finish`, a DATE column
+// the database keeps in Riyadh terms, so on a UTC deployment every outsourced
+// job spent the first three hours of its due date already marked "delayed".
+// Deleted rather than pinned — a second expression for "what day is it" is the
+// thing that let the two answers drift in the first place.
 type PhaseKey = "scheduled" | "in_progress" | "delayed" | "completed";
 function osPhaseOf(j: OutsourcedJob): PhaseKey {
   if (isOsOverdue(j)) return "delayed";
@@ -155,17 +157,25 @@ function PhaseStat({ label, value, phase }: { label: string; value: number; phas
 // raw +/-delta when last month was 0 (percent is undefined at a 0
 // baseline), otherwise a percent change with an up/down arrow — thin/
 // flat right now is expected with days-old test data, not a bug.
+//
+// COUNTED BY MONTH KEY, NOT BY INSTANT COMPARISON. The three boundary Dates this
+// replaces were built from the HOST's calendar and then compared against
+// timestamptz instants, so on a UTC deployment every boundary sat three hours
+// late: rows created between 21:00 and 24:00 UTC on the last day of a month
+// counted into the month that had already ended in Riyadh. Bucketing each row
+// with riyadhDayKey and comparing "YYYY-MM" strings asks the zone question once,
+// explicitly, and removes the boundary arithmetic entirely — including the
+// December case, where getMonth() + 1 rolls the year and getMonth() - 1 rolls it
+// back.
 function monthCreatedCounts(items: { created_at: string }[]) {
-  const now = new Date();
-  const thisStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const nextStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const lastStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const thisKey = currentMonthKey();
+  const lastKey = addDaysToKey(`${thisKey}-01`, -1).slice(0, 7);
   let thisMonth = 0;
   let lastMonth = 0;
   for (const it of items) {
-    const d = new Date(it.created_at);
-    if (d >= thisStart && d < nextStart) thisMonth++;
-    else if (d >= lastStart && d < thisStart) lastMonth++;
+    const key = riyadhDayKey(new Date(it.created_at)).slice(0, 7);
+    if (key === thisKey) thisMonth++;
+    else if (key === lastKey) lastMonth++;
   }
   return { thisMonth, lastMonth };
 }

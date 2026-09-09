@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui";
-import { cn, monthName } from "@/lib/utils";
+import { cn, monthName, riyadhDayKey } from "@/lib/utils";
 import {
   type WaterType,
   WATER_TYPE_LABELS,
@@ -49,7 +49,12 @@ type Kind = "project" | "customer";
 // held the others). They now come from `common.monthShort` via lib/utils'
 // `monthName`, which is why this takes `lang`.
 //
-// ISO timestamp → "DD Mon YYYY" in LOCAL time (matches the app's delivered-day basis).
+// ISO timestamp → "DD Mon YYYY" on RIYADH's calendar (the app's delivered-day basis).
+//
+// It read the HOST's calendar off the Date directly, which is the browser here
+// and UTC in any server render — the same delivered_at instant labelled with two
+// different days. riyadhDayKey answers the day question once, explicitly, and
+// the parts are sliced off that key rather than off a clock.
 // ONLY the month NAME is translated; the day and the year are app-formatted
 // numbers and stay Latin digits in both languages.
 //
@@ -60,8 +65,8 @@ type Kind = "project" | "customer";
 // line already read, so the output is identical by construction. The `+ 1` is
 // because getMonth() is 0-based and the dictionary keys are 1-based.
 function fmtDeliveredLocal(iso: string, lang: Lang): string {
-  const d = new Date(iso);
-  return `${d.getDate()} ${monthName(d.getMonth() + 1, lang)} ${d.getFullYear()}`;
+  const [y, m, d] = riyadhDayKey(new Date(iso)).split("-").map(Number);
+  return `${d} ${monthName(m, lang)} ${y}`;
 }
 
 const INPUT =

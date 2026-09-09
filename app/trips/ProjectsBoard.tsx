@@ -27,7 +27,7 @@ import { Btn, Stat, StatusPill, Table, TH, TD } from "@/components/ui";
 import { useApp } from "@/components/AppShell";
 import { t, fill, plural, type Lang } from "@/lib/i18n";
 import { tripStageLabel, waterTypeLabel } from "@/lib/enum-labels";
-import { cn, formatSar, formatDateLangLocale, monthName } from "@/lib/utils";
+import { cn, formatSar, formatDateLangLocale, monthName, riyadhDayKey, RIYADH_TZ } from "@/lib/utils";
 import { stationBlockedForType, type StationOption, type WaterStationRow } from "@/lib/station-pricing";
 import {
   type Trip,
@@ -173,13 +173,29 @@ function fmtPhaseStamp(iso: string | null, lang: Lang): string {
   if (!iso) return "—";
   const d = new Date(iso);
   const date = formatDateLangLocale(d, lang, "en-GB", { day: "2-digit", month: "short" });
-  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  // timeZone alongside the locale, because the DATE half above is now pinned to
+  // Riyadh and an unpinned time half would follow the host — the two halves of
+  // one stamp naming two different moments, visibly so after 21:00 UTC.
+  const time = d.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: RIYADH_TZ,
+  });
   return `${date} · ${time}`;
 }
 
-// --- Day-calendar helpers. All keys are local "YYYY-MM-DD" (matches the trips
-// trip_date date column, which is TZ-free). Using local components (not
-// toISOString, which is UTC) keeps "today" aligned with the user's clock. -------
+// --- Day-calendar helpers. All keys are "YYYY-MM-DD" (matches the trips
+// trip_date date column, which is TZ-free).
+//
+// `dayKey` IS NOW ARITHMETIC ONLY — it is never handed an instant. It reads
+// local components off a Date that parseKey built from local components, so the
+// two cancel and the arithmetic is zone-free. The two places that used to pass
+// it a real instant (`new Date()` for today, `new Date(delivered_at)` for a
+// bucket) went through the host clock, which is Riyadh here and UTC on Vercel —
+// and this board sits under a page that computes its own `today` on the SERVER.
+// One tree, two answers, for three hours every night. Both now call
+// lib/utils.riyadhDayKey, which names the zone instead of inheriting it. ------
 //
 // Both label arrays became KEY tuples. A module-level array of English words
 // cannot follow the language, so what stays at module scope is the INDEX → key
@@ -1347,7 +1363,7 @@ export default function ProjectsBoard({
   const [pickerTrip, setPickerTrip] = useState<TripRow | null>(null);
 
   // Calendar state — selected day + the visible week (Sunday key). Default today.
-  const todayKey = dayKey(new Date());
+  const todayKey = riyadhDayKey(new Date());
   const [selectedDay, setSelectedDay] = useState(todayKey);
   const [weekStart, setWeekStart] = useState(() => weekStartOf(todayKey));
 
@@ -1394,7 +1410,7 @@ export default function ProjectsBoard({
     () =>
       trips.reduce(
         (sum, t) =>
-          t.delivered_at && dayKey(new Date(t.delivered_at)) === selectedDay
+          t.delivered_at && riyadhDayKey(new Date(t.delivered_at)) === selectedDay
             ? sum + (t.commission_sar ?? 0)
             : sum,
         0

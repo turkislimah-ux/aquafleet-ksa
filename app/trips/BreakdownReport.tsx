@@ -522,8 +522,16 @@ export default function BreakdownReport({
   const dailyData = useMemo(() => {
     const [y, m] = selMonth.split("-").map(Number);
     const daysInMonth = new Date(y, m, 0).getDate();
+    // The day number is SLICED OUT OF RIYADH'S TODAY, not read off the host
+    // clock. `currentMonth` on the line above already comes from
+    // currentMonthKey(), so a `new Date().getDate()` here asked a second clock
+    // the same question — and on a UTC host the two disagree for the first three
+    // hours of every day, which on the 1st of a month drops the whole chart to
+    // zero bars while the month label still reads current.
     const lastDay =
-      selMonth === currentMonth ? Math.min(daysInMonth, new Date().getDate()) : daysInMonth;
+      selMonth === currentMonth
+        ? Math.min(daysInMonth, Number(todayKey().slice(8, 10)))
+        : daysInMonth;
     const counts = new Map<number, number>();
     for (const t of totalInMonth) {
       if (!t.trip_date) continue;

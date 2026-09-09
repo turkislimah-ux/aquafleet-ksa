@@ -27,7 +27,7 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import { t, arText } from "@/lib/i18n";
-import { cn, todayKey as todayKeyUtil, monthName } from "@/lib/utils";
+import { cn, todayKey as todayKeyUtil, riyadhDayKey, monthName } from "@/lib/utils";
 import type { Truck, WorkOrder, OutsourcedJob } from "@/lib/db-types";
 
 // EXPORTED — MaintenanceClient's own day-filter (Phase-5 fix) must bucket
@@ -35,14 +35,37 @@ import type { Truck, WorkOrder, OutsourcedJob } from "@/lib/db-types";
 // day shows an empty/wrong list (today's actual bug: the table was still
 // filtering by due_by while the calendar had already moved to start_date).
 export function woCalendarKey(w: WorkOrder): string {
-  return w.start_date ?? ymd(new Date(w.due_by));
+  // `start_date` is a DATE column and is already a calendar day. `due_by` is a
+  // timestamptz — an INSTANT — and which day it falls on is only a question once
+  // a zone is named. It used to be bucketed on the host's zone, so the same work
+  // order sat on one day in dev and on the day before in a UTC deployment.
+  return w.start_date ?? riyadhDayKey(new Date(w.due_by));
 }
 
+// LOCAL COMPONENTS, AND THAT IS CORRECT HERE — but only because nothing hands
+// this an instant any more. Every remaining caller passes a Date that was itself
+// built from local components (weekStartOf's midnight, the cell walk below), so
+// the build and the read cancel and the arithmetic carries no zone at all.
+// Instants go to riyadhDayKey; keep it that way.
 export function ymd(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/**
+ * Riyadh's today as a LOCAL-midnight Date — the seed for the week strip.
+ *
+ * The strip is walked with local `setDate` arithmetic, so the seed is the only
+ * part of it that reads a clock and pinning the seed pins the whole thing.
+ * `new Date()` was the host's, which is UTC on Vercel: before 03:00 Riyadh it
+ * names yesterday, and on a Sunday that opened the calendar on the PREVIOUS
+ * week — a wrong week, not a wrong day.
+ */
+function riyadhTodayLocal(): Date {
+  const [y, m, d] = todayKeyUtil().split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
 
 function weekStartOf(d: Date): Date {
@@ -115,7 +138,7 @@ export default function MaintenanceCalendar({
   onOpenWorkOrder: (id: string) => void;
   onOpenOutsourcedJob: (id: string) => void;
 }) {
-  const [weekStart, setWeekStart] = useState<Date>(() => weekStartOf(new Date()));
+  const [weekStart, setWeekStart] = useState<Date>(() => weekStartOf(riyadhTodayLocal()));
 
   const trucksById = useMemo(() => {
     const m = new Map<string, Truck>();
@@ -166,7 +189,7 @@ export default function MaintenanceCalendar({
     });
   }, [weekStart]);
 
-  const todayKey = ymd(new Date());
+  const todayKey = todayKeyUtil();
   // Only the month NAME follows `lang`; the day number stays Latin digits in
   // both languages, as it did before and as every other monthName caller does.
   // The separator before the year follows `lang`: Arabic gets ، (U+060C), as the

@@ -139,24 +139,45 @@ export function formatSarExact(n: number) {
 // That is the deliberate trade: one predictable rendering everywhere beats a
 // date whose shape depends on the phone. Riyadh reads both.
 //
-// NOT everything that formats a date belongs here. `formatDayKey` above renders
+// NOT everything that formats a date belongs here. `formatDayKey` below renders
 // a YYYY-MM-DD calendar key in its own "1 Sep 2026" shape and parses the parts
-// to avoid a UTC shift; `todayKey`/`daysAgoKey` never touch Intl at all. And any
-// date that becomes a KEY or a COMPARISON — notably driver-state-drift.ts's
-// en-CA + Asia/Riyadh bucket key, which is diffed against SQL — must never be
-// routed through a display formatter.
+// to avoid a UTC shift. And any date that becomes a KEY or a COMPARISON —
+// notably driver-state-drift.ts's en-CA + Asia/Riyadh bucket key, which is
+// diffed against SQL — must never be routed through a display formatter.
+//
+// TIMEZONE IS NOT LOCALE, AND THIS BLOCK NOW PINS BOTH SEPARATELY. The locale
+// stays "en-US" for the reason the paragraphs above give: Latin digits, one
+// predictable part order, no "ar-SA". The ZONE is a different question with a
+// different answer, and until now it had no answer at all — an absent
+// `timeZone` means "the host's", which is Riyadh in dev and UTC on Vercel. Same
+// build, same instant, two different days on screen for three hours a night.
+// Passing `lang` into the locale would reopen the Arabic-Indic digit bug;
+// passing a zone does not touch digits, order or wording.
+export const RIYADH_TZ = "Asia/Riyadh";
+
+/**
+ * `opts` with Riyadh as the DEFAULT zone. The spread order is the contract: a
+ * caller that names its own `timeZone` still wins, which is what keeps
+ * lib/parts-usage.ts's deliberate `timeZone: "UTC"` bucket labels exactly as
+ * they are. Every other caller — which is all of them — stops depending on
+ * where the process happens to be running.
+ */
+function withRiyadh(opts?: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
+  return { timeZone: RIYADH_TZ, ...opts };
+}
+
 export function formatDateTime(
   iso: string | number | Date,
   opts?: Intl.DateTimeFormatOptions,
 ): string {
-  return new Date(iso).toLocaleString("en-US", opts);
+  return new Date(iso).toLocaleString("en-US", withRiyadh(opts));
 }
 
 export function formatDate(
   iso: string | number | Date,
   opts?: Intl.DateTimeFormatOptions,
 ): string {
-  return new Date(iso).toLocaleDateString("en-US", opts);
+  return new Date(iso).toLocaleDateString("en-US", withRiyadh(opts));
 }
 
 // ===========================================================================
@@ -329,7 +350,10 @@ export function formatDateLang(
   opts?: Intl.DateTimeFormatOptions,
 ): string {
   if (lang === "en" || !hasMonthName(opts)) return formatDate(iso, opts);
-  return swapMonthName(new Date(iso), "en-US", opts!, lang);
+  // withRiyadh, not `opts!`, because this arm BYPASSES formatDate — without it
+  // the English and Arabic renderings of the same instant would sit in two
+  // different zones and could name two different days.
+  return swapMonthName(new Date(iso), "en-US", withRiyadh(opts), lang);
 }
 
 /** `formatDateTime` with a language. Same two rules as `formatDateLang`. */
@@ -339,7 +363,7 @@ export function formatDateTimeLang(
   opts?: Intl.DateTimeFormatOptions,
 ): string {
   if (lang === "en" || !hasMonthName(opts)) return formatDateTime(iso, opts);
-  return swapMonthName(new Date(iso), "en-US", opts!, lang);
+  return swapMonthName(new Date(iso), "en-US", withRiyadh(opts), lang);
 }
 
 /**
@@ -367,26 +391,79 @@ export function formatDateLangLocale(
   opts: Intl.DateTimeFormatOptions,
 ): string {
   const d = new Date(iso);
+  const zoned = withRiyadh(opts);
   if (lang === "en" || !hasMonthName(opts)) {
-    return new Intl.DateTimeFormat(locale, opts).format(d);
+    return new Intl.DateTimeFormat(locale, zoned).format(d);
   }
-  return swapMonthName(d, locale, opts, lang);
+  return swapMonthName(d, locale, zoned, lang);
 }
 
-// Local "today" as YYYY-MM-DD. Uses getFullYear/getMonth/getDate (local clock),
-// matching the trip day-math convention (ProjectsBoard.dayKey) so leave-"today"
-// and trip-days agree. Replaces `new Date().toISOString().slice(0,10)`, which is
-// UTC and drifts a day behind local dates in +hours timezones (e.g. Riyadh) for
-// the first hours after local midnight.
+// ===========================================================================
+// RIYADH'S TODAY — THE ONE CLOCK EVERY BUCKET KEY IN THE APP READS
+// ===========================================================================
+// The formatter below is the ONLY place a day key is derived from an instant.
+// `todayKey`, `daysAgoKey` and `currentMonthKey` all route through it, and
+// nothing else in lib/ or app/ should read `getFullYear/getMonth/getDate` to
+// build a key again.
+//
+// WHY IT IS BUILT THIS WAY, AND NOT FROM THE HOST CLOCK.
+//
+// This function used to read the LOCAL clock and its own comment explained that
+// the local clock was the correct one, because `toISOString().slice(0,10)` is
+// UTC and lands a day early in Riyadh. That reasoning was sound and the
+// conclusion was true on the machine it was written on. It stopped being true
+// on deploy: the local clock is Riyadh in dev and **UTC on Vercel**, so the
+// helper written to avoid a UTC bug produced exactly that bug in production —
+// from 00:00 to 03:00 Riyadh the server answered YESTERDAY, every night.
+//
+// A host that is merely CONFIGURED correctly is not the same as an expression
+// that is correct. `TZ=Asia/Riyadh` is also set on the deployment, and that is
+// deliberate belt-and-braces, but it is a dashboard setting one edit away from
+// silently reverting all of this to UTC with no error and no failing test. The
+// zone is named here so the answer does not depend on it.
+//
+// THE PATTERN IS driver-state-drift.ts:108-113's, GENERALISED. That file has
+// been doing this correctly since it was written, because it had to: it diffs
+// its key against SQL's `(now() at time zone 'Asia/Riyadh')` and a mismatch
+// would fire a false alarm nightly. The rest of the app compares against the
+// same 32 migrations' Riyadh-pinned dates and simply had no guard to notice.
+//
+// "en-CA" IS NOT A LOCALE CHOICE, IT IS THE FORMAT. That locale's numeric date
+// is natively YYYY-MM-DD — the exact shape a Postgres `date` compares as a
+// string — so there is no reassembly step and no chance of a part landing in
+// the wrong slot. It emits Latin digits, so this does not reopen the
+// Arabic-Indic bug the display formatters above exist to have closed. Nothing
+// user-facing renders through it; it produces keys, never labels.
+const RIYADH_KEY_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: RIYADH_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/**
+ * The Riyadh calendar date CONTAINING instant `d`, as YYYY-MM-DD.
+ *
+ * EXPORTED because bucketing a stored `timestamptz` into a day is the same
+ * question as "what day is it now", and the call sites that answered it with
+ * `new Date(iso).getDate()` were wrong in the same way and for the same reason.
+ * A timestamptz is an instant; which DAY it falls on is only a question once a
+ * zone is named, and the zone the database names is Asia/Riyadh.
+ *
+ * NOT for keys that are already calendar dates — a `date` column carries no
+ * instant, so `slice(0, 10)` is its day and passing it through here would first
+ * invent a midnight and then re-place it.
+ */
+export function riyadhDayKey(d: Date): string {
+  return RIYADH_KEY_FMT.format(d);
+}
+
+/** Riyadh's today as YYYY-MM-DD, on any host. */
 export function todayKey(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return riyadhDayKey(new Date());
 }
 
-// N days before today, as YYYY-MM-DD on the SAME local clock as todayKey().
+// N days before Riyadh's today, as YYYY-MM-DD.
 //
 // WHY THIS EXISTS RATHER THAN `new Date(Date.now() - n*86400000).toISOString()`:
 // that expression is UTC, so pairing it with todayKey() puts the two ends of a
@@ -394,21 +471,22 @@ export function todayKey(): string {
 // yesterday until 03:00 local, so between 00:00 and 02:59 the window silently
 // started a day early — measured:
 //
-//   Riyadh now              todayKey()   UTC since     local since
+//   Riyadh now              todayKey()   UTC since     Riyadh since
 //   2026-08-16T01:30+03:00  2026-08-16   2026-07-16    2026-07-17   <- off by one
 //   2026-08-16T12:00+03:00  2026-08-16   2026-07-17    2026-07-17
 //
 // Both ends must come from one clock or the window is a different length for
-// three hours a night. setDate() handles month and year rollover, so this is
-// also correct across 1 March, 1 January and leap days, which subtracting
-// 86400000 milliseconds is not guaranteed to be across a DST change.
+// three hours a night. It now derives from todayKey() rather than repeating the
+// clock read, so "the same clock as todayKey" is true BY CONSTRUCTION instead of
+// by two functions happening to be written alike — which is exactly how the two
+// drifted onto the host clock together in the first place.
+//
+// addDaysToKey does the arithmetic on a UTC-anchored key, so month, year and
+// leap-day rollover are handled and there is no DST hazard: Saudi Arabia does
+// not observe DST, and even if the zone changed, the shift happens on the KEY
+// and never on an instant.
 export function daysAgoKey(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return addDaysToKey(todayKey(), -n);
 }
 
 /**
@@ -450,22 +528,31 @@ export function addDaysToKey(key: string, days: number): string {
  * viewer's zone — so on any negative-offset machine the label lands on the day
  * BEFORE the one stored. These keys are calendar dates (commission
  * effective_from, trip_date), not instants; they carry no time and must not
- * acquire one on the way to the screen. Passing the parts to the Date
- * constructor builds it in local terms, so the digits survive the round trip
- * whatever zone the browser is in.
+ * acquire one on the way to the screen.
+ *
+ * BUILT AND READ IN THE SAME EXPLICIT ZONE, which is a change. It used to build
+ * a LOCAL midnight and format with no `timeZone` at all, and the two cancelled —
+ * correct, but only because both halves silently agreed to follow the host. Now
+ * that the formatters above default to Riyadh, a silent half is a liability: on
+ * a host east of UTC+3 the local midnight would render as the previous day. UTC
+ * on both sides makes the round trip a property of this function rather than of
+ * the machine, and the digits are identical everywhere, Riyadh included.
  */
 export function formatDayKey(key: string): string {
   const [y, m, d] = key.slice(0, 10).split("-").map(Number);
   if (!y || !m || !d) return key;
-  return new Date(y, m - 1, d).toLocaleDateString("en-GB", DAY_KEY_OPTS);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-GB", DAY_KEY_OPTS);
 }
 
 // Named so the two functions cannot drift apart in their options while sharing
-// a doc comment that says they agree.
+// a doc comment that says they agree. `timeZone: "UTC"` is the half of the round
+// trip described above, and it also OVERRIDES the Riyadh default in withRiyadh —
+// a calendar key has no instant to place in a zone, so it must not acquire one.
 const DAY_KEY_OPTS: Intl.DateTimeFormatOptions = {
   day: "numeric",
   month: "short",
   year: "numeric",
+  timeZone: "UTC",
 };
 
 /**
@@ -484,7 +571,7 @@ export function formatDayKeyLang(key: string, lang: Lang): string {
   if (lang === "en") return formatDayKey(key);
   const [y, m, d] = key.slice(0, 10).split("-").map(Number);
   if (!y || !m || !d) return key;
-  return formatDateLangLocale(new Date(y, m - 1, d), lang, "en-GB", DAY_KEY_OPTS);
+  return formatDateLangLocale(new Date(Date.UTC(y, m - 1, d)), lang, "en-GB", DAY_KEY_OPTS);
 }
 
 export function addYearsToKey(key: string, years: number): string {
@@ -494,7 +581,8 @@ export function addYearsToKey(key: string, years: number): string {
 }
 
 /**
- * The CURRENT month, "YYYY-MM", on the same local clock as todayKey().
+ * The CURRENT month, "YYYY-MM", in Riyadh — it is a slice of todayKey(), so it
+ * cannot answer a different month than the day key does.
  *
  * A FUNCTION, NEVER A CONST. It began life as
  * `export const CURRENT_MONTH_KEY = new Date().toISOString().slice(0, 7)` in

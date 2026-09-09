@@ -18,7 +18,7 @@ import { COST_COLOR } from "@/lib/cost-colors";
 import { t, fill, plural, type Lang, type TKey } from "@/lib/i18n";
 // Aliased on import because this file exports its own `monthLabel` — the
 // reports-route name for the same label, now implemented by the shared one.
-import { monthLabel as monthKeyLabel, monthName } from "@/lib/utils";
+import { currentMonthKey, monthLabel as monthKeyLabel, monthName } from "@/lib/utils";
 
 // --- View row shapes -------------------------------------------------------
 // One type per view, columns verbatim. Names match the SQL exactly so a
@@ -774,9 +774,13 @@ export function monthTick(month: string, lang: Lang): string {
  * revenue — a true figure that looks like a broken page unless it is labelled.
  */
 export function isCurrentMonth(month: string): boolean {
-  const now = new Date();
-  const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-  return month === key;
+  // currentMonthKey() rather than a local getFullYear/getMonth pair. Both
+  // callers are client components today, where the host clock is the browser's
+  // and Riyadh is the right answer by accident. But this module is imported by
+  // server code too, and nothing at a call site marks which side it is on —
+  // naming the zone makes the function correct wherever it is called from,
+  // instead of correct until someone moves it.
+  return month === `${currentMonthKey()}-01`;
 }
 
 /** The month immediately before `month` in the spine, or null at the start. */
