@@ -252,14 +252,21 @@ speed bump, not a gate — any working mailbox clears it.
 | public tables | 87 |
 | RLS enabled | **87 of 87** |
 | policies total | 89 |
-| policies that are blanket `qual = true` for `authenticated` | **85** |
+| policies that are blanket `qual = true` for `authenticated` | **84** |
 | non-trigger functions executable by `authenticated` | 58 |
 | …of which SECURITY DEFINER | **45** |
 
 **RLS being on everywhere gates almost nothing.** It separates `anon` from
 logged-in, not staff from stranger. The only 5 policies that reference the
 caller are personalization — `notification_prefs`, `notification_dismissals`,
-`notification_thresholds_user`, `user_profiles`, and `issue_reports` INSERT. No
+`notification_thresholds_user`, `user_profiles` (all `user_id = auth.uid()`,
+cmd ALL), and `issue_reports_insert_own` (INSERT, `qual` null, `with_check` on
+`reporter_id`). **84 + 5 = 89 — the blanket row and this list are one
+measurement read from both ends, so they MUST add up.** They did not: the row
+said 85 next to a list of 5, wrong in the very commit that measured it
+(`7629086`, today) and carried through 10 commits unflagged, because a table
+cell and a sentence are not checked against each other unless the arithmetic is
+written down. Now it is. Re-measured and corrected 2026-09-09. No
 role column, no staff check, no authorization tier anywhere in the app. So the
 audit's worst case is CONFIRMED REAL, not theoretical: open signup + no role
 gate + 45 reachable definer money RPCs = full fleet and finance access to
@@ -599,7 +606,7 @@ how it stays unanswered.**
 3. **PUBLIC SIGNUP IS OPEN — the more serious of the two auth settings, and the
    one that actually gates a deploy.** Measured 2026-09-09:
    `"disable_signup": false`. Anyone who registers gets an `authenticated` JWT,
-   and 85 of 89 RLS policies are blanket `qual = true` for that role, so the JWT
+   and 84 of 89 RLS policies are blanket `qual = true` for that role, so the JWT
    is the whole authorization model. Full measurement, the exact read-only curl,
    and the console path to close it are in Deploy readiness. **Item 2 used to
    claim it was the only open security item; it was not, it was the only one
