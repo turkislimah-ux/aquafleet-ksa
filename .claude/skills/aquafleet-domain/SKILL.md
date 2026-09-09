@@ -992,10 +992,37 @@ naming BOTH grantees:
   revoke execute on function public.X(<exact identity args>) from public, anon;
 ```
 
-Read the privilege back with `has_function_privilege`, never by matching
-`proacl`, and identify the function by `oid::regprocedure::text`, never by
-`pg_get_function_identity_arguments()`. `CLAUDE.md` §6 explains what each of
-those wrong turns reports — both make a healthy function look like a breach.
+The offender is the PUBLIC entry — EMPTY grantee, `=X/postgres`. Revoking `anon`
+alone changes nothing.
+
+**READ IT BACK THE RIGHT WAY. Both wrong turns INVERT the answer, reporting a
+healthy function as a breach, and a false catastrophe reads exactly like a real
+one.** `CLAUDE.md` §6 carries the rule; here is why each one lies:
+
+- **`has_function_privilege('anon', …, 'execute')` = false, NEVER `proacl`
+  matching.** A filter of `'%=X/%'` also matches `postgres=X/postgres`, the
+  OWNER's own grant. Measured 2026-09-09: it matches **74 of 74** non-trigger
+  `public` functions — the naive query reports **100%** of the schema as leaking
+  while the real answer is zero.
+- **Identify by `p.oid::regprocedure::text = 'fn_name(uuid,integer)'`, NEVER by
+  `pg_get_function_identity_arguments()`.** On PG15+ that function returns
+  argument NAMES as well as types, so a filter written as `'uuid, integer'`
+  matches ZERO rows — and a function that returns no row reads as missing, i.e.
+  as un-revoked and anon-executable. Measured on the same run: the
+  identity-arguments filter found **0** rows where `regprocedure` found **1**.
+
+```sql
+  select p.oid::regprocedure::text as fn,
+         has_function_privilege('anon', p.oid, 'execute') as anon_can_execute
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public'
+     and p.prokind = 'f'
+     and p.prorettype <> 'trigger'::regtype
+     and has_function_privilege('anon', p.oid, 'execute');
+```
+
+**Zero rows is the invariant.** Trigger functions are excluded because PostgREST
+cannot reach them; several legitimately remain anon-executable.
 
 ---
 
