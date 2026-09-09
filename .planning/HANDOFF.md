@@ -1,16 +1,29 @@
 # SESSION HANDOFF
 
-**Updated 2026-09-09 (THIRD session that day — timezone correctness and error
-boundaries; the deploy-prep and parked-items sessions earlier the same day are
-the sections below it), every figure re-measured this turn.** Rewritten fresh at
+**Updated 2026-09-10 (Batch H — the VAT rate as one object, an invoice-totals
+assert, and the payment-mode guard; the three 2026-09-09 sessions are the
+sections below it), every figure re-measured this turn.** Rewritten fresh at
 `2318055` on 2026-09-08 from a 1301-line predecessor; **nothing was lost, it is
 `e93baec:.planning/HANDOFF.md`, and every unit's reasoning lives in its own commit
 message**, which is where `CLAUDE.md` §5 says detail belongs. This file is
 STATE — what is true now, what is open, and what comes next. Rules are in
 `CLAUDE.md`; domain law is in `.claude/skills/aquafleet-domain/SKILL.md`.
 
-**THE APP AND THE DATABASE NOW AGREE ON WHAT DAY IT IS.** Both halves landed this
-session: `0189` moved every day/month/year bucket in the DB off bare
+**THE VAT RATE IS ONE OBJECT, AND `confirm_invoice` NOW REFUSES TOTALS THAT DO
+NOT ADD UP.** `0190` put `public.vat_rate()` behind the five money objects that
+carried a bare `1.15` or `0.15`, and `0191` gave the confirm RPC three tiers of
+arithmetic assert. **The two VAT families stay SEPARATE — sharing the RATE is
+safe, sharing a ROUNDING HELPER would silently merge two conventions.** Do not
+add a `vat_gross()`. See Completed this session.
+
+**AND AN ASSERT IS NOT A CONSTRAINT, DELIBERATELY.** `0191` asserts inside the
+RPC rather than as a table `CHECK` because **8 of 36 existing invoices already
+violate the identity** and are frozen by `0027` — a CHECK would take
+`pay_invoice` / `unpay_invoice` / `void_invoice` down on rows nobody is allowed
+to repair. New confirms are held to the rule; issued history is not rewritten.
+
+**THE APP AND THE DATABASE NOW AGREE ON WHAT DAY IT IS.** Both halves landed the
+previous session: `0189` moved every day/month/year bucket in the DB off bare
 `current_date` (which is UTC here), and `00cfb9e` moved the app's formatters off
 the host clock. **Neither half was sufficient alone** — the DB is authoritative
 for stored dates, the app for displayed ones, and before this they could name
@@ -41,7 +54,7 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Git
 
-- **`main` was at `876bc0b` when this line was written, and the commit carrying
+- **`main` was at `0b20721` when this line was written, and the commit carrying
   this file is its child.** Measured with `git rev-parse HEAD`.
 - **Level with origin, measured BOTH required ways**: the BRANCH line of
   `git status -sb` reads `## main...origin/main` with no ahead/behind marker,
@@ -53,10 +66,10 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Database
 
-- **Files on disk run through `0189`; 187 `.sql` files** (`ls
-  supabase/migrations/*.sql | wc -l`). The gap between 187 and 189 is historical
-  numbering, not a missing file.
-- **The two files AGREE: `CLAUDE.md`'s stub reads `0189`, matching the DB and the
+- **Files on disk run through `0191`; 189 `.sql` files** (`ls
+  supabase/migrations/*.sql | wc -l`). The gap between 189 and 191 is historical
+  numbering, not a missing file, and it has held its shape across four levels.
+- **The two files AGREE: `CLAUDE.md`'s stub reads `0191`, matching the DB and the
   files.** It read `0188` for part of 2026-09-09 and was bumped in `876bc0b`,
   after re-measuring the catalog rather than trusting this note. **Find that line
   by grep, never by address** — it has moved twice (`:251` → `:239`):
@@ -69,11 +82,11 @@ The commands are given inline so re-measuring is cheaper than trusting.
   handling is stated HERE: **a stub either moves with the DB or disagrees in
   writing.** Silence is the failure mode, because the stub is what the next
   session reads first and it reads as current.
-- **`0185`–`0189` were applied through MCP or the SQL Editor, and NEITHER PATH
+- **`0185`–`0191` were applied through MCP or the SQL Editor, and NEITHER PATH
   WRITES A `schema_migrations` LEDGER ROW.** The ledger's max version lags
   permanently and always will — see `CLAUDE.md` §7. **Do not read the migration
   level out of `schema_migrations`.** The record is the files on disk plus the
-  objects in the catalog. All five re-verified against the catalog this turn:
+  objects in the catalog. All seven re-verified against the catalog this turn:
   - **`0185_within_month_collection_rate.sql`** — `settled_same_month_revenue_sar`
     is present on **both** `v_revenue_monthly` and `v_pnl_monthly`
     (`information_schema.columns`). Applied.
@@ -117,15 +130,53 @@ The commands are given inline so re-measuring is cheaper than trusting.
     `v_today date := (now() at time zone 'Asia/Riyadh')::date`, the payslip holds
     four `date_trunc('month', … at time zone 'Asia/Riyadh')` sites. Listed by
     name because a bare `8` vs `13` reads like drift. **Do not "reconcile" them.**
-  - **Do not re-apply any of the five.**
+  - **`0190_vat_rate_constant.sql`** — applied and catalog-verified by the
+    architect, then committed as `087e456`. Re-measured this turn: the five
+    redefined objects (2 views, 3 functions) are **5 present, 5 referencing
+    `public.vat_rate()`, 0 carrying a bare literal** — the count is asserted
+    FIRST, so a typo'd name cannot read as "0 violations" on an empty set.
+    `vat_rate()` is `provolatile='i'` with `proconfig is null`, which is the
+    check that matters: **a function carrying a `SET` clause is NOT inlinable**,
+    so leaving `SET search_path` off is what lets the planner constant-fold it
+    and keeps the view plans identical. ACL correct (anon false, authenticated
+    and service_role true).
+  - **`0190`'s three FUNCTIONS applied byte-identical to the file** — live
+    `pg_get_functiondef` md5s `431c9a42…`, `569d44bb…`, `96151700…`, exactly the
+    three the pre-apply transcription proof recorded. **Its two VIEWS cannot be
+    checked that way and their hashes DIFFER — that is not drift.** Postgres
+    stores a view as a PARSE TREE and `pg_get_viewdef` re-renders the text, so a
+    byte compare against drafted view SQL is meaningless by construction. The
+    semantic checks are the right ones: money values identical across the
+    before/after snapshots, `security_invoker` restated, `anon` revoked.
+  - **`0191_confirm_invoice_totals_assert.sql`** — applied and catalog-verified,
+    committed in the same `087e456`. Live `confirm_invoice` carries Tier A, B and
+    C, references `vat_rate()`, holds NO bare literal, names the Riyadh year and
+    NOT the old `extract(year from now())`, and reads anon false / authenticated
+    true / service_role true. **The invoice-number year fix is FOLDED INTO this
+    file**, not shipped separately — the architect's call, against the drafting
+    recommendation; look for it inside `confirm_invoice`, not under its own number.
+  - **THE APPLIED `confirm_invoice` IS NOT BYTE-IDENTICAL TO THE COMMITTED FILE,
+    AND EVERY EXECUTABLE LINE IS.** Live `prosrc` is **950 chars / 12 lines
+    SHORTER** than the file's body (210 lines vs 222); the first divergence is at
+    line index 85, **inside the `TOTALS ASSERTIONS (0191)` header COMMENT** —
+    the applied copy carries that comment block differently wrapped. Proof it is
+    prose only: strip blank lines and full-line `--` comments from both sides and
+    both give **159 lines / 8,259 chars / `a0750ba5c2aec1cda607efcfe110bda3`**.
+    **DO NOT redefine a money RPC to reflow a comment** — `lib/invoice.ts`'s "fix
+    forward, never rewrite applied history" applies, and `0191`'s own verification
+    (TIER markers, Riyadh year, absence of the old year, absence of bare
+    literals) passes on the applied object.
+  - **Do not re-apply any of the seven.**
 - **View security footer holds: 50 views, 50 `security_invoker=true`, 0 readable
   by `anon`.** `CLAUDE.md` §6's counts MATCHING is the check, not the number.
-  **Re-measured AFTER `0189` replaced three of those views** (`v_report_months`,
-  `v_receivables_open`, `v_truck_day_state`) — which is the case the rule exists
-  for, since `create or replace view` silently drops `reloptions`. The companion
-  function check is green too: **0 non-trigger functions anon-executable**, after
-  eight `create or replace function` statements reset eight ACLs to
-  EXECUTE-TO-PUBLIC and the migration's footers took them back.
+  **Re-measured AFTER `0190` replaced two more of those views**
+  (`v_customer_prepaid_balance`, `v_customer_amount_payable`), and before that
+  after `0189` replaced three (`v_report_months`, `v_receivables_open`,
+  `v_truck_day_state`) — which is the case the rule exists for, since
+  `create or replace view` silently drops `reloptions`. The companion function
+  check is green too: **0 non-trigger functions anon-executable**, after twelve
+  `create or replace function` statements across `0189`–`0191` reset twelve ACLs
+  to EXECUTE-TO-PUBLIC and each migration's footer took them back.
 - **`CLAUDE.md` §7's stub carries the migration number too, so the two files go
   stale together.** When the DB moves, change it in both places or leave the
   pair openly disagreeing — never silently.
@@ -337,7 +388,91 @@ before running any build while dev is up.
 
 ---
 
-## Completed this session (2026-09-09, timezone + error boundaries, `e2a0c01` → `876bc0b`)
+## Completed this session (2026-09-10, Batch H — VAT constant + totals assert, `876bc0b` → `0b20721`)
+
+| Hash | What |
+| --- | --- |
+| `087e456` | **Migrations `0190` + `0191`** — `public.vat_rate()` behind the five money objects, and Tier A/B/C totals asserts plus the folded Riyadh year fix in `confirm_invoice`. Applied and catalog-verified BEFORE the commit; the files are the record. 2 files, 34,696 + 23,700 bytes. |
+| `0b20721` | **The payment-mode guard** — `app/trips/invoiceActions.ts` converts the ONE input `assembleInvoice` throws on into an `ActionResult` error. 18 insertions. |
+
+**`0190` IS TWO VAT FAMILIES SHARING A RATE, NOT TWO FAMILIES BEING UNIFIED, and
+that distinction is the whole design.** Family A is the VAT-INCLUSIVE gross-up
+(`* 1.15`, customer-facing, per-item) and Family B is the VAT AMOUNT (`* 0.15`,
+internal inventory cost, no ZATCA document rounding). They are deliberately not
+one thing: **sharing the RATE is safe, sharing a ROUNDING HELPER would silently
+merge two conventions** that round at different levels. **Do not add a
+`vat_gross()` helper** — it would read like tidying and would be a money bug.
+
+**THE `SET search_path` OMISSION ON `vat_rate()` IS LOAD-BEARING, NOT AN
+OVERSIGHT.** A function carrying a `SET` clause is **not inlinable**, so adding
+one would leave every money view calling a real function per row instead of
+constant-folding to a literal — different plans on the two hottest finance views.
+The migration asserts `provolatile='i' and proconfig is null` precisely so a
+later "harden it" pass fails loudly instead of quietly costing plans. The body is
+schema-qualified nowhere because it references nothing.
+
+**`0191` IS AN RPC ASSERT AND MUST STAY ONE, and the live data is why.**
+Re-measured 2026-09-10 against `invoices`: **36 rows, 23 issued non-void, and 8
+fail Tier A** — the stored `grand_subtotal_sar` does not equal the sum of the
+document's own distinct lines. **All 8 are issued** (6 paid, 2 confirmed), so all
+8 are frozen under `0027`. A table `CHECK` would therefore fire on `pay_invoice`,
+`unpay_invoice` and `void_invoice` — every one of which `UPDATE`s `invoices` —
+and take working money paths down on rows the freeze law forbids repairing.
+Asserting at confirm holds NEW documents to the rule and leaves issued history
+alone. **Tier C fails on ZERO rows**: no stored `grand_vat_sar` disagrees with
+`subtotal × 0.15`, so the whole live violation set is Tier A.
+
+**THOSE DELTAS RUN BOTH WAYS — "the frozen totals are understated" IS THE WRONG
+ONE-LINE SUMMARY.** Per invoice (subtotal delta, lines minus stored):
+`026-000007` **+410.00**, `026-000008` −1,000.00, `026-000009` **+3,690.00**,
+`026-000012` **−40,000.00**, `026-000013` −1,000.00, `026-000014` **+28,560.00**,
+`026-000016` −500.00, `026-000018` −500.00. Net −11,891.00 gross. **Do not quote
+the net** — it hides a 40,000.00 overstatement against a 28,560.00
+understatement. This is a DIFFERENT measurement from the domain skill's
+"41,756.50 SAR understated across five invoices": that one re-derives through the
+invoice engine, this one compares stored totals against the invoice's OWN stored
+jsonb. Both are dated pointers. **Neither is cash** — `pay_invoice` and the
+balance engine sum the lines, so `grand_total_sar` is display-and-reports only.
+
+**The Tier split exists so the error NAMES the broken thing.** Tier A compares
+the summed line set against `p_grand_subtotal` (over `select distinct` on
+kind+id, so a line appearing in two arrays counts once), Tier B checks the three
+component sums, Tier C checks `p_grand_vat` against `subtotal * vat_rate()`. Each
+raises with the same hint — reopen the invoice so the totals recompute, then
+confirm again — because in every case the client sent stale arithmetic and there
+is nothing the user can fix on the confirm screen itself. An explicit nine-way
+NULL guard runs first: `distinct from` on a NULL total would otherwise pass.
+
+**THE YEAR FIX WAS FOLDED IN ON THE ARCHITECT'S CALL, AGAINST THE DRAFTING
+RECOMMENDATION.** `confirm_invoice` drew the invoice-number year from
+`extract(year from now())` — session time zone, UTC on this project — the last
+survivor of the class `0189` swept. It now reads
+`extract(year from (now() at time zone 'Asia/Riyadh')::date)`, the same shape
+`0189` gave the PO number and the trip ref. It is inside `0191`, not under its
+own number: **grep the body, do not look for a `0192`.**
+
+**`0b20721` MAKES THE ONE KNOWN CALLER POLITE AND LEAVES THE ENGINE STRICT.**
+`assembleInvoice` THROWS on a null payment mode (`lib/invoice.ts:429`), which
+escapes the `ActionResult` convention the rest of `invoiceActions.ts` follows and
+reaches the client as an unhandled server-action rejection — **a blank screen
+where "pick a payment mode" belongs.** The guard converts it at the only call
+site that can hit it with unvalidated data. **The throw stays.** It is the
+money-core's own invariant — an invoice has no meaning until prepaid or postpaid
+is chosen — and must keep failing loudly for any caller that has NOT checked.
+
+**THE MD5 REVERSE-TRANSFORM PROOF IS HOW THE `confirm_invoice` REDEFINITION WAS
+TRUSTED, and it is worth reusing.** Rather than eyeballing a 24-argument
+`create or replace` against the live object, the drafted block was transformed
+BACKWARDS — remove the added declare, the assert block, the year token, the rate
+literal — and md5'd. Four reversals, each firing exactly once, produced
+`781dcd98f0430466406afa695d2503d7`, byte-identical to the live definition.
+**That also proved `0190` had not disturbed `confirm_invoice`**, so the verbatim
+base was current rather than remembered. **Functions can be byte-compared
+(`prosrc` is stored verbatim); VIEWS cannot** — see the Database section.
+
+---
+
+## Completed the previous session (2026-09-09, timezone + error boundaries, `e2a0c01` → `876bc0b`)
 
 | Hash | What |
 | --- | --- |
@@ -694,6 +829,16 @@ For the record, what they were and what measurement showed:
     apart. Deriving it from `snap.monthKey` would print one fact twice and
     delete the one this line exists to show. **This is the one label the Arabic
     month sweep left alone on purpose. Do not reopen it.**
+
+7. **The applied `confirm_invoice` carries a differently-wrapped COMMENT block
+    than `0191` on disk, and it is STAYING that way.** 950 chars / 12 lines of
+    prose inside the `TOTALS ASSERTIONS (0191)` header, nothing else — the
+    comment-stripped bodies are byte-identical (`159 lines / 8,259 chars /
+    a0750ba5c2aec1cda607efcfe110bda3`). **Redefining a money RPC to reflow a
+    comment is not a fix**; `create or replace function` would also reset the ACL
+    (`CLAUDE.md` §6), so the change with zero behavioural upside carries the
+    session's only real security footgun. Full working in Database above. **Do
+    not open this as "the migration file does not match the database".**
 
 ### Closed BY MEASUREMENT during this scan — do not relist as open
 
