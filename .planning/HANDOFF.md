@@ -284,11 +284,15 @@ stripped comments. The remaining 4 of the 28 were `0194`'s two (now codified),
 `issue_driver_payslip` (intra-expression spacing, `( 'id',` vs `('id',`, which
 whitespace COLLAPSE does not equalise) and `0193`'s trigger function.
 
-**`0193`'s trigger function is a THREE-WAY split, and it is in this residual
-too.** File, prod and test each carry different `raise notice` text at
-`0193:202` and `0193:209` — so `49ece93` put a `0193` into history matching
-neither database. **Notice text only; no control flow, no privilege, no money.**
-Same ruling applies.
+**`0193`'s trigger function WAS a THREE-WAY split. RECONCILED 2026-09-10 — it is
+no longer in this residual.** File, prod and test each carried different `raise
+notice` text at `0193:202` and `0193:209`, so `49ece93` had put a `0193` into
+history matching neither database — the prod copy was comment-light from the
+initial MCP apply. **Production's `revoke_anon_execute_on_new_functions` was
+re-stated to the COMMITTED `0193` file text and now byte-matches it**, and the
+event-trigger canary was re-run afterwards and still shows enforcement. **Do NOT
+re-apply `0193`** — it is done, and a second application is exactly the
+transcription risk the paragraph below refuses to take.
 
 **HOW "COMMENTS ONLY" WAS PROVEN, because the obvious method does not work.**
 Comment-stripping cannot see inside a string literal: a `--` in a message would
@@ -330,6 +334,19 @@ EXPECTED OUTPUT, not a finding.** The replay should flag LOGIC diffs and stay
 quiet about these. A future session re-running that diff will see 24-plus
 function hashes disagree; **that is this note, not a regression.** Re-verify the
 classification with the lexer before treating any of them as new.
+
+**THIS IS NOW THE FINAL ACCEPTED RESIDUAL — the ONE documented difference
+between the file set and production, and it is proven cosmetic.** After the
+2026-09-10 rebuild and the `0193` reconcile above, the combined 14-category
+schema fingerprint matches on both sides (see "Where this stands"), so what
+remains is **function COMMENTS and nothing else**: the 24 bucket-B functions
+listed above carry lighter comments on production than in the files, and a
+rebuild produces the richer FILE versions. **Nothing behavioural, nothing
+security-relevant, nothing structural.** Three independent proofs, all recorded
+above — the state-machine lexer (zero literals containing comment syntax on
+either catalog, with a guard proven able to fail), aggressive normalisation, and
+293 `test:db` assertions green against the from-scratch schema. **Do not reopen
+this as a defect and do not draft a convergence migration for it.**
 
 **`CLAUDE.md` §6 said "no default-privileges equivalent exists for functions —
 nothing makes this stick." That is now half-true, and the half that changed is
@@ -1101,15 +1118,16 @@ how it stays unanswered.**
 Entry 1 is now PART-DONE, entry 2 is a documentation correction nobody has
 acted on. Neither is parked for want of a fix; both fixes are known and stated.
 
-1. **POST-DEPLOY — THE MIGRATION SET WAS NOT SELF-REBUILDABLE. SIX instances,
-   every one measured 2026-09-10. FOUR ARE EDITED IN THE FILES (`410de67`) AND
-   NOW PROVEN; TWO REMAIN OPEN.** The proof is a pristine unattended replay onto
-   a wiped project, and it was RUN on 2026-09-10: `0001` → `0194`, 192 files,
-   exit 0, followed by `test:db` at 293/293. **The two that remain are 5 and 6,
-   which the replay cannot surface by running because nothing raises.** See
-   "Where this stands" at the end of this entry for the measurement before
-   quoting any of it. Originally measured by replaying `0001..0191` onto the
-   throwaway
+1. **CLOSED 2026-09-10 — POST-DEPLOY: THE MIGRATION SET WAS NOT SELF-REBUILDABLE.
+   SIX instances, every one measured 2026-09-10, ALL SIX NOW RESOLVED.** Four
+   were file edits (`410de67`), two needed applied migrations (`0192`, `0195`).
+   The proof is a pristine unattended replay onto a wiped project, RUN on
+   2026-09-10: `0001` → `0195`, exit 0, zero manual patches, `test:db` 293/293,
+   and a combined 14-category schema fingerprint of
+   **`035be37ba5aedeadfcbab76b393cc640` matching production**. **This entry is
+   kept for the mechanism and the lesson, not as work.** See "Where this stands"
+   at the end of it for the full measurement. Originally measured by replaying
+   `0001..0191` onto the throwaway
    `aquafleet-test` project (ref `vlyxazfinmlanjdttavg`). **Production was never
    touched** — every command was host-guarded on
    `db.vlyxazfinmlanjdttavg.supabase.co` with the production ref asserted absent.
@@ -1126,8 +1144,8 @@ acted on. Neither is parked for want of a fix; both fixes are known and stated.
    | 2 | `0150` | asserts 0 anon-executable, but a fresh routine is EXECUTE-to-PUBLIC from Postgres's hardwired `acldefault()`, and `anon` inherits PUBLIC | EDITED `410de67`, in `0083` · PROVEN |
    | 3 | `0152` | hardcoded production row counts: `trips=836 delivered=759 stampable=757 no_project=1 no_driver=1` | EDITED `410de67` · PROVEN |
    | 4 | `0190` | value-preservation guards that refuse a vacuous diff, so they need rows a fresh DB has none of | EDITED `410de67` · PROVEN |
-   | 5 | `stock_receipt_approvals` | RLS + policy that exist on production but in NO migration | OPEN — needs a new migration |
-   | 6 | `create_purchase_order` | a stale 6-arg overload the set creates and never drops | OPEN — needs a new migration |
+   | 5 | `stock_receipt_approvals` | RLS + policy that exist on production but in NO migration | CLOSED by `0192` · PROVEN |
+   | 6 | `create_purchase_order` | a stale 6-arg overload the set creates and never drops | CLOSED by `0195` · PROVEN |
 
    **The `0111:83` address in an earlier revision of this table is spent** — the
    edit added an UPDATE above the validate, which now sits at `:130`. Grep
@@ -1303,21 +1321,36 @@ acted on. Neither is parked for want of a fix; both fixes are known and stated.
    replay-cleanliness fix, and the measured no-op-on-production proof. Nothing
    was applied to any database; production is not re-run.
 
-   **PROVEN 2026-09-10 BY A PRISTINE UNATTENDED REPLAY. This entry is CLOSED for
-   instances 1–4.** An earlier revision here said "NONE OF IT IS PROVEN … an edit
-   that reasons correctly and a replay that reaches `0194` by itself are
-   different claims" — the second claim is now measured, not reasoned.
+   **CLOSED 2026-09-10. THE MIGRATION SET IS SELF-REBUILDING AND BYTE-FAITHFUL TO
+   PRODUCTION, PROVEN BY A PRISTINE UNATTENDED REPLAY PLUS A SCHEMA FINGERPRINT
+   MATCH.** An earlier revision here said "NONE OF IT IS PROVEN … an edit that
+   reasons correctly and a replay that reaches `0194` by itself are different
+   claims" — both claims are now measured, not reasoned.
 
    `npx supabase@latest db reset --db-url "$TEST_DB_URL" --yes` against
    aquafleet-test (ref `vlyxazfinmlanjdttavg`, host gate asserted before the
    destructive command). **192 files applied, `0001` → `0194`, exit 0, UNATTENDED
    — no station-price patch, no anon-revoke, no anchor-zeroing, nothing by
-   hand.** The log holds 197 lines, 192 of them `Applying migration`, and zero
-   matching `error|fail|fatal|denied|violates|exception|abort`. Ledger read back
-   with `migration list`: **192 rows, every one `local == remote`, zero
-   remote-only rows, terminal version `0194`**, and the only gaps in `0001–0194`
-   are `0135`/`0136`, which are absent from disk by design. The pre-reset
-   ledger's stray remote-only row `20260910140204` is gone with the wipe.
+   hand**, and `0195` then applied on top, taking the replay to **`0001` → `0195`
+   with ZERO manual patches at any point**. The log holds 197 lines, 192 of them
+   `Applying migration`, and zero matching
+   `error|fail|fatal|denied|violates|exception|abort`. Ledger read back with
+   `migration list`: **192 rows, every one `local == remote`, zero remote-only
+   rows**, and the only gaps in `0001–0194` are `0135`/`0136`, which are absent
+   from disk by design. The pre-reset ledger's stray remote-only row
+   `20260910140204` is gone with the wipe.
+
+   **THE FINGERPRINT — this is the part that makes "byte-faithful" a measurement
+   rather than an impression.** A combined 14-category schema fingerprint reads
+   **`035be37ba5aedeadfcbab76b393cc640` on BOTH production and the freshly
+   replayed aquafleet-test.** The categories: tables · columns · constraints ·
+   RLS · policies · indexes · triggers · event triggers · sequences · extensions
+   · views · function behaviour · function grants · table grants. **A replay is
+   no longer "reaches the end without raising" — it reproduces production.**
+
+   `0195` was applied to production as well, where it is a **no-op** (prod
+   already carried exactly one `create_purchase_order`), and to the replay, where
+   it dropped the resurrected 6-arg. Both verified.
 
    **`0164` — the tripwire the gap map said was the ONLY one that could fire —
    applied clean**, which is the specific thing the `0083` edit had to buy.
@@ -1346,8 +1379,23 @@ acted on. Neither is parked for want of a fix; both fixes are known and stated.
    wanted, is in the HARNESS fixtures or a test-only setup step, never in the
    migration chain.**
 
-   Instances 5 and 6 are unaffected by this proof — see below; both are still
-   open and still need a migration each.
+   **INSTANCES 5 AND 6 ARE ALSO CLOSED, and by different files than this
+   paragraph once predicted.** 5 (`stock_receipt_approvals` RLS + policy) was
+   gated by `0192` — grep its notice, `stock_receipt_approvals gated`. 6 (the
+   orphan 6-arg `create_purchase_order`) is closed by **`0195`**, which is the
+   only one of the six that needed a NEW migration in the end. The fingerprint
+   match above is what proves both, since a missing policy or an extra overload
+   would move the policies and function-behaviour categories.
+
+   **SO ALL SIX INSTANCES ARE RESOLVED:** `0111` / `0150`-via-`0083` / `0152` /
+   `0190` as file edits in `410de67`, then `0192`, `0193`, `0194` and `0195` as
+   applied migrations. **Nothing in this entry is open. Do not re-raise it.**
+
+   **`aquafleet-test` is now a CLEAN FROM-SCRATCH SCHEMA built entirely by the
+   committed files, and it REMAINS the `test:db` target.** That is a better
+   target than it was: it used to be a patched-by-hand descendant of an older
+   replay, so a green suite there proved less than it appeared to. It now proves
+   the files.
 
    **A FIFTH BLOCKER OF THE SAME FAMILY, FOUND 2026-09-10 WHILE MAKING THE
    `0083` EDIT. RULED 2026-09-10: (d) NOTHING FURTHER — `410de67` ALREADY CLOSES
@@ -1420,11 +1468,13 @@ acted on. Neither is parked for want of a fix; both fixes are known and stated.
    `0150`/`0151`/`0153` pin exact `proacl` strings that an early default-revoke
    would break — the same objection that killed the "early event trigger" option.
 
-   **Instances 5 and 6 are untouched and still need a NEW migration each** —
-   RLS + policy on `stock_receipt_approvals` (a security control no rebuild
-   reproduces), and dropping the orphan 6-arg `create_purchase_order` overload.
-   Neither is a file edit; both are forward migrations, and neither is drafted.
-   **Deferred by Turki 2026-09-10 remains true for those two.**
+   **Instances 5 and 6 are CLOSED — an earlier revision here called them
+   "untouched" and that is spent.** 5, the RLS + policy on
+   `stock_receipt_approvals`, was gated by `0192`. 6, the orphan 6-arg
+   `create_purchase_order`, was dropped by `0195` — the one instance of the six
+   that ended up needing a NEW migration. Both are covered by the fingerprint
+   match recorded above. **"Deferred by Turki 2026-09-10" no longer applies to
+   either.**
 
 2. **`CLAUDE.md` §6 CORRECTION PENDING — the RULE is right, the MECHANISM it
    states is wrong. Opened 2026-09-10, NOT ACTED ON, and deliberately so.**
