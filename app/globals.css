@@ -385,12 +385,6 @@ html[dir="rtl"] { --dock-dir: -1; }
 
 .tabular-nums { font-variant-numeric: tabular-nums; }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.6; transform: scale(0.85); }
-}
-.animate-pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
-
 /* Screen default for the print-only statement band; @media print flips it. */
 .print-only { display: none; }
 

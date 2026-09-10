@@ -173,15 +173,9 @@ export const dict = {
     // token and BOTH the Dashboard and Fleet render it, so a fleet-scoped key
     // would misdescribe itself the first time the Dashboard called it.
     na: { en: "N/A", ar: "غير متاح" },
-    optimize: { en: "Optimize", ar: "تحسين" },
-    nextService: { en: "Next Service", ar: "الصيانة القادمة" },
     capacity: { en: "Capacity", ar: "السعة" },
-    confidence: { en: "Confidence", ar: "الثقة" },
-    failureIn: { en: "Predicted in", ar: "متوقع خلال" },
     days: { en: "days", ar: "يوم" },
-    recommended: { en: "Recommended Action", ar: "الإجراء الموصى به" },
     component: { en: "Component", ar: "المكون" },
-    severity: { en: "Severity", ar: "الخطورة" },
     cost: { en: "Cost", ar: "التكلفة" },
     revenue: { en: "Revenue", ar: "الإيرادات" },
     margin: { en: "Margin", ar: "الهامش" },
@@ -10014,26 +10008,17 @@ export const dict = {
   },
 
   // ── Routes whose copy is still inline ────────────────────────────────────
-  // `iot` and `inventory` hold ONE key each, which is the whole point: these
-  // two routes never got a namespace, so their several hundred bilingual
-  // strings live as `lang === …` ternaries in the JSX. Those ternaries are not
-  // broken — they render correct Arabic — and moving them is a separate,
-  // mechanical job. What is broken is the handful of strings that were written
-  // as ENGLISH ONLY and so reach an Arabic reader untranslated. Only those
-  // move here. The namespaces exist now so the consolidation pass has a place
-  // to land rather than having to invent one mid-flight.
-  iot: {
-    // Live-feed indicator beside the sensor grid heading, next to a pulsing
-    // dot. A status word, not a label — it says the numbers below are moving.
-    streaming: { en: "Streaming", ar: "بث مباشر" },
-    // Speed unit, printed after a Latin figure (`{speed} km/h`). The other
-    // units on this card — °C, kPa, V — are SI SYMBOLS and are deliberately
-    // NOT here: those are written the same way in Arabic technical text, and
-    // transliterating them would be a style decision, not a fix. "km/h" is the
-    // odd one out because it is an English-word abbreviation, not a symbol.
-    kmh: { en: "km/h", ar: "كم/س" },
-  },
-
+  // `inventory` holds ONE key, which is the whole point: the route never got a
+  // namespace, so its several hundred bilingual strings live as `lang === …`
+  // ternaries in the JSX. Those ternaries are not broken — they render correct
+  // Arabic — and moving them is a separate, mechanical job. What is broken is
+  // the handful of strings that were written as ENGLISH ONLY and so reach an
+  // Arabic reader untranslated. Only those move here. The namespace exists now
+  // so the consolidation pass has a place to land rather than having to invent
+  // one mid-flight.
+  //
+  // `iot` used to sit beside it for the same reason, holding `streaming` and
+  // `kmh`. Both described a fabricated sensor grid and went with it.
   inventory: {
     // The "AI-generated" badge on a purchase-order row. The star is kept
     // inside the value rather than in the JSX so the English is one literal
