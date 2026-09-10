@@ -1,8 +1,9 @@
 # SESSION HANDOFF
 
-**Updated 2026-09-10 (Batch K — three live-database harnesses on one shared
-target guard; Batch H and the three 2026-09-09 sessions are the sections below
-it), every figure re-measured this turn.** Rewritten fresh at
+**Updated 2026-09-11 (migration-set convergence close-out — `0195`, the pristine
+rebuild proof, and `CLAUDE.md` compression pass 6; Batch K, Batch H and the three
+2026-09-09 sessions are the sections below it), every figure re-measured this
+turn.** Rewritten fresh at
 `2318055` on 2026-09-08 from a 1301-line predecessor; **nothing was lost, it is
 `e93baec:.planning/HANDOFF.md`, and every unit's reasoning lives in its own commit
 message**, which is where `CLAUDE.md` §5 says detail belongs. This file is
@@ -81,20 +82,23 @@ The commands are given inline so re-measuring is cheaper than trusting.
 
 ### Database
 
-- **Files on disk run through `0194`; 192 `.sql` files** (`ls
-  supabase/migrations/*.sql | wc -l`, re-measured this turn). The gap between 192
-  and 194 is historical numbering, not a missing file, and it has held its shape
-  across six levels. **`0192`, `0193` and `0194` are ALL applied to production and
-  catalog-verified — do NOT re-apply any of them.** See the three-layer section
-  and the `0194` section below.
+- **Files on disk run through `0195`; 193 `.sql` files** (`ls
+  supabase/migrations/*.sql | wc -l`, re-measured this turn). The gap between 193
+  and 195 is historical numbering, not a missing file, and it has held its shape
+  across seven levels. **`0192`, `0193`, `0194` and `0195` are ALL applied to
+  production and catalog-verified — do NOT re-apply any of them.** See the
+  three-layer section, the `0194` section below, and item (b)1 for `0195`.
 - **THE STUB DISAGREEMENT IS CLOSED. `CLAUDE.md`'s stub and the DB both read
-  `0194`.** It was allowed to disagree in writing for exactly one commit pair —
-  the security commit was scoped to `0192`/`0193` alone and its docs commit to
-  this file alone — and the bump landed in the first commit that had reason to
-  touch `CLAUDE.md`, which is the commit carrying this line. That is the rule
-  below working as designed, not a lapse that got fixed. **Find that line by
-  grep, never by address** — it has moved four times
-  (`:251` → `:239` → `:236`, and it will move again):
+  `0195`.** It has now been allowed to disagree in writing TWICE, both times by
+  the same rule and both times closed the same way. The first was one commit pair
+  at `0194` — the security commit scoped to `0192`/`0193` alone and its docs
+  commit to this file alone. The second was `0195`: the stub read `0194` through
+  `5ba4db2` (the migration) and `604cdf7` (the proof), then bumped in `0fa3969`,
+  the first commit that had reason to touch `CLAUDE.md` at all. **Twice is the
+  rule working as designed, not a lapse that keeps recurring** — the alternative
+  is a `CLAUDE.md` edit riding inside a migration commit, which breaks
+  one-logical-unit. **Find that line by grep, never by address** — it has moved
+  four times (`:251` → `:239` → `:236`, and it will move again):
   `npx tsx scripts/code-grep.ts 'DB at migration' CLAUDE.md --worktree`.
 - **THE RULE THAT GAP TAUGHT, kept because the gap will recur.** `0189` was
   applied through MCP, which touches the database and leaves NOTHING in git — so
@@ -668,7 +672,116 @@ before running any build while dev is up.
 
 ---
 
-## Completed this session (2026-09-10, Batch K — live-DB harnesses, `0b20721` → `41904c3`)
+## Completed this session (2026-09-11, migration-set convergence close-out — `08b96a1` → `1adf8a3`)
+
+**This session spans midnight — do not read the dates as two sessions.**
+`5ba4db2` is stamped 2026-09-10 22:02, the other three 2026-09-11 01:24–01:41.
+Four commits, one theme: **the migration set that could not rebuild itself now
+does, and the file that explains why was audited for explaining it wrongly.**
+
+| Hash | What |
+| --- | --- |
+| `5ba4db2` | **Migration `0195` — drops the stale 6-arg `create_purchase_order`.** The LAST of the six self-rebuild instances and the only one of the six that needed a NEW file rather than an edit to an existing one. 238 insertions, nearly all of them reasoning plus three raised assertions in ONE rollback-scoped block. Applied on BOTH sides: a **no-op on production**, which already carried exactly one overload (the 6-arg was dropped there BY HAND and no migration records it), and a real drop on the pristine replay, where a from-scratch run resurrects it. |
+| `604cdf7` | **HANDOFF — the pristine rebuild proof; open item (b)1 CLOSED.** `0001` → `0195` replayed UNATTENDED onto a wiped project: 192 files, exit 0, **zero manual patches at any point**, `test:db` 293/293, and a combined 14-category schema fingerprint of **`035be37ba5aedeadfcbab76b393cc640` matching production**. Also reconciled `0193` (its applied text now byte-matches the committed file — **do NOT re-apply it**) and named the final accepted residual: function COMMENTS only, 24 bucket-B functions. 83 insertions / 33 deletions. |
+| `0fa3969` | **`CLAUDE.md` compression pass 6 — §6's function-ACL MECHANISM corrected.** 102 insertions / 103 deletions; **14,796 → 14,671 bytes**, back under §7's 15 KB trigger. |
+| `1adf8a3` | **HANDOFF — open item (b)2 CLOSED**, with what pass 6 found written down. Section (b) is effectively empty again. 59 insertions / 24 deletions. |
+
+Re-measure rather than quote either column:
+```sh
+git log --oneline --stat 08b96a1..HEAD
+wc -c CLAUDE.md
+```
+
+**WHAT `0195` TEACHES IS NOT ABOUT PURCHASE ORDERS. ADDING A PARAMETER DOES NOT
+EDIT A FUNCTION — IT CREATES A SECOND ONE.** `create or replace function` matches
+on the FULL argument-type list, so a widened signature is a NEW object: the old
+one keeps existing, keeps its own body, and keeps its own grants. `0053` knew
+that, said so in its own header, and dropped the 6-arg explicitly in the same
+migration that widened it — which is the correct discipline. Then `0056` was
+authored against `0050`'s shape, wrote **"UNCHANGED signature (0050/0053)"** —
+**the comment WRAPS mid-phrase at `0056:304-305`, so grepping the joined string
+finds nothing; grep `UNCHANGED signature`** — then issued a drop for a signature
+`0053` had already removed (so it dropped nothing),
+and its create added a SECOND overload beside the 9-arg. Nine migrations later
+the twin was still there, frozen at `0056` semantics: bare `0.15` VAT literal, no
+Riyadh date buckets.
+
+**Two failure modes follow, and both bit here:**
+
+- a LATER migration that edits "the function" from an OUT-OF-DATE signature
+  revives the dead one instead of editing the live one — `0056`;
+- an assertion pinned to ONE `regprocedure` reports the live object healthy while
+  the stale twin sits beside it, unmeasured. `0190`'s no-bare-VAT-literal guard
+  scopes itself by exact signature (`0190:665` names the 9-arg), so a DIFFERENT
+  signature of the same name is outside its five named objects **by
+  construction**. That is not a hole in `0190` — **a guard pinned to a signature
+  cannot see an overload.**
+
+**The rule: count the overloads BY NAME, never assume there is one.** `0195`'s
+first assertion does exactly that, and only then checks which one survived.
+
+**IT WAS DEAD BY CALLER HABIT, NOT BY STRUCTURE — which is why it never surfaced
+as a bug.** `app/inventory/actions.ts:548` sends all nine named parameters, so
+PostgREST resolves the 9-arg and the 6-arg never ran. Any caller omitting
+`p_ai_generated` / `p_ai_rationale` / `p_ai_rationale_ar` would have landed on the
+stale VAT path silently. The drop makes that unreachable structurally rather than
+by convention.
+
+**A RULE RIGHT IN ITS INSTRUCTION AND WRONG IN ITS REASON IS ONE SOMEBODY
+EVENTUALLY ARGUES THEIR WAY OUT OF.** That is why pass 6 CORRECTED §6 instead of
+weakening it. §6 had claimed both redefinition forms strip a function's ACL. They
+do not: **`create or replace function` PRESERVES `proacl`** — same OID — and only
+`drop`+`create` resets it to `acldefault()`, which always includes `EXECUTE TO
+PUBLIC`. Measured, not reasoned: `0150` replaces that way and asserts its
+before-ACL against its after (`is distinct from`, `0150:329`), and production
+passed.
+
+**And the incident §6 cited could never have demonstrated what it was cited for.**
+`0118:208` is itself `drop function if exists public.issue_driver_payslip(uuid,
+date, text);` followed by a create — the one form that DOES reset — and
+`grep -ciE 'revoke +execute|revoke +all +on +function'` over `0115` and `0118`
+returns **0**, so neither file ever carried a function revoke at all. The breach
+was **"never revoked"**, not "a redefinition stripped it". **The instruction did
+not change**: every SECURITY DEFINER function and every money or guarded RPC still
+ends with a `revoke execute` naming BOTH `public` and `anon`, because the two
+forms sit one line apart in a diff and re-revoking is free.
+
+**PASS 5 FOUND NOTHING AND WAS READ AS CONVERGENCE. PASS 6 FOUND THREE.** Besides
+the ACL mechanism: §7's State line was stale at `0194`, and §5's `divide-` example
+named the wrong grep — the plain pattern now returns **9 live, correctly-coloured**
+sites, and only the BUG pattern (`divide-y`/`divide-x` lacking
+`divide-[rgb(var(--border))]`) returns the single comment hit the rule is actually
+about. Everything else was re-measured and HELD. **Read "converged" as a
+measurement of ONE pass, never as licence to skip the next audit** — the pass that
+finds nothing is indistinguishable beforehand from the one that finds the bug.
+
+**THE NEXT REDUCTION IS A ROUTING DECISION, NOT A TRIM — and it is not Code's to
+make.** `CLAUDE.md` sits at 14,671 bytes against a 15 KB trigger and the wording
+fat is gone; three trim rounds were needed just to land under it, because the
+first edit round made the file BIGGER (15,080). Getting materially smaller now
+means MOVING a rule to `.claude/skills/aquafleet-domain/SKILL.md`, which is
+Turki's/the architect's call. **Do not buy headroom by cutting a REASON** — that
+is exactly the failure the §6 correction above is an instance of.
+
+**WHAT IS OPEN AFTER THIS SESSION.** Open item **(b) is empty** — both entries
+closed, kept only for their mechanism. **(a) is decisions-for-Turki only.** The
+only carried code item is the unconsumed `shared` → `map` → `approximate` entry
+at `lib/i18n.ts:996`, and **re-measuring it this turn changed what it is.**
+
+**IT IS NOT DEAD COPY — IT IS COPY WAITING ON A DEFERRED PAGE, AND DELETING IT
+WOULD BE THE MISTAKE.** Measured: nothing consumes it, and **`SaudiMap` does not
+exist as a component at all** — the name appears only in `lib/i18n.ts` and in a
+comment at `app/routes/page.tsx:12` describing what `/routes` will show. So the
+key is orphaned because its consumer is DEFERRED, not because someone forgot to
+remove it, and the Forward agenda already rules the disclaimer stays translated
+(see "The map's English city labels"). **Leave it.** Two traps if this is
+re-raised: the key is NESTED, so `code-grep 'shared.map.approximate'` exits 0 and
+reads as already-removed — grep the leaf; and the tree's other `approximate` hits
+are unrelated (`GlobalSearch.tsx`'s own local, two comments in `lib/invoice.ts`).
+
+Next work comes from the Forward agenda.
+
+## Completed the previous session (2026-09-10, Batch K — live-DB harnesses, `0b20721` → `41904c3`)
 
 | Hash | What |
 | --- | --- |
@@ -747,10 +860,30 @@ deducts at DELIVERY; `v_customer_prepaid_balance` has no `paid` term. Pass 2
 asserts the zero deliberately — an assertion that the pool does NOT move is the
 one that catches a well-meaning "fix" adding a second deduction at payment.
 
-**The test database is not empty and must not be wiped.** It carries 1 customer /
-1 project / 1 trip / 1 top-up / 1 commission-history row from the earlier `0190`
-unblock; **removing them re-blocks a migration replay.** The harnesses'
-censuses are written against that baseline, not against zero.
+**THIS PARAGRAPH SAID THE TEST DATABASE "MUST NOT BE WIPED". IT WAS WIPED, AND
+ALL THREE OF ITS CLAIMS ARE NOW FALSE. CORRECTED 2026-09-11.** As written it
+said: `aquafleet-test` carries 1 customer / 1 project / 1 trip / 1 top-up / 1
+commission-history row from the earlier `0190` unblock, removing them re-blocks a
+migration replay, and the harnesses' censuses are written against that baseline
+rather than against zero. Each fails on its own evidence:
+
+- **The replay no longer needs a single row.** `410de67` made `0190`'s
+  value-preservation guards data-AWARE — an empty snapshot is reported **SKIPPED**,
+  never green and never fatal (grep `REPLAY-CLEANLINESS EDIT` in `0190`). The
+  row-count check and the per-column diff are unchanged; they moved into the ELSE
+  branch. The guard is still fully armed wherever there is money.
+- **The wipe happened and the replay ran clean through it.** `db reset` against
+  `aquafleet-test`, `0001` → `0195`, exit 0, unattended, zero manual patches — see
+  open item (b)1 for the full measurement and the fingerprint.
+- **The census is a DELTA, not an absolute.** All three harnesses take it on a
+  fresh connection before AND after, then assert every key unchanged between the
+  two (grep `zero-leak` in `scripts/db/`), so it holds at zero exactly as it held
+  at one. `test:db` returned **293/293** on the freshly replayed schema.
+
+**The live baseline is now whatever the pristine replay produced**, which is a
+BETTER target than the old one: `aquafleet-test` used to be a patched-by-hand
+descendant of an older replay, so a green suite there proved less than it looked
+like. It now proves the committed files. **It REMAINS the `test:db` target.**
 
 ## Completed earlier the same day (2026-09-10, Batch H — VAT constant + totals assert, `876bc0b` → `0b20721`)
 
