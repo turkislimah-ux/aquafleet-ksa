@@ -1101,26 +1101,31 @@ how it stays unanswered.**
 Entry 1 is now PART-DONE, entry 2 is a documentation correction nobody has
 acted on. Neither is parked for want of a fix; both fixes are known and stated.
 
-1. **POST-DEPLOY — THE MIGRATION SET IS NOT SELF-REBUILDABLE. SIX instances,
-   every one measured 2026-09-10. FOUR ARE NOW EDITED IN THE FILES (`410de67`),
-   TWO REMAIN, AND NONE IS PROVEN** — the proof is a pristine unattended replay
-   onto a fresh project, which has NOT been re-run. See "Where this stands" at
-   the end of this entry before quoting any of it as closed. Measured by
-   replaying `0001..0191` onto the throwaway
+1. **POST-DEPLOY — THE MIGRATION SET WAS NOT SELF-REBUILDABLE. SIX instances,
+   every one measured 2026-09-10. FOUR ARE EDITED IN THE FILES (`410de67`) AND
+   NOW PROVEN; TWO REMAIN OPEN.** The proof is a pristine unattended replay onto
+   a wiped project, and it was RUN on 2026-09-10: `0001` → `0194`, 192 files,
+   exit 0, followed by `test:db` at 293/293. **The two that remain are 5 and 6,
+   which the replay cannot surface by running because nothing raises.** See
+   "Where this stands" at the end of this entry for the measurement before
+   quoting any of it. Originally measured by replaying `0001..0191` onto the
+   throwaway
    `aquafleet-test` project (ref `vlyxazfinmlanjdttavg`). **Production was never
    touched** — every command was host-guarded on
    `db.vlyxazfinmlanjdttavg.supabase.co` with the production ref asserted absent.
 
-   **The set DID reach 189/189, and that is the finding, not a reassurance:** it
-   only got there because the ENVIRONMENT was patched four times underneath it.
-   A rebuild nobody is babysitting stops at the first of these.
+   **That first run DID reach 189/189, and THAT was the finding, not a
+   reassurance:** it only got there because the ENVIRONMENT was patched four
+   times underneath it, and a rebuild nobody is babysitting stopped at the first
+   of these. **The 2026-09-10 re-run needed no patch at all** — that is the
+   difference the edits bought, and it is what "PROVEN" means in the table.
 
    | # | Site | What it depends on that the set never creates | Edit |
    |---|---|---|---|
-   | 1 | `0111` | operator-entered station prices — `validate constraint water_stations_offers_at_least_one_type` | EDITED `410de67` |
-   | 2 | `0150` | asserts 0 anon-executable, but a FRESH Supabase project grants `anon` EXECUTE on functions by default | EDITED `410de67`, in `0083` |
-   | 3 | `0152` | hardcoded production row counts: `trips=836 delivered=759 stampable=757 no_project=1 no_driver=1` | EDITED `410de67` |
-   | 4 | `0190` | value-preservation guards that refuse a vacuous diff, so they need rows a fresh DB has none of | EDITED `410de67` |
+   | 1 | `0111` | operator-entered station prices — `validate constraint water_stations_offers_at_least_one_type` | EDITED `410de67` · PROVEN |
+   | 2 | `0150` | asserts 0 anon-executable, but a fresh routine is EXECUTE-to-PUBLIC from Postgres's hardwired `acldefault()`, and `anon` inherits PUBLIC | EDITED `410de67`, in `0083` · PROVEN |
+   | 3 | `0152` | hardcoded production row counts: `trips=836 delivered=759 stampable=757 no_project=1 no_driver=1` | EDITED `410de67` · PROVEN |
+   | 4 | `0190` | value-preservation guards that refuse a vacuous diff, so they need rows a fresh DB has none of | EDITED `410de67` · PROVEN |
    | 5 | `stock_receipt_approvals` | RLS + policy that exist on production but in NO migration | OPEN — needs a new migration |
    | 6 | `create_purchase_order` | a stale 6-arg overload the set creates and never drops | OPEN — needs a new migration |
 
@@ -1297,14 +1302,60 @@ acted on. Neither is parked for want of a fix; both fixes are known and stated.
    each carrying its own in-file record of what changed, that it is a post-hoc
    replay-cleanliness fix, and the measured no-op-on-production proof. Nothing
    was applied to any database; production is not re-run.
-   **NONE OF IT IS PROVEN. The proof is a pristine unattended replay onto a
-   FRESH project, and that has not been run.** An edit that reasons correctly
-   and a replay that reaches `0194` by itself are different claims, and only the
-   second one closes this entry. The target is `0194`, not the old `0191` —
-   quoting `0191` would declare victory three migrations early.
+
+   **PROVEN 2026-09-10 BY A PRISTINE UNATTENDED REPLAY. This entry is CLOSED for
+   instances 1–4.** An earlier revision here said "NONE OF IT IS PROVEN … an edit
+   that reasons correctly and a replay that reaches `0194` by itself are
+   different claims" — the second claim is now measured, not reasoned.
+
+   `npx supabase@latest db reset --db-url "$TEST_DB_URL" --yes` against
+   aquafleet-test (ref `vlyxazfinmlanjdttavg`, host gate asserted before the
+   destructive command). **192 files applied, `0001` → `0194`, exit 0, UNATTENDED
+   — no station-price patch, no anon-revoke, no anchor-zeroing, nothing by
+   hand.** The log holds 197 lines, 192 of them `Applying migration`, and zero
+   matching `error|fail|fatal|denied|violates|exception|abort`. Ledger read back
+   with `migration list`: **192 rows, every one `local == remote`, zero
+   remote-only rows, terminal version `0194`**, and the only gaps in `0001–0194`
+   are `0135`/`0136`, which are absent from disk by design. The pre-reset
+   ledger's stray remote-only row `20260910140204` is gone with the wipe.
+
+   **`0164` — the tripwire the gap map said was the ONLY one that could fire —
+   applied clean**, which is the specific thing the `0083` edit had to buy.
+
+   **Behaviourally sound, not merely present: `npm run test:db` → 293 assertions,
+   0 failures** (confirm-invoice 30, invoice-lifecycle 110, inventory-money 153),
+   each harness's row census IDENTICAL before and after, so nothing leaked into a
+   schema that was minutes old. `confirm_invoice` case 5 and lifecycle R10/R11/R12
+   all confirm **anon is REFUSED** with `permission denied for function …` — the
+   §6 invariant holding on a from-scratch build, which is exactly what the `0083`
+   edit was for.
+
+   **ONE FINDING, AND IT IS NOT A MIGRATION DEFECT — the harnesses need OPERATOR
+   CONFIG that no migration supplies BY DESIGN.** All three hard-code
+   `'manfuhah_station', 'potable'`, and on a pristine replay every station comes
+   out potable-`NULL` / non-potable-`0.00`, so `0114`'s
+   `trips_station_offers_water_type` refuses the fixture with `23514` —
+   `Manfuhah Station does not fill potable water.` **That is `0111`'s edit working
+   as its own header states**, not failing: `0110` deliberately refuses to price
+   the stations because "nobody knows yet" which type each offers, `0111` claims
+   only the smaller non-potable `0.00`, and the operator enters real prices in the
+   stations UI before the first trip. Confirmed by running `test:db` with
+   `manfuhah.fill_cost_potable_sar = 5.00` (production's own value) — 293/293 — 
+   then restoring the column to `NULL` and re-reading the census, so the project
+   the architect diffs is byte-for-byte the pristine replay. **The fix, if one is
+   wanted, is in the HARNESS fixtures or a test-only setup step, never in the
+   migration chain.**
+
+   Instances 5 and 6 are unaffected by this proof — see below; both are still
+   open and still need a migration each.
 
    **A FIFTH BLOCKER OF THE SAME FAMILY, FOUND 2026-09-10 WHILE MAKING THE
-   `0083` EDIT, NOT YET RULED ON AND DELIBERATELY NOT FIXED.** The `0083` edit
+   `0083` EDIT. RULED 2026-09-10: (d) NOTHING FURTHER — `410de67` ALREADY CLOSES
+   IT, and the clean replay above is the proof.** The description below is kept
+   because the MECHANISM is worth knowing and the sub-decision it names is real;
+   read it as closed, not as pending work. Two corrections to it are recorded
+   after it — the per-file count it quotes is wrong, and so is the cause.
+   The `0083` edit
    closes instance 2 for functions that exist AT `0083`. It does NOT revoke the
    fresh-project DEFAULT PRIVILEGES, so every function created AFTER it still
    arrives with an explicit `anon=X/postgres` grant. **`0164` then fails**: it
@@ -1330,7 +1381,44 @@ acted on. Neither is parked for want of a fix; both fixes are known and stated.
    re-stated from `0157` onward. Revoking the default early denies them the
    anon grant they hold on production, so the rebuild would diverge from prod's
    end state on four trigger functions. Harmless in security terms, visible in
-   a diff. **Architect's call, per-blocker, before anything is edited.**
+   a diff.
+
+   **TWO CORRECTIONS TO THE PARAGRAPH ABOVE, both measured 2026-09-10.**
+
+   1. **"24 files define functions and only 7 carry a live anon revoke" is a
+      per-FILE presence count and it UNDERCOUNTS BADLY. Do not quote it.**
+      Per-FUNCTION, every non-trigger function created in the `0084`–`0192`
+      window IS individually revoked — `0102` carries `from public, anon` on all
+      three `search_*` functions, and the rest follow. A static replay of all 307
+      create/drop/revoke events across the 192 files, with the `0083` edit in
+      place, puts **3** functions anon-executable at `0164` and all three are
+      revoked by `0164` itself, then **0** at `0192` and **0** at `0194`, ending
+      on exactly production's four trigger functions BY NAME. The live replay
+      then confirmed it: `0164` applied without raising.
+   2. **The CAUSE stated in `0193`'s header and repeated above — "`supabase_admin`'s
+      default privileges re-grant anon" — is WRONG, though the conclusion it
+      supports is right.** Canary on aquafleet-test: after
+      `alter default privileges in schema public revoke execute on functions from
+      anon`, a fresh routine still came back anon-executable with
+      `acl={=X/postgres,postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}`.
+      The offender is the **`=X/postgres` EMPTY-grantee entry, i.e. PUBLIC**,
+      handed out by Postgres's hardwired `acldefault()` for functions, which
+      always includes `EXECUTE TO PUBLIC`. `supabase_admin` cannot be the source:
+      `pg_default_acl` keys on the OWNER role and does not expand role
+      membership, and all of production's functions are owned by `postgres`.
+
+   **A `0195` WAS AVAILABLE AND WAS DECLINED — do not draft it.** The hardening
+   is `alter default privileges in schema public revoke execute on functions from
+   PUBLIC` (note **PUBLIC**, not `anon` — `0192` already did `anon`, and per
+   correction 2 that is the wrong grantee for this class). Declined by the
+   architect 2026-09-10 on two grounds: it is a **real production change** for a
+   class `0193`'s event trigger already handles at **0** non-trigger
+   anon-executable functions, and the replay proof above shows the chain needs
+   nothing further to reach `0194`. **Recorded as available-but-declined future
+   hardening only.** If it is ever revived: it is untested, it would deny the
+   four legitimate TRIGGER functions the anon grant they hold on production, and
+   `0150`/`0151`/`0153` pin exact `proacl` strings that an early default-revoke
+   would break — the same objection that killed the "early event trigger" option.
 
    **Instances 5 and 6 are untouched and still need a NEW migration each** —
    RLS + policy on `stock_receipt_approvals` (a security control no rebuild
