@@ -1112,11 +1112,12 @@ how it stays unanswered.**
    claim it was the only open security item; it was not, it was the only one
    anybody had measured.**
 
-### (b) Doable FIX — TWO entries, both opened 2026-09-10
+### (b) Doable FIX — TWO entries, both opened 2026-09-10, BOTH NOW CLOSED
 
-**This section read "EMPTY again" from 2026-09-09 until entry 1 opened it.**
-Entry 1 is now PART-DONE, entry 2 is a documentation correction nobody has
-acted on. Neither is parked for want of a fix; both fixes are known and stated.
+**This section read "EMPTY again" from 2026-09-09 until entry 1 opened it, and
+it is effectively EMPTY again as of 2026-09-11.** Entry 1 closed 2026-09-10 on
+the pristine replay; entry 2 closed 2026-09-11 as `0fa3969`. Both are kept below
+for their mechanism and their lesson, **not as work** — do not reopen either.
 
 1. **CLOSED 2026-09-10 — POST-DEPLOY: THE MIGRATION SET WAS NOT SELF-REBUILDABLE.
    SIX instances, every one measured 2026-09-10, ALL SIX NOW RESOLVED.** Four
@@ -1476,15 +1477,18 @@ acted on. Neither is parked for want of a fix; both fixes are known and stated.
    match recorded above. **"Deferred by Turki 2026-09-10" no longer applies to
    either.**
 
-2. **`CLAUDE.md` §6 CORRECTION PENDING — the RULE is right, the MECHANISM it
-   states is wrong. Opened 2026-09-10, NOT ACTED ON, and deliberately so.**
+2. **`CLAUDE.md` §6 CORRECTION — CLOSED 2026-09-11 as `0fa3969`, compression
+   pass 6. Opened 2026-09-10. The RULE was right, the MECHANISM it stated was
+   wrong, and it turned out to be wrong TWICE.**
 
-   §6 says **"A REDEFINED FUNCTION IS EXECUTE-TO-PUBLIC AGAIN"** and gives the
+   §6 said **"A REDEFINED FUNCTION IS EXECUTE-TO-PUBLIC AGAIN"** and gave the
    mechanism as `create or replace function` **and** `drop`+`create` both
    resetting the ACL to the Postgres default. **`create or replace function`
    does NOT reset `proacl`. It preserves it.** `drop`+`create` does reset,
    because that is a new object with a new OID — the two halves of that sentence
-   do not behave the same way and the rule states them as one.
+   do not behave the same way and the rule stated them as one. The bullet now
+   reads **"EVERY FUNCTION DEFINITION CARRIES ITS OWN REVOKE — AND ONLY ONE FORM
+   STRIPS THE ACL."**
 
    **Measured, not reasoned.** `0150` replaces `update_project_with_customer`
    with `create or replace function` and its assertion (3) compares the ACL
@@ -1493,27 +1497,58 @@ acted on. Neither is parked for want of a fix; both fixes are known and stated.
    reads `{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}`
    — non-null, no PUBLIC entry, no anon. An ACL that had been reset to the
    default would have been null-or-PUBLIC and the assertion would have raised.
-   **The `0115`/`0118` case §6 cites as proof is explained without the claim:**
-   `0115` created `issue_driver_payslip` AFTER `0083`'s sweep, so it never
-   carried the revoke in the first place. `0118` replacing it lost nothing,
-   because there was nothing to lose.
+   **THE SECOND ERROR, found only when the edit was actually made 2026-09-11:
+   `0118` is not a replacement at all.** `0118:208` is
+   `drop function if exists public.issue_driver_payslip(uuid, date, text);`
+   followed by a create — a `drop`+`create`, the one form that DOES reset. So
+   the cited incident could not demonstrate the claim it was cited for either
+   way. And it did not need to: `grep -ciE 'revoke +execute|revoke +all +on
+   +function'` over `0115` and `0118` returns **0**. Neither file ever carried a
+   function revoke. `0115` created `issue_driver_payslip` AFTER `0083`'s sweep,
+   so nothing ever gave it one, and `0118` added none — the RPC was
+   anon-executable because it was never revoked, not because a redefinition
+   stripped it.
 
    **DO NOT weaken the rule on the strength of this.** Re-revoking is
    safe-directional and free, naming both `public` and `anon` is still correct
    and still required, and the security footers plus `0193`'s event trigger hold
-   the invariant regardless of which mechanism is true. **What is wrong is the
+   the invariant regardless of which mechanism is true. **What was wrong is the
    stated REASON, and a rule whose reason is wrong is one someone eventually
-   argues their way out of.** That is the whole cost, and it is why this is a
-   pending correction rather than an incident.
+   argues their way out of.** That was the whole cost — an incident it never
+   was. The rewritten bullet keeps every instruction it had, including the
+   `revoke execute` naming **both `public` and `anon`**, and swaps only the why.
 
-   **Why nothing was edited: `CLAUDE.md` is at 14,796 bytes against §7's 15 KB
-   trigger** (re-measured this turn — about 560 bytes of headroom). A correction
-   that ADDS prose to a file already at its cap is the wrong move, and §5 is
-   explicit that compression happens by re-verifying every claim, never by
-   trimming blind. **This correction belongs to the compression pass, which
-   wants its own session.** Note that pass 5 (2026-09-09) found zero stale
-   claims and concluded the file had converged — **this is the first thing found
-   since, so that conclusion is now one item out of date.**
+   **TWO FURTHER FINDINGS FROM THE SAME PASS, both landed in `0fa3969`.**
+
+   1. **§7's State line was stale at `0194`; it now reads `0195`.** Cite it by
+      grep, never by address: `npx tsx scripts/code-grep.ts 'DB at migration'
+      CLAUDE.md --worktree`.
+   2. **§5's `divide-` example was imprecise and would have read as a
+      regression.** It claimed the `divide-` grep "has exactly one hit and it is
+      a comment". Measured 2026-09-11: the plain grep returns **9 hits, all live
+      code, all correctly carrying `divide-[rgb(var(--border))]`**. It is the
+      BUG pattern — `divide-y`/`divide-x` on a line lacking that colour — that
+      has exactly one hit, and that hit is still the comment in
+      `components/settings/WarehousesSection.tsx` documenting the fix. Reworded
+      to name the bug pattern, so the next session greps for the right thing.
+
+   **SIZE: 14,796 → 14,671 bytes** against §7's 15 KB trigger; 102 insertions,
+   103 deletions. The corrected rule COST about 250 bytes, paid for by
+   tightening wording across the header, sections 1–4 and nine bullets — **no
+   rule and no reason was removed**, which is the §5 requirement. Headroom is
+   now thin, so **the next real reduction means MOVING a rule to the domain
+   skill, not trimming**; that is a routing decision for Turki or the architect.
+
+   **Everything else in `CLAUDE.md` was re-measured and HELD**, including 147 of
+   the 170 files up to `0172` carrying `begin;`/`commit;` and **zero** files
+   from `0173` on, the 11-file `preview/` list, `selfTest()` running at import in
+   `scripts/code-grep.ts` with exactly two `test:money` checks importing it, and
+   `0161`'s default privileges being tables-only.
+
+   **Pass 5 (2026-09-09) found zero stale claims and concluded the file had
+   converged. Pass 6 found three. Read "converged" as a measurement of one
+   pass, never as licence to skip the next audit** — that sentence is now in
+   `CLAUDE.md` §5 itself.
 
 **Both 2026-09-09 entries are CLOSED. Kept below so they are not reopened.**
 
