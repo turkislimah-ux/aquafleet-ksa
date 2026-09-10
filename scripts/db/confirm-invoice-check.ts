@@ -54,117 +54,8 @@
 // else — asserted below on a FRESH connection.
 // ---------------------------------------------------------------------------
 
-import { readFileSync } from "node:fs";
 import { Client } from "pg";
-
-const TEST_REF = "vlyxazfinmlanjdttavg";
-const PROD_REF = "ceqzmztewbborwgxnrqh";
-const ENV_FILE = ".env.test.local";
-
-// ---------------------------------------------------------------------------
-// HARD GUARD. Runs before anything opens a socket.
-//
-// The environment file is loaded, not trusted. Three independent strings name
-// the project — the REST URL, the Postgres URI and the service-role JWT's `ref`
-// claim — and this asserts all three are the TEST project and that the
-// production ref appears nowhere in the file at all. A guard that checks the
-// REST URL and then connects via the Postgres URI checks the wrong string.
-// ---------------------------------------------------------------------------
-
-function die(msg: string): never {
-  console.error("\nABORT — " + msg + "\n");
-  process.exit(1);
-}
-
-function loadEnv(): Record<string, string> {
-  let raw: string;
-  try {
-    raw = readFileSync(ENV_FILE, "utf8");
-  } catch {
-    return die(
-      `${ENV_FILE} not found. This harness talks to the aquafleet-test project and ` +
-        `will not guess a connection.`,
-    );
-  }
-
-  // 0. The whole file, before parsing: the production ref must not be in it.
-  if (raw.includes(PROD_REF)) {
-    return die(
-      `${ENV_FILE} contains the PRODUCTION project ref ${PROD_REF}. This harness ` +
-        `writes rows and allocates invoice numbers. It will not run against production.`,
-    );
-  }
-
-  const env: Record<string, string> = {};
-  for (const line of raw.split("\n")) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    const i = t.indexOf("=");
-    if (i > 0) env[t.slice(0, i).trim()] = t.slice(i + 1).trim();
-  }
-
-  for (const k of ["TEST_DB_URL", "TEST_SUPABASE_URL", "TEST_SERVICE_ROLE_KEY"]) {
-    if (!env[k]) return die(`${ENV_FILE} is missing ${k}.`);
-  }
-
-  // 1. The REST URL's ref.
-  const urlRef = /^https:\/\/([a-z0-9]+)\.supabase\.co\/?$/.exec(env.TEST_SUPABASE_URL)?.[1];
-  if (urlRef !== TEST_REF) {
-    return die(
-      `TEST_SUPABASE_URL points at project ref "${urlRef ?? "(unparseable)"}", not the ` +
-        `test project ${TEST_REF}.`,
-    );
-  }
-
-  // 2. The Postgres URI's host — the string this file actually CONNECTS to.
-  //    Checking only the REST URL would leave the connection unguarded.
-  let dbHost: string;
-  try {
-    dbHost = new URL(env.TEST_DB_URL).hostname;
-  } catch {
-    return die("TEST_DB_URL is not a parseable URI.");
-  }
-  if (!dbHost.includes(TEST_REF)) {
-    return die(`TEST_DB_URL host "${dbHost}" does not name the test project ${TEST_REF}.`);
-  }
-
-  // 3. The service-role JWT's own `ref` claim. A key pasted from the wrong
-  //    project is the failure mode the two URL checks cannot see.
-  let jwtRef: string | undefined;
-  try {
-    const payload = JSON.parse(
-      Buffer.from(env.TEST_SERVICE_ROLE_KEY.split(".")[1], "base64").toString("utf8"),
-    );
-    jwtRef = payload.ref;
-    if (payload.role !== "service_role") {
-      return die(`TEST_SERVICE_ROLE_KEY carries role "${payload.role}", not service_role.`);
-    }
-  } catch {
-    return die("TEST_SERVICE_ROLE_KEY is not a decodable JWT.");
-  }
-  if (jwtRef !== TEST_REF) {
-    return die(`TEST_SERVICE_ROLE_KEY belongs to project ref "${jwtRef}", not ${TEST_REF}.`);
-  }
-
-  console.log(`Target guard PASSED — project ref ${TEST_REF} (aquafleet-test), host ${dbHost}.`);
-  return env;
-}
-
-// ---------------------------------------------------------------------------
-// Assertion plumbing.
-// ---------------------------------------------------------------------------
-
-let failures = 0;
-function check(label: string, actual: unknown, expected: unknown): void {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  if (!ok) failures++;
-  console.log(
-    `${ok ? "  ok  " : "  FAIL"}  ${label}` + (ok ? "" : `\n          expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`),
-  );
-}
-function ok(label: string, cond: boolean): void {
-  check(label, cond, true);
-}
+import { check, connOptions, failureCount, loadTestEnv, ok, TEST_REF } from "./harness";
 
 // ---------------------------------------------------------------------------
 // The payload. One trip line, 100.00 net.
@@ -247,8 +138,8 @@ function confirmArgs(invoiceId: string, p: Payload): unknown[] {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const env = loadEnv();
-  const conn = { connectionString: env.TEST_DB_URL, ssl: { rejectUnauthorized: false } };
+  const env = loadTestEnv();
+  const conn = connOptions(env);
 
   // ---- Pre-run census, on its own connection, outside the test transaction.
   //      This is the baseline the zero-leak assertion compares against.
@@ -467,6 +358,7 @@ async function main(): Promise<void> {
   await post.end();
 
   console.log("");
+  const failures = failureCount();
   if (failures === 0) {
     console.log("All confirm_invoice DB checks PASSED ✓ — every tier raised, nothing leaked.");
     process.exit(0);
