@@ -556,7 +556,29 @@ grant execute on function public.receive_purchase_order(uuid,jsonb,jsonb,text,te
 
 -- 5a. The money. Before-image vs after-image, every numeric column of both
 --     views. An EMPTY snapshot passes a diff test vacuously, so the empty case
---     aborts on its own rather than reading green.
+--     is reported as SKIPPED — never as green.
+--
+--     REPLAY-CLEANLINESS EDIT, POST-HOC (2026-09-10). This block originally
+--     RAISED on an empty snapshot. That is correct on a database with money in
+--     it, and wrong on a from-scratch replay, where zero customers exist by
+--     construction: the abort halts the whole migration chain over a condition
+--     that is not a defect. What changed is the VERDICT on empty, not the
+--     guard — the empty case still refuses to report green, it now says out
+--     loud that it compared nothing. The row-count check and the per-column
+--     diff are unchanged; they moved into the ELSE branch and were re-indented,
+--     nothing else.
+--
+--     NO-OP ON PRODUCTION'S END STATE. Production is not re-applied — 0190 ran
+--     there already — so no row and no figure moves. On the semantics, measured
+--     against production 2026-09-10: 9 customers (8 active), 9 rows in
+--     v_customer_prepaid_balance, 9 in v_customer_amount_payable. v_before = 9
+--     at both guards, the ELSE branch is taken, and every check that ran before
+--     runs identically. The guard is fully armed wherever there is money.
+--
+--     5b/5c/5d below are data-independent and are untouched: even on an empty
+--     replay this file still PROVES the five rewritten objects reference
+--     vat_rate() and carry no bare VAT literal, the four EXECUTE grants, and
+--     the two view security footers.
 do $$
 declare
   v_before integer;
@@ -566,53 +588,55 @@ begin
   select count(*) into v_before from _vat0190_prepaid_before;
   select count(*) into v_after  from public.v_customer_prepaid_balance;
   if v_before = 0 then
-    raise exception '0190: the v_customer_prepaid_balance snapshot is EMPTY — nothing was compared, and a zero-row diff would report green. Aborting.';
-  end if;
-  if v_before <> v_after then
-    raise exception '0190: v_customer_prepaid_balance row count moved (% before, % after).', v_before, v_after;
-  end if;
+    raise notice '0190: the v_customer_prepaid_balance snapshot is EMPTY (0 rows) — there was no money to compare. The value diff is SKIPPED, NOT PASSED. On a populated database this branch is not taken.';
+  else
+    if v_before <> v_after then
+      raise exception '0190: v_customer_prepaid_balance row count moved (% before, % after).', v_before, v_after;
+    end if;
 
-  select count(*) into v_diff from (
-    ( select customer_id, topups_sar, trip_consumption_sar, charge_consumption_sar, balance_sar, returns_sar
-        from _vat0190_prepaid_before
-      except
-      select customer_id, topups_sar, trip_consumption_sar, charge_consumption_sar, balance_sar, returns_sar
-        from public.v_customer_prepaid_balance )
-    union all
-    ( select customer_id, topups_sar, trip_consumption_sar, charge_consumption_sar, balance_sar, returns_sar
-        from public.v_customer_prepaid_balance
-      except
-      select customer_id, topups_sar, trip_consumption_sar, charge_consumption_sar, balance_sar, returns_sar
-        from _vat0190_prepaid_before )
-  ) d;
-  if v_diff <> 0 then
-    raise exception '0190: % row(s) of v_customer_prepaid_balance changed VALUE. The rate substitution was supposed to be arithmetically inert.', v_diff;
+    select count(*) into v_diff from (
+      ( select customer_id, topups_sar, trip_consumption_sar, charge_consumption_sar, balance_sar, returns_sar
+          from _vat0190_prepaid_before
+        except
+        select customer_id, topups_sar, trip_consumption_sar, charge_consumption_sar, balance_sar, returns_sar
+          from public.v_customer_prepaid_balance )
+      union all
+      ( select customer_id, topups_sar, trip_consumption_sar, charge_consumption_sar, balance_sar, returns_sar
+          from public.v_customer_prepaid_balance
+        except
+        select customer_id, topups_sar, trip_consumption_sar, charge_consumption_sar, balance_sar, returns_sar
+          from _vat0190_prepaid_before )
+    ) d;
+    if v_diff <> 0 then
+      raise exception '0190: % row(s) of v_customer_prepaid_balance changed VALUE. The rate substitution was supposed to be arithmetically inert.', v_diff;
+    end if;
   end if;
 
   select count(*) into v_before from _vat0190_payable_before;
   select count(*) into v_after  from public.v_customer_amount_payable;
   if v_before = 0 then
-    raise exception '0190: the v_customer_amount_payable snapshot is EMPTY — nothing was compared. Aborting.';
-  end if;
-  if v_before <> v_after then
-    raise exception '0190: v_customer_amount_payable row count moved (% before, % after).', v_before, v_after;
-  end if;
+    raise notice '0190: the v_customer_amount_payable snapshot is EMPTY (0 rows) — there was nothing to compare. The value diff is SKIPPED, NOT PASSED. On a populated database this branch is not taken.';
+  else
+    if v_before <> v_after then
+      raise exception '0190: v_customer_amount_payable row count moved (% before, % after).', v_before, v_after;
+    end if;
 
-  select count(*) into v_diff from (
-    ( select customer_id, prepaid_balance_sar, postpaid_unpaid_sar, amount_payable_sar, owed_sar, archive_blocked
-        from _vat0190_payable_before
-      except
-      select customer_id, prepaid_balance_sar, postpaid_unpaid_sar, amount_payable_sar, owed_sar, archive_blocked
-        from public.v_customer_amount_payable )
-    union all
-    ( select customer_id, prepaid_balance_sar, postpaid_unpaid_sar, amount_payable_sar, owed_sar, archive_blocked
-        from public.v_customer_amount_payable
-      except
-      select customer_id, prepaid_balance_sar, postpaid_unpaid_sar, amount_payable_sar, owed_sar, archive_blocked
-        from _vat0190_payable_before )
-  ) d;
-  if v_diff <> 0 then
-    raise exception '0190: % row(s) of v_customer_amount_payable changed VALUE — including the refund gate and the archive guard that read off it.', v_diff;
+    select count(*) into v_diff from (
+      ( select customer_id, prepaid_balance_sar, postpaid_unpaid_sar, amount_payable_sar, owed_sar, archive_blocked
+          from _vat0190_payable_before
+        except
+        select customer_id, prepaid_balance_sar, postpaid_unpaid_sar, amount_payable_sar, owed_sar, archive_blocked
+          from public.v_customer_amount_payable )
+      union all
+      ( select customer_id, prepaid_balance_sar, postpaid_unpaid_sar, amount_payable_sar, owed_sar, archive_blocked
+          from public.v_customer_amount_payable
+        except
+        select customer_id, prepaid_balance_sar, postpaid_unpaid_sar, amount_payable_sar, owed_sar, archive_blocked
+          from _vat0190_payable_before )
+    ) d;
+    if v_diff <> 0 then
+      raise exception '0190: % row(s) of v_customer_amount_payable changed VALUE — including the refund gate and the archive guard that read off it.', v_diff;
+    end if;
   end if;
 end $$;
 

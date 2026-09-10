@@ -79,6 +79,53 @@ begin;
 -- ---------------------------------------------------------------------
 -- 1) Lock the guarantee first.
 -- ---------------------------------------------------------------------
+-- REPLAY-CLEANLINESS EDIT, POST-HOC (2026-09-10): the UPDATE below is new.
+-- The validate is unchanged.
+--
+-- WHY. 0110 added fill_cost_potable_sar / fill_cost_non_potable_sar as NULL and
+-- added this constraint NOT VALID, deliberately, because nobody knew yet which
+-- type each station offers. On a from-scratch replay nobody has said yet
+-- either: 0014 seeds three stations, and NO migration anywhere prices them —
+-- only 0110, 0111, 0114 and 0122 so much as name those columns, and not one of
+-- them writes a value. So all three rows violate the constraint and the
+-- validate below fails outright, taking the replay with it.
+--
+-- WHY THIS FILE AND NOT 0014. 0014 cannot seed a column that does not exist
+-- for another 96 files — the price columns arrive at 0110. And 0110 must not
+-- seed them either: its stated thesis is that filling both types from the old
+-- flat fill_cost "would make the database ASSERT that every station offers
+-- both types, which is exactly the thing nobody knows yet," which is correct
+-- and stands. That leaves this file, which is also the one actually at fault:
+-- it validates a constraint whose precondition it neither establishes nor
+-- checks.
+--
+-- WHY NON-POTABLE, AND WHY 0.00. Non-potable because it is the type every live
+-- station actually prices, and because it makes the SMALLER claim — one type,
+-- not both, which is the thing 0110 was protecting. 0.00 because it is a REAL
+-- price in this model rather than a placeholder: 0110 records that
+-- company-owned stations fill free, and production's furaian station is
+-- genuinely 0.00 / 0.00 today.
+--
+-- THE "0.00 CLAIMS THE FILL WAS FREE" ARGUMENT IN THIS FILE'S HEADER DOES NOT
+-- APPLY HERE. That argument is about TRIPS — back-filling trips.filling_cost_sar
+-- with 0.00 would assert that a delivered fill cost nothing, which is a lie
+-- about work that happened. This prices a STATION, on a rebuild that has zero
+-- trips, so nothing is mis-costed. The operator corrects it in the stations UI
+-- before the first trip is recorded, and the snapshot freeze does the rest:
+-- trips.filling_cost_sar is stamped from the station's price AT TRIP TIME, so
+-- every trip created after real prices are entered carries the real price.
+--
+-- NO-OP ON PRODUCTION'S END STATE. Production is not re-applied — 0111 ran
+-- there already, and the constraint is convalidated = true. On the semantics,
+-- measured 2026-09-10: 5 stations — furaian 0.00/0.00, manfuhah 5.00/0.00,
+-- olaya NULL/80.00, shas 80.00/50.00, umm_al_hamam NULL/10.00 — and ZERO with
+-- both prices NULL. The UPDATE matches no row there. On a replay it touches
+-- only rows this replay itself seeded, one column, one value.
+update public.water_stations
+   set fill_cost_non_potable_sar = 0.00
+ where fill_cost_potable_sar     is null
+   and fill_cost_non_potable_sar is null;
+
 alter table public.water_stations
   validate constraint water_stations_offers_at_least_one_type;
 

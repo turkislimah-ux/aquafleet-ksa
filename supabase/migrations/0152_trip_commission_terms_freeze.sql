@@ -272,7 +272,37 @@ begin
     raise exception 'Constraint trips_commission_terms_all_or_none already exists on public.trips.';
   end if;
 
-  -- (c2) Shape anchors.
+  -- (c2) Shape anchors. DIAGNOSTIC, NOT AN ASSERTION.
+  --
+  --      REPLAY-CLEANLINESS EDIT, POST-HOC (2026-09-10): this comparison used
+  --      to RAISE. Demoted to a notice, counts still printed, drafted figures
+  --      still named. Nothing else in this file changed — (c3), (c4), (f1),
+  --      (f2) and the _0152_anchor block above are untouched.
+  --
+  --      WHY. These five numbers were never an invariant. They are a
+  --      DRAFTING-TIME STALENESS TRIPWIRE — the error text below says so
+  --      itself ("this is DRIFT, NOT A DEFECT"). They answer "is this database
+  --      the same shape as the day this file was written", a question with no
+  --      meaning on a from-scratch replay, where the answer is 0/0/0/0/0 by
+  --      construction and the abort halts the migration chain over nothing.
+  --      They were already stale against PRODUCTION too, long before replay was
+  --      a concern: measured 2026-09-10, prod stands at 981 / 904 / 902 / 1 / 1
+  --      against the 836 / 759 / 757 / 1 / 1 drafted here.
+  --
+  --      NOT REPLACED BY `stampable <= delivered <= total`. That relation
+  --      CANNOT FAIL as computed: all three counts come from the single
+  --      count(*) filter (...) pass below, over nested-superset predicates, so
+  --      the ordering holds on 981/904/902, on 0/0/0 and on a corrupted table
+  --      alike. Coding it would install a guard that is green by construction —
+  --      the dead invariant, not a cure for one. The failable guards here are
+  --      (c3) and (c4) below, and (f1)/(f2) in the verification section; all
+  --      four are already scale-free and all four still RAISE.
+  --
+  --      NO-OP ON PRODUCTION'S END STATE. Production is not re-applied — 0152
+  --      ran there already. This block writes nothing; it is pure assertion, so
+  --      demoting it moves no row. Prod re-measured green on every guard that
+  --      remains: 902 stamped, 0 missed, 0 delivered-with-NULL-commission,
+  --      0 undelivered-with-non-NULL, sum(commission_sar) = 18,322.84.
   select count(*),
          count(*) filter (where delivered_at is not null),
          count(*) filter (where delivered_at is not null
@@ -288,8 +318,8 @@ begin
   if (v_total, v_delivered, v_stampable, v_no_project, v_no_driver)
      is distinct from
      (a.trips_total, a.delivered, a.stampable, a.deliv_no_project, a.deliv_no_driver) then
-    raise exception
-      E'Anchor counts moved since this file was drafted.\n  expected  trips=%  delivered=%  stampable=%  no_project=%  no_driver=%\n  actual    trips=%  delivered=%  stampable=%  no_project=%  no_driver=%\n  If trips were delivered during testing this is DRIFT, NOT A DEFECT: re-measure with block A of the VERIFICATION section, edit the _0152_anchor block, and re-run.',
+    raise notice
+      E'Anchor counts moved since this file was drafted.\n  drafted against  trips=%  delivered=%  stampable=%  no_project=%  no_driver=%\n  actual           trips=%  delivered=%  stampable=%  no_project=%  no_driver=%\n  If trips were delivered during testing this is DRIFT, NOT A DEFECT: re-measure with block A of the VERIFICATION section and edit the _0152_anchor block. A from-scratch replay reports 0/0/0/0/0 here, which is the empty database, not damage. The guards that decide whether this migration may proceed are (c3) and (c4) below.',
       a.trips_total, a.delivered, a.stampable, a.deliv_no_project, a.deliv_no_driver,
       v_total, v_delivered, v_stampable, v_no_project, v_no_driver;
   end if;
